@@ -40,12 +40,20 @@ _OFF = frozenset({'', 'off', 'none'})
 _AUTO = 'auto'
 
 
-def _parse_cpu_list(spec: str) -> set[int] | None:
+def _parse_cpu_list(spec: str, ceiling: int) -> set[int] | None:
     """Parse ``taskset``-style ``2,4,6-9`` into a CPU set, or ``None`` if the
     text is not a well-formed list.
 
     Deliberately strict — a typo in a deployment variable should announce
     itself rather than resolve to some neighbouring core.
+
+    Ranges are clamped to *ceiling*, the highest CPU this process could
+    possibly be placed on.  Nothing above it survives the caller's
+    intersection anyway, and materialising it first is how a mistyped bound
+    (``0-20000000`` for ``0-20``) turns into a gigabyte and two seconds in
+    every worker at fork time.  Validation happens before the clamp, so a
+    reversed range is still reported rather than flattened into a plausible
+    one.
     """
     cpus: set[int] = set()
     for field in spec.split(','):
@@ -59,7 +67,7 @@ def _parse_cpu_list(spec: str) -> set[int] | None:
         hi = int(hi_text) if sep else lo
         if hi < lo:
             return None
-        cpus.update(range(lo, hi + 1))
+        cpus.update(range(lo, min(hi, ceiling) + 1))
     return cpus
 
 
@@ -81,7 +89,7 @@ def resolve_worker_cpus(spec: str, worker_id: int,
     if normalised == _AUTO:
         pool = sorted(allowed)
     else:
-        requested = _parse_cpu_list(normalised)
+        requested = _parse_cpu_list(normalised, max(allowed))
         if requested is None:
             logger.warning('BB_CPU_PINNING=%r is not a CPU list '
                            "('auto', 'off', or e.g. '2,4,6-9'); "

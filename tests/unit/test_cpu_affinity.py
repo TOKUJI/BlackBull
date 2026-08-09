@@ -23,6 +23,7 @@ from __future__ import annotations
 import concurrent.futures
 import logging
 import os
+import time
 
 import pytest
 
@@ -100,6 +101,27 @@ def test_explicit_list_disjoint_from_allowed_declines_to_pin(caplog):
     with caplog.at_level(logging.WARNING, logger='blackbull.server.affinity'):
         assert resolve_worker_cpus('0-3', 0, RESTRICTED) is None
     assert 'BB_CPU_PINNING' in caplog.text
+
+
+def test_an_absurd_range_costs_nothing_to_reject():
+    """A mistyped upper bound must not be materialised.  Every CPU above the
+    mask is discarded by the intersection anyway, so building the range first
+    buys nothing and costs a gigabyte: ``0-20000000`` allocated 1.15 GiB and
+    took 1.8 s *per worker*, at fork time, before being thrown away."""
+    before = time.perf_counter()
+    cpus = resolve_worker_cpus('0-20000000', 0, RESTRICTED)
+    elapsed = time.perf_counter() - before
+
+    assert cpus == {8}, 'the clamp must not change which CPU is chosen'
+    assert elapsed < 0.5, f'took {elapsed:.2f}s — the range was materialised'
+
+
+def test_clamping_does_not_swallow_a_malformed_range(caplog):
+    """The bound is applied after validation, so a reversed range is still
+    reported rather than quietly clamped into something plausible."""
+    with caplog.at_level(logging.WARNING, logger='blackbull.server.affinity'):
+        assert resolve_worker_cpus('11-8', 0, RESTRICTED) is None
+    assert 'not a CPU list' in caplog.text
 
 
 @pytest.mark.parametrize('spec', ['sixteen', '3-', '-3', '4-2', '1,,2', '-1'])
