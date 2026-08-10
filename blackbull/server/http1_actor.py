@@ -506,9 +506,13 @@ def _validate_host(headers: 'Headers') -> None:
 # ---------------------------------------------------------------------------
 
 class RequestActor(Actor):
-    """Owns one HTTP/1.1 request lifetime.
+    """Owns one request's app boundary: what the app is called with.
 
-    Spawned by HTTP1Actor, awaited to completion.  Calls the ASGI app.
+    Shared by both protocol actors — H/1 reuses one instance per connection
+    via :meth:`bind`; H/2 builds one per stream.  Owns the app-facing
+    representation (the native :class:`Connection` on the default lane, the
+    materialized ASGI scope on ``BB_FORCE_ASGI_SCOPE=1``), binds the raw
+    recipient before any wrapper exists, and calls the app.
 
     The request-lifecycle Level B events are emitted by the application
     layer (``BlackBull._dispatch`` / ``__call__``) —
@@ -519,48 +523,82 @@ class RequestActor(Actor):
 
     def __init__(
         self,
-        conn: dict | Connection,
-        receive: ASGIReceiveCallable,
+        conn: Connection,
+        recipient: ASGIReceiveCallable,
         send: ASGISendCallable,
         app: Callable[..., Awaitable[None]],
         # ``None`` for a foreign ASGI app: no dispatcher means no
         # aggregator, and the actor skips event emission rather than
         # the caller forking to a second dispatch path.
         aggregator: EventAggregator | None,
+        force_asgi: bool,
     ) -> None:
         super().__init__()
         self._conn = conn
-        self._receive = receive
+        self._recipient = recipient
         self._send = send
         self._app = app
         self._aggregator = aggregator
+        self._force_asgi = force_asgi
 
-    def bind(self, conn, receive, send) -> 'RequestActor':
+    def bind(self, conn: Connection, recipient: ASGIReceiveCallable,
+             send: ASGISendCallable) -> 'RequestActor':
         """Point this actor at the next request on the same connection.
 
         HTTP/1.1 dispatches one request at a time per connection, so the
         instance is free between requests and rebinding it is indistinguishable
         from building a new one — except for the allocation, which the keep-alive
-        loop would otherwise pay on every request.  ``app`` and ``aggregator``
-        are per-connection and stay put.
+        loop would otherwise pay on every request.  ``app``, ``aggregator`` and
+        ``force_asgi`` are per-connection and stay put.
 
         Deliberately **not** available to HTTP/2, whose streams are concurrent:
         two live requests sharing one actor would interleave their fields.
         """
         self._conn = conn
-        self._receive = receive
+        self._recipient = recipient
         self._send = send
         return self
 
+    def _build_app_arg(self) -> 'dict | Connection':
+        """What the app is called with: the Connection, or a scope snapshot.
+
+        The one place a scope can come into existence on either protocol's
+        path (the ``BB_FORCE_ASGI_SCOPE=1`` compat lane); every other surface
+        stays native.  The snapshot is taken at the call boundary, so every
+        pre-dispatch mutation of *conn* — H/1's HEAD→GET rewrite, H/2's
+        priority/extensions — has already landed (COMP-HEAD-NO-BODY).
+        """
+        if self._force_asgi:
+            return self._conn.to_asgi_scope(force_asgi=True)
+        return self._conn
+
     async def run(self) -> None:  # override: single-shot, no inbox loop
+        target = self._build_app_arg()
+        # Bind the *raw* recipient onto the target for lazy ``target.body()``
+        # before any disconnect-detecting wrapper is built.  Binding the
+        # wrapper instead would close a per-request reference cycle
+        # (target._receive → wrapper → target) reclaimable only by the cyclic
+        # GC — the v0.60.0 tail-latency regression.  Idempotent.
+        bind_receive_channel(target, self._recipient)
+        # Wrap receive for disconnect detection only when a listener observes
+        # it (request_disconnected, or request_completed via
+        # mark_disconnected); otherwise dispatch the raw recipient and save
+        # the per-request closure.  Body-level disconnect (``target.body()`` →
+        # ClientDisconnected) is independent of this wrapper.
+        if (self._aggregator is not None
+                and _disconnect_events_observed(self._aggregator)):
+            receive = _make_disconnect_detecting_receive(
+                self._recipient, target, self._aggregator)
+        else:
+            receive = self._recipient
         try:
-            await self._app(self._conn, self._receive, self._send)
+            await self._app(target, receive, self._send)
         except BaseException as e:
             # None-tolerant: a foreign ASGI app has no dispatcher, so there is
             # no aggregator and nowhere to publish the ``error`` event.  The
             # exception still propagates — containment is the caller's job.
             if self._aggregator is not None:
-                await self._aggregator.on_error(self._conn, e)
+                await self._aggregator.on_error(target, e)
             raise
 
     async def _handle(self, msg: Message) -> None:  # never reached
@@ -1395,30 +1433,29 @@ class HTTP1Actor(Actor):
     ) -> tuple[bool, 'HTTP1Recipient']:
         """Prepare and run one request; return ``(keep_alive, inner_receive)``.
 
-        A skeleton of named steps.  Each helper below owns one reason to
-        change — the access log, the sender's per-request state, the app
-        argument, the recipient, the server-wide ``OPTIONS *`` answer, the
-        dispatch itself — so a change to any of them edits one method rather
-        than a line somewhere inside a long one.
+        Protocol-side preparation only: the access-log record, the sender's
+        per-request reset, the Expect/100-continue answer, the HEAD→GET
+        rewrite, and the recipient.  Everything app-facing — what the app is
+        called with (native Connection or ASGI scope), the raw-recipient
+        binding, the disconnect-detecting wrapper, and the call itself — is
+        delegated to :class:`RequestActor`, the shared app boundary.
 
-        **The order of the middle two calls is a contract, not a style
-        choice.**  ``_arm_sender`` performs the HEAD→GET rewrite and
-        ``_build_app_arg`` snapshots the result; reversed, the compat lane
-        freezes ``method='HEAD'``, the router finds no HEAD route, and the
-        dual-path lane answers 405 where the native lane answers 200
-        (COMP-HEAD-NO-BODY).  ``test_head_dual_path.py`` is the guard.
-
-        Splitting costs call frames, which
-        `AB-HIGH-PRECISION.md` §6.1 warns about for the hot path.  The helpers
-        are all sync methods (~13 ns each); the dispatch itself stays inline
-        rather than becoming a sixth awaited helper — a new ``await`` boundary
-        on the happy path measures ~0.5 µs per hop here (see the
-        hotpath-async-extraction run), which is right at what the EC2 A/B
-        resolves at 12 rounds (±1 %).
+        The HEAD→GET rewrite must run before :class:`RequestActor` snapshots
+        the app argument; reversed, the compat lane freezes ``method='HEAD'``,
+        the router finds no HEAD route, and the dual-path lane answers 405
+        where the native lane answers 200 (COMP-HEAD-NO-BODY).
+        ``test_head_dual_path.py`` is the guard.
         """
         import asyncio  # noqa: PLC0415
 
-        log_record = self._open_log_record(conn, loop_start_perf, loop_start_cpu)
+        # Build the access-log record only when something consumes it
+        # (access log / phase trace / request_completed listener).  On the
+        # baseline hot path — no logging, no listeners — it stays ``None``,
+        # skipping a per-request allocation and the ``conn.state`` dict it
+        # forces (the Connection graph's per-request objects are what the
+        # cyclic GC scans under concurrency).
+        log_record = _open_record(conn, self._aggregator,
+                                  (loop_start_perf, loop_start_cpu))
 
         # Reset per-request sender state before anything writes through it.
         # The HTTP1Sender instance is shared across keep-alive requests on
@@ -1426,8 +1463,6 @@ class HTTP1Actor(Actor):
         # first response and the timeout branch's ``if not send._started``
         # check skips the synthetic 408 on a second-or-later request.
         # ``_chunked`` / ``_buffered_status`` similarly outlive their request.
-        # Encapsulated in the sender so a new per-request slot cannot be
-        # silently missed at this call site.
         send.reset_per_request_state()
 
         # RFC 9110 §10.1.1 / §15.2 — a server MUST NOT send a 1xx response to
@@ -1437,47 +1472,57 @@ class HTTP1Actor(Actor):
         # After the reset, because the sender's "response already complete"
         # guard is set from the previous response until the reset clears it —
         # written before it, the interim response is dropped from request two
-        # onward and the peer stalls until its own Expect timeout.  Before
-        # ``_arm_sender`` attaches the record, so the interim status never
-        # lands in the one the real response owns.
+        # onward and the peer stalls until its own Expect timeout.  Before the
+        # sender capture below attaches the record, so the interim status
+        # never lands in the one the real response owns.
         if (conn.http_version != '1.0'
                 and conn.headers.get(b'expect').lower() == b'100-continue'):
             await send(b'', HTTPStatus.CONTINUE)
 
-        self._arm_sender(send, conn, log_record)
-        app_arg = self._build_app_arg(conn, cfg)      # snapshot: after the rewrite
-        inner_receive = self._bind_recipient(inner_receive, conn, cfg, dl)
+        # Inline access-log capture into the sender itself — avoids the
+        # per-event coroutine dispatch through a wrapper (7% of CPU in the
+        # py-spy profile).  RFC 9110 §9.3.2 — a HEAD response must be
+        # identical to the GET response except for the absence of the body,
+        # synthesised by dispatching to the GET handler and stripping body
+        # bytes.  The rewrite lands on the Connection only: a materialized
+        # scope reads ``method`` back from it, so writing ``scope['method']``
+        # too would force materialization for nothing.  The access log keeps
+        # the original HEAD, which it took from the request line.
+        send._log_record = log_record
+        send._head_mode = (conn.method == 'HEAD')
+        if send._head_mode:
+            conn.method = 'GET'
+
+        # One recipient per connection, rebound per request — the same trade
+        # as ``send.reset_per_request_state()``: the reader, body timeout, and
+        # deadline are connection properties, so rebuilding them per request
+        # bought nothing.  ``bind`` re-derives the framing from the new head.
+        if inner_receive is None:
+            inner_receive = RecipientFactory.http1(
+                self._reader, conn, body_timeout=cfg.body_timeout, deadline=dl)
+        else:
+            inner_receive.bind(conn)
 
         if conn._asterisk_form:
-            await self._answer_server_wide_options(send)
+            # RFC 9112 §3.2.4 — ``OPTIONS *`` targets the origin, not a
+            # resource, so it never routes.  Answered at the server level with
+            # 204 plus an Allow header advertising the methods the origin
+            # implements.
+            await send(b'', HTTPStatus.NO_CONTENT,
+                       [(b'allow', _SERVER_WIDE_ALLOW)])
             return True, inner_receive
 
-        # Bind the *raw* recipient onto the app argument for lazy
-        # ``app_arg.body()`` before any disconnect-detecting wrapper is built.
-        # Binding the wrapper instead would close a per-request reference
-        # cycle (app_arg._receive → wrapper → app_arg) reclaimable only by the
-        # cyclic GC — the v0.60.0 tail-latency regression.  Idempotent.
-        bind_receive_channel(app_arg, inner_receive)
-
-        # Wrap receive for disconnect detection only when a listener observes
-        # it (request_disconnected, or request_completed via
-        # mark_disconnected); otherwise dispatch the raw receive and save the
-        # per-request closure.
-        if (self._aggregator is not None
-                and _disconnect_events_observed(self._aggregator)):
-            detecting_receive = _make_disconnect_detecting_receive(
-                inner_receive, app_arg, self._aggregator)
-        else:
-            detecting_receive = inner_receive
-
+        # Hand the native Connection and the raw recipient to the shared app
+        # boundary; it decides what the app is called with and owns the
+        # binding, the wrapper, and the call.
         request_actor = self._request_actor
         if request_actor is None:
             request_actor = self._request_actor = RequestActor(
-                app_arg, detecting_receive, send,
-                self._app, self._aggregator,
+                conn, inner_receive, send,
+                self._app, self._aggregator, cfg.force_asgi_scope,
             )
         else:
-            request_actor.bind(app_arg, detecting_receive, send)
+            request_actor.bind(conn, inner_receive, send)
         try:
             await request_actor.run()
         except asyncio.CancelledError:
@@ -1490,76 +1535,6 @@ class HTTP1Actor(Actor):
         finally:
             _close_record(log_record)
         return True, inner_receive
-
-    def _open_log_record(self, conn: Connection,
-                         loop_start_perf: float, loop_start_cpu: float):
-        """This request's access-log record, or ``None`` if nothing reads it.
-
-        The decision and the record's shape belong to ``access_log``; the
-        actor's only contribution is the keep-alive loop's entry timestamps,
-        which it alone has.
-        """
-        return _open_record(conn, self._aggregator,
-                            (loop_start_perf, loop_start_cpu))
-
-    @staticmethod
-    def _arm_sender(send, conn: Connection, log_record) -> None:
-        """Point the sender at this request: log capture, then HEAD mode.
-
-        Capture is inline in the sender rather than through a wrapping
-        ``send`` — the wrapper cost a per-event coroutine dispatch worth 7 %
-        of CPU in the py-spy profile, and the sender's match arms already
-        pattern-match the event types the record cares about.
-
-        RFC 9110 §9.3.2 — a HEAD response must be identical to the GET
-        response except for the absence of the body, synthesised by
-        dispatching to the GET handler and stripping body bytes.  The rewrite
-        lands on the Connection only: a materialized scope reads ``method``
-        back from it, so writing ``scope['method']`` too would force
-        materialization for nothing.  The access log keeps the original HEAD,
-        which it took from the request line.
-
-        **Callers must build the app argument after this**, not before — see
-        ``_dispatch_request``'s docstring.
-        """
-        send._log_record = log_record
-        send._head_mode = (conn.method == 'HEAD')
-        if send._head_mode:
-            conn.method = 'GET'
-
-    @staticmethod
-    def _build_app_arg(conn: Connection, cfg) -> 'dict | Connection':
-        """What the app is called with: the Connection, or a scope snapshot.
-
-        The native lane hands over the Connection itself and would tolerate an
-        earlier binding.  The compat lane emits a *snapshot*, which is why
-        this runs after every pre-dispatch mutation of *conn*.
-        """
-        if cfg.force_asgi_scope:
-            return conn.to_asgi_scope(force_asgi=True)
-        return conn
-
-    def _bind_recipient(self, inner_receive: 'HTTP1Recipient | None',
-                        conn: Connection, cfg, dl) -> 'HTTP1Recipient':
-        """One recipient per connection, rebound per request.
-
-        The same trade as ``send.reset_per_request_state()``, for the same
-        reason: the reader, body timeout, and deadline are connection
-        properties, so rebuilding them per request bought nothing.  ``bind``
-        re-derives the framing from the new head.
-        """
-        if inner_receive is None:
-            return RecipientFactory.http1(
-                self._reader, conn, body_timeout=cfg.body_timeout, deadline=dl)
-        inner_receive.bind(conn)
-        return inner_receive
-
-    @staticmethod
-    async def _answer_server_wide_options(send) -> None:
-        """RFC 9112 §3.2.4 — ``OPTIONS *`` targets the origin, not a resource,
-        so it never routes.  Answered here with 204 plus an Allow header
-        advertising the methods the origin implements."""
-        await send(b'', HTTPStatus.NO_CONTENT, [(b'allow', _SERVER_WIDE_ALLOW)])
 
     async def _read_headers(self, max_total: int) -> None:
         """Read the next message head into ``self._request``.

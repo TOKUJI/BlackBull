@@ -65,14 +65,11 @@ _RESPONSE_DICT_ALLOWED: dict[str, str] = {
 
 # ``Connection.to_asgi_scope()`` — the native → ASGI request-side conversion.
 _TO_ASGI_SCOPE_ALLOWED: dict[str, str] = {
-    'blackbull/server/http1_actor.py::HTTP1Actor._build_app_arg':
+    'blackbull/server/http1_actor.py::RequestActor._build_app_arg':
         'boundary — BB_FORCE_ASGI_SCOPE=1, the dual-path conformance lane. '
         'The whole method is the boundary: it answers "what is the app called '
-        'with", so a scope can come into existence here and nowhere else on '
-        'the H/1 path',
-    'blackbull/server/http2_actor.py::HTTP2Actor._dispatch_target':
-        'boundary — the same lane on H2; the actor is native everywhere else, '
-        'so requests and pushed requests both convert here or not at all',
+        'with" and is shared by H/1 and H/2, so a scope can come into '
+        'existence here and nowhere else on either protocol path',
     'blackbull/middleware/utils.py::_adapt':
         'boundary — builds the scope a `scope`-declaring middleware asked for',
 }

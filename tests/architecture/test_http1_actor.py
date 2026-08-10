@@ -621,10 +621,12 @@ class TestAccessLogging:
         record = AccessLogRecord(
             client_ip='10.0.0.1', method='GET', path='/h2', http_version='2',
         )
-        scope = {
-            'type': 'http', 'method': 'GET', 'path': '/h2',
-            'http_version': '2', 'client': ['10.0.0.1', 0],
-        }
+        # The shared boundary derives the app argument from the native
+        # Connection; StreamActor always receives the native Connection.
+        conn = Connection(
+            method='GET', path='/h2', raw_path=b'/h2',
+            headers=Headers([]), http_version='2',
+        )
 
         # A real HTTP2Actor, not a mock: StreamActor's annotation is the
         # concrete class and beartype enforces it on this path.
@@ -635,8 +637,9 @@ class TestAccessLogging:
 
         with caplog.at_level(logging.INFO):
             await StreamActor(
-                stream_id=1, conn=scope, receive=fake_receive, send=noop_send,
+                stream_id=1, conn=conn, receive=fake_receive, send=noop_send,
                 app=app, aggregator=None, http2_actor=h2, log_record=record,
+                force_asgi=False,
             ).run()
 
         access_records = [r for r in caplog.records if r.name == 'blackbull.access']

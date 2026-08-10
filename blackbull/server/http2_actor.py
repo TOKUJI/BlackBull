@@ -19,7 +19,7 @@ from ..protocol.frame_types import (
     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE,
 )
 from ..protocol.stream import Stream, StreamState
-from ..connection import Connection, bind_receive_channel
+from ..connection import Connection
 from ..headers import Headers
 from .parser import parse_headers
 from .cap_log import log_cap_hit
@@ -29,12 +29,10 @@ from .recipient import (AbstractReader, IncompleteReadError,
 from .response import ResponderFactory
 from .sender import AbstractWriter, ConnectionWindow, SenderFactory
 from .access_log import (
-    _make_disconnect_detecting_receive,
     close_record as _close_record,
     close_ws_record as _close_ws_record,
     open_record as _open_record,
     start_record as _start_record,
-    disconnect_events_observed as _disconnect_events_observed,
 )
 from ..asgi import (ASGIEvent, ASGIReceiveCallable, ASGISendCallable,
                     HTTPResponsePushEvent)
@@ -181,7 +179,7 @@ class StreamActor(Actor):
     def __init__(
         self,
         stream_id: int,
-        conn: 'dict | Connection',
+        conn: Connection,
         receive: ASGIReceiveCallable,
         send: ASGISendCallable,
         app: Callable[..., Awaitable[None]],
@@ -191,6 +189,7 @@ class StreamActor(Actor):
         aggregator: EventAggregator | None,
         http2_actor: 'HTTP2Actor',
         log_record,
+        force_asgi: bool,
     ) -> None:
         super().__init__()
         self._stream_id = stream_id
@@ -201,12 +200,13 @@ class StreamActor(Actor):
         self._aggregator = aggregator
         self._http2_actor = http2_actor
         self._log_record = log_record
+        self._force_asgi = force_asgi
 
     async def run(self) -> None:
         try:
             await RequestActor(
                 self._conn, self._receive, self._send,
-                self._app, self._aggregator,
+                self._app, self._aggregator, self._force_asgi,
             ).run()
         except Exception:
             await self._http2_actor.send_frame(
@@ -992,21 +992,6 @@ class HTTP2Actor(Actor):
 
         _signal_recipients(self._recipients)
 
-    def _dispatch_target(self, conn: Connection) -> 'dict | Connection':
-        """The object the application receives — the single native→ASGI point.
-
-        The actor's own state is native everywhere (``stream.conn`` included),
-        so this is the one place a scope can come into existence, and it runs
-        after every pre-dispatch mutation of *conn*.  That ordering is the
-        contract: the scope is a **snapshot**, so anything written to *conn*
-        later is visible only through the fields the two share by reference.
-        H/1.1 has the same rule for the same reason (its HEAD→GET rewrite must
-        precede the snapshot or the router sees the wrong method).
-        """
-        if not self._force_asgi:
-            return conn
-        return conn.to_asgi_scope(force_asgi=True)
-
     def _spawn_stream_task(
         self,
         tg: asyncio.TaskGroup,
@@ -1029,41 +1014,25 @@ class HTTP2Actor(Actor):
         completes normally (does not cancel the TaskGroup).
         """
         self._active_stream_count += 1
-        target = self._dispatch_target(conn)
 
-        # Bind the *raw* recipient onto the Connection for lazy ``conn.body()``
-        # before the disconnect-detecting wrapper is built, so ``conn._receive``
-        # never captures ``conn`` through the wrapper (per-request cycle → cyclic
-        # GC = v0.60.0 tail-latency regression). Idempotent (binds when unset).
-        # A pure scope carries no stash, so this is a no-op on the compat lane.
-        bind_receive_channel(target, recipient)
-
-        # One dispatch path whether or not an aggregator exists.  Forking on
-        # it would duplicate this plumbing for no gain: ``StreamActor`` is
-        # None-tolerant in both fields that would differ (``log_record``, and
-        # ``aggregator`` via ``RequestActor``), and its failure handling is the
-        # one a peer can act on — a raising stream is reset with
-        # INTERNAL_ERROR rather than left to stop without explanation.
-        #
-        # Wrap receive for disconnect detection only when a listener observes
-        # it (request_disconnected / request_completed); otherwise dispatch the
-        # raw recipient and save the per-request closure. Body-level disconnect
-        # (conn.body() → ClientDisconnected) is independent of this wrapper.
-        if (self._aggregator is not None
-                and _disconnect_events_observed(self._aggregator)):
-            dispatch_receive = _make_disconnect_detecting_receive(
-                recipient, target, self._aggregator)
-        else:
-            dispatch_receive = recipient
+        # One dispatch path: the shared app boundary (``RequestActor``) owns
+        # what the app is called with, the raw-recipient binding, and the
+        # disconnect-detecting wrapper.  Forking on the aggregator would
+        # duplicate that plumbing for no gain: ``StreamActor`` is None-tolerant
+        # in both fields that would differ (``log_record``, and ``aggregator``
+        # via ``RequestActor``), and its failure handling is the one a peer
+        # can act on — a raising stream is reset with INTERNAL_ERROR rather
+        # than left to stop without explanation.
         coro = StreamActor(
             stream_id=stream_id,
-            conn=target,
-            receive=dispatch_receive,
+            conn=conn,
+            receive=recipient,
             send=send,
             app=self.app,
             aggregator=self._aggregator,
             http2_actor=self,
             log_record=log_record,
+            force_asgi=self._force_asgi,
         ).run()
 
         timeout = self._request_timeout
