@@ -34,6 +34,16 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.75.0] — 2026-08-11
+
+Sprint 99.  The app boundary becomes one shared `RequestActor`.  What the
+application is called with — the native `Connection`, or a materialised
+ASGI scope on the `BB_FORCE_ASGI_SCOPE=1` compat lane — is now decided in a
+single actor shared by HTTP/1.1 and HTTP/2, and the forty-three-release-old
+`scope['http2_priority']` deprecation finally ships its removal.  The
+separation cost on the H/1 native lane (≈0.4-0.5 %, below the A/B null
+floor's spread) is accepted and recorded in `bench/results/`.
+
 ### Removed
 
 - **`scope['http2_priority']`** — deprecated in v0.31.0 with removal scheduled
