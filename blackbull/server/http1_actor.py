@@ -23,11 +23,12 @@ from .recipient import (AbstractReader, HTTP1Recipient, IncompleteReadError,
                         ReadLimitExceeded, RecipientFactory, _HEAD_END,
                         _WS_READ_INLINE)
 from .sender import AbstractWriter, SenderFactory
-from .access_log import (_make_disconnect_detecting_receive,
-                         close_record as _close_record,
+from .access_log import (AccessLogRecord as _AccessLogRecord,
+                         _make_disconnect_detecting_receive,
                          close_ws_record as _close_ws_record,
                          disconnect_events_observed as _disconnect_events_observed,
-                         open_record as _open_record,
+                         emit_access_log as _emit_access_log,
+                         request_record_needed as _request_record_needed,
                          start_record as _start_record,
                          PHASE_TRACE as _PHASE_TRACE)
 from .cap_log import log_cap_hit
@@ -1453,9 +1454,17 @@ class HTTP1Actor(Actor):
         # baseline hot path — no logging, no listeners — it stays ``None``,
         # skipping a per-request allocation and the ``conn.state`` dict it
         # forces (the Connection graph's per-request objects are what the
-        # cyclic GC scans under concurrency).
-        log_record = _open_record(conn, self._aggregator,
-                                  (loop_start_perf, loop_start_cpu))
+        # cyclic GC scans under concurrency).  ``_request_record_needed``
+        # takes ``None`` and answers correctly for it.
+        if _request_record_needed(self._aggregator):
+            log_record = _AccessLogRecord.from_conn(conn)
+            if _PHASE_TRACE:
+                log_record.phases['loop_start'] = (
+                    loop_start_perf, loop_start_cpu)
+            log_record.mark('parsed')
+            conn.state['access_log'] = log_record
+        else:
+            log_record = None
 
         # Reset per-request sender state before anything writes through it.
         # The HTTP1Sender instance is shared across keep-alive requests on
@@ -1533,7 +1542,9 @@ class HTTP1Actor(Actor):
         except Exception:
             return False, inner_receive
         finally:
-            _close_record(log_record)
+            if log_record is not None:
+                log_record.mark('dispatch_done')
+                _emit_access_log(log_record)
         return True, inner_receive
 
     async def _read_headers(self, max_total: int) -> None:
