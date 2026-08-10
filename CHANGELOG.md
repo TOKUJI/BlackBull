@@ -16,6 +16,14 @@ BlackBull uses [ZeroVer](https://0ver.org/) prior to a 1.0 commitment:
   nothing.  The minor number therefore does **not** equal the sprint number —
   patch releases and combined-sprint releases have introduced an offset
   (Sprint 49 closed as `v0.43.0`; Sprint 97 closed as `v0.73.1`).
+- **MINOR is judged by effective surface, not the diff.**  Removing a public
+  API key that has been deprecated with a documented replacement long enough
+  for adopters to have migrated is a **PATCH**: an adopter who followed the
+  deprecation does nothing, so the surface they see is unchanged.  Only a
+  removal that forces action on current, doc-following adopters is a MINOR.
+  (Sprint 99 removed `scope['http2_priority']`, deprecated since v0.31.0; it
+  shipped as v0.75.0 under the pre-change rule, which now reads it as a
+  PATCH.)
 - **Exception (2026-06-25)**: Sprints 50 through 54 are not independently
   released — they ship together as `v0.44.0` (the next minor after `v0.43.0`),
   the MQTT-broker debut plus its actor-model rebuild and the protocol-agnostic
@@ -43,6 +51,12 @@ single actor shared by HTTP/1.1 and HTTP/2, and the forty-three-release-old
 `scope['http2_priority']` deprecation finally ships its removal.  The
 separation cost on the H/1 native lane (≈0.4-0.5 %, below the A/B null
 floor's spread) is accepted and recorded in `bench/results/`.
+
+Versioned as a MINOR under the then-current rule (a public-API removal).
+The versioning rule was tightened on 2026-08-11 to judge removals by
+effective surface: a removal of an API deprecated long enough that adopters
+have migrated is now a PATCH — under that rule this release would have been
+`v0.74.1`.
 
 ### Removed
 
