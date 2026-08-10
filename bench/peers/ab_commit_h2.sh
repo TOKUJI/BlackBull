@@ -42,6 +42,7 @@ PATHSPEC="${PATHSPEC:-blackbull/}"
 ROUNDS="${ROUNDS:-3}"
 PORT="${PORT:-8443}"
 BB_UVLOOP="${BB_UVLOOP:-0}"
+BB_FORCE_ASGI_SCOPE="${BB_FORCE_ASGI_SCOPE:-0}"
 PHASES="${PHASES:-null real}"
 URL_PATH="${URL_PATH:-/1kb}"
 H2_CONNS="${H2_CONNS:-32}"
@@ -176,6 +177,7 @@ PY
 
 start_server() {
     BB_UVLOOP="$BB_UVLOOP" BB_WORKERS=1 BB_ACCESS_LOG=0 \
+        BB_FORCE_ASGI_SCOPE="$BB_FORCE_ASGI_SCOPE" \
         setsid "${PIN_SERVER[@]}" "$PY" bench/app.py --no-tls \
             --port "$PORT" \
             >"$OUTDIR/server.log" 2>&1 &
@@ -268,6 +270,7 @@ restore_tree
     echo "| Lane | \`h2load -c $H2_CONNS -m $H2_STREAMS -n $H2_N $URL_PATH\` |"
     echo "| Rounds | $ROUNDS ABBA per phase |"
     echo "| uvloop | $BB_UVLOOP |"
+    echo "| scope | $BB_FORCE_ASGI_SCOPE |"
     echo "| Pinning | server \`$SERVER_CPUS\` / load \`$LOAD_CPUS\` |"
     echo "| Files swapped | \`${FILES[*]}\` |"
     echo ""
