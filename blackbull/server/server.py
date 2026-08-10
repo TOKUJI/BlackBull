@@ -17,7 +17,6 @@ from ..protocol.rsock import (
 from .sender import AbstractWriter
 from .recipient import (AbstractReader,
                         _HTTP2_STREAM_QUEUE_DEPTH, _WS_READ_INLINE)
-from .access_log import AccessLogRecord, emit_access_log as _emit_access_log
 from .cap_log import log_cap_hit
 from ..asgi import ASGIEvent
 logger = logging.getLogger(__name__)

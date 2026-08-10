@@ -13,24 +13,22 @@ from http import HTTPStatus
 from urllib.parse import unquote
 
 from ..actor import Actor, Message
-from ..event import Event
 from ..event_aggregator import EventAggregator
 from ..asgi import ASGIEvent, ASGIReceiveCallable, ASGISendCallable
 from ..connection import (
-    Connection, bind_receive_channel, disconnected, mark_disconnected)
+    Connection, bind_receive_channel)
 from ..headers import Headers
 from .deadline import ConnectionDeadline
 from .recipient import (AbstractReader, HTTP1Recipient, IncompleteReadError,
                         ReadLimitExceeded, RecipientFactory, _HEAD_END,
                         _WS_READ_INLINE)
 from .sender import AbstractWriter, SenderFactory
-from .access_log import (AccessLogRecord as _AccessLogRecord,
-                         _make_disconnect_detecting_receive,
+from .access_log import (_make_disconnect_detecting_receive,
                          close_record as _close_record,
-    close_ws_record as _close_ws_record,
                          close_ws_record as _close_ws_record,
-                         open_record as _open_record,
                          disconnect_events_observed as _disconnect_events_observed,
+                         open_record as _open_record,
+                         start_record as _start_record,
                          PHASE_TRACE as _PHASE_TRACE)
 from .cap_log import log_cap_hit
 
@@ -654,7 +652,6 @@ class HTTP1Actor(Actor):
         import asyncio  # noqa: PLC0415
         import time as _time  # noqa: PLC0415
         from ..env import get_settings as _get_settings  # noqa: PLC0415
-        from .access_log import PHASE_TRACE as _PHASE_TRACE  # noqa: PLC0415
         cfg = _get_settings()
         # One rescheduled TimerHandle per connection drives
         # all phase deadlines (headers / body / keep-alive).  Created
@@ -1270,7 +1267,7 @@ class HTTP1Actor(Actor):
             from ..event_aggregator import EventAggregator  # noqa: PLC0415
             aggregator = EventAggregator(EventDispatcher())
 
-        log_record = _AccessLogRecord.from_conn(conn)
+        log_record = _start_record(conn)
         log_record.status = 101  # HTTP 101 Switching Protocols
 
         if not await self._do_ws_handshake(conn):
@@ -1412,11 +1409,12 @@ class HTTP1Actor(Actor):
         (COMP-HEAD-NO-BODY).  ``test_head_dual_path.py`` is the guard.
 
         Splitting costs call frames, which
-        `AB-HIGH-PRECISION.md` §6.1 warns about for the hot path.  Measured
-        rather than assumed: a bound-method frame is ~13 ns and an awaited
-        coroutine frame ~50 ns here, so the six steps below total ~0.2 % of a
-        request — an order of magnitude under what the EC2 A/B can resolve at
-        12 rounds (±1 %).
+        `AB-HIGH-PRECISION.md` §6.1 warns about for the hot path.  The helpers
+        are all sync methods (~13 ns each); the dispatch itself stays inline
+        rather than becoming a sixth awaited helper — a new ``await`` boundary
+        on the happy path measures ~0.5 µs per hop here (see the
+        hotpath-async-extraction run), which is right at what the EC2 A/B
+        resolves at 12 rounds (±1 %).
         """
         import asyncio  # noqa: PLC0415
 
@@ -1454,7 +1452,44 @@ class HTTP1Actor(Actor):
             await self._answer_server_wide_options(send)
             return True, inner_receive
 
-        return await self._run_app(app_arg, inner_receive, send, log_record)
+        # Bind the *raw* recipient onto the app argument for lazy
+        # ``app_arg.body()`` before any disconnect-detecting wrapper is built.
+        # Binding the wrapper instead would close a per-request reference
+        # cycle (app_arg._receive → wrapper → app_arg) reclaimable only by the
+        # cyclic GC — the v0.60.0 tail-latency regression.  Idempotent.
+        bind_receive_channel(app_arg, inner_receive)
+
+        # Wrap receive for disconnect detection only when a listener observes
+        # it (request_disconnected, or request_completed via
+        # mark_disconnected); otherwise dispatch the raw receive and save the
+        # per-request closure.
+        if (self._aggregator is not None
+                and _disconnect_events_observed(self._aggregator)):
+            detecting_receive = _make_disconnect_detecting_receive(
+                inner_receive, app_arg, self._aggregator)
+        else:
+            detecting_receive = inner_receive
+
+        request_actor = self._request_actor
+        if request_actor is None:
+            request_actor = self._request_actor = RequestActor(
+                app_arg, detecting_receive, send,
+                self._app, self._aggregator,
+            )
+        else:
+            request_actor.bind(app_arg, detecting_receive, send)
+        try:
+            await request_actor.run()
+        except asyncio.CancelledError:
+            # Let BB_REQUEST_TIMEOUT's wait_for see the cancellation;
+            # swallowing it here would convert a timeout into a normal close
+            # without the 408 synthesis.
+            raise
+        except Exception:
+            return False, inner_receive
+        finally:
+            _close_record(log_record)
+        return True, inner_receive
 
     def _open_log_record(self, conn: Connection,
                          loop_start_perf: float, loop_start_cpu: float):
@@ -1525,60 +1560,6 @@ class HTTP1Actor(Actor):
         so it never routes.  Answered here with 204 plus an Allow header
         advertising the methods the origin implements."""
         await send(b'', HTTPStatus.NO_CONTENT, [(b'allow', _SERVER_WIDE_ALLOW)])
-
-    async def _run_app(self, app_arg, inner_receive: 'HTTP1Recipient',
-                       capturing_send, log_record,
-                       ) -> tuple[bool, 'HTTP1Recipient']:
-        """Dispatch through the request actor; return ``(keep_alive, receive)``.
-
-        One path whether or not an aggregator exists.  Forking on it would
-        mean a second disconnect wrapper beside
-        ``_make_disconnect_detecting_receive``, duplicating cycle-sensitive
-        plumbing that nothing would keep in step; and the fork could never pay
-        for itself, because ``aggregator is None`` implies the app has no
-        dispatcher on every served connection
-        (``test_aggregator_dispatcher_invariant``).
-        """
-        import asyncio  # noqa: PLC0415
-
-        # Bind the *raw* recipient onto the app argument for lazy
-        # ``app_arg.body()`` before any disconnect-detecting wrapper is built.
-        # Binding the wrapper instead would close a per-request reference
-        # cycle (app_arg._receive → wrapper → app_arg) reclaimable only by the
-        # cyclic GC — the v0.60.0 tail-latency regression.  Idempotent.
-        bind_receive_channel(app_arg, inner_receive)
-
-        # Wrap receive for disconnect detection only when a listener observes
-        # it (request_disconnected, or request_completed via
-        # mark_disconnected); otherwise dispatch the raw receive and save the
-        # per-request closure.
-        if (self._aggregator is not None
-                and _disconnect_events_observed(self._aggregator)):
-            detecting_receive = _make_disconnect_detecting_receive(
-                inner_receive, app_arg, self._aggregator)
-        else:
-            detecting_receive = inner_receive
-
-        request_actor = self._request_actor
-        if request_actor is None:
-            request_actor = self._request_actor = RequestActor(
-                app_arg, detecting_receive, capturing_send,
-                self._app, self._aggregator,
-            )
-        else:
-            request_actor.bind(app_arg, detecting_receive, capturing_send)
-        try:
-            await request_actor.run()
-        except asyncio.CancelledError:
-            # Let BB_REQUEST_TIMEOUT's wait_for see the cancellation;
-            # swallowing it here would convert a timeout into a normal close
-            # without the 408 synthesis.
-            raise
-        except Exception:
-            return False, inner_receive
-        finally:
-            _close_record(log_record)
-        return True, inner_receive
 
     async def _read_headers(self, max_total: int) -> None:
         """Read the next message head into ``self._request``.

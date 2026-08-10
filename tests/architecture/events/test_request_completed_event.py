@@ -12,7 +12,7 @@ import pytest
 from blackbull import BlackBull, StreamingResponse
 from blackbull.event_aggregator import EventAggregator
 from blackbull.event import Event
-from blackbull.server.server import AccessLogRecord
+from blackbull.server.access_log import AccessLogRecord
 from blackbull.server.http1_actor import HTTP1Actor
 from blackbull.server.recipient import AbstractReader
 from blackbull.server.sender import AbstractWriter

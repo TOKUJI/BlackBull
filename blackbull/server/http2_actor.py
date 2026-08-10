@@ -29,7 +29,7 @@ from .recipient import (AbstractReader, IncompleteReadError,
 from .response import ResponderFactory
 from .sender import AbstractWriter, ConnectionWindow, SenderFactory
 from .access_log import (
-    AccessLogRecord, _make_disconnect_detecting_receive,
+    _make_disconnect_detecting_receive,
     close_record as _close_record,
     close_ws_record as _close_ws_record,
     open_record as _open_record,

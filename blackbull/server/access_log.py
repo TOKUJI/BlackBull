@@ -85,14 +85,18 @@ def close_record(record: "AccessLogRecord | None") -> None:
     emit_access_log(record)
 
 
-def close_ws_record(record: 'AccessLogRecord', close_code) -> None:
-    """Finish a WebSocket session's record and emit it.
+def close_ws_record(record: 'AccessLogRecord | None', close_code) -> None:
+    """Finish a WebSocket session's record and emit it.  A no-op when there is
+    none — a session that never opened a record (no consumer, per
+    :func:`request_record_needed`) must not crash its close path.
 
     A session is not a request dispatch: it has no ``dispatch_done`` phase,
     and what it reports instead is the close code the peer or the server
     ended on.  Separate from :func:`close_record` for that reason, so neither
     protocol actor has to know which terminal field belongs to which shape.
     """
+    if record is None:
+        return
     record.close_code = close_code
     emit_access_log(record)
 
