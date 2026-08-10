@@ -3942,6 +3942,28 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.access_log.close_record" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        close_record
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.access_log.close_ws_record" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        close_ws_record
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.access_log.disconnect_events_observed" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3964,10 +3986,32 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.access_log.open_record" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        open_record
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.access_log.request_record_needed" class="md-nav__link">
     <span class="md-ellipsis">
       
         request_record_needed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.access_log.start_record" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        start_record
       
     </span>
   </a>
@@ -5191,6 +5235,28 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.access_log.close_record" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        close_record
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.access_log.close_ws_record" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        close_ws_record
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.access_log.disconnect_events_observed" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5213,10 +5279,32 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.access_log.open_record" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        open_record
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.access_log.request_record_needed" class="md-nav__link">
     <span class="md-ellipsis">
       
         request_record_needed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.access_log.start_record" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        start_record
       
     </span>
   </a>
@@ -5444,6 +5532,51 @@ tracing is disabled, so callers don't need to guard themselves.</p>
 <div class="doc doc-object doc-function">
 
 
+<h3 id="blackbull.server.access_log.close_record" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">close_record</span><span class="p">(</span><span class="n">record</span><span class="p">)</span></code>
+
+<a href="#blackbull.server.access_log.close_record" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Finish a request's record and emit it.  A no-op when there is none.</p>
+<p>Paired with :func:<code>open_record</code>, so a caller that opened a record does not
+also have to remember the final <code>mark</code> or repeat the <code>is not None</code>
+guard at every dispatch exit.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.server.access_log.close_ws_record" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">close_ws_record</span><span class="p">(</span><span class="n">record</span><span class="p">,</span> <span class="n">close_code</span><span class="p">)</span></code>
+
+<a href="#blackbull.server.access_log.close_ws_record" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Finish a WebSocket session's record and emit it.  A no-op when there is
+none — a session that never opened a record (no consumer, per
+:func:<code>request_record_needed</code>) must not crash its close path.</p>
+<p>A session is not a request dispatch: it has no <code>dispatch_done</code> phase,
+and what it reports instead is the close code the peer or the server
+ended on.  Separate from :func:<code>close_record</code> for that reason, so neither
+protocol actor has to know which terminal field belongs to which shape.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h3 id="blackbull.server.access_log.disconnect_events_observed" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">disconnect_events_observed</span><span class="p">(</span><span class="n">aggregator</span><span class="p">)</span></code>
 
@@ -5509,6 +5642,36 @@ working (see docs/guide/logging.md).</p>
 <div class="doc doc-object doc-function">
 
 
+<h3 id="blackbull.server.access_log.open_record" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">open_record</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">aggregator</span><span class="p">,</span> <span class="n">loop_start</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+<a href="#blackbull.server.access_log.open_record" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Start a request's access-log record, or <code>None</code> if nothing reads it.</p>
+<p>The one place that answers "does this request need a record, and if so
+what does a fresh one look like".  Both protocol actors call it; neither
+decides the gate, builds the record, or knows that <code>conn.state</code> is where
+it is published.</p>
+<p><em>loop_start</em> seeds the phase trace with the keep-alive loop's entry
+timestamps, which only the H/1 actor has to give.</p>
+<p>The record is always built from the <code>Connection</code>, never from an ASGI
+scope: the actor has the parsed Connection on every lane, and on the
+<code>BB_FORCE_ASGI_SCOPE</code> lane the emitted scope shares <code>conn.state</code> by
+identity — so the app's rebuilt Connection reads back the same record.
+That sharing is the contract <code>BlackBull._dispatch</code> relies on to source
+<code>request_completed</code>'s wire fields.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h3 id="blackbull.server.access_log.request_record_needed" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">request_record_needed</span><span class="p">(</span><span class="n">aggregator</span><span class="p">)</span></code>
 
@@ -5527,6 +5690,29 @@ costly under concurrency (extra live objects for the cyclic GC to scan) —
 so the actor skips building it. Consumers already tolerate its absence: the
 sender guards <code>if self._log_record is not None</code> and <code>request_completed</code>
 reads <code>conn.state.get('access_log')</code> with <code>'-'</code>/<code>0</code> placeholders.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.server.access_log.start_record" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">start_record</span><span class="p">(</span><span class="n">conn</span><span class="p">)</span></code>
+
+<a href="#blackbull.server.access_log.start_record" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Build and publish a record unconditionally.</p>
+<p>For the paths whose consumer analysis is not the per-request one:
+a WebSocket session's record spans the connection and carries
+<code>close_code</code>, and a pushed response needs one for the sender's inline
+capture.  Both want a record regardless of what
+:func:<code>request_record_needed</code> says about ordinary requests.</p>
 
 
     </div>

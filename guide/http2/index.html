@@ -782,10 +782,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#migrating-from-scopehttp2_priority-pre-v031" class="md-nav__link">
+  <a href="#migrating-from-scopehttp2_priority-removed-in-v0750" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Migrating from scope['http2_priority'] (pre-v0.31)
+        Migrating from scope['http2_priority'] (removed in v0.75.0)
       
     </span>
   </a>
@@ -5234,10 +5234,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#migrating-from-scopehttp2_priority-pre-v031" class="md-nav__link">
+  <a href="#migrating-from-scopehttp2_priority-removed-in-v0750" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Migrating from scope['http2_priority'] (pre-v0.31)
+        Migrating from scope['http2_priority'] (removed in v0.75.0)
       
     </span>
   </a>
@@ -5484,15 +5484,19 @@ not the deprecated RFC 7540 weight/tree):</p>
         <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;HIGH-PRIORITY u=</span><span class="si">%d</span><span class="s1">: </span><span class="si">%s</span><span class="s1"> </span><span class="si">%s</span><span class="s1">&#39;</span><span class="p">,</span>
                     <span class="n">hint</span><span class="p">[</span><span class="s1">&#39;urgency&#39;</span><span class="p">],</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;method&#39;</span><span class="p">],</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;path&#39;</span><span class="p">])</span>
 </code></pre></div>
-<h3 id="migrating-from-scopehttp2_priority-pre-v031">Migrating from <code>scope['http2_priority']</code> (pre-v0.31)<a class="headerlink" href="#migrating-from-scopehttp2_priority-pre-v031" title="Permanent link">&para;</a></h3>
+<h3 id="migrating-from-scopehttp2_priority-removed-in-v0750">Migrating from <code>scope['http2_priority']</code> (removed in v0.75.0)<a class="headerlink" href="#migrating-from-scopehttp2_priority-removed-in-v0750" title="Permanent link">&para;</a></h3>
 <p>Earlier BlackBull releases exposed priority as a top-level scope
 key, <code>scope['http2_priority']</code>.  v0.31 moved it under
 <code>conn.extensions</code> to match ASGI conventions and align the key
-name with gunicorn's beta HTTP/2 surface.  The legacy key is still
-populated alongside the new extension during the v0.31 cycle and
-is scheduled for removal in v0.32.0.</p>
+name with gunicorn's beta HTTP/2 surface, kept the old key
+populated as a deprecation alias, and <strong>removed it in v0.75.0</strong>.</p>
+<p>The extension is not merely the newer spelling — it is the only
+one that was ever correct.  <code>extensions</code> is shared by reference
+with the <code>Connection</code>, so a <code>PRIORITY_UPDATE</code> arriving <em>after</em>
+dispatch reaches the application through it.  The top-level key
+was a dispatch-time copy and silently went stale.</p>
 <p>To migrate, replace:</p>
-<div class="highlight"><pre><span></span><code><span class="n">hint</span> <span class="o">=</span> <span class="n">scope</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;http2_priority&#39;</span><span class="p">,</span> <span class="n">DEFAULT</span><span class="p">)</span>            <span class="c1"># legacy (pre-v0.31)</span>
+<div class="highlight"><pre><span></span><code><span class="n">hint</span> <span class="o">=</span> <span class="n">scope</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;http2_priority&#39;</span><span class="p">,</span> <span class="n">DEFAULT</span><span class="p">)</span>            <span class="c1"># removed in v0.75.0</span>
 </code></pre></div>
 <p>with:</p>
 <div class="highlight"><pre><span></span><code><span class="n">hint</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">extensions</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;http.response.priority&#39;</span><span class="p">,</span> <span class="n">DEFAULT</span><span class="p">)</span>   <span class="c1"># v0.31+</span>

@@ -5470,8 +5470,12 @@ response code from :class:<code>BadRequestError</code>'s 400).</p>
 
 
 
-        <p>Owns one HTTP/1.1 request lifetime.</p>
-<p>Spawned by HTTP1Actor, awaited to completion.  Calls the ASGI app.</p>
+        <p>Owns one request's app boundary: what the app is called with.</p>
+<p>Shared by both protocol actors — H/1 reuses one instance per connection
+via :meth:<code>bind</code>; H/2 builds one per stream.  Owns the app-facing
+representation (the native :class:<code>Connection</code> on the default lane, the
+materialized ASGI scope on <code>BB_FORCE_ASGI_SCOPE=1</code>), binds the raw
+recipient before any wrapper exists, and calls the app.</p>
 <p>The request-lifecycle Level B events are emitted by the application
 layer (<code>BlackBull._dispatch</code> / <code>__call__</code>) —
 the cross-transport emission points — not here.  The
@@ -5503,7 +5507,7 @@ escape the app call (e.g. a raising global middleware).</p>
 
 
 <h4 id="blackbull.server.http1_actor.RequestActor.bind" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">bind</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">bind</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">recipient</span><span class="p">,</span> <span class="n">send</span><span class="p">)</span></code>
 
 <a href="#blackbull.server.http1_actor.RequestActor.bind" class="headerlink" title="Permanent link">&para;</a></h4>
 
@@ -5514,8 +5518,8 @@ escape the app call (e.g. a raising global middleware).</p>
 <p>HTTP/1.1 dispatches one request at a time per connection, so the
 instance is free between requests and rebinding it is indistinguishable
 from building a new one — except for the allocation, which the keep-alive
-loop would otherwise pay on every request.  <code>app</code> and <code>aggregator</code>
-are per-connection and stay put.</p>
+loop would otherwise pay on every request.  <code>app</code>, <code>aggregator</code> and
+<code>force_asgi</code> are per-connection and stay put.</p>
 <p>Deliberately <strong>not</strong> available to HTTP/2, whose streams are concurrent:
 two live requests sharing one actor would interleave their fields.</p>
 

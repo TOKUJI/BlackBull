@@ -5895,10 +5895,11 @@ server and under external ASGI hosts.</p>
   on it when the window is exhausted.</li>
 <li>Keeps its state <strong>native</strong>: <code>stream.conn</code> is a <code>Connection</code> on
   every lane, and the one place an ASGI scope can come into
-  existence is the app boundary in <code>_dispatch_target</code>, matching
-  what HTTP/1.1 does.  Anything that reads the request mid-flight
-  — a late <code>PRIORITY_UPDATE</code>, a server push reading its parent —
-  reads attributes, never a dict.</li>
+  existence is the app boundary in the shared <code>RequestActor.run</code>,
+  matching what HTTP/1.1 does (the <code>BB_FORCE_ASGI_SCOPE=1</code> compat
+  lane).  Anything that reads the request mid-flight — a late
+  <code>PRIORITY_UPDATE</code>, a server push reading its parent — reads
+  attributes, never a dict.</li>
 <li>Supervisor strategy: <strong>propagate</strong> — a framing error on the
   connection is fatal.  <code>HTTP2Actor</code> sends GOAWAY and exits,
   causing <code>ConnectionActor</code> to close.</li>
@@ -5907,9 +5908,11 @@ server and under external ASGI hosts.</p>
 mutation of the <code>Connection</code>.  Fields the two share by reference
 (<code>state</code>, <code>extensions</code>) stay live afterwards — which is how a
 <code>PRIORITY_UPDATE</code> arriving after dispatch still reaches the
-application under <code>extensions['http.response.priority']</code>.  The
-deprecated top-level <code>scope['http2_priority']</code> alias is a copy and
-does not track it.</p>
+application under <code>extensions['http.response.priority']</code>.</p>
+<p>That sharing is why the extension became the hint's only home.  The
+top-level <code>scope['http2_priority']</code> alias, removed in v0.75.0, was
+a dispatch-time copy: a late <code>PRIORITY_UPDATE</code> could not reach it,
+so the two disagreed for the rest of the request.</p>
 <h3 id="streamactor"><code>StreamActor</code><a class="headerlink" href="#streamactor" title="Permanent link">&para;</a></h3>
 <ul>
 <li>Owns one HTTP/2 stream.</li>
