@@ -16,6 +16,7 @@ import asyncio
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 from blackbull import BlackBull
+from blackbull.event_aggregator import EventAggregator
 from blackbull.connection import Connection
 from blackbull.event import Event
 from blackbull.server.http1_actor import HTTP1Actor
@@ -88,11 +89,23 @@ def _ws_request(path: str = '/ws') -> bytes:
     return '\r\n'.join(lines).encode()
 
 
+# These drive HTTP1Actor directly, so they must supply the aggregator the
+# server would have built.  Passing None instead used to "work": the actor's
+# no-aggregator branch carried its own disconnect wrapper that emitted through
+# app._dispatcher.  That branch was dead on every served connection, so these
+# tests were exercising an implementation production never ran.  Sprint 99
+# deleted it; they now go through the real path.
+def _served_aggregator(app):
+    """The aggregator ASGIServer builds for *app* — see
+    tests/architecture/test_aggregator_dispatcher_invariant.py."""
+    return EventAggregator(app._dispatcher)
+
+
 async def _run_request(app, raw: bytes) -> None:
     """Run a single HTTP/1.1 request through HTTP1Actor and return."""
     writer = _FakeWriter()
     actor = HTTP1Actor(
-        _FakeReader(b''), writer, app, None,
+        _FakeReader(b''), writer, app, _served_aggregator(app),
         request=raw,
         peername=('127.0.0.1', 54321),
         sockname=('0.0.0.0', 8000),
@@ -117,7 +130,7 @@ async def _drive_request_with_disconnect(
     raw = _raw_request(path=path)
     writer = _FakeWriter()
     actor = HTTP1Actor(
-        _FakeReader(b''), writer, app, None,
+        _FakeReader(b''), writer, app, _served_aggregator(app),
         request=raw,
         peername=('127.0.0.1', 54321),
         sockname=('0.0.0.0', 8000),
@@ -211,7 +224,7 @@ async def test_websocket_connection_does_not_fire_request_completed():
 
     with patch.object(WebSocketActor, 'run', new=AsyncMock()):
         actor = HTTP1Actor(
-            _FakeReader(raw), writer, app, None,
+            _FakeReader(raw), writer, app, _served_aggregator(app),
             request=raw,
             peername=('127.0.0.1', 54321),
         )
@@ -356,7 +369,7 @@ async def test_websocket_connection_does_not_fire_request_disconnected():
 
     with patch.object(WebSocketActor, 'run', new=AsyncMock()):
         actor = HTTP1Actor(
-            _FakeReader(raw), writer, app, None,
+            _FakeReader(raw), writer, app, _served_aggregator(app),
             request=raw,
             peername=('127.0.0.1', 54321),
         )

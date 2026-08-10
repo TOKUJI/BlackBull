@@ -158,10 +158,11 @@ server and under external ASGI hosts.
   on it when the window is exhausted.
 - Keeps its state **native**: `stream.conn` is a `Connection` on
   every lane, and the one place an ASGI scope can come into
-  existence is the app boundary in `_dispatch_target`, matching
-  what HTTP/1.1 does.  Anything that reads the request mid-flight
-  — a late `PRIORITY_UPDATE`, a server push reading its parent —
-  reads attributes, never a dict.
+  existence is the app boundary in the shared `RequestActor.run`,
+  matching what HTTP/1.1 does (the `BB_FORCE_ASGI_SCOPE=1` compat
+  lane).  Anything that reads the request mid-flight — a late
+  `PRIORITY_UPDATE`, a server push reading its parent — reads
+  attributes, never a dict.
 - Supervisor strategy: **propagate** — a framing error on the
   connection is fatal.  `HTTP2Actor` sends GOAWAY and exits,
   causing `ConnectionActor` to close.
@@ -170,9 +171,12 @@ The boundary is a **snapshot**, taken after every pre-dispatch
 mutation of the `Connection`.  Fields the two share by reference
 (`state`, `extensions`) stay live afterwards — which is how a
 `PRIORITY_UPDATE` arriving after dispatch still reaches the
-application under `extensions['http.response.priority']`.  The
-deprecated top-level `scope['http2_priority']` alias is a copy and
-does not track it.
+application under `extensions['http.response.priority']`.
+
+That sharing is why the extension became the hint's only home.  The
+top-level `scope['http2_priority']` alias, removed in v0.75.0, was
+a dispatch-time copy: a late `PRIORITY_UPDATE` could not reach it,
+so the two disagreed for the rest of the request.
 
 ### `StreamActor`
 

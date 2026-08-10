@@ -17,7 +17,6 @@ from ..protocol.rsock import (
 from .sender import AbstractWriter
 from .recipient import (AbstractReader,
                         _HTTP2_STREAM_QUEUE_DEPTH, _WS_READ_INLINE)
-from .access_log import AccessLogRecord, emit_access_log as _emit_access_log
 from .cap_log import log_cap_hit
 from ..asgi import ASGIEvent
 logger = logging.getLogger(__name__)
@@ -26,26 +25,6 @@ logger = logging.getLogger(__name__)
 #: constructed with it runs its coroutine synchronously until the first
 #: suspension instead of queueing that first step for the next loop iteration.
 _EAGER_TASKS = sys.version_info >= (3, 12)
-
-async def _run_with_log(coro, record: AccessLogRecord) -> None:
-    """Await *coro* then emit one access log entry on 'blackbull.access'.
-
-    CancelledError re-raised so TaskGroup cancellation propagates correctly.
-    All other exceptions are logged and swallowed so a failing stream does not
-    cancel sibling streams through the TaskGroup.
-
-    Request-lifecycle Level B events are emitted by ``BlackBull._dispatch``
-    not here.
-    """
-    try:
-        await coro
-    except asyncio.CancelledError:
-        raise
-    except Exception:
-        logger.exception('HTTP/2 stream raised an unhandled exception')
-    finally:
-        _emit_access_log(record)
-
 
 
 class LifespanManager:

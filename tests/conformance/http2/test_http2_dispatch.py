@@ -917,7 +917,12 @@ class TestHTTP2Priority:
 
 @pytest.mark.asyncio
 class TestHTTP2PriorityScope:
-    """scope['http2_priority'] must be set on every HTTP/2 request."""
+    """The RFC 9218 priority hint must reach every HTTP/2 request.
+
+    Named for the scope key it used to arrive under; since v0.75.0 the only
+    home is ``extensions['http.response.priority']``, which is what these
+    assertions have always actually read.
+    """
 
     @staticmethod
     def _make_priority_update_frame(prioritized_stream_id: int,
@@ -968,7 +973,7 @@ class TestHTTP2PriorityScope:
         assert parse_priority_field('???') == {'urgency': 3, 'incremental': False}
         assert parse_priority_field('u=2, ???') == {'urgency': 3, 'incremental': False}
 
-    async def test_scope_has_default_http2_priority(self):
+    async def test_scope_has_default_priority_extension(self):
         h_frame = _make_headers_frame(stream_id=1, end_stream=True)
 
         scopes = []

@@ -50,6 +50,7 @@ CONNS="${CONNS:-32}"
 URL_PATH="${URL_PATH:-/plaintext}"
 PORT="${PORT:-8443}"
 BB_UVLOOP="${BB_UVLOOP:-0}"
+BB_FORCE_ASGI_SCOPE="${BB_FORCE_ASGI_SCOPE:-0}"
 PIPELINE="${PIPELINE:-1}"
 PHASES="${PHASES:-null real}"
 # Extra wrk header args, e.g. -H 'Accept-Encoding: gzip'.  Without an
@@ -184,6 +185,7 @@ PY
 
 start_server() {
     BB_UVLOOP="$BB_UVLOOP" BB_WORKERS=1 BB_ACCESS_LOG=0 \
+        BB_FORCE_ASGI_SCOPE="$BB_FORCE_ASGI_SCOPE" \
         setsid "${PIN_SERVER[@]}" .venv/bin/blackbull bench.peers.native_app:app \
             --bind "127.0.0.1:${PORT}" \
             >"$OUTDIR/server.log" 2>&1 &
@@ -282,6 +284,7 @@ restore_tree
     echo "| Lane | \`wrk -t$THREADS -c$CONNS -d${DURATION}s $URL_PATH\` |"
     echo "| Rounds | $ROUNDS ABBA per phase |"
     echo "| uvloop | $BB_UVLOOP |"
+    echo "| scope | $BB_FORCE_ASGI_SCOPE |"
     echo "| Pinning | server \`$SERVER_CPUS\` / load \`$LOAD_CPUS\` |"
     echo "| Files swapped | \`${FILES[*]}\` |"
     echo ""

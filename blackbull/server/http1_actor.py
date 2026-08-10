@@ -13,11 +13,10 @@ from http import HTTPStatus
 from urllib.parse import unquote
 
 from ..actor import Actor, Message
-from ..event import Event
 from ..event_aggregator import EventAggregator
 from ..asgi import ASGIEvent, ASGIReceiveCallable, ASGISendCallable
 from ..connection import (
-    Connection, bind_receive_channel, disconnected, mark_disconnected)
+    Connection, bind_receive_channel)
 from ..headers import Headers
 from .deadline import ConnectionDeadline
 from .recipient import (AbstractReader, HTTP1Recipient, IncompleteReadError,
@@ -26,9 +25,11 @@ from .recipient import (AbstractReader, HTTP1Recipient, IncompleteReadError,
 from .sender import AbstractWriter, SenderFactory
 from .access_log import (AccessLogRecord as _AccessLogRecord,
                          _make_disconnect_detecting_receive,
+                         close_ws_record as _close_ws_record,
+                         disconnect_events_observed as _disconnect_events_observed,
                          emit_access_log as _emit_access_log,
                          request_record_needed as _request_record_needed,
-                         disconnect_events_observed as _disconnect_events_observed,
+                         start_record as _start_record,
                          PHASE_TRACE as _PHASE_TRACE)
 from .cap_log import log_cap_hit
 
@@ -506,9 +507,13 @@ def _validate_host(headers: 'Headers') -> None:
 # ---------------------------------------------------------------------------
 
 class RequestActor(Actor):
-    """Owns one HTTP/1.1 request lifetime.
+    """Owns one request's app boundary: what the app is called with.
 
-    Spawned by HTTP1Actor, awaited to completion.  Calls the ASGI app.
+    Shared by both protocol actors — H/1 reuses one instance per connection
+    via :meth:`bind`; H/2 builds one per stream.  Owns the app-facing
+    representation (the native :class:`Connection` on the default lane, the
+    materialized ASGI scope on ``BB_FORCE_ASGI_SCOPE=1``), binds the raw
+    recipient before any wrapper exists, and calls the app.
 
     The request-lifecycle Level B events are emitted by the application
     layer (``BlackBull._dispatch`` / ``__call__``) —
@@ -519,41 +524,80 @@ class RequestActor(Actor):
 
     def __init__(
         self,
-        conn: dict | Connection,
-        receive: ASGIReceiveCallable,
+        conn: Connection,
+        recipient: ASGIReceiveCallable,
         send: ASGISendCallable,
         app: Callable[..., Awaitable[None]],
-        aggregator: EventAggregator,
+        # ``None`` for a foreign ASGI app: no dispatcher means no
+        # aggregator, and the actor skips event emission rather than
+        # the caller forking to a second dispatch path.
+        aggregator: EventAggregator | None,
+        force_asgi: bool,
     ) -> None:
         super().__init__()
         self._conn = conn
-        self._receive = receive
+        self._recipient = recipient
         self._send = send
         self._app = app
         self._aggregator = aggregator
+        self._force_asgi = force_asgi
 
-    def bind(self, conn, receive, send) -> 'RequestActor':
+    def bind(self, conn: Connection, recipient: ASGIReceiveCallable,
+             send: ASGISendCallable) -> 'RequestActor':
         """Point this actor at the next request on the same connection.
 
         HTTP/1.1 dispatches one request at a time per connection, so the
         instance is free between requests and rebinding it is indistinguishable
         from building a new one — except for the allocation, which the keep-alive
-        loop would otherwise pay on every request.  ``app`` and ``aggregator``
-        are per-connection and stay put.
+        loop would otherwise pay on every request.  ``app``, ``aggregator`` and
+        ``force_asgi`` are per-connection and stay put.
 
         Deliberately **not** available to HTTP/2, whose streams are concurrent:
         two live requests sharing one actor would interleave their fields.
         """
         self._conn = conn
-        self._receive = receive
+        self._recipient = recipient
         self._send = send
         return self
 
     async def run(self) -> None:  # override: single-shot, no inbox loop
+        # What the app is called with: the native Connection, or — on the
+        # ``BB_FORCE_ASGI_SCOPE=1`` compat lane — a materialized ASGI scope.
+        # The one place a scope can come into existence on either protocol's
+        # path; the snapshot is taken here at the call boundary, so every
+        # pre-dispatch mutation of *conn* — H/1's HEAD→GET rewrite, H/2's
+        # priority/extensions — has already landed (COMP-HEAD-NO-BODY).
+        # Inlined rather than a helper call: this is the per-request hot path
+        # and an extra call frame measured ~0.1-0.2 % here.
+        if self._force_asgi:
+            target = self._conn.to_asgi_scope(force_asgi=True)
+        else:
+            target = self._conn
+        # Bind the *raw* recipient onto the target for lazy ``target.body()``
+        # before any disconnect-detecting wrapper is built.  Binding the
+        # wrapper instead would close a per-request reference cycle
+        # (target._receive → wrapper → target) reclaimable only by the cyclic
+        # GC — the v0.60.0 tail-latency regression.  Idempotent.
+        bind_receive_channel(target, self._recipient)
+        # Wrap receive for disconnect detection only when a listener observes
+        # it (request_disconnected, or request_completed via
+        # mark_disconnected); otherwise dispatch the raw recipient and save
+        # the per-request closure.  Body-level disconnect (``target.body()`` →
+        # ClientDisconnected) is independent of this wrapper.
+        if (self._aggregator is not None
+                and _disconnect_events_observed(self._aggregator)):
+            receive = _make_disconnect_detecting_receive(
+                self._recipient, target, self._aggregator)
+        else:
+            receive = self._recipient
         try:
-            await self._app(self._conn, self._receive, self._send)
+            await self._app(target, receive, self._send)
         except BaseException as e:
-            await self._aggregator.on_error(self._conn, e)
+            # None-tolerant: a foreign ASGI app has no dispatcher, so there is
+            # no aggregator and nowhere to publish the ``error`` event.  The
+            # exception still propagates — containment is the caller's job.
+            if self._aggregator is not None:
+                await self._aggregator.on_error(target, e)
             raise
 
     async def _handle(self, msg: Message) -> None:  # never reached
@@ -645,7 +689,6 @@ class HTTP1Actor(Actor):
         import asyncio  # noqa: PLC0415
         import time as _time  # noqa: PLC0415
         from ..env import get_settings as _get_settings  # noqa: PLC0415
-        from .access_log import PHASE_TRACE as _PHASE_TRACE  # noqa: PLC0415
         cfg = _get_settings()
         # One rescheduled TimerHandle per connection drives
         # all phase deadlines (headers / body / keep-alive).  Created
@@ -1261,7 +1304,7 @@ class HTTP1Actor(Actor):
             from ..event_aggregator import EventAggregator  # noqa: PLC0415
             aggregator = EventAggregator(EventDispatcher())
 
-        log_record = _AccessLogRecord.from_conn(conn)
+        log_record = _start_record(conn)
         log_record.status = 101  # HTTP 101 Switching Protocols
 
         if not await self._do_ws_handshake(conn):
@@ -1277,8 +1320,7 @@ class HTTP1Actor(Actor):
         try:
             await ws_actor.run()
         finally:
-            log_record.close_code = ws_actor._disconnect_code
-            _emit_access_log(log_record)
+            _close_ws_record(log_record, ws_actor._disconnect_code)
 
     async def _do_ws_handshake(self, conn: Connection) -> bool:
         """Validate the WebSocket upgrade and store a deferred 101 callback.
@@ -1378,27 +1420,6 @@ class HTTP1Actor(Actor):
         }
         return True
 
-    @staticmethod
-    def _make_legacy_disconnect_receive(receive, conn: dict | Connection, dispatcher, log_record):
-        """Legacy disconnect-detecting receive wrapper (mirrors server.py helper)."""
-        async def detecting_receive():
-            event = await receive()
-            if isinstance(event, dict) and event.get('type') == ASGIEvent.HTTP_DISCONNECT:
-                if not disconnected(conn):
-                    mark_disconnected(conn)
-                    await dispatcher.emit(Event(
-                        'request_disconnected',
-                        detail={
-                            'conn':        conn,
-                            'client_ip':    log_record.client_ip,
-                            'method':       log_record.method,
-                            'path':         log_record.path,
-                            'http_version': log_record.http_version,
-                        },
-                    ))
-            return event
-        return detecting_receive
-
     async def _dispatch_request(
         self,
         conn: Connection,
@@ -1411,168 +1432,115 @@ class HTTP1Actor(Actor):
     ) -> tuple[bool, 'HTTP1Recipient']:
         """Prepare and run one request; return ``(keep_alive, inner_receive)``.
 
-        The per-request preparation lives here instead of in ``run`` so the
-        keep-alive loop stays a skeleton and the hot path gains no new call
-        site or coroutine boundary (AB-HIGH-PRECISION.md §6.1).
+        Protocol-side preparation only: the access-log record, the sender's
+        per-request reset, the Expect/100-continue answer, the HEAD→GET
+        rewrite, and the recipient.  Everything app-facing — what the app is
+        called with (native Connection or ASGI scope), the raw-recipient
+        binding, the disconnect-detecting wrapper, and the call itself — is
+        delegated to :class:`RequestActor`, the shared app boundary.
+
+        The HEAD→GET rewrite must run before :class:`RequestActor` snapshots
+        the app argument; reversed, the compat lane freezes ``method='HEAD'``,
+        the router finds no HEAD route, and the dual-path lane answers 405
+        where the native lane answers 200 (COMP-HEAD-NO-BODY).
+        ``test_head_dual_path.py`` is the guard.
         """
         import asyncio  # noqa: PLC0415
 
         # Build the access-log record only when something consumes it
-        # (access log / phase trace / request_completed listener). On the
-        # baseline hot path — no logging, no listeners — skipping it drops
-        # a per-request allocation and the ``conn.state`` dict it forces
-        # (the Connection graph's per-request objects are what the
-        # cyclic GC scans under concurrency). The
-        # legacy (no-aggregator) branch of the dispatch reads the
-        # record unconditionally, so keep building it when there is no
-        # aggregator. Consumers below are all None-tolerant (the sender
-        # guards ``_log_record is not None``; the finally guards ``emit``).
-        if self._aggregator is None or _request_record_needed(self._aggregator):
+        # (access log / phase trace / request_completed listener).  On the
+        # baseline hot path — no logging, no listeners — it stays ``None``,
+        # skipping a per-request allocation and the ``conn.state`` dict it
+        # forces (the Connection graph's per-request objects are what the
+        # cyclic GC scans under concurrency).  ``_request_record_needed``
+        # takes ``None`` and answers correctly for it.
+        if _request_record_needed(self._aggregator):
             log_record = _AccessLogRecord.from_conn(conn)
             if _PHASE_TRACE:
                 log_record.phases['loop_start'] = (
                     loop_start_perf, loop_start_cpu)
             log_record.mark('parsed')
-            # Write onto ``conn.state`` directly (the same dict the scope
-            # exposes as ``scope['state']``) so recording the access log
-            # does not materialize the lazy scope.
             conn.state['access_log'] = log_record
         else:
             log_record = None
-        # Reset per-request sender state.  The
-        # HTTP1Sender instance is shared across keep-alive
-        # requests on this connection; without this reset
-        # ``_started`` stays True after the first response and
-        # the timeout branch's ``if not send._started`` check
-        # would skip the synthetic 408 on a second-or-later
-        # request.  ``_chunked`` / ``_buffered_status`` similarly
-        # outlive their request.  Encapsulated in the sender
-        # so adding a new per-request slot can't be silently
-        # missed at this call site.
+
+        # Reset per-request sender state before anything writes through it.
+        # The HTTP1Sender instance is shared across keep-alive requests on
+        # this connection; without the reset ``_started`` stays True after the
+        # first response and the timeout branch's ``if not send._started``
+        # check skips the synthetic 408 on a second-or-later request.
+        # ``_chunked`` / ``_buffered_status`` similarly outlive their request.
         send.reset_per_request_state()
 
-        # RFC 9110 §10.1.1 / §15.2 — a server MUST NOT send a 1xx
-        # response to an HTTP/1.0 client (COMP-NO-1XX-HTTP10); the
-        # Expect header is ignored and the body read normally.
+        # RFC 9110 §10.1.1 / §15.2 — a server MUST NOT send a 1xx response to
+        # an HTTP/1.0 client (COMP-NO-1XX-HTTP10); the Expect header is
+        # ignored and the body read normally.
         #
-        # Emitted *after* the reset: the sender is shared across keep-alive
-        # requests, and its "response already complete" guard is still set
-        # from the previous response until the reset clears it.  Written
-        # before it, the interim response is silently dropped from request
-        # two onward and the peer stalls until its own Expect timeout.
-        # Before ``_log_record`` is attached, too, so the interim status
-        # never lands in the record the real response owns.
+        # After the reset, because the sender's "response already complete"
+        # guard is set from the previous response until the reset clears it —
+        # written before it, the interim response is dropped from request two
+        # onward and the peer stalls until its own Expect timeout.  Before the
+        # sender capture below attaches the record, so the interim status
+        # never lands in the one the real response owns.
         if (conn.http_version != '1.0'
-                and conn.headers.get(b'expect').lower()
-                == b'100-continue'):
+                and conn.headers.get(b'expect').lower() == b'100-continue'):
             await send(b'', HTTPStatus.CONTINUE)
 
-        # Inline access-log capture into the sender itself —
-        # avoids the per-event coroutine dispatch through a
-        # wrapper (which was 622 samples / 7% of CPU in the
-        # py-spy profile).  The sender's existing match arms
-        # already pattern-match on the event types we care
-        # about; updating ``log_record`` there is free.
+        # Inline access-log capture into the sender itself — avoids the
+        # per-event coroutine dispatch through a wrapper (7% of CPU in the
+        # py-spy profile).  RFC 9110 §9.3.2 — a HEAD response must be
+        # identical to the GET response except for the absence of the body,
+        # synthesised by dispatching to the GET handler and stripping body
+        # bytes.  The rewrite lands on the Connection only: a materialized
+        # scope reads ``method`` back from it, so writing ``scope['method']``
+        # too would force materialization for nothing.  The access log keeps
+        # the original HEAD, which it took from the request line.
         send._log_record = log_record
-        capturing_send = send
-        # RFC 9110 §9.3.2 — a HEAD response must be identical to
-        # the GET response except for the absence of the body.
-        # We synthesise that by dispatching to the GET handler
-        # and stripping body bytes from outgoing events.
-        # ``method`` is rewritten to ``GET`` on both the Connection
-        # (which the router/dispatcher read) and the scope envelope
-        # (which middleware may inspect); the access log records the
-        # original ``HEAD`` from the request line.
         send._head_mode = (conn.method == 'HEAD')
         if send._head_mode:
-            # Rewrite on the Connection only; a materialized scope reads
-            # ``method`` back from ``conn`` (now 'GET'), so no separate
-            # ``scope['method']`` write (which would force materialization).
             conn.method = 'GET'
 
-        # The app's argument is built *here*, after every pre-dispatch
-        # mutation of ``conn`` — the HEAD→GET rewrite above being the one
-        # that matters.  The native lane passes the Connection itself and
-        # so would tolerate an earlier binding, but the compat lane emits
-        # a *snapshot*: taken any earlier it freezes ``method='HEAD'``,
-        # the router finds no HEAD route, and the dual-path lane answers
-        # 405 where the native lane answers 200 (COMP-HEAD-NO-BODY).
-        if cfg.force_asgi_scope:
-            app_arg = conn.to_asgi_scope(force_asgi=True)  # pure scope
-        else:
-            app_arg = conn                                     # native Connection
-        # One recipient per connection, rebound per request — the same
-        # trade as ``send.reset_per_request_state()`` above, and for the
-        # same reason: the reader, body timeout, and deadline are
-        # connection properties, so rebuilding them per request bought
-        # nothing.  ``bind`` re-derives the framing from the new head.
+        # One recipient per connection, rebound per request — the same trade
+        # as ``send.reset_per_request_state()``: the reader, body timeout, and
+        # deadline are connection properties, so rebuilding them per request
+        # bought nothing.  ``bind`` re-derives the framing from the new head.
         if inner_receive is None:
             inner_receive = RecipientFactory.http1(
-                self._reader, conn,
-                body_timeout=cfg.body_timeout,
-                deadline=dl,
-            )
+                self._reader, conn, body_timeout=cfg.body_timeout, deadline=dl)
         else:
             inner_receive.bind(conn)
 
         if conn._asterisk_form:
-            # RFC 9112 §3.2.4 — ``OPTIONS *`` is a server-wide request
-            # whose target is not a resource, so it never routes.
-            # Answer at the server level with 204 + an Allow header
-            # advertising the methods the origin implements.
-            await capturing_send(b'', HTTPStatus.NO_CONTENT,
-                                 [(b'allow', _SERVER_WIDE_ALLOW)])
+            # RFC 9112 §3.2.4 — ``OPTIONS *`` targets the origin, not a
+            # resource, so it never routes.  Answered at the server level with
+            # 204 plus an Allow header advertising the methods the origin
+            # implements.
+            await send(b'', HTTPStatus.NO_CONTENT,
+                       [(b'allow', _SERVER_WIDE_ALLOW)])
             return True, inner_receive
 
-        # Bind the *raw* recipient onto the app argument for lazy
-        # ``app_arg.body()`` before any disconnect-detecting wrapper is
-        # built. Binding the wrapper instead would close a per-request
-        # reference cycle (app_arg._receive → wrapper → app_arg) reclaimable
-        # only by the cyclic GC — the v0.60.0 tail-latency regression.
-        # Idempotent (only binds when unset).
-        bind_receive_channel(app_arg, inner_receive)
-        if self._aggregator is not None:
-            # Wrap receive for disconnect detection only when a listener observes
-            # it (request_disconnected, or request_completed via mark_disconnected);
-            # otherwise dispatch the raw receive and save the per-request closure.
-            if _disconnect_events_observed(self._aggregator):
-                detecting_receive = _make_disconnect_detecting_receive(
-                    inner_receive, app_arg, self._aggregator)
-            else:
-                detecting_receive = inner_receive
-            request_actor = self._request_actor
-            if request_actor is None:
-                request_actor = self._request_actor = RequestActor(
-                    app_arg, detecting_receive, capturing_send,
-                    self._app, self._aggregator,
-                )
-            else:
-                request_actor.bind(app_arg, detecting_receive, capturing_send)
-            try:
-                await request_actor.run()
-            except asyncio.CancelledError:
-                # Let BB_REQUEST_TIMEOUT's wait_for see
-                # the cancellation; swallowing it here would convert a
-                # timeout into a normal close without the 408 synthesis.
-                raise
-            except Exception:
-                return False, inner_receive
-            finally:
-                if log_record is not None:
-                    log_record.mark('dispatch_done')
-                    _emit_access_log(log_record)
+        # Hand the native Connection and the raw recipient to the shared app
+        # boundary; it decides what the app is called with and owns the
+        # binding, the wrapper, and the call.
+        request_actor = self._request_actor
+        if request_actor is None:
+            request_actor = self._request_actor = RequestActor(
+                conn, inner_receive, send,
+                self._app, self._aggregator, cfg.force_asgi_scope,
+            )
         else:
-            _dispatcher = getattr(self._app, '_dispatcher', None)
-            if _dispatcher is not None:
-                detecting_receive = self._make_legacy_disconnect_receive(
-                    inner_receive, app_arg, _dispatcher, log_record)
-            else:
-                detecting_receive = inner_receive
-            try:
-                await self._app(app_arg, detecting_receive, capturing_send)
-            except BaseException:
-                raise
-            finally:
+            request_actor.bind(conn, inner_receive, send)
+        try:
+            await request_actor.run()
+        except asyncio.CancelledError:
+            # Let BB_REQUEST_TIMEOUT's wait_for see the cancellation;
+            # swallowing it here would convert a timeout into a normal close
+            # without the 408 synthesis.
+            raise
+        except Exception:
+            return False, inner_receive
+        finally:
+            if log_record is not None:
                 log_record.mark('dispatch_done')
                 _emit_access_log(log_record)
         return True, inner_receive

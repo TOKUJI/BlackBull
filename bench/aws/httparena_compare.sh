@@ -19,7 +19,8 @@
 #              (default: "baseline json json-tls static")
 #   FRAMEWORKS space-separated framework names to run
 #              (default: "blackbull fastapi";
-#               supported: blackbull, blackbull-uvloop, fastapi, sanic)
+#               supported: blackbull, blackbull-uvloop, blackbull-asgiscope,
+#               fastapi, sanic, aiohttp)
 #   BLACKBULL_VERSION  PyPI version pin (default: pyproject.toml's version)
 #   SPRINT_TAG  prefix on the result directory (default: sprint29)
 #   SKIP_VALIDATE   set to 1 to skip the full 49-point correctness check and
@@ -91,7 +92,7 @@ export TOPO=single
 
 : "${PROFILES:?must be set explicitly, space-separated (e.g. 'baseline baseline-h2 echo-ws json json-comp json-tls limited-conn pipelined static static-h2 upload')}"
 FRAMEWORKS="${FRAMEWORKS:-blackbull fastapi}"
-# Supported frameworks: blackbull, blackbull-uvloop, fastapi, sanic
+# Supported frameworks: blackbull, blackbull-uvloop, blackbull-asgiscope, fastapi, sanic, aiohttp
 KEEP_INSTANCE="${KEEP_INSTANCE:-0}"
 SKIP_VALIDATE="${SKIP_VALIDATE:-0}"
 # BB_UVLOOP: baked into the `blackbull` image ENV. Default 0 (pure-Python event
@@ -398,20 +399,23 @@ ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" 'bash ~/patch_cpuset.sh'
 # Rewrite the Dockerfile to install from PyPI (or the local wheel).  Flip
 # meta.json enabled=true so HttpArena's harness picks it up.
 #
-# Two variants may be requested in the same run:
+# Three variants may be requested in the same run:
 #
-#   blackbull          BB_UVLOOP=$BB_UVLOOP   (default 0 — the shipped default)
-#   blackbull-uvloop   BB_UVLOOP=1
+#   blackbull           BB_UVLOOP=$BB_UVLOOP   (default 0 — the shipped default)
+#   blackbull-uvloop    BB_UVLOOP=1
+#   blackbull-asgiscope BB_FORCE_ASGI_SCOPE=1 (ASGI scope conversion on every
+#                       request — the dual-path lane, and Sprint 99's baseline)
 #
-# Naming both in $FRAMEWORKS puts the two event loops on the *same instance in
-# the same session*, alongside the same peers.  That is the only way to read the
-# uvloop delta as a property of BlackBull rather than of the box: the two images
+# Naming them in $FRAMEWORKS puts the variants on the *same instance in the
+# same session*, alongside the same peers.  That is the only way to read a
+# variant's delta as a property of BlackBull rather than of the box: the images
 # differ in exactly one ENV line — same wheel, same app.py, same launcher.py —
 # so nothing else can account for a gap between them.
 #
-# BB_UVLOOP is set in its own ENV layer at the very end of the Dockerfile.  It
-# is not needed at build time, and keeping it after the pip install lets the two
-# variants share every expensive layer: the second image builds in seconds.
+# BB_UVLOOP / BB_FORCE_ASGI_SCOPE are set in their own ENV layers at the very
+# end of the Dockerfile.  They are not needed at build time, and keeping them
+# after the pip install lets the variants share every expensive layer: the
+# second image builds in seconds.
 # ---------------------------------------------------------------------------
 
 # Upload framework files.  In LOCAL_BB_WHEEL=1 mode the wheel is also
@@ -433,10 +437,11 @@ _BB_RSYNC_FILES=(
 _LOGGING_INI_COPY=''
 
 _stage_blackbull() {
-    local fw="$1" uvloop="$2"
+    local fw="$1" uvloop="$2" scope="$3"
     local dir="HttpArena/frameworks/${fw}"
 
-    echo ">>> staging ${fw} framework dir on the instance (BB_UVLOOP=${uvloop}) ..."
+    echo ">>> staging ${fw} framework dir on the instance (BB_UVLOOP=${uvloop}"
+    echo "        BB_FORCE_ASGI_SCOPE=${scope:-<unset>}) ..."
     ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" "mkdir -p ${dir}"
 
     rsync -e "ssh ${SSH_OPTS[*]}" -az --delete \
@@ -486,6 +491,7 @@ ${_LOGGING_INI_COPY}
 # Last layer, and the only one that differs between the blackbull variants —
 # everything above is shared cache.
 ENV BB_UVLOOP=${uvloop}
+${scope:+ENV BB_FORCE_ASGI_SCOPE=${scope}}
 EXPOSE 8080 8081 8443
 CMD ["python", "launcher.py"]
 EOF
@@ -509,6 +515,7 @@ ${_LOGGING_INI_COPY}
 # Last layer, and the only one that differs between the blackbull variants —
 # everything above is shared cache.
 ENV BB_UVLOOP=${uvloop}
+${scope:+ENV BB_FORCE_ASGI_SCOPE=${scope}}
 EXPOSE 8080 8081 8443
 CMD ["python", "launcher.py"]
 EOF
@@ -534,8 +541,9 @@ EOF
 
 for fw in $FRAMEWORKS; do
     case "$fw" in
-        blackbull)        _stage_blackbull blackbull "$BB_UVLOOP" ;;
-        blackbull-uvloop) _stage_blackbull blackbull-uvloop 1 ;;
+        blackbull)          _stage_blackbull blackbull "$BB_UVLOOP" "" ;;
+        blackbull-uvloop)   _stage_blackbull blackbull-uvloop 1 "" ;;
+        blackbull-asgiscope) _stage_blackbull blackbull-asgiscope "$BB_UVLOOP" 1 ;;
     esac
 done
 
@@ -570,6 +578,39 @@ if [[ " $FRAMEWORKS " == *" sanic "* ]]; then
         'sed -i "s/\"enabled\": false/\"enabled\": true/" HttpArena/frameworks/sanic/meta.json'
 
     echo "    sanic staged."
+fi
+
+# ---------------------------------------------------------------------------
+# Step 4c — stage bench/httparena/aiohttp/ as the `aiohttp` framework.
+# Same pattern as sanic: upload app.py, launcher.py, meta.json,
+# requirements.txt, Dockerfile, and build.sh.
+# Only stages if "aiohttp" is in $FRAMEWORKS.
+# ---------------------------------------------------------------------------
+if [[ " $FRAMEWORKS " == *" aiohttp "* ]]; then
+    echo ">>> staging aiohttp framework dir on the instance ..."
+    ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" 'mkdir -p HttpArena/frameworks/aiohttp'
+
+    _AIOHTTP_RSYNC_FILES=(
+        "$REPO_ROOT/bench/httparena/aiohttp/app.py"
+        "$REPO_ROOT/bench/httparena/aiohttp/launcher.py"
+        "$REPO_ROOT/bench/httparena/aiohttp/meta.json"
+        "$REPO_ROOT/bench/httparena/aiohttp/requirements.txt"
+        "$REPO_ROOT/bench/httparena/aiohttp/Dockerfile"
+        "$REPO_ROOT/bench/httparena/aiohttp/build.sh"
+    )
+    rsync -e "ssh ${SSH_OPTS[*]}" -az --delete \
+        "${_AIOHTTP_RSYNC_FILES[@]}" \
+        "$SERVER_REMOTE:HttpArena/frameworks/aiohttp/"
+
+    ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
+        'chmod +x HttpArena/frameworks/aiohttp/build.sh
+         echo "    build context:"; ls -1 HttpArena/frameworks/aiohttp/'
+
+    # Flip meta.json enabled=true on the remote copy.
+    ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
+        'sed -i "s/\"enabled\": false/\"enabled\": true/" HttpArena/frameworks/aiohttp/meta.json'
+
+    echo "    aiohttp staged."
 fi
 
 # ---------------------------------------------------------------------------
@@ -634,6 +675,32 @@ for fw in $FRAMEWORKS; do
         1:*uvloop*)   echo "    OK — uvloop active." ;;
         0:*asyncio*)  echo "    OK — stock asyncio loop." ;;
         *) echo "FATAL: $fw did not get the intended event loop (wanted BB_UVLOOP=${_want}); probe said: ${_probe}" >&2
+           exit 1 ;;
+    esac
+done
+
+# --- prove the asgiscope variant's BB_FORCE_ASGI_SCOPE the same way.  The
+# silent-failure shape is identical: if the ENV never lands in the image, the
+# arm still produces a full set of plausible numbers that read as "scope
+# forcing is free" — so abort rather than measure a mislabelled arm.
+_SCOPE_PROBE='
+import os
+from blackbull.env import get_settings, reset_settings_cache
+reset_settings_cache()
+s = get_settings()
+print("BB_FORCE_ASGI_SCOPE=" + str(os.environ.get("BB_FORCE_ASGI_SCOPE"))
+      + " setting=" + str(s.force_asgi_scope))
+'
+for fw in $FRAMEWORKS; do
+    case "$fw" in blackbull-asgiscope) ;; *) continue ;; esac
+    echo ">>> verifying ASGI scope forcing for $fw (expect BB_FORCE_ASGI_SCOPE=1) ..."
+    _probe=$(ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
+        "sudo docker run --rm --entrypoint python httparena-${fw} -c '${_SCOPE_PROBE}'" \
+        2>&1 | tail -1) || true
+    echo "    $_probe"
+    case "$_probe" in
+        *BB_FORCE_ASGI_SCOPE=1*setting=True*) echo "    OK — ASGI scope forced." ;;
+        *) echo "FATAL: $fw did not get BB_FORCE_ASGI_SCOPE=1; probe said: ${_probe}" >&2
            exit 1 ;;
     esac
 done

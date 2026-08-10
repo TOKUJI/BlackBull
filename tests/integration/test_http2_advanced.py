@@ -74,10 +74,10 @@ def _make_priority_app() -> BlackBull:
 def _make_stream_info_app() -> BlackBull:
     """Echoes the H/2 extensions surface a native handler sees.
 
-    The legacy top-level ``http2_priority`` key is deliberately not read
-    here: it is populated only on the ASGI-compat lane, so a native handler
-    has no such key to read.  Its shape contract is pinned in
-    ``tests/unit/test_http2_extensions.py::TestLegacyAliasContract``.
+    The legacy top-level ``http2_priority`` key is not read here because it
+    no longer exists — removed in v0.75.0, and never present on the native
+    lane before that.  Its absence is pinned in
+    ``tests/unit/test_http2_extensions.py::TestLegacyAliasIsGone``.
     """
     app = BlackBull()
 

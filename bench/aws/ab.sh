@@ -17,7 +17,7 @@
 # Env (defaults mirror ab_commit.sh; EC2-friendly defaults differ where noted):
 #   REF_BASE(=HEAD~1) REF_TREAT(=HEAD) PATHSPEC(=blackbull/)
 #   ROUNDS(=8) DURATION(=15) WARMUP(=5) THREADS(=4) CONNS(=32)
-#   PORT(=8443) BB_UVLOOP(=0) PIPELINE(=1) PHASES(=null real)
+#   PORT(=8443) BB_UVLOOP(=0) BB_FORCE_ASGI_SCOPE(=0) PIPELINE(=1) PHASES(=null real)
 #   SERVER_CPUS(=0-1) LOAD_CPUS(=2-5)
 #   WRK_HEADERS (extra wrk header args, e.g. '-H Accept-Encoding:gzip')
 #   URL_PATH(=/plaintext) or URL_PATHS (comma-separated — multiple sessions)
@@ -43,6 +43,7 @@ THREADS="${THREADS:-4}"
 CONNS="${CONNS:-32}"
 PORT="${PORT:-8443}"
 BB_UVLOOP="${BB_UVLOOP:-0}"
+BB_FORCE_ASGI_SCOPE="${BB_FORCE_ASGI_SCOPE:-0}"
 PIPELINE="${PIPELINE:-1}"
 PHASES="${PHASES:-null real}"
 SERVER_CPUS="${SERVER_CPUS:-0-1}"
@@ -62,8 +63,8 @@ MODE="${1:-launch}"
 ab_env() {  # $1 = url
     printf "REF_BASE='%s' REF_TREAT='%s' PATHSPEC='%s' URL_PATH='%s' ROUNDS='%s' " \
         "$REF_BASE" "$REF_TREAT" "$PATHSPEC" "$1" "$ROUNDS"
-    printf "DURATION='%s' WARMUP='%s' THREADS='%s' CONNS='%s' PORT='%s' BB_UVLOOP='%s' " \
-        "$DURATION" "$WARMUP" "$THREADS" "$CONNS" "$PORT" "$BB_UVLOOP"
+    printf "DURATION='%s' WARMUP='%s' THREADS='%s' CONNS='%s' PORT='%s' BB_UVLOOP='%s' BB_FORCE_ASGI_SCOPE='%s' " \
+        "$DURATION" "$WARMUP" "$THREADS" "$CONNS" "$PORT" "$BB_UVLOOP" "$BB_FORCE_ASGI_SCOPE"
     printf "PIPELINE='%s' PHASES='%s' SERVER_CPUS='%s' LOAD_CPUS='%s' " \
         "$PIPELINE" "$PHASES" "$SERVER_CPUS" "$LOAD_CPUS"
     printf "PEER_MW='%s' " "$PEER_MW"
@@ -123,9 +124,16 @@ finish)
     {
         echo "ab.sh finish start: $(date -u)"
         runner=-1; complete=0
+        # NOTE: the pattern is 'bench/results/ab_runner[.]sh', NOT
+        # 'bench/results/ab_runner.sh'.  ssh runs this command as the remote
+        # shell's `bash -c "<full command>"`, whose own cmdline contains the
+        # literal pattern — a plain pattern would self-match and n would never
+        # reach 0, forcing every finish into the full poll budget.  The [.]
+        # bracket makes the regex require a literal dot, which the bracketed
+        # text in the wrapper's cmdline does not contain.
         for i in $(seq 1 "$AB_POLLS"); do
             state=$(ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
-                "cd $REMOTE_REPO && n=\$(pgrep -f 'bench/results/ab_runner.sh' | wc -l); \
+                "cd $REMOTE_REPO && n=\$(pgrep -f 'bench/results/ab_runner[.]sh' | wc -l); \
                  c=0; for f in bench/results/ab-commit-*/raw.tsv; do [ -f \"\$f\" ] && \
                  [ \"\$(wc -l < \"\$f\")\" -ge $EXPECT_LINES ] && c=\$((c+1)); done; echo \"\$n \$c\"" \
                 2>/dev/null)

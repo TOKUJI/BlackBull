@@ -432,9 +432,9 @@ async def test_priority_update_existing_stream_stores_hint():
     stream = MagicMock()
     # Native Connection, because that is what ``stream.conn`` holds on every
     # lane.  A late PRIORITY_UPDATE reaches the application through the
-    # extensions dict — which the compat lane's scope shares by reference —
-    # and not through the deprecated top-level ``http2_priority`` alias, which
-    # is a dispatch-time snapshot.
+    # extensions dict — which the compat lane's scope shares by reference.
+    # That sharing is why the removed top-level alias could not have carried
+    # this: it was a dispatch-time copy.
     stream.conn = Connection(type='http', method='GET', path='/',
                              raw_path=b'/', http_version='2',
                              headers=Headers([]))

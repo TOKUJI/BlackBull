@@ -34,6 +34,47 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.75.0] — 2026-08-11
+
+Sprint 99.  The app boundary becomes one shared `RequestActor`.  What the
+application is called with — the native `Connection`, or a materialised
+ASGI scope on the `BB_FORCE_ASGI_SCOPE=1` compat lane — is now decided in a
+single actor shared by HTTP/1.1 and HTTP/2, and the forty-three-release-old
+`scope['http2_priority']` deprecation finally ships its removal.  The
+separation cost on the H/1 native lane (≈0.4-0.5 %, below the A/B null
+floor's spread) is accepted and recorded in `bench/results/`.
+
+### Removed
+
+- **`scope['http2_priority']`** — deprecated in v0.31.0 with removal scheduled
+  for v0.32.0, then shipped for another forty-three minor releases.  It is
+  gone.  Read the RFC 9218 hint from
+  `scope['extensions']['http.response.priority']` (or
+  `conn.extensions[...]` natively), which is where it has lived since v0.31.0.
+
+  The extension is not merely the newer spelling — it is the only one that was
+  ever correct.  `extensions` is shared by reference with the `Connection`, so
+  a `PRIORITY_UPDATE` arriving *after* dispatch reaches the application through
+  it; the top-level key was a dispatch-time copy that silently went stale for
+  the rest of the request.  Only the ASGI-compat lane
+  (`BB_FORCE_ASGI_SCOPE=1`) ever carried it; native handlers never saw it.
+
+### Internal
+
+- **The app boundary moved into one shared `RequestActor`.**  What the
+  application is called with — the native `Connection`, or a materialised
+  ASGI scope on the `BB_FORCE_ASGI_SCOPE=1` lane — is now decided in a single
+  actor shared by HTTP/1.1 and HTTP/2, instead of one per-protocol
+  dispatch site.  No user-facing API change; the A/B measurement of the
+  separation cost is recorded in `bench/results/`.
+- **Access-log record construction unified.**  H/1's per-request record is
+  built inline (master-equivalent); the record owners for H/2 and WS share
+  the same helpers.
+- **Bench tooling fixes:** `ab.sh` finish's pgrep self-match (50-min poll
+  budget) fixed via the `[.]` bracket trick; `ab_commit_h2.sh` no longer
+  recreates `.venv` on the EC2 instance; `BB_FORCE_ASGI_SCOPE` threaded
+  through the ab-verify tooling.
+
 ---
 
 ## [0.74.0] — 2026-08-10
