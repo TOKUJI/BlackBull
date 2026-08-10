@@ -30,8 +30,10 @@ from .response import ResponderFactory
 from .sender import AbstractWriter, ConnectionWindow, SenderFactory
 from .access_log import (
     AccessLogRecord, _make_disconnect_detecting_receive,
-    emit_access_log as _emit_access_log,
-    request_record_needed as _request_record_needed,
+    close_record as _close_record,
+    close_ws_record as _close_ws_record,
+    open_record as _open_record,
+    start_record as _start_record,
     disconnect_events_observed as _disconnect_events_observed,
 )
 from ..asgi import (ASGIEvent, ASGIReceiveCallable, ASGISendCallable,
@@ -84,19 +86,6 @@ def _signal_recipients(recipients: dict[int, _StreamRecipient]) -> None:
     for recipient in recipients.values():
         recipient.put_disconnect()
 
-
-def _make_log_record(conn: Connection):
-    # Publish the record for the app layer: BlackBull._dispatch sources the
-    # request_completed detail's wire fields (status / response_bytes /
-    # duration_ms) from the request's ``conn.state['access_log']`` — same
-    # contract as the HTTP/1.1 actor. The actor
-    # always has the parsed Connection, even on the BB_FORCE_ASGI_SCOPE lane
-    # (where the emitted scope shares ``conn.state`` by identity, so the app's
-    # rebuilt Connection sees the same record) — so the log record is always
-    # built from the Connection, never an ASGI scope dict.
-    record = AccessLogRecord.from_conn(conn)
-    conn.state['access_log'] = record
-    return record
 
 _DEFAULT_PRIORITY: dict[str, int | bool] = {'urgency': 3, 'incremental': False}
 
@@ -228,8 +217,7 @@ class StreamActor(Actor):
             # log_record is None on the baseline hot path when nothing consumes
             # it (no access log, no request_completed listener) — the gate lives
             # at the dispatch call sites (_request_record_needed).
-            if self._log_record is not None:
-                _emit_access_log(self._log_record)
+            _close_record(self._log_record)
 
     async def _handle(self, msg: Message) -> None:  # never reached
         raise NotImplementedError
@@ -1181,7 +1169,7 @@ class HTTP2Actor(Actor):
                     stream.stream_id, ErrorCodes.PROTOCOL_ERROR))
                 return True
             stream.on_headers_received(end_stream=False)
-            log_record = _make_log_record(conn)
+            log_record = _start_record(conn)
             await self._handle_h2_websocket(stream, tg, log_record)
             return True
 
@@ -1199,26 +1187,19 @@ class HTTP2Actor(Actor):
             # No body to deliver — skip queue allocation; recipient synthesizes
             # the empty http.request event on first receive() call if needed.
             stream_recipient.mark_end_of_stream_on_headers()
-        # Build the access-log record (and hand it to the sender for inline
-        # capture) only when something consumes it: access log, phase trace, or
-        # a request_completed listener.  ``_request_record_needed`` takes None
-        # and answers correctly for it — the first two consumers exist
-        # independently of any aggregator — so the gate is unconditional now
-        # that the legacy task wrapper, which emitted without a None check, is
-        # gone.
-        if _request_record_needed(self._aggregator):
-            log_record = _make_log_record(conn)
-            # Sprint 93 M1 — inline capture: the HTTP2Sender updates the
-            # record in its native/dict/bytes arms.  The old dict-shaped
-            # _make_capturing_send wrapper never saw a NativeResponse after
-            # the H2 native seam (status/bytes silently regressed to '-'/0)
-            # and cost a per-event coroutine dispatch besides.
-            send._log_record = log_record
-            dispatch_send = send
-        else:
-            log_record = None
-            dispatch_send = send
-        self._spawn_stream_task(tg, stream.stream_id, conn, stream_recipient, dispatch_send, log_record)
+        # ``open_record`` owns the gate: a record exists only when the access
+        # log, phase tracing, or a request_completed listener will read it,
+        # and is None otherwise.
+        #
+        # Capture is inline in the sender, which updates the record in its
+        # native/dict/bytes arms.  A wrapping ``send`` cannot do this job: the
+        # dict-shaped wrapper never saw a NativeResponse once the H2 native
+        # seam landed, so status and bytes silently regressed to '-' and 0 —
+        # and it cost a per-event coroutine dispatch besides.  ``None`` is a
+        # valid value here; the sender's arms guard on it.
+        log_record = _open_record(conn, self._aggregator)
+        send._log_record = log_record
+        self._spawn_stream_task(tg, stream.stream_id, conn, stream_recipient, send, log_record)
         return True
 
     async def _on_continuation_frame(
@@ -1307,16 +1288,10 @@ class HTTP2Actor(Actor):
         stream.conn = conn
         stream_recipient = self._make_stream_recipient(stream.stream_id)
         self._recipients[stream.stream_id] = stream_recipient
-        # Same consumer-gate as the HEADERS path: skip the record + inline
-        # capture when nothing reads them.
-        if _request_record_needed(self._aggregator):
-            log_record = _make_log_record(conn)
-            send._log_record = log_record
-            dispatch_send = send
-        else:
-            log_record = None
-            dispatch_send = send
-        self._spawn_stream_task(tg, stream.stream_id, conn, stream_recipient, dispatch_send, log_record)
+        # Same consumer gate and the same inline capture as the HEADERS path.
+        log_record = _open_record(conn, self._aggregator)
+        send._log_record = log_record
+        self._spawn_stream_task(tg, stream.stream_id, conn, stream_recipient, send, log_record)
         return True
 
     async def _on_data_frame(self, frame, stream: 'Stream') -> None:
@@ -1506,8 +1481,7 @@ class HTTP2Actor(Actor):
                 # ``_make_done_cb(is_ws=True)`` below, sharing the
                 # single lifecycle hook with ``_active_stream_count`` and
                 # per-stream dicts.
-                log_record.close_code = ws_actor._disconnect_code
-                _emit_access_log(log_record)
+                _close_ws_record(log_record, ws_actor._disconnect_code)
 
         self._ws_stream_count += 1
         self._active_stream_count += 1
@@ -1603,7 +1577,7 @@ class HTTP2Actor(Actor):
         push_sender = SenderFactory.http2(
             self._writer, self.factory, push_stream_id, push_callback=None,
             conn_window=self._conn_window)
-        log_record = _make_log_record(pushed_conn)
+        log_record = _start_record(pushed_conn)
         # Inline capture (Sprint 93 M1), same as the request path.
         push_sender._log_record = log_record
         capturing_send = push_sender

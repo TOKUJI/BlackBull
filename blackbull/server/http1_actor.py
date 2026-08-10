@@ -26,8 +26,10 @@ from .recipient import (AbstractReader, HTTP1Recipient, IncompleteReadError,
 from .sender import AbstractWriter, SenderFactory
 from .access_log import (AccessLogRecord as _AccessLogRecord,
                          _make_disconnect_detecting_receive,
-                         emit_access_log as _emit_access_log,
-                         request_record_needed as _request_record_needed,
+                         close_record as _close_record,
+    close_ws_record as _close_ws_record,
+                         close_ws_record as _close_ws_record,
+                         open_record as _open_record,
                          disconnect_events_observed as _disconnect_events_observed,
                          PHASE_TRACE as _PHASE_TRACE)
 from .cap_log import log_cap_hit
@@ -1284,8 +1286,7 @@ class HTTP1Actor(Actor):
         try:
             await ws_actor.run()
         finally:
-            log_record.close_code = ws_actor._disconnect_code
-            _emit_access_log(log_record)
+            _close_ws_record(log_record, ws_actor._disconnect_code)
 
     async def _do_ws_handshake(self, conn: Connection) -> bool:
         """Validate the WebSocket upgrade and store a deferred 101 callback.
@@ -1457,27 +1458,14 @@ class HTTP1Actor(Actor):
 
     def _open_log_record(self, conn: Connection,
                          loop_start_perf: float, loop_start_cpu: float):
-        """The per-request access-log record, or ``None`` if nothing reads it.
+        """This request's access-log record, or ``None`` if nothing reads it.
 
-        ``_request_record_needed`` accepts ``None``: the access logger and
-        phase tracing are consumers that exist independently of any
-        aggregator, and only the ``request_completed`` check needs one.
-
-        Skipping the record on the baseline hot path — no logging, no
-        listeners — drops a per-request allocation and the ``conn.state`` dict
-        it forces, which is what the cyclic GC scans under concurrency.
+        The decision and the record's shape belong to ``access_log``; the
+        actor's only contribution is the keep-alive loop's entry timestamps,
+        which it alone has.
         """
-        if not _request_record_needed(self._aggregator):
-            return None
-        log_record = _AccessLogRecord.from_conn(conn)
-        if _PHASE_TRACE:
-            log_record.phases['loop_start'] = (loop_start_perf, loop_start_cpu)
-        log_record.mark('parsed')
-        # Written onto ``conn.state`` directly — the same dict the scope
-        # exposes as ``scope['state']`` — so recording the access log does not
-        # materialize the lazy scope.
-        conn.state['access_log'] = log_record
-        return log_record
+        return _open_record(conn, self._aggregator,
+                            (loop_start_perf, loop_start_cpu))
 
     @staticmethod
     def _arm_sender(send, conn: Connection, log_record) -> None:
@@ -1589,9 +1577,7 @@ class HTTP1Actor(Actor):
         except Exception:
             return False, inner_receive
         finally:
-            if log_record is not None:
-                log_record.mark('dispatch_done')
-                _emit_access_log(log_record)
+            _close_record(log_record)
         return True, inner_receive
 
     async def _read_headers(self, max_total: int) -> None:

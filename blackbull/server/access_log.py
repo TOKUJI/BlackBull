@@ -26,6 +26,77 @@ _access_logger = logging.getLogger('blackbull.access')
 PHASE_TRACE: bool = os.environ.get('BB_PHASE_TRACE', '0') == '1'
 
 
+def open_record(conn, aggregator: 'EventAggregator | None',
+                loop_start: 'tuple[float, float] | None' = None,
+                ) -> "AccessLogRecord | None":
+    """Start a request's access-log record, or ``None`` if nothing reads it.
+
+    The one place that answers "does this request need a record, and if so
+    what does a fresh one look like".  Both protocol actors call it; neither
+    decides the gate, builds the record, or knows that ``conn.state`` is where
+    it is published.
+
+    *loop_start* seeds the phase trace with the keep-alive loop's entry
+    timestamps, which only the H/1 actor has to give.
+
+    The record is always built from the ``Connection``, never from an ASGI
+    scope: the actor has the parsed Connection on every lane, and on the
+    ``BB_FORCE_ASGI_SCOPE`` lane the emitted scope shares ``conn.state`` by
+    identity — so the app's rebuilt Connection reads back the same record.
+    That sharing is the contract ``BlackBull._dispatch`` relies on to source
+    ``request_completed``'s wire fields.
+    """
+    if not request_record_needed(aggregator):
+        return None
+    record = start_record(conn)
+    if PHASE_TRACE and loop_start is not None:
+        record.phases['loop_start'] = loop_start
+    record.mark('parsed')
+    return record
+
+
+def start_record(conn) -> 'AccessLogRecord':
+    """Build and publish a record unconditionally.
+
+    For the paths whose consumer analysis is not the per-request one:
+    a WebSocket session's record spans the connection and carries
+    ``close_code``, and a pushed response needs one for the sender's inline
+    capture.  Both want a record regardless of what
+    :func:`request_record_needed` says about ordinary requests.
+    """
+    record = AccessLogRecord.from_conn(conn)
+    # Written onto ``conn.state`` directly — the same dict the scope exposes
+    # as ``scope['state']`` — so recording the access log does not materialize
+    # the lazy scope.
+    conn.state['access_log'] = record
+    return record
+
+
+def close_record(record: "AccessLogRecord | None") -> None:
+    """Finish a request's record and emit it.  A no-op when there is none.
+
+    Paired with :func:`open_record`, so a caller that opened a record does not
+    also have to remember the final ``mark`` or repeat the ``is not None``
+    guard at every dispatch exit.
+    """
+    if record is None:
+        return
+    record.mark('dispatch_done')
+    emit_access_log(record)
+
+
+def close_ws_record(record: 'AccessLogRecord', close_code) -> None:
+    """Finish a WebSocket session's record and emit it.
+
+    A session is not a request dispatch: it has no ``dispatch_done`` phase,
+    and what it reports instead is the close code the peer or the server
+    ended on.  Separate from :func:`close_record` for that reason, so neither
+    protocol actor has to know which terminal field belongs to which shape.
+    """
+    record.close_code = close_code
+    emit_access_log(record)
+
+
 def emit_access_log(record: 'AccessLogRecord') -> None:
     """Emit *record* on the access logger if INFO is enabled.
 
