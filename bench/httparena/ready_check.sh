@@ -102,16 +102,50 @@ echo "  PASS [server up on :8080]"
 # --- probes ---------------------------------------------------------------
 probe "/pipeline 200"                "ok"      curl -s http://127.0.0.1:8080/pipeline
 probe "/baseline11 sum"              "^3$"     curl -s "http://127.0.0.1:8080/baseline11?int=1&int=2"
-probe "h2c :8082 (prior-knowledge)"  "ok"      curl -s --http2-prior-knowledge http://127.0.0.1:8082/pipeline
-if [ "$_HAVE_CERTS" = 1 ]; then
-    probe "TLS h2 :8443"             "ok"      curl -sk --http2 https://127.0.0.1:8443/pipeline
-    probe "TLS h1 :8081"             "ok"      curl -sk https://127.0.0.1:8081/pipeline
+
+# ── Probe applicability ────────────────────────────────────────────────────
+# Which listeners a framework must expose depends on the profiles it
+# subscribes to in meta.json (mirrors validate.sh's has_test()).  A
+# baseline-only framework (e.g. aiohttp) has no h2c / TLS / WS / gRPC
+# listeners, so those probes would otherwise false-fail.  Parse the
+# subscribed test list once and gate each listener probe on it.
+_HAS_H2=0; _HAS_TLS=0; _HAS_WS=0; _HAS_GRPC=0
+_META="$HARENA_DIR/frameworks/$FW/meta.json"
+if [ -f "$_META" ]; then
+    _TESTS="$(python3 -c 'import json,sys; print(" ".join(json.load(open(sys.argv[1]))["tests"]))' "$_META" 2>/dev/null || true)"
+    case " $_TESTS " in
+        *" baseline-h2 "*|*" static-h2 "*|*" baseline-h2c "*|*" json-h2c "*|*" baseline-h3 "*) _HAS_H2=1 ;;
+    esac
+    case " $_TESTS " in
+        *" json-tls "*|*" baseline-h2 "*|*" static-h2 "*|*" unary-grpc-tls "*|*" stream-grpc-tls "*) _HAS_TLS=1 ;;
+    esac
+    case " $_TESTS " in
+        *" echo-ws "*|*" echo-ws-pipeline "*|*" echo-ws-limited "*) _HAS_WS=1 ;;
+    esac
+    case " $_TESTS " in
+        *" unary-grpc "*|*" unary-grpc-tls "*|*" stream-grpc "*|*" stream-grpc-tls "*) _HAS_GRPC=1 ;;
+    esac
+fi
+
+if [ "$_HAS_H2" = 1 ]; then
+    probe "h2c :8082 (prior-knowledge)"  "ok"  curl -s --http2-prior-knowledge http://127.0.0.1:8082/pipeline
 else
-    echo "  SKIP [TLS probes — no certs mounted]"
+    echo "  SKIP [h2c :8082 — framework subscribes to no h2/h3 profile]"
+fi
+if [ "$_HAS_TLS" = 1 ]; then
+    if [ "$_HAVE_CERTS" = 1 ]; then
+        probe "TLS h2 :8443"             "ok"  curl -sk --http2 https://127.0.0.1:8443/pipeline
+        probe "TLS h1 :8081"             "ok"  curl -sk https://127.0.0.1:8081/pipeline
+    else
+        echo "  SKIP [TLS probes — no certs mounted]"
+    fi
+else
+    echo "  SKIP [TLS probes — framework subscribes to no TLS profile]"
 fi
 
 # WebSocket echo — stdlib-only raw client (masked text frame "ping" → "ping").
-if WS_OUT="$(python3 - "$CID" <<'PYEOF' 2>&1
+if [ "$_HAS_WS" = 1 ]; then
+    if WS_OUT="$(python3 - "$CID" <<'PYEOF' 2>&1
 import socket, os, base64, sys
 host, port = '127.0.0.1', 8080
 s = socket.create_connection((host, port), timeout=10)
@@ -139,14 +173,17 @@ while len(data) < ln:
 print('OK' if (opcode == 1 and data == payload) else 'mismatch')
 s.close()
 PYEOF
-)"; then
-    case "$WS_OUT" in
-        *OK*) echo "  PASS [ws echo on /ws]" ;;
-        *)    echo "  FAIL [ws echo on /ws] ($WS_OUT)"; _fail=1 ;;
-    esac
+    )"; then
+        case "$WS_OUT" in
+            *OK*) echo "  PASS [ws echo on /ws]" ;;
+            *)    echo "  FAIL [ws echo on /ws] ($WS_OUT)"; _fail=1 ;;
+        esac
+    else
+        echo "  FAIL [ws echo on /ws] (client error)"
+        _fail=1
+    fi
 else
-    echo "  FAIL [ws echo on /ws] (client error)"
-    _fail=1
+    echo "  SKIP [ws echo — framework subscribes to no ws profile]"
 fi
 
 # gRPC unary — raw frame over h2c: SumRequest{a=1,b=2} → SumReply{result=3}.
@@ -154,19 +191,23 @@ fi
 # response body 00 00 00 00 02 08 03 (payload "08 03" is 2 bytes;
 # grpc-status rides the trailers).  The request frame is written to a temp
 # file: neither bash $'...' nor $(...) can carry NUL bytes.
-GRPC_REQ="$(mktemp)"
-printf '\x00\x00\x00\x00\x04\x08\x01\x10\x02' > "$GRPC_REQ"
-GRPC_BODY="$(curl -s --http2-prior-knowledge \
-    -H 'content-type: application/grpc' -H 'te: trailers' \
-    --data-binary @"$GRPC_REQ" \
-    http://127.0.0.1:8080/benchmark.BenchmarkService/GetSum \
-    | od -An -tx1 | tr -d ' \n')"
-rm -f "$GRPC_REQ"
-if [ "$GRPC_BODY" = "00000000020803" ]; then
-    echo "  PASS [gRPC unary GetSum on :8080]"
+if [ "$_HAS_GRPC" = 1 ]; then
+    GRPC_REQ="$(mktemp)"
+    printf '\x00\x00\x00\x00\x04\x08\x01\x10\x02' > "$GRPC_REQ"
+    GRPC_BODY="$(curl -s --http2-prior-knowledge \
+        -H 'content-type: application/grpc' -H 'te: trailers' \
+        --data-binary @"$GRPC_REQ" \
+        http://127.0.0.1:8080/benchmark.BenchmarkService/GetSum \
+        | od -An -tx1 | tr -d ' \n')"
+    rm -f "$GRPC_REQ"
+    if [ "$GRPC_BODY" = "00000000020803" ]; then
+        echo "  PASS [gRPC unary GetSum on :8080]"
+    else
+        echo "  FAIL [gRPC unary GetSum on :8080] (body=$GRPC_BODY)"
+        _fail=1
+    fi
 else
-    echo "  FAIL [gRPC unary GetSum on :8080] (body=$GRPC_BODY)"
-    _fail=1
+    echo "  SKIP [gRPC unary — framework subscribes to no grpc profile]"
 fi
 
 echo

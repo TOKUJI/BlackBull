@@ -1,0 +1,16 @@
+{
+  "display_name": "aiohttp",
+  "language": "Python",
+  "type": "emerging",
+  "mode": "standard",
+  "engine": "aiohttp",
+  "description": "aiohttp — async HTTP client/server framework for Python. HTTP/1.1 + WebSocket (no HTTP/2, no gRPC). Multi-process via gunicorn worker.",
+  "repo": "https://github.com/aio-libs/aiohttp",
+  "enabled": true,
+  "tests": [
+    "baseline"
+  ],
+  "maintainers": [
+    "TOKUJI"
+  ]
+}
