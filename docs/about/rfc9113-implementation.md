@@ -404,12 +404,18 @@ client a different thing to do next.
 
 **§8.1 Request/Response Exchange** ✅
 `HTTP2Actor._spawn_stream_task()` bridges connection and application: count the
-stream, create the `StreamActor` (or direct-dispatch coroutine), optionally wrap
-in a request-timeout (`BB_REQUEST_TIMEOUT` → RST CANCEL on expiry) and a
-per-worker concurrency semaphore (`BB_H2_ACTIVE_STREAMS_1W`), and register the
-done-callback.  An HTTP message is HEADERS → zero or more DATA → optional
-trailing HEADERS.  *Because* this is the seam between protocol and ASGI app;
-everything protocol-level must be settled before the app sees a scope.
+stream, create the `StreamActor`, optionally wrap in a request-timeout
+(`BB_REQUEST_TIMEOUT` → RST CANCEL on expiry) and a per-worker concurrency
+semaphore (`BB_H2_ACTIVE_STREAMS_1W`), and register the done-callback.  An HTTP
+message is HEADERS → zero or more DATA → optional trailing HEADERS.  The
+app-boundary decision itself — call the app with the native `Connection`, or a
+materialised ASGI scope on the `BB_FORCE_ASGI_SCOPE=1` compat lane — is owned by
+the **shared `RequestActor`** (the same actor HTTP/1.1 uses), so the seam
+between protocol and application is one place across protocols, and everything
+protocol-level is settled before the app sees a representation.  *Because* this
+is the seam between protocol and ASGI app; the boundary is a snapshot taken
+after every pre-dispatch mutation of the `Connection` (e.g. late
+`PRIORITY_UPDATE`), so the app always sees settled state.
 
 **§8.1.1 Malformed Messages** ✅
 Malformed requests are RST PROTOCOL_ERROR *before the application sees them*,

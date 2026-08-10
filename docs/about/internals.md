@@ -158,10 +158,11 @@ server and under external ASGI hosts.
   on it when the window is exhausted.
 - Keeps its state **native**: `stream.conn` is a `Connection` on
   every lane, and the one place an ASGI scope can come into
-  existence is the app boundary in `_dispatch_target`, matching
-  what HTTP/1.1 does.  Anything that reads the request mid-flight
-  — a late `PRIORITY_UPDATE`, a server push reading its parent —
-  reads attributes, never a dict.
+  existence is the app boundary in the shared `RequestActor.run`,
+  matching what HTTP/1.1 does (the `BB_FORCE_ASGI_SCOPE=1` compat
+  lane).  Anything that reads the request mid-flight — a late
+  `PRIORITY_UPDATE`, a server push reading its parent — reads
+  attributes, never a dict.
 - Supervisor strategy: **propagate** — a framing error on the
   connection is fatal.  `HTTP2Actor` sends GOAWAY and exits,
   causing `ConnectionActor` to close.

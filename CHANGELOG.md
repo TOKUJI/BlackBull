@@ -49,6 +49,22 @@ so the editable install's metadata catches up.
   the rest of the request.  Only the ASGI-compat lane
   (`BB_FORCE_ASGI_SCOPE=1`) ever carried it; native handlers never saw it.
 
+### Internal
+
+- **The app boundary moved into one shared `RequestActor`.**  What the
+  application is called with — the native `Connection`, or a materialised
+  ASGI scope on the `BB_FORCE_ASGI_SCOPE=1` lane — is now decided in a single
+  actor shared by HTTP/1.1 and HTTP/2, instead of one per-protocol
+  dispatch site.  No user-facing API change; the A/B measurement of the
+  separation cost is recorded in `bench/results/`.
+- **Access-log record construction unified.**  H/1's per-request record is
+  built inline (master-equivalent); the record owners for H/2 and WS share
+  the same helpers.
+- **Bench tooling fixes:** `ab.sh` finish's pgrep self-match (50-min poll
+  budget) fixed via the `[.]` bracket trick; `ab_commit_h2.sh` no longer
+  recreates `.venv` on the EC2 instance; `BB_FORCE_ASGI_SCOPE` threaded
+  through the ab-verify tooling.
+
 ---
 
 ## [0.74.0] — 2026-08-10

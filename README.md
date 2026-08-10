@@ -361,6 +361,7 @@ for the full tutorial.
 | [`examples/typed_routes_ok.py`](examples/typed_routes_ok.py) | `{param:converter}` syntax, `url_path_for` |
 | [`examples/scenario_h1_fault_injection.py`](examples/scenario_h1_fault_injection.py) | HTTP/1.1 fault scenarios driven against stdlib `http.server` |
 | [`examples/scenario_h2_fault_injection.py`](examples/scenario_h2_fault_injection.py) | HTTP/2 fault scenarios served against httpx |
+| [`examples/PriorityExample/`](examples/PriorityExample/) | RFC 9218 priority hints via `conn.extensions['http.response.priority']` — echo and urgency-scaled work endpoints |
 | [`examples/connection_object.py`](examples/connection_object.py) | Opt-in `Connection` context object — headers, cookies, client, `body()`/`json()`/`text()` |
 | [`examples/websocket_object.py`](examples/websocket_object.py) | High-level `WebSocket` object — `async for` messages, `send_json`, path/query injection, handshake rejection, and the raw event form side by side |
 | [`examples/dependency_injection.py`](examples/dependency_injection.py) | `Depends` on a pseudo DB pool — per-request acquire/release with teardown after the response, query params, `use_cache` sharing |
