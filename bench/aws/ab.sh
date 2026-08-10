@@ -124,9 +124,16 @@ finish)
     {
         echo "ab.sh finish start: $(date -u)"
         runner=-1; complete=0
+        # NOTE: the pattern is 'bench/results/ab_runner[.]sh', NOT
+        # 'bench/results/ab_runner.sh'.  ssh runs this command as the remote
+        # shell's `bash -c "<full command>"`, whose own cmdline contains the
+        # literal pattern — a plain pattern would self-match and n would never
+        # reach 0, forcing every finish into the full poll budget.  The [.]
+        # bracket makes the regex require a literal dot, which the bracketed
+        # text in the wrapper's cmdline does not contain.
         for i in $(seq 1 "$AB_POLLS"); do
             state=$(ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
-                "cd $REMOTE_REPO && n=\$(pgrep -f 'bench/results/ab_runner.sh' | wc -l); \
+                "cd $REMOTE_REPO && n=\$(pgrep -f 'bench/results/ab_runner[.]sh' | wc -l); \
                  c=0; for f in bench/results/ab-commit-*/raw.tsv; do [ -f \"\$f\" ] && \
                  [ \"\$(wc -l < \"\$f\")\" -ge $EXPECT_LINES ] && c=\$((c+1)); done; echo \"\$n \$c\"" \
                 2>/dev/null)
