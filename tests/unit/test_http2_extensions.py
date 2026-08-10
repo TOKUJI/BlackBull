@@ -7,8 +7,9 @@ Covers:
   gunicorn's beta HTTP/2 convention.
 - ``scope['extensions']['http.response.http2_stream']`` — stream_id
   + send-window snapshot (gRPC server-streaming foundation).
-- Deprecation alias: ``scope['http2_priority']`` is still populated
-  and MUST agree with the new priority extension for one release.
+- Removed alias: ``scope['http2_priority']`` is gone (v0.75.0); the
+  priority extension above is its only home, and a grep-based guard
+  keeps it from creeping back.
 
 The new extensions are built by ``_build_h2_extensions`` in
 ``blackbull.server.http2_actor``; these tests pin its behaviour so
@@ -108,24 +109,51 @@ class TestBuildExtensions:
         assert a_pri == b_pri == shared
 
 
-class TestLegacyAliasContract:
-    """``scope['http2_priority']`` is kept populated for one release
-    so middleware that read the legacy key keeps working through
-    the v0.31 deprecation window.  Removal scheduled for v0.32.0.
+class TestLegacyAliasIsGone:
+    """``scope['http2_priority']`` was deprecated in v0.31.0 with removal
+    scheduled for v0.32.0, and then shipped for another forty-three minor
+    releases.  It is gone.
 
-    These tests don't drive a real request — they pin the contract
-    by asserting the helper's priority output is the same shape the
-    legacy key carried."""
+    The priority hint lives in exactly one place now —
+    ``scope['extensions']['http.response.priority']`` — which is also the
+    one that was ever correct under a mid-flight PRIORITY_UPDATE: the
+    extensions dict is shared by reference, while the top-level alias was a
+    dispatch-time snapshot that silently went stale."""
 
-    def test_legacy_alias_shape_matches_priority_extension(self):
+    def test_the_priority_hint_is_carried_by_the_extension(self):
         ext = _build_h2_extensions(
             stream_id=7,
             priority={'urgency': 5, 'incremental': False},
             peer_initial_window=65535,
             connection_window=65535)
-        # The populate sites assign the SAME dict to both
-        # scope['http2_priority'] and scope['extensions']
-        # ['http.response.priority'].  Asserting equality on the
-        # extension's contents pins that contract.
         assert ext['http.response.priority'] == {
             'urgency': 5, 'incremental': False}
+
+    def test_the_extensions_builder_never_emits_the_legacy_key(self):
+        """The alias was written at the app boundary, not here — but a
+        future edit that "restores" it would most naturally do it in this
+        helper, so the absence is asserted where it would reappear."""
+        ext = _build_h2_extensions(
+            stream_id=7,
+            priority={'urgency': 5, 'incremental': False},
+            peer_initial_window=65535,
+            connection_window=65535)
+        assert 'http2_priority' not in ext
+
+    def test_no_source_in_the_tree_still_populates_the_alias(self):
+        """The durable guard.  A grep, because the alias's whole problem was
+        that it was written in one place and read in another — a behavioural
+        test at either end would not have caught a re-introduction at the
+        other."""
+        import pathlib
+
+        root = pathlib.Path(__file__).resolve().parents[2] / 'blackbull'
+        offenders = [
+            f'{path.relative_to(root.parent)}:{i}'
+            for path in root.rglob('*.py')
+            for i, line in enumerate(path.read_text().splitlines(), 1)
+            if 'http2_priority' in line
+        ]
+        assert offenders == [], (
+            'scope[\'http2_priority\'] was removed in v0.75.0; these lines '
+            f'reference it again: {offenders}')

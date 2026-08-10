@@ -170,9 +170,12 @@ The boundary is a **snapshot**, taken after every pre-dispatch
 mutation of the `Connection`.  Fields the two share by reference
 (`state`, `extensions`) stay live afterwards — which is how a
 `PRIORITY_UPDATE` arriving after dispatch still reaches the
-application under `extensions['http.response.priority']`.  The
-deprecated top-level `scope['http2_priority']` alias is a copy and
-does not track it.
+application under `extensions['http.response.priority']`.
+
+That sharing is why the extension became the hint's only home.  The
+top-level `scope['http2_priority']` alias, removed in v0.75.0, was
+a dispatch-time copy: a late `PRIORITY_UPDATE` could not reach it,
+so the two disagreed for the rest of the request.
 
 ### `StreamActor`
 

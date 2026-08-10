@@ -196,7 +196,10 @@ class StreamActor(Actor):
         receive: ASGIReceiveCallable,
         send: ASGISendCallable,
         app: Callable[..., Awaitable[None]],
-        aggregator: EventAggregator,
+        # ``None`` for a foreign ASGI app: no dispatcher means no
+        # aggregator, and the actor skips event emission rather than
+        # the caller forking to a second dispatch path.
+        aggregator: EventAggregator | None,
         http2_actor: 'HTTP2Actor',
         log_record,
     ) -> None:
@@ -1014,17 +1017,7 @@ class HTTP2Actor(Actor):
         """
         if not self._force_asgi:
             return conn
-        scope = conn.to_asgi_scope(force_asgi=True)
-        # ``http2_priority`` — deprecation alias, derived from the extensions
-        # rather than passed in, so the request and server-push paths cannot
-        # disagree about it.  ``extensions`` itself is shared by reference, so
-        # a PRIORITY_UPDATE arriving after dispatch still reaches the app under
-        # ``extensions['http.response.priority']``; this top-level copy is a
-        # snapshot and does not track it.
-        priority = (conn.extensions or {}).get('http.response.priority')
-        if priority is not None:
-            scope['http2_priority'] = priority
-        return scope
+        return conn.to_asgi_scope(force_asgi=True)
 
     def _spawn_stream_task(
         self,
@@ -1035,7 +1028,7 @@ class HTTP2Actor(Actor):
         send,
         log_record,
     ) -> None:
-        """Spawn a StreamActor (aggregator path) or legacy _run_with_log task.
+        """Spawn the StreamActor that runs one stream's app dispatch.
 
         *conn* is always the native :class:`Connection`; the compat lane's ASGI
         scope is derived here, at the app boundary, and nowhere else.
@@ -1057,33 +1050,33 @@ class HTTP2Actor(Actor):
         # A pure scope carries no stash, so this is a no-op on the compat lane.
         bind_receive_channel(target, recipient)
 
-        if self._aggregator is not None:
-            # Wrap receive for disconnect detection only when a listener observes
-            # it (request_disconnected / request_completed); otherwise dispatch the
-            # raw recipient and save the per-request closure. Body-level disconnect
-            # (conn.body() → ClientDisconnected) is independent of this wrapper.
-            if _disconnect_events_observed(self._aggregator):
-                dispatch_receive = _make_disconnect_detecting_receive(
-                    recipient, target, self._aggregator)
-            else:
-                dispatch_receive = recipient
-            stream_actor = StreamActor(
-                stream_id=stream_id,
-                conn=target,
-                receive=dispatch_receive,
-                send=send,
-                app=self.app,
-                aggregator=self._aggregator,
-                http2_actor=self,
-                log_record=log_record,
-            )
-            coro = stream_actor.run()
+        # One dispatch path whether or not an aggregator exists.  Forking on
+        # it would duplicate this plumbing for no gain: ``StreamActor`` is
+        # None-tolerant in both fields that would differ (``log_record``, and
+        # ``aggregator`` via ``RequestActor``), and its failure handling is the
+        # one a peer can act on — a raising stream is reset with
+        # INTERNAL_ERROR rather than left to stop without explanation.
+        #
+        # Wrap receive for disconnect detection only when a listener observes
+        # it (request_disconnected / request_completed); otherwise dispatch the
+        # raw recipient and save the per-request closure. Body-level disconnect
+        # (conn.body() → ClientDisconnected) is independent of this wrapper.
+        if (self._aggregator is not None
+                and _disconnect_events_observed(self._aggregator)):
+            dispatch_receive = _make_disconnect_detecting_receive(
+                recipient, target, self._aggregator)
         else:
-            from .server import _run_with_log  # noqa: PLC0415
-            coro = _run_with_log(
-                self.app(target, recipient, send),
-                log_record,
-            )
+            dispatch_receive = recipient
+        coro = StreamActor(
+            stream_id=stream_id,
+            conn=target,
+            receive=dispatch_receive,
+            send=send,
+            app=self.app,
+            aggregator=self._aggregator,
+            http2_actor=self,
+            log_record=log_record,
+        ).run()
 
         timeout = self._request_timeout
         if timeout > 0:
@@ -1208,9 +1201,12 @@ class HTTP2Actor(Actor):
             stream_recipient.mark_end_of_stream_on_headers()
         # Build the access-log record (and hand it to the sender for inline
         # capture) only when something consumes it: access log, phase trace, or
-        # a request_completed listener.  The legacy (aggregator=None) path
-        # always builds it — _run_with_log emits unconditionally.
-        if self._aggregator is None or _request_record_needed(self._aggregator):
+        # a request_completed listener.  ``_request_record_needed`` takes None
+        # and answers correctly for it — the first two consumers exist
+        # independently of any aggregator — so the gate is unconditional now
+        # that the legacy task wrapper, which emitted without a None check, is
+        # gone.
+        if _request_record_needed(self._aggregator):
             log_record = _make_log_record(conn)
             # Sprint 93 M1 — inline capture: the HTTP2Sender updates the
             # record in its native/dict/bytes arms.  The old dict-shaped
@@ -1313,7 +1309,7 @@ class HTTP2Actor(Actor):
         self._recipients[stream.stream_id] = stream_recipient
         # Same consumer-gate as the HEADERS path: skip the record + inline
         # capture when nothing reads them.
-        if self._aggregator is None or _request_record_needed(self._aggregator):
+        if _request_record_needed(self._aggregator):
             log_record = _make_log_record(conn)
             send._log_record = log_record
             dispatch_send = send
@@ -1582,7 +1578,7 @@ class HTTP2Actor(Actor):
         # Build the synthetic pushed request as a native Connection and dispatch
         # it natively (like the HEADERS path). The H/2 extensions go straight on
         # ``conn.extensions``; the ``force_asgi`` lane converts to an ASGI scope
-        # (adding the ``http2_priority`` deprecation alias) at the boundary.
+        # at the boundary.
         pushed_conn = Connection(
             method='GET',
             path=_pushed_path,

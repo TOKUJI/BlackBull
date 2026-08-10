@@ -10,6 +10,7 @@ Affected-tests baseline (must not regress after implementation):
 import asyncio
 import pytest
 from blackbull import BlackBull, StreamingResponse
+from blackbull.event_aggregator import EventAggregator
 from blackbull.event import Event
 from blackbull.server.server import AccessLogRecord
 from blackbull.server.http1_actor import HTTP1Actor
@@ -67,11 +68,23 @@ def _raw_request(method: str = 'GET', path: str = '/',
     return '\r\n'.join(lines).encode()
 
 
+# These drive HTTP1Actor directly, so they must supply the aggregator the
+# server would have built.  Passing None instead used to "work": the actor's
+# no-aggregator branch carried its own disconnect wrapper that emitted through
+# app._dispatcher.  That branch was dead on every served connection, so these
+# tests were exercising an implementation production never ran.  Sprint 99
+# deleted it; they now go through the real path.
+def _served_aggregator(app):
+    """The aggregator ASGIServer builds for *app* — see
+    tests/architecture/test_aggregator_dispatcher_invariant.py."""
+    return EventAggregator(app._dispatcher)
+
+
 async def _run_request(app, raw: bytes) -> None:
     """Run a single HTTP/1.1 request through HTTP1Actor and return."""
     writer = _FakeWriter()
     actor = HTTP1Actor(
-        _FakeReader(b''), writer, app, None,
+        _FakeReader(b''), writer, app, _served_aggregator(app),
         request=raw,
         peername=('127.0.0.1', 54321),
         sockname=('0.0.0.0', 8000),

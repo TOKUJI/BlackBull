@@ -273,9 +273,10 @@ class PriorityUpdateResponder(Responder):
             # Reflect a late PRIORITY_UPDATE onto an already-dispatched request.
             # ``stream.conn`` is the native Connection on every lane, and its
             # ``extensions`` dict is shared by reference with the ASGI scope the
-            # compat lane hands the app — so this one write reaches both.  The
-            # deprecated top-level ``scope['http2_priority']`` alias is a
-            # dispatch-time snapshot and is deliberately not chased here.
+            # compat lane hands the app — so this one write reaches both.  That
+            # sharing is why the extension is the only home for the hint: a
+            # top-level scope key would be a dispatch-time copy that a late
+            # PRIORITY_UPDATE like this one could not reach.
             conn = stream.conn
             if conn is not None and conn.extensions is not None:
                 conn.extensions['http.response.priority'] = hint

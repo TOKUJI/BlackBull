@@ -89,19 +89,24 @@ async def handle_priority(event):
                     hint['urgency'], event.detail['method'], event.detail['path'])
 ```
 
-### Migrating from `scope['http2_priority']` (pre-v0.31)
+### Migrating from `scope['http2_priority']` (removed in v0.75.0)
 
 Earlier BlackBull releases exposed priority as a top-level scope
 key, `scope['http2_priority']`.  v0.31 moved it under
 `conn.extensions` to match ASGI conventions and align the key
-name with gunicorn's beta HTTP/2 surface.  The legacy key is still
-populated alongside the new extension during the v0.31 cycle and
-is scheduled for removal in v0.32.0.
+name with gunicorn's beta HTTP/2 surface, kept the old key
+populated as a deprecation alias, and **removed it in v0.75.0**.
+
+The extension is not merely the newer spelling — it is the only
+one that was ever correct.  `extensions` is shared by reference
+with the `Connection`, so a `PRIORITY_UPDATE` arriving *after*
+dispatch reaches the application through it.  The top-level key
+was a dispatch-time copy and silently went stale.
 
 To migrate, replace:
 
 ```python
-hint = scope.get('http2_priority', DEFAULT)            # legacy (pre-v0.31)
+hint = scope.get('http2_priority', DEFAULT)            # removed in v0.75.0
 ```
 
 with:

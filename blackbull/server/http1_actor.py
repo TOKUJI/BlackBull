@@ -523,7 +523,10 @@ class RequestActor(Actor):
         receive: ASGIReceiveCallable,
         send: ASGISendCallable,
         app: Callable[..., Awaitable[None]],
-        aggregator: EventAggregator,
+        # ``None`` for a foreign ASGI app: no dispatcher means no
+        # aggregator, and the actor skips event emission rather than
+        # the caller forking to a second dispatch path.
+        aggregator: EventAggregator | None,
     ) -> None:
         super().__init__()
         self._conn = conn
@@ -553,7 +556,11 @@ class RequestActor(Actor):
         try:
             await self._app(self._conn, self._receive, self._send)
         except BaseException as e:
-            await self._aggregator.on_error(self._conn, e)
+            # None-tolerant: a foreign ASGI app has no dispatcher, so there is
+            # no aggregator and nowhere to publish the ``error`` event.  The
+            # exception still propagates — containment is the caller's job.
+            if self._aggregator is not None:
+                await self._aggregator.on_error(self._conn, e)
             raise
 
     async def _handle(self, msg: Message) -> None:  # never reached
@@ -1378,27 +1385,6 @@ class HTTP1Actor(Actor):
         }
         return True
 
-    @staticmethod
-    def _make_legacy_disconnect_receive(receive, conn: dict | Connection, dispatcher, log_record):
-        """Legacy disconnect-detecting receive wrapper (mirrors server.py helper)."""
-        async def detecting_receive():
-            event = await receive()
-            if isinstance(event, dict) and event.get('type') == ASGIEvent.HTTP_DISCONNECT:
-                if not disconnected(conn):
-                    mark_disconnected(conn)
-                    await dispatcher.emit(Event(
-                        'request_disconnected',
-                        detail={
-                            'conn':        conn,
-                            'client_ip':    log_record.client_ip,
-                            'method':       log_record.method,
-                            'path':         log_record.path,
-                            'http_version': log_record.http_version,
-                        },
-                    ))
-            return event
-        return detecting_receive
-
     async def _dispatch_request(
         self,
         conn: Connection,
@@ -1423,11 +1409,14 @@ class HTTP1Actor(Actor):
         # a per-request allocation and the ``conn.state`` dict it forces
         # (the Connection graph's per-request objects are what the
         # cyclic GC scans under concurrency). The
-        # legacy (no-aggregator) branch of the dispatch reads the
-        # record unconditionally, so keep building it when there is no
-        # aggregator. Consumers below are all None-tolerant (the sender
-        # guards ``_log_record is not None``; the finally guards ``emit``).
-        if self._aggregator is None or _request_record_needed(self._aggregator):
+        # ``_request_record_needed`` takes ``None`` and answers correctly for
+        # it: the access logger and phase tracing are consumers that exist
+        # independently of any aggregator, and only the ``request_completed``
+        # check needs one.  Asking it unconditionally is therefore both
+        # simpler and more accurate than the two branches this replaced —
+        # which force-built the record whenever the aggregator was None,
+        # because the legacy dispatch branch read it without a None guard.
+        if _request_record_needed(self._aggregator):
             log_record = _AccessLogRecord.from_conn(conn)
             if _PHASE_TRACE:
                 log_record.phases['loop_start'] = (
@@ -1531,48 +1520,43 @@ class HTTP1Actor(Actor):
         # only by the cyclic GC — the v0.60.0 tail-latency regression.
         # Idempotent (only binds when unset).
         bind_receive_channel(app_arg, inner_receive)
-        if self._aggregator is not None:
-            # Wrap receive for disconnect detection only when a listener observes
-            # it (request_disconnected, or request_completed via mark_disconnected);
-            # otherwise dispatch the raw receive and save the per-request closure.
-            if _disconnect_events_observed(self._aggregator):
-                detecting_receive = _make_disconnect_detecting_receive(
-                    inner_receive, app_arg, self._aggregator)
-            else:
-                detecting_receive = inner_receive
-            request_actor = self._request_actor
-            if request_actor is None:
-                request_actor = self._request_actor = RequestActor(
-                    app_arg, detecting_receive, capturing_send,
-                    self._app, self._aggregator,
-                )
-            else:
-                request_actor.bind(app_arg, detecting_receive, capturing_send)
-            try:
-                await request_actor.run()
-            except asyncio.CancelledError:
-                # Let BB_REQUEST_TIMEOUT's wait_for see
-                # the cancellation; swallowing it here would convert a
-                # timeout into a normal close without the 408 synthesis.
-                raise
-            except Exception:
-                return False, inner_receive
-            finally:
-                if log_record is not None:
-                    log_record.mark('dispatch_done')
-                    _emit_access_log(log_record)
+        # One dispatch path whether or not an aggregator exists.  Forking on
+        # it would mean a second disconnect wrapper beside
+        # ``_make_disconnect_detecting_receive``, duplicating cycle-sensitive
+        # plumbing that nothing would keep in step; and the fork could never
+        # pay for itself, because ``aggregator is None`` implies the app has
+        # no dispatcher on every served connection
+        # (``test_aggregator_dispatcher_invariant``) — so the branch would be
+        # unreachable in production anyway.
+        #
+        # Wrap receive for disconnect detection only when a listener observes
+        # it (request_disconnected, or request_completed via mark_disconnected);
+        # otherwise dispatch the raw receive and save the per-request closure.
+        if (self._aggregator is not None
+                and _disconnect_events_observed(self._aggregator)):
+            detecting_receive = _make_disconnect_detecting_receive(
+                inner_receive, app_arg, self._aggregator)
         else:
-            _dispatcher = getattr(self._app, '_dispatcher', None)
-            if _dispatcher is not None:
-                detecting_receive = self._make_legacy_disconnect_receive(
-                    inner_receive, app_arg, _dispatcher, log_record)
-            else:
-                detecting_receive = inner_receive
-            try:
-                await self._app(app_arg, detecting_receive, capturing_send)
-            except BaseException:
-                raise
-            finally:
+            detecting_receive = inner_receive
+        request_actor = self._request_actor
+        if request_actor is None:
+            request_actor = self._request_actor = RequestActor(
+                app_arg, detecting_receive, capturing_send,
+                self._app, self._aggregator,
+            )
+        else:
+            request_actor.bind(app_arg, detecting_receive, capturing_send)
+        try:
+            await request_actor.run()
+        except asyncio.CancelledError:
+            # Let BB_REQUEST_TIMEOUT's wait_for see
+            # the cancellation; swallowing it here would convert a
+            # timeout into a normal close without the 408 synthesis.
+            raise
+        except Exception:
+            return False, inner_receive
+        finally:
+            if log_record is not None:
                 log_record.mark('dispatch_done')
                 _emit_access_log(log_record)
         return True, inner_receive

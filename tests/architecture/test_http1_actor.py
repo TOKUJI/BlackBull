@@ -595,14 +595,28 @@ class TestAccessLogging:
         assert actor._disconnect_code == 1001
 
     async def test_http2_access_log_emitted_per_stream(self, caplog):
-        import logging
-        from blackbull.server.server import AccessLogRecord, _run_with_log
+        """Driven through ``StreamActor``, which is what H/2 actually uses.
 
-        async def app(scope, receive, send):
+        This used to call ``server._run_with_log`` directly — a helper only the
+        no-aggregator H/2 branch ever reached, and that branch is gone.  The
+        test name always described the contract correctly; the body tested a
+        different function.
+        """
+        import logging
+        from unittest.mock import AsyncMock, MagicMock
+
+        from blackbull.server.access_log import AccessLogRecord
+        from blackbull.server.http2_actor import HTTP2Actor, StreamActor
+        from blackbull.server.sender import AsyncioWriter
+
+        async def app(conn, receive, send):
             pass
 
         async def noop_send(event, *a, **kw):
             pass
+
+        async def fake_receive():
+            return {'type': 'http.request', 'body': b'', 'more_body': False}
 
         record = AccessLogRecord(
             client_ip='10.0.0.1', method='GET', path='/h2', http_version='2',
@@ -612,11 +626,18 @@ class TestAccessLogging:
             'http_version': '2', 'client': ['10.0.0.1', 0],
         }
 
-        async def fake_receive():
-            return {'type': 'http.request', 'body': b'', 'more_body': False}
+        # A real HTTP2Actor, not a mock: StreamActor's annotation is the
+        # concrete class and beartype enforces it on this path.
+        sw = MagicMock()
+        sw.drain = AsyncMock()
+        h2 = HTTP2Actor(None, AsyncioWriter(sw), app, aggregator=None)
+        h2.send_frame = AsyncMock()
 
         with caplog.at_level(logging.INFO):
-            await _run_with_log(app(scope, fake_receive, noop_send), record)
+            await StreamActor(
+                stream_id=1, conn=scope, receive=fake_receive, send=noop_send,
+                app=app, aggregator=None, http2_actor=h2, log_record=record,
+            ).run()
 
         access_records = [r for r in caplog.records if r.name == 'blackbull.access']
         assert access_records, 'Expected one access log entry for HTTP/2 stream'
