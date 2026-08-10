@@ -560,21 +560,19 @@ class RequestActor(Actor):
         self._send = send
         return self
 
-    def _build_app_arg(self) -> 'dict | Connection':
-        """What the app is called with: the Connection, or a scope snapshot.
-
-        The one place a scope can come into existence on either protocol's
-        path (the ``BB_FORCE_ASGI_SCOPE=1`` compat lane); every other surface
-        stays native.  The snapshot is taken at the call boundary, so every
-        pre-dispatch mutation of *conn* — H/1's HEAD→GET rewrite, H/2's
-        priority/extensions — has already landed (COMP-HEAD-NO-BODY).
-        """
-        if self._force_asgi:
-            return self._conn.to_asgi_scope(force_asgi=True)
-        return self._conn
-
     async def run(self) -> None:  # override: single-shot, no inbox loop
-        target = self._build_app_arg()
+        # What the app is called with: the native Connection, or — on the
+        # ``BB_FORCE_ASGI_SCOPE=1`` compat lane — a materialized ASGI scope.
+        # The one place a scope can come into existence on either protocol's
+        # path; the snapshot is taken here at the call boundary, so every
+        # pre-dispatch mutation of *conn* — H/1's HEAD→GET rewrite, H/2's
+        # priority/extensions — has already landed (COMP-HEAD-NO-BODY).
+        # Inlined rather than a helper call: this is the per-request hot path
+        # and an extra call frame measured ~0.1-0.2 % here.
+        if self._force_asgi:
+            target = self._conn.to_asgi_scope(force_asgi=True)
+        else:
+            target = self._conn
         # Bind the *raw* recipient onto the target for lazy ``target.body()``
         # before any disconnect-detecting wrapper is built.  Binding the
         # wrapper instead would close a per-request reference cycle
