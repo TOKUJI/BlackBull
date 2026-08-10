@@ -274,7 +274,7 @@ restore_tree
     echo "| Pinning | server \`$SERVER_CPUS\` / load \`$LOAD_CPUS\` |"
     echo "| Files swapped | \`${FILES[*]}\` |"
     echo ""
-    uv run python bench/peers/ab_report.py "$RAW"
+    .venv/bin/python bench/peers/ab_report.py "$RAW"
 } >"$REPORT"
 
 echo ""
