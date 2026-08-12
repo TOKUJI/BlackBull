@@ -52,11 +52,20 @@ _COMPACT_MIN = 4096
 #: costs, not of a deployment.
 _VIEW_COPY_THRESHOLD = 8192
 
+#: Fully-consumed *small* messages a grown buffer must survive before
+#: :meth:`ReadBuffer._release` returns it to the floor.  Hysteresis: a
+#: keep-alive connection that repeats a large message reuses its grown
+#: allocation instead of churning grow+shrink per message (F6 follow-up); the
+#: peak is given back once the connection has shown a few messages that did
+#: not need it.
+_RELEASE_HYSTERESIS = 4
+
 
 class ReadBuffer:
     """A cursor-addressed byte buffer fed by `asyncio.BufferedProtocol`."""
 
-    __slots__ = ('_buf', '_r', '_w', '_scanned', '_eof', '_examined', '_view')
+    __slots__ = ('_buf', '_r', '_w', '_scanned', '_eof', '_examined', '_view',
+                 '_peak_avail', '_release_count')
 
     #: :meth:`find_head_end` result meaning "the byte budget ran out before the
     #: terminator appeared".  Returned rather than raised — see module docstring.
@@ -69,6 +78,8 @@ class ReadBuffer:
         self._scanned = 0    # absolute offset the head scan has cleared
         self._eof = False
         self._examined = 0   # cumulative bytes the scan has looked at
+        self._peak_avail = 0     # peak resident bytes since the last boundary
+        self._release_count = 0  # consecutive small messages since the last grow
         # The write window last handed to the transport.  Held so it can be
         # released before any resize: a bytearray with a live memoryview
         # raises BufferError on grow, and relying on the caller to drop its
@@ -115,11 +126,20 @@ class ReadBuffer:
         asyncio passes ``-1`` when it has no preference, and the protocol
         contract requires a non-empty buffer — returning an empty one stalls
         the connection permanently.
+
+        The *sizehint* is what the transport would *like* to read in one
+        recv, not what it needs: uvloop's cleartext path passes libuv's fixed
+        64 KiB on every call, so honouring it would grow every connection's
+        buffer to 64 KiB on its first request and ``compact()``/``_release()``
+        would give it back at the message boundary — a 64 KiB alloc/free
+        churn per request (the F5 read-path finding).  Growth is driven by
+        bytes actually arriving (the ``_w`` cursor), never by the hint: offer
+        the buffer's free span, growing only when it falls below the read
+        floor.
         """
         self._drop_view()
-        want = _MIN_READ if sizehint <= 0 else max(sizehint, _MIN_READ)
-        if len(self._buf) - self._w < want:
-            self._make_room(want)
+        if len(self._buf) - self._w < _MIN_READ:
+            self._make_room(_MIN_READ)
         # Hand out *all* the free space, not just what was asked for: the
         # allocation is already paid for, so a bigger window costs nothing and
         # saves `recv` calls on a large body.
@@ -129,12 +149,47 @@ class ReadBuffer:
     def buffer_updated(self, nbytes: int) -> None:
         """Declare how much of the last :meth:`get_buffer` was written."""
         self._w += nbytes
-        self._drop_view()
+        # Track the message's peak resident bytes — but only once the buffer
+        # has grown past the floor; a floor-sized buffer can never need the
+        # hysteresis decision, so the common case costs one compare.
+        if len(self._buf) > _INITIAL and self._w - self._r > self._peak_avail:
+            self._peak_avail = self._w - self._r
+        # uvloop can still hold the window's export here (see _drop_view);
+        # only this transport callback tolerates that.
+        self._drop_view(tolerate_export=True)
 
-    def _drop_view(self) -> None:
-        """Release the outstanding write window so the buffer can be resized."""
+    def _drop_view(self, *, tolerate_export: bool = False) -> None:
+        """Release the outstanding write window so the buffer can be resized.
+
+        ``tolerate_export`` is for the one call site where the transport can
+        legitimately still hold an export: uvloop's buffered read path calls
+        ``buffer_updated()`` while its Py_buffer export on the window is still
+        acquired (uvloop releases the export in its own finally, immediately
+        after our callback returns), so ``release()`` there transiently raises
+        ``memoryview has 1 exported buffer`` on the cleartext path (TLS goes
+        through SSLProtocol and never hits this).  Dropping the reference is
+        enough there — the memoryview is deallocated as soon as uvloop
+        releases the export, which it does before the next ``get_buffer``.
+
+        Every other call site (``get_buffer``, ``compact``, ``_make_room``)
+        runs after that release, so a BufferError there is a genuine export
+        leak from our own code (e.g. a body ``memoryview`` outliving its
+        request) and must propagate loudly instead of being masked.  On that
+        strict path the reference is deliberately left set (the ``self._view
+        = None`` sits after the ``except``): as long as the leak persists,
+        every subsequent call fails the same way, so the connection is
+        effectively fatal at the first sign of a leak rather than limping on
+        to an unrelated crash later.  A body leak can also surface one step
+        further on — as the bytearray mutation itself raising
+        ``Existing exports of data`` at ``compact``/``_make_room`` — which is
+        the same loud failure, from the resize site.
+        """
         if self._view is not None:
-            self._view.release()
+            try:
+                self._view.release()
+            except BufferError:
+                if not tolerate_export:
+                    raise
             self._view = None
 
     # -- reading ----------------------------------------------------------
@@ -271,10 +326,24 @@ class ReadBuffer:
 
         A single large upload must not leave every connection that served one
         holding its peak allocation for the rest of its keep-alive life — that
-        is the idle-memory floor the read window is also sized against.
+        is the idle-memory floor the read window is also sized against.  The
+        release is hysteretic: a fully-consumed message whose peak resident
+        bytes exceeded the floor re-arms the counter, so a connection that
+        keeps serving large messages reuses its allocation instead of growing
+        and shrinking per message (the F6/B7 churn); only after
+        ``_RELEASE_HYSTERESIS`` fully-consumed *small* messages is the
+        allocation given back.
         """
-        if self._w == 0 and len(self._buf) > _INITIAL:
-            self._buf = bytearray(_INITIAL)
+        if self._w == 0:
+            if len(self._buf) > _INITIAL:
+                if self._peak_avail > _INITIAL:
+                    self._release_count = 0
+                else:
+                    self._release_count += 1
+                    if self._release_count >= _RELEASE_HYSTERESIS:
+                        self._buf = bytearray(_INITIAL)
+                        self._release_count = 0
+            self._peak_avail = 0
 
     # -- internals --------------------------------------------------------
 

@@ -24,6 +24,7 @@ import asyncio
 import pytest
 
 from blackbull.server.connection_protocol import ConnectionProtocol
+from blackbull.server.read_buffer import ReadBuffer
 from blackbull.server.recipient import (AsyncioReader, IncompleteReadError,
                                         PrefixReader, ReadLimitExceeded)
 
@@ -39,9 +40,17 @@ HEAD = b'GET /x HTTP/1.1\r\nHost: localhost\r\n\r\n'
 def _buffer_reader(data: bytes):
     proto = ConnectionProtocol()
     proto.connection_made(_NullTransport())
-    view = proto.get_buffer(len(data))
-    view[:len(data)] = data
-    proto.buffer_updated(len(data))
+    # The transport writes in window-sized chunks: get_buffer's window is the
+    # buffer's free span (the sizehint is advisory — F5), so a head larger
+    # than the initial 8 KiB fills it in pieces and the buffer grows only as
+    # bytes arrive — exactly what uvloop/asyncio do in their recv loop.
+    pos = 0
+    while pos < len(data):
+        view = proto.get_buffer(len(data) - pos)
+        n = min(len(view), len(data) - pos)
+        view[:n] = data[pos:pos + n]
+        proto.buffer_updated(n)
+        pos += n
     proto.eof_received()
     return proto.reader
 
@@ -142,3 +151,36 @@ async def test_second_head_reads_cleanly_after_the_first(make_reader):
     assert await reader.read_head(8192) == HEAD
     assert await reader.read_head(8192) == HEAD
     assert await reader.read_head(8192) == b''
+
+
+async def test_read_head_skips_the_empty_scan():
+    """read_head must not call ``find_head_end`` while the buffer is empty —
+    the "check" of the check-then-wait-then-check pattern.
+
+    That empty call is a control-flow artifact (~0.79 µs/req on EC2, F5): an
+    empty buffer can never be ``LIMIT_EXCEEDED`` (0 > limit is false) and the
+    scan's resumption state is untouched (it would set ``_scanned = _w``,
+    which already equals ``_r``), so skipping it is conformance-safe.
+    """
+    proto = ConnectionProtocol()
+    proto.connection_made(_NullTransport())
+    empty_calls: list[int] = []
+    orig = ReadBuffer.find_head_end
+
+    def counting(self, limit: int = 0):
+        if self.available == 0:
+            empty_calls.append(self.available)
+        return orig(self, limit)
+
+    ReadBuffer.find_head_end = counting
+    try:
+        task = asyncio.create_task(proto.reader.read_head(8192))
+        await asyncio.sleep(0)                 # let it reach the wait
+        view = proto.get_buffer(4096)
+        view[:len(HEAD)] = HEAD
+        proto.buffer_updated(len(HEAD))
+        assert await asyncio.wait_for(task, 1) == HEAD
+    finally:
+        ReadBuffer.find_head_end = orig
+    assert not empty_calls, \
+        f'find_head_end ran on an empty buffer {len(empty_calls)}×'

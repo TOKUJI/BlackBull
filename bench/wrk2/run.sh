@@ -36,11 +36,20 @@ WRK2="${WRK2_BIN:-$HOME/.local/bin/wrk2}"
 logfile="$OUTDIR/wrk2_${LABEL_PREFIX}B2r_plaintext_rate${RATE}.txt"
 url="$BASE/plaintext"
 
+# Per-scenario CPU + seam capture (Sprint 100 F2) — same hook as bench/wrk.
+if [ -n "${CAPTURE_CMD:-}" ]; then
+    "$CAPTURE_CMD" before "B2r_plaintext_rate${RATE}" 2>/dev/null || true
+fi
+
 {
     echo "# scenario: B2r_plaintext_rate${RATE}"
     echo "# command: $WRK2 --latency -t4 -c256 -d${D}s -R${RATE} $url"
     "$WRK2" --latency -t4 -c256 -d"${D}s" -R"${RATE}" "$url"
 } > "$logfile" 2>&1 || true
+
+if [ -n "${CAPTURE_CMD:-}" ]; then
+    "$CAPTURE_CMD" after "B2r_plaintext_rate${RATE}" 2>/dev/null || true
+fi
 
 if grep -q "unable to connect" "$logfile" 2>/dev/null; then
     echo "| B2r_plaintext_rate${RATE} | err | — | — | — | — |  (unable to connect) |"

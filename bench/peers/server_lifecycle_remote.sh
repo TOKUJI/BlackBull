@@ -39,6 +39,38 @@ case "$cmd" in
             granian_env="GRANIAN_LOG_TARGET=$GRANIAN_LOG_TARGET"
         fi
 
+        # Propagate the per-stack gc-observation knob (Sprint 100 Phase 1)
+        # set by compare_servers.sh; ignored by stacks whose app does not
+        # import the sampler.
+        gc_env=""
+        if [ -n "${BB_GC_STATS_OUT:-}" ]; then
+            gc_env="BB_GC_STATS_OUT=$BB_GC_STATS_OUT"
+        fi
+
+        # Propagate the per-stack loop-identity stamp (Sprint 100 Phase 2).
+        loop_env=""
+        if [ -n "${BB_LOOP_STAMP_OUT:-}" ]; then
+            loop_env="BB_LOOP_STAMP_OUT=$BB_LOOP_STAMP_OUT"
+        fi
+
+        # Propagate the per-stack response-transmit timing (Phase 2 F1).
+        resp_env=""
+        if [ -n "${BB_RESP_TIMING_OUT:-}" ]; then
+            resp_env="BB_RESP_TIMING_OUT=$BB_RESP_TIMING_OUT"
+        fi
+
+        # Propagate the per-stack seam snapshot + handler bracket
+        # (Sprint 100 Phase 2 F2).  BB_TIMING_SNAP is the SIGUSR1 snapshot
+        # target; BB_HANDLER_TIMING enables the handler-region bracket.
+        snap_env=""
+        if [ -n "${BB_TIMING_SNAP:-}" ]; then
+            snap_env="BB_TIMING_SNAP=$BB_TIMING_SNAP"
+        fi
+        handler_env=""
+        if [ -n "${BB_HANDLER_TIMING:-}" ]; then
+            handler_env="BB_HANDLER_TIMING=1"
+        fi
+
         # BIND_HOST is the seam introduced for split topology.  Default to
         # 0.0.0.0 in this script even if the env var is missing, because by
         # construction nobody invokes server_lifecycle_remote.sh in the
@@ -70,7 +102,7 @@ case "$cmd" in
         # wait_ready does the actual readiness probe.  Redirect stdin from
         # /dev/null per a known caution: pipe stdin to a non-reader
         # is a known deadlock shape.
-        nohup env $granian_env BIND_HOST="$bind_host" PATH="$PATH" \
+        nohup env $gc_env $loop_env $resp_env $snap_env $handler_env $granian_env BIND_HOST="$bind_host" PATH="$PATH" \
             "${taskset_prefix[@]}" \
             bash bench/peers/run_peer.sh "$stack" "$port" "$cert" "$key" \
             </dev/null >"$logfile_rel" 2>&1 &

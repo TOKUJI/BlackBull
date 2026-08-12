@@ -16,6 +16,14 @@ BlackBull uses [ZeroVer](https://0ver.org/) prior to a 1.0 commitment:
   nothing.  The minor number therefore does **not** equal the sprint number —
   patch releases and combined-sprint releases have introduced an offset
   (Sprint 49 closed as `v0.43.0`; Sprint 97 closed as `v0.73.1`).
+- **MINOR is judged by effective surface, not the diff.**  Removing a public
+  API key that has been deprecated with a documented replacement long enough
+  for adopters to have migrated is a **PATCH**: an adopter who followed the
+  deprecation does nothing, so the surface they see is unchanged.  Only a
+  removal that forces action on current, doc-following adopters is a MINOR.
+  (Sprint 99 removed `scope['http2_priority']`, deprecated since v0.31.0; it
+  shipped as v0.75.0 under the pre-change rule, which now reads it as a
+  PATCH.)
 - **Exception (2026-06-25)**: Sprints 50 through 54 are not independently
   released — they ship together as `v0.44.0` (the next minor after `v0.43.0`),
   the MQTT-broker debut plus its actor-model rebuild and the protocol-agnostic
@@ -34,6 +42,51 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.75.1] — 2026-08-13
+
+Sprint 100.  A patch rather than a minor: the public surface is unchanged —
+no new API, no new environment variable, nothing new to call or configure.
+What shipped is a set of read-path fixes (the largest term named by the
+per-request attribution run) and the measurement harness that named them.
+
+### Fixed
+
+- **Every HTTP/1.1 cleartext connection crashed under uvloop.**
+  `buffer_updated` released the buffer's memoryview while uvloop still held
+  its Py_buffer export (uvloop releases the export in a `finally` after the
+  transport callback returns), raising `BufferError: memoryview has 1
+  exported buffer` and killing the connection.  TLS was unaffected (a
+  different transport path).  The tolerant call site fixes the crash; the
+  strict call sites still fail loudly on a genuine leak.
+- **Small keep-alive requests churned a 64 KiB allocation per request.**
+  `BufferedProtocol.get_buffer`'s sizehint — which uvloop fills with
+  libuv's fixed 64 KiB on every cleartext read — was treated as a demand,
+  growing every connection's buffer to 64 KiB on its first request and
+  shrinking it back at the message boundary: a 64 KiB alloc/free per
+  request.  The sizehint is advisory (CPython's documented contract), so
+  growth is now driven by the bytes actually arriving.  Measured on EC2:
+  the read-path term of the B1 cleartext deficit dropped +4.24 → +0.16 µs/req.
+
+### Internal
+
+- **Empty head-scan skip.**  `read_head` no longer scans for the head
+  terminator while the buffer is empty — an empty buffer can never exceed
+  the scan's limit, so the scan was a control-flow artifact, not a
+  conformance requirement.  Measured on EC2: empty scans 1.00 → 0.00/req.
+- **`_release` hysteresis.**  A buffer grown for a large message now returns
+  to its floor only after several fully-consumed small messages, so a
+  keep-alive connection that repeats a large body reuses its allocation
+  instead of growing and shrinking per message.
+- **Benchmark attribution harness.**  The per-seam timing instruments, null
+  seam, gate stamps, and EC2 driver used to attribute the read-path deficit
+  land under `bench/` (harness only; nothing runs in a stock launch).
+  Full Sprint 100 record: `.claude/sprint-logs/sprint-100.md`.
+
+### Docs
+
+- `docs/about/internals.md` §Read-path invariant — the sizehint is advisory
+  and the buffer returns to its floor with hysteresis.
+
 ## [0.75.0] — 2026-08-11
 
 Sprint 99.  The app boundary becomes one shared `RequestActor`.  What the
@@ -43,6 +96,12 @@ single actor shared by HTTP/1.1 and HTTP/2, and the forty-three-release-old
 `scope['http2_priority']` deprecation finally ships its removal.  The
 separation cost on the H/1 native lane (≈0.4-0.5 %, below the A/B null
 floor's spread) is accepted and recorded in `bench/results/`.
+
+Versioned as a MINOR under the then-current rule (a public-API removal).
+The versioning rule was tightened on 2026-08-11 to judge removals by
+effective surface: a removal of an API deprecated long enough that adopters
+have migrated is now a PATCH — under that rule this release would have been
+`v0.74.1`.
 
 ### Removed
 

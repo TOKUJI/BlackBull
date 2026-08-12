@@ -135,7 +135,9 @@ pip install --upgrade \
     hypercorn \
     granian \
     daphne \
-    starlette
+    starlette \
+    sanic \
+    fastapi
 
 echo ""
 echo "=== Versions ==="
@@ -148,6 +150,8 @@ python3 -c "import hypercorn; print('hypercorn ', getattr(hypercorn, '__version_
 python3 -c "import granian;   print('granian   ', granian.__version__)"
 python3 -c "import daphne;    print('daphne    ', daphne.__version__)"
 python3 -c "import starlette; print('starlette ', starlette.__version__)"
+python3 -c "import sanic;     print('sanic     ', sanic.__version__)"
+python3 -c "import fastapi;   print('fastapi   ', fastapi.__version__)"
 
 echo ""
 echo "=== Setup complete ==="

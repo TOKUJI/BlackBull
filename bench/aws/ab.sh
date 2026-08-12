@@ -154,8 +154,16 @@ finish)
             [ -f "$f" ] && echo "raw.tsv lines: $f -> $(wc -l < "$f")"
         done
 
-        echo "tearing down: $(date -u)"
-        bash "$(dirname "$0")/down.sh" 2>&1 | tail -4
+        # TEARDOWN=0 leaves the instance up so a later stage (e.g. Sprint 100
+        # Phase 1's compare_servers.sh run) can reuse the same box.  The
+        # instance's own fail-safes (terminate-on-shutdown + scheduled
+        # self-shutdown) remain the backstop; down.sh is just skipped here.
+        if [ "${TEARDOWN:-1}" = "1" ]; then
+            echo "tearing down: $(date -u)"
+            bash "$(dirname "$0")/down.sh" 2>&1 | tail -4
+        else
+            echo "teardown skipped (TEARDOWN=0) — instance left up for chained runs"
+        fi
         echo "AB FINISH COMPLETE: $(date -u)"
     } >> "$AB_FINISH_LOG" 2>&1
     echo "finish running in background; progress -> $AB_FINISH_LOG"

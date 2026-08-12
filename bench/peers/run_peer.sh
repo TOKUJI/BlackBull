@@ -55,6 +55,8 @@ workers=1
 case "$stack" in
     *-cleartext)
         base="${stack%-cleartext}"; variant="cleartext" ;;
+    *-noevents)
+        base="${stack%-noevents}"; variant="noevents" ;;
     *-nginx)
         base="${stack%-nginx}";     variant="nginx" ;;
     *-h11)
@@ -85,7 +87,7 @@ case "$variant" in
         uv_tls_args=(--ssl-certfile "$cert" --ssl-keyfile "$key")
         gr_tls_args=(--ssl-certificate "$cert" --ssl-keyfile "$key")
         ;;
-    cleartext|nginx)
+    cleartext|nginx|noevents)
         bb_tls_args=()
         uv_tls_args=()
         gr_tls_args=()
@@ -154,12 +156,16 @@ case "$base" in
         # Honour BB_UVLOOP env if already set; default to 1 for apples-to-
         # apples with uvicorn/ hypercorn/ granian (all uvloop by default).
         bb_uvloop="${BB_UVLOOP:-1}"
+        bb_noevents=""
+        [ "$variant" = "noevents" ] && bb_noevents="BB_NO_EVENTS=1"
         LAUNCH_CMD=(
             env BB_UVLOOP="$bb_uvloop" "BB_WORKERS=$workers"
                 BB_H2_INITIAL_WINDOW_SIZE=65535
                 BB_H2_CONNECTION_WINDOW_SIZE=65535
                 BB_H2_MAX_CONCURRENT_STREAMS=100
                 BB_ACCESS_LOG=0
+                BB_GC_STATS_OUT="$BB_GC_STATS_OUT"
+                $bb_noevents
             blackbull bench.peers.native_app:app
                 --bind "${BIND_HOST}:${upstream_port}"
                 "${bb_tls_args[@]}"
@@ -313,6 +319,7 @@ json.dump(cfg, open(sys.argv[2], 'w'))
             ssl_args=()
         fi
         LAUNCH_CMD=(
+            env BB_GC_STATS_OUT="$BB_GC_STATS_OUT"
             python3 bench/peers/sanic_app.py
                 --host "$BIND_HOST" --port "$upstream_port"
                 "${ssl_args[@]}"

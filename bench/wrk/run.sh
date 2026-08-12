@@ -125,19 +125,36 @@ run_one() {
 echo "| Scenario | req/s | mean lat | p50 | p99 | max | socket errors | noise (MAD) |"
 echo "|---|---|---|---|---|---|---|---|"
 
+# Per-scenario CPU + seam capture (Sprint 100 F2).  When CAPTURE_CMD is set
+# (compare_servers.sh arms it with bench/peers/scenario_capture.sh), wrap
+# each scenario so cpu0/cpu1 + SIGUSR1 seam snapshots land at the scenario
+# boundaries — fixing the F1 scope (body-size-mixed whole-lane) and the
+# warmup denominator mismatch.  The wrapper guarantees `after` runs even if
+# run_one early-returns.
+run_captured() {
+    local label="$1"
+    if [ -n "${CAPTURE_CMD:-}" ]; then
+        "$CAPTURE_CMD" before "$label" 2>/dev/null || true
+    fi
+    run_one "$@"
+    if [ -n "${CAPTURE_CMD:-}" ]; then
+        "$CAPTURE_CMD" after "$label" 2>/dev/null || true
+    fi
+}
+
 # B1 — /plaintext, no pipeline (TechEmpower-style baseline)
-run_one "B1_plaintext_c256"   4  256 ""                                  "$BASE/plaintext" ""
+run_captured "B1_plaintext_c256"   4  256 ""                                  "$BASE/plaintext" ""
 # B2 — /plaintext, pipeline depth 16 (TechEmpower-style high-concurrency)
-run_one "B2_plaintext_c1024_p16" 4 1024 "-s bench/wrk/pipeline.lua"       "$BASE/plaintext" "16"
+run_captured "B2_plaintext_c1024_p16" 4 1024 "-s bench/wrk/pipeline.lua"       "$BASE/plaintext" "16"
 # B3 — /json (TechEmpower JSON-comparable)
-run_one "B3_json_c256"        4  256 ""                                  "$BASE/json" ""
+run_captured "B3_json_c256"        4  256 ""                                  "$BASE/json" ""
 # B4 — /16kb (internal)
-run_one "B4_16kb_c100"        4  100 ""                                  "$BASE/16kb" ""
+run_captured "B4_16kb_c100"        4  100 ""                                  "$BASE/16kb" ""
 # B5 — /64kb (internal)
-run_one "B5_64kb_c50"         4   50 ""                                  "$BASE/64kb" ""
+run_captured "B5_64kb_c50"         4   50 ""                                  "$BASE/64kb" ""
 # B6 + B7 — /echo POST. Skipped for static-only references (nginx) which
 # can't accept POST without an upstream.
 if [ "${SKIP_POST:-0}" != "1" ]; then
-    run_one "B6_echo_1kb"         4  100 "-s bench/wrk/post_echo.lua"   "$BASE/echo" "1024"
-    run_one "B7_echo_100kb"       4   50 "-s bench/wrk/post_echo.lua"   "$BASE/echo" "102400"
+    run_captured "B6_echo_1kb"         4  100 "-s bench/wrk/post_echo.lua"   "$BASE/echo" "1024"
+    run_captured "B7_echo_100kb"       4   50 "-s bench/wrk/post_echo.lua"   "$BASE/echo" "102400"
 fi

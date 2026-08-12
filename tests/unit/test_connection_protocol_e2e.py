@@ -47,12 +47,15 @@ class _ServedProtocol(ConnectionProtocol):
 
     async def _serve(self):
         try:
-            head = await self.reader.read_head(limit=65536)
-            if not head:
-                return
+            # The actor reads every head itself, off the raw buffer (the
+            # buffered ``read_head`` path).  Handing the first head in as
+            # ``request=`` would wrap the reader in ``PrefixReader`` and
+            # silently downgrade every keep-alive head read to the line-by-line
+            # fallback — which is the production connection's *other* path and
+            # would make these tests miss the read-path invariant they exist
+            # to cover.  Idle EOF is handled inside the actor (silent close).
             actor = HTTP1Actor(
                 self.reader, AsyncioWriter(self), self._app, None,
-                request=head,
                 peername=self.get_extra_info('peername'),
                 sockname=self.get_extra_info('sockname'),
             )

@@ -79,6 +79,18 @@ LANES_ALL="A B-wrk B-oha C D"
 STACKS="${STACKS:-$STACKS_ALL}"
 LANES="${LANES:-$LANES_ALL}"
 
+# --- CPU-µs/req capture (Sprint 100 Phase 2) ------------------------------
+# Server utime+stime (fields 14+15 of /proc/<pid>/stat, clock ticks) sampled
+# across the measured lanes; the analysis divides by the lane's served
+# requests to get µs-CPU/req directly — immune to the client-share confound
+# and to wrk2's pacing artifact.  TOPO=single only (pid<=0 in remote mode).
+CLK_TCK="$(getconf CLK_TCK 2>/dev/null || echo 100)"
+cpu_ticks() {
+    local pid="$1"
+    [ "$pid" -gt 0 ] 2>/dev/null || { echo 0; return; }
+    awk '{print $14 + $15}' "/proc/$pid/stat" 2>/dev/null || echo 0
+}
+
 # Servers that support HTTP/2 (lane A applies).  The variants
 # (*-cleartext, *-nginx, *-h11) are intentionally NOT listed — Lane A
 # would either not negotiate (cleartext) or measure nginx-frontend H2
@@ -104,13 +116,14 @@ strip_worker_suffix() {
 # Per-stack BASE URL.  Three suffix conventions, plus
 # a fourth (multi-worker):
 #   *-cleartext     → http  on $BASE_PORT (no TLS on the server)
+#   *-noevents      → http  on $BASE_PORT (events knocked out, cleartext)
 #   *-nginx         → https on $BASE_PORT (TLS terminated by nginx, HTTP upstream)
 #   *-h11           → https on $BASE_PORT (uvicorn with --http h11)
 #   blackbull-w<N>  → https on $BASE_PORT (BlackBull with N workers, e.g. -w4)
 #   (no suffix)     → https on $BASE_PORT (standalone TLS — current default)
 compute_base() {
     case "$1" in
-        *-cleartext) echo "http://${BENCH_TARGET_HOST}:${BASE_PORT}" ;;
+        *-cleartext|*-noevents) echo "http://${BENCH_TARGET_HOST}:${BASE_PORT}" ;;
         *)           echo "https://${BENCH_TARGET_HOST}:${BASE_PORT}" ;;
     esac
 }
@@ -424,6 +437,116 @@ PYEOF
 # Per-stack driver
 # ----------------------------------------------------------------------------
 
+# Instrument-cost calibration (Sprint 100).  The timing instruments (resp
+# seam + handler bracket) run inside the server process, so the measured
+# totals include the instrument's own per-request cost — which differs per
+# stack (BB's wrapper vs sanic's wrapper).  To capture that cost ON THE SAME
+# INSTANCE (no cross-environment transfer), one bare (no-instrument) B1 run
+# is executed back-to-back with the instrumented lanes; the analysis diffs
+# CPU-µs/req:
+#   instrument_cost = cpu_<stack>_B1 (instrumented) − cpu_<stack>_bare (B1)
+# Enabled automatically when a timing instrument is active; CALIBRATE=0
+# disables.  Adds ~40 s per stack (5 s warmup + 30 s B1 + relaunch).
+calibrate_instrument() {
+    local stack="$1"
+    [ "${CALIBRATE:-1}" = "0" ] && return 0
+    [ -n "${BB_TIMING_SNAP:-}" ] || [ -n "${BB_RESP_TIMING:-}" ] || return 0
+
+    # Per-seam instrument-cost calibration: CALIBRATE_RUNS saturated B1s per
+    # mode, back-to-back, on the same instance (the fork's own workload).
+    #   bare        = no instruments    → total instrument cost = full − bare
+    #   responly    = resp seam only    → handler-bracket cost = resphandler − responly
+    #   resphandler = resp + handler bracket (no F3 parse seam)
+    #                                 → parse-seam cost = full − resphandler (once it exists)
+    # The full instrumented B1 is the main bench's B1 capture.
+    #
+    # CRITICAL (learned in the F2 re-measurement): BB_TIMING_SNAP and
+    # BB_HANDLER_TIMING (and the future BB_PARSE_TIMING) sit in the
+    # orchestrator env; `env $calib_env bash …` inherits them, which re-arms
+    # the full instrument in EVERY calibration arm — making them identical to
+    # full and the calibration non-informative.  All arms must STRIP them
+    # (bare strips the resp output path too; responly re-adds
+    # BB_RESP_TIMING_OUT, resphandler re-adds BB_RESP_TIMING_OUT +
+    # BB_HANDLER_TIMING after the strip).
+    local runs="${CALIBRATE_RUNS:-3}"
+    local tag
+    for tag in bare responly resphandler; do
+        echo "  Calibrate: $tag B1 ×$runs for $stack ..."
+        kill_existing
+
+        local server_pid=0 calib_env=""
+        # Gate stamp (F3+ review fix): every calibration arm — bare included —
+        # writes its armed state so it can prove itself.
+        if [ "$BENCH_REMOTE_LIFECYCLE" = "1" ]; then
+            calib_env="BB_GATE_STAMP_OUT=$BENCH_REMOTE_REPO/$SCRATCH/gate_${stack}_${tag}.txt"
+        else
+            calib_env="BB_GATE_STAMP_OUT=$SCRATCH/gate_${stack}_${tag}.txt"
+        fi
+        case "$tag" in
+            responly)
+                if [ "$BENCH_REMOTE_LIFECYCLE" = "1" ]; then
+                    calib_env="$calib_env BB_RESP_TIMING_OUT=$BENCH_REMOTE_REPO/$SCRATCH/resp_${stack}_responly.txt"
+                else
+                    calib_env="$calib_env BB_RESP_TIMING_OUT=$SCRATCH/resp_${stack}_responly.txt"
+                fi
+                ;;
+            resphandler)
+                if [ "$BENCH_REMOTE_LIFECYCLE" = "1" ]; then
+                    calib_env="$calib_env BB_RESP_TIMING_OUT=$BENCH_REMOTE_REPO/$SCRATCH/resp_${stack}_resphandler.txt BB_HANDLER_TIMING=1"
+                else
+                    calib_env="$calib_env BB_RESP_TIMING_OUT=$SCRATCH/resp_${stack}_resphandler.txt BB_HANDLER_TIMING=1"
+                fi
+                ;;
+        esac
+
+        if [ "$BENCH_REMOTE_LIFECYCLE" = "1" ]; then
+            # Remote mode: server_lifecycle_remote.sh start only forwards the
+            # env it is given; the strips are defensive (the SSH env is clean).
+            $BENCH_REMOTE_SSH "cd $BENCH_REMOTE_REPO && mkdir -p $SCRATCH && \
+                env -u BB_TIMING_SNAP -u BB_HANDLER_TIMING -u BB_RESP_TIMING_OUT -u BB_PARSE_TIMING -u BB_DISPATCH_TIMING -u BB_READ_TIMING \
+                $calib_env BIND_HOST=$BENCH_BIND_HOST BASE_PORT=$BASE_PORT \
+                bash bench/peers/server_lifecycle_remote.sh start \
+                '$stack' '$BASE_PORT' '$CERT' '$KEY' '$SCRATCH/server_${stack}_${tag}.log'" \
+                || { echo "  calibrate: $tag launch failed; skipping." >&2; kill_existing; return 0; }
+        else
+            # Local mode: same run_peer.sh launch with the bracket/snapshot
+            # toggles stripped; responly/resphandler re-add their own env.
+            env -u BB_TIMING_SNAP -u BB_HANDLER_TIMING -u BB_RESP_TIMING_OUT -u BB_PARSE_TIMING -u BB_DISPATCH_TIMING -u BB_READ_TIMING \
+                $calib_env \
+                bash bench/peers/run_peer.sh "$stack" "$BASE_PORT" "$CERT" "$KEY" \
+                > "$SCRATCH/server_${stack}_${tag}.log" 2>&1 &
+            server_pid=$!
+            disown
+        fi
+
+        if ! wait_ready "$server_pid"; then
+            echo "  calibrate: $stack $tag failed to start; skipping." >&2
+            kill_existing
+            return 0
+        fi
+
+        # Short warmup, then CALIBRATE_RUNS saturated B1s (the F2 parent
+        # workload).  Per-run cpu/wrk files let the analysis take the median
+        # (beats the ~0.7 µs/req single-run noise floor).
+        if [ "${WARMUP:-15}" -gt 0 ]; then
+            wrk -t2 -c64 -d5s "$BASE/plaintext" >/dev/null 2>&1 || true
+        fi
+        local run cpu0 cpu1
+        for run in $(seq 1 "$runs"); do
+            cpu0="$(cpu_ticks "$server_pid")"
+            wrk --latency -t4 -c256 -d30s "$BASE/plaintext" \
+                > "$SCRATCH/wrk_${stack}_${tag}_B1_plaintext_c256_run${run}.txt" 2>&1 || true
+            cpu1="$(cpu_ticks "$server_pid")"
+            printf 'pid=%s ticks=%s clk_tck=%s\n' "$server_pid" "$((cpu1 - cpu0))" "$CLK_TCK" \
+                > "$SCRATCH/cpu_${stack}_${tag}_run${run}.txt"
+        done
+        if [ -f "$SCRATCH/cpu_${stack}_${tag}_run1.txt" ]; then
+            echo "_Calibration ($tag B1 ×$runs): $(cat "$SCRATCH/cpu_${stack}_${tag}_run1.txt")_" >> "$OUT"
+        fi
+        kill_existing
+    done
+}
+
 bench_stack() {
     local stack="$1"
 
@@ -454,13 +577,48 @@ bench_stack() {
         # remote log on failure so the orchestrator output is useful.
         local granian_log_env_remote=""
         [ "$stack" = "granian" ] && granian_log_env_remote="GRANIAN_LOG_TARGET=$BENCH_REMOTE_REPO/$SCRATCH/server_granian.log"
+        # Per-stack gc-observation file (Sprint 100 Phase 1).  Only set when
+        # BB_GC_STATS=1; the apps (native_app / sanic_app) import the
+        # sampler env-gated, so other stacks ignore it.
+        local gc_env_remote=""
+        [ -n "${BB_GC_STATS:-}" ] && gc_env_remote="BB_GC_STATS_OUT=$BENCH_REMOTE_REPO/$SCRATCH/gc_${stack}.jsonl"
+        # Per-stack loop-identity stamp (Sprint 100 Phase 2), remote mode.
+        local loop_env_remote=""
+        [ -n "${BB_LOOP_STAMP:-}" ] && loop_env_remote="BB_LOOP_STAMP_OUT=$BENCH_REMOTE_REPO/$SCRATCH/loop_${stack}.txt"
+        # Per-stack response-transmit timing (Sprint 100 Phase 2 F1), remote.
+        local resp_env_remote=""
+        [ -n "${BB_RESP_TIMING:-}" ] && resp_env_remote="BB_RESP_TIMING_OUT=$BENCH_REMOTE_REPO/$SCRATCH/resp_${stack}.txt"
+        # Per-stack seam snapshot + handler bracket (Sprint 100 Phase 2 F2),
+        # remote mode.  BB_TIMING_SNAP is the SIGUSR1 snapshot target;
+        # BB_HANDLER_TIMING enables the handler-region bracket.
+        local snap_env_remote=""
+        [ -n "${BB_TIMING_SNAP:-}" ] && snap_env_remote="BB_TIMING_SNAP=$BENCH_REMOTE_REPO/$SCRATCH/timing_snap_${stack}.txt"
+        local handler_env_remote=""
+        [ -n "${BB_HANDLER_TIMING:-}" ] && handler_env_remote="BB_HANDLER_TIMING=1"
+        # Per-stack F3 parse seam (bytes-delivered → parsed-request-ready),
+        # remote mode.
+        local parse_env_remote=""
+        [ -n "${BB_PARSE_TIMING:-}" ] && parse_env_remote="BB_PARSE_TIMING_OUT=$BENCH_REMOTE_REPO/$SCRATCH/parse_${stack}.txt"
+        # Per-stack F4 app-dispatch seam (BlackBull.__call__ /
+        # Sanic.handle_request), remote mode.  Same file as the parse seam —
+        # the analysis reads both from parse_<stack>.txt.
+        local dispatch_env_remote=""
+        [ -n "${BB_DISPATCH_TIMING:-}" ] && dispatch_env_remote="BB_DISPATCH_TIMING_OUT=$BENCH_REMOTE_REPO/$SCRATCH/parse_${stack}.txt"
+        # Per-stack F5 read-path seam (get_buffer/buffer_updated/
+        # data_received), remote mode.  Same file as the parse seam.
+        local read_env_remote=""
+        [ -n "${BB_READ_TIMING:-}" ] && read_env_remote="BB_READ_TIMING_OUT=$BENCH_REMOTE_REPO/$SCRATCH/parse_${stack}.txt"
+        # Armed-state gate stamp (F3+ review fix): written on EVERY launch so
+        # the bare calibration arm can prove itself, remote mode.
+        local gate_env_remote=""
+        [ -n "${BB_GATE_STAMP:-}" ] && gate_env_remote="BB_GATE_STAMP_OUT=$BENCH_REMOTE_REPO/$SCRATCH/gate_${stack}.txt"
         # Propagate BB_BENCH_TASKSET so per-stack runs
         # can pin workers to specific CPUs.  Empty (the default) means no
         # pinning on the server side.
         local taskset_env_remote=""
         [ -n "${BB_BENCH_TASKSET:-}" ] && taskset_env_remote="BB_BENCH_TASKSET=$BB_BENCH_TASKSET"
         $BENCH_REMOTE_SSH "cd $BENCH_REMOTE_REPO && mkdir -p $SCRATCH && \
-            $granian_log_env_remote $taskset_env_remote BIND_HOST=$BENCH_BIND_HOST BASE_PORT=$BASE_PORT \
+            $gc_env_remote $loop_env_remote $resp_env_remote $snap_env_remote $handler_env_remote $parse_env_remote $dispatch_env_remote $read_env_remote $gate_env_remote $granian_log_env_remote $taskset_env_remote BIND_HOST=$BENCH_BIND_HOST BASE_PORT=$BASE_PORT \
             bash bench/peers/server_lifecycle_remote.sh start \
             '$stack' '$BASE_PORT' '$CERT' '$KEY' '$SCRATCH/server_${stack}.log'" \
             || {
@@ -477,10 +635,42 @@ bench_stack() {
         # buffering question altogether); other stacks use the shell pipe.
         local granian_log_env=""
         [ "$stack" = "granian" ] && granian_log_env="GRANIAN_LOG_TARGET=$(pwd)/$SCRATCH/server_granian.log"
+        # Per-stack gc-observation file (Sprint 100 Phase 1), local mode.
+        local gc_env=""
+        [ -n "${BB_GC_STATS:-}" ] && gc_env="BB_GC_STATS_OUT=$SCRATCH/gc_${stack}.jsonl"
+        # Per-stack loop-identity stamp (Sprint 100 Phase 2), local mode.
+        local loop_env=""
+        [ -n "${BB_LOOP_STAMP:-}" ] && loop_env="BB_LOOP_STAMP_OUT=$SCRATCH/loop_${stack}.txt"
+        # Per-stack response-transmit timing (Sprint 100 Phase 2 F1), local.
+        local resp_env=""
+        [ -n "${BB_RESP_TIMING:-}" ] && resp_env="BB_RESP_TIMING_OUT=$SCRATCH/resp_${stack}.txt"
+        # Per-stack seam snapshot + handler bracket (Sprint 100 Phase 2 F2),
+        # local mode.  BB_TIMING_SNAP is the SIGUSR1 snapshot target;
+        # BB_HANDLER_TIMING enables the handler-region bracket.
+        local snap_env=""
+        [ -n "${BB_TIMING_SNAP:-}" ] && snap_env="BB_TIMING_SNAP=$SCRATCH/timing_snap_${stack}.txt"
+        local handler_env=""
+        [ -n "${BB_HANDLER_TIMING:-}" ] && handler_env="BB_HANDLER_TIMING=1"
+        # Per-stack F3 parse seam (bytes-delivered → parsed-request-ready),
+        # local mode.
+        local parse_env=""
+        [ -n "${BB_PARSE_TIMING:-}" ] && parse_env="BB_PARSE_TIMING_OUT=$SCRATCH/parse_${stack}.txt"
+        # Per-stack F4 app-dispatch seam (BlackBull.__call__ /
+        # Sanic.handle_request), local mode.  Same file as the parse seam.
+        local dispatch_env=""
+        [ -n "${BB_DISPATCH_TIMING:-}" ] && dispatch_env="BB_DISPATCH_TIMING_OUT=$SCRATCH/parse_${stack}.txt"
+        # Per-stack F5 read-path seam, local mode.  Same file as the parse
+        # seam.
+        local read_env=""
+        [ -n "${BB_READ_TIMING:-}" ] && read_env="BB_READ_TIMING_OUT=$SCRATCH/parse_${stack}.txt"
+        # Armed-state gate stamp (F3+ review fix): written on EVERY launch so
+        # the bare calibration arm can prove itself, local mode.
+        local gate_env=""
+        [ -n "${BB_GATE_STAMP:-}" ] && gate_env="BB_GATE_STAMP_OUT=$SCRATCH/gate_${stack}.txt"
         # Optional CPU pinning, same env var as remote mode.
         local taskset_prefix=()
         [ -n "${BB_BENCH_TASKSET:-}" ] && taskset_prefix=(taskset -c "$BB_BENCH_TASKSET")
-        env $granian_log_env \
+        env $gc_env $loop_env $resp_env $snap_env $handler_env $parse_env $dispatch_env $read_env $gate_env $granian_log_env \
             "${taskset_prefix[@]}" \
             bash bench/peers/run_peer.sh "$stack" "$BASE_PORT" "$CERT" "$KEY" \
             > "$SCRATCH/server_${stack}.log" 2>&1 &
@@ -534,6 +724,28 @@ bench_stack() {
     local stack_base
     stack_base="$(strip_worker_suffix "$stack")"
 
+    local cpu0
+    cpu0="$(cpu_ticks "$server_pid")"
+
+    # Per-scenario CPU + seam capture (Sprint 100 Phase 2 F2).  Armed only
+    # for the local (single-topology) server; the wrk/wrk2 scenario runners
+    # call scenario_capture.sh before/after each scenario so cpu0/cpu1 and
+    # the SIGUSR1 seam snapshots land at the scenario boundaries.  This
+    # fixes F1's two caveats in one change: the body-size-mixed whole-lane
+    # aggregate (B4/B5/B7 = 98% of bytes) and the warmup denominator
+    # mismatch (cpu0 + snapshot both taken after warmup).  In split
+    # topology the server is remote and the capture is a no-op (F2 runs
+    # TOPO=single).
+    if [ -n "${BB_TIMING_SNAP:-}" ] && [ "$BENCH_REMOTE_LIFECYCLE" != "1" ]; then
+        export CAPTURE_CMD="$(pwd)/bench/peers/scenario_capture.sh"
+        export CAPTURE_PID="$server_pid"
+        export CAPTURE_SCRATCH="$SCRATCH"
+        export CAPTURE_PREFIX="${stack}_"
+        export CAPTURE_SNAP="$SCRATCH/timing_snap_${stack}.txt"
+    else
+        unset CAPTURE_CMD CAPTURE_PID CAPTURE_SCRATCH CAPTURE_PREFIX CAPTURE_SNAP 2>/dev/null || true
+    fi
+
     if contains_word "A" $LANES && contains_word "$stack_base" $SUPPORTS_H2; then
         echo "  Lane A (h2load HTTP/2) ..."
         run_lane_a_h2load "$stack"
@@ -570,7 +782,21 @@ bench_stack() {
         echo "_Skipped — $stack is a static-only reference (no WebSocket terminator)._" >> "$OUT"
     fi
 
-    kill_existing
+    # CPU-µs/req capture + identity stamps (Sprint 100 Phase 2).
+    local cpu1
+    cpu1="$(cpu_ticks "$server_pid")"
+    printf 'pid=%s ticks=%s clk_tck=%s\n' "$server_pid" "$((cpu1 - cpu0))" "$CLK_TCK" > "$SCRATCH/cpu_${stack}.txt"
+    if [ -f "$SCRATCH/loop_${stack}.txt" ]; then
+        echo "" >> "$OUT"
+        echo "_Loop identity (Phase 2 stamp): $(cat "$SCRATCH/loop_${stack}.txt")_" >> "$OUT"
+    fi
+    if [ -f "$SCRATCH/cpu_${stack}.txt" ]; then
+        echo "_CPU capture (Phase 2): $(cat "$SCRATCH/cpu_${stack}.txt")_" >> "$OUT"
+    fi
+
+    # Instrument-cost calibration: one bare B1 back-to-back so the
+    # instrument's own per-request cost is measured on the same instance.
+    calibrate_instrument "$stack"
 }
 
 # ----------------------------------------------------------------------------
