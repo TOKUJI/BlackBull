@@ -5595,6 +5595,15 @@ every arrival re-scan the whole head — quadratic, and attacker-chosen.</p>
 <p>asyncio passes <code>-1</code> when it has no preference, and the protocol
 contract requires a non-empty buffer — returning an empty one stalls
 the connection permanently.</p>
+<p>The <em>sizehint</em> is what the transport would <em>like</em> to read in one
+recv, not what it needs: uvloop's cleartext path passes libuv's fixed
+64 KiB on every call, so honouring it would grow every connection's
+buffer to 64 KiB on its first request and <code>compact()</code>/<code>_release()</code>
+would give it back at the message boundary — a 64 KiB alloc/free
+churn per request (the F5 read-path finding).  Growth is driven by
+bytes actually arriving (the <code>_w</code> cursor), never by the hint: offer
+the buffer's free span, growing only when it falls below the read
+floor.</p>
 
 
     </div>
