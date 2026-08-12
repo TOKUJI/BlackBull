@@ -14,7 +14,63 @@ from blackbull import BlackBull, Connection, Response
 from blackbull.utils import Scheme
 from blackbull.websocket import WebSocket
 
+# GC observation sampler (Sprint 100 Phase 1 mean-vs-tail fork).  Env-gated:
+# with BB_GC_STATS_OUT set, a background thread appends gc.get_stats()
+# snapshots to that file.  Observation-only — no request-path boundary is
+# added, so whole-server measurements stay whole-server.  Off by default.
+if os.environ.get("BB_GC_STATS_OUT"):
+    from bench.peers import gc_stats  # noqa: F401  (import activates)
+
+# Loop-identity stamp (Sprint 100 Phase 2).  Env-gated; writes the effective
+# loop class to BB_LOOP_STAMP_OUT at import.  Off by default.
+if os.environ.get("BB_LOOP_STAMP_OUT"):
+    from bench.peers import loop_stamp  # noqa: F401  (import activates)
+
+# Response-transmit timing (Sprint 100 Phase 2 F1 fork).  Env-gated; ONE
+# boundary (the response send seam).  The app declares its server so the
+# instrument wraps the right seam (blackbull is importable even under sanic).
+# The F2 fork also enables the handler-region bracket (registered below once
+# the app object exists) and the SIGUSR1 per-scenario snapshot; the F3 fork
+# adds the parse seam (bytes-delivered → parsed-request-ready) via
+# BB_PARSE_TIMING_OUT; the F4 fork adds the app-dispatch seam
+# (BlackBull.__call__) via BB_DISPATCH_TIMING_OUT; the F5 fork adds the
+# read-path seam (get_buffer + buffer_updated) via BB_READ_TIMING_OUT.
+if (os.environ.get("BB_RESP_TIMING_OUT") or os.environ.get("BB_TIMING_SNAP")
+        or os.environ.get("BB_PARSE_TIMING_OUT")
+        or os.environ.get("BB_DISPATCH_TIMING_OUT")
+        or os.environ.get("BB_READ_TIMING_OUT")):
+    os.environ["BB_RESP_TIMING_SERVER"] = "blackbull"
+    os.environ["BB_PARSE_TIMING_SERVER"] = "blackbull"
+    os.environ["BB_DISPATCH_TIMING_SERVER"] = "blackbull"
+    os.environ["BB_READ_TIMING_SERVER"] = "blackbull"
+    from bench.peers import response_timing  # noqa: F401  (import activates)
+
+# Armed-state gate stamp (Sprint 100 Phase 2 F3+ review fix).  Env-gated;
+# writes the resp/handler/parse armed flags on EVERY launch (bare included,
+# where response_timing is never imported) so every calibration arm can prove
+# itself.
+if os.environ.get("BB_GATE_STAMP_OUT"):
+    from bench.peers import gate_stamp  # noqa: F401  (import writes the stamp)
+
 app = BlackBull()
+
+# Lifecycle-event knock-out (Sprint 100 Phase C2 measurement).  Env-gated;
+# strips the four request-lifecycle event guards (request_received /
+# before_handler / after_handler / request_completed) for the events bare
+# A/B.  Installed at import (before serving); the no-events variant must
+# serve byte-identical responses.
+if os.environ.get("BB_NO_EVENTS"):
+    from bench.peers import no_events
+
+    no_events._install_no_events(app)
+
+# Handler-region timing (Sprint 100 Phase 2 F2 fork).  Env-gated; registers
+# before_handler/after_handler brackets on the app.  Per-request pairing by
+# id(conn) — valid at B1 (one in-flight request per connection).
+if os.environ.get("BB_HANDLER_TIMING"):
+    from bench.peers import response_timing
+
+    response_timing.register_handler_timing(app)
 
 # PEER_MW=httparena reproduces the middleware stack bench/httparena/app.py
 # registers, so a local A/B can ask whether the leaderboard gap lives in the
