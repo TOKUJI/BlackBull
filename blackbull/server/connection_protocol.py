@@ -135,6 +135,18 @@ class BufferReader(AbstractReader):
         close returns ``b''`` and a truncated one raises with the partial.
         """
         while True:
+            if not self._buf.available:
+                # Nothing resident: go straight to the wait — the "check" of
+                # the check-then-wait-then-check pattern.  The empty scan it
+                # skips is a control-flow artifact (~0.79 µs/req on EC2, F5):
+                # an empty buffer can never be LIMIT_EXCEEDED (0 > limit is
+                # false) and the scan's resumption state is untouched (it
+                # sets ``_scanned = _w``, which already equals ``_r``), so the
+                # idle-close and truncated-head contracts below are unchanged.
+                if self._proto.at_eof:
+                    return b''
+                await self._proto.wait_for_data()
+                continue
             end = self._buf.find_head_end(limit=limit)
             if end == ReadBuffer.LIMIT_EXCEEDED:
                 # The bytes stay resident: the caller classifies them, and the

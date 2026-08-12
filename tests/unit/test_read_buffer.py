@@ -10,7 +10,7 @@ These are unit tests with no I/O — the buffer is fed the way the protocol's
 """
 import pytest
 
-from blackbull.server.read_buffer import ReadBuffer
+from blackbull.server.read_buffer import ReadBuffer, _RELEASE_HYSTERESIS
 
 
 def _feed(rb: ReadBuffer, data: bytes) -> None:
@@ -19,6 +19,22 @@ def _feed(rb: ReadBuffer, data: bytes) -> None:
     view = rb.get_buffer(len(data))
     view[:len(data)] = data
     rb.buffer_updated(len(data))
+
+
+def _feed_chunked(rb: ReadBuffer, data: bytes) -> None:
+    """Write *data* the way a real transport does — in window-sized chunks.
+
+    ``get_buffer``'s window is the buffer's free span (the sizehint is
+    advisory — F5), so a message larger than the current allocation fills it
+    in pieces and the buffer grows only as bytes actually arrive.
+    """
+    pos = 0
+    while pos < len(data):
+        view = rb.get_buffer(len(data) - pos)
+        n = min(len(view), len(data) - pos)
+        view[:n] = data[pos:pos + n]
+        rb.buffer_updated(n)
+        pos += n
 
 
 class TestSingleMaterialisation:
@@ -137,20 +153,55 @@ class TestCompaction:
         assert rb.available == 0
         assert rb.capacity <= 8192, f'buffer grew to {rb.capacity}'
 
-    def test_a_large_body_does_not_leave_a_permanent_allocation(self):
-        """Peak allocation is released once the message is consumed.
+    def test_a_large_body_is_released_after_small_messages(self):
+        """A grown allocation is released once the connection has shown a few
+        small messages — the idle-memory floor, served with hysteresis.
 
-        Otherwise every connection that ever served one big upload holds its
-        peak for the rest of its keep-alive life — the same idle-memory floor
-        the read window is sized against, arrived at from the other side.
+        Without hysteresis every connection that ever served one big upload
+        held its peak for the rest of its keep-alive life; the release is
+        now deferred across ``_RELEASE_HYSTERESIS`` fully-consumed *small*
+        messages so a connection that repeats large messages reuses its
+        allocation instead of churning grow+shrink per message.
         """
         rb = ReadBuffer()
-        _feed(rb, b'H\r\n\r\n' + b'z' * 200_000)
+        _feed(rb, b'H\r\n\r\n')
+        _feed_chunked(rb, b'z' * 200_000)
         rb.take(rb.find_head_end())
         assert rb.capacity > 100_000          # grew to hold the body
         rb.consume(200_000)
         rb.compact()
+        # Hysteresis: this message's peak exceeded the floor, so the grown
+        # allocation is kept, not released.
+        assert rb.capacity > 100_000
+        # A few fully-consumed small messages give it back.
+        for _ in range(_RELEASE_HYSTERESIS):
+            _feed(rb, b'GET / HTTP/1.1\r\n\r\n')
+            rb.take(rb.find_head_end())
+            rb.compact()
         assert rb.capacity <= 8192, f'stayed at {rb.capacity} after the body'
+
+    def test_repeated_large_messages_reuse_the_grown_buffer(self):
+        """Hysteresis: a connection that keeps serving large messages must
+        not shrink-and-regrow between them (the F6/B7 churn).  Each large
+        message re-arms the release counter, so the allocation survives.
+        """
+        rb = ReadBuffer()
+        body = b'z' * 100_000
+        _feed(rb, b'H\r\n\r\n')
+        _feed_chunked(rb, body)
+        rb.take(rb.find_head_end())
+        rb.consume(len(body))
+        rb.compact()
+        cap = rb.capacity
+        assert cap > 100_000
+        for _ in range(_RELEASE_HYSTERESIS + 2):
+            _feed(rb, b'H\r\n\r\n')
+            _feed_chunked(rb, body)
+            rb.take(rb.find_head_end())
+            rb.consume(len(body))
+            rb.compact()
+            assert rb.capacity == cap, \
+                f'capacity changed {cap} -> {rb.capacity} between large messages'
 
     def test_compaction_preserves_unconsumed_surplus(self):
         rb = ReadBuffer()
@@ -228,10 +279,29 @@ class TestResizeSafety:
 
 
 class TestGetBufferContract:
-    def test_get_buffer_returns_at_least_the_hint(self):
+    def test_get_buffer_returns_usable_space_not_the_raw_hint(self):
+        """The sizehint is advisory, not a minimum-window contract.
+
+        uvloop's cleartext path passes libuv's fixed 64 KiB hint on every
+        call; honouring it (``want = max(sizehint, _MIN_READ)``) grew the
+        buffer to 64 KiB and ``_release`` gave it back at every message
+        boundary — a 64 KiB alloc/free churn per request (the F5 finding).
+        The window is the buffer's free span (never below the read floor);
+        growth happens only when bytes actually arriving fill the buffer.
+        """
         rb = ReadBuffer()
-        assert len(rb.get_buffer(64)) >= 64
-        assert len(rb.get_buffer(1 << 20)) >= (1 << 20)
+        # A fresh 8 KiB buffer offers its free span regardless of the hint.
+        assert len(rb.get_buffer(64)) >= 4096
+        big = rb.get_buffer(1 << 20)
+        assert 4096 <= len(big) < (1 << 20)    # hint not honoured; no 1 MiB alloc
+        # Data actually arriving is what drives growth.
+        for _ in range(3):
+            view = rb.get_buffer(-1)
+            n = min(len(view), 8192)
+            view[:n] = b'x' * n
+            rb.buffer_updated(n)
+        assert rb.capacity > 8192              # grew for the resident data
+        assert len(rb.get_buffer(1 << 20)) >= 4096
 
     def test_zero_hint_still_returns_usable_space(self):
         # asyncio passes sizehint=-1 or 0; returning an empty buffer would
@@ -247,3 +317,62 @@ class TestGetBufferContract:
         rb.buffer_updated(3)
         assert rb.available == 3
         assert bytes(rb.view(3)) == b'abc'
+
+
+class TestDropViewUnderTransportExport:
+    class _ExportHeld:
+        """A write window whose release() raises exactly as uvloop's still-held
+        Py_buffer export does on the cleartext path."""
+
+        def release(self):
+            raise BufferError('memoryview has 1 exported buffer')
+
+    def test_buffer_updated_tolerates_transport_export(self):
+        """uvloop's buffered read path calls ``buffer_updated`` while its
+        Py_buffer export on the get_buffer window is still acquired (the
+        export is released in uvloop's own finally, immediately after our
+        callback returns), so a ``release()`` there transiently raises
+        ``BufferError: memoryview has 1 exported buffer``.  The
+        ``buffer_updated`` call site tolerates it and drops the reference;
+        the transport releases the export before the next ``get_buffer``."""
+        rb = ReadBuffer()
+        rb._view = self._ExportHeld()          # transport still owns the export
+        rb._drop_view(tolerate_export=True)    # the buffer_updated call site
+        assert rb._view is None
+        # A fresh window works and is again droppable.
+        view = rb.get_buffer(16)
+        view[:3] = b'abc'
+        rb.buffer_updated(3)
+        assert rb._view is None
+        assert rb.available == 3
+
+    def test_other_call_sites_are_strict(self):
+        """get_buffer / compact / _make_room run after uvloop has released
+        the export, so a BufferError there is a genuine leak from our own
+        code (e.g. a body memoryview outliving its request) and must
+        propagate loudly instead of being masked."""
+        rb = ReadBuffer()
+        rb._view = self._ExportHeld()
+        with pytest.raises(BufferError):
+            rb._drop_view()                    # strict: propagate
+        assert rb._view is not None            # reference kept on failure
+
+    def test_a_held_body_view_surfaces_as_a_loud_buffer_error(self):
+        """A body memoryview still alive across a compact is the genuine
+        leak the strict path protects: it surfaces as ``BufferError`` (the
+        bytearray cannot resize with a live export), not a silent corruption.
+
+        Note this fires at the mutation site (``del self._buf[:r]``), not at
+        ``_drop_view``'s release — a real write-window export can only be
+        created by a C-level buffer-protocol consumer like uvloop, which is
+        why the strict branch itself is exercised with the ``_ExportHeld``
+        stub above."""
+        rb = ReadBuffer()
+        _feed(rb, b'HEAD\r\n\r\n' + b'x' * 100)
+        rb.take(rb.find_head_end())
+        v = rb.view(100)                       # the leak: body view kept alive
+        try:
+            with pytest.raises(BufferError):
+                rb.compact()
+        finally:
+            v.release()

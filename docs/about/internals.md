@@ -305,6 +305,16 @@ whole point, because the cost being removed was never the parked
 coroutine but reading *through* another layer that had already copied the
 bytes once.
 
+One non-obvious rule keeps that buffer cheap: `get_buffer` treats the
+transport's *sizehint* as advisory, not as a minimum window.  uvloop's
+cleartext path passes a fixed 64 KiB hint on every read; honouring it
+would grow every connection's buffer to 64 KiB and `_release` would hand
+it back — a 64 KiB alloc/free churn per request.  The buffer grows only
+when bytes actually arriving need the room, and `_release` returns a
+grown allocation to the floor only once the connection has shown a few
+small messages, so a connection repeating large bodies reuses its
+allocation.
+
 Three consequences follow, and each retires a workaround that existed
 only because the buffer was somewhere else:
 
