@@ -860,9 +860,8 @@ env vars, no behaviour change beyond the fix below.
 
 - **A/B verdict asymmetry documented.**  `bench/peers/AB-HIGH-PRECISION.md`
   records why local and EC2 A/B verdicts can disagree, and the ab-verify
-  workflow is wired into the agent docs (`.github/copilot-instructions.md`,
-  `AGENTS.md`) with EC2 calibration and a two-consecutive-polls wait rule for
-  reading check rollups.
+  workflow is wired into the agent docs (`AGENTS.md`) with EC2 calibration
+  and a two-consecutive-polls wait rule for reading check rollups.
 - **ab-verify EC2 launcher added** — `bench/aws/ab.sh` (ABBA measurement +
   import-hash proof) with `install.sh` uv/.git provisioning and a
   `native_app` bench target, so high-precision A/Bs can run on EC2 without
