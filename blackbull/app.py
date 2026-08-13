@@ -1447,33 +1447,15 @@ def serve(app, *,
     # Single-worker reload is supported by promoting to workers=1
     # under the multi-worker path.
     if workers == 1 and not reload:
-        import logging as _logging  # noqa: PLC0415
-        from .logger import setup_async_logging, teardown_async_logging  # noqa: PLC0415
-        from .env import apply_event_loop_policy  # noqa: PLC0415
-        from .server import ASGIServer  # noqa: PLC0415
-        apply_event_loop_policy(_cfg)
-        if _cfg.async_logging:
-            setup_async_logging(
-                log_format=_cfg.log_format,
-                syslog_addr=_cfg.log_syslog_addr,
-                batch_size=_cfg.log_batch_size,
-                batch_timeout_ms=_cfg.log_batch_timeout_ms,
-                log_file=_cfg.log_file,
-            )
-        if not _cfg.access_log:
-            _logging.getLogger('blackbull.access').setLevel(_logging.WARNING)
-        try:
-            asyncio.run(_run_single(
-                app,
-                certfile=certfile, keyfile=keyfile, port=port,
-                unix_path=unix_path,
-                inherited_fd=inherited_fd,
-                max_connections=max_connections,
-                stream_queue_depth=stream_queue_depth,
-                ws_queue_depth=ws_queue_depth,
-            ))
-        finally:
-            teardown_async_logging()
+        _serve_single_worker(
+            app, _cfg,
+            certfile=certfile, keyfile=keyfile, port=port,
+            unix_path=unix_path,
+            inherited_fd=inherited_fd,
+            max_connections=max_connections,
+            stream_queue_depth=stream_queue_depth,
+            ws_queue_depth=ws_queue_depth,
+        )
         return
 
     from .server import ASGIServer  # noqa: PLC0415
@@ -1518,6 +1500,55 @@ def serve(app, *,
     ).run()
 
     master_server.close_socket()
+
+
+def _serve_single_worker(
+    app,
+    cfg,
+    *,
+    certfile,
+    keyfile,
+    port,
+    unix_path,
+    inherited_fd,
+    max_connections,
+    stream_queue_depth,
+    ws_queue_depth,
+) -> None:
+    """Run one worker in-process (no reload): loop policy + async logging,
+    then ``asyncio.run``.  Boot-time only — never on a request path."""
+    import logging as _logging  # noqa: PLC0415
+    from .logger import setup_async_logging, teardown_async_logging  # noqa: PLC0415
+    from .env import apply_event_loop_policy  # noqa: PLC0415
+    from .server import ASGIServer  # noqa: PLC0415
+
+    apply_event_loop_policy(cfg)
+    if cfg.async_logging:
+        setup_async_logging(
+            log_format=cfg.log_format,
+            syslog_addr=cfg.log_syslog_addr,
+            batch_size=cfg.log_batch_size,
+            batch_timeout_ms=cfg.log_batch_timeout_ms,
+            log_file=cfg.log_file,
+        )
+    if not cfg.access_log:
+        _logging.getLogger('blackbull.access').setLevel(_logging.WARNING)
+    try:
+        asyncio.run(
+            _run_single(
+                app,
+                certfile=certfile,
+                keyfile=keyfile,
+                port=port,
+                unix_path=unix_path,
+                inherited_fd=inherited_fd,
+                max_connections=max_connections,
+                stream_queue_depth=stream_queue_depth,
+                ws_queue_depth=ws_queue_depth,
+            )
+        )
+    finally:
+        teardown_async_logging()
 
 
 async def _run_single(app, *, certfile, keyfile, port, unix_path, inherited_fd,
