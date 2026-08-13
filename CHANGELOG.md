@@ -42,6 +42,30 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Added
+
+- **Adaptive request-body read sizing** (`BB_BODY_CHUNK_MAX`, default
+  `524288`).  `BB_BODY_CHUNK_SIZE` is now the *starting* slice for a
+  `Content-Length` body rather than a fixed one: while a peer keeps the
+  transport running ahead of the server the slice doubles up to the new
+  ceiling, and two consecutive reads that drain the transport halve it again,
+  never below the starting size.  Fewer, larger reads for a fast uploader;
+  unchanged reads for a slow one, which is what the ceiling is for — slices
+  stay exact-size, so an unbounded ramp would eventually promise more than
+  `BB_BODY_TIMEOUT` allows.
+
+  The grow-on-evidence / two-quiet-reads-before-backing-off / hard-ceiling
+  rule is [Netty][netty-adaptive]'s `AdaptiveRecvByteBufAllocator`, adapted to
+  an exact-size reader.
+
+[netty-adaptive]: https://netty.io/4.1/api/io/netty/channel/AdaptiveRecvByteBufAllocator.html
+
+  No behaviour change for applications: bodies still arrive as successive
+  `http.request` events with `more_body`, a truncated body still raises, and
+  only the number of events varies.  Set `BB_BODY_CHUNK_MAX` equal to
+  `BB_BODY_CHUNK_SIZE` for the previous fixed-size slices.  Throughput effect
+  is not yet measured.
+
 ## [0.75.1] — 2026-08-13
 
 Sprint 100.  A patch rather than a minor: the public surface is unchanged —
