@@ -44,6 +44,32 @@ so the editable install's metadata catches up.
 
 ### Added
 
+- **`conn.disconnected`** — a named accessor for mid-request disconnect state,
+  previously readable only as a private field or through the module-level
+  `disconnected()` helper.  Useful in a long-running handler whose result
+  nobody is waiting for any more.  The module-level `disconnected()` remains
+  the form for the two ASGI boundaries, where the same state may live on a
+  `scope` dict.
+
+### Changed
+
+- **The actor→sender disconnect signal is a method, not an event.**  When a
+  read proved the connection dead, the HTTP/1.1 actor told its sender by
+  pushing an `http.disconnect` dict down the *send* channel — a receive-side
+  ASGI event sent the wrong way through the pipe.  It is now
+  `BaseSender.mark_client_gone()`.  The cost was never the dict: every
+  sender's event union had to widen to admit a message no application or
+  middleware may legally send, so the private `_SenderEvent` alias now
+  collapses back to `ASGISendEvent`.
+
+  `http.disconnect` on `receive()` — the direction ASGI defines it in — is
+  unchanged.  Senders no longer honour it on the send channel, so an
+  application or middleware holding `send` can no longer close its own
+  connection by sending that dict; it is logged and dropped like any other
+  unknown send event.
+
+### Added
+
 - **Adaptive request-body read sizing** (`BB_BODY_CHUNK_MAX`, default
   `524288`).  `BB_BODY_CHUNK_SIZE` is now the *starting* slice for a
   `Content-Length` body rather than a fixed one: while a peer keeps the

@@ -276,6 +276,28 @@ class Connection:
     # ---- path params (lazy — allocated on first access) ------------------
 
     @property
+    def disconnected(self) -> bool:
+        """True once the client dropped mid-request.
+
+        The named form of what used to be readable only as a private field or
+        through the module-level :func:`disconnected` helper.  A long-running
+        handler polls this to abandon work whose answer nobody is waiting for::
+
+            for row in rows:
+                if conn.disconnected:
+                    break
+
+        Set by the actor's disconnect-detecting receive wrapper, so it goes
+        true when the *server* notices — at the next ``receive()`` — rather
+        than the instant the peer's FIN lands.
+
+        The module-level :func:`disconnected` remains the form to use at the
+        two ASGI boundaries, where the same state may live on a ``scope``
+        dict instead of a :class:`Connection`.
+        """
+        return self._disconnected
+
+    @property
     def path_params(self) -> dict[str, Any]:
         """Matched URL path params, set by the router (values are converter-
         coerced, hence ``Any``). The backing dict is created lazily on first
