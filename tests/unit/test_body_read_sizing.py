@@ -163,3 +163,34 @@ async def test_a_rebound_recipient_does_not_inherit_the_previous_read_size():
     r.bind(_conn(40))
 
     assert (await _drain(r))[0] == 8       # starts over, not at 64
+
+
+@pytest.mark.asyncio
+async def test_a_single_read_request_between_two_uploads_carries_nothing_across():
+    """Only a body that could take more than one read re-arms the sizing, so a
+    small request in between skips that work.  It must not become a hole the
+    first upload's size escapes through: the small body is served from its own
+    length, and the second upload still starts from scratch."""
+    peer = _Peer(bytes(200))
+    r = HTTP1Recipient(peer, _conn(200), chunk_size=8, chunk_max=64)
+    await _drain(r)                        # grows to the 64-byte ceiling
+
+    peer._d = bytearray(bytes(5))          # a small request rides in between
+    peer.reads = 0
+    r.bind(_conn(5))
+    assert await _drain(r) == [5]          # its own length, not the stale 64
+
+    peer._d = bytearray(bytes(200))        # …and the next upload starts over
+    peer.reads = 0
+    r.bind(_conn(200))
+    assert (await _drain(r))[0] == 8
+
+
+@pytest.mark.asyncio
+async def test_a_connection_whose_first_request_is_small_still_reads_it():
+    """The sizing fields are bound once per connection rather than per request,
+    so a connection that opens with a bodyless or tiny request must not find
+    them missing."""
+    r = HTTP1Recipient(_Peer(bytes(3)), _conn(3), chunk_size=8, chunk_max=64)
+
+    assert await _drain(r) == [3]

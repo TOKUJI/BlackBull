@@ -733,6 +733,10 @@ class HTTP1Recipient(BaseRecipient):
         # Never below the starting size: a cap under the base would make the
         # first read the ceiling and the floor at once.
         self._chunk_max = max(chunk_max, chunk_size)
+        # Bound once per connection so the slots exist however small the first
+        # request is; ``bind`` re-arms them only for a body big enough to care.
+        self._read_n = chunk_size
+        self._shrink_armed = False
         # Body-read deadline.  0 = disabled.  Applied per
         # ``_read_with_timeout`` call — which is per *slice* on both framings,
         # since a chunk larger than ``chunk_size`` is delivered in several.
@@ -787,8 +791,19 @@ class HTTP1Recipient(BaseRecipient):
         # Adaptive body-read sizing, per request: request N's peer speed says
         # nothing about request N+1's, and a rebound recipient that inherited a
         # 512 KiB read would hand it to a client that never earned it.
-        self._read_n = self._chunk_size
-        self._shrink_armed = False
+        #
+        # Only a body that could take more than one read can observe this state
+        # or change it, so only such a body pays to reset it — a bodyless GET
+        # on a keep-alive connection must not be charged for a feature it can
+        # never reach.  Shorter bodies are safe to skip rather than merely
+        # cheap to skip: ``min(content_length, _read_n)`` clamps a single-read
+        # body to its own length whatever ``_read_n`` says, and
+        # ``_adapt_read_size`` never runs for one, so a stale value can be
+        # neither seen nor propagated.  The next multi-read body resets it
+        # again before any of it matters.
+        if self._content_length and self._content_length > self._chunk_size:
+            self._read_n = self._chunk_size
+            self._shrink_armed = False
         self._done = False
         # Set once a chunked-framing violation is detected: the byte stream is
         # now desynced, so the connection MUST close rather than keep-alive
