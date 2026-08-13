@@ -251,7 +251,7 @@ Equivalent TOML for a config file — see
 ## Next
 
 - [TLS](tls.md) — HTTPS, HTTP/2 via ALPN, mTLS.
-- [Behind nginx](behind-nginx.md) — running multi-worker
+- [Behind a reverse proxy](behind-reverse-proxy.md) — running multi-worker
   BlackBull behind a load-balancing reverse proxy.
 - [Reference — Environment variables](../reference/env-vars.md)
   — the full `BB_*` table.

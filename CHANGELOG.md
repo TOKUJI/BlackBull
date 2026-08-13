@@ -53,6 +53,17 @@ so the editable install's metadata catches up.
 
 ### Changed
 
+- **Deployment docs cover three reverse proxies, not one.**
+  `deployment/behind-nginx.md` becomes
+  `deployment/behind-reverse-proxy.md`, adding **HAProxy** and **Envoy**
+  alongside nginx, each with HTTP/1.1 *and* HTTP/2 backend configuration, plus
+  a guide to choosing between them.  The distinction that matters is whether a
+  proxy can speak HTTP/2 to the backend — BlackBull does natively, and a proxy
+  that downgrades to HTTP/1.1 on the back leg throws that away.  HAProxy
+  (2019) and Envoy (2016) have shipped it for years; nginx's
+  `proxy_http_version 2` arrived in 1.29.4.  `guide/http2.md` gains a
+  cross-reference.
+
 - **The actor→sender disconnect signal is a method, not an event.**  When a
   read proved the connection dead, the HTTP/1.1 actor told its sender by
   pushing an `http.disconnect` dict down the *send* channel — a receive-side

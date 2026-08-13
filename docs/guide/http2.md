@@ -268,8 +268,23 @@ CONNECT).  Off by default; opt in via
 [WebSockets — Transport](websockets.md#transport-http11-upgrade-vs-http2-extended-connect)
 for the details.
 
+## Behind a reverse proxy
+
+A proxy that terminates HTTP/2 from clients but speaks HTTP/1.1 to BlackBull
+gives you HTTP/2 on the front leg only — the native HTTP/2 support described
+on this page goes unused. To keep it end-to-end, the proxy needs an HTTP/2
+backend: **HAProxy** (`server … proto h2`) and **Envoy**
+(`http2_protocol_options: {}`) have both shipped that for years, while
+nginx's `proxy_http_version 2` arrived only in 1.29.4.
+
+An HTTP/1.1 back leg remains a fine default for ordinary traffic. See
+[Behind a reverse proxy](../deployment/behind-reverse-proxy.md) for the
+trade-off and complete configurations.
+
 ## Next
 
+- [Behind a reverse proxy](../deployment/behind-reverse-proxy.md) — HTTP/2
+  backend configuration for HAProxy, Envoy, and nginx.
 - [WebSockets](websockets.md) — the WebSocket transport,
   including HTTP/2 carriage.
 - [Configuration](configuration.md) — `BB_H2_*` flow-control,
