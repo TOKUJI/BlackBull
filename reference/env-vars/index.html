@@ -5394,11 +5394,6 @@ first-hit-then-summary rate-limit model.</p>
 <td>Slice size (bytes) for streaming an HTTP/1.1 request body to the ASGI app, on <strong>both</strong> framings.  The body is delivered as successive <code>http.request</code> events (<code>more_body: True</code> until exhausted) instead of one allocation the size of the declared length — capping per-connection buffering at O(chunk × connections).  It bounds a <code>Content-Length</code> body by the remaining count and a <code>Transfer-Encoding: chunked</code> body by what is left of the chunk in progress, so a peer-declared <code>chunk-size</code> never sets the read size.  64 KiB matches asyncio's default <code>StreamReader</code> buffer and sits below the backpressure high-water mark, which is what lets the pause work.  Must be <code>&gt; 0</code> (invalid values fall back to the default).</td>
 </tr>
 <tr>
-<td><code>BB_BODY_CHUNK_MAX</code></td>
-<td><code>524288</code></td>
-<td>Ceiling (bytes) for the adaptive <code>Content-Length</code> body read.  <code>BB_BODY_CHUNK_SIZE</code> is only the <em>starting</em> slice: while a peer keeps the transport running ahead of the server the slice doubles, up to this ceiling, so a large upload costs fewer receive round-trips; two consecutive reads that drain the transport halve it again, never below <code>BB_BODY_CHUNK_SIZE</code>.  Raise it for large uploads over fast links.  The ceiling is a <strong>latency</strong> bound rather than a memory one — reads are exact-size, so a slice is also a promise to deliver that many bytes inside <code>BB_BODY_TIMEOUT</code>, and a slow client on a large slice can run out of time.  Set equal to <code>BB_BODY_CHUNK_SIZE</code> for fixed-size slices.  Values below it are raised to it.  The sizing rule is adapted from Netty's <a href="https://netty.io/4.1/api/io/netty/channel/AdaptiveRecvByteBufAllocator.html"><code>AdaptiveRecvByteBufAllocator</code></a>.</td>
-</tr>
-<tr>
 <td><code>BB_STREAM_QUEUE_DEPTH</code></td>
 <td><code>64</code></td>
 <td><code>asyncio.Queue</code> depth for HTTP/2 per-stream request-body events.  Caps memory growth when an ASGI handler is slower than the client uploading data.</td>
