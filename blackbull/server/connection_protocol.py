@@ -82,7 +82,7 @@ class BufferReader(AbstractReader):
     the interface would force a no-op onto them.
     """
 
-    __slots__ = ('_buf', '_peak_avail', '_proto', '_release_count', '_waiting')
+    __slots__ = ('_buf', '_proto', '_release_count', '_waiting')
 
     def __init__(self, buf: ReadBuffer, proto: ConnectionProtocol) -> None:
         self._buf = buf
@@ -93,17 +93,21 @@ class BufferReader(AbstractReader):
         #: the wake and the reader running read as "nobody is waiting" and
         #: armed a pause that the next park immediately released.
         self._waiting = False
-        self._peak_avail = 0     # peak resident bytes since the last boundary
         self._release_count = 0  # consecutive small messages since the last grow
 
     # -- the receive decisions ---------------------------------------------
 
-    def data_arrived(self) -> None:
-        """Bytes landed: decide whether the peer should keep sending.
+    def data_arrived(self, nbytes: int) -> None:
+        """Bytes landed: account them, then decide whether to stop the peer.
 
         Called by the protocol from its transport callback, which takes no
         view of its own — the watermark comparison and the parked-reader
         exemption are both judgements about *reading*.
+
+        Accounting is delegated to the buffer, which returns the new resident
+        count so this decision costs one read instead of a property call; the
+        buffer also tracks the message's peak as part of that accounting (it
+        already holds the cursors), leaving only the hysteresis *policy* here.
 
         Not while this reader is waiting: it is starved, not behind, so the
         condition backpressure exists to prevent is not the one in play.
@@ -111,10 +115,7 @@ class BufferReader(AbstractReader):
         two ``epoll_ctl`` calls — on every arrival for the whole of a large
         read, since the next park releases it again.
         """
-        buf = self._buf
-        avail = buf.available
-        if buf.grown and avail > self._peak_avail:
-            self._peak_avail = avail
+        avail = self._buf.buffer_updated(nbytes)
         if not self._waiting and avail >= _HIGH_WATER:
             self._proto.pause_reading()
 
@@ -149,14 +150,14 @@ class BufferReader(AbstractReader):
         """
         buf = self._buf
         if buf.grown:
-            if self._peak_avail > buf.FLOOR:
+            if buf.peak_avail > buf.FLOOR:
                 self._release_count = 0
             else:
                 self._release_count += 1
                 if (self._release_count >= _RELEASE_HYSTERESIS
                         and buf.release_to_floor()):
                     self._release_count = 0
-        self._peak_avail = 0
+        buf.peak_avail = 0
 
     async def wait_for_data(self) -> None:
         """Park until more arrives, declaring the wait first.
@@ -334,10 +335,11 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
             # asyncio treats a zero-length read as EOF on some transports.
             self.eof_received()
             return
-        self._rb.buffer_updated(nbytes)
         # The arrival is reported, not judged: whether it should stop the peer
         # is a receive decision, and this class holds no watermark to make it.
-        self.reader.data_arrived()
+        # The reader accounts the bytes and decides in that one call, so the
+        # per-arrival cost is the single entry point it owns.
+        self.reader.data_arrived(nbytes)
         self._wake()
 
     def eof_received(self) -> bool:

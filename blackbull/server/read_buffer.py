@@ -19,9 +19,10 @@ actor; it distinguishes "EOF with nothing" from "EOF mid-head" only by leaving
 also the actor's job.
 
 Free of *receive* policy for the same reason.  It grows on demand, reports a
-drained message boundary, and offers :meth:`release_to_floor` — but when the
-allocation is actually given back is the reader's call, because only the reader
-knows what the connection has been asked to deliver.
+drained message boundary, tracks the message's peak resident bytes (accounting
+— the release *policy* consumes it), and offers :meth:`release_to_floor` — but
+when the allocation is actually given back is the reader's call, because only
+the reader knows what the connection has been asked to deliver.
 
 Not thread-safe and not concurrency-safe — one connection, one buffer, one
 actor loop, per the actor model.
@@ -71,6 +72,7 @@ class ReadBuffer:
         '_w',
         'drained_boundary',
         'grown',
+        'peak_avail',
     )
 
     #: :meth:`find_head_end` result meaning "the byte budget ran out before the
@@ -98,6 +100,10 @@ class ReadBuffer:
         #: reader's release policy hangs off.  Raised here, cleared by whoever
         #: acts on it; the buffer itself never reads it.
         self.drained_boundary = False
+        #: Peak resident bytes since the last boundary.  Accounting, not
+        #: policy: tracked here because the write path already holds the
+        #: cursors, and consumed (reset) by the reader's release hysteresis.
+        self.peak_avail = 0
         # The write window last handed to the transport.  Held so it can be
         # released before any resize: a bytearray with a live memoryview
         # raises BufferError on grow, and relying on the caller to drop its
@@ -164,12 +170,22 @@ class ReadBuffer:
         self._view = memoryview(self._buf)[self._w:]
         return self._view
 
-    def buffer_updated(self, nbytes: int) -> None:
-        """Declare how much of the last :meth:`get_buffer` was written."""
+    def buffer_updated(self, nbytes: int) -> int:
+        """Declare how much of the last :meth:`get_buffer` was written.
+
+        Returns the new resident count so the caller — the reader's arrival
+        decision — need not re-read it.  Tracks the message's peak resident
+        bytes while it is at it, but only once the buffer has grown past the
+        floor; a floor-sized buffer can never need the hysteresis decision,
+        so the common case costs one compare.
+        """
         self._w += nbytes
+        if self.grown and self._w - self._r > self.peak_avail:
+            self.peak_avail = self._w - self._r
         # uvloop can still hold the window's export here (see _drop_view);
         # only this transport callback tolerates that.
         self._drop_view(tolerate_export=True)
+        return self._w - self._r
 
     def _drop_view(self, *, tolerate_export: bool = False) -> None:
         """Release the outstanding write window so the buffer can be resized.

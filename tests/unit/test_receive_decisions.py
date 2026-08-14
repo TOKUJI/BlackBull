@@ -187,7 +187,7 @@ class TestTheStopReadingDecision:
             def __init__(self):
                 self.arrivals = 0
 
-            def data_arrived(self):
+            def data_arrived(self, nbytes):
                 self.arrivals += 1
 
         proto.reader = _StubReader()
