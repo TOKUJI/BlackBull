@@ -665,6 +665,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#noticing-that-the-client-left" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Noticing that the client left
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#read_json-and-read_text" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1582,14 +1593,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../../deployment/behind-nginx/" class="md-nav__link">
+      <a href="../../deployment/behind-reverse-proxy/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Behind nginx
+    Behind a reverse proxy
   
 
     
@@ -5285,6 +5296,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#noticing-that-the-client-left" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Noticing that the client left
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#read_json-and-read_text" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5690,6 +5712,23 @@ handler itself).</p>
 returns one chunk with <code>more_body=True</code> until the final chunk
 arrives with <code>more_body=False</code>.  <code>read_body</code> is a convenience
 wrapper that buffers all chunks before returning.</p>
+<h3 id="noticing-that-the-client-left">Noticing that the client left<a class="headerlink" href="#noticing-that-the-client-left" title="Permanent link">&para;</a></h3>
+<p><code>conn.disconnected</code> is <code>True</code> once the client dropped mid-request.  It is
+worth checking in a loop whose result nobody is waiting for any more:</p>
+<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="s1">&#39;/report&#39;</span><span class="p">)</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">report</span><span class="p">(</span><span class="n">conn</span><span class="p">):</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">async</span> <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">slow_query</span><span class="p">():</span>
+        <span class="k">if</span> <span class="n">conn</span><span class="o">.</span><span class="n">disconnected</span><span class="p">:</span>
+            <span class="k">return</span>            <span class="c1"># nobody is listening; stop paying for this</span>
+        <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">row</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s1">&#39;rows&#39;</span><span class="p">:</span> <span class="n">rows</span><span class="p">}</span>
+</code></pre></div>
+<p>The flag goes true when the <em>server</em> notices — at the next <code>receive()</code> — not
+the instant the peer's FIN arrives, so a handler that never reads the body
+and never streams will not see it change.  For a push-style notification
+instead of a poll, use the
+<a href="../events/"><code>request_disconnected</code> event</a>.</p>
 <h3 id="read_json-and-read_text"><code>read_json</code> and <code>read_text</code><a class="headerlink" href="#read_json-and-read_text" title="Permanent link">&para;</a></h3>
 <p>For the two most common body shapes, <code>read_json</code> and <code>read_text</code>
 wrap <code>read_body</code> so the handler skips the parse/decode boilerplate:</p>

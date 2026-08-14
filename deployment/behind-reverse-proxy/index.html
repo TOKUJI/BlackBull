@@ -10,7 +10,7 @@
       
       
       
-        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/deployment/behind-nginx/">
+        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/deployment/behind-reverse-proxy/">
       
       
         <link rel="prev" href="../tls/">
@@ -27,7 +27,7 @@
     
     
       
-        <title>Behind nginx - BlackBull</title>
+        <title>Behind a reverse proxy - BlackBull</title>
       
     
     
@@ -72,7 +72,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#behind-nginx" class="md-skip">
+        <a href="#behind-a-reverse-proxy" class="md-skip">
           Skip to content
         </a>
       
@@ -108,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Behind nginx
+              Behind a reverse proxy
             
           </span>
         </div>
@@ -1268,7 +1268,7 @@
   <span class="md-ellipsis">
     
   
-    Behind nginx
+    Behind a reverse proxy
   
 
     
@@ -1286,7 +1286,7 @@
   <span class="md-ellipsis">
     
   
-    Behind nginx
+    Behind a reverse proxy
   
 
     
@@ -1312,10 +1312,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#setup" class="md-nav__link">
+  <a href="#choosing-a-proxy" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Setup
+        Choosing a proxy
       
     </span>
   </a>
@@ -1323,17 +1323,18 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#complete-nginx-configuration" class="md-nav__link">
+  <a href="#common-setup-the-blackbull-side" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Complete nginx configuration
+        Common setup — the BlackBull side
       
     </span>
   </a>
   
-</li>
-      
-        <li class="md-nav__item">
+    <nav class="md-nav" aria-label="Common setup — the BlackBull side">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
   <a href="#trusted-proxy-headers" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1341,6 +1342,100 @@
       
     </span>
   </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#nginx" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        nginx
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#haproxy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HAProxy
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="HAProxy">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#http11-backend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HTTP/1.1 backend
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#http2-backend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HTTP/2 backend
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#envoy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Envoy
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Envoy">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#http11-backend_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HTTP/1.1 backend
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#http2-backend_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HTTP/2 backend
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -5056,10 +5151,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#setup" class="md-nav__link">
+  <a href="#choosing-a-proxy" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Setup
+        Choosing a proxy
       
     </span>
   </a>
@@ -5067,17 +5162,18 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#complete-nginx-configuration" class="md-nav__link">
+  <a href="#common-setup-the-blackbull-side" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Complete nginx configuration
+        Common setup — the BlackBull side
       
     </span>
   </a>
   
-</li>
-      
-        <li class="md-nav__item">
+    <nav class="md-nav" aria-label="Common setup — the BlackBull side">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
   <a href="#trusted-proxy-headers" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5085,6 +5181,100 @@
       
     </span>
   </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#nginx" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        nginx
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#haproxy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HAProxy
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="HAProxy">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#http11-backend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HTTP/1.1 backend
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#http2-backend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HTTP/2 backend
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#envoy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Envoy
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Envoy">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#http11-backend_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HTTP/1.1 backend
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#http2-backend_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HTTP/2 backend
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -5152,22 +5342,108 @@
   
 
 
-<h1 id="behind-nginx">Behind nginx<a class="headerlink" href="#behind-nginx" title="Permanent link">&para;</a></h1>
-<p>For most production deployments, running BlackBull behind a
-reverse proxy (nginx, Caddy) is the simplest topology — the
-proxy handles TLS termination, static files, and load balancing
-across multiple processes.</p>
-<p>This page covers the nginx side of that setup and the
-<code>TrustedProxy</code> middleware on the BlackBull side that recovers
-client IP and scheme from the proxy headers.</p>
-<h2 id="setup">Setup<a class="headerlink" href="#setup" title="Permanent link">&para;</a></h2>
-<p>Start BlackBull <strong>without</strong> TLS — nginx handles certificates:</p>
-<div class="highlight"><pre><span></span><code>python<span class="w"> </span>app.py<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span><span class="w">   </span><span class="c1"># plain HTTP/1.1; no --cert / --key</span>
+<h1 id="behind-a-reverse-proxy">Behind a reverse proxy<a class="headerlink" href="#behind-a-reverse-proxy" title="Permanent link">&para;</a></h1>
+<p>For most production deployments, running BlackBull behind a reverse proxy is
+the simplest topology — the proxy handles TLS termination, static files, and
+load balancing across multiple processes.</p>
+<p>This page covers three proxies (nginx, HAProxy, Envoy), the choice between
+them, and the <code>TrustedProxy</code> middleware on the BlackBull side that recovers
+client IP and scheme from the proxy's forwarded headers.</p>
+<h2 id="choosing-a-proxy">Choosing a proxy<a class="headerlink" href="#choosing-a-proxy" title="Permanent link">&para;</a></h2>
+<p>The question that separates them is whether the proxy can speak <strong>HTTP/2 to
+the backend</strong>. BlackBull speaks HTTP/2 natively, so a proxy that downgrades to
+HTTP/1.1 on the back leg throws that away — you get HTTP/2 between client and
+proxy only.</p>
+<table>
+<thead>
+<tr>
+<th>Proxy</th>
+<th>HTTP/2 to backend</th>
+<th>Reach for it when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>nginx</strong></td>
+<td>⚠️ since 1.29.4 (2025-12) — new, <a href="https://nginx.org/en/security_advisories.html">three CVEs so far</a></td>
+<td>You already run nginx, and an HTTP/1.1 back leg is fine</td>
+</tr>
+<tr>
+<td><strong>HAProxy</strong></td>
+<td>✅ stable since 1.9 (2019)</td>
+<td>You want the HTTP/2 back leg, high throughput, and a config you can read</td>
+</tr>
+<tr>
+<td><strong>Envoy</strong></td>
+<td>✅ stable since 2016</td>
+<td>Kubernetes or a service mesh; heavy gRPC; dynamic configuration</td>
+</tr>
+</tbody>
+</table>
+<p>An HTTP/1.1 back leg is a perfectly good default. It is what the nginx section
+below configures, it is what most deployments run, and it costs nothing for
+ordinary request/response traffic. The HTTP/2 back leg earns its keep when the
+proxy would otherwise open many upstream connections — high-concurrency APIs,
+gRPC, or long-lived streams — because multiplexing collapses them onto one.</p>
+<div class="admonition note">
+<p class="admonition-title">nginx's <code>proxy_http_version 2</code> is young</p>
+<p>nginx only gained HTTP/2 proxying to the backend in 1.29.4, and the
+feature has already carried security advisories. HAProxy and Envoy have
+shipped it for years. If you want the HTTP/2 back leg today, prefer one of
+those; revisit nginx once the feature has more road behind it.</p>
+</div>
+<p>Not covered: <strong>Caddy</strong> (capable, but little enterprise deployment — ask if you
+need it), <strong>Traefik</strong> (no HTTP/2 backend support), and <strong>Apache httpd</strong> (its
+HTTP/2 proxying has been experimental for a decade).</p>
+<h2 id="common-setup-the-blackbull-side">Common setup — the BlackBull side<a class="headerlink" href="#common-setup-the-blackbull-side" title="Permanent link">&para;</a></h2>
+<p>Start BlackBull <strong>without</strong> TLS. The proxy handles certificates:</p>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>app.py<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span><span class="w">   </span><span class="c1"># plain HTTP; no --cert / --key</span>
 </code></pre></div>
-<p>nginx terminates TLS and HTTP/2 toward clients, then proxies to
-BlackBull over HTTP/1.1.  Regular HTTP requests, WebSocket
-upgrades, and Server-Sent Events all work through this topology.</p>
-<h2 id="complete-nginx-configuration">Complete nginx configuration<a class="headerlink" href="#complete-nginx-configuration" title="Permanent link">&para;</a></h2>
+<h3 id="trusted-proxy-headers">Trusted-proxy headers<a class="headerlink" href="#trusted-proxy-headers" title="Permanent link">&para;</a></h3>
+<p>By default <code>conn.client</code> is the raw TCP peer — the proxy's address — and
+<code>conn.scheme</code> is <code>'http'</code> even when the client connected over HTTPS. Enable
+<code>TrustedProxy</code> to recover both:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Shortcut on BlackBull — registers TrustedProxy automatically</span>
+<span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">(</span><span class="n">trusted_proxies</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;127.0.0.1&#39;</span><span class="p">,</span> <span class="s1">&#39;::1&#39;</span><span class="p">])</span>
+
+<span class="c1"># Or register explicitly for more control (e.g. a private subnet):</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">TrustedProxy</span>
+<span class="n">app</span><span class="o">.</span><span class="n">use</span><span class="p">(</span><span class="n">TrustedProxy</span><span class="p">([</span><span class="s1">&#39;127.0.0.1&#39;</span><span class="p">,</span> <span class="s1">&#39;::1&#39;</span><span class="p">,</span> <span class="s1">&#39;10.0.0.0/8&#39;</span><span class="p">]))</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Without middleware</th>
+<th>With middleware</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>conn.client</code></td>
+<td>the proxy's IP</td>
+<td>real client IP (from <code>X-Forwarded-For</code>)</td>
+</tr>
+<tr>
+<td><code>conn.scheme</code></td>
+<td><code>'http'</code></td>
+<td><code>'https'</code> (from <code>X-Forwarded-Proto</code>)</td>
+</tr>
+</tbody>
+</table>
+<p>Supported headers, in precedence order:</p>
+<ol>
+<li>RFC 7239 <code>Forwarded</code> — <code>for=&lt;ip&gt;; proto=&lt;scheme&gt;</code></li>
+<li><code>X-Forwarded-For</code> — comma-separated chain; leftmost non-trusted IP wins</li>
+<li><code>X-Forwarded-Proto</code></li>
+</ol>
+<p>Headers are <strong>only applied when the direct TCP peer is in the trusted set</strong>,
+which is what stops a client forging <code>X-Forwarded-For</code> to spoof its own IP.
+Every configuration below sets these headers on the proxy side; the trusted
+set on the BlackBull side must match where the proxy actually connects from.</p>
+<h2 id="nginx">nginx<a class="headerlink" href="#nginx" title="Permanent link">&para;</a></h2>
+<p>Terminates TLS and HTTP/2 toward clients, proxies to BlackBull over HTTP/1.1.
+Regular requests, WebSocket upgrades, and Server-Sent Events all work.</p>
 <div class="highlight"><pre><span></span><code><span class="k">upstream</span><span class="w"> </span><span class="s">blackbull</span><span class="w"> </span><span class="p">{</span>
 <span class="w">    </span><span class="kn">server</span><span class="w"> </span><span class="n">127.0.0.1</span><span class="p">:</span><span class="mi">8000</span><span class="p">;</span>
 <span class="w">    </span><span class="kn">keepalive</span><span class="w"> </span><span class="mi">64</span><span class="p">;</span>
@@ -5188,7 +5464,7 @@ upgrades, and Server-Sent Events all work through this topology.</p>
 <span class="w">        </span><span class="kn">proxy_set_header</span><span class="w">   </span><span class="s">Host</span><span class="w">              </span><span class="nv">$host</span><span class="p">;</span>
 <span class="w">        </span><span class="kn">proxy_set_header</span><span class="w">   </span><span class="s">X-Forwarded-For</span><span class="w">   </span><span class="nv">$proxy_add_x_forwarded_for</span><span class="p">;</span>
 <span class="w">        </span><span class="kn">proxy_set_header</span><span class="w">   </span><span class="s">X-Forwarded-Proto</span><span class="w"> </span><span class="nv">$scheme</span><span class="p">;</span>
-<span class="w">        </span><span class="kn">proxy_set_header</span><span class="w">   </span><span class="s">Connection</span><span class="w">        </span><span class="s">&quot;&quot;</span><span class="p">;</span><span class="w">   </span><span class="c1"># enable keep-alive to upstream</span>
+<span class="w">        </span><span class="kn">proxy_set_header</span><span class="w">   </span><span class="s">Connection</span><span class="w">        </span><span class="s">&quot;&quot;</span><span class="p">;</span><span class="w">   </span><span class="c1"># enable keep-alive upstream</span>
 <span class="w">    </span><span class="p">}</span>
 
 <span class="w">    </span><span class="c1"># ── WebSocket ─────────────────────────────────────────────────────</span>
@@ -5222,50 +5498,132 @@ upgrades, and Server-Sent Events all work through this topology.</p>
 <span class="w">    </span><span class="kn">return</span><span class="w"> </span><span class="mi">301</span><span class="w"> </span><span class="s">https://</span><span class="nv">$host$request_uri</span><span class="p">;</span>
 <span class="p">}</span>
 </code></pre></div>
-<h2 id="trusted-proxy-headers">Trusted-proxy headers<a class="headerlink" href="#trusted-proxy-headers" title="Permanent link">&para;</a></h2>
-<p>By default, <code>conn.client</code> is the raw TCP peer (nginx's
-loopback address) and <code>conn.scheme</code> is <code>'http'</code> even when
-the client connected via HTTPS.  Enable <code>TrustedProxy</code> to
-rewrite both from the proxy's forwarded headers:</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># Shortcut on BlackBull — registers TrustedProxy automatically</span>
-<span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">(</span><span class="n">trusted_proxies</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;127.0.0.1&#39;</span><span class="p">,</span> <span class="s1">&#39;::1&#39;</span><span class="p">])</span>
+<h2 id="haproxy">HAProxy<a class="headerlink" href="#haproxy" title="Permanent link">&para;</a></h2>
+<h3 id="http11-backend">HTTP/1.1 backend<a class="headerlink" href="#http11-backend" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>global
+    log stdout format raw local0
 
-<span class="c1"># Or register explicitly for more control (e.g. private subnet):</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">TrustedProxy</span>
-<span class="n">app</span><span class="o">.</span><span class="n">use</span><span class="p">(</span><span class="n">TrustedProxy</span><span class="p">([</span><span class="s1">&#39;127.0.0.1&#39;</span><span class="p">,</span> <span class="s1">&#39;::1&#39;</span><span class="p">,</span> <span class="s1">&#39;10.0.0.0/8&#39;</span><span class="p">]))</span>
+defaults
+    mode    http
+    timeout connect 5s
+    timeout client  60s
+    timeout server  60s
+
+frontend https_in
+    bind *:443 ssl crt /etc/haproxy/certs/example.com.pem alpn h2,http/1.1
+    bind *:80
+    http-request redirect scheme https unless { ssl_fc }
+
+    # Forwarded headers — TrustedProxy reads these.
+    http-request set-header X-Forwarded-Proto https if { ssl_fc }
+    http-request set-header X-Forwarded-Proto http  unless { ssl_fc }
+    option forwardfor                       # appends X-Forwarded-For
+
+    default_backend blackbull
+
+backend blackbull
+    # WebSocket needs no special handling: HAProxy tunnels the Upgrade
+    # automatically in HTTP mode.  Raise the server timeout for long-lived
+    # connections (WebSocket, SSE).
+    timeout tunnel 3600s
+    server bb1 127.0.0.1:8000 check
 </code></pre></div>
-<p>With trusted-proxy support active:</p>
-<table>
-<thead>
-<tr>
-<th><code>scope</code> key</th>
-<th>Without middleware</th>
-<th>With middleware</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>conn.client</code></td>
-<td>nginx's loopback IP</td>
-<td>real client IP (from <code>X-Forwarded-For</code>)</td>
-</tr>
-<tr>
-<td><code>conn.scheme</code></td>
-<td><code>'http'</code></td>
-<td><code>'https'</code> (from <code>X-Forwarded-Proto</code>)</td>
-</tr>
-</tbody>
-</table>
-<p>Supported headers, in precedence order:</p>
-<ol>
-<li>RFC 7239 <code>Forwarded</code> — <code>for=&lt;ip&gt;; proto=&lt;scheme&gt;</code></li>
-<li><code>X-Forwarded-For</code> — comma-separated chain; leftmost
-   non-trusted IP wins</li>
-<li><code>X-Forwarded-Proto</code></li>
-</ol>
-<p>Headers are <strong>only applied when the direct TCP peer is in the
-trusted set</strong>, preventing clients from spoofing their IP by
-forging <code>X-Forwarded-For</code>.</p>
+<h3 id="http2-backend">HTTP/2 backend<a class="headerlink" href="#http2-backend" title="Permanent link">&para;</a></h3>
+<p>Change one thing — the <code>server</code> line. <code>proto h2</code> forces cleartext HTTP/2
+(h2c) to the backend:</p>
+<div class="highlight"><pre><span></span><code>backend blackbull
+    timeout tunnel 3600s
+    server bb1 127.0.0.1:8000 proto h2 check
+</code></pre></div>
+<p>Over TLS to the backend, negotiate it with ALPN instead:</p>
+<div class="highlight"><pre><span></span><code>    server bb1 10.0.0.5:8443 ssl alpn h2 verify required \
+        ca-file /etc/haproxy/certs/ca.pem check
+</code></pre></div>
+<div class="admonition warning">
+<p class="admonition-title">WebSocket over an HTTP/2 backend</p>
+<p>WebSocket over HTTP/2 uses Extended CONNECT (RFC 8441), which is a
+different mechanism from the HTTP/1.1 <code>Upgrade</code> handshake. BlackBull
+supports it, but if you hit trouble, route WebSocket paths to an
+HTTP/1.1 backend and keep HTTP/2 for the rest:</p>
+<div class="highlight"><pre><span></span><code>frontend https_in
+    acl is_ws path_beg /ws
+    use_backend blackbull_h1 if is_ws
+    default_backend blackbull_h2
+</code></pre></div>
+</div>
+<h2 id="envoy">Envoy<a class="headerlink" href="#envoy" title="Permanent link">&para;</a></h2>
+<h3 id="http11-backend_1">HTTP/1.1 backend<a class="headerlink" href="#http11-backend_1" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nt">static_resources</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">listeners</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https_listener</span>
+<span class="w">    </span><span class="nt">address</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">socket_address</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">address</span><span class="p">:</span><span class="w"> </span><span class="nv">0.0.0.0</span><span class="p p-Indicator">,</span><span class="nt"> port_value</span><span class="p">:</span><span class="w"> </span><span class="nv">443</span><span class="p p-Indicator">}</span>
+<span class="w">    </span><span class="nt">filter_chains</span><span class="p">:</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">filters</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">envoy.filters.network.http_connection_manager</span>
+<span class="w">        </span><span class="nt">typed_config</span><span class="p">:</span>
+<span class="w">          </span><span class="s">&quot;@type&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager</span>
+<span class="w">          </span><span class="nt">stat_prefix</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ingress_http</span>
+<span class="w">          </span><span class="nt">use_remote_address</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">      </span><span class="c1"># populates X-Forwarded-For / -Proto</span>
+<span class="w">          </span><span class="nt">upgrade_configs</span><span class="p">:</span>
+<span class="w">          </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">upgrade_type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">websocket</span><span class="w">     </span><span class="c1"># required for WebSocket</span>
+<span class="w">          </span><span class="nt">route_config</span><span class="p">:</span>
+<span class="w">            </span><span class="nt">virtual_hosts</span><span class="p">:</span>
+<span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">backend</span>
+<span class="w">              </span><span class="nt">domains</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;*&quot;</span><span class="p p-Indicator">]</span>
+<span class="w">              </span><span class="nt">routes</span><span class="p">:</span>
+<span class="w">              </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">match</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">prefix</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;/&quot;</span><span class="p p-Indicator">}</span>
+<span class="w">                </span><span class="nt">route</span><span class="p">:</span>
+<span class="w">                  </span><span class="nt">cluster</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">blackbull</span>
+<span class="w">                  </span><span class="nt">timeout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0s</span><span class="w">           </span><span class="c1"># no timeout: SSE / streaming</span>
+<span class="w">          </span><span class="nt">http_filters</span><span class="p">:</span>
+<span class="w">          </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">envoy.filters.http.router</span>
+<span class="w">            </span><span class="nt">typed_config</span><span class="p">:</span>
+<span class="w">              </span><span class="s">&quot;@type&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.filters.http.router.v3.Router</span>
+<span class="w">      </span><span class="nt">transport_socket</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">envoy.transport_sockets.tls</span>
+<span class="w">        </span><span class="nt">typed_config</span><span class="p">:</span>
+<span class="w">          </span><span class="s">&quot;@type&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext</span>
+<span class="w">          </span><span class="nt">common_tls_context</span><span class="p">:</span>
+<span class="w">            </span><span class="nt">alpn_protocols</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;h2&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;http/1.1&quot;</span><span class="p p-Indicator">]</span>
+<span class="w">            </span><span class="nt">tls_certificates</span><span class="p">:</span>
+<span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">certificate_chain</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">filename</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;/etc/envoy/certs/fullchain.pem&quot;</span><span class="p p-Indicator">}</span>
+<span class="w">              </span><span class="nt">private_key</span><span class="p">:</span><span class="w">       </span><span class="p p-Indicator">{</span><span class="nt">filename</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;/etc/envoy/certs/privkey.pem&quot;</span><span class="p p-Indicator">}</span>
+
+<span class="w">  </span><span class="nt">clusters</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">blackbull</span>
+<span class="w">    </span><span class="nt">connect_timeout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5s</span>
+<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">STATIC</span>
+<span class="w">    </span><span class="nt">load_assignment</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">cluster_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">blackbull</span>
+<span class="w">      </span><span class="nt">endpoints</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">lb_endpoints</span><span class="p">:</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">endpoint</span><span class="p">:</span>
+<span class="w">            </span><span class="nt">address</span><span class="p">:</span>
+<span class="w">              </span><span class="nt">socket_address</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">address</span><span class="p">:</span><span class="w"> </span><span class="nv">127.0.0.1</span><span class="p p-Indicator">,</span><span class="nt"> port_value</span><span class="p">:</span><span class="w"> </span><span class="nv">8000</span><span class="p p-Indicator">}</span>
+</code></pre></div>
+<h3 id="http2-backend_1">HTTP/2 backend<a class="headerlink" href="#http2-backend_1" title="Permanent link">&para;</a></h3>
+<p>Add <code>typed_extension_protocol_options</code> to the <strong>cluster</strong>. Everything else
+stays as above:</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="nt">clusters</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">blackbull</span>
+<span class="w">    </span><span class="nt">connect_timeout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5s</span>
+<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">STATIC</span>
+<span class="w">    </span><span class="nt">typed_extension_protocol_options</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">envoy.extensions.upstreams.http.v3.HttpProtocolOptions</span><span class="p">:</span>
+<span class="w">        </span><span class="s">&quot;@type&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions</span>
+<span class="w">        </span><span class="nt">explicit_http_config</span><span class="p">:</span>
+<span class="w">          </span><span class="nt">http2_protocol_options</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{}</span><span class="w">      </span><span class="c1"># h2c to the backend</span>
+<span class="w">    </span><span class="nt">load_assignment</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">cluster_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">blackbull</span>
+<span class="w">      </span><span class="nt">endpoints</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">lb_endpoints</span><span class="p">:</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">endpoint</span><span class="p">:</span>
+<span class="w">            </span><span class="nt">address</span><span class="p">:</span>
+<span class="w">              </span><span class="nt">socket_address</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">address</span><span class="p">:</span><span class="w"> </span><span class="nv">127.0.0.1</span><span class="p p-Indicator">,</span><span class="nt"> port_value</span><span class="p">:</span><span class="w"> </span><span class="nv">8000</span><span class="p p-Indicator">}</span>
+</code></pre></div>
+<p>For gRPC, this is the configuration you want — Envoy will multiplex all RPCs
+onto one upstream connection. See <a href="../../guide/grpc/">gRPC</a>.</p>
 <h2 id="docker">Docker<a class="headerlink" href="#docker" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="k">FROM</span><span class="w"> </span><span class="s">python:3.13-slim</span>
 <span class="k">WORKDIR</span><span class="w"> </span><span class="s">/app</span>
@@ -5280,35 +5638,46 @@ forging <code>X-Forwarded-For</code>.</p>
 <span class="n">SECRET</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s1">&#39;SECRET_KEY&#39;</span><span class="p">]</span>
 <span class="n">PORT</span>   <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;PORT&#39;</span><span class="p">,</span> <span class="mi">8000</span><span class="p">))</span>
 </code></pre></div>
-<h2 id="going-one-step-further-af_unix">Going one step further — <code>AF_UNIX</code><a class="headerlink" href="#going-one-step-further-af_unix" title="Permanent link">&para;</a></h2>
-<p>When the reverse proxy and BlackBull are on the same host, an
-<code>AF_UNIX</code> socket between them removes TCP overhead and avoids
-exposing a port on <code>0.0.0.0</code>.  See
-<a href="../unix-and-fd/">Unix and fd inheritance</a>.</p>
-<p>The nginx upstream then looks like:</p>
-<div class="highlight"><pre><span></span><code><span class="k">upstream</span><span class="w"> </span><span class="s">blackbull</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="kn">server</span><span class="w"> </span><span class="s">unix:/run/blackbull.sock</span><span class="p">;</span><span class="w"> </span><span class="p">}</span>
+<p>In Compose, the proxy reaches BlackBull by service name, so the trusted set
+must cover the Docker network rather than loopback:</p>
+<div class="highlight"><pre><span></span><code><span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">(</span><span class="n">trusted_proxies</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;172.16.0.0/12&#39;</span><span class="p">])</span>
 </code></pre></div>
+<h2 id="going-one-step-further-af_unix">Going one step further — <code>AF_UNIX</code><a class="headerlink" href="#going-one-step-further-af_unix" title="Permanent link">&para;</a></h2>
+<p>When the proxy and BlackBull share a host, an <code>AF_UNIX</code> socket between them
+removes TCP overhead and avoids exposing a port on <code>0.0.0.0</code>. See
+<a href="../unix-and-fd/">Unix and fd inheritance</a>.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># nginx</span>
+<span class="k">upstream</span><span class="w"> </span><span class="s">blackbull</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="kn">server</span><span class="w"> </span><span class="s">unix:/run/blackbull.sock</span><span class="p">;</span><span class="w"> </span><span class="p">}</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code># HAProxy
+backend blackbull
+    server bb1 /run/blackbull.sock
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><span class="c1"># Envoy — in the cluster&#39;s endpoint address</span>
+<span class="nt">address</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">pipe</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="nv">/run/blackbull.sock</span><span class="p p-Indicator">}</span>
+</code></pre></div>
+<p>With a Unix socket there is no meaningful IP to trust, so <code>TrustedProxy</code> needs
+the peer that the socket presents rather than a network range — verify what
+<code>conn.client</code> reports before assuming a value.</p>
 <h2 id="when-fronting-http2-is-the-right-call">When fronting HTTP/2 is the right call<a class="headerlink" href="#when-fronting-http2-is-the-right-call" title="Permanent link">&para;</a></h2>
 <p>HTTP/2 costs more per request than HTTP/1.1 in <em>every</em> implementation — each
-stream carries state, framing, and flow control that HTTP/1.1 does not.  That
+stream carries state, framing, and flow control that HTTP/1.1 does not. That
 is the protocol, not a BlackBull property, but it has a deployment
 consequence worth naming: if a workload needs maximum throughput on a single
 HTTP/2 connection at high multiplex, the usual production shape is a fronting
-HTTP/2 terminator (nginx, Envoy) with BlackBull on HTTP/1.1 behind it — the
-arrangement this page describes.</p>
-<p>BlackBull's own HTTP/2 is conformant (<code>h2spec</code>, RFC 9113).  How its
-per-stream cost compares to other servers is <strong>not measured</strong>: the
+HTTP/2 terminator with BlackBull on HTTP/1.1 behind it.</p>
+<p>BlackBull's own HTTP/2 is conformant (<code>h2spec</code>, RFC 9113). How its per-stream
+cost compares to other servers is <strong>not measured</strong>: the
 <code>bench/CHARACTERIZATION.md</code> A-lane (h2load at n=1/10/50) is specified but has
 no recorded results, so no comparative claim is made in either direction.</p>
 <h2 id="next">Next<a class="headerlink" href="#next" title="Permanent link">&para;</a></h2>
 <ul>
-<li><a href="../workers/">Workers</a> — multi-worker is a natural fit behind
-  nginx; each worker can saturate one core while the proxy
-  load-balances.</li>
-<li><a href="../unix-and-fd/">Unix and fd inheritance</a> — <code>AF_UNIX</code> bind
-  pattern.</li>
-<li><a href="../tls/">TLS</a> — if you decide to terminate TLS in BlackBull
-  instead of upstream.</li>
+<li><a href="../workers/">Workers</a> — multi-worker is a natural fit behind a proxy; each
+  worker can saturate one core while the proxy load-balances.</li>
+<li><a href="../unix-and-fd/">Unix and fd inheritance</a> — the <code>AF_UNIX</code> bind pattern.</li>
+<li><a href="../tls/">TLS</a> — if you decide to terminate TLS in BlackBull instead.</li>
+<li><a href="../../guide/http2/">HTTP/2</a> — what the native HTTP/2 support gives you.</li>
 </ul>
 
 

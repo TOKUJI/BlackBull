@@ -16,7 +16,7 @@
         <link rel="prev" href="../workers/">
       
       
-        <link rel="next" href="../behind-nginx/">
+        <link rel="next" href="../behind-reverse-proxy/">
       
       
         
@@ -1382,14 +1382,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../behind-nginx/" class="md-nav__link">
+      <a href="../behind-reverse-proxy/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Behind nginx
+    Behind a reverse proxy
   
 
     
@@ -5262,7 +5262,7 @@ proxy (nginx, Caddy) is simpler:</p>
 <li>You can use <code>AF_UNIX</code> between proxy and BlackBull, removing
   TCP overhead.</li>
 </ul>
-<p>See <a href="../behind-nginx/">Behind nginx</a> for the configuration on
+<p>See <a href="../behind-reverse-proxy/">Behind a reverse proxy</a> for the configuration on
 both sides, and <a href="../unix-and-fd/">Unix and fd inheritance</a> for
 the UDS bind pattern.</p>
 <p>Terminate TLS <em>in</em> BlackBull when:</p>
@@ -5275,7 +5275,7 @@ the UDS bind pattern.</p>
 </ul>
 <h2 id="next">Next<a class="headerlink" href="#next" title="Permanent link">&para;</a></h2>
 <ul>
-<li><a href="../behind-nginx/">Behind nginx</a> — terminating TLS upstream.</li>
+<li><a href="../behind-reverse-proxy/">Behind a reverse proxy</a> — terminating TLS upstream.</li>
 <li><a href="../unix-and-fd/">Unix and fd inheritance</a> — <code>AF_UNIX</code> and
   systemd socket activation.</li>
 <li><a href="../../guide/http2/">HTTP/2</a> — what the framework does with

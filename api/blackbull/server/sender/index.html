@@ -1250,14 +1250,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../deployment/behind-nginx/" class="md-nav__link">
+      <a href="../../../../deployment/behind-reverse-proxy/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Behind nginx
+    Behind a reverse proxy
   
 
     
@@ -4510,6 +4510,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="BaseSender">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.sender.BaseSender.mark_client_gone" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mark_client_gone
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -5388,6 +5405,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="BaseSender">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.sender.BaseSender.mark_client_gone" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mark_client_gone
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -5935,6 +5969,38 @@ logic is decoupled from asyncio internals.</p>
 
 
 
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.server.sender.BaseSender.mark_client_gone" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">mark_client_gone</span><span class="p">()</span></code>
+
+<a href="#blackbull.server.sender.BaseSender.mark_client_gone" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>The peer is gone — drop further writes instead of raising.</p>
+<p>The actor calls this when a read fails in a way that proves the
+connection is dead (an <code>IncompleteReadError</code> that escaped the body
+reader), so the response it may still be mid-way through writing dies
+quietly rather than as a broken-pipe traceback.</p>
+<p>This is a <em>control signal between the actor and its sender</em>, which is
+why it is a method and not an event.  It used to travel as an
+<code>http.disconnect</code> dict down the send channel — the one place the
+server pushed a receive-side event the wrong way through the pipe,
+purely because that pipe was already there.  The cost was not the dict
+but the type: every sender's public event union had to widen to admit
+a message no application or middleware may ever legally send, and
+anyone reading the signature learned the wrong contract.</p>
+<p><code>http.disconnect</code> remains the app-facing spelling on <code>receive()</code>,
+which is the direction ASGI defines it in.</p>
+
+
+    </div>
+
+</div>
 
 
 

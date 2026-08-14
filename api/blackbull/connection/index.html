@@ -1250,14 +1250,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../deployment/behind-nginx/" class="md-nav__link">
+      <a href="../../../deployment/behind-reverse-proxy/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Behind nginx
+    Behind a reverse proxy
   
 
     
@@ -2118,6 +2118,17 @@
     <span class="md-ellipsis">
       
         cookies
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.connection.Connection.disconnected" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        disconnected
       
     </span>
   </a>
@@ -5228,6 +5239,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.connection.Connection.disconnected" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        disconnected
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.connection.Connection.path_params" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5562,6 +5584,41 @@ middleware, and handlers. The ASGI <code>scope</code> dict is a <em>derived</em>
     <div class="doc doc-contents ">
 
         <p>Cookies from the <code>Cookie</code> header, parsed once and cached.</p>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.connection.Connection.disconnected" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">disconnected</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#blackbull.connection.Connection.disconnected" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>True once the client dropped mid-request.</p>
+<p>The named form of what used to be readable only as a private field or
+through the module-level :func:<code>disconnected</code> helper.  A long-running
+handler polls this to abandon work whose answer nobody is waiting for::</p>
+<pre><code>for row in rows:
+    if conn.disconnected:
+        break
+</code></pre>
+<p>Set by the actor's disconnect-detecting receive wrapper, so it goes
+true when the <em>server</em> notices — at the next <code>receive()</code> — rather
+than the instant the peer's FIN lands.</p>
+<p>The module-level :func:<code>disconnected</code> remains the form to use at the
+two ASGI boundaries, where the same state may live on a <code>scope</code>
+dict instead of a :class:<code>Connection</code>.</p>
 
     </div>
 

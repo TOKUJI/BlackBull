@@ -914,6 +914,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#behind-a-reverse-proxy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Behind a reverse proxy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#next" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1498,14 +1509,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../../deployment/behind-nginx/" class="md-nav__link">
+      <a href="../../deployment/behind-reverse-proxy/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Behind nginx
+    Behind a reverse proxy
   
 
     
@@ -5366,6 +5377,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#behind-a-reverse-proxy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Behind a reverse proxy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#next" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5638,8 +5660,20 @@ CONNECT).  Off by default; opt in via
 <code>BB_H2_ENABLE_WEBSOCKET=1</code>.  See
 <a href="../websockets/#transport-http11-upgrade-vs-http2-extended-connect">WebSockets — Transport</a>
 for the details.</p>
+<h2 id="behind-a-reverse-proxy">Behind a reverse proxy<a class="headerlink" href="#behind-a-reverse-proxy" title="Permanent link">&para;</a></h2>
+<p>A proxy that terminates HTTP/2 from clients but speaks HTTP/1.1 to BlackBull
+gives you HTTP/2 on the front leg only — the native HTTP/2 support described
+on this page goes unused. To keep it end-to-end, the proxy needs an HTTP/2
+backend: <strong>HAProxy</strong> (<code>server … proto h2</code>) and <strong>Envoy</strong>
+(<code>http2_protocol_options: {}</code>) have both shipped that for years, while
+nginx's <code>proxy_http_version 2</code> arrived only in 1.29.4.</p>
+<p>An HTTP/1.1 back leg remains a fine default for ordinary traffic. See
+<a href="../../deployment/behind-reverse-proxy/">Behind a reverse proxy</a> for the
+trade-off and complete configurations.</p>
 <h2 id="next">Next<a class="headerlink" href="#next" title="Permanent link">&para;</a></h2>
 <ul>
+<li><a href="../../deployment/behind-reverse-proxy/">Behind a reverse proxy</a> — HTTP/2
+  backend configuration for HAProxy, Envoy, and nginx.</li>
 <li><a href="../websockets/">WebSockets</a> — the WebSocket transport,
   including HTTP/2 carriage.</li>
 <li><a href="../configuration/">Configuration</a> — <code>BB_H2_*</code> flow-control,
