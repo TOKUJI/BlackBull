@@ -51,6 +51,33 @@ so the editable install's metadata catches up.
   the form for the two ASGI boundaries, where the same state may live on a
   `scope` dict.
 
+- **Adaptive request-body read sizing** (`BB_BODY_CHUNK_MAX`, default
+  `524288`).  `BB_BODY_CHUNK_SIZE` is now the *starting* slice for a
+  `Content-Length` body rather than a fixed one: while a peer keeps the
+  transport running ahead of the server the slice doubles up to the new
+  ceiling, and two consecutive reads that drain the transport halve it again,
+  never below the starting size.  Fewer, larger reads for a fast uploader;
+  unchanged reads for a slow one, which is what the ceiling is for — slices
+  stay exact-size, so an unbounded ramp would eventually promise more than
+  `BB_BODY_TIMEOUT` allows.
+
+  The grow-on-evidence / two-quiet-reads-before-backing-off / hard-ceiling
+  rule is [Netty][netty-adaptive]'s `AdaptiveRecvByteBufAllocator`, adapted to
+  an exact-size reader.
+
+  No behaviour change for applications: bodies still arrive as successive
+  `http.request` events with `more_body`, a truncated body still raises, and
+  only the number of events varies.  Set `BB_BODY_CHUNK_MAX` equal to
+  `BB_BODY_CHUNK_SIZE` for the previous fixed-size slices.
+
+  Measured on EC2 against v0.75.1 (m7a.8xlarge, 16 workers, 20-profile
+  HttpArena sweep): upload/32 **+15.0 %**, upload/256 **−14.5 %** — the
+  256-connection upload cell regresses and the mechanism is not yet
+  attributed.  The body-read design is under re-examination; a follow-up
+  release will revise it.
+
+[netty-adaptive]: https://netty.io/4.1/api/io/netty/channel/AdaptiveRecvByteBufAllocator.html
+
 ### Changed
 
 - **Deployment docs cover three reverse proxies, not one.**
@@ -79,29 +106,13 @@ so the editable install's metadata catches up.
   connection by sending that dict; it is logged and dropped like any other
   unknown send event.
 
-### Added
+### Internal
 
-- **Adaptive request-body read sizing** (`BB_BODY_CHUNK_MAX`, default
-  `524288`).  `BB_BODY_CHUNK_SIZE` is now the *starting* slice for a
-  `Content-Length` body rather than a fixed one: while a peer keeps the
-  transport running ahead of the server the slice doubles up to the new
-  ceiling, and two consecutive reads that drain the transport halve it again,
-  never below the starting size.  Fewer, larger reads for a fast uploader;
-  unchanged reads for a slow one, which is what the ceiling is for — slices
-  stay exact-size, so an unbounded ramp would eventually promise more than
-  `BB_BODY_TIMEOUT` allows.
-
-  The grow-on-evidence / two-quiet-reads-before-backing-off / hard-ceiling
-  rule is [Netty][netty-adaptive]'s `AdaptiveRecvByteBufAllocator`, adapted to
-  an exact-size reader.
-
-[netty-adaptive]: https://netty.io/4.1/api/io/netty/channel/AdaptiveRecvByteBufAllocator.html
-
-  No behaviour change for applications: bodies still arrive as successive
-  `http.request` events with `more_body`, a truncated body still raises, and
-  only the number of events varies.  Set `BB_BODY_CHUNK_MAX` equal to
-  `BB_BODY_CHUNK_SIZE` for the previous fixed-size slices.  Throughput effect
-  is not yet measured.
+- **Per-request closure annotations stripped** on the HTTP/2 and gRPC
+  streaming hot paths (four sites each).  A nested `def` pays for its
+  annotations on every creation; the types move to comments, saving ~250 ns
+  per H/2 request stream, and an architecture test now guards the rule that
+  per-request factories stay unannotated.
 
 ## [0.75.1] — 2026-08-13
 
