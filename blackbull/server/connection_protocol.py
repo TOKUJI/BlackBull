@@ -21,12 +21,14 @@ so the body recipient and the WebSocket/h2c successors work unchanged, and adds
 instead of a `readuntil` per line.
 
 **The two classes split decision from execution.**  The reader owns the receive
-competence — how much to let the peer send, when to stop it, when to wait, and
-when to hand a grown buffer back — because reading is the only activity that
+competence — whether a high-water crossing should pause, when to wait, and
+when a hand a grown buffer back — because reading is the only activity that
 knows both what was asked for and what was consumed.  The protocol owns the
-socket: the transport callbacks, the rendezvous future, and the two flow-control
-calls it makes when the reader asks.  Before the split the stop-reading test sat
-in :meth:`ConnectionProtocol.buffer_updated` and reconstructed the reader's
+socket: the transport callbacks, the rendezvous future, the two flow-control
+calls it makes when the reader asks, and the byte-level high-water comparison
+(a threshold, not a judgement — the reader decides what a crossing means).
+Before the split the stop-reading test sat in
+:meth:`ConnectionProtocol.buffer_updated` and reconstructed the reader's
 state from outside — resident bytes plus a guess at whether anyone was parked.
 
 Because peeked bytes stay resident, protocol detection can decide without
@@ -72,10 +74,11 @@ class BufferReader(AbstractReader):
     **This is where the receive decisions live.**  Reading is the only activity
     that knows both the demand (``read(n)``, :meth:`read_head`) and the
     consumption (``take``), so everything that follows from the pair is
-    decided here and merely *executed* on the transport: when to stop the peer
-    (:meth:`data_arrived`), when to let it go again (:meth:`_consumed`), and
-    when a grown allocation goes back to the floor (:meth:`_at_boundary`).
-    The protocol below owns the socket, not the judgement about it.
+    decided here and merely *executed* on the transport: whether a high-water
+    crossing pauses the peer (:meth:`maybe_pause`), when to let it go again
+    (:meth:`_consumed`), and when a grown allocation goes back to the floor
+    (:meth:`_at_boundary`).  The protocol below owns the socket, not the
+    judgement about it.
 
     Deliberately not on :class:`~.recipient.AbstractReader`: two of its three
     implementations have no transport to pause, so promoting this competence to
@@ -97,17 +100,13 @@ class BufferReader(AbstractReader):
 
     # -- the receive decisions ---------------------------------------------
 
-    def data_arrived(self, nbytes: int) -> None:
-        """Bytes landed: account them, then decide whether to stop the peer.
+    def maybe_pause(self) -> None:
+        """A delivery crossed the high-water mark: decide whether to pause.
 
-        Called by the protocol from its transport callback, which takes no
-        view of its own — the watermark comparison and the parked-reader
-        exemption are both judgements about *reading*.
-
-        Accounting is delegated to the buffer, which returns the new resident
-        count so this decision costs one read instead of a property call; the
-        buffer also tracks the message's peak as part of that accounting (it
-        already holds the cursors), leaving only the hysteresis *policy* here.
+        Called by the protocol only when the resident count crossed the mark —
+        the byte threshold is compared at the transport, which already holds
+        the count and accounts it, so this reader call is the rare crossing
+        rather than a per-arrival one.
 
         Not while this reader is waiting: it is starved, not behind, so the
         condition backpressure exists to prevent is not the one in play.
@@ -115,8 +114,7 @@ class BufferReader(AbstractReader):
         two ``epoll_ctl`` calls — on every arrival for the whole of a large
         read, since the next park releases it again.
         """
-        avail = self._buf.buffer_updated(nbytes)
-        if not self._waiting and avail >= _HIGH_WATER:
+        if not self._waiting:
             self._proto.pause_reading()
 
     def _consumed(self) -> None:
@@ -294,8 +292,9 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
     callback↔coroutine rendezvous, and the two flow-control calls — but none of
     the judgement about when to make them.  Those belong to
     :class:`BufferReader`, which is the only object that knows what has been
-    asked for; this class executes what it is told and keeps no watermark of
-    its own to compare against.
+    asked for; this class executes what it is told.  Its one comparison — the
+    byte-level high-water threshold — is a transport fact, not a judgement:
+    whether a crossing pauses the peer is the Reader's call.
     """
 
     def __init__(self) -> None:
@@ -335,11 +334,13 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
             # asyncio treats a zero-length read as EOF on some transports.
             self.eof_received()
             return
-        # The arrival is reported, not judged: whether it should stop the peer
-        # is a receive decision, and this class holds no watermark to make it.
-        # The reader accounts the bytes and decides in that one call, so the
-        # per-arrival cost is the single entry point it owns.
-        self.reader.data_arrived(nbytes)
+        # The byte threshold is a transport-side fact: whether this arrival
+        # crossed the high-water mark is compared here at base-equal per-arrival
+        # cost.  Whether that crossing should pause — the parked-reader
+        # exemption — is the reader's decision, invoked only on the crossing.
+        avail = self._rb.buffer_updated(nbytes)
+        if avail >= _HIGH_WATER:
+            self.reader.maybe_pause()
         self._wake()
 
     def eof_received(self) -> bool:

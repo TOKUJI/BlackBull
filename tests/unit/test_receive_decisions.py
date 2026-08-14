@@ -174,26 +174,27 @@ class TestTheStopReadingDecision:
         assert not transport.paused, 'transport stayed paused after draining'
 
     async def test_the_protocol_routes_the_decision_through_the_reader(self, wired):
-        """``buffer_updated`` executes; it does not judge.
+        """The transport front end compares the byte threshold; it never pauses.
 
         With a Reader that never asks for a pause, a delivery far past the
-        watermark must not pause anything — the front end has no watermark of
-        its own to compare against.  This is the assertion that fails if the
-        stop-reading test creeps back into the transport callback.
+        watermark must not pause anything — the front end executes, and the
+        Reader decides.  This is the assertion that fails if the pause
+        decision creeps back into the transport callback.
         """
         proto, transport = wired
 
         class _StubReader:
             def __init__(self):
-                self.arrivals = 0
+                self.crossings = 0
 
-            def data_arrived(self, nbytes):
-                self.arrivals += 1
+            def maybe_pause(self):
+                self.crossings += 1
 
         proto.reader = _StubReader()
         _deliver(proto, b'z' * (_HIGH_WATER * 2))
 
-        assert proto.reader.arrivals > 0, 'the Reader was never told bytes landed'
+        assert proto.reader.crossings > 0, (
+            'the Reader was never consulted on a high-water crossing')
         assert transport.pauses == 0, (
             'the transport front end paused without a Reader asking it to')
 
