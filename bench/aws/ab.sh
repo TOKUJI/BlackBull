@@ -52,6 +52,8 @@ URL_PATH="${URL_PATH:-/plaintext}"
 URL_PATHS="${URL_PATHS:-}"
 PEER_MW="${PEER_MW:-}"
 WRK_HEADERS="${WRK_HEADERS:-}"
+WRK_SCRIPT="${WRK_SCRIPT:-}"
+WRK_SCRIPT_ARGS="${WRK_SCRIPT_ARGS:-}"
 EXPECT_LINES="${EXPECT_LINES:-$((1 + ROUNDS * 8))}"
 AB_FINISH_LOG="${AB_FINISH_LOG:-$REPO_ROOT/bench/results/ab-finish.log}"
 AB_POLLS="${AB_POLLS:-300}"
@@ -69,6 +71,7 @@ ab_env() {  # $1 = url
         "$PIPELINE" "$PHASES" "$SERVER_CPUS" "$LOAD_CPUS"
     printf "PEER_MW='%s' " "$PEER_MW"
     printf "WRK_HEADERS='%s' " "$WRK_HEADERS"
+    printf "WRK_SCRIPT='%s' WRK_SCRIPT_ARGS='%s' " "$WRK_SCRIPT" "$WRK_SCRIPT_ARGS"
 }
 
 case "$MODE" in
