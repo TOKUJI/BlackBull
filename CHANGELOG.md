@@ -42,6 +42,25 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.76.1] — 2026-08-14
+
+Emergency correction.  v0.76.0 released the Sprint 102 upload body-read work
+out of scope — its design is under re-examination, so it should not have
+shipped.  This patch restores the v0.75.1 receive path.
+
+### Removed
+
+- **Adaptive request-body read sizing and `BB_BODY_CHUNK_MAX`** — withdrawn
+  pending the design re-examination.  The `Content-Length` body read is back
+  to the v0.75.1 fixed-slice behaviour.
+- **HttpArena crud_create contract pin** — the test that accompanied that
+  work is withdrawn with it.
+
+### Fixed
+
+- v0.76.0's out-of-scope upload release corrected; the receive path matches
+  v0.75.1 byte-for-byte.
+
 ## [0.76.0] — 2026-08-14
 
 ### Added
