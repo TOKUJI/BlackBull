@@ -42,6 +42,8 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.76.0] — 2026-08-14
+
 ### Added
 
 - **`conn.disconnected`** — a named accessor for mid-request disconnect state,
