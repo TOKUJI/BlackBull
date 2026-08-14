@@ -136,7 +136,7 @@ uses.
   abuse defences, production checklist.
 - [TLS](tls.md) — HTTPS, HTTP/2 via ALPN, self-signed certs,
   mTLS.
-- [Behind nginx](behind-nginx.md) — terminating TLS upstream,
+- [Behind a reverse proxy](behind-reverse-proxy.md) — terminating TLS upstream,
   trusted-proxy headers.
 - [Unix and fd inheritance](unix-and-fd.md) — `AF_UNIX`,
   systemd socket activation.

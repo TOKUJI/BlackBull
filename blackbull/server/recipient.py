@@ -714,16 +714,29 @@ class HTTP1Recipient(BaseRecipient):
     def __init__(self, reader: AbstractReader, conn: Connection,
                  *, body_timeout: float = 0.0,
                  deadline: ConnectionDeadline | None = None,
-                 chunk_size: int | None = None):
+                 chunk_size: int | None = None,
+                 chunk_max: int | None = None):
         super().__init__(reader)
-        # Deliver a Content-Length body in fixed-size chunks instead of one
-        # giant ``readexactly(content_length)`` allocation.  Falls back to the
-        # ``BB_BODY_CHUNK_SIZE`` setting when not injected (direct-instantiation
-        # tests pass it explicitly).
-        if chunk_size is None:
+        # Deliver a Content-Length body in chunks instead of one giant
+        # ``readexactly(content_length)`` allocation.  ``chunk_size`` is the
+        # starting read and ``chunk_max`` the ceiling the adaptive sizing in
+        # ``_adapt_read_size`` may grow it to.  Both fall back to settings when
+        # not injected (direct-instantiation tests pass them explicitly).
+        if chunk_size is None or chunk_max is None:
             from ..env import get_settings as _get_settings  # noqa: PLC0415
-            chunk_size = _get_settings().body_chunk_size
+            _s = _get_settings()
+            if chunk_size is None:
+                chunk_size = _s.body_chunk_size
+            if chunk_max is None:
+                chunk_max = _s.body_chunk_max
         self._chunk_size = chunk_size
+        # Never below the starting size: a cap under the base would make the
+        # first read the ceiling and the floor at once.
+        self._chunk_max = max(chunk_max, chunk_size)
+        # Bound once per connection so the slots exist however small the first
+        # request is; ``bind`` re-arms them only for a body big enough to care.
+        self._read_n = chunk_size
+        self._shrink_armed = False
         # Body-read deadline.  0 = disabled.  Applied per
         # ``_read_with_timeout`` call — which is per *slice* on both framings,
         # since a chunk larger than ``chunk_size`` is delivered in several.
@@ -775,6 +788,22 @@ class HTTP1Recipient(BaseRecipient):
         # request, not per connection: a rebound recipient that inherited a
         # half-read chunk would splice request N's body into request N+1.
         self._chunk_remaining = 0
+        # Adaptive body-read sizing, per request: request N's peer speed says
+        # nothing about request N+1's, and a rebound recipient that inherited a
+        # 512 KiB read would hand it to a client that never earned it.
+        #
+        # Only a body that could take more than one read can observe this state
+        # or change it, so only such a body pays to reset it — a bodyless GET
+        # on a keep-alive connection must not be charged for a feature it can
+        # never reach.  Shorter bodies are safe to skip rather than merely
+        # cheap to skip: ``min(content_length, _read_n)`` clamps a single-read
+        # body to its own length whatever ``_read_n`` says, and
+        # ``_adapt_read_size`` never runs for one, so a stale value can be
+        # neither seen nor propagated.  The next multi-read body resets it
+        # again before any of it matters.
+        if self._content_length and self._content_length > self._chunk_size:
+            self._read_n = self._chunk_size
+            self._shrink_armed = False
         self._done = False
         # Set once a chunked-framing violation is detected: the byte stream is
         # now desynced, so the connection MUST close rather than keep-alive
@@ -815,6 +844,52 @@ class HTTP1Recipient(BaseRecipient):
             if drained > max_bytes:
                 return False
         return True
+
+    def _adapt_read_size(self) -> None:
+        """Resize the next body read to what this peer has proven it can feed.
+
+        Netty's ``AdaptiveRecvByteBufAllocator`` rule, transposed to an
+        exact-size reader.  Netty grows when a ``recv`` *filled* the buffer,
+        because a full buffer means there was probably more waiting; it shrinks
+        only after two consecutive under-filled reads, so one pause in the
+        stream cannot talk it down; and it clamps to a hard ceiling.
+
+        ``readexactly`` returns exactly what was asked for, so "did it fill?"
+        carries no information here and the signal has to come from the other
+        side: whatever is *still* buffered once the slice is taken.  Bytes left
+        over mean the transport is running ahead of us and the read was too
+        small — the same evidence Netty reads off a filled buffer.
+
+        Sizing is pure throughput policy.  It cannot change what the caller
+        observes, because every path still reads exactly ``content_length``
+        bytes or raises :class:`IncompleteReadError`; only the number of
+        ``http.request`` events the app sees varies, which ``more_body``
+        already makes explicit.
+
+        The ceiling is not a memory bound but a *latency* one.  A read is a
+        promise to deliver ``n`` bytes inside ``body_timeout``, so an unbounded
+        ramp would eventually ask a slow peer for more than it can supply in
+        time and turn a working upload into a cap hit.  Growth is earned by
+        peers that are already ahead, and those are exactly the peers for whom
+        the larger read costs no extra wall time.
+
+        Sync, not ``async``: the request path must not gain an ``await``
+        boundary (~0.5 µs/hop measured, Sprint 81), and this needs no I/O.
+        """
+        if self._reader.buffered_len():
+            # Still ahead of us — we under-asked.  Double, but never past the
+            # ceiling that keeps one read inside ``body_timeout``.
+            self._read_n = min(self._read_n * 2, self._chunk_max)
+            self._shrink_armed = False
+        elif self._shrink_armed:
+            # Second drained read running: the peer really is slower than our
+            # slice.  Back off, never below the starting size.
+            self._read_n = max(self._read_n // 2, self._chunk_size)
+            self._shrink_armed = False
+        else:
+            # One drained read is not evidence — a peer that is keeping up
+            # exactly, or paused for a moment, looks identical.  Arm and wait.
+            self._shrink_armed = True
 
     def _parse_chunk_size_or_400(self, size_line: bytes) -> int:
         """Parse the chunk-size line, marking the stream unframeable on any
@@ -956,18 +1031,23 @@ class HTTP1Recipient(BaseRecipient):
                 self._chunk_remaining = chunk_size
                 return await self._read_chunk_slice()
             else:
-                # Stream the Content-Length body in ``chunk_size`` slices so
-                # a large upload is delivered as several ``http.request`` events
-                # (``more_body: True`` until exhausted) rather than one giant
-                # allocation.  ``readexactly`` keeps the exact-bytes contract —
-                # a short body still raises IncompleteReadError below.
+                # Stream the Content-Length body in slices so a large upload is
+                # delivered as several ``http.request`` events (``more_body:
+                # True`` until exhausted) rather than one giant allocation.
+                # The slice size adapts to the peer — see
+                # :meth:`_adapt_read_size`.  ``readexactly`` keeps the
+                # exact-bytes contract either way: a short body still raises
+                # IncompleteReadError below, so the sizing is free of any
+                # semantic consequence.
                 if self._content_length:
-                    n = min(self._content_length, self._chunk_size)
+                    n = min(self._content_length, self._read_n)
                     body = await self._read_with_timeout(
                         self._reader.readexactly(n))
                     self._content_length -= n
                     if self._content_length == 0:
                         self._done = True
+                    else:
+                        self._adapt_read_size()
                     return body
                 self._done = True
                 return None

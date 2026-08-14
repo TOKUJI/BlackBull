@@ -102,7 +102,7 @@ ASGI-triplet form.
   [Edge inference serving](guide/edge-inference.md) walks the
   one-process shape end to end, with a runnable example.
 - Deploying? See [Deployment](deployment/running.md) for multi-worker,
-  TLS, AF_UNIX, systemd activation, and behind-nginx topologies.
+  TLS, AF_UNIX, systemd activation, and reverse-proxy topologies.
 - Curious about the design? [Architecture](about/architecture.md) covers
   the actor model, protocol ownership, and fault injection;
   [Internals](about/internals.md) walks the implementation in detail.

@@ -478,7 +478,10 @@ class HTTP2Actor(Actor):
         back-pressures the peer instead of overflowing the recipient queue
         into RST_STREAM(ENHANCE_YOUR_CALM).
         """
-        async def _credit(n: int, sid: int = stream_id) -> None:
+
+        # Unannotated for the per-request-closure reason (see
+        # app.py::_wrap_send); ``n`` is an int and ``sid`` an int stream id.
+        async def _credit(n, sid=stream_id):
             # Mirrors the per-frame enqueue-credit shape (and the WS reader's
             # _replay_credit): stream + connection WINDOW_UPDATE, in that
             # order.  Skip the stream-level frame once the stream is released
@@ -509,7 +512,9 @@ class HTTP2Actor(Actor):
         if balance <= 0 or self._goaway_sent:
             return
 
-        async def _replay() -> None:
+        # Unannotated for the per-request-closure reason (see
+        # app.py::_wrap_send); takes nothing, returns nothing.
+        async def _replay():
             try:
                 await self.send_frame(self.factory.window_update(0, balance))
             except Exception:
@@ -638,7 +643,10 @@ class HTTP2Actor(Actor):
         don't silently drift the WS counter below the true in-flight
         count (which would cause the WS cap to over-admit).
         """
-        def _cb(_task: asyncio.Task) -> None:
+
+        # Unannotated for the per-request-closure reason (see
+        # app.py::_wrap_send); ``_task`` is the done asyncio.Task, unused.
+        def _cb(_task):
             self._active_stream_count = max(0, self._active_stream_count - 1)
             if is_ws:
                 self._ws_stream_count = max(0, self._ws_stream_count - 1)
@@ -1417,7 +1425,9 @@ class HTTP2Actor(Actor):
 
         sid = stream.stream_id
 
-        async def _replay_credit(n: int) -> None:
+        # Unannotated for the per-request-closure reason (see
+        # app.py::_wrap_send); ``n`` is the octet count to re-credit.
+        async def _replay_credit(n):
             # HTTP2WSReader hit its buffer cap and withheld credit while
             # delivering DATA frames; once readexactly drained below the
             # cap, replay both the stream-level and connection-level

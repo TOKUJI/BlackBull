@@ -584,7 +584,9 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
     # message order on the wire matches yield order.
     flush_lock = asyncio.Lock()
 
-    async def _flush() -> None:
+    # Unannotated for the per-request-closure reason (see
+    # app.py::_wrap_send); takes nothing, returns nothing.
+    async def _flush():
         async with flush_lock:
             if not buf:
                 return
@@ -606,7 +608,9 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
     flush_wanted = asyncio.Event()
     finished = False
 
-    async def _idle_flusher() -> None:
+    # Unannotated for the per-request-closure reason (see
+    # app.py::_wrap_send); takes nothing, returns nothing.
+    async def _idle_flusher():
         while not finished:
             await flush_wanted.wait()
             flush_wanted.clear()
@@ -614,7 +618,9 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
 
     idle_flusher = asyncio.create_task(_idle_flusher())
 
-    async def _stop_idle_flusher() -> None:
+    # Unannotated for the per-request-closure reason (see
+    # app.py::_wrap_send); takes nothing, returns nothing.
+    async def _stop_idle_flusher():
         # Graceful stop so an in-flight flush completes rather than being
         # cancelled mid-send; the drive/error paths flush any tail themselves.
         nonlocal finished
@@ -625,7 +631,9 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
         except Exception:  # noqa: BLE001 — send failures already surfaced
             logger.exception('gRPC stream idle flusher raised')
 
-    async def _drive() -> None:
+    # Unannotated for the per-request-closure reason (see
+    # app.py::_wrap_send); takes nothing, returns nothing.
+    async def _drive():
         # Coalesce consecutive messages into one DATA frame.  A *synchronous*
         # burst (the bulk case — thousands of tiny messages yielded without
         # awaiting) buffers into ``buf`` and flushes only at ~one max-frame

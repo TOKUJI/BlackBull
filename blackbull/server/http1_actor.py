@@ -14,7 +14,7 @@ from urllib.parse import unquote
 
 from ..actor import Actor, Message
 from ..event_aggregator import EventAggregator
-from ..asgi import ASGIEvent, ASGIReceiveCallable, ASGISendCallable
+from ..asgi import ASGIReceiveCallable, ASGISendCallable
 from ..connection import (
     Connection, bind_receive_channel)
 from ..headers import Headers
@@ -937,9 +937,10 @@ class HTTP1Actor(Actor):
         except IncompleteReadError:
             # Safety net: any IncompleteReadError that escapes the
             # explicit catches above (e.g. body-read EOF that wasn't
-            # absorbed by HTTP1Recipient).  Surface http.disconnect
-            # to the ASGI sender and let the connection close.
-            await send({'type': ASGIEvent.HTTP_DISCONNECT})
+            # absorbed by HTTP1Recipient).  The peer is gone, so tell the
+            # sender directly and let the connection close; anything still
+            # in flight is dropped rather than raising on a dead pipe.
+            send.mark_client_gone()
 
     # ------------------------------------------------------------------
     # Private helpers

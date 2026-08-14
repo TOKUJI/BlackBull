@@ -17,8 +17,13 @@ from .constants import WSCloseCode
 from .deadline import WriteDeadline
 from .ws_codec import WSOpcode, encode_frame, encode_frame_header
 import logging
-from ..asgi import (ASGIEvent, ASGISendEvent, HTTPDisconnectEvent,
-                    WebSocketAcceptEvent, WebSocketCloseEvent, WebSocketSendEvent)
+from ..asgi import (
+    ASGIEvent,
+    ASGISendEvent,
+    WebSocketAcceptEvent,
+    WebSocketCloseEvent,
+    WebSocketSendEvent,
+)
 from ..headers import Headers, HeaderList
 from ..native import NativeResponse, NativeWSMessage
 
@@ -426,19 +431,16 @@ class AsyncioWriter(AbstractWriter):
 # Sender hierarchy
 # ---------------------------------------------------------------------------
 
-# The senders accept strictly more than the public ASGI send contract, so
-# they get a private widening rather than polluting ``ASGISendEvent``:
-#
-# - ``http.disconnect`` arrives on the *send* side as an internal signal from
-#   the actor (an IncompleteReadError on the read side), not as an ASGI send
-#   event — see the ``HTTP_DISCONNECT`` case in ``HTTP1Sender.__call__``.
-# - raw ``bytes`` is the ``send(body, status, headers)`` convenience form.
+# The senders accept one thing beyond the public ASGI send contract — raw
+# ``bytes``, the ``send(body, status, headers)`` convenience form — so it gets
+# a private widening rather than polluting ``ASGISendEvent``.
 #
 # Keeping the public alias honestly ASGI-shaped is the point: an app or
 # middleware author holding an ``ASGISendCallable`` should not be told that
-# sending a disconnect or a bare byte string is legal, because through the
-# app-facing channel it is not.
-_SenderEvent = ASGISendEvent | HTTPDisconnectEvent
+# sending a bare byte string is legal, because through the app-facing channel
+# it is not.  Disconnect used to widen this too, until the actor→sender signal
+# it existed for became :meth:`BaseSender.mark_client_gone`.
+_SenderEvent = ASGISendEvent
 _SenderBody = _SenderEvent | bytes | NativeResponse
 _WSSenderEvent = WebSocketSendEvent | WebSocketCloseEvent | WebSocketAcceptEvent
 
@@ -468,6 +470,28 @@ class BaseSender(ABC):
         # that the slot is bound from construction; the ``getattr(...,
         # False)`` reads in the write methods remain compatible.
         self._closed = False
+
+    def mark_client_gone(self) -> None:
+        """The peer is gone — drop further writes instead of raising.
+
+        The actor calls this when a read fails in a way that proves the
+        connection is dead (an ``IncompleteReadError`` that escaped the body
+        reader), so the response it may still be mid-way through writing dies
+        quietly rather than as a broken-pipe traceback.
+
+        This is a *control signal between the actor and its sender*, which is
+        why it is a method and not an event.  It used to travel as an
+        ``http.disconnect`` dict down the send channel — the one place the
+        server pushed a receive-side event the wrong way through the pipe,
+        purely because that pipe was already there.  The cost was not the dict
+        but the type: every sender's public event union had to widen to admit
+        a message no application or middleware may ever legally send, and
+        anyone reading the signature learned the wrong contract.
+
+        ``http.disconnect`` remains the app-facing spelling on ``receive()``,
+        which is the direction ASGI defines it in.
+        """
+        self._closed = True
 
     @abstractmethod
     async def __call__(self, body: _SenderBody,
@@ -607,9 +631,6 @@ class HTTP1Sender(BaseSender):
             # request; drop any further response events so a handler that
             # raises after completing (→ the error handler emits a second
             # response) can't splice two responses onto one connection.
-            # A disconnect signal still marks the writer closed.
-            if isinstance(body, dict) and body.get('type') == ASGIEvent.HTTP_DISCONNECT:
-                self._closed = True
             return
 
         match body:
@@ -705,14 +726,6 @@ class HTTP1Sender(BaseSender):
             case {'type': ASGIEvent.HTTP_RESPONSE_PATHSEND}:
                 await self._pathsend(body['path'])
                 self._completed = True
-
-            case {'type': ASGIEvent.HTTP_DISCONNECT}:
-                # http1_actor.py sends this on IncompleteReadError; the
-                # canonical channel for disconnect is receive(), but
-                # accommodating the actor's signal here makes future
-                # writes no-ops so the broken pipe doesn't surface as
-                # a traceback in _write.
-                self._closed = True
 
             case {'type': str() as event_type}:
                 logger.warning('HTTP1Sender: unknown event type %r', event_type)

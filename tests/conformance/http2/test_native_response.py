@@ -21,6 +21,20 @@ from blackbull.asgi import ASGIEvent
 pytestmark = pytest.mark.asyncio
 
 
+@pytest.fixture(autouse=True)
+def _frozen_http_date(monkeypatch):
+    """Hold the ``date`` header still for the length of a test.
+
+    Every wire-equivalence test here drives two senders and compares their
+    bytes.  The senders inject ``date`` at whole-second resolution, so a test
+    whose two halves straddle a second boundary compares responses that
+    genuinely differ — a real failure of an invariant nobody claimed.  Freezing
+    the clock is what makes "byte-identical" mean the thing under test.
+    """
+    monkeypatch.setattr('blackbull.server.sender._http_date',
+                        lambda: b'Thu, 01 Jan 1970 00:00:00 GMT')
+
+
 def _make_sender(max_frame_size: int | None = None):
     written = bytearray()
     mock_writer = MagicMock()

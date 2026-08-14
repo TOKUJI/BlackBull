@@ -125,7 +125,7 @@ proxy (nginx, Caddy) is simpler:
 - You can use `AF_UNIX` between proxy and BlackBull, removing
   TCP overhead.
 
-See [Behind nginx](behind-nginx.md) for the configuration on
+See [Behind a reverse proxy](behind-reverse-proxy.md) for the configuration on
 both sides, and [Unix and fd inheritance](unix-and-fd.md) for
 the UDS bind pattern.
 
@@ -139,7 +139,7 @@ Terminate TLS *in* BlackBull when:
 
 ## Next
 
-- [Behind nginx](behind-nginx.md) — terminating TLS upstream.
+- [Behind a reverse proxy](behind-reverse-proxy.md) — terminating TLS upstream.
 - [Unix and fd inheritance](unix-and-fd.md) — `AF_UNIX` and
   systemd socket activation.
 - [HTTP/2](../guide/http2.md) — what the framework does with

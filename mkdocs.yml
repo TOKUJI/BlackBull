@@ -69,7 +69,7 @@ nav:
     - Running BlackBull: deployment/running.md
     - Workers: deployment/workers.md
     - TLS: deployment/tls.md
-    - Behind nginx: deployment/behind-nginx.md
+    - Behind a reverse proxy: deployment/behind-reverse-proxy.md
     - Unix and fd inheritance: deployment/unix-and-fd.md
     - Hot reload: deployment/hot-reload.md
   - Reference:

@@ -19,6 +19,7 @@ import pytest
 
 from blackbull.connection import (
     Connection, _CONNECTION_FIELDS, _scope_fields, ClientDisconnected,
+    disconnected, mark_disconnected,
 )
 from blackbull.headers import Headers
 
@@ -223,3 +224,35 @@ class TestEquality:
         b._receive = _stub_receive()
         a._body = b'x'
         assert a == b, 'receive/body cache must not affect equality'
+
+
+# ---------------------------------------------------------------------------
+# Disconnect state — the named accessor
+# ---------------------------------------------------------------------------
+
+class TestDisconnected:
+    """``conn.disconnected`` is the app-facing read of mid-request disconnect
+    state.  The module-level :func:`disconnected` stays the boundary form,
+    because at the two ASGI boundaries the same state may live on a scope dict
+    instead — so the two must never disagree about the same connection."""
+
+    def test_a_fresh_connection_is_not_disconnected(self):
+        assert _sample_connection().disconnected is False
+
+    def test_it_reports_what_mark_disconnected_recorded(self):
+        conn = _sample_connection()
+        mark_disconnected(conn)
+        assert conn.disconnected is True
+
+    def test_the_property_and_the_boundary_helper_agree(self):
+        conn = _sample_connection()
+        assert conn.disconnected == disconnected(conn)
+        mark_disconnected(conn)
+        assert conn.disconnected == disconnected(conn) is True
+
+    def test_disconnect_state_is_not_part_of_equality(self):
+        """It is per-request liveness, not identity — two connections
+        describing the same request stay equal when one's peer drops."""
+        a, b = _sample_connection(), _sample_connection()
+        mark_disconnected(a)
+        assert a == b

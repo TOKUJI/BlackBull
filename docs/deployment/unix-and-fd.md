@@ -101,7 +101,7 @@ of a port number.
 
 ## Next
 
-- [Behind nginx](behind-nginx.md) — pairing `AF_UNIX` with an
+- [Behind a reverse proxy](behind-reverse-proxy.md) — pairing `AF_UNIX` with an
   upstream reverse proxy.
 - [Running BlackBull](running.md) — the broader entry-point
   overview.

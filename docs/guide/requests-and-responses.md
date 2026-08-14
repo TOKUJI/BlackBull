@@ -105,6 +105,28 @@ returns one chunk with `more_body=True` until the final chunk
 arrives with `more_body=False`.  `read_body` is a convenience
 wrapper that buffers all chunks before returning.
 
+### Noticing that the client left
+
+`conn.disconnected` is `True` once the client dropped mid-request.  It is
+worth checking in a loop whose result nobody is waiting for any more:
+
+```python
+@app.route('/report')
+async def report(conn):
+    rows = []
+    async for row in slow_query():
+        if conn.disconnected:
+            return            # nobody is listening; stop paying for this
+        rows.append(row)
+    return {'rows': rows}
+```
+
+The flag goes true when the *server* notices — at the next `receive()` — not
+the instant the peer's FIN arrives, so a handler that never reads the body
+and never streams will not see it change.  For a push-style notification
+instead of a poll, use the
+[`request_disconnected` event](events.md).
+
 ### `read_json` and `read_text`
 
 For the two most common body shapes, `read_json` and `read_text`
