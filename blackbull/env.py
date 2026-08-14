@@ -514,19 +514,6 @@ class Settings:
     #: ``StreamReader`` buffer limit.  Must be > 0.
     body_chunk_size: int = 65536
 
-    #: Ceiling (bytes) for the adaptive body-read size.  ``body_chunk_size`` is
-    #: the *starting* read; a peer that keeps the transport ahead of the server
-    #: doubles it, up to this cap, so a large upload costs proportionally fewer
-    #: receive round-trips (8.5 MB: 130 reads fixed → 19 capped at 512 KiB).
-    #:
-    #: The cap is what keeps a fast peer's win from becoming a slow peer's
-    #: failure.  Reads are ``readexactly``, so the size is also a *latency*
-    #: commitment: one read must complete inside ``body_timeout``.  At 512 KiB
-    #: a 1 Mbps client needs 4.2 s against the 30 s default; an uncapped ramp
-    #: would reach 8 MiB and stall 67 s, tripping the cap as a disconnect.
-    #: Set equal to ``body_chunk_size`` to pin the old fixed-size behaviour.
-    body_chunk_max: int = 524288
-
     #: Per-stream HTTP/2 flow-control window advertised in the server's SETTINGS.
     #: 65535 is the RFC 9113 §6.9.2 default.  Production deployments serving
     #: large responses should raise this — see
@@ -678,7 +665,6 @@ def get_settings() -> Settings:
         header_max_total=_int_env_nonneg('BB_HEADER_MAX_TOTAL', 65536),
         force_asgi_scope=_bool_env('BB_FORCE_ASGI_SCOPE', False),
         body_chunk_size=_int_env('BB_BODY_CHUNK_SIZE', 65536),
-        body_chunk_max=_int_env('BB_BODY_CHUNK_MAX', 524288),
         # RFC 9113 §6.9.2 default initial window size.  See
         # docs/reference/env-vars.md "Performance recommendations" for the
         # values commonly used on tuned production deployments.
