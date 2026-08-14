@@ -20,6 +20,15 @@ so the body recipient and the WebSocket/h2c successors work unchanged, and adds
 :meth:`BufferReader.read_head` — the one-scan header read the H/1.1 actor uses
 instead of a `readuntil` per line.
 
+**The two classes split decision from execution.**  The reader owns the receive
+competence — how much to let the peer send, when to stop it, when to wait, and
+when to hand a grown buffer back — because reading is the only activity that
+knows both what was asked for and what was consumed.  The protocol owns the
+socket: the transport callbacks, the rendezvous future, and the two flow-control
+calls it makes when the reader asks.  Before the split the stop-reading test sat
+in :meth:`ConnectionProtocol.buffer_updated` and reconstructed the reader's
+state from outside — resident bytes plus a guess at whether anyone was parked.
+
 Because peeked bytes stay resident, protocol detection can decide without
 consuming: there is nothing to replay to the winning binding, which is what
 retires `PrefixReader` on this path.
@@ -42,6 +51,14 @@ _HIGH_WATER = 128 * 1024
 #: transport being paused and resumed on alternate reads.
 _LOW_WATER = 32 * 1024
 
+#: Fully-consumed *small* messages a grown buffer must survive before
+#: :meth:`BufferReader._at_boundary` returns it to the floor.  Hysteresis: a
+#: keep-alive connection that repeats a large message reuses its grown
+#: allocation instead of churning grow+shrink per message (F6 follow-up); the
+#: peak is given back once the connection has shown a few messages that did
+#: not need it.
+_RELEASE_HYSTERESIS = 4
+
 
 class BufferReader(AbstractReader):
     """`AbstractReader` over a :class:`ReadBuffer` fed by :class:`ConnectionProtocol`.
@@ -51,13 +68,116 @@ class BufferReader(AbstractReader):
     resident, so those reads complete without a loop turn — which is the claim
     the layered predecessor made and could not deliver, because it sat on a
     reader that was buffering underneath it.
+
+    **This is where the receive decisions live.**  Reading is the only activity
+    that knows both the demand (``read(n)``, :meth:`read_head`) and the
+    consumption (``take``), so everything that follows from the pair is
+    decided here and merely *executed* on the transport: when to stop the peer
+    (:meth:`data_arrived`), when to let it go again (:meth:`_consumed`), and
+    when a grown allocation goes back to the floor (:meth:`_at_boundary`).
+    The protocol below owns the socket, not the judgement about it.
+
+    Deliberately not on :class:`~.recipient.AbstractReader`: two of its three
+    implementations have no transport to pause, so promoting this competence to
+    the interface would force a no-op onto them.
     """
 
-    __slots__ = ('_buf', '_proto')
+    __slots__ = ('_buf', '_proto', '_waiting', '_peak_avail', '_release_count')
 
     def __init__(self, buf: ReadBuffer, proto: 'ConnectionProtocol') -> None:
         self._buf = buf
         self._proto = proto
+        #: This reader is parked waiting for bytes.  Held here rather than
+        #: inferred from the protocol's rendezvous future: the future is
+        #: cleared when the reader is *woken*, so an arrival landing between
+        #: the wake and the reader running read as "nobody is waiting" and
+        #: armed a pause that the next park immediately released.
+        self._waiting = False
+        self._peak_avail = 0     # peak resident bytes since the last boundary
+        self._release_count = 0  # consecutive small messages since the last grow
+
+    # -- the receive decisions ---------------------------------------------
+
+    def data_arrived(self) -> None:
+        """Bytes landed: decide whether the peer should keep sending.
+
+        Called by the protocol from its transport callback, which takes no
+        view of its own — the watermark comparison and the parked-reader
+        exemption are both judgements about *reading*.
+
+        Not while this reader is waiting: it is starved, not behind, so the
+        condition backpressure exists to prevent is not the one in play.
+        Pausing anyway would cost a ``pause_reading``/``resume_reading`` pair —
+        two ``epoll_ctl`` calls — on every arrival for the whole of a large
+        read, since the next park releases it again.
+        """
+        buf = self._buf
+        avail = buf.available
+        if buf.grown and avail > self._peak_avail:
+            self._peak_avail = avail
+        if not self._waiting and avail >= _HIGH_WATER:
+            self._proto.pause_reading()
+
+    def _consumed(self) -> None:
+        """A read took bytes out: the two decisions that follow from that.
+
+        Releasing backpressure is gated on the low mark rather than on any
+        consumption, so the gap between the marks stops the transport being
+        paused and resumed on alternate reads.
+
+        The message boundary is answered here and nowhere else, late rather
+        than eagerly.  ``compact()`` also raises it from the *arrival* path
+        (``_make_room`` compacts before growing), and a delivery lands
+        immediately after that — so answering it there could never release
+        anything, and would consume the boundary that this path can act on.
+        """
+        proto, buf = self._proto, self._buf
+        if proto.reading_paused and buf.available <= _LOW_WATER:
+            proto.resume_reading()
+        if buf.drained_boundary:
+            buf.drained_boundary = False
+            self._at_boundary()
+
+    def _at_boundary(self) -> None:
+        """A message is provably gone: decide whether to keep its allocation.
+
+        Hysteretic.  A message whose peak exceeded the floor re-arms the
+        counter, so a connection that keeps serving large messages reuses its
+        allocation instead of growing and shrinking per message (the F6/B7
+        churn); only after ``_RELEASE_HYSTERESIS`` fully-consumed *small*
+        messages is the peak given back.
+        """
+        buf = self._buf
+        if buf.grown:
+            if self._peak_avail > buf.FLOOR:
+                self._release_count = 0
+            else:
+                self._release_count += 1
+                if self._release_count >= _RELEASE_HYSTERESIS:
+                    if buf.release_to_floor():
+                        self._release_count = 0
+        self._peak_avail = 0
+
+    async def wait_for_data(self) -> None:
+        """Park until more arrives, declaring the wait first.
+
+        Parking releases the high-water pause.  Backpressure exists to stop a
+        fast peer outrunning a handler that is *behind*; a reader about to
+        block is the opposite case — it is starved, and the bytes it waits for
+        are precisely the ones the pause is refusing to read.  Without this,
+        any single read larger than the mark deadlocks: a WebSocket frame, or
+        a ``chunked`` chunk whose size the peer chose.
+        ``asyncio.StreamReader._wait_for_data`` resumes here for the same
+        reason.
+        """
+        proto = self._proto
+        if proto.reading_paused:
+            proto.resume_reading()
+        self._waiting = True
+        try:
+            await proto.wait_for_arrival()
+        finally:
+            self._waiting = False
 
     # -- AbstractReader ----------------------------------------------------
 
@@ -65,12 +185,12 @@ class BufferReader(AbstractReader):
         if not self._buf.available:
             if self._proto.at_eof:
                 return b''
-            await self._proto.wait_for_data()
+            await self.wait_for_data()
             if not self._buf.available:
                 return b''
         take = self._buf.available if n < 0 else min(n, self._buf.available)
         out = self._buf.take(take)
-        self._proto.maybe_resume()
+        self._consumed()
         return out
 
     async def readexactly(self, n: int) -> bytes:
@@ -78,9 +198,9 @@ class BufferReader(AbstractReader):
             if self._proto.at_eof:
                 partial = self._buf.take(self._buf.available)
                 raise IncompleteReadError(partial)
-            await self._proto.wait_for_data()
+            await self.wait_for_data()
         out = self._buf.take(n)
-        self._proto.maybe_resume()
+        self._consumed()
         return out
 
     async def readuntil(self, sep: bytes = b'\n') -> bytes:
@@ -88,11 +208,11 @@ class BufferReader(AbstractReader):
             idx = self._buf.find(sep)
             if idx >= 0:
                 out = self._buf.take(idx + len(sep))
-                self._proto.maybe_resume()
+                self._consumed()
                 return out
             if self._proto.at_eof:
                 raise IncompleteReadError(self._buf.take(self._buf.available))
-            await self._proto.wait_for_data()
+            await self.wait_for_data()
 
     def has_buffered(self) -> bool:
         return self._buf.available > 0
@@ -118,7 +238,7 @@ class BufferReader(AbstractReader):
         while self._buf.available < n:
             if self._proto.at_eof:
                 return False
-            await self._proto.wait_for_data()
+            await self.wait_for_data()
         return True
 
     # -- the one-scan header read ------------------------------------------
@@ -145,7 +265,7 @@ class BufferReader(AbstractReader):
                 # idle-close and truncated-head contracts below are unchanged.
                 if self._proto.at_eof:
                     return b''
-                await self._proto.wait_for_data()
+                await self.wait_for_data()
                 continue
             end = self._buf.find_head_end(limit=limit)
             if end == ReadBuffer.LIMIT_EXCEEDED:
@@ -156,18 +276,26 @@ class BufferReader(AbstractReader):
                     bytes(self._buf.view(min(self._buf.available, limit + 2))))
             if end >= 0:
                 out = self._buf.take(end)
-                self._proto.maybe_resume()
+                self._consumed()
                 return out
             if self._proto.at_eof:
                 partial = self._buf.take(self._buf.available)
                 if not partial:
                     return b''
                 raise IncompleteReadError(partial)
-            await self._proto.wait_for_data()
+            await self.wait_for_data()
 
 
 class ConnectionProtocol(asyncio.BufferedProtocol):
-    """Buffered-protocol front end for one H/1.1 connection."""
+    """Buffered-protocol front end for one H/1.1 connection.
+
+    The transport half of the receive path: it owns the socket callbacks, the
+    callback↔coroutine rendezvous, and the two flow-control calls — but none of
+    the judgement about when to make them.  Those belong to
+    :class:`BufferReader`, which is the only object that knows what has been
+    asked for; this class executes what it is told and keeps no watermark of
+    its own to compare against.
+    """
 
     def __init__(self) -> None:
         self._rb = ReadBuffer()
@@ -176,7 +304,10 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
         self._waiter: asyncio.Future[None] | None = None
         self._eof = False
         self._exc: BaseException | None = None
-        self._paused = False
+        #: The transport is not reading.  Public because the reader consults it
+        #: on the consuming path, where a property call is not free; kept a
+        #: plain flag maintained by the two methods that change it.
+        self.reading_paused = False
         self._drain_waiter: asyncio.Future[None] | None = None
 
     # -- state -------------------------------------------------------------
@@ -204,20 +335,9 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
             self.eof_received()
             return
         self._rb.buffer_updated(nbytes)
-        if (not self._paused and self._waiter is None
-                and self._rb.available >= _HIGH_WATER):
-            # Backpressure: stop the kernel handing us more until the handler
-            # catches up.  Paired with ``maybe_resume`` on every consuming read.
-            #
-            # Not while a reader is parked (``_waiter``): that reader is
-            # starved, and ``wait_for_data`` would immediately undo the pause —
-            # so pausing here would cost a pause_reading/resume_reading pair,
-            # two epoll_ctl calls, on *every* arrival for the whole of a large
-            # read.  The rule is the same one stated in ``wait_for_data``;
-            # this is where it stops being paid for.
-            self._paused = True
-            if self.transport is not None:
-                self.transport.pause_reading()
+        # The arrival is reported, not judged: whether it should stop the peer
+        # is a receive decision, and this class holds no watermark to make it.
+        self.reader.data_arrived()
         self._wake()
 
     def eof_received(self) -> bool:
@@ -344,7 +464,9 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
                 if remaining <= 0:
                     break
                 try:
-                    await asyncio.wait_for(self.wait_for_data(), remaining)
+                    # Through the reader: discarding is still reading, so the
+                    # wait has to release any pause the discarded bytes armed.
+                    await asyncio.wait_for(self.reader.wait_for_data(), remaining)
                 except (asyncio.TimeoutError, TimeoutError):
                     break
                 except Exception:
@@ -361,8 +483,12 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
 
     # -- waiting -----------------------------------------------------------
 
-    async def wait_for_data(self) -> None:
+    async def wait_for_arrival(self) -> None:
         """Park until the next arrival, EOF, or connection loss.
+
+        The rendezvous itself — a callback↔coroutine handoff, which is why it
+        stays here while the decision to wait, and the backpressure release
+        that goes with it, live on :meth:`BufferReader.wait_for_data`.
 
         One waiter only: a connection is driven by a single actor coroutine, so
         a second concurrent reader is a bug rather than a case to support.
@@ -373,20 +499,8 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
             return
         if self._waiter is not None:
             raise RuntimeError(
-                'ConnectionProtocol.wait_for_data is not re-entrant — one connection '
-                'is driven by one actor coroutine')
-        # Parking here releases the high-water pause.  Backpressure exists to
-        # stop a fast peer outrunning a handler that is *behind*; a reader
-        # about to block is the opposite case — it is starved, and the bytes it
-        # waits for are precisely the ones the pause is refusing to read.
-        # Without this, any single read larger than the mark deadlocks: a
-        # WebSocket frame, or a ``chunked`` chunk whose size the peer chose.
-        # ``asyncio.StreamReader._wait_for_data`` resumes here for the same
-        # reason.
-        if self._paused:
-            self._paused = False
-            if self.transport is not None:
-                self.transport.resume_reading()
+                'ConnectionProtocol.wait_for_arrival is not re-entrant — one '
+                'connection is driven by one actor coroutine')
         self._waiter = asyncio.get_running_loop().create_future()
         try:
             await self._waiter
@@ -403,9 +517,18 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
             else:
                 waiter.set_result(None)
 
-    def maybe_resume(self) -> None:
-        """Resume reading once the resident bytes fall back to the low mark."""
-        if self._paused and self._rb.available <= _LOW_WATER:
-            self._paused = False
+    # -- flow control (execution only) -------------------------------------
+
+    def pause_reading(self) -> None:
+        """Stop the transport, because the reader asked.  Idempotent."""
+        if not self.reading_paused:
+            self.reading_paused = True
+            if self.transport is not None:
+                self.transport.pause_reading()
+
+    def resume_reading(self) -> None:
+        """Let the transport read again, because the reader asked.  Idempotent."""
+        if self.reading_paused:
+            self.reading_paused = False
             if self.transport is not None:
                 self.transport.resume_reading()

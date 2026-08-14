@@ -87,16 +87,21 @@ async def test_transport_is_paused_at_the_high_water_mark():
 
 
 async def test_waiting_for_data_releases_the_pause():
-    """A parked reader is starved, not behind."""
+    """A parked reader is starved, not behind.
+
+    Driven through the reader: deciding to wait and releasing the pause that
+    goes with it are one receive decision, so they live together on
+    ``BufferReader`` while the protocol keeps only the rendezvous.
+    """
     proto = ConnectionProtocol()
     proto.connection_made(_FakeTransport())
     _fill(proto, _HIGH_WATER * 2)
     assert not proto.transport.reading
 
-    waiter = asyncio.create_task(proto.wait_for_data())
+    waiter = asyncio.create_task(proto.reader.wait_for_data())
     await asyncio.sleep(0)
     assert proto.transport.reading, (
-        'wait_for_data parked without resuming the transport — the bytes it '
+        'the reader parked without resuming the transport — the bytes it '
         'is waiting for can never arrive')
 
     _fill(proto, 64)

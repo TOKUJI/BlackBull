@@ -18,6 +18,11 @@ actor; it distinguishes "EOF with nothing" from "EOF mid-head" only by leaving
 :attr:`available` intact, because deciding between a silent close and a 400 is
 also the actor's job.
 
+Free of *receive* policy for the same reason.  It grows on demand, reports a
+drained message boundary, and offers :meth:`release_to_floor` — but when the
+allocation is actually given back is the reader's call, because only the reader
+knows what the connection has been asked to deliver.
+
 Not thread-safe and not concurrency-safe — one connection, one buffer, one
 actor loop, per the actor model.
 """
@@ -35,7 +40,7 @@ _INITIAL = 8192
 #: the life of every connection, idle ones included, so offering the 64 KiB a
 #: `recv` could use would cost ~640 MB across 10k idle keep-alive peers.  A
 #: large body simply takes more `recv` calls into a buffer that grows on
-#: demand and is released again at :meth:`ReadBuffer.compact`.
+#: demand and is released again at :meth:`ReadBuffer.release_to_floor`.
 _MIN_READ = 4096
 
 #: Compact once the consumed prefix is at least this large *and* at least half
@@ -52,24 +57,21 @@ _COMPACT_MIN = 4096
 #: costs, not of a deployment.
 _VIEW_COPY_THRESHOLD = 8192
 
-#: Fully-consumed *small* messages a grown buffer must survive before
-#: :meth:`ReadBuffer._release` returns it to the floor.  Hysteresis: a
-#: keep-alive connection that repeats a large message reuses its grown
-#: allocation instead of churning grow+shrink per message (F6 follow-up); the
-#: peak is given back once the connection has shown a few messages that did
-#: not need it.
-_RELEASE_HYSTERESIS = 4
-
 
 class ReadBuffer:
     """A cursor-addressed byte buffer fed by `asyncio.BufferedProtocol`."""
 
     __slots__ = ('_buf', '_r', '_w', '_scanned', '_eof', '_examined', '_view',
-                 '_peak_avail', '_release_count')
+                 'grown', 'drained_boundary')
 
     #: :meth:`find_head_end` result meaning "the byte budget ran out before the
     #: terminator appeared".  Returned rather than raised — see module docstring.
     LIMIT_EXCEEDED = -2
+
+    #: The allocation a buffer sits at until a message makes it grow, and the
+    #: size :meth:`release_to_floor` returns it to.  Public because the release
+    #: *policy* lives on the reader: it compares a message's peak against this.
+    FLOOR = _INITIAL
 
     def __init__(self) -> None:
         self._buf = bytearray(_INITIAL)
@@ -78,8 +80,15 @@ class ReadBuffer:
         self._scanned = 0    # absolute offset the head scan has cleared
         self._eof = False
         self._examined = 0   # cumulative bytes the scan has looked at
-        self._peak_avail = 0     # peak resident bytes since the last boundary
-        self._release_count = 0  # consecutive small messages since the last grow
+        #: Allocation is above the floor.  A plain flag rather than a
+        #: ``capacity > FLOOR`` comparison because the reader consults it on
+        #: every arrival and every consuming read, while it changes only at the
+        #: two sites that resize.
+        self.grown = False
+        #: A compaction left the buffer empty — the message boundary the
+        #: reader's release policy hangs off.  Raised here, cleared by whoever
+        #: acts on it; the buffer itself never reads it.
+        self.drained_boundary = False
         # The write window last handed to the transport.  Held so it can be
         # released before any resize: a bytearray with a live memoryview
         # raises BufferError on grow, and relying on the caller to drop its
@@ -130,7 +139,7 @@ class ReadBuffer:
         The *sizehint* is what the transport would *like* to read in one
         recv, not what it needs: uvloop's cleartext path passes libuv's fixed
         64 KiB on every call, so honouring it would grow every connection's
-        buffer to 64 KiB on its first request and ``compact()``/``_release()``
+        buffer to 64 KiB on its first request and the reader's release policy
         would give it back at the message boundary — a 64 KiB alloc/free
         churn per request (the F5 read-path finding).  Growth is driven by
         bytes actually arriving (the ``_w`` cursor), never by the hint: offer
@@ -149,11 +158,6 @@ class ReadBuffer:
     def buffer_updated(self, nbytes: int) -> None:
         """Declare how much of the last :meth:`get_buffer` was written."""
         self._w += nbytes
-        # Track the message's peak resident bytes — but only once the buffer
-        # has grown past the floor; a floor-sized buffer can never need the
-        # hysteresis decision, so the common case costs one compare.
-        if len(self._buf) > _INITIAL and self._w - self._r > self._peak_avail:
-            self._peak_avail = self._w - self._r
         # uvloop can still hold the window's export here (see _drop_view);
         # only this transport callback tolerates that.
         self._drop_view(tolerate_export=True)
@@ -305,11 +309,18 @@ class ReadBuffer:
         Called on message boundaries.  Without it the cursors walk forward for
         the life of a keep-alive connection and the allocation grows to every
         byte ever received on it.
+
+        Compacting to empty is the one moment a message is provably gone, so it
+        raises :attr:`drained_boundary` for the reader's release policy.  The
+        flag is a report, not a decision: this object does not know whether a
+        connection that has just finished a large message is about to serve
+        another one.
         """
         self._drop_view()
         r = self._r
         if r == 0:
-            self._release()
+            if self._w == 0:
+                self.drained_boundary = True
             return
         if self._w == r:
             self._r = self._w = self._scanned = 0
@@ -319,31 +330,33 @@ class ReadBuffer:
             self._w -= r
             self._scanned = max(0, self._scanned - r)
             self._r = 0
-        self._release()
+        if self._w == 0:
+            self.drained_boundary = True
 
-    def _release(self) -> None:
-        """Return a grown buffer to the floor once its message is gone.
+    def release_to_floor(self) -> bool:
+        """Hand a grown allocation back.  ``True`` when it was given up.
 
         A single large upload must not leave every connection that served one
         holding its peak allocation for the rest of its keep-alive life — that
-        is the idle-memory floor the read window is also sized against.  The
-        release is hysteretic: a fully-consumed message whose peak resident
-        bytes exceeded the floor re-arms the counter, so a connection that
-        keeps serving large messages reuses its allocation instead of growing
-        and shrinking per message (the F6/B7 churn); only after
-        ``_RELEASE_HYSTERESIS`` fully-consumed *small* messages is the
-        allocation given back.
+        is the idle-memory floor the read window is also sized against.  *When*
+        to do that is hysteretic and belongs to the reader, which is the only
+        object that knows what the connection has been asked for; this is the
+        mechanism it calls.
+
+        Refuses while bytes are resident, and that is not a policy check but
+        the one invariant the container owes its caller: the boundary flag is
+        raised inside :meth:`compact`, including the compaction
+        :meth:`_make_room` does on the *arrival* path, where a delivery lands
+        immediately afterwards.  Reallocating there would discard bytes the
+        transport has already handed over.
         """
-        if self._w == 0:
-            if len(self._buf) > _INITIAL:
-                if self._peak_avail > _INITIAL:
-                    self._release_count = 0
-                else:
-                    self._release_count += 1
-                    if self._release_count >= _RELEASE_HYSTERESIS:
-                        self._buf = bytearray(_INITIAL)
-                        self._release_count = 0
-            self._peak_avail = 0
+        if not self.grown or self._w != self._r:
+            return False
+        self._drop_view()
+        self._buf = bytearray(_INITIAL)
+        self._r = self._w = self._scanned = 0
+        self.grown = False
+        return True
 
     # -- internals --------------------------------------------------------
 
@@ -374,3 +387,4 @@ class ReadBuffer:
         while size < need:
             size *= 2
         self._buf.extend(bytes(size - len(self._buf)))
+        self.grown = len(self._buf) > _INITIAL

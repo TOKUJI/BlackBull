@@ -42,6 +42,22 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Changed
+
+- **Receive-path responsibility separation** — the receive competence moves
+  onto `BufferReader`, the only object that knows both what was asked for and
+  what was consumed.  It now owns the stop-reading decision, the backpressure
+  release, and the grown-buffer release hysteresis; `ConnectionProtocol` keeps
+  the transport callbacks, the rendezvous, and executing `pause_reading` /
+  `resume_reading`; `ReadBuffer` keeps bytes, scanning, and growth, reporting a
+  drained message boundary instead of acting on one.  Internal only — no public
+  API, environment variable, or wire behaviour changes.
+  - Side effect of deleting the old inference: a reader that is already parked
+    now arms **no** backpressure pause at all.  The transport front end used to
+    guess "is anybody waiting" from the rendezvous future, which clears when a
+    reader is *woken*, so arrivals in that window cost a
+    `pause_reading`/`resume_reading` pair that the next park undid.
+
 ## [0.76.1] — 2026-08-14
 
 Emergency correction.  v0.76.0 released the Sprint 102 upload body-read work

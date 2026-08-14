@@ -308,12 +308,38 @@ bytes once.
 One non-obvious rule keeps that buffer cheap: `get_buffer` treats the
 transport's *sizehint* as advisory, not as a minimum window.  uvloop's
 cleartext path passes a fixed 64 KiB hint on every read; honouring it
-would grow every connection's buffer to 64 KiB and `_release` would hand
-it back — a 64 KiB alloc/free churn per request.  The buffer grows only
-when bytes actually arriving need the room, and `_release` returns a
-grown allocation to the floor only once the connection has shown a few
+would grow every connection's buffer to 64 KiB and the release policy
+would hand it back — a 64 KiB alloc/free churn per request.  The buffer
+grows only when bytes actually arriving need the room, and a grown
+allocation returns to the floor only once the connection has shown a few
 small messages, so a connection repeating large bodies reuses its
 allocation.
+
+### Who decides, and who acts
+
+The read path is three objects, split by competence rather than by layer:
+
+| object | owns |
+|---|---|
+| `BufferReader` | the receive **decisions** — how much to let the peer send, when to stop it, when to wait, and when a grown allocation goes back to the floor |
+| `ConnectionProtocol` | the **transport** — socket callbacks, the callback↔coroutine rendezvous, and executing `pause_reading` / `resume_reading` |
+| `ReadBuffer` | the **bytes** — the allocation, the cursors, and the scanning primitives |
+
+The reader gets the decisions because reading is the only activity that
+knows both what was asked for and what was consumed; every judgement on
+this path follows from that pair.  The transport front end previously
+decided when to stop reading, which meant reconstructing the reader's
+state from outside — resident bytes plus a guess, taken from the
+rendezvous future, at whether anybody was parked.  The guess had a gap:
+the future clears when a reader is *woken*, not when it stops waiting, so
+an arrival in that window armed a pause the next park released.  Moving
+the decision deleted the inference rather than relocating it.
+
+`ReadBuffer` keeps no policy for the same reason.  It reports the one
+moment a message is provably gone — a compaction that leaves it empty —
+and offers `release_to_floor()`; whether to take that offer is the
+reader's call, because only the reader knows whether the connection is
+between large messages or done with them.
 
 Three consequences follow, and each retires a workaround that existed
 only because the buffer was somewhere else:
@@ -373,14 +399,15 @@ bytes.
 
 ### Backpressure pauses for a handler that is behind, not one that is waiting
 
-The buffer pauses the transport once unconsumed bytes reach a high-water mark,
-so a fast peer cannot grow it without bound while a handler falls behind.  That
-rule inverts for a reader that is **blocked waiting for more**: the bytes it is
-parked on are exactly the ones the pause is refusing to read, and the
-connection hangs with no error and no response.
+The reader stops the transport once unconsumed bytes reach a high-water mark,
+so a fast peer cannot grow the buffer without bound while a handler falls
+behind.  That rule inverts for a reader that is **blocked waiting for more**:
+the bytes it is parked on are exactly the ones the pause is refusing to read,
+and the connection hangs with no error and no response.
 
-So parking releases the pause.  A reader about to block is starved, not behind,
-and the condition backpressure exists to prevent is not the one in play.
+So parking releases the pause, and a reader that is already waiting arms no
+pause in the first place.  A reader about to block is starved, not behind, and
+the condition backpressure exists to prevent is not the one in play.
 `asyncio.StreamReader` resumes at the same point for the same reason.
 
 One shape reaches this and the request body does not.  A WebSocket frame is
