@@ -17,8 +17,13 @@ from .constants import WSCloseCode
 from .deadline import WriteDeadline
 from .ws_codec import WSOpcode, encode_frame, encode_frame_header
 import logging
-from ..asgi import (ASGIEvent, ASGISendEvent,
-                    WebSocketAcceptEvent, WebSocketCloseEvent, WebSocketSendEvent)
+from ..asgi import (
+    ASGIEvent,
+    ASGISendEvent,
+    WebSocketAcceptEvent,
+    WebSocketCloseEvent,
+    WebSocketSendEvent,
+)
 from ..headers import Headers, HeaderList
 from ..native import NativeResponse, NativeWSMessage
 

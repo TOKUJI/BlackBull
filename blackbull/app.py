@@ -1448,8 +1448,11 @@ def serve(app, *,
     # under the multi-worker path.
     if workers == 1 and not reload:
         _serve_single_worker(
-            app, _cfg,
-            certfile=certfile, keyfile=keyfile, port=port,
+            app,
+            _cfg,
+            certfile=certfile,
+            keyfile=keyfile,
+            port=port,
             unix_path=unix_path,
             inherited_fd=inherited_fd,
             max_connections=max_connections,

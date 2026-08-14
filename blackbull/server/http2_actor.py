@@ -478,6 +478,7 @@ class HTTP2Actor(Actor):
         back-pressures the peer instead of overflowing the recipient queue
         into RST_STREAM(ENHANCE_YOUR_CALM).
         """
+
         # Unannotated for the per-request-closure reason (see
         # app.py::_wrap_send); ``n`` is an int and ``sid`` an int stream id.
         async def _credit(n, sid=stream_id):
@@ -642,6 +643,7 @@ class HTTP2Actor(Actor):
         don't silently drift the WS counter below the true in-flight
         count (which would cause the WS cap to over-admit).
         """
+
         # Unannotated for the per-request-closure reason (see
         # app.py::_wrap_send); ``_task`` is the done asyncio.Task, unused.
         def _cb(_task):
