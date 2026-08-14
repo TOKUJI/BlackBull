@@ -61,8 +61,17 @@ _VIEW_COPY_THRESHOLD = 8192
 class ReadBuffer:
     """A cursor-addressed byte buffer fed by `asyncio.BufferedProtocol`."""
 
-    __slots__ = ('_buf', '_r', '_w', '_scanned', '_eof', '_examined', '_view',
-                 'grown', 'drained_boundary')
+    __slots__ = (
+        '_buf',
+        '_eof',
+        '_examined',
+        '_r',
+        '_scanned',
+        '_view',
+        '_w',
+        'drained_boundary',
+        'grown',
+    )
 
     #: :meth:`find_head_end` result meaning "the byte budget ran out before the
     #: terminator appeared".  Returned rather than raised — see module docstring.

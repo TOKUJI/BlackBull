@@ -214,7 +214,7 @@ async def test_single_chunked_chunk_past_the_mark_is_read():
                     break
                 out += chunk
             return out
-        except socket.timeout:
+        except TimeoutError:
             return b'<timed out>'
         finally:
             s.close()

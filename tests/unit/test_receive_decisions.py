@@ -31,7 +31,11 @@ import asyncio
 import pytest
 
 from blackbull.server.connection_protocol import (
-    _HIGH_WATER, _LOW_WATER, _RELEASE_HYSTERESIS, ConnectionProtocol)
+    _HIGH_WATER,
+    _LOW_WATER,
+    _RELEASE_HYSTERESIS,
+    ConnectionProtocol,
+)
 from blackbull.server.read_buffer import ReadBuffer
 
 pytestmark = pytest.mark.asyncio

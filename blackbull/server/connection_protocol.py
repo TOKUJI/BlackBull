@@ -82,9 +82,9 @@ class BufferReader(AbstractReader):
     the interface would force a no-op onto them.
     """
 
-    __slots__ = ('_buf', '_proto', '_waiting', '_peak_avail', '_release_count')
+    __slots__ = ('_buf', '_peak_avail', '_proto', '_release_count', '_waiting')
 
-    def __init__(self, buf: ReadBuffer, proto: 'ConnectionProtocol') -> None:
+    def __init__(self, buf: ReadBuffer, proto: ConnectionProtocol) -> None:
         self._buf = buf
         self._proto = proto
         #: This reader is parked waiting for bytes.  Held here rather than
@@ -153,9 +153,9 @@ class BufferReader(AbstractReader):
                 self._release_count = 0
             else:
                 self._release_count += 1
-                if self._release_count >= _RELEASE_HYSTERESIS:
-                    if buf.release_to_floor():
-                        self._release_count = 0
+                if (self._release_count >= _RELEASE_HYSTERESIS
+                        and buf.release_to_floor()):
+                    self._release_count = 0
         self._peak_avail = 0
 
     async def wait_for_data(self) -> None:
@@ -467,7 +467,7 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
                     # Through the reader: discarding is still reading, so the
                     # wait has to release any pause the discarded bytes armed.
                     await asyncio.wait_for(self.reader.wait_for_data(), remaining)
-                except (asyncio.TimeoutError, TimeoutError):
+                except TimeoutError:
                     break
                 except Exception:
                     break
