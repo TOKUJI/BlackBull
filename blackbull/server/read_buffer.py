@@ -144,7 +144,7 @@ class ReadBuffer:
 
     # -- BufferedProtocol surface -----------------------------------------
 
-    def get_buffer(self, sizehint: int) -> memoryview:
+    def get_buffer(self, sizehint: int, *, want: int = 0) -> memoryview:
         """Space for the transport to read into.
 
         asyncio passes ``-1`` when it has no preference, and the protocol
@@ -156,14 +156,20 @@ class ReadBuffer:
         64 KiB on every call, so honouring it would grow every connection's
         buffer to 64 KiB on its first request and the reader's release policy
         would give it back at the message boundary — a 64 KiB alloc/free
-        churn per request (the F5 read-path finding).  Growth is driven by
-        bytes actually arriving (the ``_w`` cursor), never by the hint: offer
-        the buffer's free span, growing only when it falls below the read
-        floor.
+        churn per request (the F5 read-path finding).  Growth is therefore
+        driven by bytes actually arriving (the ``_w`` cursor) and by the
+        *demand* the caller passes in — the reader's pending read size, via
+        :class:`ConnectionProtocol` — never by the hint.  A parked read of
+        *n* gets a free span of up to ``min(n, high-water)`` so one recv
+        feeds most of it: the arrival granularity follows the demand, not the
+        idle floor, which is what keeps a transport-paced (up-to-n) read from
+        collapsing to floor-sized deliveries.  Idle (``want = 0``) stays at
+        the floor span.
         """
         self._drop_view()
-        if len(self._buf) - self._w < _MIN_READ:
-            self._make_room(_MIN_READ)
+        target = want if want > _MIN_READ else _MIN_READ
+        if len(self._buf) - self._w < target:
+            self._make_room(target)
         # Hand out *all* the free space, not just what was asked for: the
         # allocation is already paid for, so a bigger window costs nothing and
         # saves `recv` calls on a large body.

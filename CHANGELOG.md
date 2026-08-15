@@ -42,8 +42,26 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Added
+
+- **`BB_BODY_CHUNK_MAX`** (default `524288`) — per-read bound for a
+  `Content-Length` request body.  Reads are up-to-n and transport-paced: each
+  returns whatever the peer has delivered so far, up to this cap, instead of
+  waiting to fill a fixed slice.  A slow peer yields small slices (no read is
+  ever a latency commitment `BB_BODY_TIMEOUT` might not deliver); a fast one
+  earns fewer, larger ones.  `BB_BODY_CHUNK_SIZE` now applies only to the
+  chunked-transfer path.
+
 ### Changed
 
+- **Transport-paced `Content-Length` body delivery** — the body-read slice is
+  no longer a fixed `readexactly(chunk_size)` per `http.request` event; each
+  read returns whatever the transport has delivered, up to `BB_BODY_CHUNK_MAX`.
+  The transport offer follows the reader's pending read demand (capped at the
+  backpressure high-water mark), so a fast peer's body arrives in large
+  chunks instead of floor-sized ones.  The exact-bytes contract is unchanged:
+  EOF before the declared length is still a truncated upload, never a complete
+  one.
 - **Receive-path responsibility separation** — the receive competence moves
   onto `BufferReader`, the only object that knows both what was asked for and
   what was consumed.  It now owns the stop-reading decision, the backpressure

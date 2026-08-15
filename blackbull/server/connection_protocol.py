@@ -85,7 +85,7 @@ class BufferReader(AbstractReader):
     the interface would force a no-op onto them.
     """
 
-    __slots__ = ('_buf', '_proto', '_release_count', '_waiting')
+    __slots__ = ('_buf', '_proto', '_release_count', '_waiting', '_read_demand')
 
     def __init__(self, buf: ReadBuffer, proto: ConnectionProtocol) -> None:
         self._buf = buf
@@ -97,6 +97,15 @@ class BufferReader(AbstractReader):
         #: armed a pause that the next park immediately released.
         self._waiting = False
         self._release_count = 0  # consecutive small messages since the last grow
+        #: The size of the read the actor is parked on, capped at the
+        #: high-water mark, or 0 when no read is pending.  The transport
+        #: offers at least this much in one recv (``get_buffer`` consults it
+        #: via :meth:`offer_size`), so a large read is fed by one large
+        #: arrival instead of many floor-sized ones — the arrival granularity
+        #: follows the demand, not the idle floor (the 8 KiB delivery-pinning
+        #: that sank the first transport-paced attempt).  Idle reads offer
+        #: the floor span, so the idle-memory floor is untouched.
+        self._read_demand = 0
 
     # -- the receive decisions ---------------------------------------------
 
@@ -157,6 +166,18 @@ class BufferReader(AbstractReader):
                     self._release_count = 0
         buf.peak_avail = 0
 
+    def offer_size(self) -> int:
+        """How much the transport may pull in one recv for the pending read.
+
+        The reader owns "how much to offer the transport" — the receive
+        decision the split names, completed here.  No pending read returns 0,
+        which keeps the idle offer at the buffer's floor span; a parked read
+        of *n* offers ``min(n, _HIGH_WATER)`` so one recv feeds most of it,
+        which is what keeps an up-to-n read from collapsing to the arrival
+        size.
+        """
+        return self._read_demand
+
     async def wait_for_data(self) -> None:
         """Park until more arrives, declaring the wait first.
 
@@ -181,26 +202,34 @@ class BufferReader(AbstractReader):
     # -- AbstractReader ----------------------------------------------------
 
     async def read(self, n: int = -1) -> bytes:
-        if not self._buf.available:
-            if self._proto.at_eof:
-                return b''
-            await self.wait_for_data()
+        self._read_demand = _HIGH_WATER if n < 0 else min(n, _HIGH_WATER)
+        try:
             if not self._buf.available:
-                return b''
-        take = self._buf.available if n < 0 else min(n, self._buf.available)
-        out = self._buf.take(take)
-        self._consumed()
-        return out
+                if self._proto.at_eof:
+                    return b''
+                await self.wait_for_data()
+                if not self._buf.available:
+                    return b''
+            take = self._buf.available if n < 0 else min(n, self._buf.available)
+            out = self._buf.take(take)
+            self._consumed()
+            return out
+        finally:
+            self._read_demand = 0
 
     async def readexactly(self, n: int) -> bytes:
-        while self._buf.available < n:
-            if self._proto.at_eof:
-                partial = self._buf.take(self._buf.available)
-                raise IncompleteReadError(partial)
-            await self.wait_for_data()
-        out = self._buf.take(n)
-        self._consumed()
-        return out
+        self._read_demand = min(n, _HIGH_WATER)
+        try:
+            while self._buf.available < n:
+                if self._proto.at_eof:
+                    partial = self._buf.take(self._buf.available)
+                    raise IncompleteReadError(partial)
+                await self.wait_for_data()
+            out = self._buf.take(n)
+            self._consumed()
+            return out
+        finally:
+            self._read_demand = 0
 
     async def readuntil(self, sep: bytes = b'\n') -> bytes:
         while True:
@@ -327,7 +356,10 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
         self.transport = transport
 
     def get_buffer(self, sizehint: int) -> memoryview:
-        return self._rb.get_buffer(sizehint)
+        # The demand comes from the reader, not the hint: the reader owns
+        # "how much to offer the transport" (see :meth:`BufferReader.offer_size`),
+        # and the hint is unreliable (asyncio passes -1, uvloop a fixed 64 KiB).
+        return self._rb.get_buffer(sizehint, want=self.reader.offer_size())
 
     def buffer_updated(self, nbytes: int) -> None:
         if nbytes == 0:

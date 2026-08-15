@@ -556,18 +556,24 @@ class TestTimeoutHandling:
 
     async def test_slow_body_read_times_out(self):
         """A reader that hangs during body read must also time out."""
-        async def slow_body(*args, **kwargs):
+        head = (b'POST / HTTP/1.1\r\nHost: x\r\n'
+                b'Content-Length: 5\r\n\r\n')
+        pending = [head]
+
+        async def head_then_hang(*args, **kwargs):
+            # Detection peek + the whole header block arrive in one read; every
+            # read after that is the body, and the body is what hangs.  The
+            # Content-Length path is transport-paced, so the hang has to sit in
+            # ``read`` — a hang scripted onto ``readexactly`` is never reached.
+            if pending:
+                return pending.pop(0)
             await asyncio.sleep(10)
             return b''
 
         sw = _make_fake_writer()
         reader = MagicMock()
-        # Detection peek + the whole header block arrive in one read; the body
-        # read (readexactly) is the one that hangs.
-        reader.read = AsyncMock(
-            side_effect=[b'POST / HTTP/1.1\r\nHost: x\r\n'
-                         b'Content-Length: 5\r\n\r\n'])
-        reader.readexactly = AsyncMock(side_effect=slow_body)
+        reader.read = AsyncMock(side_effect=head_then_hang)
+        reader.readexactly = AsyncMock(side_effect=head_then_hang)
 
         async def noop_app(scope, receive, send):
             await receive()  # triggers body read

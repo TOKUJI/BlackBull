@@ -190,6 +190,9 @@ class TestTheStopReadingDecision:
             def maybe_pause(self):
                 self.crossings += 1
 
+            def offer_size(self) -> int:
+                return 0
+
         proto.reader = _StubReader()
         _deliver(proto, b'z' * (_HIGH_WATER * 2))
 
@@ -269,3 +272,60 @@ class TestTheMemoryPolicy:
             assert proto.buffer.capacity == grown, (
                 f'capacity changed {grown} -> {proto.buffer.capacity} between '
                 f'large messages')
+
+
+# ---------------------------------------------------------------------------
+# The transport offer follows the read demand
+# ---------------------------------------------------------------------------
+
+class TestTheTransportOfferFollowsTheDemand:
+    """The arrival granularity is the reader's call: a parked read offers the
+    transport a recv window of up to ``min(demand, high-water)``, so one
+    arrival feeds most of the read instead of a floor-sized dribble.  This is
+    what keeps a transport-paced (up-to-n) body read from collapsing to the
+    8 KiB delivery-pinning that sank the first attempt."""
+
+    async def test_idle_reader_offers_nothing(self, wired):
+        proto, _ = wired
+        assert proto.reader.offer_size() == 0
+
+    async def test_parked_read_declares_its_demand(self, wired):
+        proto, _ = wired
+        task = asyncio.create_task(proto.reader.readexactly(64 * 1024))
+        await asyncio.sleep(0)
+        assert proto.reader.offer_size() == 64 * 1024
+        _deliver(proto, b'x' * (64 * 1024))
+        await task
+        assert proto.reader.offer_size() == 0
+
+    async def test_demand_is_capped_at_the_high_water_mark(self, wired):
+        proto, _ = wired
+        task = asyncio.create_task(proto.reader.read(1 << 30))
+        await asyncio.sleep(0)
+        assert proto.reader.offer_size() == _HIGH_WATER
+        _deliver(proto, b'y')
+        assert await task == b'y'
+        assert proto.reader.offer_size() == 0
+
+    async def test_one_recv_can_feed_the_whole_demand(self, wired):
+        """The point of the offer: one get_buffer + buffer_updated pair
+        delivers the entire parked read, not an 8 KiB slice of it."""
+        proto, _ = wired
+        task = asyncio.create_task(proto.reader.readexactly(64 * 1024))
+        await asyncio.sleep(0)
+        view = proto.get_buffer(-1)
+        assert len(view) >= 64 * 1024, 'the offer did not follow the demand'
+        view[:64 * 1024] = b'z' * (64 * 1024)
+        proto.buffer_updated(64 * 1024)
+        assert await task == b'z' * (64 * 1024)
+        assert proto.reader.offer_size() == 0
+
+    async def test_idle_get_buffer_stays_at_the_floor(self, wired):
+        """No pending read → the idle offer is the floor span, so the
+        idle-memory floor is untouched (the F5 finding holds)."""
+        proto, _ = wired
+        view = proto.get_buffer(-1)
+        try:
+            assert len(view) == ReadBuffer.FLOOR
+        finally:
+            view.release()
