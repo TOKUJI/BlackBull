@@ -282,10 +282,32 @@ kill_server
 restore_tree
 
 # --- report ----------------------------------------------------------------
+
+# Host identity, detected not asserted.  The old "Local box" was a template
+# string that mislabelled every EC2 run — the two classes are ~100x apart in
+# wrk latency spread and ~20x in per-arm SE, so the header must name the host
+# it actually ran on.  EC2 is detected from the DMI product name plus the
+# IMDS instance type; anything else is reported as local with the kernel
+# string.
+_host_identity() {
+    local product inst
+    product="$(cat /sys/class/dmi/id/product_name 2>/dev/null || true)"
+    if printf '%s' "$product" | grep -qi 'amazon ec2'; then
+        inst="$(curl -s --max-time 2 \
+            http://169.254.169.254/latest/meta-data/instance-type 2>/dev/null \
+            || true)"
+        printf 'EC2 %s (nproc=%s)' "${inst:-instance-type-unreadable}" "$(nproc)"
+    else
+        printf 'local %s (nproc=%s)' \
+            "$(uname -sr 2>/dev/null || echo unknown)" "$(nproc)"
+    fi
+}
+HOST_IDENTITY="$(_host_identity)"
+
 {
     echo "# A/B — $SHA_BASE (base) vs $SHA_TREAT (treat)"
     echo ""
-    echo "Local box, HTTP/1.1 cleartext keep-alive, single worker."
+    echo "$HOST_IDENTITY, HTTP/1.1 cleartext keep-alive, single worker."
     echo ""
     echo "| | |"
     echo "|---|---|"

@@ -299,10 +299,28 @@ kill_server
 restore_tree
 
 # --- report ----------------------------------------------------------------
+
+# Host identity, detected not asserted — see ab_commit.sh (the old "Local box"
+# was a template string that mislabelled every EC2 run).
+_host_identity() {
+    local product inst
+    product="$(cat /sys/class/dmi/id/product_name 2>/dev/null || true)"
+    if printf '%s' "$product" | grep -qi 'amazon ec2'; then
+        inst="$(curl -s --max-time 2 \
+            http://169.254.169.254/latest/meta-data/instance-type 2>/dev/null \
+            || true)"
+        printf 'EC2 %s (nproc=%s)' "${inst:-instance-type-unreadable}" "$(nproc)"
+    else
+        printf 'local %s (nproc=%s)' \
+            "$(uname -sr 2>/dev/null || echo unknown)" "$(nproc)"
+    fi
+}
+HOST_IDENTITY="$(_host_identity)"
+
 {
     echo "# WS A/B — $SHA_BASE (base) vs $SHA_TREAT (treat)"
     echo ""
-    echo "Local box, WebSocket echo (k6 flood), $BB_WORKERS worker(s)."
+    echo "$HOST_IDENTITY, WebSocket echo (k6 flood), $BB_WORKERS worker(s)."
     echo ""
     echo "| | |"
     echo "|---|---|"
