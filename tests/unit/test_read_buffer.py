@@ -10,7 +10,7 @@ These are unit tests with no I/O — the buffer is fed the way the protocol's
 """
 import pytest
 
-from blackbull.server.read_buffer import ReadBuffer, _RELEASE_HYSTERESIS
+from blackbull.server.read_buffer import ReadBuffer
 
 
 def _feed(rb: ReadBuffer, data: bytes) -> None:
@@ -153,55 +153,63 @@ class TestCompaction:
         assert rb.available == 0
         assert rb.capacity <= 8192, f'buffer grew to {rb.capacity}'
 
-    def test_a_large_body_is_released_after_small_messages(self):
-        """A grown allocation is released once the connection has shown a few
-        small messages — the idle-memory floor, served with hysteresis.
+    def test_compacting_to_empty_reports_the_message_boundary(self):
+        """The buffer's whole share of the release policy: it says when a
+        message is provably gone and offers the allocation back.
 
-        Without hysteresis every connection that ever served one big upload
-        held its peak for the rest of its keep-alive life; the release is
-        now deferred across ``_RELEASE_HYSTERESIS`` fully-consumed *small*
-        messages so a connection that repeats large messages reuses its
-        allocation instead of churning grow+shrink per message.
+        Whether to take that offer is hysteretic and belongs to
+        ``BufferReader``, which is the only object that knows what the
+        connection has been asked for — asserted in
+        ``test_receive_decisions.py``.
         """
         rb = ReadBuffer()
         _feed(rb, b'H\r\n\r\n')
         _feed_chunked(rb, b'z' * 200_000)
         rb.take(rb.find_head_end())
         assert rb.capacity > 100_000          # grew to hold the body
+        assert rb.grown
         rb.consume(200_000)
         rb.compact()
-        # Hysteresis: this message's peak exceeded the floor, so the grown
-        # allocation is kept, not released.
-        assert rb.capacity > 100_000
-        # A few fully-consumed small messages give it back.
-        for _ in range(_RELEASE_HYSTERESIS):
-            _feed(rb, b'GET / HTTP/1.1\r\n\r\n')
-            rb.take(rb.find_head_end())
-            rb.compact()
-        assert rb.capacity <= 8192, f'stayed at {rb.capacity} after the body'
 
-    def test_repeated_large_messages_reuse_the_grown_buffer(self):
-        """Hysteresis: a connection that keeps serving large messages must
-        not shrink-and-regrow between them (the F6/B7 churn).  Each large
-        message re-arms the release counter, so the allocation survives.
+        assert rb.drained_boundary, 'a drained compaction is a message boundary'
+        assert rb.capacity > 100_000, 'the buffer released on its own judgement'
+        assert rb.release_to_floor() is True
+        assert rb.capacity == ReadBuffer.FLOOR
+        assert not rb.grown
+
+    def test_the_buffer_never_shrinks_on_its_own_judgement(self):
+        """Repeated boundaries with nobody deciding must leave the allocation
+        alone — a buffer that shrinks here kept a policy it handed over."""
+        rb = ReadBuffer()
+        _feed(rb, b'H\r\n\r\n')
+        _feed_chunked(rb, b'z' * 200_000)
+        rb.take(rb.find_head_end())
+        grown = rb.capacity
+        rb.consume(200_000)
+        for _ in range(8):
+            rb.compact()
+        assert rb.capacity == grown, 'the buffer released its own allocation'
+        assert rb.drained_boundary, 'and stopped reporting the boundary besides'
+
+    def test_the_release_never_discards_resident_bytes(self):
+        """The one precondition the mechanism keeps for itself.
+
+        The boundary flag is raised inside ``compact()`` — including the
+        compaction ``_make_room`` does on the *arrival* path, where bytes land
+        immediately afterwards.  A release firing there would throw away a
+        delivery the transport has already handed over.
         """
         rb = ReadBuffer()
-        body = b'z' * 100_000
         _feed(rb, b'H\r\n\r\n')
-        _feed_chunked(rb, body)
+        _feed_chunked(rb, b'z' * 200_000)
         rb.take(rb.find_head_end())
-        rb.consume(len(body))
+        rb.consume(200_000)
         rb.compact()
-        cap = rb.capacity
-        assert cap > 100_000
-        for _ in range(_RELEASE_HYSTERESIS + 2):
-            _feed(rb, b'H\r\n\r\n')
-            _feed_chunked(rb, body)
-            rb.take(rb.find_head_end())
-            rb.consume(len(body))
-            rb.compact()
-            assert rb.capacity == cap, \
-                f'capacity changed {cap} -> {rb.capacity} between large messages'
+        _feed(rb, b'keep')
+
+        assert rb.release_to_floor() is False, (
+            'released an allocation that still held a delivery')
+        assert bytes(rb.view(4)) == b'keep'
 
     def test_compaction_preserves_unconsumed_surplus(self):
         rb = ReadBuffer()
@@ -284,7 +292,7 @@ class TestGetBufferContract:
 
         uvloop's cleartext path passes libuv's fixed 64 KiB hint on every
         call; honouring it (``want = max(sizehint, _MIN_READ)``) grew the
-        buffer to 64 KiB and ``_release`` gave it back at every message
+        buffer to 64 KiB and the reader's release policy gave it back at every message
         boundary — a 64 KiB alloc/free churn per request (the F5 finding).
         The window is the buffer's free span (never below the read floor);
         growth happens only when bytes actually arriving fill the buffer.

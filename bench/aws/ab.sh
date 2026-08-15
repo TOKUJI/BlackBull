@@ -21,6 +21,9 @@
 #   SERVER_CPUS(=0-1) LOAD_CPUS(=2-5)
 #   WRK_HEADERS (extra wrk header args, e.g. '-H Accept-Encoding:gzip')
 #   URL_PATH(=/plaintext) or URL_PATHS (comma-separated — multiple sessions)
+#   WRK_SCRIPT / WRK_SCRIPT_ARGS (applied to every URL) — or per-URL forms
+#   WRK_SCRIPTS / WRK_SCRIPT_ARGSS (comma-separated, parallel to URL_PATHS;
+#   empty entries fall back to the single values)
 #   EXPECT_LINES (raw.tsv completeness per session; default 1+ROUNDS*8)
 #   AB_FINISH_LOG (finish progress log; default bench/results/ab-finish.log)
 #   AB_POLLS(=300) AB_POLL_INTERVAL(=10) — finish polling budget (~50 min)
@@ -52,6 +55,12 @@ URL_PATH="${URL_PATH:-/plaintext}"
 URL_PATHS="${URL_PATHS:-}"
 PEER_MW="${PEER_MW:-}"
 WRK_HEADERS="${WRK_HEADERS:-}"
+WRK_SCRIPT="${WRK_SCRIPT:-}"
+WRK_SCRIPT_ARGS="${WRK_SCRIPT_ARGS:-}"
+#: Per-URL forms, parallel to URL_PATHS.  An empty entry falls back to the
+#: single WRK_SCRIPT / WRK_SCRIPT_ARGS above (which default to '' = no script).
+WRK_SCRIPTS="${WRK_SCRIPTS:-}"
+WRK_SCRIPT_ARGSS="${WRK_SCRIPT_ARGSS:-}"
 EXPECT_LINES="${EXPECT_LINES:-$((1 + ROUNDS * 8))}"
 AB_FINISH_LOG="${AB_FINISH_LOG:-$REPO_ROOT/bench/results/ab-finish.log}"
 AB_POLLS="${AB_POLLS:-300}"
@@ -60,7 +69,7 @@ AB_POLL_INTERVAL="${AB_POLL_INTERVAL:-10}"
 MODE="${1:-launch}"
 
 # --- build the env prefix for one ab_commit.sh invocation ------------------
-ab_env() {  # $1 = url
+ab_env() {  # $1 = url, $2 = wrk script ('' = none), $3 = wrk script args
     printf "REF_BASE='%s' REF_TREAT='%s' PATHSPEC='%s' URL_PATH='%s' ROUNDS='%s' " \
         "$REF_BASE" "$REF_TREAT" "$PATHSPEC" "$1" "$ROUNDS"
     printf "DURATION='%s' WARMUP='%s' THREADS='%s' CONNS='%s' PORT='%s' BB_UVLOOP='%s' BB_FORCE_ASGI_SCOPE='%s' " \
@@ -69,6 +78,7 @@ ab_env() {  # $1 = url
         "$PIPELINE" "$PHASES" "$SERVER_CPUS" "$LOAD_CPUS"
     printf "PEER_MW='%s' " "$PEER_MW"
     printf "WRK_HEADERS='%s' " "$WRK_HEADERS"
+    printf "WRK_SCRIPT='%s' WRK_SCRIPT_ARGS='%s' " "$2" "$3"
 }
 
 case "$MODE" in
@@ -77,6 +87,18 @@ launch)
         IFS=',' read -r -a URLS <<< "$URL_PATHS"
     else
         URLS=("$URL_PATH")
+    fi
+    # Per-URL wrk script/args, parallel to URL_PATHS; an empty entry falls
+    # back to the single WRK_SCRIPT / WRK_SCRIPT_ARGS (so the two forms mix).
+    if [ -n "$WRK_SCRIPTS" ]; then
+        IFS=',' read -r -a SCRIPTS <<< "$WRK_SCRIPTS"
+    else
+        SCRIPTS=()
+    fi
+    if [ -n "$WRK_SCRIPT_ARGSS" ]; then
+        IFS=',' read -r -a ARGSS <<< "$WRK_SCRIPT_ARGSS"
+    else
+        ARGSS=()
     fi
 
     # Preflight: uv on PATH (install.sh symlinks it) and both refs present,
@@ -97,12 +119,14 @@ launch)
         echo '#!/usr/bin/env bash'
         echo 'set -uo pipefail'
         printf 'cd %q\n' "$REMOTE_REPO"
-        for u in "${URLS[@]}"; do
+        for i in "${!URLS[@]}"; do
+            u="${URLS[$i]}"
             # The URL path (e.g. /static/static_ab.js) becomes part of the
             # log filename; a nested slash must not, or the shell redirect
             # fails on the missing directory and the runner dies instantly.
             log="bench/results/ec2-ab-$(printf '%s' "${u#/}" | tr '/' '_').log"
-            printf 'env %s bash bench/peers/ab_commit.sh > %q 2>&1\n' "$(ab_env "$u")" "$log"
+            printf 'env %s bash bench/peers/ab_commit.sh > %q 2>&1\n' \
+                "$(ab_env "$u" "${SCRIPTS[$i]:-$WRK_SCRIPT}" "${ARGSS[$i]:-$WRK_SCRIPT_ARGS}")" "$log"
         done
     } > "$RUNNER"
 

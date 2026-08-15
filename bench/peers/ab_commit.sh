@@ -59,6 +59,10 @@ PHASES="${PHASES:-null real}"
 # both arms measure identical middleware code.  Kept unquoted at the call site
 # so multi-arg header flags word-split correctly.
 WRK_HEADERS="${WRK_HEADERS:-}"
+# Optional wrk Lua script for non-GET lanes (e.g. bench/wrk/post_echo.lua for
+# the upload body-read path).  WRK_SCRIPT_ARGS (word-split) is passed after --.
+WRK_SCRIPT="${WRK_SCRIPT:-}"
+WRK_SCRIPT_ARGS="${WRK_SCRIPT_ARGS:-}"
 # Server and load generator on disjoint cores.  Unpinned, the two fight for
 # the same cores and the throughput distribution goes bimodal (two scheduler
 # placements, ~15 % apart), which swamps anything a refactor of this size
@@ -210,12 +214,16 @@ start_server() {
 # One measured run.  Echoes req/s on stdout.
 measure() {
     local tag="$1"
-    local pipe_args=()
-    [ "$PIPELINE" != "1" ] && pipe_args=(-s bench/wrk/pipeline.lua -- "$PIPELINE")
+    local script_args=()
+    if [ -n "$WRK_SCRIPT" ]; then
+        script_args=(-s "$WRK_SCRIPT" ${WRK_SCRIPT_ARGS:+-- $WRK_SCRIPT_ARGS})
+    elif [ "$PIPELINE" != "1" ]; then
+        script_args=(-s bench/wrk/pipeline.lua -- "$PIPELINE")
+    fi
     "${PIN_LOAD[@]}" wrk -t"$THREADS" -c"$CONNS" -d"${WARMUP}s" --latency \
-        $WRK_HEADERS "$BASE_URL$URL_PATH" "${pipe_args[@]}" >/dev/null 2>&1
+        $WRK_HEADERS "$BASE_URL$URL_PATH" "${script_args[@]}" >/dev/null 2>&1
     "${PIN_LOAD[@]}" wrk -t"$THREADS" -c"$CONNS" -d"${DURATION}s" --latency \
-        $WRK_HEADERS "$BASE_URL$URL_PATH" "${pipe_args[@]}" >"$OUTDIR/wrk_${tag}.txt" 2>&1
+        $WRK_HEADERS "$BASE_URL$URL_PATH" "${script_args[@]}" >"$OUTDIR/wrk_${tag}.txt" 2>&1
     awk '/Requests\/sec:/ {print $2}' "$OUTDIR/wrk_${tag}.txt"
 }
 
@@ -274,10 +282,32 @@ kill_server
 restore_tree
 
 # --- report ----------------------------------------------------------------
+
+# Host identity, detected not asserted.  The old "Local box" was a template
+# string that mislabelled every EC2 run — the two classes are ~100x apart in
+# wrk latency spread and ~20x in per-arm SE, so the header must name the host
+# it actually ran on.  EC2 is detected from the DMI product name plus the
+# IMDS instance type; anything else is reported as local with the kernel
+# string.
+_host_identity() {
+    local product inst
+    product="$(cat /sys/class/dmi/id/product_name 2>/dev/null || true)"
+    if printf '%s' "$product" | grep -qi 'amazon ec2'; then
+        inst="$(curl -s --max-time 2 \
+            http://169.254.169.254/latest/meta-data/instance-type 2>/dev/null \
+            || true)"
+        printf 'EC2 %s (nproc=%s)' "${inst:-instance-type-unreadable}" "$(nproc)"
+    else
+        printf 'local %s (nproc=%s)' \
+            "$(uname -sr 2>/dev/null || echo unknown)" "$(nproc)"
+    fi
+}
+HOST_IDENTITY="$(_host_identity)"
+
 {
     echo "# A/B — $SHA_BASE (base) vs $SHA_TREAT (treat)"
     echo ""
-    echo "Local box, HTTP/1.1 cleartext keep-alive, single worker."
+    echo "$HOST_IDENTITY, HTTP/1.1 cleartext keep-alive, single worker."
     echo ""
     echo "| | |"
     echo "|---|---|"

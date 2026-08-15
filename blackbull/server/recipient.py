@@ -714,16 +714,28 @@ class HTTP1Recipient(BaseRecipient):
     def __init__(self, reader: AbstractReader, conn: Connection,
                  *, body_timeout: float = 0.0,
                  deadline: ConnectionDeadline | None = None,
-                 chunk_size: int | None = None):
+                 chunk_size: int | None = None,
+                 chunk_max: int | None = None):
         super().__init__(reader)
-        # Deliver a Content-Length body in fixed-size chunks instead of one
-        # giant ``readexactly(content_length)`` allocation.  Falls back to the
-        # ``BB_BODY_CHUNK_SIZE`` setting when not injected (direct-instantiation
-        # tests pass it explicitly).
-        if chunk_size is None:
+        # Deliver a Content-Length body in slices instead of one giant
+        # ``readexactly(content_length)`` allocation.  Reads are up-to-n and
+        # transport-paced: each returns whatever the peer has delivered, up to
+        # ``chunk_max``, so the slice follows the transport (small for a slow
+        # peer, large for a fast one) and no read is ever a latency
+        # commitment.  ``chunk_size`` is the fixed slice for the chunked-
+        # transfer path.  Both fall back to settings when not injected
+        # (direct-instantiation tests pass them explicitly).
+        if chunk_size is None or chunk_max is None:
             from ..env import get_settings as _get_settings  # noqa: PLC0415
-            chunk_size = _get_settings().body_chunk_size
+            _s = _get_settings()
+            if chunk_size is None:
+                chunk_size = _s.body_chunk_size
+            if chunk_max is None:
+                chunk_max = _s.body_chunk_max
         self._chunk_size = chunk_size
+        # A cap of 0 would turn every up-to-n read into b'' (which reads as
+        # EOF), so a misconfigured zero falls back to a single usable byte.
+        self._chunk_max = max(chunk_max, 1)
         # Body-read deadline.  0 = disabled.  Applied per
         # ``_read_with_timeout`` call — which is per *slice* on both framings,
         # since a chunk larger than ``chunk_size`` is delivered in several.
@@ -835,8 +847,9 @@ class HTTP1Recipient(BaseRecipient):
         a read larger than the high-water mark has to reopen the transport the
         mark just paused, because otherwise it would be waiting for bytes its
         own pause is refusing to accept.  Slicing keeps every read under the
-        mark, so the pause does its job — and it is what the Content-Length
-        path already does with the same setting.
+        mark, so the pause does its job.  (The Content-Length path is
+        transport-paced instead — an up-to-n read never parks on bytes the
+        pause is refusing to read, so it needs no such bound.)
 
         The exact-bytes contract is unchanged: ``readexactly`` (not the up-to-n
         ``read``) still backs every slice, so a chunk split across TCP segments
@@ -956,16 +969,30 @@ class HTTP1Recipient(BaseRecipient):
                 self._chunk_remaining = chunk_size
                 return await self._read_chunk_slice()
             else:
-                # Stream the Content-Length body in ``chunk_size`` slices so
-                # a large upload is delivered as several ``http.request`` events
+                # Stream the Content-Length body in up-to-n slices so a large
+                # upload is delivered as several ``http.request`` events
                 # (``more_body: True`` until exhausted) rather than one giant
-                # allocation.  ``readexactly`` keeps the exact-bytes contract —
-                # a short body still raises IncompleteReadError below.
+                # allocation.  Each read returns whatever the peer has
+                # delivered, up to ``_chunk_max``, and never parks on bytes
+                # the transport has not produced — no read is a latency
+                # commitment ``body_timeout`` might not deliver.  ``b''`` from
+                # the reader means the peer is gone (a reader parks rather
+                # than returning short when more may come), so a body that is
+                # not yet spent is a truncated upload, never a complete one.
                 if self._content_length:
-                    n = min(self._content_length, self._chunk_size)
-                    body = await self._read_with_timeout(
-                        self._reader.readexactly(n))
-                    self._content_length -= n
+                    n = min(self._content_length, self._chunk_max)
+                    body = await self._read_with_timeout(self._reader.read(n))
+                    # Gate on the *length*, not truthiness.  Forward progress
+                    # is now the reader's return value rather than a constant
+                    # ``n``, so "zero bytes came back" is the only thing that
+                    # ends the loop — and a zero-length result that is somehow
+                    # truthy would decrement by nothing and spin forever.  For
+                    # ``bytes`` the two tests are identical; the difference is
+                    # that this one cannot be defeated by a reader whose reads
+                    # do not return ``bytes``.
+                    if not len(body):
+                        raise IncompleteReadError(b'')
+                    self._content_length -= len(body)
                     if self._content_length == 0:
                         self._done = True
                     return body

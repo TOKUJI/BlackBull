@@ -157,6 +157,19 @@ async def echo(body: bytes):
     return Response(body, content_type=_OCTET_CT)
 
 
+@app.route(path="/upload", methods=[HTTPMethod.POST, HTTPMethod.GET])
+async def upload_route(conn: Connection):
+    # Mirrors the HttpArena upload profile (bench/httparena/app.py): stream the
+    # body — never materialize — and return the byte count.  GET answers 200 so
+    # ab_commit.sh's server-ready probe passes on the POST lane.
+    if conn.method != "POST":
+        return Response(b"ok", content_type=_HTML_CT)
+    size = 0
+    async for chunk in conn.stream():
+        size += len(chunk)
+    return Response(str(size).encode(), content_type=_PLAIN_CT)
+
+
 # HttpArena's `baseline` profile endpoint, copied from bench/httparena/app.py
 # so a local A/B exercises the same handler as the leaderboard run.  /ping
 # measures the framework floor; this measures the floor plus query parsing
