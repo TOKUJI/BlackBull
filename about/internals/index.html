@@ -5036,6 +5036,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#who-decides-and-who-acts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Who decides, and who acts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#read_head-is-a-contract-not-a-capability" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5536,6 +5547,17 @@
   
     <nav class="md-nav" aria-label="Read-path invariant">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#who-decides-and-who-acts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Who decides, and who acts
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#read_head-is-a-contract-not-a-capability" class="md-nav__link">
@@ -6103,12 +6125,50 @@ bytes once.</p>
 <p>One non-obvious rule keeps that buffer cheap: <code>get_buffer</code> treats the
 transport's <em>sizehint</em> as advisory, not as a minimum window.  uvloop's
 cleartext path passes a fixed 64 KiB hint on every read; honouring it
-would grow every connection's buffer to 64 KiB and <code>_release</code> would hand
-it back — a 64 KiB alloc/free churn per request.  The buffer grows only
-when bytes actually arriving need the room, and <code>_release</code> returns a
-grown allocation to the floor only once the connection has shown a few
+would grow every connection's buffer to 64 KiB and the release policy
+would hand it back — a 64 KiB alloc/free churn per request.  The buffer
+grows only when bytes actually arriving need the room, and a grown
+allocation returns to the floor only once the connection has shown a few
 small messages, so a connection repeating large bodies reuses its
 allocation.</p>
+<h3 id="who-decides-and-who-acts">Who decides, and who acts<a class="headerlink" href="#who-decides-and-who-acts" title="Permanent link">&para;</a></h3>
+<p>The read path is three objects, split by competence rather than by layer:</p>
+<table>
+<thead>
+<tr>
+<th>object</th>
+<th>owns</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>BufferReader</code></td>
+<td>the receive <strong>decisions</strong> — how much to let the peer send, when to stop it, when to wait, and when a grown allocation goes back to the floor</td>
+</tr>
+<tr>
+<td><code>ConnectionProtocol</code></td>
+<td>the <strong>transport</strong> — socket callbacks, the callback↔coroutine rendezvous, and executing <code>pause_reading</code> / <code>resume_reading</code></td>
+</tr>
+<tr>
+<td><code>ReadBuffer</code></td>
+<td>the <strong>bytes</strong> — the allocation, the cursors, and the scanning primitives</td>
+</tr>
+</tbody>
+</table>
+<p>The reader gets the decisions because reading is the only activity that
+knows both what was asked for and what was consumed; every judgement on
+this path follows from that pair.  The transport front end previously
+decided when to stop reading, which meant reconstructing the reader's
+state from outside — resident bytes plus a guess, taken from the
+rendezvous future, at whether anybody was parked.  The guess had a gap:
+the future clears when a reader is <em>woken</em>, not when it stops waiting, so
+an arrival in that window armed a pause the next park released.  Moving
+the decision deleted the inference rather than relocating it.</p>
+<p><code>ReadBuffer</code> keeps no policy for the same reason.  It reports the one
+moment a message is provably gone — a compaction that leaves it empty —
+and offers <code>release_to_floor()</code>; whether to take that offer is the
+reader's call, because only the reader knows whether the connection is
+between large messages or done with them.</p>
 <p>Three consequences follow, and each retires a workaround that existed
 only because the buffer was somewhere else:</p>
 <ul>
@@ -6184,13 +6244,14 @@ decides what they were:</p>
 the reader, so both reader kinds reach the same verdict from the same
 bytes.</p>
 <h3 id="backpressure-pauses-for-a-handler-that-is-behind-not-one-that-is-waiting">Backpressure pauses for a handler that is behind, not one that is waiting<a class="headerlink" href="#backpressure-pauses-for-a-handler-that-is-behind-not-one-that-is-waiting" title="Permanent link">&para;</a></h3>
-<p>The buffer pauses the transport once unconsumed bytes reach a high-water mark,
-so a fast peer cannot grow it without bound while a handler falls behind.  That
-rule inverts for a reader that is <strong>blocked waiting for more</strong>: the bytes it is
-parked on are exactly the ones the pause is refusing to read, and the
-connection hangs with no error and no response.</p>
-<p>So parking releases the pause.  A reader about to block is starved, not behind,
-and the condition backpressure exists to prevent is not the one in play.
+<p>The reader stops the transport once unconsumed bytes reach a high-water mark,
+so a fast peer cannot grow the buffer without bound while a handler falls
+behind.  That rule inverts for a reader that is <strong>blocked waiting for more</strong>:
+the bytes it is parked on are exactly the ones the pause is refusing to read,
+and the connection hangs with no error and no response.</p>
+<p>So parking releases the pause, and a reader that is already waiting arms no
+pause in the first place.  A reader about to block is starved, not behind, and
+the condition backpressure exists to prevent is not the one in play.
 <code>asyncio.StreamReader</code> resumes at the same point for the same reason.</p>
 <p>One shape reaches this and the request body does not.  A WebSocket frame is
 read with one <code>readexactly</code> of a size <strong>the peer chose</strong>, so it can exceed the

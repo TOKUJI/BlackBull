@@ -5391,7 +5391,12 @@ first-hit-then-summary rate-limit model.</p>
 <tr>
 <td><code>BB_BODY_CHUNK_SIZE</code></td>
 <td><code>65536</code></td>
-<td>Slice size (bytes) for streaming an HTTP/1.1 request body to the ASGI app, on <strong>both</strong> framings.  The body is delivered as successive <code>http.request</code> events (<code>more_body: True</code> until exhausted) instead of one allocation the size of the declared length — capping per-connection buffering at O(chunk × connections).  It bounds a <code>Content-Length</code> body by the remaining count and a <code>Transfer-Encoding: chunked</code> body by what is left of the chunk in progress, so a peer-declared <code>chunk-size</code> never sets the read size.  64 KiB matches asyncio's default <code>StreamReader</code> buffer and sits below the backpressure high-water mark, which is what lets the pause work.  Must be <code>&gt; 0</code> (invalid values fall back to the default).</td>
+<td>Slice size (bytes) for a <code>Transfer-Encoding: chunked</code> request body: each chunk in progress is delivered in reads of at most this many bytes, so a peer-declared <code>chunk-size</code> never sets the read size.  64 KiB sits below the backpressure high-water mark, which is what lets the pause work.  The <code>Content-Length</code> path is transport-paced instead — its per-read bound is <code>BB_BODY_CHUNK_MAX</code>.  Must be <code>&gt; 0</code> (invalid values fall back to the default).</td>
+</tr>
+<tr>
+<td><code>BB_BODY_CHUNK_MAX</code></td>
+<td><code>524288</code></td>
+<td>Per-read bound (bytes) for a <code>Content-Length</code> request body.  Reads are up-to-n and transport-paced: each returns whatever the peer has delivered so far, up to this cap, and never blocks waiting to fill it — so a slow peer yields small slices (no read is a latency commitment <code>BB_BODY_TIMEOUT</code> might not deliver) while a fast one earns fewer, larger ones.  The cap is a memory bound, not a latency one: it limits how much a single read may materialise per connection.  Values below <code>BB_BODY_CHUNK_SIZE</code> are raised to it.</td>
 </tr>
 <tr>
 <td><code>BB_STREAM_QUEUE_DEPTH</code></td>

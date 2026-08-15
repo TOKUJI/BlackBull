@@ -4401,6 +4401,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.read_buffer.ReadBuffer.release_to_floor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        release_to_floor
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.read_buffer.ReadBuffer.take" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5263,6 +5274,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.read_buffer.ReadBuffer.release_to_floor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        release_to_floor
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.read_buffer.ReadBuffer.take" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5345,6 +5367,11 @@ only one.</p>
 actor; it distinguishes "EOF with nothing" from "EOF mid-head" only by leaving
 :attr:<code>available</code> intact, because deciding between a silent close and a 400 is
 also the actor's job.</p>
+<p>Free of <em>receive</em> policy for the same reason.  It grows on demand, reports a
+drained message boundary, tracks the message's peak resident bytes (accounting
+— the release <em>policy</em> consumes it), and offers :meth:<code>release_to_floor</code> — but
+when the allocation is actually given back is the reader's call, because only
+the reader knows what the connection has been asked to deliver.</p>
 <p>Not thread-safe and not concurrency-safe — one connection, one buffer, one
 actor loop, per the actor model.</p>
 
@@ -5488,6 +5515,11 @@ that is the straddled-terminator back-off.</p>
     <div class="doc doc-contents ">
 
         <p>Declare how much of the last :meth:<code>get_buffer</code> was written.</p>
+<p>Returns the new resident count so the caller — the reader's arrival
+decision — need not re-read it.  Tracks the message's peak resident
+bytes while it is at it, but only once the buffer has grown past the
+floor; a floor-sized buffer can never need the hysteresis decision,
+so the common case costs one compare.</p>
 
 
     </div>
@@ -5509,6 +5541,11 @@ that is the straddled-terminator back-off.</p>
 <p>Called on message boundaries.  Without it the cursors walk forward for
 the life of a keep-alive connection and the allocation grows to every
 byte ever received on it.</p>
+<p>Compacting to empty is the one moment a message is provably gone, so it
+raises :attr:<code>drained_boundary</code> for the reader's release policy.  The
+flag is a report, not a decision: this object does not know whether a
+connection that has just finished a large message is about to serve
+another one.</p>
 
 
     </div>
@@ -5584,7 +5621,7 @@ every arrival re-scan the whole head — quadratic, and attacker-chosen.</p>
 
 
 <h4 id="blackbull.server.read_buffer.ReadBuffer.get_buffer" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">get_buffer</span><span class="p">(</span><span class="n">sizehint</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">get_buffer</span><span class="p">(</span><span class="n">sizehint</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">want</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span></code>
 
 <a href="#blackbull.server.read_buffer.ReadBuffer.get_buffer" class="headerlink" title="Permanent link">&para;</a></h4>
 
@@ -5598,12 +5635,47 @@ the connection permanently.</p>
 <p>The <em>sizehint</em> is what the transport would <em>like</em> to read in one
 recv, not what it needs: uvloop's cleartext path passes libuv's fixed
 64 KiB on every call, so honouring it would grow every connection's
-buffer to 64 KiB on its first request and <code>compact()</code>/<code>_release()</code>
+buffer to 64 KiB on its first request and the reader's release policy
 would give it back at the message boundary — a 64 KiB alloc/free
-churn per request (the F5 read-path finding).  Growth is driven by
-bytes actually arriving (the <code>_w</code> cursor), never by the hint: offer
-the buffer's free span, growing only when it falls below the read
-floor.</p>
+churn per request (the F5 read-path finding).  Growth is therefore
+driven by bytes actually arriving (the <code>_w</code> cursor) and by the
+<em>demand</em> the caller passes in — the reader's pending read size, via
+:class:<code>ConnectionProtocol</code> — never by the hint.  A parked read of
+<em>n</em> gets a free span of up to <code>min(n, high-water)</code> so one recv
+feeds most of it: the arrival granularity follows the demand, not the
+idle floor, which is what keeps a transport-paced (up-to-n) read from
+collapsing to floor-sized deliveries.  Idle (<code>want = 0</code>) stays at
+the floor span.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.server.read_buffer.ReadBuffer.release_to_floor" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">release_to_floor</span><span class="p">()</span></code>
+
+<a href="#blackbull.server.read_buffer.ReadBuffer.release_to_floor" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Hand a grown allocation back.  <code>True</code> when it was given up.</p>
+<p>A single large upload must not leave every connection that served one
+holding its peak allocation for the rest of its keep-alive life — that
+is the idle-memory floor the read window is also sized against.  <em>When</em>
+to do that is hysteretic and belongs to the reader, which is the only
+object that knows what the connection has been asked for; this is the
+mechanism it calls.</p>
+<p>Refuses while bytes are resident, and that is not a policy check but
+the one invariant the container owes its caller: the boundary flag is
+raised inside :meth:<code>compact</code>, including the compaction
+:meth:<code>_make_room</code> does on the <em>arrival</em> path, where a delivery lands
+immediately afterwards.  Reallocating there would discard bytes the
+transport has already handed over.</p>
 
 
     </div>

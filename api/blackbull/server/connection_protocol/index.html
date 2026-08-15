@@ -4033,10 +4033,32 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.connection_protocol.BufferReader.maybe_pause" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        maybe_pause
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.connection_protocol.BufferReader.read_head" class="md-nav__link">
     <span class="md-ellipsis">
       
         read_head
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.connection_protocol.BufferReader.wait_for_data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        wait_for_data
       
     </span>
   </a>
@@ -4094,10 +4116,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol.ConnectionProtocol.maybe_resume" class="md-nav__link">
+  <a href="#blackbull.server.connection_protocol.ConnectionProtocol.pause_reading" class="md-nav__link">
     <span class="md-ellipsis">
       
-        maybe_resume
+        pause_reading
       
     </span>
   </a>
@@ -4105,10 +4127,21 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol.ConnectionProtocol.wait_for_data" class="md-nav__link">
+  <a href="#blackbull.server.connection_protocol.ConnectionProtocol.resume_reading" class="md-nav__link">
     <span class="md-ellipsis">
       
-        wait_for_data
+        resume_reading
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.connection_protocol.ConnectionProtocol.wait_for_arrival" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        wait_for_arrival
       
     </span>
   </a>
@@ -5159,10 +5192,32 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.connection_protocol.BufferReader.maybe_pause" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        maybe_pause
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.connection_protocol.BufferReader.read_head" class="md-nav__link">
     <span class="md-ellipsis">
       
         read_head
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.connection_protocol.BufferReader.wait_for_data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        wait_for_data
       
     </span>
   </a>
@@ -5220,10 +5275,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol.ConnectionProtocol.maybe_resume" class="md-nav__link">
+  <a href="#blackbull.server.connection_protocol.ConnectionProtocol.pause_reading" class="md-nav__link">
     <span class="md-ellipsis">
       
-        maybe_resume
+        pause_reading
       
     </span>
   </a>
@@ -5231,10 +5286,21 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol.ConnectionProtocol.wait_for_data" class="md-nav__link">
+  <a href="#blackbull.server.connection_protocol.ConnectionProtocol.resume_reading" class="md-nav__link">
     <span class="md-ellipsis">
       
-        wait_for_data
+        resume_reading
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.connection_protocol.ConnectionProtocol.wait_for_arrival" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        wait_for_arrival
       
     </span>
   </a>
@@ -5314,6 +5380,16 @@ never the coroutine — it was reading through a second buffer.</p>
 so the body recipient and the WebSocket/h2c successors work unchanged, and adds
 :meth:<code>BufferReader.read_head</code> — the one-scan header read the H/1.1 actor uses
 instead of a <code>readuntil</code> per line.</p>
+<p><strong>The two classes split decision from execution.</strong>  The reader owns the receive
+competence — whether a high-water crossing should pause, when to wait, and
+when a hand a grown buffer back — because reading is the only activity that
+knows both what was asked for and what was consumed.  The protocol owns the
+socket: the transport callbacks, the rendezvous future, the two flow-control
+calls it makes when the reader asks, and the byte-level high-water comparison
+(a threshold, not a judgement — the reader decides what a crossing means).
+Before the split the stop-reading test sat in
+:meth:<code>ConnectionProtocol.buffer_updated</code> and reconstructed the reader's
+state from outside — resident bytes plus a guess at whether anyone was parked.</p>
 <p>Because peeked bytes stay resident, protocol detection can decide without
 consuming: there is nothing to replay to the winning binding, which is what
 retires <code>PrefixReader</code> on this path.</p>
@@ -5360,6 +5436,17 @@ more.  A pipelined or keep-alive peer's next head is usually already
 resident, so those reads complete without a loop turn — which is the claim
 the layered predecessor made and could not deliver, because it sat on a
 reader that was buffering underneath it.</p>
+<p><strong>This is where the receive decisions live.</strong>  Reading is the only activity
+that knows both the demand (<code>read(n)</code>, :meth:<code>read_head</code>) and the
+consumption (<code>take</code>), so everything that follows from the pair is
+decided here and merely <em>executed</em> on the transport: whether a high-water
+crossing pauses the peer (:meth:<code>maybe_pause</code>), when to let it go again
+(:meth:<code>_consumed</code>), and when a grown allocation goes back to the floor
+(:meth:<code>_at_boundary</code>).  The protocol below owns the socket, not the
+judgement about it.</p>
+<p>Deliberately not on :class:<code>~.recipient.AbstractReader</code>: two of its three
+implementations have no transport to pause, so promoting this competence to
+the interface would force a no-op onto them.</p>
 
 
 
@@ -5410,6 +5497,33 @@ hand the winning binding this very reader with the stream still whole.</p>
 <div class="doc doc-object doc-function">
 
 
+<h4 id="blackbull.server.connection_protocol.BufferReader.maybe_pause" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">maybe_pause</span><span class="p">()</span></code>
+
+<a href="#blackbull.server.connection_protocol.BufferReader.maybe_pause" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>A delivery crossed the high-water mark: decide whether to pause.</p>
+<p>Called by the protocol only when the resident count crossed the mark —
+the byte threshold is compared at the transport, which already holds
+the count and accounts it, so this reader call is the rare crossing
+rather than a per-arrival one.</p>
+<p>Not while this reader is waiting: it is starved, not behind, so the
+condition backpressure exists to prevent is not the one in play.
+Pausing anyway would cost a <code>pause_reading</code>/<code>resume_reading</code> pair —
+two <code>epoll_ctl</code> calls — on every arrival for the whole of a large
+read, since the next park releases it again.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h4 id="blackbull.server.connection_protocol.BufferReader.read_head" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">read_head</span><span class="p">(</span><span class="n">limit</span><span class="p">)</span></code>
 
@@ -5429,6 +5543,36 @@ single copy.  Resumable, so bytes already scanned are not scanned again
 when the head arrives split across reads.</p>
 <p>Contract as documented on :meth:<code>AbstractReader.read_head</code> — an idle
 close returns <code>b''</code> and a truncated one raises with the partial.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.server.connection_protocol.BufferReader.wait_for_data" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">wait_for_data</span><span class="p">()</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.server.connection_protocol.BufferReader.wait_for_data" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Park until more arrives, declaring the wait first.</p>
+<p>Parking releases the high-water pause.  Backpressure exists to stop a
+fast peer outrunning a handler that is <em>behind</em>; a reader about to
+block is the opposite case — it is starved, and the bytes it waits for
+are precisely the ones the pause is refusing to read.  Without this,
+any single read larger than the mark deadlocks: a WebSocket frame, or
+a <code>chunked</code> chunk whose size the peer chose.
+<code>asyncio.StreamReader._wait_for_data</code> resumes here for the same
+reason.</p>
 
 
     </div>
@@ -5461,6 +5605,13 @@ close returns <code>b''</code> and a truncated one raises with the partial.</p>
 
 
         <p>Buffered-protocol front end for one H/1.1 connection.</p>
+<p>The transport half of the receive path: it owns the socket callbacks, the
+callback↔coroutine rendezvous, and the two flow-control calls — but none of
+the judgement about when to make them.  Those belong to
+:class:<code>BufferReader</code>, which is the only object that knows what has been
+asked for; this class executes what it is told.  Its one comparison — the
+byte-level high-water threshold — is a transport fact, not a judgement:
+whether a crossing pauses the peer is the Reader's call.</p>
 
 
 
@@ -5570,15 +5721,15 @@ even one extra loop turn, for the burst-keepalive workload.</p>
 <div class="doc doc-object doc-function">
 
 
-<h4 id="blackbull.server.connection_protocol.ConnectionProtocol.maybe_resume" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">maybe_resume</span><span class="p">()</span></code>
+<h4 id="blackbull.server.connection_protocol.ConnectionProtocol.pause_reading" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">pause_reading</span><span class="p">()</span></code>
 
-<a href="#blackbull.server.connection_protocol.ConnectionProtocol.maybe_resume" class="headerlink" title="Permanent link">&para;</a></h4>
+<a href="#blackbull.server.connection_protocol.ConnectionProtocol.pause_reading" class="headerlink" title="Permanent link">&para;</a></h4>
 
 
     <div class="doc doc-contents ">
 
-        <p>Resume reading once the resident bytes fall back to the low mark.</p>
+        <p>Stop the transport, because the reader asked.  Idempotent.</p>
 
 
     </div>
@@ -5588,19 +5739,40 @@ even one extra loop turn, for the burst-keepalive workload.</p>
 <div class="doc doc-object doc-function">
 
 
-<h4 id="blackbull.server.connection_protocol.ConnectionProtocol.wait_for_data" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">wait_for_data</span><span class="p">()</span></code>
+<h4 id="blackbull.server.connection_protocol.ConnectionProtocol.resume_reading" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">resume_reading</span><span class="p">()</span></code>
+
+<a href="#blackbull.server.connection_protocol.ConnectionProtocol.resume_reading" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Let the transport read again, because the reader asked.  Idempotent.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.server.connection_protocol.ConnectionProtocol.wait_for_arrival" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">wait_for_arrival</span><span class="p">()</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
   </span>
 
-<a href="#blackbull.server.connection_protocol.ConnectionProtocol.wait_for_data" class="headerlink" title="Permanent link">&para;</a></h4>
+<a href="#blackbull.server.connection_protocol.ConnectionProtocol.wait_for_arrival" class="headerlink" title="Permanent link">&para;</a></h4>
 
 
     <div class="doc doc-contents ">
 
         <p>Park until the next arrival, EOF, or connection loss.</p>
+<p>The rendezvous itself — a callback↔coroutine handoff, which is why it
+stays here while the decision to wait, and the backpressure release
+that goes with it, live on :meth:<code>BufferReader.wait_for_data</code>.</p>
 <p>One waiter only: a connection is driven by a single actor coroutine, so
 a second concurrent reader is a bug rather than a case to support.</p>
 
