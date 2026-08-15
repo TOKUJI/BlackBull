@@ -283,29 +283,34 @@ class TestTheTransportOfferFollowsTheDemand:
     transport a recv window of up to ``min(demand, high-water)``, so one
     arrival feeds most of the read instead of a floor-sized dribble.  This is
     what keeps a transport-paced (up-to-n) body read from collapsing to the
-    8 KiB delivery-pinning that sank the first attempt."""
+    8 KiB delivery-pinning that sank the first attempt.
+
+    The decision is the reader's; the *delivery* of it is a published
+    attribute, the mirror of ``reading_paused`` going the other way.  Which
+    side stores it is not a detail here — the arrival path touches it on
+    every connection, so a poll in that position is a per-arrival cost."""
 
     async def test_idle_reader_offers_nothing(self, wired):
         proto, _ = wired
-        assert proto.reader.offer_size() == 0
+        assert proto.read_offer == 0
 
     async def test_parked_read_declares_its_demand(self, wired):
         proto, _ = wired
         task = asyncio.create_task(proto.reader.readexactly(64 * 1024))
         await asyncio.sleep(0)
-        assert proto.reader.offer_size() == 64 * 1024
+        assert proto.read_offer == 64 * 1024
         _deliver(proto, b'x' * (64 * 1024))
         await task
-        assert proto.reader.offer_size() == 0
+        assert proto.read_offer == 0
 
     async def test_demand_is_capped_at_the_high_water_mark(self, wired):
         proto, _ = wired
         task = asyncio.create_task(proto.reader.read(1 << 30))
         await asyncio.sleep(0)
-        assert proto.reader.offer_size() == _HIGH_WATER
+        assert proto.read_offer == _HIGH_WATER
         _deliver(proto, b'y')
         assert await task == b'y'
-        assert proto.reader.offer_size() == 0
+        assert proto.read_offer == 0
 
     async def test_one_recv_can_feed_the_whole_demand(self, wired):
         """The point of the offer: one get_buffer + buffer_updated pair
@@ -318,12 +323,37 @@ class TestTheTransportOfferFollowsTheDemand:
         view[:64 * 1024] = b'z' * (64 * 1024)
         proto.buffer_updated(64 * 1024)
         assert await task == b'z' * (64 * 1024)
-        assert proto.reader.offer_size() == 0
+        assert proto.read_offer == 0
 
     async def test_idle_get_buffer_stays_at_the_floor(self, wired):
         """No pending read → the idle offer is the floor span, so the
         idle-memory floor is untouched (the F5 finding holds)."""
         proto, _ = wired
+        view = proto.get_buffer(-1)
+        try:
+            assert len(view) == ReadBuffer.FLOOR
+        finally:
+            view.release()
+
+    async def test_the_arrival_path_reads_the_offer_without_calling_the_reader(
+            self, wired):
+        """Published, not polled.
+
+        ``get_buffer`` runs on every arrival on every connection, including
+        the ones that never read a body — so a call into the reader there is
+        paid by the no-body path for nothing.  Standing the reader in with an
+        object that refuses every attribute proves the call is gone rather
+        than merely cheap.
+        """
+        proto, _ = wired
+
+        class _Unreachable:
+            def __getattr__(self, name):
+                raise AssertionError(
+                    f'the arrival path consulted the reader ({name}) for the '
+                    f'offer; it is published on the protocol')
+
+        proto.reader = _Unreachable()
         view = proto.get_buffer(-1)
         try:
             assert len(view) == ReadBuffer.FLOOR
