@@ -15,12 +15,26 @@ BB_MAX_CONNECTIONS
     Maximum simultaneous TCP connections accepted per worker.  When the
     cap is reached, new connections receive HTTP/1.1 ``503 Service
     Unavailable`` with ``Retry-After: 1`` (a load-balancer-friendly
-    response, not a silent reset).  ``0`` disables the cap and relies
-    on the OS file-descriptor limit instead.  Default: ``0`` (uncapped).
-    Production deployments on untrusted hosts should set this to a
-    finite ceiling — 1024 is a sensible single-loop value; multi-worker
-    deployments multiply (so ``workers=8`` × ``BB_MAX_CONNECTIONS=1024``
-    → 8K connections per process).
+    response, not a silent reset).
+    Accepts ``auto`` (the default), ``0`` to disable the cap, or an
+    explicit number.
+    **``auto`` derives the cap from this process's own ``RLIMIT_NOFILE``**,
+    less a small reserve for listeners, the event loop's selector, log
+    files and the application's own descriptors.  A cap above the fd
+    budget would be decorative — ``accept()`` fails with ``EMFILE`` before
+    the cap is consulted, and the peer gets a dropped connection instead
+    of the 503 — so the derived value can only refuse connections the OS
+    was going to refuse anyway.  That is what makes a finite default safe
+    to ship, and it follows the operator's own intent: raising the fd
+    limit is how you say how large this process may become.  The resolved
+    value is logged at startup, because a derived default nobody can see
+    is a default nobody can size.
+    An explicit number is honoured as given, not clamped to the fd budget.
+    Note this bounds *descriptor exhaustion*, not event-loop health: a
+    ceiling reflecting what one asyncio loop serves well is a policy
+    number that depends on the workload — set it explicitly; 1024 is a
+    typical single-loop value.  Multi-worker deployments multiply (so
+    ``workers=8`` × ``BB_MAX_CONNECTIONS=1024`` → 8K per process).
 BB_STREAM_QUEUE_DEPTH
     ``asyncio.Queue`` depth for HTTP/2 per-stream request-body events.
     Limits memory growth when an ASGI handler is slower than the client.
@@ -360,6 +374,7 @@ BB_CPU_PINNING
 import dataclasses
 import functools as _functools
 import os
+import resource
 from enum import StrEnum
 
 
@@ -402,6 +417,61 @@ def _int_env_nonneg(name: str, default: int) -> int:
     except ValueError:
         return default
     return value if value >= 0 else default
+
+
+#: File descriptors held back from the connection budget when
+#: ``BB_MAX_CONNECTIONS`` derives its value: the listening sockets, the
+#: event loop's own selector, log files, and whatever the application
+#: keeps open (a database pool being the usual case).  Handing every
+#: descriptor to connections would move the failure from "a connection is
+#: refused" — which the peer can retry — to "a request already accepted
+#: cannot open its database connection", which it cannot.
+FD_RESERVE = 64
+
+
+def resolve_max_connections(raw: str | None) -> int:
+    """Resolve ``BB_MAX_CONNECTIONS`` — ``auto``, ``0``, or a number.
+
+    ``auto`` (the default) derives the cap from this process's own
+    ``RLIMIT_NOFILE``.  A cap above the file-descriptor budget is
+    decorative: ``accept()`` fails with ``EMFILE`` before the cap is
+    consulted, so the peer gets a dropped connection instead of the
+    ``503 + Retry-After`` the mechanism exists to send.  Derived, the cap
+    can only refuse connections the OS was going to refuse anyway — which
+    is what makes a finite default safe to ship — and it tracks the
+    operator's own intent, since raising the fd limit is how an operator
+    states how large this process may become.
+
+    An explicit number is honoured as given, *not* clamped to the fd
+    budget: an operator who names a number means it, and silently running
+    a different one would make the live configuration differ from the
+    configured one with nothing to show for it.  ``0`` disables the cap.
+
+    Note this bounds *descriptor exhaustion*, not event-loop health.  A
+    ceiling reflecting what one asyncio loop serves well is a policy
+    number that depends on the workload — set it explicitly; 1024 is a
+    typical single-loop value.
+    """
+    if raw is None or raw.strip().lower() in ('', 'auto'):
+        try:
+            soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        except Exception:  # pragma: no cover - non-POSIX or restricted host
+            return 0
+        if soft in (resource.RLIM_INFINITY, -1):
+            # No fd ceiling to derive from; an arbitrary number here would
+            # be a policy the operator never chose.
+            return 0
+        # Never fall to 0 — in this server's vocabulary 0 means *uncapped*,
+        # so an arithmetic slip would turn the tightest host into the least
+        # protected one.
+        return max(1, soft - FD_RESERVE)
+    try:
+        value = int(raw)
+    except ValueError:
+        return resolve_max_connections('auto')
+    if value < 0:
+        return resolve_max_connections('auto')
+    return value
 
 
 def _float_env_nonneg(name: str, default: float) -> float:
@@ -457,6 +527,12 @@ class Settings:
     #: 1024 is a typical single-asyncio-loop ceiling, and multi-worker
     #: deployments multiply (so ``workers=8`` × ``BB_MAX_CONNECTIONS=1024``
     #: → 8K connections per process).
+    #:
+    #: Resolved by :func:`resolve_max_connections` — the default is
+    #: ``auto``, derived from ``RLIMIT_NOFILE``.  The dataclass default
+    #: below is only the fallback for a directly-constructed ``Settings``
+    #: (tests); ``0`` there keeps such a construction unbounded rather
+    #: than silently capped by whatever host the test happens to run on.
     max_connections: int = 0
 
     #: asyncio.Queue depth for HTTP/2 per-stream request-body events.
@@ -831,7 +907,8 @@ def get_settings() -> Settings:
     return Settings(
         env=env,
         workers=_int_env('BB_WORKERS', 1),
-        max_connections=_int_env_nonneg('BB_MAX_CONNECTIONS', 0),
+        max_connections=resolve_max_connections(
+            os.environ.get('BB_MAX_CONNECTIONS')),
         stream_queue_depth=_int_env('BB_STREAM_QUEUE_DEPTH', 64),
         ws_queue_depth=_int_env('BB_WS_QUEUE_DEPTH', 0),
         async_logging=_bool_env('BB_ASYNC_LOGGING', True),

@@ -184,6 +184,15 @@ class Server:
                  **kwds):
         self.app = app
         self._max_connections = max_connections
+        # A derived default depends on the host, so the only way an operator
+        # learns the value in force is by being told it.  INFO, once per
+        # server, alongside the other boot-time facts.
+        logger.info(
+            'max_connections=%s (%s)',
+            max_connections or 'uncapped',
+            'explicit' if max_connections else
+            'no cap configured — relying on the OS file-descriptor limit',
+        )
         self._stream_queue_depth = stream_queue_depth
         self._ws_queue_depth = ws_queue_depth
         self._active_connections = 0

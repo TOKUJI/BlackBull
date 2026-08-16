@@ -162,6 +162,25 @@ so the editable install's metadata catches up.
 
 ### Changed
 
+- **`BB_MAX_CONNECTIONS` now defaults to a finite, derived value** instead of
+  `0` (uncapped).  It accepts `auto` (the new default), `0`, or a number.
+  `auto` derives the cap from the process's own `RLIMIT_NOFILE`, less a
+  64-descriptor reserve for listeners, the event loop's selector, log files and
+  the application's own descriptors.
+  The value is derived rather than picked because a cap above the fd budget is
+  decorative: `accept()` fails with `EMFILE` before the cap is consulted, and
+  the peer gets a dropped connection instead of the `503` + `Retry-After` the
+  mechanism exists to send.  Derived, it can only refuse connections the OS was
+  going to refuse anyway — which is what makes a finite default safe to ship —
+  and it follows the operator's own intent, since raising the fd limit is how
+  you say how large a process may become.  The resolved value is logged at
+  startup, because a derived default nobody can see is a default nobody can
+  size.
+  An explicit number is still honoured as given and is *not* clamped to the fd
+  budget.  **This bounds descriptor exhaustion, not event-loop health**: a
+  ceiling reflecting what one asyncio loop serves well is a policy number that
+  depends on the workload, so set it explicitly (1024 is a typical single-loop
+  value).
 - **Transport-paced `Content-Length` body delivery** — the body-read slice is
   no longer a fixed `readexactly(chunk_size)` per `http.request` event; each
   read returns whatever the transport has delivered, up to `BB_BODY_CHUNK_MAX`.
