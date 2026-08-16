@@ -1330,9 +1330,13 @@ class TestHTTP2BrowserShapedFrames:
 
 @pytest.mark.asyncio
 class TestRapidReset:
-    """``HTTP2Actor._RST_RATE_LIMIT`` caps inbound RST_STREAM frames
-    per ``_RST_RATE_WINDOW`` seconds.  Over the cap, the connection
-    receives ``GOAWAY ENHANCE_YOUR_CALM``."""
+    """``BB_FRAME_RATE_LIMIT`` caps inbound RST_STREAM frames per
+    ``BB_FRAME_RATE_WINDOW`` seconds.  Over the cap, the connection
+    receives ``GOAWAY ENHANCE_YOUR_CALM``.
+
+    The budget was a class constant until the shared frame-rate meter
+    landed; it is read from settings here so the tests track the shipped
+    value rather than a copy of it."""
 
     @staticmethod
     def _rst_frame(stream_id: int, error_code: int = 0) -> bytes:
@@ -1352,12 +1356,12 @@ class TestRapidReset:
             handler._closed_streams[sid] = False  # closed-via-END_STREAM
 
     async def test_burst_of_rst_stream_emits_goaway(self):
-        """Sending RST_STREAM frames at a rate above ``_RST_RATE_LIMIT``
-        in a single second must trigger GOAWAY(ENHANCE_YOUR_CALM)."""
+        """Sending RST_STREAM frames at a rate above the frame-rate
+        budget in a single second must trigger GOAWAY(ENHANCE_YOUR_CALM)."""
         from blackbull.protocol.frame_types import ErrorCodes as _EC
-        from blackbull.server.http2_actor import HTTP2Actor
+        from blackbull.env import get_settings
 
-        burst = HTTP2Actor._RST_RATE_LIMIT + 5
+        burst = get_settings().frame_rate_limit + 5
         sids = [1 + 2 * i for i in range(burst)]
         frames = [self._rst_frame(stream_id=s) for s in sids]
 
@@ -1377,9 +1381,9 @@ class TestRapidReset:
     async def test_rate_below_cap_does_not_trip(self):
         """Sending RST_STREAM frames *under* the cap must NOT trigger
         GOAWAY — regression lock against an overly-aggressive limit."""
-        from blackbull.server.http2_actor import HTTP2Actor
+        from blackbull.env import get_settings
 
-        below = max(1, HTTP2Actor._RST_RATE_LIMIT // 2)
+        below = max(1, get_settings().frame_rate_limit // 2)
         sids = [1 + 2 * i for i in range(below)]
         frames = [self._rst_frame(stream_id=s) for s in sids]
 

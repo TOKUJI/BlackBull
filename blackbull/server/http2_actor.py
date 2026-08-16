@@ -25,6 +25,7 @@ from ..connection import Connection
 from ..headers import Headers
 from .parser import parse_headers
 from .cap_log import log_cap_hit
+from .rate_window import RateWindow
 from .recipient import (AbstractReader, IncompleteReadError,
                         HTTP2Recipient, RecipientFactory,
                         _HTTP2_STREAM_QUEUE_DEPTH)
@@ -248,15 +249,6 @@ class HTTP2Actor(Actor):
     path (same behaviour as the pre-Actor HTTP2Handler).
     """
 
-    # CVE-2023-44487 (Rapid Reset) rolling-window thresholds.  20
-    # RST_STREAMs per second is generous for legitimate clients
-    # (browser navigation + prefetch cancellation rarely exceeds
-    # ~10/s) and limiting for the attack shape (CVE-2023-44487
-    # exploits routinely hit thousands/s).  Promote to env vars if a
-    # real workload surfaces that legitimately exceeds the threshold.
-    _RST_RATE_LIMIT: int = 20
-    _RST_RATE_WINDOW: float = 1.0  # seconds
-
     # Frame types whose payload size violation is a connection error
     # rather than a stream error (RFC 9113 §4.2).  Pre-computed as a
     # class-level frozenset so _frame_loop avoids allocating a tuple on
@@ -434,19 +426,33 @@ class HTTP2Actor(Actor):
         # frame handlers without calling run().
         self._force_asgi: bool = False
 
-        # CVE-2023-44487 (Rapid Reset) guard — rolling RST_STREAM rate.
-        # Attackers open a stream with HEADERS and immediately RST it,
-        # churning the per-stream allocations (Stream node, sender,
-        # recipient, HPACK context) without hitting
-        # ``max_concurrent_streams`` because the lifecycle is too fast
-        # for the counter to accumulate.  When the inbound RST_STREAM
-        # rate exceeds the threshold, the connection is closed with
-        # GOAWAY ENHANCE_YOUR_CALM.  Cheap counter, no allocation per
-        # RST; threshold/window are class constants today and can be
-        # promoted to env vars if a real workload surfaces that
-        # legitimately exceeds them.
-        self._rst_count: int = 0
-        self._rst_window_start: float = 0.0
+        # Frame-rate meters.  Four shapes share one form — a frame cheap
+        # for the peer to send that obliges the server to a small piece of
+        # work — so they share one mechanism (``RateWindow``) with a meter
+        # per counted thing:
+        #
+        #   RST_STREAM  CVE-2023-44487 (Rapid Reset).  Open a stream with
+        #               HEADERS, immediately RST it: the per-stream
+        #               allocations churn without ``max_concurrent_streams``
+        #               ever accumulating, because the lifecycle is too
+        #               short.  Counts resets *this server emits* too — a
+        #               stream reset is a stream reset whoever sent it, and
+        #               a peer can provoke ours by repeatedly tripping a
+        #               real limit.
+        #   PING        CVE-2019-9512.  One ACK write per frame.
+        #   SETTINGS    CVE-2019-9515.  One ACK write per frame.
+        #   empty       CVE-2019-9518's shape.  A zero-length CONTINUATION
+        #               costs a parse and a loop turn and adds *no bytes*,
+        #               so ``BB_HEADER_MAX_TOTAL`` — a byte budget — never
+        #               sees it.
+        #
+        # Separate meters so a peer may legitimately spend its allowance of
+        # each without the types competing for one shared budget.
+        _rate, _window = _cfg.frame_rate_limit, _cfg.frame_rate_window
+        self._rst_meter = RateWindow(_rate, _window)
+        self._ping_meter = RateWindow(_rate, _window)
+        self._settings_meter = RateWindow(_rate, _window)
+        self._empty_frame_meter = RateWindow(_rate, _window)
 
         # RFC 8441 stream-exhaustion guard — count of in-flight WebSocket
         # streams on this connection, capped at
@@ -590,8 +596,16 @@ class HTTP2Actor(Actor):
 
     @log
     async def send_frame(self, frame: FrameBase) -> None:
-        """Send a raw HTTP/2 frame via the control-plane sender."""
+        """Send a raw HTTP/2 frame via the control-plane sender.
+
+        Every emitted RST_STREAM passes through here, which is what makes
+        this the one place the G8 blind spot can be closed without dusting
+        the counter across a dozen refusal sites.
+        """
         await self._control_sender(frame)
+        if (frame.FrameType() == FrameTypes.RST_STREAM
+                and not self._goaway_sent):
+            await self._count_emitted_rst()
 
     def _validate_stream_state(
         self, stream: Stream, frame_type: FrameTypes,
@@ -785,6 +799,51 @@ class HTTP2Actor(Actor):
 
         self._task_group = None
 
+    async def _meter(self, window: RateWindow, what: str) -> bool:
+        """Count one frame; close the connection if the budget is spent.
+
+        Returns True when the caller should stop processing this frame —
+        the connection is ending either way, but the frame loop's
+        ``continue`` lets the peer read the GOAWAY before the close, which
+        is the difference between a diagnosable refusal and a reset socket.
+        """
+        if not window.hit():
+            return False
+        log_cap_hit('frame_rate',
+                    requested=window.count, limit=window.limit,
+                    protocol='http2')
+        await self._connection_error(
+            ErrorCodes.ENHANCE_YOUR_CALM,
+            f'{what} rate limit exceeded ({window.count} in {window.window}s)')
+        return True
+
+    async def _count_emitted_rst(self) -> None:
+        """Count a reset *this server* sent (audit G8).
+
+        The Rapid Reset meter watched inbound resets only, so a peer could
+        get the same stream-slot churn for free by provoking ours —
+        protocol violations, window overruns, and the body-size and
+        body-rate refusals added in Sprint 103 are all reachable on
+        demand.  A stream reset is a stream reset whoever sent it.
+
+        The consequence is deliberate and worth stating plainly: a client
+        that repeatedly trips a *legitimate* limit — an upload loop over
+        ``BB_MAX_BODY_SIZE``, say — eventually loses its connection.  That
+        is the correct outcome for a client behaving abusively even
+        unintentionally, and the cap-hit log names which limit it kept
+        tripping so the operator can tell the two apart.
+        """
+        if not self._rst_meter.hit():
+            return
+        log_cap_hit('frame_rate',
+                    requested=self._rst_meter.count, limit=self._rst_meter.limit,
+                    protocol='http2')
+        logger.warning(
+            'server-emitted RST_STREAM rate limit exceeded (%d in %ss) — '
+            'the peer is provoking resets faster than the budget allows',
+            self._rst_meter.count, self._rst_meter.window)
+        await self._close_connection(ErrorCodes.ENHANCE_YOUR_CALM)
+
     async def _liveness_watchdog(self) -> None:
         """Bound how long a peer may take, without touching the frame read.
 
@@ -960,17 +1019,26 @@ class HTTP2Actor(Actor):
             # stream and abusive RSTs on idle/unknown streams both
             # count toward the rolling budget.
             if frame_type == FrameTypes.RST_STREAM:
-                now = time.monotonic()
-                if now - self._rst_window_start > self._RST_RATE_WINDOW:
-                    self._rst_count = 0
-                    self._rst_window_start = now
-                self._rst_count += 1
-                if self._rst_count > self._RST_RATE_LIMIT:
-                    await self._connection_error(
-                        ErrorCodes.ENHANCE_YOUR_CALM,
-                        f'RST_STREAM rate limit exceeded '
-                        f'({self._rst_count} in '
-                        f'{self._RST_RATE_WINDOW}s)')
+                if await self._meter(self._rst_meter, 'RST_STREAM'):
+                    continue
+
+            # CVE-2019-9512 / CVE-2019-9515 — a PING or SETTINGS flood buys
+            # one ACK write per frame.  Metered before the responder runs, so
+            # the answer is refused rather than merely counted.
+            elif frame_type == FrameTypes.PING:
+                if await self._meter(self._ping_meter, 'PING'):
+                    continue
+            elif frame_type == FrameTypes.SETTINGS:
+                if await self._meter(self._settings_meter, 'SETTINGS'):
+                    continue
+
+            # CVE-2019-9518's shape — a zero-length frame costs a parse and a
+            # loop turn while adding nothing to any byte budget.  Only the
+            # count can see it, so the count is what is bounded.
+            if (frame.length == 0
+                    and frame_type in (FrameTypes.CONTINUATION, FrameTypes.DATA)):
+                if await self._meter(self._empty_frame_meter,
+                                     f'empty {frame_type.name}'):
                     continue
 
             # RFC 9113 §4.2 — a frame whose payload exceeds the receiver's

@@ -12,6 +12,7 @@ from .ws_codec import (
     read_frame_header, read_payload,
 )
 from .constants import WSCloseCode
+from .rate_window import RateWindow
 from ..asgi import ASGIEvent, ASGIReceiveEvent
 from ..connection import Connection, disconnected, mark_disconnected
 from ..request import ClientDisconnected
@@ -1665,6 +1666,15 @@ class WebSocketRecipient(BaseRecipient):
             except Exception:
                 self._max_message_size = self._MAX_MESSAGE_SIZE
         self._assembler = FragmentAssembler(max_total=self._max_message_size)
+        # Per-connection control-frame meter (see _read_step).  Built here
+        # rather than shared, because the budget is what one peer may spend.
+        try:
+            from ..env import get_settings  # noqa: PLC0415
+            _s = get_settings()
+            self._control_meter = RateWindow(_s.frame_rate_limit,
+                                             _s.frame_rate_window)
+        except Exception:
+            self._control_meter = RateWindow(20, 1.0)
         # Server-side: client frames MUST be masked (RFC 6455 §5.1).  Client-side:
         # server frames MUST NOT be masked, so the recipient must not raise when
         # they aren't.  When ``require_masked`` is False, outgoing PONG frames
@@ -1782,6 +1792,23 @@ class WebSocketRecipient(BaseRecipient):
             if h.length > 125:
                 raise ProtocolError(
                     f'control frame payload {h.length} > 125')
+            # A control frame is at most 125 bytes and obliges an answer —
+            # a PING costs a PONG write.  No byte budget can see a flood of
+            # them, so the count is metered instead (the same mechanism
+            # HTTP/2 uses for PING and SETTINGS).  Checked before the
+            # payload is read: the answer to too many is to stop, not to
+            # keep reading them faster.
+            if self._control_meter.hit():
+                log_cap_hit('frame_rate',
+                            requested=self._control_meter.count,
+                            limit=self._control_meter.limit,
+                            scope_path=self._conn.path if self._conn else None,
+                            protocol='ws')
+                raise ProtocolError(
+                    f'control frame rate limit exceeded '
+                    f'({self._control_meter.count} in '
+                    f'{self._control_meter.window}s)',
+                    close_code=WSCloseCode.POLICY_VIOLATION)
 
         # RFC 6455 §5.2 — reserved RSV bits MUST be 0 unless an
         # extension defining them was negotiated in the handshake.

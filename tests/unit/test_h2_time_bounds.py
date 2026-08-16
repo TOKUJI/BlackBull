@@ -44,6 +44,10 @@ def _short_h2_timeouts(monkeypatch):
     monkeypatch.setenv('BB_H2_IDLE_TIMEOUT', str(_IDLE))
     monkeypatch.setenv('BB_H2_PING_TIMEOUT', str(_PING_WAIT))
     monkeypatch.setenv('BB_HEADER_TIMEOUT', str(_HEADER))
+    # Off: these tests answer probes far faster than any real peer would, to
+    # keep the suite quick, and a frame-rate meter is right to object to that.
+    # Metering has its own tests; here it would only obscure the time bounds.
+    monkeypatch.setenv('BB_FRAME_RATE_LIMIT', '0')
     from blackbull.env import reset_settings_cache
     reset_settings_cache()
     yield

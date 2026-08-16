@@ -141,6 +141,24 @@ so the editable install's metadata catches up.
       peer that does not answer gets `GOAWAY(NO_ERROR)`.  `0` disables probing.
   h2spec: 146 tests, 145 passed, 1 skipped, 0 failed — no bound fires during a
   conformance case.
+- **`BB_FRAME_RATE_LIMIT`** (default `20`) and **`BB_FRAME_RATE_WINDOW`**
+  (default `1.0`) — a per-type, per-connection budget for control frames that
+  are cheap to send and oblige the server to work.  BlackBull metered exactly
+  one frame type (inbound `RST_STREAM`, from the Rapid Reset work); four more
+  shapes had no meter at all:
+    - HTTP/2 `PING` flood (CVE-2019-9512) — one ACK write per frame;
+    - HTTP/2 `SETTINGS` flood (CVE-2019-9515) — one ACK write per frame;
+    - zero-length `CONTINUATION` / `DATA` (CVE-2019-9518's shape) — a parse and
+      a loop turn for **no bytes at all**, so `BB_HEADER_MAX_TOTAL`, which
+      counts bytes, never saw them;
+    - WebSocket control-frame flood — one PONG write per PING.
+  Each type gets its own budget, so a peer may legitimately spend its PING
+  allowance *and* its SETTINGS allowance.  Over the budget:
+  `GOAWAY(ENHANCE_YOUR_CALM)` on HTTP/2, close `1008` on WebSocket, plus a
+  `frame_rate` cap hit.  `0` disables metering.  h2spec re-run with the meters
+  live: 146 tests, 145 passed, 1 skipped, 0 failed.
+  The Rapid Reset budget was a class constant (`HTTP2Actor._RST_RATE_LIMIT`,
+  20/s); it is now this knob, at the same default.
 
 ### Changed
 
@@ -173,6 +191,16 @@ so the editable install's metadata catches up.
     A/B on `/conn` puts the change at +0.13 % (95 % CI [−0.13, +0.39]), i.e.
     no throughput claim either way.  Ownership is unchanged: the party that
     decides is the party that writes.
+- **Server-emitted `RST_STREAM` frames now count toward the Rapid Reset
+  budget.**  The meter watched inbound resets only, so a peer could get the
+  same stream-slot churn for free by *provoking* ours — protocol violations,
+  window overruns, and (new in this release) the body-size and body-rate
+  refusals are all reachable on demand.  A stream reset is a stream reset
+  whoever sent it.  **Deliberate consequence**: a client that repeatedly trips
+  a legitimate limit — an upload loop over `BB_MAX_BODY_SIZE`, say —
+  eventually loses its connection.  That is the correct outcome for a client
+  behaving abusively even unintentionally; the cap-hit log names which limit it
+  kept tripping so an operator can tell the two apart.
 - **MQTT is visible in `blackbull.caps`.**  The broker previously had no
   `log_cap_hit` call anywhere, so nothing it refused reached the operational
   channel every other protocol reports through.  Each of the new limits emits

@@ -219,6 +219,28 @@ BB_WS_MAX_MESSAGE_SIZE
     stays green on shipped defaults.  An application that does not serve
     huge messages should lower this: at the measured ratio a peer still
     buys 16 MiB of server memory for ~16 KiB of upstream bandwidth.
+BB_FRAME_RATE_LIMIT
+    Maximum number of each metered control frame a peer may send per
+    ``BB_FRAME_RATE_WINDOW``, **per type, per connection**.  Several
+    attack shapes share one form: a frame that is cheap to send and
+    obliges the server to a small piece of work per frame, so no byte
+    budget can see them and only a count can.  Metered:
+    HTTP/2 ``RST_STREAM`` (CVE-2023-44487 Rapid Reset — inbound *and*
+    server-emitted), ``PING`` (CVE-2019-9512), ``SETTINGS``
+    (CVE-2019-9515), zero-length ``CONTINUATION``/``DATA``
+    (CVE-2019-9518 — invisible to ``BB_HEADER_MAX_TOTAL``, which counts
+    bytes), and WebSocket control frames.
+    Each type gets its own budget, so a peer may legitimately spend its
+    allowance of PINGs *and* of SETTINGS without the two competing.
+    Exceeding it closes the connection (``GOAWAY(ENHANCE_YOUR_CALM)`` on
+    HTTP/2, close ``1008`` on WebSocket) and logs a ``frame_rate`` cap
+    hit naming the frame type.  ``0`` disables all frame-rate metering.
+    Default: ``20`` — generous for legitimate peers (browser navigation
+    plus prefetch cancellation rarely exceeds ~10 RST/s) and limiting for
+    the attack shapes, which run to thousands per second.
+BB_FRAME_RATE_WINDOW
+    Width in seconds of the rolling window ``BB_FRAME_RATE_LIMIT``
+    counts within.  Default: ``1.0``.
 BB_H2_IDLE_TIMEOUT
     Seconds of complete silence on an HTTP/2 connection before the
     server probes the peer with a PING.  HTTP/2 connections are *meant*
@@ -689,6 +711,13 @@ class Settings:
     #: the security rationale.  Default 64 MiB.
     ws_max_frame_payload: int = 64 * 1024 * 1024
 
+    #: Per-type, per-connection budget for metered control frames.  See
+    #: BB_FRAME_RATE_LIMIT above; ``0`` disables all frame-rate metering.
+    frame_rate_limit: int = 20
+
+    #: Width in seconds of the frame-rate window.  See BB_FRAME_RATE_WINDOW.
+    frame_rate_window: float = 1.0
+
     #: Seconds of silence on an HTTP/2 connection before probing the peer
     #: with a PING; ``0`` disables the probe.  See BB_H2_IDLE_TIMEOUT above.
     h2_idle_timeout: float = 300.0
@@ -847,6 +876,8 @@ def get_settings() -> Settings:
             'BB_WS_MAX_FRAME_PAYLOAD', 64 * 1024 * 1024),
         ws_max_message_size=_int_env_nonneg(
             'BB_WS_MAX_MESSAGE_SIZE', 16 * 1024 * 1024),
+        frame_rate_limit=_int_env_nonneg('BB_FRAME_RATE_LIMIT', 20),
+        frame_rate_window=_float_env_nonneg('BB_FRAME_RATE_WINDOW', 1.0),
         h2_idle_timeout=_float_env_nonneg('BB_H2_IDLE_TIMEOUT', 300.0),
         h2_ping_timeout=_float_env_nonneg('BB_H2_PING_TIMEOUT', 30.0),
         mqtt_max_packet_size=_int_env_nonneg(

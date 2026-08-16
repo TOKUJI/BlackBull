@@ -299,6 +299,7 @@ record on `blackbull.caps` when it fires.  Coverage:
 | `BB_WRITE_TIMEOUT` | drain stalled (slow-read peer) |
 | `BB_WS_MAX_FRAME_PAYLOAD` | WebSocket frame declared length exceeded |
 | `BB_WS_MAX_MESSAGE_SIZE` | WebSocket message over the total cap post-reassembly / post-inflation — `requested` is the size reached when the bound tripped, never the size the message would have become |
+| `BB_FRAME_RATE_LIMIT` | A metered control frame exceeded its per-type budget (H/2 `RST_STREAM` — inbound or server-emitted — `PING`, `SETTINGS`, zero-length frames; WebSocket control frames).  Logged as cap name `frame_rate`; `protocol` says which protocol |
 | `BB_MQTT_MAX_PACKET_SIZE` | MQTT packet declared larger than the cap — `requested` is the declared size, since the payload is refused unread |
 | `BB_MQTT_MAX_QUEUED_MESSAGES` | MQTT session backlog full while the client's Receive Maximum window was; `scope_path` carries the topic |
 | `BB_MQTT_MAX_RETAINED` | MQTT retained publish to a new topic refused at the store cap; `scope_path` carries the topic |
