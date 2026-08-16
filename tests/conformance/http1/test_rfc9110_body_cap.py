@@ -116,6 +116,62 @@ class TestDeclaredBodyOverCap:
         assert resp.status == 200
         assert resp.body == body
 
+    def test_a_repeated_content_length_is_weighed_once(self, capped_app):
+        """RFC 9112 §6.2 — repeating the field is legal when the values agree.
+
+        The cap reads the length framing validation produced, not the header
+        store, so this is the case that proves the two see the same number:
+        the request is well-framed by §6.2 and under the cap, so it must be
+        *served*.  A 413 would mean the repeats were summed or the wrong one
+        taken; a 400 would mean the declaration was lost between the
+        validator and the limit.
+        """
+        body = b'z' * 8
+        sock = open_socket('127.0.0.1', capped_app.port, timeout=5.0)
+        try:
+            sock.sendall(
+                b'POST /echo HTTP/1.1\r\nHost: x\r\n'
+                b'Content-Length: 8\r\nContent-Length: 8\r\n\r\n' + body)
+            raw = read_until_eof(sock)
+        finally:
+            sock.close()
+        resp = parse_response(raw, closed=True)
+        assert resp.status == 200, raw[:200]
+        assert resp.body == body
+
+    def test_a_repeated_content_length_over_the_cap_is_still_refused(
+            self, capped_app):
+        """And the same shape over the cap is refused, not served."""
+        n = _CAP * 100
+        sock = open_socket('127.0.0.1', capped_app.port, timeout=5.0)
+        try:
+            sock.sendall(b'POST /echo HTTP/1.1\r\nHost: x\r\n'
+                         b'Content-Length: %d\r\nContent-Length: %d\r\n\r\n'
+                         % (n, n))
+            raw = read_until_eof(sock)
+        finally:
+            sock.close()
+        assert parse_response(raw, closed=True).status == 413, raw[:200]
+
+    def test_a_leading_zero_length_never_reaches_the_cap(self, capped_app):
+        """The strict field check owns this one, and refuses it first.
+
+        Framing validation carries machinery for leading zeros (``00005``
+        and ``5`` compare equal across repeats), so it is worth recording on
+        the wire that no such value can arrive: ``BB_HEADER`` line validation
+        accepts only ``0`` or a digit string with no leading zero, so the
+        number the cap weighs is always already canonical.  Written down
+        because the cap's own reasoning depends on it.
+        """
+        sock = open_socket('127.0.0.1', capped_app.port, timeout=5.0)
+        try:
+            sock.sendall(b'POST /echo HTTP/1.1\r\nHost: x\r\n'
+                         b'Content-Length: 0008\r\n\r\n' + b'z' * 8)
+            raw = read_until_eof(sock)
+        finally:
+            sock.close()
+        assert parse_response(raw, closed=True).status == 400, raw[:200]
+
     def test_expect_100_continue_gets_the_413_instead_of_the_interim(
             self, capped_app):
         """RFC 9110 §10.1.1 — answer the final status, not ``100 Continue``.

@@ -904,7 +904,12 @@ class HTTP1Recipient(BaseRecipient):
         dispatch to decide whether to drain.  A body-less request (GET, no
         Content-Length, not chunked) never needs draining.
         """
-        if self.must_close:
+        if self.framing_broken or self._body_refused:
+            # ``must_close`` spelled out rather than called: this runs once per
+            # request on the keep-alive path, and the property is the same two
+            # reads behind a Python-level call.  The two must stay in step —
+            # ``test_needs_drain_agrees_with_must_close`` is what keeps them so.
+            #
             # Nothing to preserve: the connection is going away, and draining a
             # refused body would read the very octets the refusal declined
             # (and, for a cap breach, re-raise the 413 on the way).
@@ -1280,6 +1285,13 @@ class HTTP2Recipient(BaseRecipient):
         # exactly as it did before, rather than being handed a synthetic one.
         self._done: bool = False
         if max_body is None or min_rate is None or min_rate_grace is None:
+            # Fallback for a directly-instantiated recipient (tests, and any
+            # caller that is not the actor).  One recipient is built *per
+            # stream*, so the production path must never take this branch: a
+            # function-level relative import is resolved through
+            # ``importlib._bootstrap`` on every execution, and at one stream
+            # per request that is per-request work.  ``HTTP2Actor`` reads these
+            # once per connection and passes them in.
             from ..env import get_settings as _get_settings  # noqa: PLC0415
             _s = _get_settings()
             if max_body is None:
@@ -2505,10 +2517,18 @@ class RecipientFactory:
               queue_depth: int = _HTTP2_STREAM_QUEUE_DEPTH,
               credit_callback: Optional[
                   Callable[[int], Awaitable[None]]] = None,
-              credit_budget: int = DEFAULT_INITIAL_WINDOW_SIZE) -> HTTP2Recipient:
+              credit_budget: int = DEFAULT_INITIAL_WINDOW_SIZE,
+              max_body: int | None = None,
+              min_rate: float | None = None,
+              min_rate_grace: float | None = None) -> HTTP2Recipient:
+        # The body limits are forwarded rather than left to the recipient's own
+        # fallback: this runs once per stream, and resolving them there costs a
+        # function-level import per request.  See ``HTTP2Recipient.__init__``.
         return HTTP2Recipient(frame, queue_depth=queue_depth,
                               credit_callback=credit_callback,
-                              credit_budget=credit_budget)
+                              credit_budget=credit_budget,
+                              max_body=max_body, min_rate=min_rate,
+                              min_rate_grace=min_rate_grace)
 
     @staticmethod
     def websocket(reader, writer, *,

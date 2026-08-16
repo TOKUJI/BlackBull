@@ -162,6 +162,46 @@ class TestARefusedBodyEndsTheConnection:
         assert r.needs_drain() is True
 
 
+class TestTheTwoRefusalReadsAgree:
+    """``needs_drain`` spells ``must_close`` out instead of calling it.
+
+    The property is one Python-level call per request on the keep-alive path,
+    so the hot copy reads the two flags directly.  That is only safe while the
+    two stay in step, which is what these assert: every combination of the
+    causes, checked through both spellings.
+    """
+
+    async def test_needs_drain_agrees_with_must_close(self):
+        r = _chunked_recipient([b'a' * 100], cap=1024)
+        for framing_broken, body_refused in ((False, False), (True, False),
+                                             (False, True), (True, True)):
+            r.framing_broken = framing_broken
+            r._body_refused = body_refused
+            assert r.must_close is (framing_broken or body_refused)
+            if r.must_close:
+                assert r.needs_drain() is False, (
+                    f'needs_drain still wants the wire with '
+                    f'framing_broken={framing_broken} '
+                    f'body_refused={body_refused} — the two reads have '
+                    f'drifted, and the drain would read octets the refusal '
+                    f'declined')
+
+    async def test_a_new_refusal_cause_must_be_added_to_both(self):
+        """The failure mode this pair exists to catch, stated as a test.
+
+        A third cause added to ``must_close`` alone would leave
+        ``needs_drain`` reading the old two and draining a connection that
+        must not be drained.  Comparing the property against the inlined
+        expression is what makes that a test failure rather than a silent
+        smuggling window.
+        """
+        r = _chunked_recipient([b'a' * 100], cap=1024)
+        r._body_refused = True
+        assert r.must_close is (r.framing_broken or r._body_refused), (
+            'must_close no longer reduces to the two flags needs_drain '
+            'reads; update needs_drain to match')
+
+
 class TestTheCapIsReportedAsACapHit:
     async def test_a_refusal_records_a_cap_hit(self, monkeypatch):
         """Operators find out that a limit fired, and which one, the same way

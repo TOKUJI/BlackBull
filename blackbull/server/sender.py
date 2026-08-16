@@ -996,7 +996,8 @@ class HTTP2Sender(BaseSender):
     def __init__(self, writer: AbstractWriter, factory, stream_id: int,
                  push_callback=None,
                  conn_window: 'ConnectionWindow | None' = None,
-                 initial_window: int | None = None):
+                 initial_window: int | None = None,
+                 flow_control_timeout: float | None = None):
         super().__init__(writer)
         self._factory = factory
         self._stream_id = stream_id
@@ -1020,10 +1021,19 @@ class HTTP2Sender(BaseSender):
         self.max_frame_size = DEFAULT_MAX_FRAME_SIZE
         self._window_open: asyncio.Event | None = None
         # How long the peer may take to grant flow-control credit before the
-        # stream gives up.  Read here rather than at the wait so a stalled
+        # stream gives up.  Held here rather than read at the wait so a stalled
         # write costs no settings lookup.
-        from ..env import get_settings  # noqa: PLC0415
-        self._flow_control_timeout: float = get_settings().write_timeout
+        #
+        # Passed in by every caller that builds senders in bulk: one sender is
+        # created *per stream*, so resolving this here would put a
+        # function-level relative import — resolved through
+        # ``importlib._bootstrap`` on every execution — on the per-request
+        # path.  The fallback is for direct instantiation (tests, the
+        # experimental client).
+        if flow_control_timeout is None:
+            from ..env import get_settings  # noqa: PLC0415
+            flow_control_timeout = get_settings().write_timeout
+        self._flow_control_timeout: float = flow_control_timeout
         self._end_stream_sent: bool = False
         # Defer HEADERS write until first body event (mirrors HTTP1Sender).
         self._buffered_status: HTTPStatus | None = None
@@ -1687,11 +1697,13 @@ class SenderFactory:
     def http2(stream_writer, factory, stream_id: int,
               push_callback=None,
               conn_window: 'ConnectionWindow | None' = None,
-              initial_window: int | None = None) -> HTTP2Sender:
+              initial_window: int | None = None,
+              flow_control_timeout: float | None = None) -> HTTP2Sender:
         return HTTP2Sender(SenderFactory._ensure_writer(stream_writer),
                            factory, stream_id, push_callback,
                            conn_window=conn_window,
-                           initial_window=initial_window)
+                           initial_window=initial_window,
+                           flow_control_timeout=flow_control_timeout)
 
     @staticmethod
     def websocket(stream_writer, *, compressor=None) -> WebSocketSender:

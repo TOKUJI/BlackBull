@@ -337,6 +337,14 @@ class HTTP2Actor(Actor):
         # A declared over-cap body is refused at HEADERS; an undeclared one is
         # counted by the recipient as DATA arrives.
         self._max_body_size: int = _cfg.max_body_size
+        # The rest of the per-stream limits, resolved once here and handed to
+        # each stream's recipient and sender.  Connection-scoped on purpose:
+        # every one of these is process-wide configuration, and a stream is a
+        # request — reading them per stream would put a settings lookup, and
+        # the function-level import that reaches it, on the per-request path.
+        self._min_body_rate: float = _cfg.min_body_rate
+        self._min_body_rate_grace: float = _cfg.min_body_rate_grace
+        self._write_timeout: float = _cfg.write_timeout
         # Per-connection semaphore: caps concurrently-running stream handlers to
         # prevent a high-mux connection from starving other connections on the
         # same worker.  None means no cap.
@@ -505,6 +513,7 @@ class HTTP2Actor(Actor):
                 # have been changed by SETTINGS frames received before this
                 # stream opened.  The connection window is shared, not copied.
                 initial_window=self._peer_initial_window_size,
+                flow_control_timeout=self._write_timeout,
             )
             self._senders[stream_id] = sender
         return self._senders[stream_id]
@@ -535,6 +544,9 @@ class HTTP2Actor(Actor):
             queue_depth=self._stream_queue_depth,
             credit_callback=_credit,
             credit_budget=self._inbound_stream_window,
+            max_body=self._max_body_size,
+            min_rate=self._min_body_rate,
+            min_rate_grace=self._min_body_rate_grace,
         )
 
     def _release_recipient_credit(self, recipient) -> None:
@@ -956,6 +968,12 @@ class HTTP2Actor(Actor):
         _tasks_since_yield = 0
         _yield_every = self._frame_yield_every
         _loop = asyncio.get_running_loop()
+        # Bound once: this is read on every inbound frame, and the attribute
+        # walk is the avoidable half of the cost.  The clock read itself stays
+        # — it is what makes ``BB_H2_IDLE_TIMEOUT`` mean the period it says,
+        # and trading a stated time bound for a fraction of a microsecond is
+        # not a trade this server makes.
+        _loop_time = _loop.time
 
         while data := await self.receive():
             # Any frame is a sign of life, so one timestamp answers both the
@@ -965,7 +983,7 @@ class HTTP2Actor(Actor):
             # ``time.monotonic()``: the watchdog sleeps on the loop's clock,
             # and two clocks that agree today are a bug waiting for a loop
             # implementation that reads a different one.
-            self._last_frame_at = _loop.time()
+            self._last_frame_at = _loop_time()
             self._probe_sent_at = None
             if self._goaway_sent:
                 # A previous frame triggered a connection error and the GOAWAY
@@ -1384,7 +1402,9 @@ class HTTP2Actor(Actor):
         stream.expected_content_length = _extract_content_length(conn)
         stream.conn = conn
 
-        if await self._refuse_oversized_declared_body(stream, conn, send):
+        if (self._declared_body_over_cap(stream)
+                and await self._refuse_oversized_declared_body(
+                    stream, conn, send)):
             return True
 
         self._apply_priority_and_extensions(stream, conn)
@@ -1493,7 +1513,9 @@ class HTTP2Actor(Actor):
             return True
 
         stream.conn = conn
-        if await self._refuse_oversized_declared_body(stream, conn, send):
+        if (self._declared_body_over_cap(stream)
+                and await self._refuse_oversized_declared_body(
+                    stream, conn, send)):
             return True
 
         self._apply_priority_and_extensions(stream, conn)
@@ -1505,8 +1527,20 @@ class HTTP2Actor(Actor):
         self._spawn_stream_task(tg, stream.stream_id, conn, stream_recipient, send, log_record)
         return True
 
+    def _declared_body_over_cap(self, stream) -> bool:
+        """Whether this stream's head declares more body than the cap allows.
+
+        Split from the refusal so the common answer — no — costs two attribute
+        reads and a compare at the call site, rather than creating and driving
+        a coroutine once per stream.  A stream is a request, so anything on
+        this path is per-request work.
+        """
+        declared = stream.expected_content_length
+        cap = self._max_body_size
+        return bool(cap) and declared is not None and declared > cap
+
     async def _refuse_oversized_declared_body(self, stream, conn, send) -> bool:
-        """413 the stream when its head declares more body than the cap allows.
+        """413 the stream whose head declared more body than the cap allows.
 
         The HTTP/2 shape of the same guard HTTP/1.1 applies at head time, and
         RFC 9113 §8.1 names the sequence exactly: send the complete response
@@ -1521,6 +1555,9 @@ class HTTP2Actor(Actor):
 
         A body with no ``content-length`` declares nothing and cannot be
         answered here — ``HTTP2Recipient`` counts that one as DATA arrives.
+
+        Callers gate this on :meth:`_declared_body_over_cap`; it re-checks so
+        the refusal remains correct when called directly.
         """
         declared = stream.expected_content_length
         cap = self._max_body_size
@@ -1820,13 +1857,18 @@ class HTTP2Actor(Actor):
                 self._peer_initial_window_size,
                 self._conn_window.size),
         )
-        push_recipient = RecipientFactory.http2(queue_depth=self._stream_queue_depth)
+        push_recipient = RecipientFactory.http2(
+            queue_depth=self._stream_queue_depth,
+            max_body=self._max_body_size,
+            min_rate=self._min_body_rate,
+            min_rate_grace=self._min_body_rate_grace)
         # Pushed requests have no body — same lazy-queue path as GETs with END_STREAM on HEADERS.
         push_recipient.mark_end_of_stream_on_headers()
         self._recipients[push_stream_id] = push_recipient
         push_sender = SenderFactory.http2(
             self._writer, self.factory, push_stream_id, push_callback=None,
-            conn_window=self._conn_window)
+            conn_window=self._conn_window,
+            flow_control_timeout=self._write_timeout)
         log_record = _start_record(pushed_conn)
         # Inline capture (Sprint 93 M1), same as the request path.
         push_sender._log_record = log_record

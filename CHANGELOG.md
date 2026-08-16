@@ -275,6 +275,26 @@ no red-team exercise, no volumetric-DoS protection.
   makes explicit what a desynced chunked stream already implied, and extends it
   to a body refused for size: the actor breaks the keep-alive loop instead of
   reading the next request out of octets the peer chose.
+- **The new limits no longer cost a measurable share of the request.**  The
+  close A/B for this programme showed HTTP/1.1 `/conn` down ~1.7 % and HTTP/2
+  `/1kb` down ~3.7 %; a per-request call-count profile attributed all of it and
+  each site is now paid once per connection, or not at all:
+  - the declared-body check reads the length `_validate_message_framing`
+    already validated, instead of asking the header store again — a request
+    with no `Content-Length` was paying an index miss plus the `bytes.lower()`
+    allocation of the fallback probe;
+  - `HTTP2Recipient` and `HTTP2Sender` are handed their limits by the
+    connection's actor rather than resolving settings themselves.  One of each
+    is built per stream, so a function-level import was being resolved through
+    `importlib._bootstrap` on every request;
+  - the HTTP/2 declared-body refusal is gated on a plain comparison, so the
+    common answer — no — no longer drives a coroutine per stream;
+  - `needs_drain()` reads the two refusal flags directly instead of calling
+    `must_close`, with a test holding the two spellings in step.
+
+  Behaviour is unchanged in every case; `BB_H2_IDLE_TIMEOUT`'s per-frame clock
+  read was left alone deliberately, because it is what makes that bound mean
+  the period it states.
 
 ## [0.76.1] — 2026-08-14
 

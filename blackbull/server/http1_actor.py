@@ -345,30 +345,7 @@ def _declares_content(headers: 'Headers') -> bool:
     return bool(cl) and bool(cl.lstrip(b'0'))
 
 
-def _declared_body_over_cap(headers: 'Headers', cap: int) -> int:
-    """The declared body length if it exceeds *cap*, else 0.
-
-    A ``Content-Length`` announces the whole body before any of it is sent,
-    so an over-cap request can be refused for the price of reading the head —
-    which is the point: the alternative is to accept octets we have already
-    decided not to keep.  ``chunked`` declares nothing, so that framing is
-    counted as it arrives instead (``HTTP1Recipient``); the two together are
-    what makes "no request body exceeds the cap" true on both framings.
-
-    Returns the length rather than a bool so the caller can report what was
-    asked for.  Assumes :func:`_validate_message_framing` has already run, so
-    the value is ``1*DIGIT`` and consistent across repeats.
-    """
-    if not cap:
-        return 0
-    cl = headers.get(b'content-length', b'').strip()
-    if not cl:
-        return 0
-    declared = int(cl)
-    return declared if declared > cap else 0
-
-
-def _validate_message_framing(headers: 'Headers') -> None:
+def _validate_message_framing(headers: 'Headers') -> int:
     """RFC 9112 §6 — reject framing-header combinations that are unsafe.
 
     These are the rules every smuggling-class incident I'm aware of has
@@ -387,6 +364,16 @@ def _validate_message_framing(headers: 'Headers') -> None:
       :class:`NotImplementedFramingError`.  Without this check the
       recipient layer raised ``NotImplementedError`` later and the
       connection dropped silently.
+
+    Returns the declared body length — the validated ``Content-Length``, or 0
+    when the message declares none (``chunked`` included: that framing
+    announces no total, so its body is counted as it arrives instead).  The
+    value is returned rather than looked up again by whoever wants it because
+    this function has already parsed it and proved it well-formed; asking the
+    header store a second time would repeat both, and on the common request —
+    which carries no ``Content-Length`` at all — that repeat is a guaranteed
+    index miss plus the ``bytes.lower()`` allocation of the fallback probe, on
+    the per-request path.
     """
     cls = headers.getlist(b'content-length')
     tes = headers.getlist(b'transfer-encoding')
@@ -396,6 +383,7 @@ def _validate_message_framing(headers: 'Headers') -> None:
             'Content-Length and Transfer-Encoding both present '
             '(smuggling vector)')
 
+    declared = 0
     if cls:
         # Collapse comma-combined and multi-header into a single set of values.
         values: set[bytes] = set()
@@ -409,6 +397,7 @@ def _validate_message_framing(headers: 'Headers') -> None:
         if len(values) > 1:
             raise BadRequestError(
                 f'conflicting Content-Length values: {sorted(values)!r}')
+        declared = int(next(iter(values)))
 
     # Transfer-Encoding validation.
     #
@@ -443,6 +432,8 @@ def _validate_message_framing(headers: 'Headers') -> None:
             raise NotImplementedFramingError(
                 f'Transfer-Encoding {codings!r} applies an unimplemented '
                 f'content coding before chunked')
+
+    return declared
 
 
 # RFC 3986 §3.2 — authority = [userinfo "@"] host [":" port].  None of
@@ -657,6 +648,13 @@ class HTTP1Actor(Actor):
     _line_cache_bytes: int = 0
     _max_line: int | None = None
 
+    #: The body length the current request declares, as validated by
+    #: :func:`_validate_message_framing` in ``_parse``; 0 when it declares none.
+    #: Immutable class default for the same ``__new__`` reason as above, and so
+    #: a test double that never parsed a head reads "no declared body" rather
+    #: than raising.
+    _declared_body_len: int = 0
+
     def __init__(
         self,
         reader: AbstractReader,
@@ -720,6 +718,10 @@ class HTTP1Actor(Actor):
         if self._deadline is None:
             self._deadline = ConnectionDeadline()
         dl = self._deadline
+        # Hoisted out of the per-request loop below: the cap is process-wide
+        # configuration, so re-reading the attribute once per request bought
+        # nothing.
+        max_body_size = cfg.max_body_size
         send = SenderFactory.http1(self._writer)
         # Capture loop_start at the very top
         # of each iteration so we can quantify the between-request gap
@@ -895,17 +897,21 @@ class HTTP1Actor(Actor):
                 # connection closes because the octets we refused are still
                 # coming — reading the next request out of them is the
                 # smuggling shape.
-                oversized = _declared_body_over_cap(
-                    conn.headers, cfg.max_body_size)
-                if oversized:
+                #
+                # The length was validated during the head parse and carried
+                # here, so a request that declares no body — every GET on a
+                # keep-alive connection — spends one integer compare on this,
+                # not a header lookup.
+                oversized = self._declared_body_len
+                if max_body_size and oversized > max_body_size:
                     logger.warning(
                         '413 Content Too Large — %s %s declares %d bytes, '
                         'BB_MAX_BODY_SIZE=%d; peer=%r',
-                        conn.method, conn.path, oversized, cfg.max_body_size,
+                        conn.method, conn.path, oversized, max_body_size,
                         self._peername)
                     log_cap_hit('max_body_size',
                                 requested=oversized,
-                                limit=cfg.max_body_size,
+                                limit=max_body_size,
                                 peer=self._peername,
                                 scope_path=conn.path, protocol='http1')
                     await self._send_error_and_close(
@@ -1287,7 +1293,9 @@ class HTTP1Actor(Actor):
         # framing header is rejected before any body bytes are read.
         # Also validates Host (§3.2 / §7.2) and the
         # transfer-coding registry (§6.1 → 501 on unknown coding).
-        _validate_message_framing(headers)
+        # It returns the declared body length it just validated; ``run`` weighs
+        # that against ``BB_MAX_BODY_SIZE`` without asking the headers again.
+        self._declared_body_len = _validate_message_framing(headers)
         _validate_host(headers)
         # RFC 9112 §3.2 / §7.2 — every HTTP/1.1 (and later 1.x) request
         # MUST carry a Host header (RFC9112-7.1-MISSING-HOST); only
