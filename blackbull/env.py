@@ -287,9 +287,13 @@ BB_MQTT_MAX_PACKET_SIZE
 BB_MQTT_RECEIVE_MAXIMUM
     The broker's own ``Receive Maximum`` (§3.2.2.3.3), advertised in
     CONNACK: how many QoS>0 PUBLISH packets a client may have in flight
-    towards the broker before it must wait for acknowledgements.  The
-    client's Receive Maximum is honoured in the other direction — see
-    ``BB_MQTT_MAX_QUEUED_MESSAGES``.  Default: ``64``.
+    towards the broker before it must wait for acknowledgements.
+    **This is a promise a conforming client keeps, not a gate the broker
+    closes** — nothing counts a non-conforming client's in-flight
+    publishes against it.  What bounds that direction is the 16-bit
+    packet-identifier space and ``BB_MQTT_MAX_PACKET_SIZE``.  The
+    *client's* Receive Maximum, in the outbound direction, **is**
+    enforced — see ``BB_MQTT_MAX_QUEUED_MESSAGES``.  Default: ``64``.
 BB_MQTT_MAX_QUEUED_MESSAGES
     Maximum QoS>0 messages held per session while the client's own
     ``Receive Maximum`` window is full.  MQTT 5 §4.9 forbids sending
@@ -304,10 +308,20 @@ BB_MQTT_MAX_RETAINED
     Maximum number of distinct topics holding a retained message
     (§3.3.1.3).  A retained message is permanent by design, so without a
     bound one PUBLISH per topic grows broker memory forever.  At the cap
-    a retained publish to a **new** topic is refused with
-    ``0x97 (Quota Exceeded)`` and logged; updating or deleting an
-    already-retained topic always works, so a client can never be locked
-    out of correcting its own state.  ``0`` disables the cap.  Default:
+    a retained publish to a **new** topic is refused and logged;
+    updating or deleting an already-retained topic always works, so a
+    client can never be locked out of correcting its own state.  The
+    message is still delivered to current subscribers — only the storage
+    is declined.
+    How the publisher learns depends on the QoS it chose, because that is
+    what decides whether the protocol has a channel for the answer:
+    **QoS 1 and 2** receive ``0x97 (Quota Exceeded)`` in the PUBACK or
+    PUBREC; **QoS 0 is not told at all** — it has no acknowledgement
+    (§3.3.4), and closing the connection over a storage quota would be
+    disproportionate and would also destroy a live delivery that
+    succeeded.  A publisher that needs to know its retained state was
+    stored must use QoS ≥ 1.  The operator sees every refusal in the
+    ``blackbull.caps`` log regardless.  ``0`` disables the cap.  Default:
     ``10000``.
 BB_COMPRESSION_MIN_SIZE
     Minimum response body size in bytes below which

@@ -82,6 +82,12 @@ class PacketFramer:
     def __init__(self, max_packet_size: int = 0) -> None:
         self._buffer = bytearray()
         self._max_packet_size = max_packet_size
+        # True while the buffer is known to start at a packet boundary: a
+        # fresh connection does, and so does every position just after a
+        # successful decode.  A resync leaves it False until the next packet
+        # decodes, because from there the start is a guess — and the size
+        # gate's answer is too final to spend on a guess.
+        self._synced = True
 
     @property
     def buffered(self) -> bytearray:
@@ -97,8 +103,23 @@ class PacketFramer:
         Silent when the header is not yet readable or is malformed: this
         is a size gate, not a validator.  Whatever is wrong with those
         bytes is the decoder's verdict to give, one step later.
+
+        **Only applied when the framer is synchronised.**  The gate's
+        answer is fatal — ``DISCONNECT 0x95`` and close — so it must only
+        judge bytes that really are a packet header.  After a resync the
+        buffer starts at a *guess*, and junk read as a Remaining Length
+        decodes to something enormous about as often as not; answering
+        that would turn a desync the framer can recover from into a
+        connection the peer cannot re-establish its way out of.  A fresh
+        connection begins at a boundary, and every successful decode ends
+        at one; only those positions are trusted.
+
+        Also silent for a reserved control-packet type of 0 (§2.1.2),
+        which cannot begin a packet at any position.
         """
-        if not self._max_packet_size:
+        if not self._max_packet_size or not self._synced:
+            return
+        if not buffer[0] >> 4:
             return
         try:
             remaining_length, rl_consumed = decode_variable_byte_integer(
@@ -122,9 +143,11 @@ class PacketFramer:
             except IncompletePacket:
                 return  # need more bytes; keep the partial packet buffered
             except (MQTTDecodeError, ValueError):
+                self._synced = False
                 self._resync(buffer)
                 continue
             del buffer[:message[1]]  # message[1] == bytes consumed
+            self._synced = True      # this position is a real boundary again
             yield message
 
     @staticmethod

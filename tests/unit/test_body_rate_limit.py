@@ -249,6 +249,35 @@ class TestHTTP2BodyLimitsAreJudgedOnArrival:
         assert await r.next_chunk() == b'a' * 512
         assert r.put_DATAFrame(_data(b'a')) is True
 
+    async def test_the_exemption_ends_when_the_window_reopens(self, clock):
+        """The exemption marks an interval, not the rest of the stream.
+
+        A flag that only ever turns on retires the rate detector for the
+        life of the stream: one window-filling burst — 64 KiB is enough —
+        would buy a peer an unlimited drip afterwards, which is precisely
+        the attack ``BB_MIN_BODY_RATE`` exists to answer.
+        """
+        async def _credit(_n):
+            pass
+
+        r = HTTP2Recipient(credit_callback=_credit, credit_budget=1024,
+                           max_body=0, min_rate=240.0, min_rate_grace=5.0)
+        assert r.put_DATAFrame(_data(b'a' * 512)) is True
+        assert r.put_DATAFrame(_data(b'a' * 512)) is True   # window closes here
+        clock.advance(60.0)
+        assert await r.next_chunk() == b'a' * 512           # credit replayed
+        assert await r.next_chunk() == b'a' * 512
+
+        # From here the peer can send freely again, so its pace is its own.
+        assert r.put_DATAFrame(_data(b'z')) is True         # fresh window opens
+        clock.advance(3.0)
+        assert r.put_DATAFrame(_data(b'z')) is True         # inside the grace
+        clock.advance(3.0)
+        assert r.put_DATAFrame(_data(b'z')) is False, (
+            'the back-pressure exemption survived the window reopening, so '
+            'the rate detector is disabled for the rest of this stream'
+        )
+
     async def test_zero_rate_disables_the_detector(self, clock):
         r = HTTP2Recipient(max_body=0, min_rate=0.0)
         assert r.put_DATAFrame(_data(b'a')) is True

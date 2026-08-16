@@ -121,12 +121,36 @@ class TestObservability:
         from blackbull.server import ASGIServer
 
         with caplog.at_level('INFO', logger='blackbull'):
-            server = ASGIServer(BlackBull())
+            server = ASGIServer(BlackBull(),
+                                max_connections=get_settings().max_connections)
             server.open_socket(0)
             try:
-                assert any('max_connections' in r.getMessage()
-                           for r in caplog.records), (
+                messages = [r.getMessage() for r in caplog.records
+                            if 'max_connections' in r.getMessage()]
+                assert messages, (
                     'the derived connection cap was never reported; an '
                     'operator has no way to learn it')
+                assert 'derived' in messages[-1], (
+                    f'a derived value was reported as if someone configured '
+                    f'it: {messages[-1]!r}.  That sends an operator hunting '
+                    f'for a setting nobody wrote.')
+            finally:
+                server.close()
+
+    @pytest.mark.asyncio
+    async def test_an_explicit_value_is_reported_as_explicit(self, caplog,
+                                                             monkeypatch):
+        monkeypatch.setenv('BB_MAX_CONNECTIONS', '512')
+        reset_settings_cache()
+        from blackbull import BlackBull
+        from blackbull.server import ASGIServer
+
+        with caplog.at_level('INFO', logger='blackbull'):
+            server = ASGIServer(BlackBull(), max_connections=512)
+            server.open_socket(0)
+            try:
+                messages = [r.getMessage() for r in caplog.records
+                            if 'max_connections' in r.getMessage()]
+                assert messages and 'explicitly' in messages[-1], messages
             finally:
                 server.close()

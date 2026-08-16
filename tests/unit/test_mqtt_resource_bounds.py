@@ -24,8 +24,8 @@ from blackbull.mqtt.broker import (
 )
 from blackbull.mqtt.connection import MQTT5Actor, PacketFramer, PacketTooLarge
 from blackbull.mqtt.messages import (
-    MQTTConnack, MQTTConnect, MQTTDisconnect, MQTTPublish, MQTTSubscribe,
-    ReasonCode, encode_packet, encode_variable_byte_integer,
+    MQTTConnack, MQTTConnect, MQTTDisconnect, MQTTPuback, MQTTPublish,
+    MQTTSubscribe, ReasonCode, encode_packet, encode_variable_byte_integer,
 )
 from blackbull.server.protocol_registry import ProtocolContext
 from blackbull.server.recipient import AbstractReader
@@ -204,6 +204,38 @@ class TestPacketSizeBound:
         assert ReasonCode.PACKET_TOO_LARGE in sent, (
             f'DISCONNECT did not carry 0x95: {sent!r}')
 
+    async def test_junk_is_left_to_the_resync_not_answered_with_0x95(self):
+        """A size gate must not spend a fatal answer on a guess.
+
+        The gate closes the connection, so it may only judge bytes that
+        really are a packet header.  Mid-junk the buffer starts wherever
+        the resync guessed, and arbitrary bytes read as a Remaining Length
+        decode to something enormous about as often as not — answering
+        *that* with ``DISCONNECT 0x95`` turns a desync the framer recovers
+        from into a connection the peer cannot re-establish its way out
+        of.  The junk below is the adversarial case: every byte after the
+        first parses as a variable-byte-integer continuation.
+        """
+        junk = bytes([0x00, 0xFF, 0xFF, 0xFF, 0x7F])
+        good = encode_packet(MQTTPublish(topic='t', payload=b'x', qos=0))
+        framer = PacketFramer(max_packet_size=4096)
+        framer.feed(junk + good)
+
+        decoded = list(framer)     # must not raise PacketTooLarge
+        assert len(decoded) == 1 and decoded[0].topic == 't'
+
+    async def test_the_gate_still_fires_once_resynchronised(self):
+        """Recovering must not disarm the limit for the rest of the connection."""
+        junk = bytes([0x00, 0xFF, 0xFF, 0xFF, 0x7F])
+        good = encode_packet(MQTTPublish(topic='t', payload=b'x', qos=0))
+        framer = PacketFramer(max_packet_size=4096)
+        framer.feed(junk + good)
+        assert len(list(framer)) == 1          # resynced, boundary re-established
+
+        framer.feed(_oversized_header(64 * 1024 * 1024))
+        with pytest.raises(PacketTooLarge):
+            list(framer)
+
     async def test_cap_hit_is_logged(self, caplog):
         framer = PacketFramer(max_packet_size=4096)
         framer.feed(_oversized_header(64 * 1024 * 1024))
@@ -359,6 +391,72 @@ class TestRetainedBound:
         assert 't0' not in broker._retained
         await _publish(broker, pub, 't2', payload=b'v', retain=True)
         assert 't2' in broker._retained, 'freed room was not reusable'
+
+    async def test_the_publisher_is_told_the_retain_was_refused(self):
+        """A refusal only the log hears is a refusal that changes nothing.
+
+        Nobody re-publishes what they believe already worked, and a
+        retained message is exactly the kind a publisher sends once and
+        assumes is live for good.  So the acknowledgement carries 0x97,
+        which means the decision has to be taken before the ACK is sent.
+        """
+        broker = BrokerActor(max_retained=1)
+        pub = RecordingConn()
+        await _attach(broker, pub)
+        await _publish(broker, pub, 't0', payload=b'v', retain=True)
+
+        await _publish(broker, pub, 't1', payload=b'v', retain=True,
+                       qos=1, packet_id=7)
+        pubacks = [p for p in pub.packets() if isinstance(p, MQTTPuback)]
+        assert pubacks, 'no PUBACK at all'
+        assert pubacks[-1].reason_code == ReasonCode.QUOTA_EXCEEDED, (
+            f'PUBACK said {pubacks[-1].reason_code:#x}; the publisher believes '
+            f'its retained message is stored')
+
+    async def test_an_accepted_retain_still_acknowledges_success(self):
+        broker = BrokerActor(max_retained=10)
+        pub = RecordingConn()
+        await _attach(broker, pub)
+        await _publish(broker, pub, 't0', payload=b'v', retain=True,
+                       qos=1, packet_id=7)
+
+        pubacks = [p for p in pub.packets() if isinstance(p, MQTTPuback)]
+        assert pubacks[-1].reason_code == ReasonCode.SUCCESS
+
+    async def test_a_refused_retain_is_still_routed_to_live_subscribers(self):
+        """Only the *storage* was declined.  Subscribers online now are
+        entitled to the message; refusing to deliver it would punish them
+        for a limit the publisher hit."""
+        broker = BrokerActor(max_retained=1)
+        sub, pub = RecordingConn(), RecordingConn()
+        await _attach(broker, sub, client_id='sub')
+        await _attach(broker, pub, client_id='pub')
+        await _subscribe(broker, sub, 't1', qos=0)
+        await _publish(broker, pub, 't0', payload=b'v', retain=True)
+
+        await _publish(broker, pub, 't1', payload=b'live', retain=True)
+
+        assert [p.payload for p in sub.publishes()] == [b'live']
+
+    async def test_qos0_is_not_disconnected_for_a_refused_retain(self):
+        """§3.3.4 — QoS 0 has no acknowledgement to carry a reason code, and a
+        storage quota is not worth a connection.
+
+        Closing here would destroy a live delivery that succeeded, over a
+        limit about *storage*.  The publisher is not told — that is a real
+        limitation of QoS 0, documented in `BB_MQTT_MAX_RETAINED` rather
+        than papered over with a disproportionate close.  The operator is
+        told, via the cap-hit log.
+        """
+        broker = BrokerActor(max_retained=1)
+        pub = RecordingConn()
+        await _attach(broker, pub)
+        await _publish(broker, pub, 't0', payload=b'v', retain=True)
+
+        await _publish(broker, pub, 't1', payload=b'v', retain=True)
+
+        assert not [p for p in pub.packets() if isinstance(p, MQTTDisconnect)]
+        assert not [m for m in pub.outbox if isinstance(m, Close)]
 
     async def test_zero_disables_the_cap(self):
         broker = BrokerActor(max_retained=0)

@@ -58,7 +58,7 @@ pieces. Each row below names the knob for each column.
 | WebSocket frame | `BB_WS_MAX_FRAME_PAYLOAD` 64 MiB | — | — |
 | WebSocket message | per frame | `BB_WS_MAX_MESSAGE_SIZE` 16 MiB | idle watchdog |
 | MQTT packet | `BB_MQTT_MAX_PACKET_SIZE` 1 MiB | same, before buffering | keep-alive × 1.5 |
-| MQTT session state | `Receive Maximum` 64 | `BB_MQTT_MAX_QUEUED_MESSAGES` 1000 | session expiry |
+| MQTT session state | 16-bit packet-identifier space | `BB_MQTT_MAX_QUEUED_MESSAGES` 1000 | session expiry |
 | MQTT retained store | — | `BB_MQTT_MAX_RETAINED` 10000 | — |
 | Connections | — | `BB_MAX_CONNECTIONS` (derived) | detect deadline, keep-alive |
 
@@ -77,6 +77,14 @@ itself — an over-sized message is refused without ever being built.
 read.** An over-cap `Content-Length`, an over-cap MQTT Remaining Length, and an
 over-cap HTTP/2 frame are all refused at the header. MQTT 5 permits a peer to
 declare 268,435,455 bytes; nothing waits for them to arrive.
+
+**An advertised limit is not always an enforced one, and this page says
+which is which.** `BB_MQTT_RECEIVE_MAXIMUM` is announced in CONNACK so a
+conforming client paces itself; it is a *promise*, and nothing counts a
+non-conforming client's in-flight publishes against it. What bounds that
+direction is the 16-bit packet-identifier space and the packet size cap. The
+client's own Receive Maximum, in the outbound direction, **is** enforced. Every
+other limit in the table above is enforced.
 
 **A rate floor is what a per-read timeout cannot be.** An arrival-paced read
 completes before any per-read deadline no matter how few bytes it carries, so a

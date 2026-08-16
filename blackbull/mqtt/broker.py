@@ -261,11 +261,17 @@ class BrokerActor(Actor):
         # All 65535 identifiers are in flight — far past any conformant bound.
         raise RuntimeError('No free MQTT packet identifier (65535 in flight)')
 
-    def _store_retained(self, publish) -> None:
+    def _store_retained(self, publish) -> bool:
+        """Store, update or delete a retained message.  ``False`` = refused.
+
+        The return value is what lets the acknowledgement carry the truth:
+        a refusal that only reaches the log leaves the publisher believing
+        its retained message is live.
+        """
         # §3.3.2.3 — a zero-length retained payload deletes the retained message.
         if publish.payload == b'':
             self._retained.pop(publish.topic, None)
-            return
+            return True
         # The cap counts *topics*, so it only binds a topic that is not already
         # retained.  Updating and deleting stay available at the cap on
         # purpose: a client locked out of correcting its own retained state
@@ -279,8 +285,9 @@ class BrokerActor(Actor):
                         limit=self._max_retained,
                         scope_path=publish.topic,
                         protocol='mqtt')
-            return
+            return False
         self._retained[publish.topic] = publish
+        return True
 
     def _clear_pending(self, conn, bucket, packet_id) -> None:
         session = self._session_for(conn)
@@ -470,18 +477,34 @@ class BrokerActor(Actor):
         if not validate_topic_name(publish.topic):
             await self._reject_publish(conn, publish, ReasonCode.TOPIC_NAME_INVALID)
             return
+        # Retain is decided *before* the acknowledgement, so the acknowledgement
+        # can tell the truth.  Acknowledging SUCCESS and then silently declining
+        # to store leaves the publisher believing its retained message is live —
+        # the one failure mode a retained message cannot recover from, since
+        # nobody re-publishes what they think already worked.
+        retain_refused = bool(publish.retain) and not self._store_retained(publish)
+        ack = ReasonCode.QUOTA_EXCEEDED if retain_refused else ReasonCode.SUCCESS
+
         if publish.qos == 1:
             await conn.send(Send(packet=MQTTPuback(
-                packet_id=publish.packet_id, reason_code=ReasonCode.SUCCESS)))
+                packet_id=publish.packet_id, reason_code=ack)))
         elif publish.qos == 2:
             # §4.3.3 — always acknowledge with PUBREC, but a DUP retransmit of an
             # id we have already accepted must not be delivered a second time.
             await conn.send(Send(packet=MQTTPubrec(
-                packet_id=publish.packet_id, reason_code=ReasonCode.SUCCESS)))
+                packet_id=publish.packet_id, reason_code=ack)))
             if not self._qos2_accept_inbound(conn, publish.packet_id):
                 return  # duplicate — PUBREC re-sent above; skip retain + route
-        if publish.retain:
-            self._store_retained(publish)
+        # QoS 0 has no acknowledgement to carry a reason code (§3.3.4), so a
+        # refused retain cannot be reported on that path.  It is *not* answered
+        # with DISCONNECT: closing a connection over a storage quota is
+        # disproportionate, and it would also destroy the live delivery below,
+        # which succeeded.  The publisher is not told; the operator is, via the
+        # cap-hit log.  This asymmetry is documented in BB_MQTT_MAX_RETAINED
+        # rather than hidden.
+        #
+        # Either way a refused *retain* is still a valid publish: subscribers
+        # online now are entitled to it.  Only the storage was declined.
         await self._route(publish, source_conn=conn)
 
     def _qos2_accept_inbound(self, conn, packet_id) -> bool:
@@ -574,7 +597,7 @@ class BrokerActor(Actor):
                                 retain=(rap and publish.retain))
 
     def _connack_properties(self) -> dict[str, Any]:
-        """§3.2.2.3 — state the limits the broker actually enforces.
+        """§3.2.2.3 — state the limits, so a conforming client stays inside them.
 
         A conforming client that reads these never sends an over-size
         packet or over-fills the window, so the enforcement paths become
@@ -582,6 +605,19 @@ class BrokerActor(Actor):
         well-behaved one.  Omit what is disabled: advertising "no limit"
         and advertising nothing mean the same thing to a client, and only
         one of them can go stale.
+
+        The two properties differ in what backs them, and the difference
+        matters when reading this code as a security claim:
+
+        * ``maximum_packet_size`` is **enforced** — by ``PacketFramer``,
+          one layer down where the bytes are.  It is read here only so the
+          advertised number and the applied one cannot drift.
+        * ``receive_maximum`` is a **promise**, not a gate.  Nothing counts
+          a non-conforming client's in-flight QoS>0 PUBLISHes towards it.
+          What bounds that direction today is the packet-identifier space
+          (``pending_qos2_in`` is keyed by a 16-bit id) and the packet size
+          cap — real bounds, but not this number.  The outbound direction,
+          where the *client's* Receive Maximum applies, **is** enforced.
         """
         props: dict[str, Any] = {}
         if self._max_packet_size:
@@ -698,6 +734,9 @@ class BrokerActor(Actor):
         will = self._wills.pop(client_id, None)
         if will is not None and not graceful:
             if will.retain:
+                # Return deliberately ignored: the client whose Will this is has
+                # already gone, so there is no acknowledgement left to carry a
+                # refusal.  The cap hit still reaches the log.
                 self._store_retained(will)
             await self._route(will)
         session = self._sessions.get(client_id)

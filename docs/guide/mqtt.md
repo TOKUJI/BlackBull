@@ -101,7 +101,7 @@ conformance matrix:
 | Session takeover | a second CONNECT for a live Client Identifier disconnects the prior connection with `0x8E` (§3.1.4) |
 | Properties | the full MQTT 5 property set (§2.2.2.2) on every packet that carries properties |
 | Sessions | subscriptions and pending QoS state preserved across reconnects with Clean Start = 0 |
-| Flow control | the client's `Receive Maximum` (§3.1.2.11.3) is honoured in the outbound direction and the broker's own is advertised in CONNACK |
+| Flow control | the client's `Receive Maximum` (§3.1.2.11.3) is enforced in the outbound direction; the broker's own is advertised in CONNACK as a promise to conforming clients |
 | Resource limits | packet size, session backlog, and retained-store size are bounded and advertised — see below |
 
 The wire codec lives in `blackbull.mqtt.messages` (the 15 control-packet
@@ -165,9 +165,9 @@ ever meeting the enforcement path.
 | Limit | Default | Advertised as | Over the limit |
 |---|---|---|---|
 | `BB_MQTT_MAX_PACKET_SIZE` | 1 MiB | `Maximum Packet Size` (§3.2.2.3.6) | `DISCONNECT` **0x95 Packet Too Large**, connection closed |
-| `BB_MQTT_RECEIVE_MAXIMUM` | 64 | `Receive Maximum` (§3.2.2.3.3) | the client waits for acknowledgements |
+| `BB_MQTT_RECEIVE_MAXIMUM` | 64 | `Receive Maximum` (§3.2.2.3.3) | a conforming client waits — a promise, not a gate (see below) |
 | `BB_MQTT_MAX_QUEUED_MESSAGES` | 1000 | — (a broker-side total) | newest message refused, cap hit logged |
-| `BB_MQTT_MAX_RETAINED` | 10000 | — (a broker-side total) | retained publish to a *new* topic refused |
+| `BB_MQTT_MAX_RETAINED` | 10000 | — (a broker-side total) | retained publish to a *new* topic refused; `0x97` in the PUBACK/PUBREC at QoS ≥ 1 |
 
 Three properties of these limits are worth knowing before you tune them:
 
@@ -191,7 +191,23 @@ allowed.** At the cap, a retained publish to a *new* topic is refused, but
 updating or deleting an already-retained topic still works. A client locked out
 of correcting its own retained state would be worse off than one that could
 never set it — and deleting (a zero-length retained payload, §3.3.2.3) is what
-frees the room being contended for.
+frees the room being contended for. The message is still delivered to current
+subscribers; only the storage is declined.
+
+How the publisher finds out depends on the QoS it chose, because that is what
+decides whether the protocol has a channel for the answer. **QoS 1 and 2**
+receive `0x97 (Quota Exceeded)` in the PUBACK or PUBREC. **QoS 0 is not told**
+— it has no acknowledgement (§3.3.4), and closing the connection over a storage
+quota would be disproportionate as well as destroying a live delivery that
+succeeded. If you need to know your retained state was stored, publish it at
+QoS ≥ 1.
+
+**One limit is advertised but not enforced, and it is worth knowing which.**
+`BB_MQTT_RECEIVE_MAXIMUM` tells a client how many QoS>0 publishes it may have
+in flight *towards* the broker. Nothing counts a non-conforming client's
+against it; what bounds that direction is the 16-bit packet-identifier space
+and the packet size cap. The **client's** Receive Maximum, in the outbound
+direction, is enforced — that is what `BB_MQTT_MAX_QUEUED_MESSAGES` backs.
 
 Every refusal above emits a record on `blackbull.caps` (see
 [Logging](logging.md#cap-hit-log-blackbullcaps)), so a limit that fires is a

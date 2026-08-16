@@ -120,6 +120,27 @@ class TestARefusedBodyEndsTheConnection:
             await _drain(r)
         assert r.needs_drain() is False
 
+    async def test_the_drain_absorbs_a_413_instead_of_raising_it(self):
+        """The one path where the cap trips with no request left to answer.
+
+        A handler that never reads an *undeclared* over-cap body leaves it
+        on the wire — a declared one is refused at the head, before
+        dispatch — so the keep-alive drain reads it instead, and the
+        recipient's octet count raises the 413 there.  Nothing above the
+        drain can use it: the response has gone out, and the exception
+        would land in the connection's generic handler and be recorded as
+        a server error, which it is not.  The drain reports "could not
+        drain", and the caller closes — the same thing a refused body asks
+        for.
+        """
+        r = _chunked_recipient([b'a' * 700, b'b' * 700], cap=1024)
+        # The handler answered without reading, so nothing has been accounted
+        # yet and the recipient still believes a drain is worth attempting.
+        assert r.needs_drain() is True
+
+        assert await r.drain(max_bytes=1024 * 1024) is False
+        assert r.must_close is True
+
     async def test_a_served_request_does_not_close_the_connection(self):
         r = _chunked_recipient([b'a' * 512], cap=1024)
         await _drain(r)

@@ -705,6 +705,13 @@ class FragmentAssembler:
                 )
             if fin:
                 return (opcode, payload, rsv1)  # unfragmented — pass through immediately
+            # The opening fragment is bounded too.  It is not covered by the
+            # continuation check below — that runs on the *next* frame — so
+            # without this an over-cap opener would be held until a second
+            # frame arrived, and the only thing bounding it would be the frame
+            # cap, which is the very substitution this limit exists to stop.
+            if self._max_total and len(payload) > self._max_total:
+                raise MessageTooLarge(len(payload), self._max_total)
             self._opcode = opcode
             self._buf = bytearray(payload)
             self._compressed = rsv1
@@ -910,6 +917,9 @@ class HTTP1Recipient(BaseRecipient):
         False if the unread body exceeded *max_bytes* — the caller should then
         close the connection rather than keep it alive.
         """
+        # Lazily, once per drain rather than per chunk: ``router`` cannot be
+        # imported at module scope here (see :func:`_bad_request`).
+        from ..router import HTTPException  # noqa: PLC0415
         drained = 0
         while not self._done:
             try:
@@ -918,6 +928,17 @@ class HTTP1Recipient(BaseRecipient):
                 # EOF / body_timeout mid-drain: nothing left to desync, and
                 # ``_done`` is now set so the loop would exit anyway.
                 return True
+            except HTTPException:
+                # A body limit tripped while draining.  Reachable when the
+                # handler never read an *undeclared* over-cap body (a declared
+                # one is refused at the head, before dispatch): the drain reads
+                # it instead and ``_account`` raises the 413 here, where there
+                # is no request left to answer with it.  Report "could not
+                # drain" — the caller closes, which is the same thing a refused
+                # body asks for — rather than let the exception reach the
+                # connection's generic handler and be logged as a server error.
+                self._body_refused = True
+                return False
             if chunk is None:
                 break
             drained += len(chunk)
@@ -1535,6 +1556,18 @@ class HTTP2Recipient(BaseRecipient):
             # take_uncredited() can never double-credit; worst case a
             # cancellation mid-send under-credits by one frame.
             self._uncredited -= credit
+            if (self._was_window_stalled
+                    and self._uncredited < self._credit_budget):
+                # The window is open again, so the peer's pace is its own once
+                # more.  The exemption has to end here: it marks an *interval*
+                # we back-pressured, and a flag that only ever turns on retires
+                # the rate detector for the rest of the stream — one
+                # window-filling burst would buy a peer an unlimited drip.
+                # The rate window restarts rather than resumes, so the
+                # exempted interval is not averaged into the next judgement.
+                self._was_window_stalled = False
+                self._rate_window_start = None
+                self._rate_window_seen = 0
             try:
                 await self._credit_cb(credit)
             except Exception:

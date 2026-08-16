@@ -279,6 +279,45 @@ class TestFragmentTotal:
         assert event['bytes'] == chunk * 4
 
     @pytest.mark.asyncio
+    async def test_the_opening_fragment_is_bounded_too(self):
+        """The opener is not covered by the continuation check.
+
+        That check runs when the *next* frame arrives, so an over-cap
+        opening fragment would otherwise be held until then — bounded only
+        by the frame cap, which is exactly the unit-cap-for-total-cap
+        substitution this limit exists to stop.
+        """
+        cap = 4096
+        recipient, reader, writer = _driver(
+            _frame(b'y' * (cap + 1), opcode=WSOpcode.BINARY, fin=False)
+            + _frame(b'y', opcode=WSOpcode.CONTINUATION, fin=True),
+            max_message_size=cap, max_frame_payload=1024 * 1024)
+
+        assert await recipient() == {'type': 'websocket.connect'}
+        with pytest.raises(ProtocolError) as exc:
+            await recipient()
+        assert exc.value.close_code == WSCloseCode.MESSAGE_TOO_BIG
+        assert _closed_with(writer, WSCloseCode.MESSAGE_TOO_BIG)
+        assert reader.remaining > 0, (
+            'the continuation frame was consumed, so the opener was accepted '
+            'and only the second frame was judged'
+        )
+
+    @pytest.mark.asyncio
+    async def test_an_opening_fragment_exactly_at_the_cap_is_accepted(self):
+        """The bound is on the total, so a full-cap opener is legal until
+        something is appended to it."""
+        cap = 4096
+        recipient, _, _ = _driver(
+            _frame(b'y' * cap, opcode=WSOpcode.BINARY, fin=False)
+            + _frame(b'', opcode=WSOpcode.CONTINUATION, fin=True),
+            max_message_size=cap, max_frame_payload=1024 * 1024)
+
+        assert await recipient() == {'type': 'websocket.connect'}
+        event = await recipient()
+        assert event['bytes'] == b'y' * cap
+
+    @pytest.mark.asyncio
     async def test_unfragmented_frame_over_the_cap_is_refused(self):
         """The message cap binds even when no fragment and no deflate is involved.
 
