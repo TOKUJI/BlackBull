@@ -299,6 +299,9 @@ record on `blackbull.caps` when it fires.  Coverage:
 | `BB_WRITE_TIMEOUT` | drain stalled (slow-read peer) |
 | `BB_WS_MAX_FRAME_PAYLOAD` | WebSocket frame declared length exceeded |
 | `BB_WS_MAX_MESSAGE_SIZE` | WebSocket message over the total cap post-reassembly / post-inflation — `requested` is the size reached when the bound tripped, never the size the message would have become |
+| `BB_MQTT_MAX_PACKET_SIZE` | MQTT packet declared larger than the cap — `requested` is the declared size, since the payload is refused unread |
+| `BB_MQTT_MAX_QUEUED_MESSAGES` | MQTT session backlog full while the client's Receive Maximum window was; `scope_path` carries the topic |
+| `BB_MQTT_MAX_RETAINED` | MQTT retained publish to a new topic refused at the store cap; `scope_path` carries the topic |
 | `BB_H2_MAX_CONCURRENT_STREAMS` | HTTP/2 stream-open guard tripped |
 | `BB_H2_WS_MAX_STREAMS_PER_CONNECTION` | RFC 8441 WebSocket stream cap tripped |
 | `BB_COMPRESSION_MAX_INFLIGHT` | Compression middleware bypassed (executor saturated) |

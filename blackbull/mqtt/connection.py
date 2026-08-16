@@ -30,14 +30,30 @@ from .messages import (
     MQTTSubscribe, MQTTUnsubscribe, MQTTPingreq, MQTTPingresp,
     MQTTDisconnect, MQTTAuth, MQTTMessage,
     IncompletePacket, MQTTDecodeError, ReasonCode,
-    decode_packet, encode_packet,
+    decode_packet, decode_variable_byte_integer, encode_packet,
 )
+from ..server.cap_log import log_cap_hit
 from .tap import Message, TapActor, compile_taps, run_taps
 
 logger = logging.getLogger(__name__)
 
 _READ_CHUNK = 4096
 _IDLE_SLEEP = 0.005
+
+
+class PacketTooLarge(Exception):
+    """A packet declared more bytes than ``BB_MQTT_MAX_PACKET_SIZE`` allows.
+
+    Carries the declared size rather than a buffered one: the whole point
+    of the check is that the payload is refused on the strength of the
+    fixed header, so there is nothing buffered to report.
+    """
+
+    def __init__(self, declared: int, maximum: int):
+        super().__init__(
+            f'packet declares {declared} bytes, over the maximum {maximum}')
+        self.declared = declared
+        self.maximum = maximum
 
 
 class PacketFramer:
@@ -50,7 +66,12 @@ class PacketFramer:
     * an **incomplete** packet simply ends the current iteration — the partial
       bytes stay buffered for the next :meth:`feed` (TCP will deliver the rest),
     * a **hard decode error** (reserved flag bits, unknown type — the junk a
-      desynchronised stream produces) drops one byte and resyncs.
+      desynchronised stream produces) resyncs to the next plausible header,
+    * a packet whose **declared** size exceeds *max_packet_size* raises
+      :class:`PacketTooLarge` from the fixed header, before its body is
+      waited for.  MQTT 5 lets a peer declare 268,435,455 bytes and then
+      dribble them; a framer that judged the packet only once it was
+      complete would already have paid for the attack.
 
     This replaces explicit ``stalled_len`` bookkeeping.  The ``bytes(...)``
     snapshot at the decode boundary stays because the codec's input contract is
@@ -58,24 +79,71 @@ class PacketFramer:
     to the buffer protocol (deferred).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, max_packet_size: int = 0) -> None:
         self._buffer = bytearray()
+        self._max_packet_size = max_packet_size
+
+    @property
+    def buffered(self) -> bytearray:
+        """Bytes held for the next feed — the thing a size bound must keep small."""
+        return self._buffer
 
     def feed(self, data: bytes) -> None:
         self._buffer += data
 
+    def _check_declared_size(self, buffer: bytearray) -> None:
+        """Refuse an over-size packet from its fixed header alone.
+
+        Silent when the header is not yet readable or is malformed: this
+        is a size gate, not a validator.  Whatever is wrong with those
+        bytes is the decoder's verdict to give, one step later.
+        """
+        if not self._max_packet_size:
+            return
+        try:
+            remaining_length, rl_consumed = decode_variable_byte_integer(
+                bytes(buffer[1:5]))
+        except (IncompletePacket, MQTTDecodeError, ValueError):
+            return
+        declared = 1 + rl_consumed + remaining_length
+        if declared > self._max_packet_size:
+            log_cap_hit('mqtt_max_packet_size',
+                        requested=declared,
+                        limit=self._max_packet_size,
+                        protocol='mqtt')
+            raise PacketTooLarge(declared, self._max_packet_size)
+
     def __iter__(self) -> Iterator[MQTTMessage]:
         buffer = self._buffer
         while buffer:
+            self._check_declared_size(buffer)
             try:
                 message = decode_packet(bytes(buffer))
             except IncompletePacket:
                 return  # need more bytes; keep the partial packet buffered
             except (MQTTDecodeError, ValueError):
-                del buffer[0]  # junk byte — resync by dropping it
+                self._resync(buffer)
                 continue
             del buffer[:message[1]]  # message[1] == bytes consumed
             yield message
+
+    @staticmethod
+    def _resync(buffer: bytearray) -> None:
+        """Drop to the next byte that could plausibly start a packet.
+
+        Dropping one byte and re-decoding from the start is quadratic in
+        the length of a junk run, and a junk run is something a peer
+        chooses.  A control-packet type of 0 is reserved (§2.1.2), so any
+        byte with a zero high nibble cannot begin a packet and can be
+        skipped without a decode attempt.  Everything past that first
+        plausible byte is still the decoder's problem — this only
+        declines to *ask* about bytes that cannot possibly be an answer.
+        """
+        for offset in range(1, len(buffer)):
+            if buffer[offset] >> 4:
+                del buffer[:offset]
+                return
+        buffer.clear()
 
 
 class MQTT5Actor(Actor):
@@ -88,9 +156,14 @@ class MQTT5Actor(Actor):
 
     def __init__(self, writer: AbstractWriter, broker: BrokerActor,
                  ctx: ProtocolContext, *, app_handlers=None,
-                 tap: TapActor | None = None) -> None:
+                 tap: TapActor | None = None,
+                 max_packet_size: int | None = None) -> None:
         super().__init__()
         self._writer = writer
+        if max_packet_size is None:
+            from ..env import get_settings  # noqa: PLC0415
+            max_packet_size = get_settings().mqtt_max_packet_size
+        self._max_packet_size = max_packet_size
         self._broker = broker
         self._ctx = ctx
         # Tap dispatch: a TapActor (decoupled) takes precedence; otherwise the
@@ -126,14 +199,23 @@ class MQTT5Actor(Actor):
         merely idle, in which case we poll.  Either way the loop ends on EOF
         (``at_eof()``), a DISCONNECT (sets ``_done``), or task cancellation.
         """
-        framer = PacketFramer()
+        framer = PacketFramer(max_packet_size=self._max_packet_size)
         loop = asyncio.get_running_loop()
         self._last_rx = loop.time()
         while not self._done:
-            for message in framer:
-                await self._forward(message)
-                if self._done:
-                    return
+            try:
+                for message in framer:
+                    await self._forward(message)
+                    if self._done:
+                        return
+            except PacketTooLarge as exc:
+                # §3.14.2.1 — 0x95 Packet Too Large.  Written directly rather
+                # than through the inbox: the connection ends on this packet,
+                # and the drain task is about to be cancelled, so an enqueued
+                # reply is a reply that might never reach the wire.
+                logger.debug('MQTT %s; closing', exc)
+                await self._refuse(ReasonCode.PACKET_TOO_LARGE)
+                return
             data = await self._read_with_keepalive(reader)
             if data:
                 self._last_rx = loop.time()
@@ -152,6 +234,20 @@ class MQTT5Actor(Actor):
                 self._done = True
             else:
                 await asyncio.sleep(_IDLE_SLEEP)
+
+    async def _refuse(self, reason_code: int) -> None:
+        """Tell the peer why the connection is ending, then end it.
+
+        A refusal the peer cannot read is indistinguishable from a crash,
+        and a client that cannot tell the two apart will reconnect and do
+        the same thing again.
+        """
+        with contextlib.suppress(Exception):
+            await self._writer.write(encode_packet(
+                MQTTDisconnect(reason_code=reason_code)))
+        self.graceful = False
+        await self._broker.send(Detach(graceful=False, sender=self))
+        self._done = True
 
     async def _read_with_keepalive(self, reader: AbstractReader) -> bytes:
         """Read a chunk, but wake at the keep-alive deadline so a silent peer on

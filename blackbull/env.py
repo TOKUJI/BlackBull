@@ -219,6 +219,44 @@ BB_WS_MAX_MESSAGE_SIZE
     stays green on shipped defaults.  An application that does not serve
     huge messages should lower this: at the measured ratio a peer still
     buys 16 MiB of server memory for ~16 KiB of upstream bandwidth.
+BB_MQTT_MAX_PACKET_SIZE
+    Maximum size (bytes) of a single inbound MQTT control packet,
+    advertised to clients as the ``Maximum Packet Size`` property in
+    CONNACK (§3.2.2.3.6) so a conforming client never sends one.  The
+    check runs on the declared Remaining Length as soon as the fixed
+    header is readable, so an over-size packet is refused **without
+    buffering its payload** — MQTT 5 permits a peer to declare
+    268,435,455 bytes (256 MiB) and dribble them.  Over the cap the
+    broker answers ``DISCONNECT`` with reason code **0x95 (Packet Too
+    Large)** and closes.  ``0`` disables the cap.  Default:
+    ``1048576`` (1 MiB) — MQTT payloads are overwhelmingly small, so a
+    limit that admits a megabyte still admits every realistic message
+    while refusing the spec ceiling.
+BB_MQTT_RECEIVE_MAXIMUM
+    The broker's own ``Receive Maximum`` (§3.2.2.3.3), advertised in
+    CONNACK: how many QoS>0 PUBLISH packets a client may have in flight
+    towards the broker before it must wait for acknowledgements.  The
+    client's Receive Maximum is honoured in the other direction — see
+    ``BB_MQTT_MAX_QUEUED_MESSAGES``.  Default: ``64``.
+BB_MQTT_MAX_QUEUED_MESSAGES
+    Maximum QoS>0 messages held per session while the client's own
+    ``Receive Maximum`` window is full.  MQTT 5 §4.9 forbids sending
+    more than that many unacknowledged PUBLISH packets, so a client that
+    subscribes and never acknowledges would otherwise make the broker
+    hold every matching message for the life of the session.  Beyond
+    this bound the newest message is **refused** rather than an older one
+    silently discarded, and a cap hit is logged.  ``0`` disables the
+    bound (unbounded backlog — not recommended on an exposed broker).
+    Default: ``1000``.
+BB_MQTT_MAX_RETAINED
+    Maximum number of distinct topics holding a retained message
+    (§3.3.1.3).  A retained message is permanent by design, so without a
+    bound one PUBLISH per topic grows broker memory forever.  At the cap
+    a retained publish to a **new** topic is refused with
+    ``0x97 (Quota Exceeded)`` and logged; updating or deleting an
+    already-retained topic always works, so a client can never be locked
+    out of correcting its own state.  ``0`` disables the cap.  Default:
+    ``10000``.
 BB_COMPRESSION_MIN_SIZE
     Minimum response body size in bytes below which
     :class:`~blackbull.middleware.compression.Compression` skips
@@ -635,6 +673,22 @@ class Settings:
     #: the security rationale.  Default 64 MiB.
     ws_max_frame_payload: int = 64 * 1024 * 1024
 
+    #: Maximum size (bytes) of one inbound MQTT control packet, checked on
+    #: the declared Remaining Length before the payload is buffered and
+    #: advertised in CONNACK.  See BB_MQTT_MAX_PACKET_SIZE above.
+    mqtt_max_packet_size: int = 1024 * 1024
+
+    #: The broker's own Receive Maximum (§3.2.2.3.3), advertised in CONNACK.
+    mqtt_receive_maximum: int = 64
+
+    #: Per-session bound on QoS>0 messages held while the client's Receive
+    #: Maximum window is full.  See BB_MQTT_MAX_QUEUED_MESSAGES above.
+    mqtt_max_queued_messages: int = 1000
+
+    #: Maximum number of topics holding a retained message.  See
+    #: BB_MQTT_MAX_RETAINED above.
+    mqtt_max_retained: int = 10000
+
     #: Maximum size (bytes) of a message as the *application* receives it —
     #: post-reassembly, post-inflation.  The frame cap above bounds one
     #: compressed frame on the wire; this bounds what that frame becomes.
@@ -769,6 +823,12 @@ def get_settings() -> Settings:
             'BB_WS_MAX_FRAME_PAYLOAD', 64 * 1024 * 1024),
         ws_max_message_size=_int_env_nonneg(
             'BB_WS_MAX_MESSAGE_SIZE', 16 * 1024 * 1024),
+        mqtt_max_packet_size=_int_env_nonneg(
+            'BB_MQTT_MAX_PACKET_SIZE', 1024 * 1024),
+        mqtt_receive_maximum=_int_env_nonneg('BB_MQTT_RECEIVE_MAXIMUM', 64),
+        mqtt_max_queued_messages=_int_env_nonneg(
+            'BB_MQTT_MAX_QUEUED_MESSAGES', 1000),
+        mqtt_max_retained=_int_env_nonneg('BB_MQTT_MAX_RETAINED', 10000),
         use_uvloop=_bool_env('BB_UVLOOP', False),
         h2_active_streams_1w=_int_env_nonneg('BB_H2_ACTIVE_STREAMS_1W', 20),
         h2_active_streams=_int_env_nonneg('BB_H2_ACTIVE_STREAMS', 20),

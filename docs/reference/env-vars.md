@@ -109,6 +109,19 @@ or drop to `INFO` to surface the rate-limit summary records.
 | `BB_H2_ENABLE_WEBSOCKET` | `0` | Advertise `SETTINGS_ENABLE_CONNECT_PROTOCOL=1` (RFC 8441 §3) so peers may bootstrap WebSocket over HTTP/2 via Extended CONNECT.  Off by default — this path has fewer conformance tests than the HTTP/1.1 Upgrade path and few clients use it.  When enabling this on a BlackBull instance that terminates TLS/HTTP/2 directly (no nginx / L7 proxy in front), also set `BB_MAX_CONNECTIONS` to a finite value and review `BB_H2_WS_MAX_STREAMS_PER_CONNECTION`.  The recommended production shape (nginx terminating TLS/HTTP/2, BlackBull behind it on HTTP/1.1) eliminates the RFC 8441 attack surface entirely because nginx does not forward Extended CONNECT to the backend. |
 | `BB_H2_WS_MAX_STREAMS_PER_CONNECTION` | `5` | Maximum concurrent WebSocket (RFC 8441 Extended CONNECT) streams per HTTP/2 connection.  Caps the per-connection blast radius of WS-over-H2 stream-exhaustion attacks.  `0` disables the cap (no upper bound beyond `BB_H2_MAX_CONCURRENT_STREAMS`).  Only meaningful when `BB_H2_ENABLE_WEBSOCKET=1`. |
 
+## MQTT
+
+Every limit here is also **advertised** to the client in CONNACK where MQTT 5
+has a property for it, so a conforming client stays inside the bounds without
+ever meeting the enforcement path.
+
+| Variable | Default | Controls |
+|---|---|---|
+| `BB_MQTT_MAX_PACKET_SIZE` | `1048576` (1 MiB) | Maximum size of one inbound control packet, advertised as `Maximum Packet Size` (§3.2.2.3.6).  Checked against the declared Remaining Length as soon as the fixed header is readable, so an over-size packet is refused **without buffering its payload** — MQTT 5 lets a peer declare 268,435,455 bytes (256 MiB) and then dribble them.  Over the cap the broker answers `DISCONNECT` with **0x95 (Packet Too Large)** and closes.  `0` disables. |
+| `BB_MQTT_RECEIVE_MAXIMUM` | `64` | The broker's own `Receive Maximum` (§3.2.2.3.3): how many QoS>0 PUBLISH packets a client may have in flight towards the broker before waiting for acknowledgements. |
+| `BB_MQTT_MAX_QUEUED_MESSAGES` | `1000` | Per-session bound on QoS>0 messages held while the **client's** Receive Maximum window is full.  §4.9 forbids sending more than that many unacknowledged PUBLISH packets, so a client that subscribes and never acknowledges would otherwise make the broker hold every matching message for the life of its session.  At the bound the newest message is refused and a cap hit logged — the oldest are kept, because a subscriber is owed what it was promised first and has no way to detect a silently dropped message.  `0` disables. |
+| `BB_MQTT_MAX_RETAINED` | `10000` | Maximum number of topics holding a retained message.  Retained messages are permanent by design, so one PUBLISH per topic grows broker memory forever without a bound.  At the cap a retained publish to a **new** topic is refused; updating or deleting an already-retained topic always works, so a client can never be locked out of correcting its own state.  `0` disables. |
+
 ## Compression
 
 | Variable | Default | Controls |

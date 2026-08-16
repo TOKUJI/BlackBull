@@ -13,10 +13,12 @@ subscribers during a peer's teardown with no special-casing.
 from __future__ import annotations
 
 import logging
+from collections import deque
 from dataclasses import dataclass, field, replace
 from typing import Any
 
 from ..actor import Actor, Message as ActorMessage
+from ..server.cap_log import log_cap_hit
 from .messages import (
     MQTTConnect, MQTTConnack, MQTTDisconnect,
     MQTTPublish, MQTTPuback, MQTTPubrec, MQTTPubrel, MQTTPubcomp,
@@ -127,6 +129,19 @@ def _parse_share(topic_filter: str) -> tuple[str, str] | None:
     return parts[1], parts[2]
 
 
+@dataclass(frozen=True, slots=True)
+class _Held:
+    """One delivery waiting for room in a client's Receive Maximum window.
+
+    Deliberately not an ``MQTTPublish``: the packet does not exist yet.
+    Its Packet Identifier is allocated when it is finally sent, so a
+    long-waiting message never occupies an identifier.
+    """
+    publish: Any
+    qos: int
+    retain: bool
+
+
 def _new_broker_session() -> dict[str, Any]:
     """Per-client session state owned by the broker (§3.1.2.11)."""
     return {
@@ -141,6 +156,16 @@ def _new_broker_session() -> dict[str, Any]:
         # PUBLISH itself is kept (not just the state) so §4.4 reconnect replay
         # can retransmit it with DUP=1 while still awaiting PUBREC.
         'pending_qos2_out': {},
+        # §4.9 — messages that matched while the client's Receive Maximum
+        # window was full.  They are held, not dropped, because the client
+        # asked us to slow down rather than to forget; the queue is bounded
+        # (``BB_MQTT_MAX_QUEUED_MESSAGES``) because "hold everything" is how
+        # a client that never acknowledges turns a subscription into a leak.
+        'outbound_queue': deque(),
+        # The client's declared Receive Maximum (§3.1.2.11.3).  65535 is the
+        # protocol default when the property is absent — a real bound, not
+        # "unlimited", which is why it can be stored as a plain number.
+        'receive_maximum': 65535,
         '_expiry': 0,
         '_next_pid': 0,
     }
@@ -154,8 +179,25 @@ class BrokerActor(Actor):
     state — the design goal of the actor split.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, max_retained: int | None = None,
+                 max_queued: int | None = None,
+                 receive_maximum: int | None = None,
+                 max_packet_size: int | None = None) -> None:
         super().__init__()
+        # The broker advertises ``maximum_packet_size`` but does not enforce it
+        # — the framer does, one layer down, because that is where the bytes
+        # are.  It is read here so CONNACK states the same number the
+        # connection actually applies.
+        from ..env import get_settings  # noqa: PLC0415
+        settings = get_settings()
+        self._max_retained = (settings.mqtt_max_retained
+                              if max_retained is None else max_retained)
+        self._max_queued = (settings.mqtt_max_queued_messages
+                            if max_queued is None else max_queued)
+        self._receive_maximum = (settings.mqtt_receive_maximum
+                                 if receive_maximum is None else receive_maximum)
+        self._max_packet_size = (settings.mqtt_max_packet_size
+                                 if max_packet_size is None else max_packet_size)
         self._clients = {}          # client_id -> live connection Actor
         self._client_by_conn = {}   # id(conn) -> client_id
         self._sessions = {}         # client_id -> session dict
@@ -185,8 +227,10 @@ class BrokerActor(Actor):
             await self._on_pubrec(msg.sender, msg.packet_id)
         elif isinstance(msg, ClientPubcomp):
             self._clear_pending(msg.sender, 'pending_qos2_out', msg.packet_id)
+            await self._drain_outbound(msg.sender)
         elif isinstance(msg, ClientPuback):
             self._clear_pending(msg.sender, 'pending_qos1_out', msg.packet_id)
+            await self._drain_outbound(msg.sender)
         elif isinstance(msg, Detach):
             await self._on_detach(msg.sender, msg.graceful)
         else:  # pragma: no cover - connection actor sends only the above
@@ -221,8 +265,22 @@ class BrokerActor(Actor):
         # §3.3.2.3 — a zero-length retained payload deletes the retained message.
         if publish.payload == b'':
             self._retained.pop(publish.topic, None)
-        else:
-            self._retained[publish.topic] = publish
+            return
+        # The cap counts *topics*, so it only binds a topic that is not already
+        # retained.  Updating and deleting stay available at the cap on
+        # purpose: a client locked out of correcting its own retained state
+        # would be worse off than one that could never set it, and deletion is
+        # the operation that frees the very room being contended for.
+        if (self._max_retained
+                and publish.topic not in self._retained
+                and len(self._retained) >= self._max_retained):
+            log_cap_hit('mqtt_max_retained',
+                        requested=len(self._retained) + 1,
+                        limit=self._max_retained,
+                        scope_path=publish.topic,
+                        protocol='mqtt')
+            return
+        self._retained[publish.topic] = publish
 
     def _clear_pending(self, conn, bucket, packet_id) -> None:
         session = self._session_for(conn)
@@ -297,8 +355,20 @@ class BrokerActor(Actor):
                 session['_expiry'] = expiry
                 self._sessions[client_id] = session
 
+        # §3.1.2.11.3 — the client's Receive Maximum bounds what we may have in
+        # flight towards it.  Absent means 65535, the protocol's own default;
+        # this is session state, so a Clean Start = 0 reconnect that omits the
+        # property keeps what the client last declared rather than silently
+        # widening its window.
+        declared = connect.properties.get('receive_maximum')
+        if declared:
+            session['receive_maximum'] = declared
+        session.setdefault('receive_maximum', 65535)
+        session.setdefault('outbound_queue', deque())
+
         await conn.send(Send(packet=MQTTConnack(
-            session_present=session_present, reason_code=ReasonCode.SUCCESS)))
+            session_present=session_present, reason_code=ReasonCode.SUCCESS,
+            properties=self._connack_properties())))
 
         # §4.4 — retransmit any unacknowledged outbound messages queued while
         # the client was offline (QoS 1 + QoS 2, with DUP set on PUBLISH frames).
@@ -503,18 +573,95 @@ class BrokerActor(Actor):
             await self._deliver(conn, session, publish, qos,
                                 retain=(rap and publish.retain))
 
+    def _connack_properties(self) -> dict[str, Any]:
+        """§3.2.2.3 — state the limits the broker actually enforces.
+
+        A conforming client that reads these never sends an over-size
+        packet or over-fills the window, so the enforcement paths become
+        the answer to a misbehaving peer rather than a surprise for a
+        well-behaved one.  Omit what is disabled: advertising "no limit"
+        and advertising nothing mean the same thing to a client, and only
+        one of them can go stale.
+        """
+        props: dict[str, Any] = {}
+        if self._max_packet_size:
+            props['maximum_packet_size'] = self._max_packet_size
+        if self._receive_maximum:
+            props['receive_maximum'] = self._receive_maximum
+        return props
+
+    @staticmethod
+    def _in_flight(session) -> int:
+        """QoS>0 PUBLISH packets sent and not yet acknowledged (§4.9)."""
+        return len(session.get('pending_qos1_out') or {}) \
+            + len(session.get('pending_qos2_out') or {})
+
     async def _deliver(self, conn, session, publish, granted_qos, *, retain=False) -> None:
         qos = min(publish.qos, granted_qos)
-        packet_id = self._alloc_pid(session) if qos > 0 else None
+        if qos == 0:
+            # §4.9 bounds QoS 1 and 2 only.  Throttling QoS 0 would invent a
+            # rule the client never agreed to, and there is nothing to wait
+            # for: an unacknowledged message cannot accumulate.
+            await conn.send(Send(packet=MQTTPublish(
+                topic=publish.topic, payload=publish.payload, qos=0,
+                retain=retain, properties=dict(publish.properties))))
+            return
+
+        if self._in_flight(session) >= session.get('receive_maximum', 65535):
+            self._enqueue_outbound(session, publish, qos, retain)
+            return
+        await self._send_qos(conn, session, publish, qos, retain)
+
+    def _enqueue_outbound(self, session, publish, qos, retain) -> None:
+        """Hold a message the client's window has no room for.
+
+        The queue is the total the audit found missing, so it has its own
+        bound.  At the bound the **newest** message is refused rather than
+        an older one evicted: the client is owed what it was promised
+        first, and a broker that silently drops the oldest gives a
+        subscriber a gap it has no way to detect.
+        """
+        queue = session['outbound_queue']
+        if self._max_queued and len(queue) >= self._max_queued:
+            log_cap_hit('mqtt_max_queued_messages',
+                        requested=len(queue) + 1,
+                        limit=self._max_queued,
+                        scope_path=publish.topic,
+                        protocol='mqtt')
+            return
+        # Held as a *decision*, not a packet: a QoS>0 PUBLISH is invalid
+        # without a Packet Identifier (§3.3.2-2), and the identifier belongs to
+        # the moment of sending — allocating one now would burn an id from a
+        # 65535-wide space for a message that may wait indefinitely.
+        queue.append(_Held(publish=publish, qos=qos, retain=retain))
+
+    async def _send_qos(self, conn, session, publish, qos, retain) -> None:
+        packet_id = self._alloc_pid(session)
         out = MQTTPublish(
             topic=publish.topic, payload=publish.payload, qos=qos,
             packet_id=packet_id, retain=retain, properties=dict(publish.properties))
         if qos == 1:
             session['pending_qos1_out'][packet_id] = out
-        elif qos == 2:
+        else:
             session['pending_qos2_out'][packet_id] = {
                 'state': _QOS2_OUT_PUBLISH_SENT, 'packet': out}
         await conn.send(Send(packet=out))
+
+    async def _drain_outbound(self, conn) -> None:
+        """Release held messages as acknowledgements free the window.
+
+        Called after every event that clears an in-flight slot.  One
+        acknowledgement releases at most one message, which is what keeps
+        the window a window rather than a burst.
+        """
+        session = self._session_for(conn)
+        if session is None:
+            return
+        queue = session.get('outbound_queue')
+        limit = session.get('receive_maximum', 65535)
+        while queue and self._in_flight(session) < limit:
+            held = queue.popleft()
+            await self._send_qos(conn, session, held.publish, held.qos, held.retain)
 
     async def _on_pubrel(self, conn, packet_id) -> None:
         await conn.send(Send(packet=MQTTPubcomp(

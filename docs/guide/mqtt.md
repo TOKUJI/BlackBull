@@ -101,6 +101,8 @@ conformance matrix:
 | Session takeover | a second CONNECT for a live Client Identifier disconnects the prior connection with `0x8E` (§3.1.4) |
 | Properties | the full MQTT 5 property set (§2.2.2.2) on every packet that carries properties |
 | Sessions | subscriptions and pending QoS state preserved across reconnects with Clean Start = 0 |
+| Flow control | the client's `Receive Maximum` (§3.1.2.11.3) is honoured in the outbound direction and the broker's own is advertised in CONNACK |
+| Resource limits | packet size, session backlog, and retained-store size are bounded and advertised — see below |
 
 The wire codec lives in `blackbull.mqtt.messages` (the 15 control-packet
 dataclasses, `encode_packet` / `decode_packet`, the property system, reason
@@ -151,6 +153,49 @@ Semantics worth knowing:
   it a Protocol Error (§3.8.3.1), and the broker disconnects with `0x82`.
 - Malformed forms (`$share/g`, an empty ShareName, a wildcard in the ShareName,
   or an empty filter portion) are rejected per-entry with `0x8F`.
+
+## Resource limits
+
+An MQTT broker holds state on a client's behalf: buffered packet bytes, unacked
+messages, retained messages that outlive the session that published them. Each
+of those is bounded, and each bound is **advertised in CONNACK** where MQTT 5
+has a property for it — so a conforming client stays inside the limits without
+ever meeting the enforcement path.
+
+| Limit | Default | Advertised as | Over the limit |
+|---|---|---|---|
+| `BB_MQTT_MAX_PACKET_SIZE` | 1 MiB | `Maximum Packet Size` (§3.2.2.3.6) | `DISCONNECT` **0x95 Packet Too Large**, connection closed |
+| `BB_MQTT_RECEIVE_MAXIMUM` | 64 | `Receive Maximum` (§3.2.2.3.3) | the client waits for acknowledgements |
+| `BB_MQTT_MAX_QUEUED_MESSAGES` | 1000 | — (a broker-side total) | newest message refused, cap hit logged |
+| `BB_MQTT_MAX_RETAINED` | 10000 | — (a broker-side total) | retained publish to a *new* topic refused |
+
+Three properties of these limits are worth knowing before you tune them:
+
+**The packet limit is judged from the header.** MQTT 5 lets a peer declare a
+Remaining Length of 268,435,455 bytes (256 MiB) and then deliver it slowly. The
+check runs as soon as the fixed header is readable, so the payload is never
+buffered — the broker refuses on what the peer *claimed*, not on what it
+managed to send.
+
+**The backlog exists because flow control is not a licence to forget.** When a
+client's `Receive Maximum` window is full, matching messages are held rather
+than dropped: the client asked the broker to slow down, not to lose its
+messages. But "hold everything" is how a subscriber that never acknowledges
+turns a subscription into a leak, so the queue is bounded too. At the bound the
+**newest** message is refused and the oldest kept — a subscriber is owed what it
+was promised first, and has no way to detect a message silently dropped from the
+middle.
+
+**Retained messages are capped by topic count, and correction is always
+allowed.** At the cap, a retained publish to a *new* topic is refused, but
+updating or deleting an already-retained topic still works. A client locked out
+of correcting its own retained state would be worse off than one that could
+never set it — and deleting (a zero-length retained payload, §3.3.2.3) is what
+frees the room being contended for.
+
+Every refusal above emits a record on `blackbull.caps` (see
+[Logging](logging.md#cap-hit-log-blackbullcaps)), so a limit that fires is a
+limit you can see fire.
 
 ## Trying it with Mosquitto
 

@@ -95,6 +95,31 @@ so the editable install's metadata catches up.
   applications that do not serve huge messages should lower it.
   **This is a behaviour change**: a WebSocket message over 16 MiB now closes
   the connection unless the bound is raised.
+- **MQTT resource bounds** — the broker now answers the three questions every
+  other protocol here already answered, and **advertises** each answer in
+  CONNACK where MQTT 5 has a property for it, so a conforming client never
+  meets the enforcement path:
+    - **`BB_MQTT_MAX_PACKET_SIZE`** (default `1048576`, 1 MiB), advertised as
+      `Maximum Packet Size` (§3.2.2.3.6).  Judged from the declared Remaining
+      Length as soon as the fixed header is readable — MQTT 5 permits a peer to
+      declare 268,435,455 bytes and dribble them, so the payload is refused
+      unread.  Over the cap: `DISCONNECT` **0x95 Packet Too Large**, connection
+      closed.
+    - **`BB_MQTT_RECEIVE_MAXIMUM`** (default `64`), advertised as
+      `Receive Maximum` (§3.2.2.3.3).
+    - **`BB_MQTT_MAX_QUEUED_MESSAGES`** (default `1000`) — per-session bound on
+      QoS>0 messages held while the *client's* Receive Maximum window is full.
+      The client's `receive_maximum` was decoded but never honoured, so a
+      subscriber that never acknowledged made the broker hold every matching
+      message for the life of its session.  At the bound the newest message is
+      refused and the oldest kept.
+    - **`BB_MQTT_MAX_RETAINED`** (default `10000`) — retained messages are
+      permanent by design, so the store needed a total.  At the cap a retained
+      publish to a *new* topic is refused; updating and deleting an
+      already-retained topic always work.
+  **This is a behaviour change** for a broker exposed to peers that send
+  packets over 1 MiB, retain more than 10,000 topics, or rely on an unbounded
+  offline backlog.
 
 ### Changed
 
@@ -127,6 +152,16 @@ so the editable install's metadata catches up.
     A/B on `/conn` puts the change at +0.13 % (95 % CI [−0.13, +0.39]), i.e.
     no throughput claim either way.  Ownership is unchanged: the party that
     decides is the party that writes.
+- **MQTT is visible in `blackbull.caps`.**  The broker previously had no
+  `log_cap_hit` call anywhere, so nothing it refused reached the operational
+  channel every other protocol reports through.  Each of the new limits emits
+  one, with the topic in `scope_path`.
+- **MQTT framer resync is linear, not quadratic.**  A desynchronised stream
+  used to drop one byte and re-decode from the start, so a junk run cost a
+  decode attempt per byte — and the length of a junk run is the peer's choice.
+  It now skips to the next byte that could plausibly begin a packet (a
+  control-packet type of `0` is reserved, §2.1.2) before asking the decoder
+  again.
 - **WebSocket cap-hit records now carry the request path.**  The WebSocket
   actor passes its `Connection` to the recipient, so `ws_max_frame_payload` and
   `ws_max_message_size` report with `scope_path` set instead of `None` — the
