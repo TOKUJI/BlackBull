@@ -420,6 +420,48 @@ The following are protocol violations and raise
 | New TEXT or BINARY frame while a fragment sequence is open | §5.4 |
 | Control frame (ping/pong/close) with FIN=0 | §5.5 |
 
+## Message size limits
+
+Two limits bound an inbound message, and they are deliberately not the
+same limit:
+
+| Variable | Default | Bounds |
+|---|---|---|
+| `BB_WS_MAX_FRAME_PAYLOAD` | 64 MiB | one frame, as it arrives on the wire |
+| `BB_WS_MAX_MESSAGE_SIZE` | 16 MiB | the message your handler receives |
+
+The second exists because the first cannot see what a frame *becomes*.
+Two paths grow a message after the frame check has already passed:
+
+- **Decompression.** With `permessage-deflate` negotiated, the frame on
+  the wire is compressed.  Deflate ratios measured in this tree reach
+  **1028.8:1**, so a 1 MiB frame — comfortably legal under the frame cap
+  — inflates to roughly 1 GiB.
+- **Fragmentation.** Each continuation frame is individually legal; the
+  sum is what costs memory.
+
+`BB_WS_MAX_MESSAGE_SIZE` is therefore expressed in terms of what your
+handler is handed: post-reassembly, post-inflation.  The running total is
+checked *before* each fragment is appended, and decompression is bounded
+by zlib itself, so an over-sized message is refused without ever being
+built.
+
+A message over the limit closes the connection with **1009 (Message Too
+Big)** — RFC 6455 §7.4.1 defines the code for exactly this — and records
+a `ws_max_message_size` cap hit on `blackbull.caps` (see
+[Logging](logging.md#cap-hit-log-blackbullcaps)).
+
+```bash
+# An application whose largest legitimate message is 256 KiB
+BB_WS_MAX_MESSAGE_SIZE=262144 python app.py
+```
+
+The default is the largest message the Autobahn test suite sends, chosen
+so conformance passes with nothing configured.  **If your application
+does not serve huge messages, lower it.**  The default bounds the
+amplification but does not remove it: at the ratio above, a peer still
+buys 16 MiB of your memory for about 16 KiB of its own bandwidth.
+
 ## Read-ahead and back-pressure
 
 `BB_WS_QUEUE_DEPTH` selects how far ahead of your handler the

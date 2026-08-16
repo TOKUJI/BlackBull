@@ -195,11 +195,30 @@ BB_WS_MAX_FRAME_PAYLOAD
     before any body bytes arrive.  This cap is enforced on the
     declared length in the frame header (before reading bytes off the
     wire) and triggers ``CLOSE`` with status code 1009 (MESSAGE_TOO_BIG)
-    when exceeded.  Default: ``67108864`` (64 MiB) — large enough to
-    pass the Autobahn|Testsuite 9.x large-message cases while still
-    bounding per-connection memory use.  Lower for stricter exposure
-    (e.g. ``1048576`` for 1 MiB matching the
-    ``python-websockets`` default).
+    when exceeded.  Default: ``67108864`` (64 MiB) — comfortably above
+    the largest frame the Autobahn|Testsuite sends (16 MiB, case 9.1.6)
+    while still bounding per-connection memory use.  Lower for stricter
+    exposure (e.g. ``1048576`` for 1 MiB matching the
+    ``python-websockets`` default).  This bounds the frame *as it
+    arrives on the wire*; what the application is handed after
+    reassembly and inflation is bounded by ``BB_WS_MAX_MESSAGE_SIZE``.
+BB_WS_MAX_MESSAGE_SIZE
+    Maximum size (bytes) of a WebSocket message **as the application
+    receives it** — after fragment reassembly and after
+    permessage-deflate inflation.  This is the bound
+    ``BB_WS_MAX_FRAME_PAYLOAD`` cannot express: that one caps a single
+    compressed frame on the wire, and deflate ratios in this tree
+    measure 1028.8:1, so a frame at that cap inflates to ~64 GiB with
+    nothing between the peer and the allocator.  Fragmentation is the
+    same defect without the compression: N frames each under the frame
+    cap accumulate with no total.
+    Exceeding it closes with 1009 (MESSAGE_TOO_BIG, RFC 6455 §7.4.1) and
+    logs a ``ws_max_message_size`` cap hit.  ``0`` disables the cap.
+    Default: ``16777216`` (16 MiB) — the largest message the
+    Autobahn|Testsuite sends (9.1.6 text / 9.2.6 binary), so the suite
+    stays green on shipped defaults.  An application that does not serve
+    huge messages should lower this: at the measured ratio a peer still
+    buys 16 MiB of server memory for ~16 KiB of upstream bandwidth.
 BB_COMPRESSION_MIN_SIZE
     Minimum response body size in bytes below which
     :class:`~blackbull.middleware.compression.Compression` skips
@@ -616,6 +635,12 @@ class Settings:
     #: the security rationale.  Default 64 MiB.
     ws_max_frame_payload: int = 64 * 1024 * 1024
 
+    #: Maximum size (bytes) of a message as the *application* receives it —
+    #: post-reassembly, post-inflation.  The frame cap above bounds one
+    #: compressed frame on the wire; this bounds what that frame becomes.
+    #: See BB_WS_MAX_MESSAGE_SIZE above.  Default 16 MiB, ``0`` disables.
+    ws_max_message_size: int = 16 * 1024 * 1024
+
     #: Per-connection asyncio.Semaphore cap on running stream handlers when
     #: running with a single worker (0 = disabled).  Defaults to 20 so that
     #: high-mux connections (e.g. -m 50) do not saturate the single event loop
@@ -742,6 +767,8 @@ def get_settings() -> Settings:
         ws_permessage_deflate=_bool_env('BB_WS_PERMESSAGE_DEFLATE', True),
         ws_max_frame_payload=_int_env_nonneg(
             'BB_WS_MAX_FRAME_PAYLOAD', 64 * 1024 * 1024),
+        ws_max_message_size=_int_env_nonneg(
+            'BB_WS_MAX_MESSAGE_SIZE', 16 * 1024 * 1024),
         use_uvloop=_bool_env('BB_UVLOOP', False),
         h2_active_streams_1w=_int_env_nonneg('BB_H2_ACTIVE_STREAMS_1W', 20),
         h2_active_streams=_int_env_nonneg('BB_H2_ACTIVE_STREAMS', 20),

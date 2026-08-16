@@ -104,11 +104,15 @@ bash bench/conformance/autobahn_run.sh               # full fuzzingclient run
 CASES='1.*' bash bench/conformance/autobahn_run.sh   # subset (e.g. all of §1.x)
 ```
 
-The §9 *Limits and performance* cases send single frames of
-4-64 MiB and need the per-frame payload cap to be at least the
-case size.  The shipped default (`BB_WS_MAX_FRAME_PAYLOAD`,
-64 MiB) accepts all of Autobahn's §9 cases; lower it for stricter
-exposure on untrusted-peer deployments.
+The §9 *Limits and performance* cases send messages up to 16 MiB
+(9.1.6 text / 9.2.6 binary; the fragmented 9.4.x cases top out at
+4 MiB), so both WebSocket size limits must be at least the case
+size.  The shipped defaults accept every §9 case with nothing
+configured — `BB_WS_MAX_FRAME_PAYLOAD` at 64 MiB and
+`BB_WS_MAX_MESSAGE_SIZE` at exactly the 16 MiB the suite needs.
+Lower either for stricter exposure on untrusted-peer deployments;
+that is a deviation from the configuration this suite was run
+under.
 
 Reports land in `bench/conformance/results/autobahn_<timestamp>/`
 with an HTML index — open `index.html` in a browser for the

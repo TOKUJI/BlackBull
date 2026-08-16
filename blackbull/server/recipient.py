@@ -2,14 +2,14 @@ import asyncio
 from abc import ABC, abstractmethod
 from collections import deque
 from time import monotonic as _monotonic
-from typing import Awaitable, Callable, Optional
+from typing import Awaitable, Callable, NoReturn, Optional
 
 from .cap_log import log_cap_hit
 from .deadline import ConnectionDeadline, WsIdleWatchdog
 from .sender import AbstractWriter, AsyncioWriter
 from .ws_codec import (
-    FramePayloadTooLarge, WSOpcode, encode_frame, read_frame_header,
-    read_payload,
+    FramePayloadTooLarge, MessageTooLarge, WSOpcode, encode_frame,
+    read_frame_header, read_payload,
 )
 from .constants import WSCloseCode
 from ..asgi import ASGIEvent, ASGIReceiveEvent
@@ -645,9 +645,19 @@ class FragmentAssembler:
     Raises ``ProtocolError`` on violations:
     - CONTINUATION frame with no fragmentation in progress (§5.4)
     - New TEXT/BINARY opener while a fragmented message is open (§5.4)
+
+    *max_total* bounds the reassembled message; ``0`` disables it.  The
+    check runs **before** the append, so the frame that crosses the bound
+    is refused rather than accumulated and then regretted — a bound
+    enforced after the fact would have already paid for the attack.
+    Raises :class:`MessageTooLarge`, which the caller turns into
+    CLOSE 1009.  Note this bounds the *compressed* bytes when
+    permessage-deflate is in play; the inflated size is bounded
+    separately, because only one of the two is knowable here.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, max_total: int = 0) -> None:
+        self._max_total = max_total
         self._opcode: int | None = None
         self._buf: bytearray | None = None
         # Tracks the RSV1 bit of the message-opener frame (RFC 7692: only the
@@ -675,6 +685,9 @@ class FragmentAssembler:
                 )
             assert self._buf is not None
             assert self._opcode is not None
+            if self._max_total and len(self._buf) + len(payload) > self._max_total:
+                raise MessageTooLarge(len(self._buf) + len(payload),
+                                      self._max_total)
             self._buf += payload
             if fin:
                 result = (self._opcode, bytes(self._buf), self._compressed)
@@ -1600,13 +1613,19 @@ class WebSocketRecipient(BaseRecipient):
     # full declared length).  ``MESSAGE_TOO_BIG`` (1009) is the
     # RFC 6455 §7.4.1 close code.
     #
-    # Default: 64 MiB — large enough to pass the Autobahn|Testsuite
-    # 9.x large-message cases (up to 9.1.6 = 64 MiB text) while still
-    # bounding per-connection memory.  A 1 MiB cap regresses the
-    # Autobahn 9.x cases, which is why the default is this high.
+    # Default: 64 MiB — comfortably above the largest frame the
+    # Autobahn|Testsuite sends (16 MiB, case 9.1.6) while still bounding
+    # per-connection memory.  A 1 MiB cap regresses the Autobahn 9.x
+    # cases, which is why the default is this high.
     # Override per-deployment via ``BB_WS_MAX_FRAME_PAYLOAD`` for
     # stricter (or looser) exposure than the default.
     _MAX_FRAME_PAYLOAD: int = 64 * 1024 * 1024
+
+    # Fallback for the message bound, mirroring ``_MAX_FRAME_PAYLOAD``.
+    # 16 MiB is the largest message the Autobahn|Testsuite sends (9.1.6
+    # text / 9.2.6 binary), so the suite passes on shipped defaults.
+    # ``BB_WS_MAX_MESSAGE_SIZE`` carries the full rationale.
+    _MAX_MESSAGE_SIZE: int = 16 * 1024 * 1024
 
     def __init__(self, reader: AbstractReader, writer: AbstractWriter, *,
                  require_masked: bool = True,
@@ -1615,12 +1634,12 @@ class WebSocketRecipient(BaseRecipient):
                  ws_queue_depth: int = _WS_READ_INLINE,
                  decompressor=None,
                  max_frame_payload: int | None = None,
+                 max_message_size: int | None = None,
                  on_message: Callable[[dict], Awaitable[None]] | None = None,
                  read_ahead_needed: Callable[[], bool] | None = None):
         super().__init__(reader)
         self._writer = writer
         self._connect_sent = False
-        self._assembler = FragmentAssembler()
         # Resolution order for the cap:
         #  1. explicit ``max_frame_payload=`` constructor arg (tests + power users)
         #  2. ``BB_WS_MAX_FRAME_PAYLOAD`` env var via Settings
@@ -1636,6 +1655,16 @@ class WebSocketRecipient(BaseRecipient):
                 self._max_frame_payload = get_settings().ws_max_frame_payload
             except Exception:
                 self._max_frame_payload = self._MAX_FRAME_PAYLOAD
+        # Same three-step resolution for the message bound.
+        if max_message_size is not None:
+            self._max_message_size: int = max_message_size
+        else:
+            try:
+                from ..env import get_settings  # noqa: PLC0415
+                self._max_message_size = get_settings().ws_max_message_size
+            except Exception:
+                self._max_message_size = self._MAX_MESSAGE_SIZE
+        self._assembler = FragmentAssembler(max_total=self._max_message_size)
         # Server-side: client frames MUST be masked (RFC 6455 §5.1).  Client-side:
         # server frames MUST NOT be masked, so the recipient must not raise when
         # they aren't.  When ``require_masked`` is False, outgoing PONG frames
@@ -1858,6 +1887,20 @@ class WebSocketRecipient(BaseRecipient):
         while not self._read_finished:
             self._read_finished = await self._drive_once()
 
+    def _refuse_oversized_message(self, exc: MessageTooLarge) -> NoReturn:
+        """Log the cap hit and raise the 1009 that closes the connection.
+
+        Three call sites reach it — fragment total, inflate output, and a
+        single oversized frame — because there are three ways for a
+        message to outgrow the bound and only one thing to do about it.
+        """
+        log_cap_hit('ws_max_message_size',
+                    requested=exc.produced,
+                    limit=exc.maximum,
+                    scope_path=self._conn.path if self._conn else None,
+                    protocol='ws')
+        raise ProtocolError(str(exc), close_code=WSCloseCode.MESSAGE_TOO_BIG) from exc
+
     async def _handle_data_frame(self, opcode, payload: bytes, fin: bool,
                                  rsv1: bool = False) -> None:
         """Handle TEXT/BINARY/CONTINUATION frame.
@@ -1870,14 +1913,22 @@ class WebSocketRecipient(BaseRecipient):
         the method prevents a future reader from mistaking "a message was
         emitted" for "the read side is done".
         """
-        result = self._assembler.feed(opcode, payload, fin, rsv1)
+        try:
+            result = self._assembler.feed(opcode, payload, fin, rsv1)
+        except MessageTooLarge as exc:
+            self._refuse_oversized_message(exc)
         if result is None:
             return
         msg_opcode, full_payload, compressed = result
         if compressed:
             assert self._decompressor is not None  # frame loop enforced this
             try:
-                full_payload = self._decompressor.decompress(full_payload)
+                full_payload = self._decompressor.decompress(
+                    full_payload, max_length=self._max_message_size or None)
+            except MessageTooLarge as exc:
+                # Ordered before the generic handler on purpose: an inflate
+                # bomb is a size refusal (1009), not corrupt data (1002).
+                self._refuse_oversized_message(exc)
             except Exception as exc:
                 # RFC 7692 §7.1 — a payload that fails to decompress is a
                 # connection error.  Treat as PROTOCOL_ERROR (1002).
@@ -1885,6 +1936,13 @@ class WebSocketRecipient(BaseRecipient):
                     f'permessage-deflate decompression failed: {exc}',
                     close_code=1002,
                 ) from exc
+        elif self._max_message_size and len(full_payload) > self._max_message_size:
+            # An unfragmented, uncompressed frame reaches neither of the two
+            # bounds above: the assembler passes it straight through and there
+            # is no inflate step.  Without this, the message bound would be
+            # weaker than the frame cap for the simplest message there is.
+            self._refuse_oversized_message(
+                MessageTooLarge(len(full_payload), self._max_message_size))
         if msg_opcode == WSOpcode.TEXT:
             try:
                 text = full_payload.decode('utf-8')

@@ -77,6 +77,11 @@ class WebSocketActor(Actor):
         )
         self._ws_receive = RecipientFactory.websocket(
             reader, writer,
+            # Only the cap-hit log reads this on the actor path (every other
+            # use is gated on a dispatcher, which this path does not pass) —
+            # without it a WS limit reports with no path, which is the one
+            # field an operator needs to act on it.
+            conn=conn,
             ws_queue_depth=ws_queue_depth,
             decompressor=decompressor,
             on_message=self._emit_websocket_message,

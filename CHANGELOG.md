@@ -83,6 +83,18 @@ so the editable install's metadata catches up.
   the transport (so a slow handler is never mistaken for a slow peer), HTTP/2
   counts wall clock but exempts a peer our own closed inbound window
   back-pressured.
+- **`BB_WS_MAX_MESSAGE_SIZE`** (default `16777216`, 16 MiB) — bounds a
+  WebSocket message *as the application receives it*: after fragment
+  reassembly and after `permessage-deflate` inflation.  `BB_WS_MAX_FRAME_PAYLOAD`
+  bounds a frame on the wire and cannot express this — deflate ratios measured
+  in this tree reach **1028.8:1**, so a 1 MiB frame inflates to roughly 1 GiB,
+  and a fragmented message accumulates frames that are each individually legal.
+  Over the bound closes with **1009 Message Too Big** (RFC 6455 §7.4.1) and
+  logs a `ws_max_message_size` cap hit.  `0` disables.  The default admits the
+  largest message the Autobahn suite sends, so conformance passes unconfigured;
+  applications that do not serve huge messages should lower it.
+  **This is a behaviour change**: a WebSocket message over 16 MiB now closes
+  the connection unless the bound is raised.
 
 ### Changed
 
@@ -115,6 +127,10 @@ so the editable install's metadata catches up.
     A/B on `/conn` puts the change at +0.13 % (95 % CI [−0.13, +0.39]), i.e.
     no throughput claim either way.  Ownership is unchanged: the party that
     decides is the party that writes.
+- **WebSocket cap-hit records now carry the request path.**  The WebSocket
+  actor passes its `Connection` to the recipient, so `ws_max_frame_payload` and
+  `ws_max_message_size` report with `scope_path` set instead of `None` — the
+  one field an operator needs to act on the record.
 - **A refused body ends the HTTP/1.1 connection.**  `HTTP1Recipient.must_close`
   makes explicit what a desynced chunked stream already implied, and extends it
   to a body refused for size: the actor breaks the keep-alive loop instead of

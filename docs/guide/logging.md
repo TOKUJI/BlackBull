@@ -298,6 +298,7 @@ record on `blackbull.caps` when it fires.  Coverage:
 | `BB_REQUEST_TIMEOUT` | handler exceeded per-request budget (H/1.1 + H/2) |
 | `BB_WRITE_TIMEOUT` | drain stalled (slow-read peer) |
 | `BB_WS_MAX_FRAME_PAYLOAD` | WebSocket frame declared length exceeded |
+| `BB_WS_MAX_MESSAGE_SIZE` | WebSocket message over the total cap post-reassembly / post-inflation — `requested` is the size reached when the bound tripped, never the size the message would have become |
 | `BB_H2_MAX_CONCURRENT_STREAMS` | HTTP/2 stream-open guard tripped |
 | `BB_H2_WS_MAX_STREAMS_PER_CONNECTION` | RFC 8441 WebSocket stream cap tripped |
 | `BB_COMPRESSION_MAX_INFLIGHT` | Compression middleware bypassed (executor saturated) |
