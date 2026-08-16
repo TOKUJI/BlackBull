@@ -335,6 +335,14 @@ the future clears when a reader is *woken*, not when it stops waiting, so
 an arrival in that window armed a pause the next park released.  Moving
 the decision deleted the inference rather than relocating it.
 
+Two of these decisions cross the split as *published state* rather than as
+a call, in opposite directions: the reader writes `read_offer` (how much
+the next `recv` should be able to deliver) and reads `reading_paused`.
+Both live on the per-arrival or per-read path, where an attribute load is
+free and a method call is not — the `/conn` A/B measured one such call at
+the same order as the whole delta it was chasing.  Ownership is unchanged
+by that: the party that *decides* is the party that writes.
+
 `ReadBuffer` keeps no policy for the same reason.  It reports the one
 moment a message is provably gone — a compaction that leaves it empty —
 and offers `release_to_floor()`; whether to take that offer is the

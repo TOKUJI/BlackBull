@@ -943,8 +943,18 @@ class TestActorBackpressureBranch:
         semantics — ``RST_STREAM(ENHANCE_YOUR_CALM)``."""
         class _DropStub:
             # No backpressures_via_credit attribute
+            def __init__(self):
+                self.disconnected = False
+
             def put_DATAFrame(self, frame):
                 return False  # queue full → drop
+
+            def put_disconnect(self):
+                # Part of the ``_StreamRecipient`` protocol: a refused frame
+                # ends the body, so the actor tells the recipient — otherwise a
+                # handler parked in ``receive()`` waits for a continuation that
+                # was just reset away.
+                self.disconnected = True
 
         handler, _, _ = _make_h2_actor()
         handler.receive = AsyncMock(return_value=None)
@@ -952,7 +962,8 @@ class TestActorBackpressureBranch:
         handler.send_frame.reset_mock()
 
         stream = self._stub_stream(handler)
-        handler._recipients[1] = _DropStub()
+        recipient = _DropStub()
+        handler._recipients[1] = recipient
         await self._drive_data_frame(handler, stream, b'payload-bytes')
 
         rsts = [c.args[0] for c in handler.send_frame.call_args_list
@@ -961,3 +972,6 @@ class TestActorBackpressureBranch:
         assert len(rsts) == 1, (
             f'unmarked-recipient drop must RST_STREAM; got {rsts}')
         assert rsts[0].error_code == ErrorCodes.ENHANCE_YOUR_CALM
+        assert recipient.disconnected, (
+            'the reset stream left a handler waiting on a body that will '
+            'never continue')

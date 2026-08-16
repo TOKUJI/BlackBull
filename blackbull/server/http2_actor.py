@@ -330,6 +330,10 @@ class HTTP2Actor(Actor):
         # ENHANCE_YOUR_CALM (RFC 6585 §5 / RFC 9113 §7) — the same
         # code nginx and Envoy use for this condition.
         self._header_max_total: int = _cfg.header_max_total
+        # Total request-body ceiling, shared with HTTP/1.1 (``BB_MAX_BODY_SIZE``).
+        # A declared over-cap body is refused at HEADERS; an undeclared one is
+        # counted by the recipient as DATA arrives.
+        self._max_body_size: int = _cfg.max_body_size
         # Per-connection semaphore: caps concurrently-running stream handlers to
         # prevent a high-mux connection from starving other connections on the
         # same worker.  None means no cap.
@@ -1156,6 +1160,9 @@ class HTTP2Actor(Actor):
         stream.expected_content_length = _extract_content_length(conn)
         stream.conn = conn
 
+        if await self._refuse_oversized_declared_body(stream, conn, send):
+            return True
+
         self._apply_priority_and_extensions(stream, conn)
         stream_recipient = self._make_stream_recipient(stream.stream_id)
         self._recipients[stream.stream_id] = stream_recipient
@@ -1261,14 +1268,50 @@ class HTTP2Actor(Actor):
                 self.factory.rst_stream(stream.stream_id, ErrorCodes.REFUSED_STREAM))
             return True
 
-        self._apply_priority_and_extensions(stream, conn)
         stream.conn = conn
+        if await self._refuse_oversized_declared_body(stream, conn, send):
+            return True
+
+        self._apply_priority_and_extensions(stream, conn)
         stream_recipient = self._make_stream_recipient(stream.stream_id)
         self._recipients[stream.stream_id] = stream_recipient
         # Same consumer gate and the same inline capture as the HEADERS path.
         log_record = _open_record(conn, self._aggregator)
         send._log_record = log_record
         self._spawn_stream_task(tg, stream.stream_id, conn, stream_recipient, send, log_record)
+        return True
+
+    async def _refuse_oversized_declared_body(self, stream, conn, send) -> bool:
+        """413 the stream when its head declares more body than the cap allows.
+
+        The HTTP/2 shape of the same guard HTTP/1.1 applies at head time, and
+        RFC 9113 §8.1 names the sequence exactly: send the complete response
+        before the request finishes, then ``RST_STREAM(NO_ERROR)`` to ask the
+        peer to stop sending a body we are not going to read.
+
+        The connection survives, which is the one place this differs from
+        HTTP/1.1 and the reason it can afford to be polite: HTTP/2 frames every
+        stream explicitly, so octets we refuse can never be re-read as the next
+        request.  On HTTP/1.1 they are the next bytes in the stream, so the
+        refusal has to end the connection.
+
+        A body with no ``content-length`` declares nothing and cannot be
+        answered here — ``HTTP2Recipient`` counts that one as DATA arrives.
+        """
+        declared = stream.expected_content_length
+        cap = self._max_body_size
+        if not cap or declared is None or declared <= cap:
+            return False
+        logger.warning(
+            '413 Content Too Large — stream %d declares %d bytes, '
+            'BB_MAX_BODY_SIZE=%d', stream.stream_id, declared, cap)
+        log_cap_hit('max_body_size', requested=declared, limit=cap,
+                    scope_path=conn.path, protocol='http2')
+        await send(b'413 Content Too Large',
+                   HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                   [(b'content-type', b'text/plain')])
+        await self.send_frame(
+            self.factory.rst_stream(stream.stream_id, ErrorCodes.NO_ERROR))
         return True
 
     async def _on_data_frame(self, frame, stream: 'Stream') -> None:
@@ -1343,13 +1386,17 @@ class HTTP2Actor(Actor):
                 # RST_STREAM — the bytes are safe in the buffer.
                 pass
             else:
-                # True abuse backstop under consume-based crediting: the peer
-                # either overran the advertised inbound window it was never
-                # credited for, or dribbled a degenerate tiny-frame flood.  A
-                # conformant peer is back-pressured by the closing window and
-                # never reaches this.
+                # The recipient refused the frame: the peer overran the
+                # advertised inbound window it was never credited for, dribbled
+                # a degenerate tiny-frame flood, or broke a body limit
+                # (``BB_MAX_BODY_SIZE`` without a declaration to refuse at
+                # HEADERS, ``BB_MIN_BODY_RATE``).  Reset the stream — and tell
+                # the recipient, so a handler parked in ``receive()`` for a body
+                # that will never continue unwinds now rather than at the
+                # request timeout.
                 await self.send_frame(
                     self.factory.rst_stream(stream.stream_id, ErrorCodes.ENHANCE_YOUR_CALM))
+                recipient.put_disconnect()
         else:
             logger.warning('DATA for stream %d but no recipient found', stream.stream_id)
 

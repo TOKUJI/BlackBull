@@ -526,6 +526,55 @@ class Settings:
     #: over fast links.  Values below ``body_chunk_size`` are raised to it.
     body_chunk_max: int = 524288
 
+    #: Maximum total request-body octets accepted for one request.  Over the
+    #: cap the server answers **413 Content Too Large** and closes: a declared
+    #: ``Content-Length`` is refused at head time, before a body byte is read,
+    #: and a ``chunked`` body is refused the moment the running total passes
+    #: the cap.  Without it a peer chooses how much memory the server spends —
+    #: ``conn.body()`` accumulates whatever arrives, and the per-read bound
+    #: (``body_chunk_max``) limits one read, not the sum of them.
+    #:
+    #: The connection always closes on a refusal, on both framings: the
+    #: unread octets are attacker-chosen, so parsing whatever follows them as
+    #: the next request is the request-smuggling shape.
+    #:
+    #: 30 MiB is the same class as Kestrel's ``MaxRequestBodySize`` (30,000,000
+    #: bytes = 28.6 MiB — near, not equal: this one is a round binary value);
+    #: nginx defaults to 1 MB, axum to 2 MB.  Raise it for an upload endpoint,
+    #: or set ``0`` to
+    #: disable the cap entirely (uvicorn's behaviour — the app then owns the
+    #: 413 decision).
+    max_body_size: int = 31457280
+
+    #: Minimum sustained request-body delivery rate in **bytes per second**.
+    #: Below it, past the grace period, the connection is abandoned the same
+    #: way ``body_timeout`` abandons a silent one.  The rate is averaged over a
+    #: sliding window one grace period wide (``min_body_rate_grace``): a peer
+    #: that delivered early and then stalled is judged on the stalled window,
+    #: not on the lifetime average, so a burst cannot shelter a subsequent
+    #: drip.
+    #:
+    #: This is the anti-trickle half of the body defence, and it exists
+    #: because a transport-paced read cannot be one: each read returns
+    #: whatever has arrived, so ``body_timeout`` degrades from "fill a slice
+    #: in 30 s" to "send *something* every 30 s" — which a one-byte drip
+    #: always satisfies, holding a connection open indefinitely.  A rate is
+    #: the thing a drip cannot fake.
+    #:
+    #: 240 B/s over a 5 s grace matches Kestrel's ``MinRequestBodyDataRate``
+    #: defaults.  ``0`` disables the detector.
+    min_body_rate: float = 240.0
+
+    #: Seconds of body-read waiting before ``min_body_rate`` starts being
+    #: enforced — the slow-start allowance, so a connection is never judged
+    #: on its first few packets.
+    #:
+    #: Only time spent *waiting on the transport* counts, never time the
+    #: handler spent between reads: the rate is evidence about the peer, and
+    #: a handler that writes each chunk to a slow disk must not be mistaken
+    #: for one.
+    min_body_rate_grace: float = 5.0
+
     #: Per-stream HTTP/2 flow-control window advertised in the server's SETTINGS.
     #: 65535 is the RFC 9113 §6.9.2 default.  Production deployments serving
     #: large responses should raise this — see
@@ -678,6 +727,9 @@ def get_settings() -> Settings:
         force_asgi_scope=_bool_env('BB_FORCE_ASGI_SCOPE', False),
         body_chunk_size=_int_env('BB_BODY_CHUNK_SIZE', 65536),
         body_chunk_max=_int_env('BB_BODY_CHUNK_MAX', 524288),
+        max_body_size=_int_env_nonneg('BB_MAX_BODY_SIZE', 31457280),
+        min_body_rate=_float_env_nonneg('BB_MIN_BODY_RATE', 240.0),
+        min_body_rate_grace=_float_env_nonneg('BB_MIN_BODY_RATE_GRACE', 5.0),
         # RFC 9113 §6.9.2 default initial window size.  See
         # docs/reference/env-vars.md "Performance recommendations" for the
         # values commonly used on tuned production deployments.

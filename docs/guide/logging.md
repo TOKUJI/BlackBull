@@ -293,6 +293,8 @@ record on `blackbull.caps` when it fires.  Coverage:
 | `BB_HEADER_MAX_LINE` | per-line header limit exceeded |
 | `BB_HEADER_MAX_TOTAL` | aggregate header block exceeded (H/1.1 + H/2 CONTINUATION) |
 | `BB_BODY_TIMEOUT` | body bytes didn't arrive in time |
+| `BB_MAX_BODY_SIZE` | request body over the total cap (H/1.1 + H/2; `requested` is the declared length at head time, the running total mid-stream) |
+| `BB_MIN_BODY_RATE` | body delivered below the minimum rate past the grace period — `requested` is the observed rate in bytes/second |
 | `BB_REQUEST_TIMEOUT` | handler exceeded per-request budget (H/1.1 + H/2) |
 | `BB_WRITE_TIMEOUT` | drain stalled (slow-read peer) |
 | `BB_WS_MAX_FRAME_PAYLOAD` | WebSocket frame declared length exceeded |

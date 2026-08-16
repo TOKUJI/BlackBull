@@ -345,6 +345,29 @@ def _declares_content(headers: 'Headers') -> bool:
     return bool(cl) and bool(cl.lstrip(b'0'))
 
 
+def _declared_body_over_cap(headers: 'Headers', cap: int) -> int:
+    """The declared body length if it exceeds *cap*, else 0.
+
+    A ``Content-Length`` announces the whole body before any of it is sent,
+    so an over-cap request can be refused for the price of reading the head —
+    which is the point: the alternative is to accept octets we have already
+    decided not to keep.  ``chunked`` declares nothing, so that framing is
+    counted as it arrives instead (``HTTP1Recipient``); the two together are
+    what makes "no request body exceeds the cap" true on both framings.
+
+    Returns the length rather than a bool so the caller can report what was
+    asked for.  Assumes :func:`_validate_message_framing` has already run, so
+    the value is ``1*DIGIT`` and consistent across repeats.
+    """
+    if not cap:
+        return 0
+    cl = headers.get(b'content-length', b'').strip()
+    if not cl:
+        return 0
+    declared = int(cl)
+    return declared if declared > cap else 0
+
+
 def _validate_message_framing(headers: 'Headers') -> None:
     """RFC 9112 §6 — reject framing-header combinations that are unsafe.
 
@@ -861,6 +884,35 @@ class HTTP1Actor(Actor):
                     await self._handle_upgrade(conn)
                     return
 
+                # RFC 9110 §15.5.14 — 413 Content Too Large.  A declared body
+                # over the cap is refused here, before a single octet of it is
+                # read: the per-read bound (``body_chunk_max``) limits what one
+                # read materialises, never the sum, so without this the peer
+                # picks how much memory the request costs.  Answered ahead of
+                # any ``Expect: 100-continue`` for the same reason a 413 exists
+                # at all (RFC 9110 §10.1.1: a final status instead of the
+                # interim one tells the peer not to send the body), and the
+                # connection closes because the octets we refused are still
+                # coming — reading the next request out of them is the
+                # smuggling shape.
+                oversized = _declared_body_over_cap(
+                    conn.headers, cfg.max_body_size)
+                if oversized:
+                    logger.warning(
+                        '413 Content Too Large — %s %s declares %d bytes, '
+                        'BB_MAX_BODY_SIZE=%d; peer=%r',
+                        conn.method, conn.path, oversized, cfg.max_body_size,
+                        self._peername)
+                    log_cap_hit('max_body_size',
+                                requested=oversized,
+                                limit=cfg.max_body_size,
+                                peer=self._peername,
+                                scope_path=conn.path, protocol='http1')
+                    await self._send_error_and_close(
+                        send, b'413 Content Too Large',
+                        HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+                    return
+
                 # BB_REQUEST_TIMEOUT parity with the
                 # HTTP/2 path.  ``HTTP2Actor._spawn_stream_task`` wraps each
                 # stream coroutine with ``asyncio.wait_for``; the HTTP/1.1
@@ -913,6 +965,15 @@ class HTTP1Actor(Actor):
                 # keep-alive.  The WebSocket upgrade leaves ``run()`` above and
                 # never arrives here, which is why it refuses a bodied handshake
                 # outright instead — see ``_do_ws_handshake``.
+                if inner_receive.must_close:
+                    # The recipient has declared the connection unusable: a
+                    # desynced chunked stream, or a body refused for size whose
+                    # remaining octets are still on the way.  In both cases the
+                    # next bytes are the peer's to choose, so the message
+                    # boundary is gone and keep-alive would parse them as a
+                    # request line.  Asked before the drain, which is exactly
+                    # what we must not do to them.
+                    break
                 if inner_receive.needs_drain():
                     if not await inner_receive.drain(_MAX_KEEPALIVE_DRAIN):
                         break

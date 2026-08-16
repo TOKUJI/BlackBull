@@ -1,6 +1,7 @@
 import asyncio
 from abc import ABC, abstractmethod
 from collections import deque
+from time import monotonic as _monotonic
 from typing import Awaitable, Callable, Optional
 
 from .cap_log import log_cap_hit
@@ -137,6 +138,25 @@ def _bad_request(detail: str):
     from http import HTTPStatus  # noqa: PLC0415
     from ..router import HTTPException  # noqa: PLC0415
     return HTTPException(HTTPStatus.BAD_REQUEST, detail)
+
+
+def _content_too_large(detail: str):
+    """Build the 413 for a body that outgrew the cap mid-stream.
+
+    Only ``chunked`` can reach here: a ``Content-Length`` declares the whole
+    body in the head, so the actor refuses that one before reading any of it.
+    A chunked body announces nothing, so the verdict has to arrive during the
+    read — which is why it travels as the dispatcher's typed error rather than
+    as a status the actor chose: the handler is already running, and this is
+    the same seam a malformed chunk uses to become a 400.
+
+    ``REQUEST_ENTITY_TOO_LARGE`` rather than ``CONTENT_TOO_LARGE``: the same
+    member under both names, but the RFC 9110 spelling only exists from
+    Python 3.13 and this package supports 3.11.
+    """
+    from http import HTTPStatus  # noqa: PLC0415
+    from ..router import HTTPException  # noqa: PLC0415
+    return HTTPException(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, detail)
 
 
 def _validate_chunk_ext(ext: bytes) -> None:
@@ -715,7 +735,10 @@ class HTTP1Recipient(BaseRecipient):
                  *, body_timeout: float = 0.0,
                  deadline: ConnectionDeadline | None = None,
                  chunk_size: int | None = None,
-                 chunk_max: int | None = None):
+                 chunk_max: int | None = None,
+                 max_body: int | None = None,
+                 min_rate: float | None = None,
+                 min_rate_grace: float | None = None):
         super().__init__(reader)
         # Deliver a Content-Length body in slices instead of one giant
         # ``readexactly(content_length)`` allocation.  Reads are up-to-n and
@@ -725,14 +748,37 @@ class HTTP1Recipient(BaseRecipient):
         # commitment.  ``chunk_size`` is the fixed slice for the chunked-
         # transfer path.  Both fall back to settings when not injected
         # (direct-instantiation tests pass them explicitly).
-        if chunk_size is None or chunk_max is None:
+        if (chunk_size is None or chunk_max is None or max_body is None
+                or min_rate is None or min_rate_grace is None):
             from ..env import get_settings as _get_settings  # noqa: PLC0415
             _s = _get_settings()
             if chunk_size is None:
                 chunk_size = _s.body_chunk_size
             if chunk_max is None:
                 chunk_max = _s.body_chunk_max
+            if max_body is None:
+                max_body = _s.max_body_size
+            if min_rate is None:
+                min_rate = _s.min_body_rate
+            if min_rate_grace is None:
+                min_rate_grace = _s.min_body_rate_grace
         self._chunk_size = chunk_size
+        # Total-body cap, 0 = uncapped.  Enforced on the octets themselves
+        # rather than on the declaration, so it holds for a chunked body (which
+        # declares nothing) and for a peer that under-declares.  The actor
+        # refuses an over-cap ``Content-Length`` at head time; this is what
+        # makes the guarantee true without it — a directly-driven recipient, or
+        # an external ASGI host, gets the same ceiling.
+        self._max_body = max_body
+        # Anti-trickle floor, 0 = disabled.  A transport-paced read cannot
+        # carry a deadline the way a fixed-size one did — it returns on any
+        # arrival, so ``body_timeout`` degrades from "fill a slice in 30 s" to
+        # "send *something* every 30 s", which a one-byte drip always meets.
+        # A minimum *rate* is what a drip cannot fake (Kestrel's
+        # ``MinRequestBodyDataRate``); the grace period is the slow-start
+        # allowance so nothing is judged on its first packets.
+        self._min_rate = min_rate
+        self._min_rate_grace = min_rate_grace
         # A cap of 0 would turn every up-to-n read into b'' (which reads as
         # EOF), so a misconfigured zero falls back to a single usable byte.
         self._chunk_max = max(chunk_max, 1)
@@ -788,11 +834,45 @@ class HTTP1Recipient(BaseRecipient):
         # half-read chunk would splice request N's body into request N+1.
         self._chunk_remaining = 0
         self._done = False
+        # Body octets delivered for *this* request, against ``_max_body``.
+        self._body_seen = 0
+        # Seconds this request spent *waiting on the transport* for body
+        # octets — the denominator of the delivery rate.  Only the waiting
+        # counts: the rate is evidence about the peer, so time the handler
+        # spent between reads (writing a chunk to disk, awaiting a database)
+        # must never be charged to it.
+        self._body_wait = 0.0
+        # Rate-window state: the slow-drip judge averages over one
+        # grace-period window of waiting time, not the request's whole life.
+        # A peer that ran ahead and then stalled must be judged on the stalled
+        # window, not on the burst that paid for it (the burst-then-drip shape
+        # a cumulative average cannot see).  ``_rate_window_wait`` is the
+        # accumulated wait when the current window opened; ``_rate_window_seen``
+        # the octets delivered inside it.
+        self._rate_window_wait = 0.0
+        self._rate_window_seen = 0
+        # Set once this body was given up on — over the size cap, or below the
+        # minimum rate.  Like a framing violation it ends the connection, for a
+        # different reason: the stream is still perfectly framed, but the
+        # octets we stopped reading are still arriving.
+        self._body_refused = False
         # Set once a chunked-framing violation is detected: the byte stream is
         # now desynced, so the connection MUST close rather than keep-alive
         # (draining would parse smuggled bytes as the next request).
         self.framing_broken = False
         return self
+
+    @property
+    def must_close(self) -> bool:
+        """This connection cannot carry another request.
+
+        Two causes, one consequence.  A chunked-framing violation leaves the
+        byte stream desynced; a body refused for size leaves octets we
+        deliberately did not read.  Either way the bytes that follow are the
+        peer's to choose, and parsing them as the next request line is the
+        request-smuggling shape — so the answer is to close, not to resynchronise.
+        """
+        return self.framing_broken or self._body_refused
 
     def needs_drain(self) -> bool:
         """True if a declared request body may still be buffered unread.
@@ -803,8 +883,11 @@ class HTTP1Recipient(BaseRecipient):
         dispatch to decide whether to drain.  A body-less request (GET, no
         Content-Length, not chunked) never needs draining.
         """
-        if self.framing_broken:
-            return False  # stream is desynced — close, don't drain
+        if self.must_close:
+            # Nothing to preserve: the connection is going away, and draining a
+            # refused body would read the very octets the refusal declined
+            # (and, for a cap breach, re-raise the 413 on the way).
+            return False
         return not self._done and (self._chunked or bool(self._content_length))
 
     async def drain(self, max_bytes: int) -> bool:
@@ -901,17 +984,80 @@ class HTTP1Recipient(BaseRecipient):
             raise _bad_request('chunk framing line exceeds length limit')
         return line
 
+    def _account(self, chunk: bytes) -> bytes:
+        """Weigh *chunk* against the two body limits, giving up if it fails one.
+
+        Every delivered octet passes through here, on both framings, so the
+        limits are properties of the recipient rather than of whichever caller
+        is driving it.  Both verdicts are permanent for the connection
+        (:attr:`must_close`): the peer is still sending a body we have stopped
+        reading, so there is no message boundary left to resynchronise on.
+
+        The two failures are different in kind and answer differently.  Too
+        large is a *judgement about the request*, which the peer is entitled to
+        hear: 413.  Too slow is a judgement about the *peer*, and answering it
+        politely would be answering the attack — a trickle is cheap to send and
+        expensive to hold, so the connection is abandoned exactly as
+        ``body_timeout`` abandons a silent one.
+        """
+        self._body_seen += len(chunk)
+        self._rate_window_seen += len(chunk)
+        if self._max_body and self._body_seen > self._max_body:
+            self._body_refused = True
+            self._done = True
+            log_cap_hit('max_body_size',
+                        requested=self._body_seen, limit=self._max_body,
+                        scope_path=self._req_path, protocol='http1')
+            raise _content_too_large(
+                f'request body exceeds {self._max_body} bytes')
+        # Judged on a grace-period window of waiting time, not the request's
+        # whole life: once a window's worth of waiting has passed, the octets
+        # delivered inside it must earn their keep at ``min_body_rate``, and
+        # the window rolls so the next judgement starts from a clean slate.
+        # A peer that kept us waiting with little to show is the slow-drip
+        # shape whatever its framing; a burst that ran ahead buys one window,
+        # not the whole request.
+        if self._min_rate:
+            window_wait = self._body_wait - self._rate_window_wait
+            if window_wait > self._min_rate_grace:
+                if self._rate_window_seen < self._min_rate * window_wait:
+                    self._body_refused = True
+                    self._done = True
+                    log_cap_hit(
+                        'min_body_rate',
+                        requested=self._rate_window_seen / window_wait,
+                        limit=self._min_rate,
+                        scope_path=self._req_path, protocol='http1')
+                    raise ClientDisconnected()
+                # The window earned its keep: roll it forward so the next
+                # judgement looks at the next grace period only.
+                self._rate_window_wait = self._body_wait
+                self._rate_window_seen = 0
+        return chunk
+
     async def _read_with_timeout(self, coro):
-        """Run *coro* under the configured body_timeout, if any."""
-        if self._body_timeout > 0 and self._deadline is not None:
-            with self._deadline.guard(self._body_timeout):
-                return await coro
-        if self._body_timeout > 0:
-            # Fallback for direct-instantiation tests that don't pass a
-            # ConnectionDeadline.  Preserves per-call semantics; the
-            # production hot path takes the deadline-guard branch above.
-            return await asyncio.wait_for(coro, timeout=self._body_timeout)
-        return await coro
+        """Run *coro* under the configured body_timeout, if any.
+
+        Also the one place body reads wait, which is why the rate detector's
+        clock lives here: the elapsed time it accumulates is transport-wait
+        time only, never the handler's own.
+        """
+        # ``None``, not 0.0, for "not timing": a clock reading is a value, not a
+        # flag, and 0.0 is one a monotonic clock is allowed to return.
+        t0 = _monotonic() if self._min_rate else None
+        try:
+            if self._body_timeout > 0 and self._deadline is not None:
+                with self._deadline.guard(self._body_timeout):
+                    return await coro
+            if self._body_timeout > 0:
+                # Fallback for direct-instantiation tests that don't pass a
+                # ConnectionDeadline.  Preserves per-call semantics; the
+                # production hot path takes the deadline-guard branch above.
+                return await asyncio.wait_for(coro, timeout=self._body_timeout)
+            return await coro
+        finally:
+            if t0 is not None:
+                self._body_wait += _monotonic() - t0
 
     async def next_chunk(self) -> bytes | None:
         """The next body chunk, or ``None`` once the body is complete.
@@ -939,7 +1085,7 @@ class HTTP1Recipient(BaseRecipient):
         try:
             if self._chunked:
                 if self._chunk_remaining:
-                    return await self._read_chunk_slice()
+                    return self._account(await self._read_chunk_slice())
                 size_line = await self._read_chunk_line()
                 chunk_size = self._parse_chunk_size_or_400(size_line)
                 if chunk_size == 0:
@@ -967,7 +1113,7 @@ class HTTP1Recipient(BaseRecipient):
                     self._done = True
                     return None
                 self._chunk_remaining = chunk_size
-                return await self._read_chunk_slice()
+                return self._account(await self._read_chunk_slice())
             else:
                 # Stream the Content-Length body in up-to-n slices so a large
                 # upload is delivered as several ``http.request`` events
@@ -995,7 +1141,7 @@ class HTTP1Recipient(BaseRecipient):
                     self._content_length -= len(body)
                     if self._content_length == 0:
                         self._done = True
-                    return body
+                    return self._account(body)
                 self._done = True
                 return None
 
@@ -1074,7 +1220,10 @@ class HTTP2Recipient(BaseRecipient):
                  queue_depth: int = _HTTP2_STREAM_QUEUE_DEPTH,
                  credit_callback: Optional[
                      Callable[[int], Awaitable[None]]] = None,
-                 credit_budget: int = DEFAULT_INITIAL_WINDOW_SIZE):
+                 credit_budget: int = DEFAULT_INITIAL_WINDOW_SIZE,
+                 max_body: int | None = None,
+                 min_rate: float | None = None,
+                 min_rate_grace: float | None = None):
         super().__init__(None)
         self._queue: asyncio.Queue | None = None
         self._queue_depth = queue_depth
@@ -1095,6 +1244,38 @@ class HTTP2Recipient(BaseRecipient):
         # ``receive()`` past END_STREAM still blocks for the disconnect event
         # exactly as it did before, rather than being handed a synthetic one.
         self._done: bool = False
+        if max_body is None or min_rate is None or min_rate_grace is None:
+            from ..env import get_settings as _get_settings  # noqa: PLC0415
+            _s = _get_settings()
+            if max_body is None:
+                max_body = _s.max_body_size
+            if min_rate is None:
+                min_rate = _s.min_body_rate
+            if min_rate_grace is None:
+                min_rate_grace = _s.min_body_rate_grace
+        # The two body limits, shared with HTTP/1.1.  The actor answers a
+        # *declared* over-cap body with 413 at HEADERS; these cover what a
+        # declaration cannot — a body sent without ``content-length``, and a
+        # stream that dribbles.  Both are refusals of the frame, which the
+        # actor answers with RST_STREAM.
+        self._max_body = max_body
+        self._min_rate = min_rate
+        self._min_rate_grace = min_rate_grace
+        self._body_seen = 0
+        #: Wall-clock time the current rate window opened, or ``None`` before
+        #: the first DATA frame.  Wall clock is the honest denominator here,
+        #: unlike HTTP/1.1: DATA arrives whether or not the handler is reading,
+        #: so elapsed time is the peer's alone.  ``None`` rather than 0.0 — a
+        #: clock reading is a value, and 0.0 is one a monotonic clock may
+        #: legitimately return.
+        self._rate_window_start: float | None = None
+        #: Octets delivered inside the current grace-period window; the rate
+        #: judge averages over this window, not the stream's whole life, so a
+        #: burst that ran ahead cannot shelter a subsequent stall.
+        self._rate_window_seen = 0
+        #: The peer was ever blocked by our own closed inbound window — its
+        #: delivery rate is then partly our doing, so it is not judged.
+        self._was_window_stalled = False
         if isinstance(frame, Data):
             self.put_DATAFrame(frame)
 
@@ -1141,11 +1322,70 @@ class HTTP2Recipient(BaseRecipient):
         """
         return frame.payload, bool(frame.end_stream)
 
+    def _body_limits_refuse(self, nbytes: int) -> bool:
+        """True when this arrival breaks a body limit and must be refused.
+
+        The HTTP/2 half of the two body defences.  Both are judged on arrival
+        rather than on consumption because DATA lands whether or not the
+        handler is reading — the queue grows either way, so the memory this
+        bounds is spent before anyone asks for it.
+
+        The rate judgement is skipped once the peer has been back-pressured by
+        our own inbound window: below-rate delivery is then a consequence of
+        our flow control, and blaming the peer for obeying it would turn a slow
+        *handler* into a reset stream.  A trickle never fills the window, which
+        is exactly why the exemption does not shelter one.
+        """
+        self._body_seen += nbytes
+        if self._max_body and self._body_seen > self._max_body:
+            logger.warning('HTTP2Recipient body over BB_MAX_BODY_SIZE — '
+                           'refusing DATA frame')
+            log_cap_hit('max_body_size',
+                        requested=self._body_seen, limit=self._max_body,
+                        protocol='http2')
+            return True
+        if not self._min_rate:
+            return False
+        now = _monotonic()
+        if self._rate_window_start is None:
+            self._rate_window_start = now
+            self._rate_window_seen = nbytes
+        else:
+            self._rate_window_seen += nbytes
+            if (self._credit_cb is not None
+                    and self._uncredited + nbytes >= self._credit_budget):
+                # This arrival exhausts the peer's inbound window: from here on
+                # it sends only what we credit back, so its pace is ours to
+                # answer for.  Observed as the window *closes*, not while it is
+                # closed — the peer's next frame can only arrive after a replay
+                # has reopened it, by which point the balance no longer shows
+                # the stall.
+                self._was_window_stalled = True
+            elapsed = now - self._rate_window_start
+            if elapsed > self._min_rate_grace:
+                if (not self._was_window_stalled
+                        and self._rate_window_seen < self._min_rate * elapsed):
+                    logger.warning(
+                        'HTTP2Recipient body below BB_MIN_BODY_RATE — '
+                        'refusing DATA frame')
+                    log_cap_hit('min_body_rate',
+                                requested=self._rate_window_seen / elapsed,
+                                limit=self._min_rate, protocol='http2')
+                    return True
+                # The window earned its keep: roll it forward so the next
+                # judgement looks at the next grace period only.
+                self._rate_window_start = now
+                self._rate_window_seen = 0
+        return False
+
     def put_DATAFrame(self, frame: Data) -> bool:
         """Enqueue a DATA frame event.  Returns False when the frame must be
         refused (the caller answers RST_STREAM): queue full in legacy mode;
-        inbound-window overrun or a tiny-frame flood in consume-crediting mode.
+        inbound-window overrun, a tiny-frame flood, or a body limit
+        (``BB_MAX_BODY_SIZE`` / ``BB_MIN_BODY_RATE``) in consume-crediting mode.
         """
+        if self._body_limits_refuse(len(frame.payload)):
+            return False
         if self._credit_cb is not None:
             # Flow-control debit is the full frame length including padding
             # (RFC 9113 §6.9.1) — credit must mirror it exactly.

@@ -38,6 +38,7 @@ framing).  ~250 conformance test functions across the
 | [`test_rfc9112_pipelining.py`](https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_rfc9112_pipelining.py) | HTTP/1.1 pipelining with and without bodies |
 | [`test_rfc9112_smuggling.py`](https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_rfc9112_smuggling.py) | Request smuggling — CL.CL, CL.TE, TE.CL, TE.TE |
 | [`test_rfc9112_slowloris.py`](https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_rfc9112_slowloris.py) | Slowloris partial-headers defence (`BB_HEADER_TIMEOUT`) |
+| [`test_rfc9110_body_cap.py`](https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_rfc9110_body_cap.py) | `BB_MAX_BODY_SIZE` → 413 on both framings, refused before the body is read, and the connection close that stops a refusal becoming a smuggling window |
 | [`test_http1_dispatch.py`](https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_http1_dispatch.py) | ASGI dispatch — 1xx / 204 / 304 body suppression (RFC 9110 §15), auto-headers |
 
 ```bash
@@ -82,7 +83,8 @@ you can grep for the headline number.
 In-tree pytest tests under `tests/conformance/http2/` cover
 BlackBull-specific behaviour h2spec does not exercise (RFC 8441
 Extended CONNECT, CONTINUATION boundary cases, server-response
-shapes), and run in normal `pytest` runs.
+shapes, and the `BB_MAX_BODY_SIZE` / `BB_MIN_BODY_RATE` refusals in
+`test_rfc9113_body_cap.py`), and run in normal `pytest` runs.
 
 ## WebSocket — Autobahn|Testsuite
 

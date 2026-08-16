@@ -5,12 +5,19 @@ the headers byte by byte (or with long pauses), never send the
 terminating CRLFCRLF.  Each held connection consumes one server slot.
 With enough connections the server can't accept new ones.
 
-BlackBull's defences are three timeouts in :mod:`blackbull.env`,
-overridden short here so the suite stays fast:
+BlackBull's defences are four knobs in :mod:`blackbull.env`.  The three
+deadlines are overridden short here so the suite stays fast; the rate
+floor runs at its shipped default, because what that test asserts is
+that an out-of-the-box server survives the drip:
 
   * ``BB_HEADER_TIMEOUT`` — deadline for the header block.
-  * ``BB_BODY_TIMEOUT``   — deadline for the body.
+  * ``BB_BODY_TIMEOUT``   — deadline for a single body read.
   * ``BB_KEEP_ALIVE_TIMEOUT`` — deadline for idle persistent connections.
+  * ``BB_MIN_BODY_RATE`` — floor on the *average* delivery rate, which is
+    the only one of the four a drip cannot satisfy: an arrival-paced read
+    completes before any per-read deadline no matter how few bytes it
+    carries, so the body phase needs a bound the peer cannot reset by
+    sending one more byte.
 
 This module absorbed the former ``test_http1_slowloris.py`` into
 this file and rewrote every test on top of the
@@ -26,6 +33,7 @@ from multiprocessing import Process
 import pytest
 import pytest_asyncio
 
+from blackbull.env import get_settings
 from blackbull.client import (
     HTTP1Client,
     ReadResponse,
@@ -48,6 +56,10 @@ from .conftest import _make_app
 _SHORT_HEADER_TIMEOUT = 1.0
 _SHORT_BODY_TIMEOUT = 3.0
 _SHORT_KEEP_ALIVE_TIMEOUT = 5.0
+
+# Read, don't restate: the drip test asserts against the *shipped* grace,
+# so hard-coding it here would let the two drift apart silently.
+_MIN_BODY_RATE_GRACE = get_settings().min_body_rate_grace
 
 
 def _run_with_short_timeouts(server, env_overrides):
@@ -240,21 +252,17 @@ class TestIncrementalRequest:
 @pytest.mark.integration
 class TestBodyTrickle:
     """Send the full header block at once, then trickle the body one
-    byte every 500 ms.  The server should close after
-    ``BB_BODY_TIMEOUT`` elapses even though Content-Length says more
-    is coming.  Phase 3 added BB_BODY_TIMEOUT specifically for this."""
+    byte every 500 ms.
+
+    2 B/s is two orders of magnitude under the ``BB_MIN_BODY_RATE``
+    floor, so the server must close once the grace period is spent —
+    even though Content-Length says more is coming, and even though
+    every individual read is answered well inside ``BB_BODY_TIMEOUT``.
+    The per-read deadline cannot see this attack: the peer resets it
+    with every byte.
+    """
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(
-        strict=True,
-        reason='up-to-n (fc5c2bf) returns a read on any arrival, so a '
-               '1-byte trickle beats the per-slice BB_BODY_TIMEOUT and the '
-               'body completes; the slow-drip property returns with '
-               'BB_MIN_BODY_RATE.  The attack-resistance programme commit '
-               'must un-xfail this (security-posture-publication.md).  '
-               'strict=True: landing the rate detector without removing the '
-               'marker fails CI.',
-    )
     async def test_body_trickle_triggers_server_close(self, slow_app):
         scenario = Scenario(steps=(
             SendBytes(
@@ -263,22 +271,23 @@ class TestBodyTrickle:
                      b'Content-Length: 100\r\n\r\n',
             ),
             SendBytes(data=b'x' * 100, byte_interval=0.5),
-            ReadResponse(timeout=_SHORT_BODY_TIMEOUT + 3.0),
+            ReadResponse(timeout=_MIN_BODY_RATE_GRACE + 10.0),
         ))
         t0 = time.monotonic()
         result = await _run(scenario, slow_app.port)
         elapsed = time.monotonic() - t0
 
         assert _server_closed(result), (
-            f'expected body-timeout close, got response={result.response!r}'
+            f'expected a rate-floor close, got response={result.response!r}'
         )
         # The trickle would take 50 s at full speed; assert we got out
         # well before that.  Upper bound is generous because the client
         # only observes the server-side close on its next write() after
-        # TCP propagates RST — typically several bytes after the timeout.
-        assert elapsed < _SHORT_BODY_TIMEOUT + 15.0, (
-            f'server took {elapsed:.2f}s to close; expected well below '
-            f'the full-speed trickle time of 50 s'
+        # TCP propagates RST — typically several bytes after the refusal.
+        assert elapsed < _MIN_BODY_RATE_GRACE + 10.0, (
+            f'server took {elapsed:.2f}s to close; expected shortly after '
+            f'the {_MIN_BODY_RATE_GRACE}s grace, and far below the '
+            f'full-speed trickle time of 50 s'
         )
 
 

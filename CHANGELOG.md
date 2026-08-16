@@ -29,6 +29,15 @@ BlackBull uses [ZeroVer](https://0ver.org/) prior to a 1.0 commitment:
   the MQTT-broker debut plus its actor-model rebuild and the protocol-agnostic
   connection dispatcher.  Normal per-sprint versioning resumes at the next
   sprint close as `v0.45.0`.
+- **Exception (2026-08-16)**: the attack-resistance programme ships as **one**
+  MINOR when it is complete, not one release per sprint.  It spans several
+  sprints (request-body limits, WebSocket message bounds, MQTT resource
+  bounds, HTTP/2 time bounds, frame-rate metering) and its deliverable is a
+  *coherent* resource-governance surface — a partial release would advertise a
+  security posture the code does not hold yet, and would ask adopters to
+  re-read the same subject three times.  Sprints inside the programme close
+  without cutting a release; `[Unreleased]` accumulates until the last one
+  lands.
 - `PATCH` covers bug fixes, security fixes, and harness work — whether they
   land between sprints or close one.
 - No `1.0.0` until the framework's identity (pure-Python H1 parser,
@@ -51,6 +60,29 @@ so the editable install's metadata catches up.
   ever a latency commitment `BB_BODY_TIMEOUT` might not deliver); a fast one
   earns fewer, larger ones.  `BB_BODY_CHUNK_SIZE` now applies only to the
   chunked-transfer path.
+- **`BB_MAX_BODY_SIZE`** (default `31457280`, 30 MiB) — total request-body
+  ceiling, enforced on HTTP/1.1 and HTTP/2 alike.  A declared `Content-Length`
+  over the cap is refused at head time, before a body octet is read; an
+  undeclared or chunked body is refused the moment the running total passes it.
+  HTTP/1.1 answers **413 Content Too Large** and closes the connection (the
+  refused octets are still arriving, so keep-alive would parse them as the next
+  request); HTTP/2 answers 413 + `RST_STREAM(NO_ERROR)` before dispatch, or
+  `RST_STREAM(ENHANCE_YOUR_CALM)` mid-stream, and keeps the connection.  The
+  30 MiB default is the same class as Kestrel's `MaxRequestBodySize`
+  (30,000,000 bytes = 28.6 MiB); `0` disables the cap.
+  **This is a behaviour change**: a request body over 30 MiB is now rejected by
+  the server unless the cap is raised.
+- **`BB_MIN_BODY_RATE`** (default `240.0` B/s) and **`BB_MIN_BODY_RATE_GRACE`**
+  (default `5.0` s) — minimum sustained body-delivery rate, the anti-trickle
+  defence transport-paced reads made necessary: an up-to-n read returns on any
+  arrival, so `BB_BODY_TIMEOUT` alone degrades to "send *something* every 30 s",
+  which a one-byte drip satisfies indefinitely.  Below the rate, past the grace
+  period, the request is abandoned.  Matches Kestrel's
+  `MinRequestBodyDataRate`; `0` disables.  What the rate is measured against
+  differs by protocol on purpose — HTTP/1.1 counts only time spent waiting on
+  the transport (so a slow handler is never mistaken for a slow peer), HTTP/2
+  counts wall clock but exempts a peer our own closed inbound window
+  back-pressured.
 
 ### Changed
 
@@ -75,6 +107,18 @@ so the editable install's metadata catches up.
     guess "is anybody waiting" from the rendezvous future, which clears when a
     reader is *woken*, so arrivals in that window cost a
     `pause_reading`/`resume_reading` pair that the next park undid.
+  - The reader's transport offer is now *published* (`ConnectionProtocol.read_offer`)
+    rather than polled through a method call — the mirror of `reading_paused`
+    going the other way.  `get_buffer` runs on every arrival on every
+    connection, including the ones that never read a body, so the decision is
+    kept out of that path on principle rather than measured into it — an EC2
+    A/B on `/conn` puts the change at +0.13 % (95 % CI [−0.13, +0.39]), i.e.
+    no throughput claim either way.  Ownership is unchanged: the party that
+    decides is the party that writes.
+- **A refused body ends the HTTP/1.1 connection.**  `HTTP1Recipient.must_close`
+  makes explicit what a desynced chunked stream already implied, and extends it
+  to a body refused for size: the actor breaks the keep-alive loop instead of
+  reading the next request out of octets the peer chose.
 
 ## [0.76.1] — 2026-08-14
 
