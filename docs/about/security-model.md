@@ -56,7 +56,7 @@ pieces. Each row below names the knob for each column.
 | HTTP/2 response write | `SETTINGS_MAX_FRAME_SIZE` | — | `BB_WRITE_TIMEOUT` 30 s |
 | Control frames (HTTP/2 + WebSocket) | — | `BB_FRAME_RATE_LIMIT` 20 per type | `BB_FRAME_RATE_WINDOW` 1 s |
 | WebSocket frame | `BB_WS_MAX_FRAME_PAYLOAD` 64 MiB | — | — |
-| WebSocket message | per frame | `BB_WS_MAX_MESSAGE_SIZE` 16 MiB | idle watchdog |
+| WebSocket message | per frame | `BB_WS_MAX_MESSAGE_SIZE` 16 MiB | — *(see qualification 3)* |
 | MQTT packet | `BB_MQTT_MAX_PACKET_SIZE` 1 MiB | same, before buffering | keep-alive × 1.5 |
 | MQTT session state | 16-bit packet-identifier space | `BB_MQTT_MAX_QUEUED_MESSAGES` 1000 | session expiry |
 | MQTT retained store | — | `BB_MQTT_MAX_RETAINED` 10000 | — |
@@ -106,11 +106,11 @@ Three rungs, and the difference between them is what an operator has to do:
 | HTTP/1.1 | `bounded-by-default` | see the two qualifications below |
 | HTTP/2 | `bounded-by-default` | includes control-frame rate metering and PING-based liveness |
 | gRPC | `bounded-by-default` | own message bounds, plus everything HTTP/2 provides |
-| WebSocket | `bounded-by-default` | message bounded post-reassembly and post-inflation |
+| WebSocket | `bounded-by-default` | message bounded post-reassembly and post-inflation; see qualification 3 |
 | MQTT | `bounded-by-default` | limits are also *advertised* in CONNACK, so conforming clients stay inside them |
 
-**Two qualifications, stated here rather than in a footnote**, because they are
-the difference between the label and the whole truth:
+**Three qualifications, stated here rather than in a footnote**, because they
+are the difference between the label and the whole truth:
 
 1. **There is no total request-duration bound by default.**
    `BB_REQUEST_TIMEOUT` is `0`. A peer delivering at exactly the minimum body
@@ -128,6 +128,16 @@ the difference between the label and the whole truth:
    is 1,048,576 the derived cap is ~1,048,512. It bounds *descriptor
    exhaustion*, not event-loop health. For the latter, set an explicit number;
    1024 is a typical single-loop value.
+
+3. **A WebSocket connection has no retention bound of its own.** HTTP/1.1
+   closes an idle keep-alive connection and HTTP/2 probes a silent peer with a
+   PING; WebSocket does neither. A peer that completes the handshake and then
+   says nothing holds its connection until it disconnects or the process does,
+   bounded only by `BB_MAX_CONNECTIONS` — so qualifications 1 and 2 are what
+   hold it. Message *content* is fully bounded; this is about the connection.
+   If you serve WebSocket to untrusted peers, set `BB_MAX_CONNECTIONS`
+   explicitly, and send application-level pings from your handler if you need
+   dead peers evicted sooner.
 
 ## Defaults and deployment checklist
 
