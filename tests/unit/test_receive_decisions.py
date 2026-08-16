@@ -359,3 +359,119 @@ class TestTheTransportOfferFollowsTheDemand:
             assert len(view) == ReadBuffer.FLOOR
         finally:
             view.release()
+
+
+class TestTheOfferIsPublishedOnlyByTheParkingPath:
+    """An offer exists to size the recv that will *wake* a parked reader.
+
+    So the reader declares one when it parks, and at no other time.  A read
+    the buffer can already satisfy never reaches the transport at all — the
+    demand it would publish could not be consulted by anyone, because nothing
+    yields between the publish and the return.  Publishing it anyway is pure
+    per-read cost, and on HTTP/2 the great majority of reads are that kind.
+
+    These assert the property rather than the saving: the write itself is
+    observable, so a future change that re-arms an offer outside the parking
+    path fails here instead of quietly reappearing in a benchmark.
+    """
+
+    @staticmethod
+    def _recording(proto):
+        """Record every write to ``read_offer``, in order."""
+        writes: list[int] = []
+        cls = type(proto)
+
+        class _Recorded(cls):
+            @property
+            def read_offer(self):
+                return self._offer
+
+            @read_offer.setter
+            def read_offer(self, value):
+                writes.append(value)
+                self._offer = value
+
+        proto.__class__ = _Recorded
+        proto._offer = 0
+        writes.clear()
+        return writes
+
+    async def test_a_read_the_buffer_can_satisfy_publishes_no_offer(self, wired):
+        proto, _ = wired
+        _deliver(proto, b'abcdefgh')
+        writes = self._recording(proto)
+
+        assert await proto.reader.read(4) == b'abcd'
+
+        assert not [w for w in writes if w], (
+            f'a read that never parked still declared a demand to the '
+            f'transport: {writes!r}.  Nothing can consult it — there is no '
+            f'await between the publish and the return — so it is cost with '
+            f'no reader.')
+
+    async def test_readexactly_that_is_already_satisfied_publishes_no_offer(
+            self, wired):
+        proto, _ = wired
+        _deliver(proto, b'x' * 64)
+        writes = self._recording(proto)
+
+        assert await proto.reader.readexactly(32) == b'x' * 32
+
+        assert not [w for w in writes if w], writes
+
+    async def test_a_parked_read_still_declares_its_demand(self, wired):
+        """The half that must not be lost: an offer is exactly what makes one
+        arrival feed a whole parked read."""
+        proto, _ = wired
+        writes = self._recording(proto)
+
+        task = asyncio.create_task(proto.reader.readexactly(64 * 1024))
+        await asyncio.sleep(0)
+        assert proto.read_offer == 64 * 1024, (
+            'a parked read declared no demand — the arrival that wakes it '
+            'will be sized at the idle floor')
+
+        _deliver(proto, b'y' * (64 * 1024))
+        await task
+        assert proto.read_offer == 0
+        assert writes and writes[-1] == 0, writes
+
+    async def test_the_head_read_keeps_the_floor_offer(self, wired):
+        """Deliberately unchanged.
+
+        ``read_head`` parks like any other read but declares nothing, so a
+        header arrival is sized at the floor.  Giving it a demand would change
+        the arrival granularity of every request's first read — a separate
+        question with its own measurement, not something to acquire as a side
+        effect of moving where the offer is published.
+        """
+        proto, _ = wired
+        writes = self._recording(proto)
+
+        task = asyncio.create_task(proto.reader.read_head(limit=8192))
+        await asyncio.sleep(0)
+        assert proto.read_offer == 0, (
+            f'read_head began declaring a demand: {writes!r}.  That changes '
+            f'header arrival granularity; measure it as its own change.')
+
+        _deliver(proto, b'GET / HTTP/1.1\r\n\r\n')
+        await task
+
+    async def test_the_offer_is_non_zero_only_while_a_reader_waits(self, wired):
+        """The invariant the publication site exists to hold.
+
+        ``read_offer`` and the reader's ``_waiting`` flag are two faces of one
+        fact — somebody is parked, and this is how much they want — so they
+        are maintained together or they drift.
+        """
+        proto, _ = wired
+        reader = proto.reader
+        assert proto.read_offer == 0 and not reader._waiting
+
+        task = asyncio.create_task(proto.reader.read(4096))
+        await asyncio.sleep(0)
+        assert reader._waiting is True and proto.read_offer != 0
+
+        _deliver(proto, b'z' * 4096)
+        await task
+        assert reader._waiting is False and proto.read_offer == 0
