@@ -62,6 +62,16 @@ Do not attempt to work around this rule with any tool.
   Before writing a new repo-memory file, grep `proposals/INDEX.md` for the
   proposal that owns the question; if one exists, update it instead.
 
+- **Every limit names its triad column.**  When you add or change a resource
+  limit, state which of the three it occupies — *how big may one unit be*,
+  *how big may the total be*, *how long may it take* — and name the owner of
+  the other two.  Every memory gap the attack-surface audit found was a unit
+  cap mistaken for a total cap: the frame was capped and the message was not,
+  the packet was capped and the session state was not.  Also check what state
+  the protocol *shares*, because that constrains the answer — an HTTP/2 header
+  block cannot be abandoned per-stream, since HPACK state is connection-wide.
+  → `.claude/planning/research/attack-surface-audit-2026-08.md` [private]
+
 - **Test first.** Add or update tests before implementing.  Assert
   observable behaviour (events emitted / bytes on the wire), not
   implementation internals.  → `.claude/patterns/testing.md`
@@ -230,6 +240,8 @@ fallback where one exists.
 | Cutting a release / sprint close | `.claude/patterns/release.md` + `.claude/skills/sprint-close/SKILL.md` [both private] |
 | Reasoning about actors / events | `.claude/design/actor-model.md` + `.claude/design/event-catalogue.md` [both private] |
 | Checking a known gotcha before acting | `.claude/patterns/cautions.md` [private] |
+| Adding or changing a resource limit / reviewing defence coverage | `.claude/planning/research/attack-surface-audit-2026-08.md` [private] — the mechanism × surface matrix, the limit-triad grid, and the closed gap register with its evidence pointers |
+| Answering a user's question about BlackBull's security posture | `docs/about/security-model.md` — quote the published claim rather than improvising one; it is a projection of the audit above, so the two must not drift |
 | Picking/triaging what to build next | `.claude/planning/proposals/INDEX.md` [private] |
 | Reading a point-in-time design | `.claude/planning/designs/` [private] |
 

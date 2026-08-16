@@ -160,6 +160,43 @@ so the editable install's metadata catches up.
   The Rapid Reset budget was a class constant (`HTTP2Actor._RST_RATE_LIMIT`,
   20/s); it is now this knob, at the same default.
 
+### Security
+
+An audit of every path a peer can make the server allocate on found nine gaps,
+all closed in this release. They are listed plainly rather than folded into the
+feature notes above: BlackBull has no known production adopters and none of
+these was reported from the field, but a security page that appears quietly
+after silent fixes is worth less than the fixes.
+
+The organising defect was one shape repeated — **a cap on one unit standing in
+for a cap on the total**. The frame was bounded and the message was not; the
+packet was bounded and the session state was not.
+
+| What was unbounded | Reachable by | Now |
+|---|---|---|
+| WebSocket message after `permessage-deflate` inflation | one compressed frame; ratios measured at **1028.8:1** in this codebase, so a 1 MiB frame inflated to ~1 GiB | `BB_WS_MAX_MESSAGE_SIZE`, enforced by zlib's own `max_length` so the payload is never built |
+| WebSocket message across fragments | N continuation frames, each individually legal | same knob, checked before each append |
+| MQTT packet | declaring a Remaining Length up to the 256 MiB spec ceiling and dribbling it | `BB_MQTT_MAX_PACKET_SIZE`, judged from the header before buffering |
+| MQTT session backlog | subscribing and never acknowledging | client's `Receive Maximum` honoured; excess bounded by `BB_MQTT_MAX_QUEUED_MESSAGES` |
+| MQTT retained store | one retained PUBLISH per distinct topic, forever | `BB_MQTT_MAX_RETAINED` |
+| HTTP/2 connection time — no deadline of any kind existed in the actor | opening a header block and dribbling CONTINUATION; going silent after the preface; never opening the flow-control window | `BB_HEADER_TIMEOUT`, `BB_H2_IDLE_TIMEOUT` + `BB_H2_PING_TIMEOUT`, `BB_WRITE_TIMEOUT` |
+| HTTP/2 PING / SETTINGS / zero-length frame floods | one ACK write or one loop turn per frame, at no byte cost (CVE-2019-9512 / -9515 / -9518 shapes) | `BB_FRAME_RATE_LIMIT` per type |
+| WebSocket control-frame flood | one PONG write per PING | same meter |
+| Rapid Reset counter's blind spot | provoking *server-emitted* resets rather than sending them | emitted resets counted in the same window |
+
+Also in this release: the request-body total cap and minimum delivery rate
+(`BB_MAX_BODY_SIZE`, `BB_MIN_BODY_RATE`), and a finite default connection cap
+(`BB_MAX_CONNECTIONS`) — both described under *Added* and *Changed*.
+
+**What is still open, stated because the boundary matters as much as the
+fixes**: `BB_REQUEST_TIMEOUT` remains off by default, so a peer delivering at
+exactly the minimum rate up to the body cap legally holds a connection for
+≈36.4 hours; and the derived connection cap bounds descriptor exhaustion, not
+event-loop health. Both are documented in
+[the security model](https://github.com/TOKUJI/BlackBull/blob/master/docs/about/security-model.md),
+which also states what this project does **not** claim — no third-party audit,
+no red-team exercise, no volumetric-DoS protection.
+
 ### Changed
 
 - **`BB_MAX_CONNECTIONS` now defaults to a finite, derived value** instead of
