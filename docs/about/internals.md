@@ -887,6 +887,20 @@ the protocol stack:
   The write deadline binds its task when it is armed rather
   than when it is built, because HTTP/2 drains one
   connection-level writer from per-stream tasks.
+- **HTTP/2 liveness watchdog** — `HTTP2Actor` does *not* use the
+  scanner for its own three time bounds, because the scanner
+  cancels the task parked in the read and this actor's read is a
+  frame loop the server usually intends to keep.  A per-connection
+  watchdog observes three timestamps instead — the last frame, an
+  open header block, an outstanding liveness PING — and ends the
+  connection by closing the writer, which turns the parked read
+  into the EOF the loop already handles.  It sleeps until the
+  earliest applicable deadline rather than on a fixed tick, so an
+  idle connection costs one wake-up per idle period.  The idle
+  bound probes rather than reaps: an idle HTTP/2 connection is
+  normal (a browser holds one across a page's lifetime, a gRPC
+  channel idles between calls), and only a question distinguishes
+  it from a dead one.
 - **Sender / Recipient** — `blackbull/server/sender.py`,
   `blackbull/server/recipient.py`.  Buffer responses on the way
   out, parse incoming frames on the way in.  Cache headers

@@ -219,6 +219,22 @@ BB_WS_MAX_MESSAGE_SIZE
     stays green on shipped defaults.  An application that does not serve
     huge messages should lower this: at the measured ratio a peer still
     buys 16 MiB of server memory for ~16 KiB of upstream bandwidth.
+BB_H2_IDLE_TIMEOUT
+    Seconds of complete silence on an HTTP/2 connection before the
+    server probes the peer with a PING.  HTTP/2 connections are *meant*
+    to be long-lived and idle — a browser holds one across a page's
+    lifetime and a gRPC channel idles between calls — so reaping on
+    idleness alone would break both.  Probing distinguishes *idle* from
+    *gone*: a peer that answers is never closed, and one that does not
+    answer within ``BB_H2_PING_TIMEOUT`` gets ``GOAWAY(NO_ERROR)`` and a
+    close.  Any inbound frame counts as an answer.  ``0`` disables the
+    probe entirely, leaving a silent connection bounded only by
+    ``BB_MAX_CONNECTIONS``.  Default: ``300.0`` (5 minutes).
+BB_H2_PING_TIMEOUT
+    Seconds to wait for any frame after a liveness PING before
+    concluding the peer is gone and closing with ``GOAWAY(NO_ERROR)``.
+    Only meaningful when ``BB_H2_IDLE_TIMEOUT`` is non-zero.
+    Default: ``30.0``.
 BB_MQTT_MAX_PACKET_SIZE
     Maximum size (bytes) of a single inbound MQTT control packet,
     advertised to clients as the ``Maximum Packet Size`` property in
@@ -673,6 +689,14 @@ class Settings:
     #: the security rationale.  Default 64 MiB.
     ws_max_frame_payload: int = 64 * 1024 * 1024
 
+    #: Seconds of silence on an HTTP/2 connection before probing the peer
+    #: with a PING; ``0`` disables the probe.  See BB_H2_IDLE_TIMEOUT above.
+    h2_idle_timeout: float = 300.0
+
+    #: Seconds to wait for any frame after a liveness PING before closing
+    #: with GOAWAY(NO_ERROR).  See BB_H2_PING_TIMEOUT above.
+    h2_ping_timeout: float = 30.0
+
     #: Maximum size (bytes) of one inbound MQTT control packet, checked on
     #: the declared Remaining Length before the payload is buffered and
     #: advertised in CONNACK.  See BB_MQTT_MAX_PACKET_SIZE above.
@@ -823,6 +847,8 @@ def get_settings() -> Settings:
             'BB_WS_MAX_FRAME_PAYLOAD', 64 * 1024 * 1024),
         ws_max_message_size=_int_env_nonneg(
             'BB_WS_MAX_MESSAGE_SIZE', 16 * 1024 * 1024),
+        h2_idle_timeout=_float_env_nonneg('BB_H2_IDLE_TIMEOUT', 300.0),
+        h2_ping_timeout=_float_env_nonneg('BB_H2_PING_TIMEOUT', 30.0),
         mqtt_max_packet_size=_int_env_nonneg(
             'BB_MQTT_MAX_PACKET_SIZE', 1024 * 1024),
         mqtt_receive_maximum=_int_env_nonneg('BB_MQTT_RECEIVE_MAXIMUM', 64),

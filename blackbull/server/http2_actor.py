@@ -4,6 +4,8 @@ HTTP2Actor drives the HTTP/2 connection state machine for one TCP connection.
 StreamActor owns the lifetime of a single HTTP/2 stream.
 """
 import asyncio
+import contextlib
+import inspect
 import logging
 import time
 from collections.abc import Awaitable, Callable
@@ -27,7 +29,8 @@ from .recipient import (AbstractReader, IncompleteReadError,
                         HTTP2Recipient, RecipientFactory,
                         _HTTP2_STREAM_QUEUE_DEPTH)
 from .response import ResponderFactory
-from .sender import AbstractWriter, ConnectionWindow, SenderFactory
+from .sender import (AbstractWriter, ConnectionWindow, FlowControlStalled,
+                     SenderFactory)
 from .access_log import (
     close_record as _close_record,
     close_ws_record as _close_ws_record,
@@ -208,6 +211,14 @@ class StreamActor(Actor):
                 self._conn, self._receive, self._send,
                 self._app, self._aggregator, self._force_asgi,
             ).run()
+        except FlowControlStalled:
+            # The peer asked for this response and then refused to accept it.
+            # CANCEL, not INTERNAL_ERROR: nothing here failed — we gave up on
+            # a stream the peer abandoned while holding it open.
+            await self._http2_actor.send_frame(
+                self._http2_actor.factory.rst_stream(
+                    self._stream_id, ErrorCodes.CANCEL)
+            )
         except Exception:
             await self._http2_actor.send_frame(
                 self._http2_actor.factory.rst_stream(
@@ -350,6 +361,25 @@ class HTTP2Actor(Actor):
         )
         self._next_push_stream_id = 2
         self._task_group: asyncio.TaskGroup | None = None
+
+        # -- the time axis (see _liveness_watchdog) --------------------------
+        # HTTP/1.1 spends a ConnectionDeadline on the header block, each body
+        # read, and the idle window.  HTTP/2 cannot borrow that mechanism
+        # wholesale: it cancels the task parked in the read, and this actor's
+        # read is a frame loop the server usually intends to keep.  So the
+        # bounds are observed from a watchdog and enforced by ending the
+        # connection, never by interrupting a read mid-frame.
+        self._h2_idle_timeout: float = _cfg.h2_idle_timeout
+        self._h2_ping_timeout: float = _cfg.h2_ping_timeout
+        self._header_timeout: float = _cfg.header_timeout
+        # Monotonic time of the last frame from the peer.  Any frame counts as
+        # a sign of life, so this is the only liveness state a probe needs.
+        self._last_frame_at: float = 0.0
+        # Set when a header block is open (HEADERS/PUSH_PROMISE without
+        # END_HEADERS); the peer owes CONTINUATION from this moment.
+        self._header_block_since: float | None = None
+        # Set while a liveness PING is outstanding and unanswered.
+        self._probe_sent_at: float | None = None
 
         # Flow-control state — updated by SettingsResponder / WindowUpdateResponder
         # so that new stream senders start with the current peer-granted windows.
@@ -741,11 +771,124 @@ class HTTP2Actor(Actor):
 
         self._recipients.clear()
 
+        self._last_frame_at = asyncio.get_running_loop().time()
+        self._probe_sent_at = None
+        self._header_block_since = None
+
         async with asyncio.TaskGroup() as tg:
             self._task_group = tg
-            await self._frame_loop(tg)
+            watchdog = tg.create_task(self._liveness_watchdog())
+            try:
+                await self._frame_loop(tg)
+            finally:
+                watchdog.cancel()
 
         self._task_group = None
+
+    async def _liveness_watchdog(self) -> None:
+        """Bound how long a peer may take, without touching the frame read.
+
+        Three questions, one loop, because all three are answered by
+        looking at a timestamp and all three end the connection:
+
+        * a header block open longer than ``BB_HEADER_TIMEOUT``;
+        * total silence longer than ``BB_H2_IDLE_TIMEOUT`` — answered with
+          a PING rather than a close, because an idle HTTP/2 connection is
+          normal and a dead one is not distinguishable from it without
+          asking;
+        * a probe unanswered for ``BB_H2_PING_TIMEOUT``.
+
+        The loop sleeps until the earliest deadline that currently
+        applies and re-evaluates on waking, so an idle connection costs
+        one wake-up per idle period rather than a fixed tick.
+
+        Ending the connection means closing the writer: the frame loop is
+        parked in a read, and closing the transport makes that read return
+        EOF, which is a path the loop already handles.  Cancelling it
+        instead would abandon a partially-read frame and leave the
+        teardown racing the stream tasks.
+        """
+        if self._h2_idle_timeout <= 0 and self._header_timeout <= 0:
+            return
+        loop = asyncio.get_running_loop()
+        while True:
+            now = loop.time()
+            if self._probe_sent_at is not None:
+                wake_at = self._probe_sent_at + self._h2_ping_timeout
+                expired = 'probe'
+            elif self._header_block_since is not None and self._header_timeout > 0:
+                wake_at = self._header_block_since + self._header_timeout
+                expired = 'header'
+            elif self._h2_idle_timeout > 0:
+                wake_at = self._last_frame_at + self._h2_idle_timeout
+                expired = 'idle'
+            else:
+                # Only the header bound is enabled and no block is open —
+                # nothing to watch until the frame loop opens one.
+                await asyncio.sleep(self._header_timeout)
+                continue
+
+            if wake_at > now:
+                await asyncio.sleep(wake_at - now)
+                continue  # state may have changed while we slept
+
+            if expired == 'header':
+                await self._end_for_stalled_header_block()
+                return
+            if expired == 'probe':
+                await self._end_for_unresponsive_peer()
+                return
+            await self._probe_peer()
+
+    async def _probe_peer(self) -> None:
+        """Ask a silent peer whether it is still there (RFC 9113 §6.7)."""
+        self._probe_sent_at = asyncio.get_running_loop().time()
+        logger.debug('HTTP/2 idle %.1fs — probing with PING',
+                     self._h2_idle_timeout)
+        with contextlib.suppress(Exception):
+            await self.send_frame(self.factory.create(
+                FrameTypes.PING, 0, 0, data=b'\x00' * 8))
+
+    async def _end_for_stalled_header_block(self) -> None:
+        """A header block the peer opened and never finished.
+
+        Deliberately a connection error rather than a stream reset, even
+        though only one stream is nominally involved: HPACK state is
+        connection-wide and order-dependent, so a block whose bytes were
+        never fed leaves the decoder unable to read any later block.
+        Resetting the stream would keep a connection that can no longer
+        decode anything.
+        """
+        log_cap_hit('header_timeout',
+                    requested=self._header_timeout, limit=self._header_timeout,
+                    protocol='http2')
+        logger.warning('HTTP/2 header block incomplete after %.1fs — GOAWAY',
+                       self._header_timeout)
+        await self._close_connection(ErrorCodes.ENHANCE_YOUR_CALM)
+
+    async def _end_for_unresponsive_peer(self) -> None:
+        """The probe went unanswered: the peer is gone, not merely quiet.
+
+        ``NO_ERROR`` because nothing was violated — we asked a question
+        and got no reply, which is a fact about the network, not a
+        complaint about the peer.
+        """
+        logger.info('HTTP/2 peer did not answer the liveness PING in %.1fs '
+                    '— GOAWAY', self._h2_ping_timeout)
+        await self._close_connection(ErrorCodes.NO_ERROR)
+
+    async def _close_connection(self, error_code: int) -> None:
+        with contextlib.suppress(Exception):
+            await self.send_frame(self.factory.goaway(
+                self._last_peer_stream_id, error_code))
+        self._goaway_sent = True
+        with contextlib.suppress(Exception):
+            result = self._writer.close()
+            # AbstractWriter.close is async on the asyncio adapter and sync on
+            # the raw transports; accept both rather than make every caller
+            # know which one it holds.
+            if inspect.isawaitable(result):
+                await result
 
     async def _frame_loop(self, tg: asyncio.TaskGroup) -> None:
         """Read frames and dispatch stream tasks until EOF or GOAWAY."""
@@ -753,8 +896,18 @@ class HTTP2Actor(Actor):
         header_frame = None
         _tasks_since_yield = 0
         _yield_every = self._frame_yield_every
+        _loop = asyncio.get_running_loop()
 
         while data := await self.receive():
+            # Any frame is a sign of life, so one timestamp answers both the
+            # idle question and the outstanding-probe one.  Matching a PING ACK
+            # by its opaque data would be more precise and no more true: a peer
+            # that sent us anything at all is there.  ``loop.time()``, not
+            # ``time.monotonic()``: the watchdog sleeps on the loop's clock,
+            # and two clocks that agree today are a bug waiting for a loop
+            # implementation that reads a different one.
+            self._last_frame_at = _loop.time()
+            self._probe_sent_at = None
             if self._goaway_sent:
                 # A previous frame triggered a connection error and the GOAWAY
                 # has been flushed.  Signal recipients before exiting:
@@ -982,12 +1135,15 @@ class HTTP2Actor(Actor):
                         if not spawned:
                             waiting_continuation = True
                             header_frame = frame
+                            # The peer now owes CONTINUATION; start its clock.
+                            self._header_block_since = _loop.time()
                 case FrameTypes.CONTINUATION:
                     send = self.make_sender(stream.stream_id)
                     spawned = await self._on_continuation_frame(
                         frame, stream, send, tg, header_frame, waiting_continuation)
                     if spawned:
                         waiting_continuation = False
+                        self._header_block_since = None
                 case FrameTypes.DATA:
                     await self._on_data_frame(frame, stream)
                 case FrameTypes.GOAWAY:

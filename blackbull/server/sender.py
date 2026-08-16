@@ -925,6 +925,17 @@ class HTTP1Sender(BaseSender):
                     await self._write(chunk)
 
 
+class FlowControlStalled(Exception):
+    """The peer never granted the flow-control credit it was asked for.
+
+    Distinct from a write failure: the socket is fine and the peer is
+    answering — it simply declines to accept the response it requested,
+    which is the "data dribble" shape of CVE-2019-9511.  Carried as its
+    own type so the stream ends with ``RST_STREAM(CANCEL)`` (a stream we
+    gave up on) rather than ``INTERNAL_ERROR`` (a server that broke).
+    """
+
+
 class ConnectionWindow:
     """Shared HTTP/2 connection-level (stream 0) send flow-control window.
 
@@ -977,6 +988,7 @@ class HTTP2Sender(BaseSender):
         '_factory', '_stream_id', '_push_callback',
         '_conn_window', 'stream_window_size',
         'max_frame_size', '_window_open', '_end_stream_sent',
+        '_flow_control_timeout',
         '_buffered_status', '_buffered_headers', '_expect_trailers',
         '_buffered_body', '_auto_flush_task', '_log_record',
     )
@@ -1007,6 +1019,11 @@ class HTTP2Sender(BaseSender):
                                    if initial_window is None else initial_window)
         self.max_frame_size = DEFAULT_MAX_FRAME_SIZE
         self._window_open: asyncio.Event | None = None
+        # How long the peer may take to grant flow-control credit before the
+        # stream gives up.  Read here rather than at the wait so a stalled
+        # write costs no settings lookup.
+        from ..env import get_settings  # noqa: PLC0415
+        self._flow_control_timeout: float = get_settings().write_timeout
         self._end_stream_sent: bool = False
         # Defer HEADERS write until first body event (mirrors HTTP1Sender).
         self._buffered_status: HTTPStatus | None = None
@@ -1205,7 +1222,27 @@ class HTTP2Sender(BaseSender):
                 if (self._conn_window.size > 0 and
                         self.stream_window_size > 0):
                     break
-                await self._window_open.wait()
+                # A peer that requests a large response and never opens its
+                # window parks this task forever (CVE-2019-9511's shape).
+                # ``BB_WRITE_TIMEOUT`` already bounds a stalled socket drain;
+                # this is the same question one layer up — how long may the
+                # peer take to accept what it asked for — so it is the same
+                # knob at a second enforcement point, not a new one.
+                if self._flow_control_timeout <= 0:
+                    await self._window_open.wait()
+                    continue
+                try:
+                    async with asyncio.timeout(self._flow_control_timeout):
+                        await self._window_open.wait()
+                except (asyncio.TimeoutError, TimeoutError) as exc:
+                    log_cap_hit('write_timeout',
+                                requested=self._flow_control_timeout,
+                                limit=self._flow_control_timeout,
+                                protocol='http2')
+                    raise FlowControlStalled(
+                        f'stream {self._stream_id}: peer sent no WINDOW_UPDATE '
+                        f'in {self._flow_control_timeout}s'
+                    ) from exc
 
             chunk_size = min(
                 self._conn_window.size,

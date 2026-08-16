@@ -120,6 +120,27 @@ so the editable install's metadata catches up.
   **This is a behaviour change** for a broker exposed to peers that send
   packets over 1 MiB, retain more than 10,000 topics, or rely on an unbounded
   offline backlog.
+- **HTTP/2 now has a time axis.**  `HTTP2Actor` previously held no deadline of
+  any kind: a peer could open a header block and dribble CONTINUATION forever,
+  complete the preface and go silent, or request a large response and never
+  open its flow-control window — each holding a connection, its actor task and
+  its buffers indefinitely, at no cost to itself.  Three bounds, reusing
+  HTTP/1.1's knobs rather than inventing HTTP/2 vocabulary:
+    - **`BB_HEADER_TIMEOUT`** now also bounds an HTTP/2 header block opened
+      without END_HEADERS.  Answered with `GOAWAY(ENHANCE_YOUR_CALM)` rather
+      than a stream reset, because HPACK state is connection-wide: a block
+      whose bytes never arrived leaves the decoder unable to read any later one.
+    - **`BB_WRITE_TIMEOUT`** now also bounds waiting for `WINDOW_UPDATE` (the
+      *data dribble* shape of CVE-2019-9511).  The stream gives up with
+      `RST_STREAM(CANCEL)` instead of parking its task forever.
+    - **`BB_H2_IDLE_TIMEOUT`** (default `300.0`) and **`BB_H2_PING_TIMEOUT`**
+      (default `30.0`) — a silent connection is *probed* with a PING, not
+      reaped.  Idle HTTP/2 connections are normal (a browser holds one across a
+      page's lifetime; a gRPC channel idles between calls), so a peer that
+      answers is never closed and any inbound frame counts as an answer.  A
+      peer that does not answer gets `GOAWAY(NO_ERROR)`.  `0` disables probing.
+  h2spec: 146 tests, 145 passed, 1 skipped, 0 failed — no bound fires during a
+  conformance case.
 
 ### Changed
 
