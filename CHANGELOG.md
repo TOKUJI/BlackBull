@@ -199,6 +199,31 @@ no red-team exercise, no volumetric-DoS protection.
 
 ### Changed
 
+- **Internal `DEBUG` logging is now decided at import, not per call.**  A
+  `logger.debug(...)` that emits nothing is not free — the call happens, its
+  arguments are built, and the level is checked — and the framework was making
+  twenty of them per HTTP/2 request and three per HTTP/1.1 request, measured at
+  4.5 % and 1.7 % of those lanes.  The per-request modules (request dispatch,
+  HTTP/2 frame parsing, the response senders) now read the level once at import
+  and branch on the result.
+
+  **What this changes for you**: raising the log level to `DEBUG` *after*
+  importing `blackbull` no longer switches on those internal traces.
+  Configure it first:
+
+  ```python
+  import logging
+  logging.basicConfig(level=logging.DEBUG)   # before the import below
+  from blackbull import BlackBull
+  ```
+
+  This is the bargain the `@log` decorator has always made, and the caveat in
+  `docs/guide/logging.md` now covers internal debug logging generally rather
+  than only `@log`.  `WARNING`/`ERROR` and the access log are unaffected and
+  are still checked per call.  The paths this gates emit around twenty lines
+  per request, so they are a development setting rather than something to
+  enable on a running server.
+
 - **`BB_MAX_CONNECTIONS` now defaults to a finite, derived value** instead of
   `0` (uncapped).  It accepts `auto` (the new default), `0`, or a number.
   `auto` derives the cap from the process's own `RLIMIT_NOFILE`, less a
@@ -275,10 +300,28 @@ no red-team exercise, no volumetric-DoS protection.
   makes explicit what a desynced chunked stream already implied, and extends it
   to a body refused for size: the actor breaks the keep-alive loop instead of
   reading the next request out of octets the peer chose.
-- **The new limits no longer cost a measurable share of the request.**  The
-  close A/B for this programme showed HTTP/1.1 `/conn` down ~1.7 % and HTTP/2
-  `/1kb` down ~3.7 %; a per-request call-count profile attributed all of it and
-  each site is now paid once per connection, or not at all:
+- **The cost of the new limits, measured and then worked down.**  The close A/B
+  for this programme found a regression against `v0.76.1`: HTTP/1.1 `/conn`
+  −1.98 % and HTTP/2 `/1kb` −3.75 % (EC2 m7a.2xlarge, 8 rounds ABBA with a
+  passing A/A null).  Paying the limits once per connection instead of once per
+  request roughly halved it — to −1.06 % and −1.85 % — and that is the last
+  figure confirmed on EC2.
+
+  Attribution then moved to counting *executed instructions* per request, which
+  is exact where this box's timing is not.  It said two things worth recording.
+  About **40 % of the added cost was not the limits at all** but the receive
+  path's ownership split, which shipped in the same window; and the HTTP/2
+  instruction ratio (+1.85 %) matched that lane's measured throughput loss
+  exactly, so the count is a usable stand-in for it.
+
+  Four further changes brought the instruction cost against `v0.76.1` from
+  +2.23 % to **+0.19 %** on `/conn` and from +1.85 % to **+0.29 %** on HTTP/2 —
+  the largest of them being the DEBUG-logging gate below, which was never about
+  the limits.  **Those four are not EC2-verified**; the instruction count
+  predicts roughly −0.1 % and −0.3 % respectively, and the `/conn` ratio is
+  known to over-predict by about 2×.
+
+  What the limits themselves now cost, and what was taken back:
   - the declared-body check reads the length `_validate_message_framing`
     already validated, instead of asking the header store again — a request
     with no `Content-Length` was paying an index miss plus the `bytes.lower()`
@@ -287,14 +330,17 @@ no red-team exercise, no volumetric-DoS protection.
     connection's actor rather than resolving settings themselves.  One of each
     is built per stream, so a function-level import was being resolved through
     `importlib._bootstrap` on every request;
-  - the HTTP/2 declared-body refusal is gated on a plain comparison, so the
-    common answer — no — no longer drives a coroutine per stream;
-  - `needs_drain()` reads the two refusal flags directly instead of calling
-    `must_close`, with a test holding the two spellings in step.
+  - the HTTP/2 declared-body refusal is a comparison at the call site, so the
+    common answer — no — costs neither a coroutine nor a method call per
+    stream;
+  - the HTTP/1.1 actor asks the recipient one question after dispatch
+    (`after_dispatch`) rather than combining two predicates itself.
 
-  Behaviour is unchanged in every case; `BB_H2_IDLE_TIMEOUT`'s per-frame clock
+  Behaviour is unchanged in every case.  `BB_H2_IDLE_TIMEOUT`'s per-frame clock
   read was left alone deliberately, because it is what makes that bound mean
-  the period it states.
+  the period it states; the frame-rate meters and the body-cap state were
+  likewise left, because they are the checks rather than the way they are
+  written.
 
 ## [0.76.1] — 2026-08-14
 
