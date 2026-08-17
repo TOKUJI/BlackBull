@@ -76,6 +76,36 @@ so the editable install's metadata catches up.
     reader is *woken*, so arrivals in that window cost a
     `pause_reading`/`resume_reading` pair that the next park undid.
 
+## [0.76.2] — 2026-08-17
+
+Client-side patch.  Reported as
+[#241](https://github.com/TOKUJI/BlackBull/issues/241) against
+`WebSocketClient`; the same defect was present in every client.
+
+### Fixed
+
+- **Connection establishment is bounded on all five clients** — `Client`,
+  `HTTP1Client`, `HTTP2Client`, `WebSocketClient`, and `WebSocketH2Client`
+  opened their transport with a bare `await asyncio.open_connection()`.  A peer
+  that completes the TCP handshake and then goes silent left the coroutine
+  pending with nothing to end it: TLS negotiation has no kernel-side deadline,
+  so `async with SomeClient(...)` could hang for the lifetime of the process.
+  All five now accept **`connect_timeout=`** (default `30.0` s, matching the
+  server's `BB_BODY_TIMEOUT` default) and raise `TimeoutError` when it expires.
+  **This is a behaviour change**: a connect that legitimately takes longer than
+  30 s now fails.  Pass `connect_timeout=None` to restore the unbounded wait and
+  impose your own deadline.
+  `HTTP1Client` already carried the parameter but defaulted it to `None`, which
+  left every caller who never passed it exactly as exposed as the others.
+- **`WebSocketClient.connect()` bounds the handshake read** — a peer can accept
+  the connection and then never send the 101, which no transport-level deadline
+  covers.  New **`response_timeout=`** (default `5.0` s) matches what
+  `WebSocketH2Client.connect()` already enforced for RFC 8441 Extended CONNECT.
+- **`docs/guide/testing.md` WebSocket example corrected** — it awaited
+  `connect()` as a context manager and called `send`/`recv`, none of which
+  exist on the session.  The example now mirrors the passing test in
+  `tests/conformance/http1/test_client.py`.
+
 ## [0.76.1] — 2026-08-14
 
 Emergency correction.  v0.76.0 released the Sprint 102 upload body-read work
