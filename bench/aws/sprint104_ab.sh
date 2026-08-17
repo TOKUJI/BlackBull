@@ -67,6 +67,15 @@ THREADS="${THREADS:-4}"
 CONNS="${CONNS:-32}"
 PORT="${PORT:-8443}"
 H2_PROFILES="${H2_PROFILES:-/1kb}"
+# The H1 lane set, overridable.  Defaults reproduce the original close run
+# (/conn + /upload 256 KiB); the ±0.5 % equivalence re-run drops /upload, whose
+# null floor has been dirty in every session so far, and spends the rounds on
+# the two lanes that can actually return a verdict.  Empty WRK_SCRIPTS means
+# "no lua for any lane" — the comma-separated lists are positional against
+# URL_PATHS, so they have to be cleared together with it.
+URL_PATHS="${URL_PATHS:-/conn,/upload}"
+WRK_SCRIPTS="${WRK_SCRIPTS-,bench/wrk/post_echo.lua}"
+WRK_SCRIPT_ARGSS="${WRK_SCRIPT_ARGSS-,262144}"
 H2_CONNS="${H2_CONNS:-32}"
 H2_STREAMS="${H2_STREAMS:-16}"
 H2_N="${H2_N:-100000}"
@@ -187,8 +196,8 @@ mapfile -t PRE_EXISTING < <(ls -d "$REPO_ROOT"/bench/results/ab-commit-* \
                                   "$REPO_ROOT"/bench/results/ab-h2-* 2>/dev/null || true)
 echo ">>> bench/aws/ab.sh launch ..."
 REF_BASE="$REF_BASE" REF_TREAT="$REF_TREAT" PATHSPEC=blackbull/ \
-    URL_PATHS=/conn,/upload \
-    WRK_SCRIPTS=',bench/wrk/post_echo.lua' WRK_SCRIPT_ARGSS=',262144' \
+    URL_PATHS="$URL_PATHS" \
+    WRK_SCRIPTS="$WRK_SCRIPTS" WRK_SCRIPT_ARGSS="$WRK_SCRIPT_ARGSS" \
     H2_PROFILES="$H2_PROFILES" \
     H2_CONNS="$H2_CONNS" H2_STREAMS="$H2_STREAMS" H2_N="$H2_N" H2_WARMUP="$H2_WARMUP" \
     ROUNDS="$ROUNDS" DURATION="$DURATION" WARMUP="$WARMUP" \
