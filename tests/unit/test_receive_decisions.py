@@ -17,12 +17,21 @@ themselves, so the inference cannot come back.
 The ownership after the split:
 
 * ``BufferReader`` — the receive decisions **and** the receive-side memory
-  policy (backpressure watermarks, peak tracking, release hysteresis).
+  policy (backpressure watermarks, peak tracking, release hysteresis), plus
+  every consuming read, ``discard`` included: throwing bytes away is reading
+  them.
 * ``ConnectionProtocol`` — the transport callbacks and executing
   ``pause_reading`` / ``resume_reading``; the rendezvous future stays here
   because it is a callback↔coroutine handoff, not a receive decision.
 * ``ReadBuffer`` — bytes, scanning, and growth; it reports a drained boundary
-  but never decides what to do about one.
+  but never decides what to do about one, and it closes that boundary out
+  itself when the reader says the message is done.
+
+The last section asserts the rule that makes publishing survivable: a
+published field has exactly one writer.  Reading across the boundary is free
+and is what keeps the arrival path free of a call; *writing* across it moves a
+state transition without moving the ownership, and then only a comment says
+who is responsible.
 
 Unit tests, no I/O: the protocol is fed the way a real transport feeds it.
 """
@@ -68,6 +77,13 @@ class _FakeTransport:
     def close(self): self.closed = True
     def is_closing(self): return self.closed
     def get_extra_info(self, name, default=None): return default
+
+    # The lingering close writes FIN before draining.  Modelled because a fake
+    # that lacks it raises inside ``linger_close``'s own ``except Exception``,
+    # which silently skipped the drain the tests below are about.
+    def can_write_eof(self): return True
+
+    def write_eof(self): self.eof_written = True
 
 
 @pytest.fixture
@@ -186,12 +202,10 @@ class TestTheStopReadingDecision:
         class _StubReader:
             def __init__(self):
                 self.crossings = 0
+                self.read_offer = 0
 
             def maybe_pause(self):
                 self.crossings += 1
-
-            def offer_size(self) -> int:
-                return 0
 
         proto.reader = _StubReader()
         _deliver(proto, b'z' * (_HIGH_WATER * 2))
@@ -217,8 +231,8 @@ class TestTheMemoryPolicy:
         _deliver(proto, b'z' * _LARGE)
         await proto.reader.readexactly(_LARGE)
 
-        assert proto.buffer.capacity > _LARGE // 2, 'buffer never grew'
-        assert proto.buffer.capacity > ReadBuffer.FLOOR, (
+        assert proto._rb.capacity > _LARGE // 2, 'buffer never grew'
+        assert proto._rb.capacity > ReadBuffer.FLOOR, (
             'the grown allocation was handed back at its own message boundary')
 
     async def test_a_grown_allocation_returns_to_the_floor_after_small_messages(
@@ -236,20 +250,20 @@ class TestTheMemoryPolicy:
         await proto.reader.read_head(limit=8192)
         _deliver(proto, b'z' * _LARGE)
         await proto.reader.readexactly(_LARGE)
-        grown = proto.buffer.capacity
+        grown = proto._rb.capacity
         assert grown > ReadBuffer.FLOOR
 
         for i in range(_RELEASE_HYSTERESIS - 1):
-            proto.buffer.compact()                 # the message boundary
+            proto._rb.compact()                 # the message boundary
             await _small_message(proto)            # evaluates the pending one
-            assert proto.buffer.capacity == grown, (
+            assert proto._rb.capacity == grown, (
                 f'released after {i + 1} small messages — the hysteresis is '
                 f'{_RELEASE_HYSTERESIS}')
 
-        proto.buffer.compact()
+        proto._rb.compact()
         await _small_message(proto)
-        assert proto.buffer.capacity == ReadBuffer.FLOOR, (
-            f'stayed at {proto.buffer.capacity} after '
+        assert proto._rb.capacity == ReadBuffer.FLOOR, (
+            f'stayed at {proto._rb.capacity} after '
             f'{_RELEASE_HYSTERESIS} small messages')
 
     async def test_repeated_large_messages_reuse_the_grown_allocation(self, wired):
@@ -260,7 +274,7 @@ class TestTheMemoryPolicy:
         await proto.reader.read_head(limit=8192)
         _deliver(proto, b'z' * _LARGE)
         await proto.reader.readexactly(_LARGE)
-        grown = proto.buffer.capacity
+        grown = proto._rb.capacity
 
         for _ in range(_RELEASE_HYSTERESIS + 2):
             # No forced boundary: consuming a message this size compacts on its
@@ -269,8 +283,8 @@ class TestTheMemoryPolicy:
             await proto.reader.read_head(limit=8192)
             _deliver(proto, b'z' * _LARGE)
             await proto.reader.readexactly(_LARGE)
-            assert proto.buffer.capacity == grown, (
-                f'capacity changed {grown} -> {proto.buffer.capacity} between '
+            assert proto._rb.capacity == grown, (
+                f'capacity changed {grown} -> {proto._rb.capacity} between '
                 f'large messages')
 
 
@@ -292,25 +306,25 @@ class TestTheTransportOfferFollowsTheDemand:
 
     async def test_idle_reader_offers_nothing(self, wired):
         proto, _ = wired
-        assert proto.read_offer == 0
+        assert proto.reader.read_offer == 0
 
     async def test_parked_read_declares_its_demand(self, wired):
         proto, _ = wired
         task = asyncio.create_task(proto.reader.readexactly(64 * 1024))
         await asyncio.sleep(0)
-        assert proto.read_offer == 64 * 1024
+        assert proto.reader.read_offer == 64 * 1024
         _deliver(proto, b'x' * (64 * 1024))
         await task
-        assert proto.read_offer == 0
+        assert proto.reader.read_offer == 0
 
     async def test_demand_is_capped_at_the_high_water_mark(self, wired):
         proto, _ = wired
         task = asyncio.create_task(proto.reader.read(1 << 30))
         await asyncio.sleep(0)
-        assert proto.read_offer == _HIGH_WATER
+        assert proto.reader.read_offer == _HIGH_WATER
         _deliver(proto, b'y')
         assert await task == b'y'
-        assert proto.read_offer == 0
+        assert proto.reader.read_offer == 0
 
     async def test_one_recv_can_feed_the_whole_demand(self, wired):
         """The point of the offer: one get_buffer + buffer_updated pair
@@ -323,7 +337,7 @@ class TestTheTransportOfferFollowsTheDemand:
         view[:64 * 1024] = b'z' * (64 * 1024)
         proto.buffer_updated(64 * 1024)
         assert await task == b'z' * (64 * 1024)
-        assert proto.read_offer == 0
+        assert proto.reader.read_offer == 0
 
     async def test_idle_get_buffer_stays_at_the_floor(self, wired):
         """No pending read → the idle offer is the floor span, so the
@@ -337,23 +351,30 @@ class TestTheTransportOfferFollowsTheDemand:
 
     async def test_the_arrival_path_reads_the_offer_without_calling_the_reader(
             self, wired):
-        """Published, not polled.
+        """Published, not polled — the distinction is *call* versus *read*.
 
         ``get_buffer`` runs on every arrival on every connection, including
-        the ones that never read a body — so a call into the reader there is
-        paid by the no-body path for nothing.  Standing the reader in with an
-        object that refuses every attribute proves the call is gone rather
-        than merely cheap.
+        the ones that never read a body, and the EC2 /conn A/B showed a method
+        call in that position at the same order as a whole regression.  So the
+        rule is that the arrival path asks the reader nothing: it reads the
+        field the reader publishes.  Reaching the owner costs one attribute
+        hop (measured at 1.66 ns), which is what keeps the field on the object
+        that decides it without reinstating the call.
+
+        The stand-in permits exactly that one read and refuses everything
+        else, so a call creeping back fails here.
         """
         proto, _ = wired
 
-        class _Unreachable:
+        class _FieldOnly:
+            read_offer = 0
+
             def __getattr__(self, name):
                 raise AssertionError(
-                    f'the arrival path consulted the reader ({name}) for the '
-                    f'offer; it is published on the protocol')
+                    f'the arrival path called into the reader ({name}) for '
+                    f'the offer; it may only read the published field')
 
-        proto.reader = _Unreachable()
+        proto.reader = _FieldOnly()
         view = proto.get_buffer(-1)
         try:
             assert len(view) == ReadBuffer.FLOOR
@@ -377,22 +398,25 @@ class TestTheOfferIsPublishedOnlyByTheParkingPath:
 
     @staticmethod
     def _recording(proto):
-        """Record every write to ``read_offer``, in order."""
+        """Record every write to the reader's ``read_offer``, in order."""
         writes: list[int] = []
-        cls = type(proto)
+        reader = proto.reader
+        cls = type(reader)
+        slot = cls.read_offer          # the slot descriptor the property hides
 
         class _Recorded(cls):
+            __slots__ = ()
+
             @property
             def read_offer(self):
-                return self._offer
+                return slot.__get__(self, cls)
 
             @read_offer.setter
             def read_offer(self, value):
                 writes.append(value)
-                self._offer = value
+                slot.__set__(self, value)
 
-        proto.__class__ = _Recorded
-        proto._offer = 0
+        reader.__class__ = _Recorded
         writes.clear()
         return writes
 
@@ -427,13 +451,13 @@ class TestTheOfferIsPublishedOnlyByTheParkingPath:
 
         task = asyncio.create_task(proto.reader.readexactly(64 * 1024))
         await asyncio.sleep(0)
-        assert proto.read_offer == 64 * 1024, (
+        assert proto.reader.read_offer == 64 * 1024, (
             'a parked read declared no demand — the arrival that wakes it '
             'will be sized at the idle floor')
 
         _deliver(proto, b'y' * (64 * 1024))
         await task
-        assert proto.read_offer == 0
+        assert proto.reader.read_offer == 0
         assert writes and writes[-1] == 0, writes
 
     async def test_the_head_read_keeps_the_floor_offer(self, wired):
@@ -450,7 +474,7 @@ class TestTheOfferIsPublishedOnlyByTheParkingPath:
 
         task = asyncio.create_task(proto.reader.read_head(limit=8192))
         await asyncio.sleep(0)
-        assert proto.read_offer == 0, (
+        assert proto.reader.read_offer == 0, (
             f'read_head began declaring a demand: {writes!r}.  That changes '
             f'header arrival granularity; measure it as its own change.')
 
@@ -466,12 +490,175 @@ class TestTheOfferIsPublishedOnlyByTheParkingPath:
         """
         proto, _ = wired
         reader = proto.reader
-        assert proto.read_offer == 0 and not reader._waiting
+        assert proto.reader.read_offer == 0 and not reader._waiting
 
         task = asyncio.create_task(proto.reader.read(4096))
         await asyncio.sleep(0)
-        assert reader._waiting is True and proto.read_offer != 0
+        assert reader._waiting is True and proto.reader.read_offer != 0
 
         _deliver(proto, b'z' * 4096)
         await task
-        assert reader._waiting is False and proto.read_offer == 0
+        assert reader._waiting is False and proto.reader.read_offer == 0
+
+
+# ---------------------------------------------------------------------------
+# Ownership: what each object is allowed to touch
+# ---------------------------------------------------------------------------
+
+class TestEachPublishedFieldHasOneWriter:
+    """A published field is a *fact*, not shared state.
+
+    Publishing trades encapsulation for speed: the other side reads the
+    attribute instead of calling, which is what keeps the arrival path free of
+    a method call.  That trade is safe while the field has exactly **one**
+    writer — the owner still decides, the other side only looks.  It stops
+    being safe the moment the consumer writes back, because then a state
+    transition has crossed the boundary without the ownership crossing with
+    it, and nothing but a comment says who is responsible for it.
+
+    Asserted on the source rather than at runtime: the rule is "this class
+    contains no assignment to that field", which is a property of the code,
+    not of any one execution path.
+    """
+
+    @staticmethod
+    def _assignments_to(cls, names):
+        import ast
+        import inspect
+        import textwrap
+        tree = ast.parse(textwrap.dedent(inspect.getsource(cls)))
+        found = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign):
+                targets = node.targets
+            elif isinstance(node, (ast.AugAssign, ast.AnnAssign)):
+                targets = [node.target]
+            else:
+                continue
+            for t in targets:
+                if isinstance(t, ast.Attribute) and t.attr in names:
+                    found.append(f'{t.attr} at line {t.lineno} of the class')
+        return found
+
+    def test_the_reader_never_writes_the_buffers_fields(self):
+        """``drained_boundary`` and ``peak_avail`` are the buffer's.
+
+        The buffer raises the boundary and accumulates the peak; the reader
+        *reads* both to decide whether to hand an allocation back.  Clearing
+        them is the producer's own transition — a consumer that resets them is
+        an edge-triggered signal with the reset on the wrong side, which loses
+        an edge the moment a second consumer exists.
+        """
+        from blackbull.server.connection_protocol import BufferReader
+        bad = self._assignments_to(
+            BufferReader, {'drained_boundary', 'peak_avail'})
+        assert not bad, (
+            f'BufferReader assigns to the buffer\'s own fields: {bad}.  '
+            f'Read them to decide; ask the buffer to clear them.')
+
+    def test_the_buffer_never_writes_the_readers_fields(self):
+        """And the rule holds in the other direction."""
+        from blackbull.server.read_buffer import ReadBuffer
+        bad = self._assignments_to(ReadBuffer, {'read_offer', '_waiting'})
+        assert not bad, bad
+
+    def test_the_protocol_never_writes_the_offer_it_only_reads(self):
+        """``read_offer`` is the reader's demand; the protocol consults it."""
+        from blackbull.server.connection_protocol import ConnectionProtocol
+        bad = self._assignments_to(ConnectionProtocol, {'read_offer'})
+        assert not bad, (
+            f'ConnectionProtocol assigns to read_offer: {bad}.  The demand is '
+            f'the reader\'s; the protocol only reads it on the arrival path.')
+
+
+class TestTheProtocolOwnsNoReceiveWork:
+    """What is left on the transport front end must be socket work only."""
+
+    async def test_the_offer_lives_on_the_reader_that_decides_it(self, wired):
+        proto, _ = wired
+        assert hasattr(proto.reader, 'read_offer'), (
+            'the recv demand does not live on the object that decides it')
+
+        task = asyncio.create_task(proto.reader.readexactly(64 * 1024))
+        await asyncio.sleep(0)
+        assert proto.reader.read_offer == 64 * 1024
+        _deliver(proto, b'z' * (64 * 1024))
+        await task
+        assert proto.reader.read_offer == 0
+
+    async def test_the_protocol_hands_out_no_raw_buffer(self, wired):
+        """The reader is the only object that talks to the buffer.
+
+        A public accessor for the whole buffer is an official way round that,
+        and this one had no caller outside the tests: its stated purpose — a
+        successor taking the stream over — is served by handing over the
+        *reader*, which is what the h2c and WebSocket upgrades actually do.
+        """
+        proto, _ = wired
+        assert not hasattr(proto, 'buffer'), (
+            'ConnectionProtocol still exposes its ReadBuffer wholesale')
+
+    async def test_the_two_eof_questions_have_two_names(self, wired):
+        """"the peer closed its end" and "there is nothing left to read" are
+        different questions, and one name for both makes every call site a
+        guess about which was meant."""
+        proto, _ = wired
+        _deliver(proto, b'tail')
+        proto.eof_received()
+
+        assert proto.peer_closed is True, 'the transport fact is not readable'
+        assert proto.reader.at_eof() is False, (
+            'the reader reported EOF while it still holds bytes to serve')
+        assert await proto.reader.read(4) == b'tail'
+        assert proto.reader.at_eof() is True
+
+    async def test_discarding_is_a_read_and_takes_a_reads_decisions(self, wired):
+        """The lingering close throws bytes away, which is still reading.
+
+        So it belongs to the reader and makes the decisions every other read
+        makes — here, releasing a pause the discarded bytes had armed.  Doing
+        it on the protocol with a direct ``consume`` skipped all of them.
+        """
+        proto, transport = wired
+        _deliver(proto, b'z' * (1024 * 1024))
+        assert transport.paused, 'the delivery did not arm backpressure'
+
+        loop = asyncio.get_running_loop()
+        await proto.reader.discard(max_bytes=1024 * 1024,
+                                   deadline=loop.time() + 0.05)
+
+        assert not transport.paused, (
+            'discarding drained the buffer without releasing the pause — the '
+            'discard bypassed the reader\'s consuming decisions')
+
+    async def test_the_protocol_does_not_read_on_its_own(self, wired):
+        """``linger_close`` delegates the draining and keeps the socket half.
+
+        A Reader that refuses to discard proves the protocol has no second,
+        private read path: if the bytes still go away, the protocol read them
+        itself.
+        """
+        proto, transport = wired
+        _deliver(proto, b'z' * 4096)
+        resident = proto.reader.buffered_len()
+
+        class _RefusingReader:
+            def __init__(self, inner):
+                self._inner = inner
+                self.asked = 0
+
+            def __getattr__(self, name):
+                return getattr(self._inner, name)
+
+            async def discard(self, max_bytes, deadline):
+                self.asked += 1
+
+        proto.reader = _RefusingReader(proto.reader)
+        await proto.linger_close()
+
+        assert proto.reader.asked == 1, (
+            'linger_close did not ask the reader to discard')
+        assert proto.reader.buffered_len() == resident, (
+            'the bytes were consumed anyway — the protocol still has its own '
+            'read path into the buffer')
+        assert transport.closed, 'linger_close must still close the socket'

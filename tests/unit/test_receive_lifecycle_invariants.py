@@ -93,7 +93,7 @@ class TestTheReadOfferIsClearedOnEveryExitPath:
     async def test_after_a_completed_read(self, wired):
         proto = wired
         await _one_request(proto, b'x' * 4096)
-        assert proto.read_offer == 0
+        assert proto.reader.read_offer == 0
 
     async def test_after_an_eof_mid_read(self, wired):
         proto = wired
@@ -102,7 +102,7 @@ class TestTheReadOfferIsClearedOnEveryExitPath:
         proto.eof_received()
         with pytest.raises(Exception):
             await task
-        assert proto.read_offer == 0
+        assert proto.reader.read_offer == 0
 
     async def test_after_a_cancellation_while_parked(self, wired):
         """The path a body timeout takes: the actor's task is cancelled while
@@ -110,11 +110,11 @@ class TestTheReadOfferIsClearedOnEveryExitPath:
         proto = wired
         task = asyncio.create_task(proto.reader.read(_HIGH_WATER))
         await asyncio.sleep(0)
-        assert proto.read_offer == _HIGH_WATER, 'the read never parked'
+        assert proto.reader.read_offer == _HIGH_WATER, 'the read never parked'
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
-        assert proto.read_offer == 0
+        assert proto.reader.read_offer == 0
 
     async def test_the_idle_offer_is_the_floor_span(self, wired):
         """The consequence the invariant exists for."""
@@ -144,11 +144,11 @@ class TestTheBufferIsBoundedAndGivenBack:
         and never comes down."""
         proto = wired
         await _one_request(proto, b'x' * 200_000)
-        peak = len(proto.buffer._buf)
+        peak = len(proto._rb._buf)
         for _ in range(200):
             await _one_request(proto, b'y' * 16)
-        assert len(proto.buffer._buf) == peak, 'capacity ratcheted upward'
-        assert proto.buffer.available == 0
+        assert len(proto._rb._buf) == peak, 'capacity ratcheted upward'
+        assert proto._rb.available == 0
 
     async def test_the_peak_is_handed_back_once_the_allocation_is_walked(
             self, wired):
@@ -162,11 +162,11 @@ class TestTheBufferIsBoundedAndGivenBack:
         """
         proto = wired
         await _one_request(proto, b'x' * 200_000)
-        assert proto.buffer.grown, 'the large body never grew the buffer'
-        bound = len(proto.buffer._buf)      # far more messages than a walk needs
+        assert proto._rb.grown, 'the large body never grew the buffer'
+        bound = len(proto._rb._buf)      # far more messages than a walk needs
         for i in range(bound):
             await _one_request(proto, b'y' * 16)
-            if not proto.buffer.grown:
+            if not proto._rb.grown:
                 break
         else:
             pytest.fail(f'the peak was never released in {bound} small messages')
@@ -177,8 +177,8 @@ class TestTheBufferIsBoundedAndGivenBack:
         proto = wired
         for _ in range(50):
             await _one_request(proto, b'z' * 1024)
-        assert not proto.buffer.grown
-        assert proto.buffer.available == 0
+        assert not proto._rb.grown
+        assert proto._rb.available == 0
 
 
 class TestNoExportOutlivesItsArrival:
@@ -189,7 +189,7 @@ class TestNoExportOutlivesItsArrival:
         proto = wired
         for _ in range(5):
             await _one_request(proto, b'q' * 2048)
-            assert proto.buffer._view is None
+            assert proto._rb._view is None
 
 
 class TestNothingIsRetainedAcrossConnections:
