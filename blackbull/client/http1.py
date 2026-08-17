@@ -20,6 +20,7 @@ from ..headers import Headers, HeaderList
 from ..server.recipient import (AbstractReader, AsyncioReader,
                                 IncompleteReadError)
 from ..server.sender import AbstractWriter, AsyncioWriter
+from ._connect import DEFAULT_CONNECT_TIMEOUT, open_connection as _open_connection
 from .exceptions import ConnectionError, ProtocolError
 from .http2 import ClientResponse  # shared dataclass
 from blackbull.fault_injection.scenario_h1 import (
@@ -271,7 +272,7 @@ class HTTP1Client:
     def __init__(self, host: str, port: int, *,
                  ssl: _ssl.SSLContext | None = None,
                  record_wire_bytes: bool = False,
-                 connect_timeout: float | None = None) -> None:
+                 connect_timeout: float | None = DEFAULT_CONNECT_TIMEOUT) -> None:
         self._host = host
         self._port = port
         self._ssl = ssl
@@ -286,21 +287,18 @@ class HTTP1Client:
         # primitives record.
         self._record_wire_bytes = record_wire_bytes
         self._wire_buffer: bytearray = bytearray()
-        # Bound the connect() so a hung accept can't
-        # stall the scenario executor before any step runs.  atheris in
-        # particular cannot afford an unbounded wait per TestOneInput.
-        # None = no timeout (preserves pre-Phase-5 behaviour).
+        # Bound the connect() so a hung accept can't stall the scenario
+        # executor before any step runs.  atheris in particular cannot afford
+        # an unbounded wait per TestOneInput.  None opts out, leaving the
+        # caller to impose their own deadline.
         self._connect_timeout = connect_timeout
 
     # ---- async context manager -------------------------------------------
 
     async def __aenter__(self) -> 'HTTP1Client':
         if self._raw_writer is None:
-            coro = asyncio.open_connection(self._host, self._port, ssl=self._ssl)
-            if self._connect_timeout is not None:
-                r, w = await asyncio.wait_for(coro, timeout=self._connect_timeout)
-            else:
-                r, w = await coro
+            r, w = await _open_connection(self._host, self._port, self._ssl,
+                                          self._connect_timeout)
             self._raw_writer = w
             self._reader = AsyncioReader(r)
             self._writer = AsyncioWriter(w)

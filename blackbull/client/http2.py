@@ -23,6 +23,7 @@ from ..headers import Headers
 from ..server.recipient import AbstractReader, AsyncioReader
 from ..server.sender import AbstractWriter, AsyncioWriter, HTTP2Sender
 from ..utils import HTTP2 as _HTTP2_PREFACE
+from ._connect import DEFAULT_CONNECT_TIMEOUT, open_connection as _open_connection
 from .exceptions import ConnectionError, ProtocolError, StreamReset
 from .response import ResponderFactory
 
@@ -82,10 +83,12 @@ class HTTP2Client:
     """
 
     def __init__(self, host: str, port: int, *,
-                 ssl: _ssl.SSLContext | None = None) -> None:
+                 ssl: _ssl.SSLContext | None = None,
+                 connect_timeout: float | None = DEFAULT_CONNECT_TIMEOUT) -> None:
         self._host = host
         self._port = port
         self._ssl = ssl
+        self._connect_timeout = connect_timeout
         self._scheme = 'https' if ssl is not None else 'http'
 
         self._reader: AbstractReader | None = None
@@ -133,7 +136,8 @@ class HTTP2Client:
 
     async def __aenter__(self) -> 'HTTP2Client':
         if self._raw_writer is None:
-            r, w = await asyncio.open_connection(self._host, self._port, ssl=self._ssl)
+            r, w = await _open_connection(self._host, self._port, self._ssl,
+                                          self._connect_timeout)
             self._raw_writer = w
             self._reader = AsyncioReader(r)
             self._writer = AsyncioWriter(w)
