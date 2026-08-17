@@ -490,7 +490,8 @@ emit to a real client.
 
 ## End-to-end with BlackBull's clients
 
-BlackBull exports four async clients from `blackbull.client`:
+BlackBull bundles four async clients in `blackbull.client`, with
+testing and fault injection as their primary uses:
 
 | Client | Picks the protocol by | Use for |
 |---|---|---|
