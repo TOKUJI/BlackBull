@@ -18,6 +18,21 @@ A personal learning project — wire correctness over API stability (ZeroVer).
 
 ---
 
+## Confidentiality (non-negotiable)
+
+NEVER read, list, glob, grep, or otherwise expose the following paths or their
+contents — not via file tools, not via `bash`/`cat`/`find`, not via any other
+tool:
+
+- `**/.env*` — environment / credential files
+- `**/*.pem`, `**/*.key`, `**/*.p12`, `**/*.pfx` — private keys
+- `**/.credentials*` — credential stores
+
+If a task requires one of these files, STOP and ask the user explicitly.
+Do not attempt to work around this rule with any tool.
+
+---
+
 ## Operating principles
 
 - **Clarify ambiguity before acting.**  When a request is underspecified,

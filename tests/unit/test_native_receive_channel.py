@@ -101,7 +101,7 @@ class TestHTTP1NativeChannel:
 
     @pytest.mark.asyncio
     async def test_content_length_yields_chunks_then_none(self):
-        r = _h1(b'0123456789', [(b'content-length', b'10')], chunk_size=4)
+        r = _h1(b'0123456789', [(b'content-length', b'10')], chunk_max=4)
         assert await _drain_native(r) == [b'0123', b'4567', b'89']
 
     @pytest.mark.asyncio
@@ -137,8 +137,10 @@ class TestHTTP1NativeChannel:
     @pytest.mark.asyncio
     async def test_peer_vanishing_mid_body_raises(self):
         """EOF mid-body is not end-of-body — a truncated upload must not read
-        as a complete one."""
+        as a complete one.  The transport-paced read hands back what arrived
+        first; the disconnect surfaces once the reader hits EOF unspent."""
         r = _h1(b'abc', [(b'content-length', b'10')], chunk_size=64)
+        assert await r.next_chunk() == b'abc'
         with pytest.raises(ClientDisconnected):
             await r.next_chunk()
 
@@ -168,7 +170,7 @@ class TestHTTP1ASGICompat:
 
     @pytest.mark.asyncio
     async def test_content_length_event_sequence_unchanged(self):
-        r = _h1(b'0123456789', [(b'content-length', b'10')], chunk_size=4)
+        r = _h1(b'0123456789', [(b'content-length', b'10')], chunk_max=4)
         assert await _drain_asgi(r) == [
             {'type': 'http.request', 'body': b'0123', 'more_body': True},
             {'type': 'http.request', 'body': b'4567', 'more_body': True},
@@ -194,8 +196,12 @@ class TestHTTP1ASGICompat:
 
     @pytest.mark.asyncio
     async def test_mid_body_eof_surfaces_as_disconnect_event(self):
-        """The exception is the *native* signal; ``receive()`` keeps the dict."""
+        """The exception is the *native* signal; ``receive()`` keeps the dict.
+        The transport-paced read hands back what arrived first; the disconnect
+        event follows once the reader hits EOF with the body unspent."""
         r = _h1(b'abc', [(b'content-length', b'10')], chunk_size=64)
+        assert await r() == {'type': 'http.request', 'body': b'abc',
+                             'more_body': True}
         assert await r() == {'type': 'http.disconnect'}
 
     @pytest.mark.asyncio
@@ -314,7 +320,7 @@ class TestConnectionUsesTheNativeChannel:
     async def test_stream_yields_chunks(self):
         conn = _conn([(b'content-length', b'10')])
         conn._receive = HTTP1Recipient(
-            AsyncioReader(_Source(b'0123456789')), conn, chunk_size=4)
+            AsyncioReader(_Source(b'0123456789')), conn, chunk_max=4)
         assert [c async for c in conn.stream()] == [b'0123', b'4567', b'89']
 
     @pytest.mark.asyncio

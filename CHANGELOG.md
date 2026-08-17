@@ -42,35 +42,39 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
-## [0.76.2] — 2026-08-17
+### Added
 
-Client-side patch.  Reported as
-[#241](https://github.com/TOKUJI/BlackBull/issues/241) against
-`WebSocketClient`; the same defect was present in every client.
+- **`BB_BODY_CHUNK_MAX`** (default `524288`) — per-read bound for a
+  `Content-Length` request body.  Reads are up-to-n and transport-paced: each
+  returns whatever the peer has delivered so far, up to this cap, instead of
+  waiting to fill a fixed slice.  A slow peer yields small slices (no read is
+  ever a latency commitment `BB_BODY_TIMEOUT` might not deliver); a fast one
+  earns fewer, larger ones.  `BB_BODY_CHUNK_SIZE` now applies only to the
+  chunked-transfer path.
 
-### Fixed
+### Changed
 
-- **Connection establishment is bounded on all five clients** — `Client`,
-  `HTTP1Client`, `HTTP2Client`, `WebSocketClient`, and `WebSocketH2Client`
-  opened their transport with a bare `await asyncio.open_connection()`.  A peer
-  that completes the TCP handshake and then goes silent left the coroutine
-  pending with nothing to end it: TLS negotiation has no kernel-side deadline,
-  so `async with SomeClient(...)` could hang for the lifetime of the process.
-  All five now accept **`connect_timeout=`** (default `30.0` s, matching the
-  server's `BB_BODY_TIMEOUT` default) and raise `TimeoutError` when it expires.
-  **This is a behaviour change**: a connect that legitimately takes longer than
-  30 s now fails.  Pass `connect_timeout=None` to restore the unbounded wait and
-  impose your own deadline.
-  `HTTP1Client` already carried the parameter but defaulted it to `None`, which
-  left every caller who never passed it exactly as exposed as the others.
-- **`WebSocketClient.connect()` bounds the handshake read** — a peer can accept
-  the connection and then never send the 101, which no transport-level deadline
-  covers.  New **`response_timeout=`** (default `5.0` s) matches what
-  `WebSocketH2Client.connect()` already enforced for RFC 8441 Extended CONNECT.
-- **`docs/guide/testing.md` WebSocket example corrected** — it awaited
-  `connect()` as a context manager and called `send`/`recv`, none of which
-  exist on the session.  The example now mirrors the passing test in
-  `tests/conformance/http1/test_client.py`.
+- **Transport-paced `Content-Length` body delivery** — the body-read slice is
+  no longer a fixed `readexactly(chunk_size)` per `http.request` event; each
+  read returns whatever the transport has delivered, up to `BB_BODY_CHUNK_MAX`.
+  The transport offer follows the reader's pending read demand (capped at the
+  backpressure high-water mark), so a fast peer's body arrives in large
+  chunks instead of floor-sized ones.  The exact-bytes contract is unchanged:
+  EOF before the declared length is still a truncated upload, never a complete
+  one.
+- **Receive-path responsibility separation** — the receive competence moves
+  onto `BufferReader`, the only object that knows both what was asked for and
+  what was consumed.  It now owns the stop-reading decision, the backpressure
+  release, and the grown-buffer release hysteresis; `ConnectionProtocol` keeps
+  the transport callbacks, the rendezvous, and executing `pause_reading` /
+  `resume_reading`; `ReadBuffer` keeps bytes, scanning, and growth, reporting a
+  drained message boundary instead of acting on one.  Internal only — no public
+  API, environment variable, or wire behaviour changes.
+  - Side effect of deleting the old inference: a reader that is already parked
+    now arms **no** backpressure pause at all.  The transport front end used to
+    guess "is anybody waiting" from the rendezvous future, which clears when a
+    reader is *woken*, so arrivals in that window cost a
+    `pause_reading`/`resume_reading` pair that the next park undid.
 
 ## [0.76.1] — 2026-08-14
 

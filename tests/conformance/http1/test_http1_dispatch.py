@@ -353,14 +353,15 @@ class TestHTTPDisconnect:
             event = await receive()
             disconnect_received.append(event)
 
-        # Wrap the MagicMock in AsyncioReader: that's the production path
-        # (the recipient factory does the same when it sees a non-AbstractReader),
-        # and it converts asyncio.IncompleteReadError → blackbull's
-        # IncompleteReadError that HTTP1Recipient catches.
+        # Wrap the MagicMock in AsyncioReader: that's the production path — the
+        # recipient factory does the same when it sees a non-AbstractReader.
+        #
+        # The Content-Length body is read up-to-n, so ``read`` is what the peer
+        # is scripted through: b'' is how a reader reports the peer is gone.
         from blackbull.server.recipient import AsyncioReader as _AsyncioReader
         backing = MagicMock()
         backing.readuntil = AsyncMock(return_value=b'\r\n\r\n')
-        backing.readexactly = AsyncMock(side_effect=asyncio.IncompleteReadError(b'', 10))
+        backing.read = AsyncMock(return_value=b'')
         reader = _AsyncioReader(backing)
 
         actor = HTTP1Actor(reader, _FakeWriter(), app, None,
@@ -374,12 +375,20 @@ class TestHTTPDisconnect:
         events = []
 
         async def app(scope, receive, send):
-            events.append(await receive())
+            # The peer sent 3 of its declared 5 bytes and vanished.  A
+            # transport-paced read hands back what arrived first, so the app
+            # drains until the truncation surfaces rather than expecting it on
+            # the first event.
+            while True:
+                event = await receive()
+                events.append(event)
+                if not event.get('more_body'):
+                    return
 
         from blackbull.server.recipient import AsyncioReader as _AsyncioReader
         backing = MagicMock()
         backing.readuntil = AsyncMock(return_value=b'\r\n\r\n')
-        backing.readexactly = AsyncMock(side_effect=asyncio.IncompleteReadError(b'hel', 5))
+        backing.read = AsyncMock(side_effect=[b'hel', b''])
         reader = _AsyncioReader(backing)
 
         actor = HTTP1Actor(reader, _FakeWriter(), app, None,
@@ -422,7 +431,7 @@ class TestHTTP11Expect100Continue:
 
         reader = MagicMock(spec=AbstractReader)
         reader.readuntil = AsyncMock(return_value=b'\r\n\r\n')
-        reader.readexactly = AsyncMock(return_value=body)
+        reader.read = AsyncMock(side_effect=[body, b''])
 
         actor = HTTP1Actor(reader, writer, app, None,
                            request=raw)
@@ -443,7 +452,7 @@ class TestHTTP11Expect100Continue:
 
         reader = MagicMock(spec=AbstractReader)
         reader.readuntil = AsyncMock(return_value=b'\r\n\r\n')
-        reader.readexactly = AsyncMock(return_value=body)
+        reader.read = AsyncMock(side_effect=[body, b''])
 
         actor = HTTP1Actor(reader, _FakeWriter(), app, None,
                            request=raw)
@@ -463,7 +472,7 @@ class TestHTTP11Expect100Continue:
 
         reader = MagicMock(spec=AbstractReader)
         reader.readuntil = AsyncMock(return_value=b'\r\n\r\n')
-        reader.readexactly = AsyncMock(return_value=body)
+        reader.read = AsyncMock(side_effect=[body, b''])
 
         actor = HTTP1Actor(reader, writer, noop_app, None,
                            request=raw)
@@ -482,7 +491,7 @@ class TestHTTP11Expect100Continue:
 
         reader = MagicMock(spec=AbstractReader)
         reader.readuntil = AsyncMock(return_value=b'\r\n\r\n')
-        reader.readexactly = AsyncMock(return_value=b'hello')
+        reader.read = AsyncMock(side_effect=[b'hello', b''])
 
         actor = HTTP1Actor(reader, writer, app, None,
                            request=raw)
@@ -502,7 +511,7 @@ class TestHTTP11Expect100Continue:
 
         reader = MagicMock(spec=AbstractReader)
         reader.readuntil = AsyncMock(return_value=b'\r\n\r\n')
-        reader.readexactly = AsyncMock(return_value=body)
+        reader.read = AsyncMock(side_effect=[body, b''])
 
         actor = HTTP1Actor(reader, writer, app, None,
                            request=raw)
@@ -657,15 +666,15 @@ class TestHTTP1Recipient:
         second = await r()
         assert second == {'type': 'http.disconnect'}
 
-    # -- P4: Content-Length body streaming (chunk_size slices) --------------
+    # -- P4: Content-Length body streaming (up-to-n cap slices) -------------
 
     @pytest.mark.asyncio
     async def test_content_length_streams_in_chunks(self):
-        """A body larger than chunk_size arrives as several http.request events."""
+        """A body larger than the cap arrives as several http.request events."""
         from blackbull.server.recipient import HTTP1Recipient
         conn = _conn([(b'content-length', b'10')])
         reader = self._make_reader(b'0123456789')
-        r = HTTP1Recipient(reader, conn, chunk_size=4)
+        r = HTTP1Recipient(reader, conn, chunk_max=4)
         events = []
         while True:
             e = await r()
@@ -691,7 +700,7 @@ class TestHTTP1Recipient:
         from blackbull.server.recipient import HTTP1Recipient
         conn = _conn([(b'content-length', b'8')])
         reader = self._make_reader(b'abcdefgh')
-        r = HTTP1Recipient(reader, conn, chunk_size=4)
+        r = HTTP1Recipient(reader, conn, chunk_max=4)
         events = []
         while True:
             e = await r()
@@ -720,16 +729,16 @@ class TestHTTP1Recipient:
         assert event == {'type': 'http.request', 'body': b'', 'more_body': False}
 
     @pytest.mark.asyncio
-    async def test_body_chunk_size_from_env(self, monkeypatch):
-        """When chunk_size is not injected, BB_BODY_CHUNK_SIZE drives slicing."""
+    async def test_body_chunk_max_from_env(self, monkeypatch):
+        """When chunk_max is not injected, BB_BODY_CHUNK_MAX drives the cap."""
         import blackbull.env as env
         from blackbull.server.recipient import HTTP1Recipient
-        monkeypatch.setenv('BB_BODY_CHUNK_SIZE', '3')
+        monkeypatch.setenv('BB_BODY_CHUNK_MAX', '3')
         env.get_settings.cache_clear()
         try:
             conn = _conn([(b'content-length', b'7')])
             reader = self._make_reader(b'abcdefg')
-            r = HTTP1Recipient(reader, conn)        # no chunk_size → env
+            r = HTTP1Recipient(reader, conn)        # no chunk_max → env
             sizes = []
             while True:
                 e = await r()

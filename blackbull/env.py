@@ -505,14 +505,26 @@ class Settings:
     #: turned on in CI via ``BB_FORCE_ASGI_SCOPE=1``.
     force_asgi_scope: bool = False
 
-    #: Chunk size (bytes) for streaming an HTTP/1.1 ``Content-Length`` request
-    #: body to the ASGI app.  Instead of one ``readexactly(content_length)``
-    #: giant allocation, the body is delivered in fixed-size ``http.request``
-    #: events (``more_body: True`` until exhausted) — capping per-connection
-    #: buffering at O(chunk × connections) and letting the app start work
-    #: before the whole body arrives.  64 KiB matches asyncio's default
-    #: ``StreamReader`` buffer limit.  Must be > 0.
+    #: Slice size (bytes) for a ``Transfer-Encoding: chunked`` request body:
+    #: each chunk in progress is delivered in reads of at most this many
+    #: bytes, so a peer-declared ``chunk-size`` never sets the read size.
+    #: 64 KiB sits below the backpressure high-water mark, which is what lets
+    #: the pause work.  The ``Content-Length`` path is transport-paced instead
+    #: — its per-read bound is ``body_chunk_max``.  Must be > 0.
     body_chunk_size: int = 65536
+
+    #: Per-read bound (bytes) for a ``Content-Length`` request body.  Reads
+    #: are up-to-n and transport-paced: each returns whatever the peer has
+    #: delivered so far, up to this cap, and never blocks waiting to fill it.
+    #: A slow peer therefore yields small slices (no read is ever a latency
+    #: commitment ``body_timeout`` might not deliver) while a fast one earns
+    #: fewer, larger ones — a large upload costs proportionally fewer receive
+    #: round-trips (8.5 MB: ~130 reads at 64 KiB → ~17 capped at 512 KiB).
+    #:
+    #: The cap is a memory bound, not a latency one: it limits how much a
+    #: single read may materialise per connection.  Raise it for large uploads
+    #: over fast links.  Values below ``body_chunk_size`` are raised to it.
+    body_chunk_max: int = 524288
 
     #: Per-stream HTTP/2 flow-control window advertised in the server's SETTINGS.
     #: 65535 is the RFC 9113 §6.9.2 default.  Production deployments serving
@@ -665,6 +677,7 @@ def get_settings() -> Settings:
         header_max_total=_int_env_nonneg('BB_HEADER_MAX_TOTAL', 65536),
         force_asgi_scope=_bool_env('BB_FORCE_ASGI_SCOPE', False),
         body_chunk_size=_int_env('BB_BODY_CHUNK_SIZE', 65536),
+        body_chunk_max=_int_env('BB_BODY_CHUNK_MAX', 524288),
         # RFC 9113 §6.9.2 default initial window size.  See
         # docs/reference/env-vars.md "Performance recommendations" for the
         # values commonly used on tuned production deployments.
