@@ -315,11 +315,18 @@ no red-team exercise, no volumetric-DoS protection.
   exactly, so the count is a usable stand-in for it.
 
   Four further changes brought the instruction cost against `v0.76.1` from
-  +2.23 % to **+0.19 %** on `/conn` and from +1.85 % to **+0.29 %** on HTTP/2 —
-  the largest of them being the DEBUG-logging gate below, which was never about
-  the limits.  **Those four are not EC2-verified**; the instruction count
-  predicts roughly −0.1 % and −0.3 % respectively, and the `/conn` ratio is
-  known to over-predict by about 2×.
+  +2.23 % to +0.19 % on `/conn` and from +1.85 % to +0.29 % on HTTP/2 — the
+  largest of them being the DEBUG-logging gate below, which was never about
+  the limits.  A second EC2 A/B (20 rounds, targeting ±0.5 % equivalence)
+  confirmed both lanes are **bounded within ±1 %** of `v0.76.1`, which is the
+  bound the original regression was measured against, but did not reach the
+  stricter ±0.5 % target: HTTP/2 `/1kb` keeps a real, CI-confirmed residual of
+  **−0.35 % to −0.42 %** (91–89 % of the original −3.75 % recovered) that
+  matches the instruction-count prediction closely; `/conn` did not resolve
+  either way — its confidence interval cannot rule out zero or a cost
+  approaching −1 % at every trim level but one, though a regression larger
+  than 1 % is excluded.  Neither is release-blocking on this evidence;
+  further reduction remains an open, non-blocking candidate.
 
   What the limits themselves now cost, and what was taken back:
   - the declared-body check reads the length `_validate_message_framing`
