@@ -33,6 +33,15 @@ _WS_EVENT_QUEUE_DEPTH = 256
 # Read inline, in the app's own task — no reader task, no per-message handoff.
 _WS_READ_INLINE = 0
 
+# What :meth:`HTTP1Recipient.after_dispatch` answers.  Three states because
+# there are three things a connection can do next, and the recipient is the
+# object that knows which: the message boundary is its business.  Plain ints,
+# compared with ``is`` on small values the interpreter interns — this is read
+# once per request on every keep-alive connection.
+CONNECTION_REUSABLE = 0
+CONNECTION_NEEDS_DRAIN = 1
+CONNECTION_MUST_CLOSE = 2
+
 # Consume-crediting mode bounds the HTTP/2 stream queue by BYTES (the
 # advertised inbound window), not frame count — a conformant peer sending
 # 65535 bytes as 1-byte frames must not be RST'd.  This multiplier bounds the
@@ -900,21 +909,40 @@ class HTTP1Recipient(BaseRecipient):
 
         A handler that ignores ``receive`` (e.g. a 404/405 response to a POST)
         leaves the body bytes in the reader; the next keep-alive request would
-        then parse them as its request line.  The actor consults this after
-        dispatch to decide whether to drain.  A body-less request (GET, no
+        then parse them as its request line.  A body-less request (GET, no
         Content-Length, not chunked) never needs draining.
+
+        Kept as the named question it is, for tests and for a directly-driven
+        recipient; the actor asks :meth:`after_dispatch` instead, which answers
+        this and ``must_close`` in one call.
         """
         if self.framing_broken or self._body_refused:
-            # ``must_close`` spelled out rather than called: this runs once per
-            # request on the keep-alive path, and the property is the same two
-            # reads behind a Python-level call.  The two must stay in step —
-            # ``test_needs_drain_agrees_with_must_close`` is what keeps them so.
-            #
             # Nothing to preserve: the connection is going away, and draining a
             # refused body would read the very octets the refusal declined
             # (and, for a cap breach, re-raise the 413 on the way).
             return False
         return not self._done and (self._chunked or bool(self._content_length))
+
+    def after_dispatch(self) -> int:
+        """What the connection should do now the handler has answered.
+
+        One question, because it is one judgement.  The actor used to ask
+        ``must_close`` and then ``needs_drain()`` and combine the two, which
+        put the verdict in the caller and left the two predicates free to
+        drift apart — the recipient is the object that knows whether the
+        message boundary survived, so it should say what follows from that.
+
+        Also one call per request instead of two on the keep-alive path.
+        """
+        if self.framing_broken or self._body_refused:
+            # The bytes after a desync or a refusal are the peer's to choose,
+            # and parsing them as the next request line is the smuggling
+            # shape.  Answered before the drain, which is exactly what must
+            # not happen to them.
+            return CONNECTION_MUST_CLOSE
+        if not self._done and (self._chunked or bool(self._content_length)):
+            return CONNECTION_NEEDS_DRAIN
+        return CONNECTION_REUSABLE
 
     async def drain(self, max_bytes: int) -> bool:
         """Discard any unread request body so the next pipelined request parses

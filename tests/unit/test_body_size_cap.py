@@ -162,14 +162,50 @@ class TestARefusedBodyEndsTheConnection:
         assert r.needs_drain() is True
 
 
-class TestTheTwoRefusalReadsAgree:
-    """``needs_drain`` spells ``must_close`` out instead of calling it.
+class TestTheRefusalReadsAgree:
+    """Three spellings of one fact, which must never disagree.
 
-    The property is one Python-level call per request on the keep-alive path,
-    so the hot copy reads the two flags directly.  That is only safe while the
-    two stay in step, which is what these assert: every combination of the
-    causes, checked through both spellings.
+    ``after_dispatch`` is what the actor asks — one question, because "what
+    may this connection do next" is one judgement and the recipient is the
+    object that holds it.  ``must_close`` and ``needs_drain`` remain as the
+    named questions, for tests and for a recipient driven directly.  Three
+    readings of the same two flags is exactly the shape that drifts, so it is
+    pinned here rather than trusted.
     """
+
+    async def test_after_dispatch_agrees_with_the_named_questions(self):
+        from blackbull.server.recipient import (CONNECTION_MUST_CLOSE,
+                                                CONNECTION_NEEDS_DRAIN,
+                                                CONNECTION_REUSABLE)
+        r = _chunked_recipient([b'a' * 100], cap=1024)
+        for framing_broken, body_refused in ((False, False), (True, False),
+                                             (False, True), (True, True)):
+            r.framing_broken = framing_broken
+            r._body_refused = body_refused
+            verdict = r.after_dispatch()
+
+            if r.must_close:
+                assert verdict is CONNECTION_MUST_CLOSE, (
+                    f'must_close says close and after_dispatch says {verdict} '
+                    f'(framing_broken={framing_broken} '
+                    f'body_refused={body_refused}) — the actor would keep a '
+                    f'connection whose message boundary is gone')
+            elif r.needs_drain():
+                assert verdict is CONNECTION_NEEDS_DRAIN, verdict
+            else:
+                assert verdict is CONNECTION_REUSABLE, verdict
+
+    async def test_a_reusable_connection_is_not_drained(self):
+        """The third state exists so a served body-less request costs nothing.
+
+        A GET that no handler read has no body to drain and no reason to
+        close; collapsing that into "drain" would put a read on every
+        keep-alive request.
+        """
+        from blackbull.server.recipient import CONNECTION_REUSABLE
+        r = _chunked_recipient([b'a' * 512], cap=1024)
+        await _drain(r)
+        assert r.after_dispatch() is CONNECTION_REUSABLE
 
     async def test_needs_drain_agrees_with_must_close(self):
         r = _chunked_recipient([b'a' * 100], cap=1024)

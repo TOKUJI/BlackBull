@@ -19,7 +19,8 @@ from ..connection import (
     Connection, bind_receive_channel)
 from ..headers import Headers
 from .deadline import ConnectionDeadline
-from .recipient import (AbstractReader, HTTP1Recipient, IncompleteReadError,
+from .recipient import (CONNECTION_MUST_CLOSE, CONNECTION_NEEDS_DRAIN,
+                        AbstractReader, HTTP1Recipient, IncompleteReadError,
                         ReadLimitExceeded, RecipientFactory, _HEAD_END,
                         _WS_READ_INLINE)
 from .sender import AbstractWriter, SenderFactory
@@ -971,18 +972,17 @@ class HTTP1Actor(Actor):
                 # keep-alive.  The WebSocket upgrade leaves ``run()`` above and
                 # never arrives here, which is why it refuses a bodied handshake
                 # outright instead — see ``_do_ws_handshake``.
-                if inner_receive.must_close:
-                    # The recipient has declared the connection unusable: a
-                    # desynced chunked stream, or a body refused for size whose
-                    # remaining octets are still on the way.  In both cases the
-                    # next bytes are the peer's to choose, so the message
-                    # boundary is gone and keep-alive would parse them as a
-                    # request line.  Asked before the drain, which is exactly
-                    # what we must not do to them.
+                # One question: whether the message boundary survived, and so
+                # what this connection may do next, is the recipient's
+                # judgement.  Asking ``must_close`` and then ``needs_drain()``
+                # put that verdict together here instead, and left the two
+                # predicates free to drift apart.
+                verdict = inner_receive.after_dispatch()
+                if verdict is CONNECTION_MUST_CLOSE:
                     break
-                if inner_receive.needs_drain():
-                    if not await inner_receive.drain(_MAX_KEEPALIVE_DRAIN):
-                        break
+                if (verdict is CONNECTION_NEEDS_DRAIN
+                        and not await inner_receive.drain(_MAX_KEEPALIVE_DRAIN)):
+                    break
 
                 # RFC 9112 §9.1 — honour Connection: close.  HTTP/1.0
                 # connections without ``Connection: keep-alive`` likewise

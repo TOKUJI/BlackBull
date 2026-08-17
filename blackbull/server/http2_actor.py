@@ -1402,7 +1402,14 @@ class HTTP2Actor(Actor):
         stream.expected_content_length = _extract_content_length(conn)
         stream.conn = conn
 
-        if (self._declared_body_over_cap(stream)
+        # Guard inline rather than through a predicate: a stream is a request,
+        # and a method call to answer "no" cost 21 executed instructions per
+        # request where the comparison costs seven.  ``declared > cap > 0``
+        # chains the two facts the refusal needs — a length was declared, and
+        # a cap is in force.  The refusal re-checks; it, not this, is the
+        # authority.
+        declared = stream.expected_content_length
+        if (declared is not None and declared > self._max_body_size > 0
                 and await self._refuse_oversized_declared_body(
                     stream, conn, send)):
             return True
@@ -1513,7 +1520,14 @@ class HTTP2Actor(Actor):
             return True
 
         stream.conn = conn
-        if (self._declared_body_over_cap(stream)
+        # Guard inline rather than through a predicate: a stream is a request,
+        # and a method call to answer "no" cost 21 executed instructions per
+        # request where the comparison costs seven.  ``declared > cap > 0``
+        # chains the two facts the refusal needs — a length was declared, and
+        # a cap is in force.  The refusal re-checks; it, not this, is the
+        # authority.
+        declared = stream.expected_content_length
+        if (declared is not None and declared > self._max_body_size > 0
                 and await self._refuse_oversized_declared_body(
                     stream, conn, send)):
             return True
@@ -1526,18 +1540,6 @@ class HTTP2Actor(Actor):
         send._log_record = log_record
         self._spawn_stream_task(tg, stream.stream_id, conn, stream_recipient, send, log_record)
         return True
-
-    def _declared_body_over_cap(self, stream) -> bool:
-        """Whether this stream's head declares more body than the cap allows.
-
-        Split from the refusal so the common answer — no — costs two attribute
-        reads and a compare at the call site, rather than creating and driving
-        a coroutine once per stream.  A stream is a request, so anything on
-        this path is per-request work.
-        """
-        declared = stream.expected_content_length
-        cap = self._max_body_size
-        return bool(cap) and declared is not None and declared > cap
 
     async def _refuse_oversized_declared_body(self, stream, conn, send) -> bool:
         """413 the stream whose head declared more body than the cap allows.
@@ -1556,8 +1558,10 @@ class HTTP2Actor(Actor):
         A body with no ``content-length`` declares nothing and cannot be
         answered here — ``HTTP2Recipient`` counts that one as DATA arrives.
 
-        Callers gate this on :meth:`_declared_body_over_cap`; it re-checks so
-        the refusal remains correct when called directly.
+        Callers gate the call on the same comparison inline, so the common
+        answer costs no call at all; this re-checks because it, not the gate,
+        is where the limit is enforced — a caller that forgot the guard still
+        gets the right answer.
         """
         declared = stream.expected_content_length
         cap = self._max_body_size
