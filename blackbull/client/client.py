@@ -8,11 +8,11 @@ WebSocket is intentionally **not** part of ALPN dispatch — it is an
 HTTP/1.1 upgrade and the caller picks it explicitly via
 :class:`blackbull.client.WebSocketClient`.
 """
-import asyncio
 import ssl as _ssl
 from typing import Union
 
 import logging
+from ._connect import DEFAULT_CONNECT_TIMEOUT, open_connection as _open_connection
 from .http1 import HTTP1Client
 from .http2 import HTTP2Client
 
@@ -39,10 +39,12 @@ class Client:
     """
 
     def __init__(self, host: str, port: int, *,
-                 ssl: _ssl.SSLContext | None = None) -> None:
+                 ssl: _ssl.SSLContext | None = None,
+                 connect_timeout: float | None = DEFAULT_CONNECT_TIMEOUT) -> None:
         self._host = host
         self._port = port
         self._ssl = ssl
+        self._connect_timeout = connect_timeout
         self._inner: NegotiatedClient | None = None
 
     async def __aenter__(self) -> NegotiatedClient:
@@ -51,7 +53,8 @@ class Client:
         # ``None`` the dispatcher falls back to HTTP/1.1; when a context is
         # provided, the caller must configure ALPN with the protocols they
         # want negotiated (typically ``['h2', 'http/1.1']``).
-        r, w = await asyncio.open_connection(self._host, self._port, ssl=ctx)
+        r, w = await _open_connection(self._host, self._port, ctx,
+                                      self._connect_timeout)
 
         proto: str | None = None
         if ctx is not None:

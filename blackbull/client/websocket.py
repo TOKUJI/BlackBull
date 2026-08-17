@@ -29,6 +29,7 @@ from ..server.recipient import (_WS_EVENT_QUEUE_DEPTH, AbstractReader,
                                 AsyncioReader, WebSocketRecipient)
 from ..server.sender import AbstractWriter, AsyncioWriter
 from ..server.ws_codec import WSOpcode, encode_frame
+from ._connect import DEFAULT_CONNECT_TIMEOUT, open_connection as _open_connection
 from .exceptions import HandshakeError
 from .http1 import HTTP1RequestSender, HTTP1ResponseRecipient
 
@@ -174,16 +175,19 @@ class WebSocketClient:
     """
 
     def __init__(self, host: str, port: int, *,
-                 ssl: _ssl.SSLContext | None = None) -> None:
+                 ssl: _ssl.SSLContext | None = None,
+                 connect_timeout: float | None = DEFAULT_CONNECT_TIMEOUT) -> None:
         self._host = host
         self._port = port
         self._ssl = ssl
+        self._connect_timeout = connect_timeout
         self._reader: AbstractReader | None = None
         self._writer: AbstractWriter | None = None
         self._raw_writer: asyncio.StreamWriter | None = None
 
     async def __aenter__(self) -> 'WebSocketClient':
-        r, w = await asyncio.open_connection(self._host, self._port, ssl=self._ssl)
+        r, w = await _open_connection(self._host, self._port, self._ssl,
+                                      self._connect_timeout)
         self._raw_writer = w
         self._reader = AsyncioReader(r)
         self._writer = AsyncioWriter(w)
@@ -198,12 +202,17 @@ class WebSocketClient:
                 pass  # best-effort close on context exit; peer may already be gone.
 
     async def connect(self, path: str, *,
-                      subprotocols: Iterable[bytes] = ()) -> WebSocketSession:
+                      subprotocols: Iterable[bytes] = (),
+                      response_timeout: float | None = 5.0) -> WebSocketSession:
         """Run the HTTP/1.1 ``Upgrade: websocket`` handshake on this connection.
 
         Returns a ``WebSocketSession`` once the server has confirmed the
         upgrade with HTTP 101 and a valid ``Sec-WebSocket-Accept`` header.
-        Raises ``HandshakeError`` on any handshake-time failure.
+        Raises ``HandshakeError`` on any handshake-time failure, or
+        ``TimeoutError`` if no response arrives within *response_timeout*.
+
+        A peer can accept the connection and then never send the 101, so the
+        transport-level deadline does not cover this wait.  ``None`` opts out.
         """
         assert self._writer is not None and self._reader is not None
         assert self._raw_writer is not None
@@ -224,7 +233,11 @@ class WebSocketClient:
             request_headers.append(b'sec-websocket-protocol', b', '.join(offered))
 
         await HTTP1RequestSender(self._writer).send('GET', path, request_headers)
-        response = await HTTP1ResponseRecipient().receive(self._reader)
+        if response_timeout is None:
+            response = await HTTP1ResponseRecipient().receive(self._reader)
+        else:
+            async with asyncio.timeout(response_timeout):
+                response = await HTTP1ResponseRecipient().receive(self._reader)
 
         if response.status != HTTPStatus.SWITCHING_PROTOCOLS:
             raise HandshakeError(

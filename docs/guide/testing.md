@@ -502,6 +502,11 @@ BlackBull exports four async clients from `blackbull.client`:
 The pattern is: bind the app on an ephemeral port in a fixture,
 then `async with` a client at that port.
 
+Every client bounds connection establishment at **30 seconds** by
+default (`connect_timeout=`), raising `TimeoutError` when a peer
+accepts the connection and then stalls. Pass `connect_timeout=None`
+to opt out and impose your own deadline instead.
+
 ### Fixture — ephemeral-port server
 
 ```python
@@ -637,16 +642,22 @@ from blackbull.client import WebSocketClient
 
 @pytest.mark.asyncio
 async def test_ws_echo(server_port):
-    async with WebSocketClient('localhost', server_port).connect('/ws') as session:
-        await session.send('hello')
-        msg = await session.recv()
-        assert msg == 'hello'
+    async with WebSocketClient('localhost', server_port) as client:
+        session = await client.connect('/ws')
+        await session.send_text('hello')
+        event = await session.receive()
+        assert event['text'] == 'hello'
+        await session.close()
 ```
 
-`send` / `recv` handle both text and binary frames; fragmented
-messages are reassembled transparently (matching the
-server-side semantics — see
+`send_text` / `send_bytes` cover both frame types and `receive`
+returns the next event; fragmented messages are reassembled
+transparently (matching the server-side semantics — see
 [WebSockets](websockets.md#fragmented-messages)).
+
+`connect()` takes its own `response_timeout` (default **5 s**): a
+peer can accept the connection and then never send the 101, which
+the transport-level `connect_timeout` does not cover.
 
 ## In-process integration with `httpx`
 

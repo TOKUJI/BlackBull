@@ -51,6 +51,7 @@ from ..server.http2_ws import HTTP2WSWriter
 from ..server.recipient import (_WS_EVENT_QUEUE_DEPTH, AbstractReader,
                                 IncompleteReadError, WebSocketRecipient)
 from ..server.ws_codec import WSOpcode, encode_frame
+from ._connect import DEFAULT_CONNECT_TIMEOUT
 from .client import Client
 from .exceptions import HandshakeError
 from .http2 import HTTP2Client
@@ -280,10 +281,12 @@ class WebSocketH2Client:
 
     def __init__(self, host: str, port: int, *,
                  ssl: _ssl.SSLContext | None = None,
-                 stream_id: int = 1) -> None:
+                 stream_id: int = 1,
+                 connect_timeout: float | None = DEFAULT_CONNECT_TIMEOUT) -> None:
         self._host = host
         self._port = port
         self._ssl = ssl
+        self._connect_timeout = connect_timeout
         self._stream_id = stream_id
         self._client: HTTP2Client | None = None
         self._factory = FrameFactory()
@@ -291,7 +294,8 @@ class WebSocketH2Client:
 
     async def __aenter__(self) -> 'WebSocketH2Client':
         self._client = await Client(
-            self._host, self._port, ssl=self._ssl).__aenter__()
+            self._host, self._port, ssl=self._ssl,
+            connect_timeout=self._connect_timeout).__aenter__()
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
