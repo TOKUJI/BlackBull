@@ -5403,7 +5403,7 @@ multi-worker-only; a single-worker server is never pinned.</p>
 <p><code>uvloop</code> is a drop-in libuv-based replacement for the standard
 asyncio event loop.  BlackBull installs it as the loop policy
 when <code>BB_UVLOOP=1</code> and the <code>blackbull[speed]</code> extra is present.</p>
-<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span><span class="s1">&#39;blackbull[speed]&#39;</span>
+<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span><span class="s1">'blackbull[speed]'</span>
 <span class="nv">BB_UVLOOP</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>python<span class="w"> </span>app.py
 </code></pre></div>
 <p>If <code>BB_UVLOOP=1</code> is set but <code>uvloop</code> isn't installed, BlackBull

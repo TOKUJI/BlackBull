@@ -5425,7 +5425,7 @@ on first preface bytes (no separate port required, no upgrade
 dance).  This page covers what the framework does with HTTP/2's
 extra knobs and what your app code can do with them.</p>
 <h2 id="activating-http2">Activating HTTP/2<a class="headerlink" href="#activating-http2" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">port</span><span class="o">=</span><span class="mi">8443</span><span class="p">,</span> <span class="n">certfile</span><span class="o">=</span><span class="s1">&#39;cert.pem&#39;</span><span class="p">,</span> <span class="n">keyfile</span><span class="o">=</span><span class="s1">&#39;key.pem&#39;</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">port</span><span class="o">=</span><span class="mi">8443</span><span class="p">,</span> <span class="n">certfile</span><span class="o">=</span><span class="s1">'cert.pem'</span><span class="p">,</span> <span class="n">keyfile</span><span class="o">=</span><span class="s1">'key.pem'</span><span class="p">)</span>
 </code></pre></div>
 <p>ALPN advertises both <code>h2</code> and <code>http/1.1</code>.  Whichever the client
 picks is what gets used.  Browsers and modern HTTP clients
@@ -5446,8 +5446,8 @@ the <code>Connection</code> so your app can act on it.</p>
 <code>http.response.priority</code> ASGI extension (matches gunicorn's beta
 HTTP/2 key shape; the <em>contents</em> are RFC 9218 urgency/incremental,
 not the deprecated RFC 7540 weight/tree):</p>
-<div class="highlight"><pre><span></span><code><span class="n">conn</span><span class="o">.</span><span class="n">extensions</span><span class="p">[</span><span class="s1">&#39;http.response.priority&#39;</span><span class="p">]</span>
-<span class="c1"># → {&#39;urgency&#39;: int, &#39;incremental&#39;: bool}</span>
+<div class="highlight"><pre><span></span><code><span class="n">conn</span><span class="o">.</span><span class="n">extensions</span><span class="p">[</span><span class="s1">'http.response.priority'</span><span class="p">]</span>
+<span class="c1"># → {'urgency': int, 'incremental': bool}</span>
 </code></pre></div>
 <table>
 <thead>
@@ -5483,12 +5483,12 @@ not the deprecated RFC 7540 weight/tree):</p>
 <p>For HTTP/1.1 requests the extension key is absent.  Always use
 <code>.get()</code> with a default so your handler works across both protocols.</p>
 <h3 id="using-it-in-a-handler">Using it in a handler<a class="headerlink" href="#using-it-in-a-handler" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><span class="n">_DEFAULT_PRIORITY</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;urgency&#39;</span><span class="p">:</span> <span class="mi">3</span><span class="p">,</span> <span class="s1">&#39;incremental&#39;</span><span class="p">:</span> <span class="kc">False</span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><span class="n">_DEFAULT_PRIORITY</span> <span class="o">=</span> <span class="p">{</span><span class="s1">'urgency'</span><span class="p">:</span> <span class="mi">3</span><span class="p">,</span> <span class="s1">'incremental'</span><span class="p">:</span> <span class="kc">False</span><span class="p">}</span>
 
-<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/search&#39;</span><span class="p">)</span>
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/search'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">search</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
-    <span class="n">hint</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">extensions</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;http.response.priority&#39;</span><span class="p">,</span> <span class="n">_DEFAULT_PRIORITY</span><span class="p">)</span>
-    <span class="k">if</span> <span class="n">hint</span><span class="p">[</span><span class="s1">&#39;urgency&#39;</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="mi">2</span><span class="p">:</span>
+    <span class="n">hint</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">extensions</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'http.response.priority'</span><span class="p">,</span> <span class="n">_DEFAULT_PRIORITY</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">hint</span><span class="p">[</span><span class="s1">'urgency'</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="mi">2</span><span class="p">:</span>
         <span class="c1"># High-urgency: return cached / pre-computed result immediately</span>
         <span class="n">result</span> <span class="o">=</span> <span class="n">get_cached_result</span><span class="p">()</span>
     <span class="k">else</span><span class="p">:</span>
@@ -5497,14 +5497,14 @@ not the deprecated RFC 7540 weight/tree):</p>
     <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">JSONResponse</span><span class="p">(</span><span class="n">result</span><span class="p">))</span>
 </code></pre></div>
 <h3 id="across-every-route-via-an-interceptor">Across every route, via an interceptor<a class="headerlink" href="#across-every-route-via-an-interceptor" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">intercept</span><span class="p">(</span><span class="s1">&#39;before_handler&#39;</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">intercept</span><span class="p">(</span><span class="s1">'before_handler'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">handle_priority</span><span class="p">(</span><span class="n">event</span><span class="p">):</span>
-    <span class="n">conn</span> <span class="o">=</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;conn&#39;</span><span class="p">]</span>
-    <span class="n">hint</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">extensions</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;http.response.priority&#39;</span><span class="p">,</span>
-                                <span class="p">{</span><span class="s1">&#39;urgency&#39;</span><span class="p">:</span> <span class="mi">3</span><span class="p">,</span> <span class="s1">&#39;incremental&#39;</span><span class="p">:</span> <span class="kc">False</span><span class="p">})</span>
-    <span class="k">if</span> <span class="n">hint</span><span class="p">[</span><span class="s1">&#39;urgency&#39;</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="mi">1</span><span class="p">:</span>
-        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;HIGH-PRIORITY u=</span><span class="si">%d</span><span class="s1">: </span><span class="si">%s</span><span class="s1"> </span><span class="si">%s</span><span class="s1">&#39;</span><span class="p">,</span>
-                    <span class="n">hint</span><span class="p">[</span><span class="s1">&#39;urgency&#39;</span><span class="p">],</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;method&#39;</span><span class="p">],</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;path&#39;</span><span class="p">])</span>
+    <span class="n">conn</span> <span class="o">=</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">'conn'</span><span class="p">]</span>
+    <span class="n">hint</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">extensions</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'http.response.priority'</span><span class="p">,</span>
+                                <span class="p">{</span><span class="s1">'urgency'</span><span class="p">:</span> <span class="mi">3</span><span class="p">,</span> <span class="s1">'incremental'</span><span class="p">:</span> <span class="kc">False</span><span class="p">})</span>
+    <span class="k">if</span> <span class="n">hint</span><span class="p">[</span><span class="s1">'urgency'</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="mi">1</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">'HIGH-PRIORITY u=</span><span class="si">%d</span><span class="s1">: </span><span class="si">%s</span><span class="s1"> </span><span class="si">%s</span><span class="s1">'</span><span class="p">,</span>
+                    <span class="n">hint</span><span class="p">[</span><span class="s1">'urgency'</span><span class="p">],</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">'method'</span><span class="p">],</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">'path'</span><span class="p">])</span>
 </code></pre></div>
 <h3 id="migrating-from-scopehttp2_priority-removed-in-v0750">Migrating from <code>scope['http2_priority']</code> (removed in v0.75.0)<a class="headerlink" href="#migrating-from-scopehttp2_priority-removed-in-v0750" title="Permanent link">&para;</a></h3>
 <p>Earlier BlackBull releases exposed priority as a top-level scope
@@ -5518,10 +5518,10 @@ with the <code>Connection</code>, so a <code>PRIORITY_UPDATE</code> arriving <em
 dispatch reaches the application through it.  The top-level key
 was a dispatch-time copy and silently went stale.</p>
 <p>To migrate, replace:</p>
-<div class="highlight"><pre><span></span><code><span class="n">hint</span> <span class="o">=</span> <span class="n">scope</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;http2_priority&#39;</span><span class="p">,</span> <span class="n">DEFAULT</span><span class="p">)</span>            <span class="c1"># removed in v0.75.0</span>
+<div class="highlight"><pre><span></span><code><span class="n">hint</span> <span class="o">=</span> <span class="n">scope</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'http2_priority'</span><span class="p">,</span> <span class="n">DEFAULT</span><span class="p">)</span>            <span class="c1"># removed in v0.75.0</span>
 </code></pre></div>
 <p>with:</p>
-<div class="highlight"><pre><span></span><code><span class="n">hint</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">extensions</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;http.response.priority&#39;</span><span class="p">,</span> <span class="n">DEFAULT</span><span class="p">)</span>   <span class="c1"># v0.31+</span>
+<div class="highlight"><pre><span></span><code><span class="n">hint</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">extensions</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'http.response.priority'</span><span class="p">,</span> <span class="n">DEFAULT</span><span class="p">)</span>   <span class="c1"># v0.31+</span>
 </code></pre></div>
 <p>The dict shape (<code>{'urgency': int, 'incremental': bool}</code>) is
 unchanged.</p>
@@ -5530,9 +5530,9 @@ unchanged.</p>
 <code>conn.extensions['http.response.http2_stream']</code> — a snapshot of
 the HTTP/2 stream identity and send-flow-control credit at request
 entry:</p>
-<div class="highlight"><pre><span></span><code><span class="n">conn</span><span class="o">.</span><span class="n">extensions</span><span class="p">[</span><span class="s1">&#39;http.response.http2_stream&#39;</span><span class="p">]</span>
-<span class="c1"># → {&#39;stream_id&#39;: int, &#39;send_window_remaining&#39;: int,</span>
-<span class="c1">#    &#39;connection_send_window_remaining&#39;: int}</span>
+<div class="highlight"><pre><span></span><code><span class="n">conn</span><span class="o">.</span><span class="n">extensions</span><span class="p">[</span><span class="s1">'http.response.http2_stream'</span><span class="p">]</span>
+<span class="c1"># → {'stream_id': int, 'send_window_remaining': int,</span>
+<span class="c1">#    'connection_send_window_remaining': int}</span>
 </code></pre></div>
 <table>
 <thead>
@@ -5574,10 +5574,10 @@ sources (<code>PRIORITY_UPDATE</code> frame and <code>priority</code> header).</
 curl<span class="w"> </span>--http2<span class="w"> </span>-k<span class="w"> </span>https://localhost:8443/priority-echo
 
 <span class="c1"># High urgency</span>
-curl<span class="w"> </span>--http2<span class="w"> </span>-k<span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;priority: u=1&#39;</span><span class="w"> </span>https://localhost:8443/priority-echo
+curl<span class="w"> </span>--http2<span class="w"> </span>-k<span class="w"> </span>-H<span class="w"> </span><span class="s1">'priority: u=1'</span><span class="w"> </span>https://localhost:8443/priority-echo
 
 <span class="c1"># Background prefetch, incremental</span>
-curl<span class="w"> </span>--http2<span class="w"> </span>-k<span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;priority: u=6, i&#39;</span><span class="w"> </span>https://localhost:8443/priority-echo
+curl<span class="w"> </span>--http2<span class="w"> </span>-k<span class="w"> </span>-H<span class="w"> </span><span class="s1">'priority: u=6, i'</span><span class="w"> </span>https://localhost:8443/priority-echo
 </code></pre></div>
 <p>curl converts the <code>priority</code> header to a <code>PRIORITY_UPDATE</code> frame
 when talking HTTP/2 over TLS.  httpx (Python) sends it as a plain
@@ -5598,18 +5598,18 @@ saving one round-trip.</p>
 <h3 id="triggering-a-push">Triggering a push<a class="headerlink" href="#triggering-a-push" title="Permanent link">&para;</a></h3>
 <p>The app signals a push by calling <code>send</code> with an
 <code>http.response.push</code> event before the final <code>http.response.body</code>:</p>
-<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/&#39;</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">index</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="c1"># Push a stylesheet before sending the HTML.</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">({</span>
-        <span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;http.response.push&#39;</span><span class="p">,</span>
-        <span class="s1">&#39;path&#39;</span><span class="p">:</span> <span class="s1">&#39;/static/style.css&#39;</span><span class="p">,</span>
-        <span class="s1">&#39;headers&#39;</span><span class="p">:</span> <span class="p">[],</span>
+        <span class="s1">'type'</span><span class="p">:</span> <span class="s1">'http.response.push'</span><span class="p">,</span>
+        <span class="s1">'path'</span><span class="p">:</span> <span class="s1">'/static/style.css'</span><span class="p">,</span>
+        <span class="s1">'headers'</span><span class="p">:</span> <span class="p">[],</span>
     <span class="p">})</span>
-    <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;http.response.start&#39;</span><span class="p">,</span> <span class="s1">&#39;status&#39;</span><span class="p">:</span> <span class="mi">200</span><span class="p">,</span>
-                <span class="s1">&#39;headers&#39;</span><span class="p">:</span> <span class="p">[(</span><span class="sa">b</span><span class="s1">&#39;content-type&#39;</span><span class="p">,</span> <span class="sa">b</span><span class="s1">&#39;text/html&#39;</span><span class="p">)]})</span>
-    <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;http.response.body&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;body&#39;</span><span class="p">:</span> <span class="sa">b</span><span class="s1">&#39;&lt;html&gt;...&lt;/html&gt;&#39;</span><span class="p">})</span>
+    <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">'type'</span><span class="p">:</span> <span class="s1">'http.response.start'</span><span class="p">,</span> <span class="s1">'status'</span><span class="p">:</span> <span class="mi">200</span><span class="p">,</span>
+                <span class="s1">'headers'</span><span class="p">:</span> <span class="p">[(</span><span class="sa">b</span><span class="s1">'content-type'</span><span class="p">,</span> <span class="sa">b</span><span class="s1">'text/html'</span><span class="p">)]})</span>
+    <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">'type'</span><span class="p">:</span> <span class="s1">'http.response.body'</span><span class="p">,</span>
+                <span class="s1">'body'</span><span class="p">:</span> <span class="sa">b</span><span class="s1">'&lt;html&gt;...&lt;/html&gt;'</span><span class="p">})</span>
 </code></pre></div>
 <p><code>path</code> must be a plain string (percent-encoding decoded).
 Pseudo-headers (<code>:method</code>, <code>:scheme</code>, <code>:authority</code>) are filled in
@@ -5630,9 +5630,9 @@ automatically — do not include them in <code>headers</code>.</p>
 </ol>
 <h3 id="checking-for-support">Checking for support<a class="headerlink" href="#checking-for-support" title="Permanent link">&para;</a></h3>
 <p>The server advertises push support in <code>conn.extensions</code>:</p>
-<div class="highlight"><pre><span></span><code><span class="k">if</span> <span class="s1">&#39;http.response.push&#39;</span> <span class="ow">in</span> <span class="n">conn</span><span class="o">.</span><span class="n">extensions</span><span class="p">:</span>
-    <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;http.response.push&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;path&#39;</span><span class="p">:</span> <span class="s1">&#39;/logo.png&#39;</span><span class="p">,</span> <span class="s1">&#39;headers&#39;</span><span class="p">:</span> <span class="p">[]})</span>
+<div class="highlight"><pre><span></span><code><span class="k">if</span> <span class="s1">'http.response.push'</span> <span class="ow">in</span> <span class="n">conn</span><span class="o">.</span><span class="n">extensions</span><span class="p">:</span>
+    <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">'type'</span><span class="p">:</span> <span class="s1">'http.response.push'</span><span class="p">,</span>
+                <span class="s1">'path'</span><span class="p">:</span> <span class="s1">'/logo.png'</span><span class="p">,</span> <span class="s1">'headers'</span><span class="p">:</span> <span class="p">[]})</span>
 </code></pre></div>
 <p>For HTTP/1.1 requests <code>conn.extensions</code> does not contain
 <code>'http.response.push'</code>, so the guard above keeps the same handler

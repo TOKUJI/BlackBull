@@ -5475,7 +5475,7 @@ at construction:</p>
 <span class="k">assert</span> <span class="n">app</span><span class="o">.</span><span class="n">extensions</span> <span class="o">==</span> <span class="p">{}</span>
 </code></pre></div>
 <p>Extensions write themselves into it under a documented key:</p>
-<div class="highlight"><pre><span></span><code><span class="n">app</span><span class="o">.</span><span class="n">extensions</span><span class="p">[</span><span class="s1">&#39;auth&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">my_auth_instance</span>
+<div class="highlight"><pre><span></span><code><span class="n">app</span><span class="o">.</span><span class="n">extensions</span><span class="p">[</span><span class="s1">'auth'</span><span class="p">]</span> <span class="o">=</span> <span class="n">my_auth_instance</span>
 </code></pre></div>
 <p>Application code reads it back when one extension needs to
 look up another (for example a route handler needing the
@@ -5488,28 +5488,28 @@ through the existing <code>app.*</code> APIs:</p>
 
 
 <span class="k">class</span><span class="w"> </span><span class="nc">HelloExtension</span><span class="p">:</span>
-    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">greeting</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;Hello&#39;</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">greeting</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">'Hello'</span><span class="p">):</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_greeting</span> <span class="o">=</span> <span class="n">greeting</span>
 
     <span class="k">def</span><span class="w"> </span><span class="nf">init_app</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">app</span><span class="p">:</span> <span class="n">BlackBull</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-        <span class="n">app</span><span class="o">.</span><span class="n">extensions</span><span class="p">[</span><span class="s1">&#39;hello&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span>
+        <span class="n">app</span><span class="o">.</span><span class="n">extensions</span><span class="p">[</span><span class="s1">'hello'</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span>
 
-        <span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/hello&#39;</span><span class="p">)</span>
+        <span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/hello'</span><span class="p">)</span>
         <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">hello</span><span class="p">():</span>
-            <span class="k">return</span> <span class="p">{</span><span class="s1">&#39;message&#39;</span><span class="p">:</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_greeting</span><span class="si">}</span><span class="s1"> from extension&#39;</span><span class="p">}</span>
+            <span class="k">return</span> <span class="p">{</span><span class="s1">'message'</span><span class="p">:</span> <span class="sa">f</span><span class="s1">'</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_greeting</span><span class="si">}</span><span class="s1"> from extension'</span><span class="p">}</span>
 
-        <span class="c1"># Keep a reference so the registered handler is not GC&#39;d</span>
+        <span class="c1"># Keep a reference so the registered handler is not GC'd</span>
         <span class="c1"># if the user does not retain it.</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_handler</span> <span class="o">=</span> <span class="n">hello</span>
 
 
 <span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">()</span>
-<span class="n">HelloExtension</span><span class="p">(</span><span class="n">greeting</span><span class="o">=</span><span class="s1">&#39;Howdy&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">init_app</span><span class="p">(</span><span class="n">app</span><span class="p">)</span>
+<span class="n">HelloExtension</span><span class="p">(</span><span class="n">greeting</span><span class="o">=</span><span class="s1">'Howdy'</span><span class="p">)</span><span class="o">.</span><span class="n">init_app</span><span class="p">(</span><span class="n">app</span><span class="p">)</span>
 </code></pre></div>
 <p>Optionally accept <code>app</code> in the constructor and call
 <code>init_app</code> for the user:</p>
 <div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">HelloExtension</span><span class="p">:</span>
-    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">app</span><span class="p">:</span> <span class="n">BlackBull</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">greeting</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;Hello&#39;</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">app</span><span class="p">:</span> <span class="n">BlackBull</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">greeting</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">'Hello'</span><span class="p">):</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_greeting</span> <span class="o">=</span> <span class="n">greeting</span>
         <span class="k">if</span> <span class="n">app</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">init_app</span><span class="p">(</span><span class="n">app</span><span class="p">)</span>
@@ -5530,21 +5530,21 @@ registration seam on the core and returns the instance for chaining:</p>
 
 
 <span class="k">class</span><span class="w"> </span><span class="nc">HelloExtension</span><span class="p">(</span><span class="n">Extension</span><span class="p">):</span>
-    <span class="n">extension_key</span> <span class="o">=</span> <span class="s1">&#39;hello&#39;</span>
+    <span class="n">extension_key</span> <span class="o">=</span> <span class="s1">'hello'</span>
 
-    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">greeting</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;Hello&#39;</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">greeting</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">'Hello'</span><span class="p">):</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_greeting</span> <span class="o">=</span> <span class="n">greeting</span>
 
     <span class="k">def</span><span class="w"> </span><span class="nf">init_app</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">app</span><span class="p">:</span> <span class="n">BlackBull</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-        <span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/hello&#39;</span><span class="p">)</span>
+        <span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/hello'</span><span class="p">)</span>
         <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">hello</span><span class="p">():</span>
-            <span class="k">return</span> <span class="p">{</span><span class="s1">&#39;message&#39;</span><span class="p">:</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_greeting</span><span class="si">}</span><span class="s1"> from extension&#39;</span><span class="p">}</span>
+            <span class="k">return</span> <span class="p">{</span><span class="s1">'message'</span><span class="p">:</span> <span class="sa">f</span><span class="s1">'</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_greeting</span><span class="si">}</span><span class="s1"> from extension'</span><span class="p">}</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_handler</span> <span class="o">=</span> <span class="n">hello</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">_register</span><span class="p">(</span><span class="n">app</span><span class="p">)</span>            <span class="c1"># dup-check + app.extensions[&#39;hello&#39;] = self</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_register</span><span class="p">(</span><span class="n">app</span><span class="p">)</span>            <span class="c1"># dup-check + app.extensions['hello'] = self</span>
 
 
 <span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">()</span>
-<span class="n">hello</span> <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">add_extension</span><span class="p">(</span><span class="n">HelloExtension</span><span class="p">(</span><span class="n">greeting</span><span class="o">=</span><span class="s1">&#39;Howdy&#39;</span><span class="p">))</span>
+<span class="n">hello</span> <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">add_extension</span><span class="p">(</span><span class="n">HelloExtension</span><span class="p">(</span><span class="n">greeting</span><span class="o">=</span><span class="s1">'Howdy'</span><span class="p">))</span>
 </code></pre></div>
 <p><code>add_extension</code> accepts any object with an <code>init_app(app)</code> method, so
 the duck-typed style above still works — adopting the base class is
@@ -5555,7 +5555,7 @@ close with the application.  <code>add_extension</code> wires them into the
 <code>app_startup</code> / <code>app_shutdown</code> lifespan events, so they run under the
 ASGI lifespan <strong>and</strong> per worker in multi-worker mode:</p>
 <div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">PoolExtension</span><span class="p">(</span><span class="n">Extension</span><span class="p">):</span>
-    <span class="n">extension_key</span> <span class="o">=</span> <span class="s1">&#39;pool&#39;</span>
+    <span class="n">extension_key</span> <span class="o">=</span> <span class="s1">'pool'</span>
 
     <span class="k">def</span><span class="w"> </span><span class="nf">init_app</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">app</span><span class="p">):</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_register</span><span class="p">(</span><span class="n">app</span><span class="p">)</span>
@@ -5587,28 +5587,28 @@ one rule:</p>
   <code>blackbull-*</code> package — prefix with an underscore or the
   application name:</li>
 </ul>
-<div class="highlight"><pre><span></span><code><span class="n">app</span><span class="o">.</span><span class="n">extensions</span><span class="p">[</span><span class="s1">&#39;_myapp_cache&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">MyAppCache</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="n">app</span><span class="o">.</span><span class="n">extensions</span><span class="p">[</span><span class="s1">'_myapp_cache'</span><span class="p">]</span> <span class="o">=</span> <span class="n">MyAppCache</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
 </code></pre></div>
 <p>If a collision is detected at <code>init_app</code> time, the extension
 SHOULD raise <code>RuntimeError</code> rather than silently overwriting:</p>
 <div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">init_app</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">app</span><span class="p">:</span> <span class="n">BlackBull</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-    <span class="k">if</span> <span class="s1">&#39;auth&#39;</span> <span class="ow">in</span> <span class="n">app</span><span class="o">.</span><span class="n">extensions</span><span class="p">:</span>
-        <span class="n">existing</span> <span class="o">=</span> <span class="nb">type</span><span class="p">(</span><span class="n">app</span><span class="o">.</span><span class="n">extensions</span><span class="p">[</span><span class="s1">&#39;auth&#39;</span><span class="p">])</span><span class="o">.</span><span class="vm">__module__</span>
+    <span class="k">if</span> <span class="s1">'auth'</span> <span class="ow">in</span> <span class="n">app</span><span class="o">.</span><span class="n">extensions</span><span class="p">:</span>
+        <span class="n">existing</span> <span class="o">=</span> <span class="nb">type</span><span class="p">(</span><span class="n">app</span><span class="o">.</span><span class="n">extensions</span><span class="p">[</span><span class="s1">'auth'</span><span class="p">])</span><span class="o">.</span><span class="vm">__module__</span>
         <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
-            <span class="sa">f</span><span class="s2">&quot;app.extensions[&#39;auth&#39;] is already registered by &quot;</span>
-            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">existing</span><span class="si">}</span><span class="s2">. Cannot initialise </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="vm">__module__</span><span class="si">}</span><span class="s2">.&quot;</span><span class="p">)</span>
-    <span class="n">app</span><span class="o">.</span><span class="n">extensions</span><span class="p">[</span><span class="s1">&#39;auth&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span>
+            <span class="sa">f</span><span class="s2">"app.extensions['auth'] is already registered by "</span>
+            <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">existing</span><span class="si">}</span><span class="s2">. Cannot initialise </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="vm">__module__</span><span class="si">}</span><span class="s2">."</span><span class="p">)</span>
+    <span class="n">app</span><span class="o">.</span><span class="n">extensions</span><span class="p">[</span><span class="s1">'auth'</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span>
 </code></pre></div>
 <h2 id="extension-dependencies-and-init_app-ordering">Extension dependencies and <code>init_app</code> ordering<a class="headerlink" href="#extension-dependencies-and-init_app-ordering" title="Permanent link">&para;</a></h2>
 <p>When extension A depends on extension B (for example, an admin
 dashboard that needs an auth extension to protect its routes),
 the application author calls <code>init_app(app)</code> in dependency
 order — B before A:</p>
-<div class="highlight"><pre><span></span><code><span class="n">auth</span> <span class="o">=</span> <span class="n">AuthExtension</span><span class="p">(</span><span class="n">jwt_secret</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s1">&#39;JWT_SECRET&#39;</span><span class="p">])</span>
+<div class="highlight"><pre><span></span><code><span class="n">auth</span> <span class="o">=</span> <span class="n">AuthExtension</span><span class="p">(</span><span class="n">jwt_secret</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s1">'JWT_SECRET'</span><span class="p">])</span>
 <span class="n">auth</span><span class="o">.</span><span class="n">init_app</span><span class="p">(</span><span class="n">app</span><span class="p">)</span>
 
 <span class="n">admin</span> <span class="o">=</span> <span class="n">AdminExtension</span><span class="p">()</span>
-<span class="n">admin</span><span class="o">.</span><span class="n">init_app</span><span class="p">(</span><span class="n">app</span><span class="p">)</span>   <span class="c1"># looks up app.extensions[&#39;auth&#39;]</span>
+<span class="n">admin</span><span class="o">.</span><span class="n">init_app</span><span class="p">(</span><span class="n">app</span><span class="p">)</span>   <span class="c1"># looks up app.extensions['auth']</span>
 </code></pre></div>
 <p>BlackBull does NOT enforce ordering — that would require a
 dependency resolver inside the core.  Instead the dependent
@@ -5616,12 +5616,12 @@ extension validates its prerequisites at <code>init_app</code> time and
 raises a clear error if they are missing:</p>
 <div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">AdminExtension</span><span class="p">:</span>
     <span class="k">def</span><span class="w"> </span><span class="nf">init_app</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">app</span><span class="p">:</span> <span class="n">BlackBull</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-        <span class="k">if</span> <span class="s1">&#39;auth&#39;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">app</span><span class="o">.</span><span class="n">extensions</span><span class="p">:</span>
+        <span class="k">if</span> <span class="s1">'auth'</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">app</span><span class="o">.</span><span class="n">extensions</span><span class="p">:</span>
             <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
-                <span class="s1">&#39;AdminExtension requires an auth extension. &#39;</span>
-                <span class="s1">&#39;Initialise it first: auth.init_app(app)&#39;</span><span class="p">)</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">_auth</span> <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">extensions</span><span class="p">[</span><span class="s1">&#39;auth&#39;</span><span class="p">]</span>
-        <span class="n">app</span><span class="o">.</span><span class="n">extensions</span><span class="p">[</span><span class="s1">&#39;admin&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span>
+                <span class="s1">'AdminExtension requires an auth extension. '</span>
+                <span class="s1">'Initialise it first: auth.init_app(app)'</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_auth</span> <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">extensions</span><span class="p">[</span><span class="s1">'auth'</span><span class="p">]</span>
+        <span class="n">app</span><span class="o">.</span><span class="n">extensions</span><span class="p">[</span><span class="s1">'admin'</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span>
 </code></pre></div>
 <p>The application author owns the dependency graph; the
 extension author owns the prerequisite check.  The core stays
@@ -5662,8 +5662,8 @@ end-to-end, and shipped as part of the framework so it never
 drifts from the public extension surface:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.openapi</span><span class="w"> </span><span class="kn">import</span> <span class="n">OpenAPIExtension</span>
 
-<span class="n">OpenAPIExtension</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">title</span><span class="o">=</span><span class="s1">&#39;My API&#39;</span><span class="p">,</span> <span class="n">version</span><span class="o">=</span><span class="s1">&#39;1.0.0&#39;</span><span class="p">)</span>
-<span class="c1"># app.extensions[&#39;openapi&#39;] is the live instance.</span>
+<span class="n">OpenAPIExtension</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">title</span><span class="o">=</span><span class="s1">'My API'</span><span class="p">,</span> <span class="n">version</span><span class="o">=</span><span class="s1">'1.0.0'</span><span class="p">)</span>
+<span class="c1"># app.extensions['openapi'] is the live instance.</span>
 </code></pre></div>
 <p><code>BlackBull.enable_openapi(...)</code> is a thin convenience wrapper
 around the same class — so even the core's own ergonomics call
@@ -5673,14 +5673,14 @@ into the public extension API.</p>
 <code>(conn, receive, send, call_next)</code> shape, so an extension can
 simply pass a middleware callable through it:</p>
 <div class="highlight"><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">x_request_id_mw</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">,</span> <span class="n">call_next</span><span class="p">):</span>
-    <span class="n">conn</span><span class="o">.</span><span class="n">state</span><span class="p">[</span><span class="s1">&#39;x-request-id&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">generate_id</span><span class="p">()</span>
+    <span class="n">conn</span><span class="o">.</span><span class="n">state</span><span class="p">[</span><span class="s1">'x-request-id'</span><span class="p">]</span> <span class="o">=</span> <span class="n">generate_id</span><span class="p">()</span>
     <span class="k">await</span> <span class="n">call_next</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">)</span>
 
 
 <span class="k">class</span><span class="w"> </span><span class="nc">RequestIdExtension</span><span class="p">:</span>
     <span class="k">def</span><span class="w"> </span><span class="nf">init_app</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">app</span><span class="p">:</span> <span class="n">BlackBull</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
         <span class="n">app</span><span class="o">.</span><span class="n">use</span><span class="p">(</span><span class="n">x_request_id_mw</span><span class="p">)</span>
-        <span class="n">app</span><span class="o">.</span><span class="n">extensions</span><span class="p">[</span><span class="s1">&#39;request_id&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span>
+        <span class="n">app</span><span class="o">.</span><span class="n">extensions</span><span class="p">[</span><span class="s1">'request_id'</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span>
 </code></pre></div>
 <p>See <a href="../middleware/">Middleware</a> for the full middleware
 contract, including how to short-circuit the chain and how to
@@ -5695,7 +5695,7 @@ hypothetical advice.</p>
 <p><code>app.extensions</code> landed in BlackBull 0.36.0.
 An extension that touches it must pin at least that floor:</p>
 <div class="highlight"><pre><span></span><code><span class="n">dependencies</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
-<span class="w">    </span><span class="s2">&quot;blackbull &gt;= 0.36.0&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">"blackbull &gt;= 0.36.0"</span><span class="p">,</span>
 <span class="p">]</span>
 </code></pre></div>
 <p>If your extension uses something newer — <code>intercepting_send</code>, a
@@ -5721,7 +5721,7 @@ will break across MINOR versions.</p>
 <h3 id="eager-deferred-construction">Eager + deferred construction<a class="headerlink" href="#eager-deferred-construction" title="Permanent link">&para;</a></h3>
 <p>Follow the same dual-construction shape as <code>OpenAPIExtension</code>:</p>
 <div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">MyExtension</span><span class="p">:</span>
-    <span class="n">extension_key</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;myext&#39;</span>
+    <span class="n">extension_key</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">'myext'</span>
 
     <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">app</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">opt</span><span class="o">=...</span><span class="p">):</span>
         <span class="c1"># validate/store config first</span>
@@ -5754,9 +5754,9 @@ inverts the convention every other extension already follows.</p>
 <h3 id="tests-depend-on-blackbulltesting-for-the-parent-framework">Tests: depend on <code>blackbull[testing]</code> for the parent framework<a class="headerlink" href="#tests-depend-on-blackbulltesting-for-the-parent-framework" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="k">[project.optional-dependencies]</span>
 <span class="n">testing</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
-<span class="w">    </span><span class="s2">&quot;pytest&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="s2">&quot;pytest-asyncio&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="s2">&quot;blackbull[testing] &gt;= 0.36.0&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">"pytest"</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">"pytest-asyncio"</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">"blackbull[testing] &gt;= 0.36.0"</span><span class="p">,</span>
 <span class="p">]</span>
 </code></pre></div>
 <p>This pulls in <code>pytest-asyncio</code>, <code>httpx[http2]</code>, <code>websockets</code>,
@@ -5771,10 +5771,10 @@ construction:</p>
 <span class="k">class</span><span class="w"> </span><span class="nc">Session</span><span class="p">:</span>           <span class="c1"># in-tree, deprecated form</span>
     <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">...</span><span class="p">):</span>
         <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span>
-            <span class="s2">&quot;blackbull.middleware.Session is deprecated; install &quot;</span>
-            <span class="s2">&quot;&#39;blackbull-session&#39; and use SessionExtension instead. &quot;</span>
-            <span class="s2">&quot;Will be removed no earlier than BlackBull v0.41 &quot;</span>
-            <span class="s2">&quot;(and not before 2026-07-14).&quot;</span><span class="p">,</span>
+            <span class="s2">"blackbull.middleware.Session is deprecated; install "</span>
+            <span class="s2">"'blackbull-session' and use SessionExtension instead. "</span>
+            <span class="s2">"Will be removed no earlier than BlackBull v0.41 "</span>
+            <span class="s2">"(and not before 2026-07-14)."</span><span class="p">,</span>
             <span class="ne">DeprecationWarning</span><span class="p">,</span>
             <span class="n">stacklevel</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span>
         <span class="p">)</span>

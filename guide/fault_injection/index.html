@@ -5175,7 +5175,7 @@ when <code>BB_PRODUCTION</code> is set in the environment so the
 deliberate-misbehaviour code path cannot accidentally fire on a
 production deployment.</p>
 <h2 id="install">Install<a class="headerlink" href="#install" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span><span class="s1">&#39;blackbull[fault-injection]&#39;</span>
+<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span><span class="s1">'blackbull[fault-injection]'</span>
 </code></pre></div>
 <p>The extra adds <code>cryptography</code> (for the self-signed TLS helper) and
 <code>httpx[http2]</code> (so the canonical example runs out of the box).
@@ -5202,7 +5202,7 @@ context with ALPN <code>h2</code> advertised:</p>
     <span class="k">async</span> <span class="k">with</span> <span class="n">H2FaultServer</span><span class="p">(</span><span class="n">scenario</span><span class="o">=</span><span class="n">scenario</span><span class="p">,</span> <span class="n">ssl_context</span><span class="o">=</span><span class="n">ssl_ctx</span><span class="p">)</span> <span class="k">as</span> <span class="n">srv</span><span class="p">:</span>
         <span class="k">yield</span> <span class="n">srv</span>
 
-<span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">parametrize</span><span class="p">(</span><span class="s1">&#39;fault_server&#39;</span><span class="p">,</span> <span class="p">[</span>
+<span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">parametrize</span><span class="p">(</span><span class="s1">'fault_server'</span><span class="p">,</span> <span class="p">[</span>
     <span class="n">half_closed_stream_no_data</span><span class="p">,</span>
     <span class="n">exhausted_window_zero_initial</span><span class="p">,</span>
     <span class="n">settings_max_frame_size_below_minimum</span><span class="p">,</span>
@@ -5214,7 +5214,7 @@ context with ALPN <code>h2</code> advertised:</p>
     <span class="c1"># docstrings for the expected client-side behaviour.  Most reduce</span>
     <span class="c1"># to: client must error within a bounded time, not hang forever.</span>
     <span class="k">with</span> <span class="n">pytest</span><span class="o">.</span><span class="n">raises</span><span class="p">((</span><span class="ne">TimeoutError</span><span class="p">,</span> <span class="n">MyClient</span><span class="o">.</span><span class="n">ProtocolError</span><span class="p">)):</span>
-        <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">wait_for</span><span class="p">(</span><span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;/&#39;</span><span class="p">),</span> <span class="n">timeout</span><span class="o">=</span><span class="mf">2.0</span><span class="p">)</span>
+        <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">wait_for</span><span class="p">(</span><span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'/'</span><span class="p">),</span> <span class="n">timeout</span><span class="o">=</span><span class="mf">2.0</span><span class="p">)</span>
 </code></pre></div>
 <p>Omitting <code>ssl_context=</code> runs the server as plaintext h2c — fine for
 prior-knowledge clients, but httpx / curl / hyper-h2 only negotiate
@@ -5269,14 +5269,14 @@ connection:</p>
     <span class="n">steps</span><span class="o">=</span><span class="p">(</span>
         <span class="c1"># Wait for the client to open stream 1.</span>
         <span class="n">WaitForClientFrame</span><span class="p">(</span>
-            <span class="n">match</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;HEADERS&#39;</span><span class="p">,</span> <span class="s1">&#39;stream_id&#39;</span><span class="p">:</span> <span class="mi">1</span><span class="p">},</span>
+            <span class="n">match</span><span class="o">=</span><span class="p">{</span><span class="s1">'type'</span><span class="p">:</span> <span class="s1">'HEADERS'</span><span class="p">,</span> <span class="s1">'stream_id'</span><span class="p">:</span> <span class="mi">1</span><span class="p">},</span>
             <span class="n">timeout</span><span class="o">=</span><span class="mf">5.0</span><span class="p">,</span>
         <span class="p">),</span>
         <span class="c1"># Emit a malformed frame (illegal frame type 0xFF).</span>
-        <span class="n">SendRawBytes</span><span class="p">(</span><span class="sa">b</span><span class="s1">&#39;</span><span class="se">\x00\x00\x00\xff\x00\x00\x00\x00\x01</span><span class="s1">&#39;</span><span class="p">),</span>
+        <span class="n">SendRawBytes</span><span class="p">(</span><span class="sa">b</span><span class="s1">'</span><span class="se">\x00\x00\x00\xff\x00\x00\x00\x00\x01</span><span class="s1">'</span><span class="p">),</span>
         <span class="c1"># Pause so the client has time to react.</span>
         <span class="n">H2Sleep</span><span class="p">(</span><span class="mf">0.5</span><span class="p">),</span>
-        <span class="c1"># Tell the client we&#39;re done.</span>
+        <span class="c1"># Tell the client we're done.</span>
         <span class="n">CloseGracefully</span><span class="p">(</span><span class="n">error_code</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">last_stream_id</span><span class="o">=</span><span class="mi">1</span><span class="p">),</span>
     <span class="p">),</span>
     <span class="n">send_preface</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
@@ -5308,11 +5308,11 @@ short-circuit.</p>
 
 <span class="c1"># Send a request one byte every 200 ms — classic slowloris.</span>
 <span class="n">trickle</span> <span class="o">=</span> <span class="n">Scenario</span><span class="p">(</span><span class="n">steps</span><span class="o">=</span><span class="p">(</span>
-    <span class="n">SendBytes</span><span class="p">(</span><span class="sa">b</span><span class="s1">&#39;GET / HTTP/1.1</span><span class="se">\r\n</span><span class="s1">Host: target</span><span class="se">\r\n\r\n</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">byte_interval</span><span class="o">=</span><span class="mf">0.2</span><span class="p">),</span>
+    <span class="n">SendBytes</span><span class="p">(</span><span class="sa">b</span><span class="s1">'GET / HTTP/1.1</span><span class="se">\r\n</span><span class="s1">Host: target</span><span class="se">\r\n\r\n</span><span class="s1">'</span><span class="p">,</span> <span class="n">byte_interval</span><span class="o">=</span><span class="mf">0.2</span><span class="p">),</span>
     <span class="n">ReadResponse</span><span class="p">(</span><span class="n">timeout</span><span class="o">=</span><span class="mf">10.0</span><span class="p">),</span>
 <span class="p">))</span>
 
-<span class="k">async</span> <span class="k">with</span> <span class="n">HTTP1Client</span><span class="p">(</span><span class="s1">&#39;127.0.0.1&#39;</span><span class="p">,</span> <span class="mi">8080</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
+<span class="k">async</span> <span class="k">with</span> <span class="n">HTTP1Client</span><span class="p">(</span><span class="s1">'127.0.0.1'</span><span class="p">,</span> <span class="mi">8080</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
     <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">execute_scenario</span><span class="p">(</span><span class="n">trickle</span><span class="p">)</span>
     <span class="k">assert</span> <span class="n">result</span><span class="o">.</span><span class="n">response</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">result</span><span class="o">.</span><span class="n">timed_out</span>
 </code></pre></div>

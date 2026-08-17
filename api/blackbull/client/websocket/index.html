@@ -5271,7 +5271,7 @@ only one concurrent session per <code>WebSocketClient</code> is supported.</p>
 
 
 <h4 id="blackbull.client.websocket.WebSocketClient.connect" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">connect</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">subprotocols</span><span class="o">=</span><span class="p">())</span></code>
+            <code class="highlight language-python"><span class="n">connect</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">subprotocols</span><span class="o">=</span><span class="p">(),</span> <span class="n">response_timeout</span><span class="o">=</span><span class="mf">5.0</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
@@ -5285,7 +5285,10 @@ only one concurrent session per <code>WebSocketClient</code> is supported.</p>
         <p>Run the HTTP/1.1 <code>Upgrade: websocket</code> handshake on this connection.</p>
 <p>Returns a <code>WebSocketSession</code> once the server has confirmed the
 upgrade with HTTP 101 and a valid <code>Sec-WebSocket-Accept</code> header.
-Raises <code>HandshakeError</code> on any handshake-time failure.</p>
+Raises <code>HandshakeError</code> on any handshake-time failure, or
+<code>TimeoutError</code> if no response arrives within <em>response_timeout</em>.</p>
+<p>A peer can accept the connection and then never send the 101, so the
+transport-level deadline does not cover this wait.  <code>None</code> opts out.</p>
 
 
     </div>

@@ -5099,19 +5099,19 @@ HTTP Working Group's
 <p><code>Headers</code> exposes one accessor per top-level SF type.  Each returns
 <code>None</code> when the field is absent <strong>or</strong> fails strict parsing — RFC 9651
 requires a malformed field to be ignored in its entirety:</p>
-<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/&#39;</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">])</span>
+<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/'</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">])</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">handler</span><span class="p">(</span><span class="n">conn</span><span class="p">:</span> <span class="n">Connection</span><span class="p">):</span>
     <span class="c1"># Dictionary-typed field, e.g. Priority: u=2, i</span>
-    <span class="n">priority</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">headers</span><span class="o">.</span><span class="n">get_sf_dict</span><span class="p">(</span><span class="sa">b</span><span class="s1">&#39;priority&#39;</span><span class="p">)</span>
-    <span class="c1"># → {&#39;u&#39;: (2, {}), &#39;i&#39;: (True, {})}   or None</span>
+    <span class="n">priority</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">headers</span><span class="o">.</span><span class="n">get_sf_dict</span><span class="p">(</span><span class="sa">b</span><span class="s1">'priority'</span><span class="p">)</span>
+    <span class="c1"># → {'u': (2, {}), 'i': (True, {})}   or None</span>
 
     <span class="c1"># Item-typed field, e.g. Deprecation: @1659578233</span>
-    <span class="n">deprecation</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">headers</span><span class="o">.</span><span class="n">get_sf_item</span><span class="p">(</span><span class="sa">b</span><span class="s1">&#39;deprecation&#39;</span><span class="p">)</span>
+    <span class="n">deprecation</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">headers</span><span class="o">.</span><span class="n">get_sf_item</span><span class="p">(</span><span class="sa">b</span><span class="s1">'deprecation'</span><span class="p">)</span>
     <span class="c1"># → (Date(1659578233), {})            or None</span>
 
     <span class="c1"># List-typed field, e.g. Example: sugar, tea;kind=green</span>
-    <span class="n">example</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">headers</span><span class="o">.</span><span class="n">get_sf_list</span><span class="p">(</span><span class="sa">b</span><span class="s1">&#39;example&#39;</span><span class="p">)</span>
-    <span class="c1"># → [(Token(&#39;sugar&#39;), {}), (Token(&#39;tea&#39;), {&#39;kind&#39;: Token(&#39;green&#39;)})]</span>
+    <span class="n">example</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">headers</span><span class="o">.</span><span class="n">get_sf_list</span><span class="p">(</span><span class="sa">b</span><span class="s1">'example'</span><span class="p">)</span>
+    <span class="c1"># → [(Token('sugar'), {}), (Token('tea'), {'kind': Token('green')})]</span>
 </code></pre></div>
 <p>Multiple field lines of the same name are combined with <code>", "</code> before
 parsing, exactly as §4.2 of the RFC specifies.</p>
@@ -5184,14 +5184,14 @@ header list:</p>
     <span class="n">Date</span><span class="p">,</span> <span class="n">Token</span><span class="p">,</span> <span class="n">serialize_dictionary</span><span class="p">,</span> <span class="n">serialize_item</span><span class="p">,</span> <span class="n">serialize_list</span><span class="p">,</span>
 <span class="p">)</span>
 
-<span class="n">serialize_list</span><span class="p">([(</span><span class="n">Token</span><span class="p">(</span><span class="s1">&#39;gzip&#39;</span><span class="p">),</span> <span class="p">{}),</span> <span class="p">(</span><span class="n">Token</span><span class="p">(</span><span class="s1">&#39;br&#39;</span><span class="p">),</span> <span class="p">{</span><span class="s1">&#39;q&#39;</span><span class="p">:</span> <span class="mf">0.9</span><span class="p">})])</span>
-<span class="c1"># b&#39;gzip, br;q=0.9&#39;</span>
+<span class="n">serialize_list</span><span class="p">([(</span><span class="n">Token</span><span class="p">(</span><span class="s1">'gzip'</span><span class="p">),</span> <span class="p">{}),</span> <span class="p">(</span><span class="n">Token</span><span class="p">(</span><span class="s1">'br'</span><span class="p">),</span> <span class="p">{</span><span class="s1">'q'</span><span class="p">:</span> <span class="mf">0.9</span><span class="p">})])</span>
+<span class="c1"># b'gzip, br;q=0.9'</span>
 
-<span class="n">serialize_dictionary</span><span class="p">({</span><span class="s1">&#39;u&#39;</span><span class="p">:</span> <span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="p">{}),</span> <span class="s1">&#39;i&#39;</span><span class="p">:</span> <span class="p">(</span><span class="kc">True</span><span class="p">,</span> <span class="p">{})})</span>
-<span class="c1"># b&#39;u=2, i&#39;</span>
+<span class="n">serialize_dictionary</span><span class="p">({</span><span class="s1">'u'</span><span class="p">:</span> <span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="p">{}),</span> <span class="s1">'i'</span><span class="p">:</span> <span class="p">(</span><span class="kc">True</span><span class="p">,</span> <span class="p">{})})</span>
+<span class="c1"># b'u=2, i'</span>
 
 <span class="n">serialize_item</span><span class="p">(</span><span class="n">Date</span><span class="p">(</span><span class="mi">1659578233</span><span class="p">))</span>
-<span class="c1"># b&#39;@1659578233&#39;</span>
+<span class="c1"># b'@1659578233'</span>
 </code></pre></div>
 <p>Serialisation validates its input — an integer beyond ±(10¹⁵−1), an
 invalid Token, or a non-ASCII String raises <code>ValueError</code> instead of

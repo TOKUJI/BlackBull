@@ -5317,20 +5317,20 @@ exposing <code>send_window_remaining</code> and
 the missing primitive a gRPC server-streaming implementation
 needs to back-pressure correctly:</p>
 <div class="highlight"><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">server_streaming_rpc</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
-    <span class="n">ext</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">extensions</span><span class="p">[</span><span class="s1">&#39;http.response.http2_stream&#39;</span><span class="p">]</span>
+    <span class="n">ext</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">extensions</span><span class="p">[</span><span class="s1">'http.response.http2_stream'</span><span class="p">]</span>
     <span class="k">for</span> <span class="n">msg</span> <span class="ow">in</span> <span class="n">produce_many_messages</span><span class="p">():</span>
-        <span class="c1"># If send window is below a threshold, the peer&#39;s recv buffer</span>
+        <span class="c1"># If send window is below a threshold, the peer's recv buffer</span>
         <span class="c1"># is filling up — defer the next message via cooperative yield</span>
         <span class="c1"># or a brief asyncio.sleep instead of blasting it through.</span>
-        <span class="k">if</span> <span class="n">ext</span><span class="p">[</span><span class="s1">&#39;send_window_remaining&#39;</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">MIN_WINDOW</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">ext</span><span class="p">[</span><span class="s1">'send_window_remaining'</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">MIN_WINDOW</span><span class="p">:</span>
             <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
             <span class="c1"># Re-read snapshot: NB - v0.31 ships a snapshot at scope</span>
             <span class="c1"># build time; the value above does NOT update mid-request.</span>
-            <span class="c1"># See &quot;Open question&quot; below.</span>
-        <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;http.response.body&#39;</span><span class="p">,</span>
-                    <span class="s1">&#39;body&#39;</span><span class="p">:</span> <span class="n">frame</span><span class="p">(</span><span class="n">msg</span><span class="p">),</span> <span class="s1">&#39;more_body&#39;</span><span class="p">:</span> <span class="kc">True</span><span class="p">})</span>
-    <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;http.response.trailers&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;headers&#39;</span><span class="p">:</span> <span class="p">[(</span><span class="sa">b</span><span class="s1">&#39;grpc-status&#39;</span><span class="p">,</span> <span class="sa">b</span><span class="s1">&#39;0&#39;</span><span class="p">)]})</span>
+            <span class="c1"># See "Open question" below.</span>
+        <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">'type'</span><span class="p">:</span> <span class="s1">'http.response.body'</span><span class="p">,</span>
+                    <span class="s1">'body'</span><span class="p">:</span> <span class="n">frame</span><span class="p">(</span><span class="n">msg</span><span class="p">),</span> <span class="s1">'more_body'</span><span class="p">:</span> <span class="kc">True</span><span class="p">})</span>
+    <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">'type'</span><span class="p">:</span> <span class="s1">'http.response.trailers'</span><span class="p">,</span>
+                <span class="s1">'headers'</span><span class="p">:</span> <span class="p">[(</span><span class="sa">b</span><span class="s1">'grpc-status'</span><span class="p">,</span> <span class="sa">b</span><span class="s1">'0'</span><span class="p">)]})</span>
 </code></pre></div>
 <p>Without this hint, a gRPC server has no way to know when to slow
 down — it would either ignore back-pressure entirely (OOM risk

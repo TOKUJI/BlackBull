@@ -5454,7 +5454,7 @@ emitter</strong> (does the exception propagate?).</p>
 
 <span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">()</span>
 
-<span class="nd">@app</span><span class="o">.</span><span class="n">intercept</span><span class="p">(</span><span class="s1">&#39;app_startup&#39;</span><span class="p">)</span>
+<span class="nd">@app</span><span class="o">.</span><span class="n">intercept</span><span class="p">(</span><span class="s1">'app_startup'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">warm_cache</span><span class="p">(</span><span class="n">event</span><span class="p">:</span> <span class="n">Event</span><span class="p">):</span>
     <span class="k">await</span> <span class="n">cache</span><span class="o">.</span><span class="n">preload</span><span class="p">()</span>
 </code></pre></div>
@@ -5469,7 +5469,7 @@ ASGI server driving the lifespan protocol — typically aborting
 startup.</p>
 <h2 id="appon-fire-and-forget-observation"><code>@app.on</code> — fire-and-forget observation<a class="headerlink" href="#appon-fire-and-forget-observation" title="Permanent link">&para;</a></h2>
 <p>Register an observer for a named event:</p>
-<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">on</span><span class="p">(</span><span class="s1">&#39;app_shutdown&#39;</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">on</span><span class="p">(</span><span class="s1">'app_shutdown'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">flush_metrics</span><span class="p">(</span><span class="n">event</span><span class="p">:</span> <span class="n">Event</span><span class="p">):</span>
     <span class="k">await</span> <span class="n">metrics_client</span><span class="o">.</span><span class="n">flush</span><span class="p">()</span>
 </code></pre></div>
@@ -5484,9 +5484,9 @@ other side-effects that the request path should not depend on.</p>
 <p>Pass <code>blocking=True</code> to await the observer in registration order
 <em>before</em> the emit returns, while keeping the isolation of <code>on</code>
 (exceptions logged, never propagated):</p>
-<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">on</span><span class="p">(</span><span class="s1">&#39;scope_completed&#39;</span><span class="p">,</span> <span class="n">blocking</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">on</span><span class="p">(</span><span class="s1">'scope_completed'</span><span class="p">,</span> <span class="n">blocking</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">close_session</span><span class="p">(</span><span class="n">event</span><span class="p">:</span> <span class="n">Event</span><span class="p">):</span>
-    <span class="n">session</span> <span class="o">=</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;conn&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">state</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;db_session&#39;</span><span class="p">)</span>
+    <span class="n">session</span> <span class="o">=</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">'conn'</span><span class="p">]</span><span class="o">.</span><span class="n">state</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'db_session'</span><span class="p">)</span>
     <span class="k">if</span> <span class="n">session</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
         <span class="k">await</span> <span class="n">session</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
 </code></pre></div>
@@ -5520,7 +5520,7 @@ object, two zero-argument sugar decorators are provided:</p>
     <span class="k">await</span> <span class="n">db</span><span class="o">.</span><span class="n">disconnect</span><span class="p">()</span>
 </code></pre></div>
 <p>These are equivalent to:</p>
-<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">intercept</span><span class="p">(</span><span class="s1">&#39;app_startup&#39;</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">intercept</span><span class="p">(</span><span class="s1">'app_startup'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">_wrapped_init_db</span><span class="p">(</span><span class="n">event</span><span class="p">:</span> <span class="n">Event</span><span class="p">):</span>
     <span class="k">await</span> <span class="n">init_db</span><span class="p">()</span>
 </code></pre></div>
@@ -5631,15 +5631,15 @@ stream), and — like every request-lifecycle event — fires exactly
 once per request whether BlackBull serves the request itself or
 runs as an ASGI app under an external server (uvicorn, hypercorn,
 <code>TestClient</code>).  WebSocket connections never fire this event.</p>
-<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">intercept</span><span class="p">(</span><span class="s1">&#39;request_received&#39;</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">intercept</span><span class="p">(</span><span class="s1">'request_received'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">require_api_key</span><span class="p">(</span><span class="n">event</span><span class="p">):</span>
-    <span class="n">headers</span> <span class="o">=</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;conn&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">headers</span>
-    <span class="k">if</span> <span class="n">headers</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="sa">b</span><span class="s1">&#39;x-api-key&#39;</span><span class="p">)</span> <span class="o">!=</span> <span class="sa">b</span><span class="s1">&#39;secret&#39;</span><span class="p">:</span>
-        <span class="k">raise</span> <span class="ne">PermissionError</span><span class="p">(</span><span class="s1">&#39;missing or invalid API key&#39;</span><span class="p">)</span>
+    <span class="n">headers</span> <span class="o">=</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">'conn'</span><span class="p">]</span><span class="o">.</span><span class="n">headers</span>
+    <span class="k">if</span> <span class="n">headers</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="sa">b</span><span class="s1">'x-api-key'</span><span class="p">)</span> <span class="o">!=</span> <span class="sa">b</span><span class="s1">'secret'</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">PermissionError</span><span class="p">(</span><span class="s1">'missing or invalid API key'</span><span class="p">)</span>
 
-<span class="nd">@app</span><span class="o">.</span><span class="n">on</span><span class="p">(</span><span class="s1">&#39;request_received&#39;</span><span class="p">)</span>
+<span class="nd">@app</span><span class="o">.</span><span class="n">on</span><span class="p">(</span><span class="s1">'request_received'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">record_hit</span><span class="p">(</span><span class="n">event</span><span class="p">):</span>
-    <span class="n">metrics</span><span class="o">.</span><span class="n">increment</span><span class="p">(</span><span class="s1">&#39;http.requests&#39;</span><span class="p">,</span> <span class="n">tags</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;path&#39;</span><span class="p">:</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;path&#39;</span><span class="p">]})</span>
+    <span class="n">metrics</span><span class="o">.</span><span class="n">increment</span><span class="p">(</span><span class="s1">'http.requests'</span><span class="p">,</span> <span class="n">tags</span><span class="o">=</span><span class="p">{</span><span class="s1">'path'</span><span class="p">:</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">'path'</span><span class="p">]})</span>
 </code></pre></div>
 <p>Use <code>@app.intercept('request_received')</code> for early gates (auth,
 rate limiting); use <code>@app.on('request_received')</code> for passive
@@ -5703,10 +5703,10 @@ exist and those keys carry placeholders (<code>'-'</code> / <code>0</code> / <co
 </tr>
 </tbody>
 </table>
-<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">on</span><span class="p">(</span><span class="s1">&#39;request_completed&#39;</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">on</span><span class="p">(</span><span class="s1">'request_completed'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">log_request</span><span class="p">(</span><span class="n">event</span><span class="p">:</span> <span class="n">Event</span><span class="p">):</span>
     <span class="n">d</span> <span class="o">=</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span>
-    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">d</span><span class="p">[</span><span class="s1">&#39;method&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">d</span><span class="p">[</span><span class="s1">&#39;path&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> → </span><span class="si">{</span><span class="n">d</span><span class="p">[</span><span class="s1">&#39;status&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="n">d</span><span class="p">[</span><span class="s1">&#39;duration_ms&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">ms)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">d</span><span class="p">[</span><span class="s1">'method'</span><span class="p">]</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">d</span><span class="p">[</span><span class="s1">'path'</span><span class="p">]</span><span class="si">}</span><span class="s2"> → </span><span class="si">{</span><span class="n">d</span><span class="p">[</span><span class="s1">'status'</span><span class="p">]</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="n">d</span><span class="p">[</span><span class="s1">'duration_ms'</span><span class="p">]</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">ms)"</span><span class="p">)</span>
 </code></pre></div>
 <p><strong>Observation only.</strong>  The response has already been sent by the
 time this fires; nothing an interceptor does can change what the
@@ -5762,14 +5762,14 @@ too, and is meant for <strong>resource cleanup</strong>.</p>
 </table>
 <p>Pair it with <code>blocking=True</code> so cleanup completes before the scope
 is gone:</p>
-<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">on</span><span class="p">(</span><span class="s1">&#39;scope_completed&#39;</span><span class="p">,</span> <span class="n">blocking</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">on</span><span class="p">(</span><span class="s1">'scope_completed'</span><span class="p">,</span> <span class="n">blocking</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">cleanup</span><span class="p">(</span><span class="n">event</span><span class="p">:</span> <span class="n">Event</span><span class="p">):</span>
-    <span class="n">conn</span> <span class="o">=</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;conn&#39;</span><span class="p">]</span>
-    <span class="n">tmp</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">state</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;tempfile&#39;</span><span class="p">)</span>
+    <span class="n">conn</span> <span class="o">=</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">'conn'</span><span class="p">]</span>
+    <span class="n">tmp</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">state</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'tempfile'</span><span class="p">)</span>
     <span class="k">if</span> <span class="n">tmp</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
         <span class="n">os</span><span class="o">.</span><span class="n">unlink</span><span class="p">(</span><span class="n">tmp</span><span class="p">)</span>
-    <span class="k">if</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;exception&#39;</span><span class="p">]</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-        <span class="n">metrics</span><span class="o">.</span><span class="n">increment</span><span class="p">(</span><span class="s1">&#39;requests.failed&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">'exception'</span><span class="p">]</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">metrics</span><span class="o">.</span><span class="n">increment</span><span class="p">(</span><span class="s1">'requests.failed'</span><span class="p">)</span>
 </code></pre></div>
 <p>Use plain <code>@app.on('scope_completed')</code> (detached) only for
 observation that need not finish before the scope ends; use
@@ -5796,14 +5796,14 @@ stream's receive channel.</p>
 server read loop, <em>before</em> the message is delivered to the
 application's <code>receive()</code> call.  Observers see every message the
 server accepted — including ones the handler never reads.</p>
-<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">on</span><span class="p">(</span><span class="s1">&#39;websocket_message&#39;</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">on</span><span class="p">(</span><span class="s1">'websocket_message'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">log_message</span><span class="p">(</span><span class="n">event</span><span class="p">:</span> <span class="n">Event</span><span class="p">):</span>
-    <span class="k">if</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;text&#39;</span><span class="p">]</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[ws] text on </span><span class="si">{</span><span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;conn&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">path</span><span class="si">}</span><span class="s2">: &quot;</span>
-              <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;text&#39;</span><span class="p">]</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">'text'</span><span class="p">]</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"[ws] text on </span><span class="si">{</span><span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">'conn'</span><span class="p">]</span><span class="o">.</span><span class="n">path</span><span class="si">}</span><span class="s2">: "</span>
+              <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">'text'</span><span class="p">]</span><span class="si">!r}</span><span class="s2">"</span><span class="p">)</span>
     <span class="k">else</span><span class="p">:</span>
-        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[ws] binary on </span><span class="si">{</span><span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;conn&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">path</span><span class="si">}</span><span class="s2">: &quot;</span>
-              <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;bytes&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2"> bytes&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"[ws] binary on </span><span class="si">{</span><span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">'conn'</span><span class="p">]</span><span class="o">.</span><span class="n">path</span><span class="si">}</span><span class="s2">: "</span>
+              <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">'bytes'</span><span class="p">])</span><span class="si">}</span><span class="s2"> bytes"</span><span class="p">)</span>
 </code></pre></div>
 <p>The message has already been read off the wire by the time the
 event fires, so interceptors cannot suppress delivery — use
@@ -5818,15 +5818,15 @@ the lifetime of the connection — the same id the server assigned at
 accept time, so <code>connected</code> / <code>disconnected</code> records also correlate
 with cap-hit log records and raw-protocol <code>ProtocolContext</code> for that
 connection.</p>
-<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">on</span><span class="p">(</span><span class="s1">&#39;websocket_connected&#39;</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">on</span><span class="p">(</span><span class="s1">'websocket_connected'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">on_connected</span><span class="p">(</span><span class="n">event</span><span class="p">):</span>
-    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;WS connected id=</span><span class="si">%s</span><span class="s1"> path=</span><span class="si">%s</span><span class="s1">&#39;</span><span class="p">,</span>
-                <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;connection_id&#39;</span><span class="p">],</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;path&#39;</span><span class="p">])</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">'WS connected id=</span><span class="si">%s</span><span class="s1"> path=</span><span class="si">%s</span><span class="s1">'</span><span class="p">,</span>
+                <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">'connection_id'</span><span class="p">],</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">'path'</span><span class="p">])</span>
 
-<span class="nd">@app</span><span class="o">.</span><span class="n">on</span><span class="p">(</span><span class="s1">&#39;websocket_disconnected&#39;</span><span class="p">)</span>
+<span class="nd">@app</span><span class="o">.</span><span class="n">on</span><span class="p">(</span><span class="s1">'websocket_disconnected'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">on_disconnected</span><span class="p">(</span><span class="n">event</span><span class="p">):</span>
-    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;WS disconnected id=</span><span class="si">%s</span><span class="s1"> code=</span><span class="si">%s</span><span class="s1">&#39;</span><span class="p">,</span>
-                <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;connection_id&#39;</span><span class="p">],</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;code&#39;</span><span class="p">])</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">'WS disconnected id=</span><span class="si">%s</span><span class="s1"> code=</span><span class="si">%s</span><span class="s1">'</span><span class="p">,</span>
+                <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">'connection_id'</span><span class="p">],</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">'code'</span><span class="p">])</span>
 </code></pre></div>
 <p>Both are <strong>observation only</strong> — the connection lifecycle is
 driven by the ASGI handler, not by interceptors.</p>

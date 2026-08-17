@@ -5327,10 +5327,10 @@ other file-system assets that don't change on every request.</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">BlackBull</span>
 
 <span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">()</span>
-<span class="n">app</span><span class="o">.</span><span class="n">static</span><span class="p">(</span><span class="s1">&#39;/assets&#39;</span><span class="p">,</span> <span class="s1">&#39;public/assets&#39;</span><span class="p">)</span>
-<span class="n">app</span><span class="o">.</span><span class="n">static</span><span class="p">(</span><span class="s1">&#39;/images&#39;</span><span class="p">,</span> <span class="s1">&#39;public/images&#39;</span><span class="p">)</span>
+<span class="n">app</span><span class="o">.</span><span class="n">static</span><span class="p">(</span><span class="s1">'/assets'</span><span class="p">,</span> <span class="s1">'public/assets'</span><span class="p">)</span>
+<span class="n">app</span><span class="o">.</span><span class="n">static</span><span class="p">(</span><span class="s1">'/images'</span><span class="p">,</span> <span class="s1">'public/images'</span><span class="p">)</span>
 
-<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/&#39;</span><span class="p">)</span>
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">index</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="o">...</span>
 </code></pre></div>
@@ -5356,14 +5356,14 @@ error path, so <code>@app.on_error(HTTPStatus.NOT_FOUND)</code> still applies.</
 or when mounting without BlackBull:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.middleware.static</span><span class="w"> </span><span class="kn">import</span> <span class="n">StaticFiles</span>
 
-<span class="n">app</span> <span class="o">=</span> <span class="n">StaticFiles</span><span class="p">(</span><span class="n">directory</span><span class="o">=</span><span class="s1">&#39;public&#39;</span><span class="p">)</span>
+<span class="n">app</span> <span class="o">=</span> <span class="n">StaticFiles</span><span class="p">(</span><span class="n">directory</span><span class="o">=</span><span class="s1">'public'</span><span class="p">)</span>
 <span class="c1"># app(scope, receive, send)  — 3-argument ASGI</span>
 </code></pre></div>
 <h2 id="directory-index">Directory index<a class="headerlink" href="#directory-index" title="Permanent link">&para;</a></h2>
 <p>By default <code>StaticFiles</code> serves files by their exact path only.
 Pass <code>index</code> to serve a named file when a request resolves to a
 directory:</p>
-<div class="highlight"><pre><span></span><code><span class="n">app</span><span class="o">.</span><span class="n">static</span><span class="p">(</span><span class="s1">&#39;/&#39;</span><span class="p">,</span> <span class="s1">&#39;public&#39;</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="s1">&#39;index.html&#39;</span><span class="p">)</span>   <span class="c1"># GET / → public/index.html</span>
+<div class="highlight"><pre><span></span><code><span class="n">app</span><span class="o">.</span><span class="n">static</span><span class="p">(</span><span class="s1">'/'</span><span class="p">,</span> <span class="s1">'public'</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="s1">'index.html'</span><span class="p">)</span>   <span class="c1"># GET / → public/index.html</span>
 </code></pre></div>
 <p>The index candidate is run through the same realpath + traversal
 guard as any other target, so it can't escape the root.  The
@@ -5423,12 +5423,12 @@ files from disk on every request, no in-memory caching" (e.g. the
 HttpArena standard-mode static profile).</p>
 <p>Opt in by passing <code>cache=True</code>:</p>
 <div class="highlight"><pre><span></span><code><span class="c1"># Default — read from disk every request.</span>
-<span class="n">app</span><span class="o">.</span><span class="n">static</span><span class="p">(</span><span class="s1">&#39;/assets&#39;</span><span class="p">,</span> <span class="s1">&#39;public/assets&#39;</span><span class="p">)</span>
+<span class="n">app</span><span class="o">.</span><span class="n">static</span><span class="p">(</span><span class="s1">'/assets'</span><span class="p">,</span> <span class="s1">'public/assets'</span><span class="p">)</span>
 
 <span class="c1"># Opt-in — small files (≤ 4 MiB each, up to 256 entries) held in</span>
 <span class="c1"># process memory; stat() syscall throttled to once per second per</span>
 <span class="c1"># entry; sibling-existence answers memoised across requests.</span>
-<span class="n">app</span><span class="o">.</span><span class="n">static</span><span class="p">(</span><span class="s1">&#39;/assets&#39;</span><span class="p">,</span> <span class="s1">&#39;public/assets&#39;</span><span class="p">,</span> <span class="n">cache</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">app</span><span class="o">.</span><span class="n">static</span><span class="p">(</span><span class="s1">'/assets'</span><span class="p">,</span> <span class="s1">'public/assets'</span><span class="p">,</span> <span class="n">cache</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 </code></pre></div>
 <p>When you should turn it on:</p>
 <ul>
@@ -5502,10 +5502,10 @@ modification time and size) and a <code>Last-Modified</code> header on every
 response.  A revalidating client can then avoid re-downloading an
 unchanged asset:</p>
 <div class="highlight"><pre><span></span><code>GET /assets/app.css HTTP/1.1
-If-None-Match: &quot;18f3a-1c2&quot;
+If-None-Match: "18f3a-1c2"
 </code></pre></div>
 <div class="highlight"><pre><span></span><code>HTTP/1.1 304 Not Modified
-ETag: &quot;18f3a-1c2&quot;
+ETag: "18f3a-1c2"
 Last-Modified: Sun, 13 Jul 2026 00:00:00 GMT
 </code></pre></div>
 <p><code>If-None-Match</code> takes precedence over <code>If-Modified-Since</code> (RFC 9110
@@ -5523,10 +5523,10 @@ revalidation of a large asset costs no disk I/O.  Pass
   <code>404</code>; no directory listing is ever served.</li>
 </ul>
 <h2 id="inspecting-registered-roots">Inspecting registered roots<a class="headerlink" href="#inspecting-registered-roots" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="n">app</span><span class="o">.</span><span class="n">static</span><span class="p">(</span><span class="s1">&#39;/a&#39;</span><span class="p">,</span> <span class="s1">&#39;public/a&#39;</span><span class="p">)</span>
-<span class="n">app</span><span class="o">.</span><span class="n">static</span><span class="p">(</span><span class="s1">&#39;/b&#39;</span><span class="p">,</span> <span class="s1">&#39;public/b&#39;</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="n">app</span><span class="o">.</span><span class="n">static</span><span class="p">(</span><span class="s1">'/a'</span><span class="p">,</span> <span class="s1">'public/a'</span><span class="p">)</span>
+<span class="n">app</span><span class="o">.</span><span class="n">static</span><span class="p">(</span><span class="s1">'/b'</span><span class="p">,</span> <span class="s1">'public/b'</span><span class="p">)</span>
 <span class="nb">print</span><span class="p">(</span><span class="n">app</span><span class="o">.</span><span class="n">_static_roots</span><span class="p">)</span>
-<span class="c1"># [(&#39;/a&#39;, PosixPath(&#39;/abs/public/a&#39;)), (&#39;/b&#39;, PosixPath(&#39;/abs/public/b&#39;))]</span>
+<span class="c1"># [('/a', PosixPath('/abs/public/a')), ('/b', PosixPath('/abs/public/b'))]</span>
 </code></pre></div>
 <h2 id="pairing-with-compression">Pairing with compression<a class="headerlink" href="#pairing-with-compression" title="Permanent link">&para;</a></h2>
 <p>The <code>StaticFiles</code> middleware does not compress responses itself.
@@ -5535,7 +5535,7 @@ To gzip / brotli / zstd static content on the fly, layer the
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.middleware.compression</span><span class="w"> </span><span class="kn">import</span> <span class="n">Compression</span>
 
 <span class="n">app</span><span class="o">.</span><span class="n">use</span><span class="p">(</span><span class="n">Compression</span><span class="p">())</span>
-<span class="n">app</span><span class="o">.</span><span class="n">static</span><span class="p">(</span><span class="s1">&#39;/assets&#39;</span><span class="p">,</span> <span class="s1">&#39;public/assets&#39;</span><span class="p">)</span>
+<span class="n">app</span><span class="o">.</span><span class="n">static</span><span class="p">(</span><span class="s1">'/assets'</span><span class="p">,</span> <span class="s1">'public/assets'</span><span class="p">)</span>
 </code></pre></div>
 <p>Order matters — <code>Compression</code> registered before <code>app.static</code>
 will see the static response and compress it.  For very large

@@ -5588,7 +5588,7 @@ and <strong>a defect on one layer is invisible to the others</strong>.</p>
 <h2 id="setup">Setup<a class="headerlink" href="#setup" title="Permanent link">&para;</a></h2>
 <p>Install the testing extras for <code>pytest</code>, <code>pytest-asyncio</code>,
 <code>httpx[http2]</code>, <code>websockets</code>, and <code>hypothesis</code>:</p>
-<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span><span class="s1">&#39;.[testing]&#39;</span>
+<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span><span class="s1">'.[testing]'</span>
 </code></pre></div>
 <p>A minimal <code>pytest.ini</code>:</p>
 <div class="highlight"><pre><span></span><code><span class="k">[pytest]</span>
@@ -5612,27 +5612,27 @@ injection, events, and response serialisation.</p>
 <span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">()</span>
 
 
-<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/hello&#39;</span><span class="p">)</span>
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/hello'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">hello</span><span class="p">():</span>
-    <span class="k">return</span> <span class="s1">&#39;hi&#39;</span>
+    <span class="k">return</span> <span class="s1">'hi'</span>
 
 
 <span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">asyncio</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_hello</span><span class="p">():</span>
-    <span class="n">resp</span> <span class="o">=</span> <span class="k">await</span> <span class="n">native</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="s1">&#39;/hello&#39;</span><span class="p">)</span>
+    <span class="n">resp</span> <span class="o">=</span> <span class="k">await</span> <span class="n">native</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="s1">'/hello'</span><span class="p">)</span>
     <span class="k">assert</span> <span class="n">resp</span><span class="o">.</span><span class="n">status</span> <span class="o">==</span> <span class="mi">200</span>
-    <span class="k">assert</span> <span class="n">resp</span><span class="o">.</span><span class="n">body</span> <span class="o">==</span> <span class="sa">b</span><span class="s1">&#39;hi&#39;</span>
+    <span class="k">assert</span> <span class="n">resp</span><span class="o">.</span><span class="n">body</span> <span class="o">==</span> <span class="sa">b</span><span class="s1">'hi'</span>
 </code></pre></div>
 <p>The helpers are <code>get</code> / <code>head</code> / <code>options</code> / <code>post</code> / <code>put</code> /
 <code>patch</code> / <code>delete</code>, plus <code>request</code> for full control.  A response is
 a <code>NativeTestResponse</code> — <code>status</code>, <code>headers</code> (a <code>Headers</code>), <code>body</code>, and
 <code>.json()</code> / <code>.text()</code> convenience readers:</p>
-<div class="highlight"><pre><span></span><code><span class="n">resp</span> <span class="o">=</span> <span class="k">await</span> <span class="n">native</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="s1">&#39;/tasks&#39;</span><span class="p">,</span> <span class="n">json</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;name&#39;</span><span class="p">:</span> <span class="s1">&#39;write tests&#39;</span><span class="p">})</span>
+<div class="highlight"><pre><span></span><code><span class="n">resp</span> <span class="o">=</span> <span class="k">await</span> <span class="n">native</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="s1">'/tasks'</span><span class="p">,</span> <span class="n">json</span><span class="o">=</span><span class="p">{</span><span class="s1">'name'</span><span class="p">:</span> <span class="s1">'write tests'</span><span class="p">})</span>
 <span class="k">assert</span> <span class="n">resp</span><span class="o">.</span><span class="n">status</span> <span class="o">==</span> <span class="mi">201</span>
-<span class="k">assert</span> <span class="n">resp</span><span class="o">.</span><span class="n">json</span><span class="p">()[</span><span class="s1">&#39;id&#39;</span><span class="p">]</span>
+<span class="k">assert</span> <span class="n">resp</span><span class="o">.</span><span class="n">json</span><span class="p">()[</span><span class="s1">'id'</span><span class="p">]</span>
 
-<span class="n">resp</span> <span class="o">=</span> <span class="k">await</span> <span class="n">native</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="s1">&#39;/upload&#39;</span><span class="p">,</span> <span class="n">body</span><span class="o">=</span><span class="sa">b</span><span class="s1">&#39;</span><span class="se">\x00\x01</span><span class="s1">&#39;</span><span class="p">,</span>
-                         <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="sa">b</span><span class="s1">&#39;content-type&#39;</span><span class="p">:</span> <span class="sa">b</span><span class="s1">&#39;application/octet-stream&#39;</span><span class="p">})</span>
+<span class="n">resp</span> <span class="o">=</span> <span class="k">await</span> <span class="n">native</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="s1">'/upload'</span><span class="p">,</span> <span class="n">body</span><span class="o">=</span><span class="sa">b</span><span class="s1">'</span><span class="se">\x00\x01</span><span class="s1">'</span><span class="p">,</span>
+                         <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="sa">b</span><span class="s1">'content-type'</span><span class="p">:</span> <span class="sa">b</span><span class="s1">'application/octet-stream'</span><span class="p">})</span>
 </code></pre></div>
 <p>Headers accept <code>str</code> or <code>bytes</code> in either position and are lowercased
 for you.  A <code>host</code> header is supplied when you give none, and
@@ -5645,11 +5645,11 @@ yourself:</p>
 <span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.headers</span><span class="w"> </span><span class="kn">import</span> <span class="n">Headers</span>
 
 <span class="n">conn</span> <span class="o">=</span> <span class="n">Connection</span><span class="p">(</span>
-    <span class="n">method</span><span class="o">=</span><span class="s1">&#39;POST&#39;</span><span class="p">,</span> <span class="n">path</span><span class="o">=</span><span class="s1">&#39;/tasks&#39;</span><span class="p">,</span> <span class="n">raw_path</span><span class="o">=</span><span class="sa">b</span><span class="s1">&#39;/tasks&#39;</span><span class="p">,</span>
-    <span class="n">headers</span><span class="o">=</span><span class="n">Headers</span><span class="p">([(</span><span class="sa">b</span><span class="s1">&#39;content-type&#39;</span><span class="p">,</span> <span class="sa">b</span><span class="s1">&#39;application/json&#39;</span><span class="p">)]),</span>
+    <span class="n">method</span><span class="o">=</span><span class="s1">'POST'</span><span class="p">,</span> <span class="n">path</span><span class="o">=</span><span class="s1">'/tasks'</span><span class="p">,</span> <span class="n">raw_path</span><span class="o">=</span><span class="sa">b</span><span class="s1">'/tasks'</span><span class="p">,</span>
+    <span class="n">headers</span><span class="o">=</span><span class="n">Headers</span><span class="p">([(</span><span class="sa">b</span><span class="s1">'content-type'</span><span class="p">,</span> <span class="sa">b</span><span class="s1">'application/json'</span><span class="p">)]),</span>
 <span class="p">)</span>
-<span class="n">conn</span><span class="o">.</span><span class="n">state</span><span class="p">[</span><span class="s1">&#39;tenant&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;acme&#39;</span>          <span class="c1"># pre-seed what a middleware would set</span>
-<span class="n">resp</span> <span class="o">=</span> <span class="k">await</span> <span class="n">native</span><span class="o">.</span><span class="n">request</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">conn</span><span class="p">,</span> <span class="n">body</span><span class="o">=</span><span class="sa">b</span><span class="s1">&#39;{&quot;name&quot;:&quot;x&quot;}&#39;</span><span class="p">)</span>
+<span class="n">conn</span><span class="o">.</span><span class="n">state</span><span class="p">[</span><span class="s1">'tenant'</span><span class="p">]</span> <span class="o">=</span> <span class="s1">'acme'</span>          <span class="c1"># pre-seed what a middleware would set</span>
+<span class="n">resp</span> <span class="o">=</span> <span class="k">await</span> <span class="n">native</span><span class="o">.</span><span class="n">request</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">conn</span><span class="p">,</span> <span class="n">body</span><span class="o">=</span><span class="sa">b</span><span class="s1">'{"name":"x"}'</span><span class="p">)</span>
 </code></pre></div>
 <p><code>build_connection()</code> is the same constructor the helpers use, if you
 want the parser-faithful defaults and then a tweak.</p>
@@ -5663,7 +5663,7 @@ block:</p>
 
 <span class="k">def</span><span class="w"> </span><span class="nf">test_hello_sync</span><span class="p">():</span>
     <span class="k">with</span> <span class="n">NativeClient</span><span class="p">(</span><span class="n">app</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
-        <span class="n">resp</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;/hello&#39;</span><span class="p">)</span>
+        <span class="n">resp</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'/hello'</span><span class="p">)</span>
         <span class="k">assert</span> <span class="n">resp</span><span class="o">.</span><span class="n">status</span> <span class="o">==</span> <span class="mi">200</span>
 </code></pre></div>
 <p>Prefer the coroutines from an <code>async def</code> test: they call the app on
@@ -5687,11 +5687,11 @@ native dispatch → the bytes the sender writes.</p>
 <span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">asyncio</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_head_has_get_headers_and_no_body</span><span class="p">():</span>
     <span class="k">async</span> <span class="k">with</span> <span class="n">NativeTestServer</span><span class="p">(</span><span class="n">app</span><span class="p">)</span> <span class="k">as</span> <span class="n">server</span><span class="p">:</span>
-        <span class="n">get_resp</span> <span class="o">=</span> <span class="k">await</span> <span class="n">server</span><span class="o">.</span><span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;/hello&#39;</span><span class="p">)</span>
-        <span class="n">head_resp</span> <span class="o">=</span> <span class="k">await</span> <span class="n">server</span><span class="o">.</span><span class="n">client</span><span class="o">.</span><span class="n">head</span><span class="p">(</span><span class="s1">&#39;/hello&#39;</span><span class="p">)</span>
+        <span class="n">get_resp</span> <span class="o">=</span> <span class="k">await</span> <span class="n">server</span><span class="o">.</span><span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'/hello'</span><span class="p">)</span>
+        <span class="n">head_resp</span> <span class="o">=</span> <span class="k">await</span> <span class="n">server</span><span class="o">.</span><span class="n">client</span><span class="o">.</span><span class="n">head</span><span class="p">(</span><span class="s1">'/hello'</span><span class="p">)</span>
 
-    <span class="k">assert</span> <span class="n">head_resp</span><span class="o">.</span><span class="n">content</span> <span class="o">==</span> <span class="sa">b</span><span class="s1">&#39;&#39;</span>
-    <span class="k">assert</span> <span class="n">head_resp</span><span class="o">.</span><span class="n">headers</span><span class="p">[</span><span class="s1">&#39;content-length&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="n">get_resp</span><span class="o">.</span><span class="n">headers</span><span class="p">[</span><span class="s1">&#39;content-length&#39;</span><span class="p">]</span>
+    <span class="k">assert</span> <span class="n">head_resp</span><span class="o">.</span><span class="n">content</span> <span class="o">==</span> <span class="sa">b</span><span class="s1">''</span>
+    <span class="k">assert</span> <span class="n">head_resp</span><span class="o">.</span><span class="n">headers</span><span class="p">[</span><span class="s1">'content-length'</span><span class="p">]</span> <span class="o">==</span> <span class="n">get_resp</span><span class="o">.</span><span class="n">headers</span><span class="p">[</span><span class="s1">'content-length'</span><span class="p">]</span>
 </code></pre></div>
 <p><code>server.client</code> is an <code>httpx.AsyncClient</code> bound to <code>server.url</code>, so
 the full httpx API is available — cookies, redirects, streaming,
@@ -5703,7 +5703,7 @@ pipelining are all observable:</p>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_keep_alive</span><span class="p">():</span>
     <span class="k">async</span> <span class="k">with</span> <span class="n">NativeTestServer</span><span class="p">(</span><span class="n">app</span><span class="p">)</span> <span class="k">as</span> <span class="n">server</span><span class="p">:</span>
         <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">10</span><span class="p">):</span>
-            <span class="k">assert</span> <span class="p">(</span><span class="k">await</span> <span class="n">server</span><span class="o">.</span><span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;/hello&#39;</span><span class="p">))</span><span class="o">.</span><span class="n">status_code</span> <span class="o">==</span> <span class="mi">200</span>
+            <span class="k">assert</span> <span class="p">(</span><span class="k">await</span> <span class="n">server</span><span class="o">.</span><span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'/hello'</span><span class="p">))</span><span class="o">.</span><span class="n">status_code</span> <span class="o">==</span> <span class="mi">200</span>
         <span class="k">assert</span> <span class="n">server</span><span class="o">.</span><span class="n">connections_served</span> <span class="o">==</span> <span class="mi">1</span>
 </code></pre></div>
 <p><code>server.connections_served</code> counts TCP <strong>accepts</strong>, not requests, so ten
@@ -5714,7 +5714,7 @@ server <em>may</em> send, so its absence proves nothing on its own.</p>
 session:</p>
 <div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">test_full_stack_sync</span><span class="p">():</span>
     <span class="k">with</span> <span class="n">NativeTestServer</span><span class="p">(</span><span class="n">app</span><span class="p">)</span> <span class="k">as</span> <span class="n">server</span><span class="p">:</span>
-        <span class="k">assert</span> <span class="n">server</span><span class="o">.</span><span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;/hello&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">status_code</span> <span class="o">==</span> <span class="mi">200</span>
+        <span class="k">assert</span> <span class="n">server</span><span class="o">.</span><span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'/hello'</span><span class="p">)</span><span class="o">.</span><span class="n">status_code</span> <span class="o">==</span> <span class="mi">200</span>
 </code></pre></div>
 <p>Scope and limits:</p>
 <ul>
@@ -5732,7 +5732,7 @@ session:</p>
 <h2 id="choosing-between-native-and-testclient">Choosing between <code>native</code> and <code>TestClient</code><a class="headerlink" href="#choosing-between-native-and-testclient" title="Permanent link">&para;</a></h2>
 <p>Both run in-process and neither needs a port, so the difference is not
 speed — it is <em>which code runs</em>.</p>
-<div class="highlight"><pre><span></span><code>native.get(app, &#39;/x&#39;)                TestClient(app).get(&#39;/x&#39;)
+<div class="highlight"><pre><span></span><code>native.get(app, '/x')                TestClient(app).get('/x')
   → Connection                         → httpx.ASGITransport
   → app(conn, receive, send)           → builds an ASGI scope dict
   → isinstance(conn, Connection)       → app(scope, receive, send)
@@ -5774,27 +5774,27 @@ that changed, not the API.  For application-logic tests, reach for
 <span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">()</span>
 
 
-<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/&#39;</span><span class="p">)</span>
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">hello</span><span class="p">():</span>
-    <span class="k">return</span> <span class="s2">&quot;hello, world&quot;</span>
+    <span class="k">return</span> <span class="s2">"hello, world"</span>
 
 
-<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/items/{item_id:int}&#39;</span><span class="p">)</span>
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/items/{item_id:int}'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_item</span><span class="p">(</span><span class="n">item_id</span><span class="p">:</span> <span class="nb">int</span><span class="p">):</span>
-    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;id&quot;</span><span class="p">:</span> <span class="n">item_id</span><span class="p">,</span> <span class="s2">&quot;kind&quot;</span><span class="p">:</span> <span class="s2">&quot;widget&quot;</span><span class="p">}</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s2">"id"</span><span class="p">:</span> <span class="n">item_id</span><span class="p">,</span> <span class="s2">"kind"</span><span class="p">:</span> <span class="s2">"widget"</span><span class="p">}</span>
 
 
 <span class="k">def</span><span class="w"> </span><span class="nf">test_hello</span><span class="p">():</span>
     <span class="k">with</span> <span class="n">TestClient</span><span class="p">(</span><span class="n">app</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
-        <span class="n">response</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;/&#39;</span><span class="p">)</span>
+        <span class="n">response</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'/'</span><span class="p">)</span>
     <span class="k">assert</span> <span class="n">response</span><span class="o">.</span><span class="n">status_code</span> <span class="o">==</span> <span class="mi">200</span>
-    <span class="k">assert</span> <span class="n">response</span><span class="o">.</span><span class="n">text</span> <span class="o">==</span> <span class="s2">&quot;hello, world&quot;</span>
+    <span class="k">assert</span> <span class="n">response</span><span class="o">.</span><span class="n">text</span> <span class="o">==</span> <span class="s2">"hello, world"</span>
 
 
 <span class="k">def</span><span class="w"> </span><span class="nf">test_get_item</span><span class="p">():</span>
     <span class="k">with</span> <span class="n">TestClient</span><span class="p">(</span><span class="n">app</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
-        <span class="n">response</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;/items/42&#39;</span><span class="p">)</span>
-    <span class="k">assert</span> <span class="n">response</span><span class="o">.</span><span class="n">json</span><span class="p">()</span> <span class="o">==</span> <span class="p">{</span><span class="s2">&quot;id&quot;</span><span class="p">:</span> <span class="mi">42</span><span class="p">,</span> <span class="s2">&quot;kind&quot;</span><span class="p">:</span> <span class="s2">&quot;widget&quot;</span><span class="p">}</span>
+        <span class="n">response</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'/items/42'</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">response</span><span class="o">.</span><span class="n">json</span><span class="p">()</span> <span class="o">==</span> <span class="p">{</span><span class="s2">"id"</span><span class="p">:</span> <span class="mi">42</span><span class="p">,</span> <span class="s2">"kind"</span><span class="p">:</span> <span class="s2">"widget"</span><span class="p">}</span>
 </code></pre></div>
 <p>The response object is <code>httpx.Response</code> — same shape as a
 production HTTP client, so <code>.status_code</code>, <code>.headers</code>,
@@ -5803,7 +5803,7 @@ unchanged.</p>
 <h3 id="post-and-json-bodies">POST and JSON bodies<a class="headerlink" href="#post-and-json-bodies" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">test_create_item</span><span class="p">():</span>
     <span class="k">with</span> <span class="n">TestClient</span><span class="p">(</span><span class="n">app</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
-        <span class="n">response</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="s1">&#39;/items&#39;</span><span class="p">,</span> <span class="n">json</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;name&#39;</span><span class="p">:</span> <span class="s1">&#39;widget&#39;</span><span class="p">})</span>
+        <span class="n">response</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="s1">'/items'</span><span class="p">,</span> <span class="n">json</span><span class="o">=</span><span class="p">{</span><span class="s1">'name'</span><span class="p">:</span> <span class="s1">'widget'</span><span class="p">})</span>
     <span class="k">assert</span> <span class="n">response</span><span class="o">.</span><span class="n">status_code</span> <span class="o">==</span> <span class="mi">201</span>
 </code></pre></div>
 <p><code>client.post</code>, <code>.put</code>, <code>.patch</code>, <code>.delete</code>, <code>.head</code>,
@@ -5830,22 +5830,22 @@ for accompanying form fields).  Each <code>files</code> entry is
 <div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">test_upload</span><span class="p">():</span>
     <span class="k">with</span> <span class="n">TestClient</span><span class="p">(</span><span class="n">app</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
         <span class="n">response</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">post</span><span class="p">(</span>
-            <span class="s1">&#39;/upload&#39;</span><span class="p">,</span>
-            <span class="n">files</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;attachment&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;report.pdf&#39;</span><span class="p">,</span> <span class="sa">b</span><span class="s1">&#39;%PDF-1.4...&#39;</span><span class="p">,</span> <span class="s1">&#39;application/pdf&#39;</span><span class="p">)},</span>
-            <span class="n">data</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;note&#39;</span><span class="p">:</span> <span class="s1">&#39;monthly&#39;</span><span class="p">},</span>
+            <span class="s1">'/upload'</span><span class="p">,</span>
+            <span class="n">files</span><span class="o">=</span><span class="p">{</span><span class="s1">'attachment'</span><span class="p">:</span> <span class="p">(</span><span class="s1">'report.pdf'</span><span class="p">,</span> <span class="sa">b</span><span class="s1">'%PDF-1.4...'</span><span class="p">,</span> <span class="s1">'application/pdf'</span><span class="p">)},</span>
+            <span class="n">data</span><span class="o">=</span><span class="p">{</span><span class="s1">'note'</span><span class="p">:</span> <span class="s1">'monthly'</span><span class="p">},</span>
         <span class="p">)</span>
     <span class="k">assert</span> <span class="n">response</span><span class="o">.</span><span class="n">status_code</span> <span class="o">==</span> <span class="mi">201</span>
 </code></pre></div>
 <p><strong>HTTP authentication</strong> — pass <code>auth=</code>:</p>
 <div class="highlight"><pre><span></span><code><span class="c1"># Basic auth</span>
-<span class="n">response</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;/private&#39;</span><span class="p">,</span> <span class="n">auth</span><span class="o">=</span><span class="p">(</span><span class="s1">&#39;alice&#39;</span><span class="p">,</span> <span class="s1">&#39;hunter2&#39;</span><span class="p">))</span>
+<span class="n">response</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'/private'</span><span class="p">,</span> <span class="n">auth</span><span class="o">=</span><span class="p">(</span><span class="s1">'alice'</span><span class="p">,</span> <span class="s1">'hunter2'</span><span class="p">))</span>
 
 <span class="c1"># Custom scheme via httpx.Auth subclass — e.g. a bearer token</span>
-<span class="n">response</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;/api/me&#39;</span><span class="p">,</span> <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;Authorization&#39;</span><span class="p">:</span> <span class="s1">&#39;Bearer abc.def.ghi&#39;</span><span class="p">})</span>
+<span class="n">response</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'/api/me'</span><span class="p">,</span> <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s1">'Authorization'</span><span class="p">:</span> <span class="s1">'Bearer abc.def.ghi'</span><span class="p">})</span>
 </code></pre></div>
 <p><strong>Per-request timeout</strong> — pass <code>timeout=</code> (seconds, or an
 <code>httpx.Timeout</code> for finer control):</p>
-<div class="highlight"><pre><span></span><code><span class="n">response</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;/slow&#39;</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="mf">5.0</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="n">response</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'/slow'</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="mf">5.0</span><span class="p">)</span>
 </code></pre></div>
 <p>Default timeouts can be passed on the <code>TestClient</code> constructor
 via the <code>headers=</code> / <code>cookies=</code> / <code>follow_redirects=</code> options,
@@ -5854,10 +5854,10 @@ or set after construction by mutating <code>client.headers</code> /
 <code>httpx.AsyncClient</code>, so the standard httpx jar semantics apply
 (cookies set by responses persist across subsequent requests on
 the same client).</p>
-<div class="highlight"><pre><span></span><code><span class="k">with</span> <span class="n">TestClient</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;X-Test-Tag&#39;</span><span class="p">:</span> <span class="s1">&#39;integration&#39;</span><span class="p">})</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
+<div class="highlight"><pre><span></span><code><span class="k">with</span> <span class="n">TestClient</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s1">'X-Test-Tag'</span><span class="p">:</span> <span class="s1">'integration'</span><span class="p">})</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
     <span class="c1"># X-Test-Tag goes out on every request below</span>
-    <span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;/api/one&#39;</span><span class="p">)</span>
-    <span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;/api/two&#39;</span><span class="p">)</span>
+    <span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'/api/one'</span><span class="p">)</span>
+    <span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'/api/two'</span><span class="p">)</span>
 </code></pre></div>
 <h3 id="websocket-sessions">WebSocket sessions<a class="headerlink" href="#websocket-sessions" title="Permanent link">&para;</a></h3>
 <p><code>client.websocket_connect(path)</code> returns a synchronous
@@ -5868,23 +5868,23 @@ synchronous calls:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.router</span><span class="w"> </span><span class="kn">import</span> <span class="n">Scheme</span>
 
 
-<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/ws&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/ws'</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">ws_echo</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="k">await</span> <span class="n">receive</span><span class="p">()</span>                              <span class="c1"># websocket.connect</span>
-    <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;websocket.accept&#39;</span><span class="p">})</span>
+    <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">'type'</span><span class="p">:</span> <span class="s1">'websocket.accept'</span><span class="p">})</span>
     <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
         <span class="n">event</span> <span class="o">=</span> <span class="k">await</span> <span class="n">receive</span><span class="p">()</span>
-        <span class="k">if</span> <span class="n">event</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;websocket.disconnect&#39;</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">event</span><span class="p">[</span><span class="s1">'type'</span><span class="p">]</span> <span class="o">==</span> <span class="s1">'websocket.disconnect'</span><span class="p">:</span>
             <span class="k">return</span>
-        <span class="k">if</span> <span class="n">event</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;text&#39;</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-            <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;websocket.send&#39;</span><span class="p">,</span> <span class="s1">&#39;text&#39;</span><span class="p">:</span> <span class="n">event</span><span class="p">[</span><span class="s1">&#39;text&#39;</span><span class="p">]})</span>
+        <span class="k">if</span> <span class="n">event</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'text'</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">'type'</span><span class="p">:</span> <span class="s1">'websocket.send'</span><span class="p">,</span> <span class="s1">'text'</span><span class="p">:</span> <span class="n">event</span><span class="p">[</span><span class="s1">'text'</span><span class="p">]})</span>
 
 
 <span class="k">def</span><span class="w"> </span><span class="nf">test_ws_echo</span><span class="p">():</span>
     <span class="k">with</span> <span class="n">TestClient</span><span class="p">(</span><span class="n">app</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
-        <span class="k">with</span> <span class="n">client</span><span class="o">.</span><span class="n">websocket_connect</span><span class="p">(</span><span class="s1">&#39;/ws&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">ws</span><span class="p">:</span>
-            <span class="n">ws</span><span class="o">.</span><span class="n">send_text</span><span class="p">(</span><span class="s1">&#39;ping&#39;</span><span class="p">)</span>
-            <span class="k">assert</span> <span class="n">ws</span><span class="o">.</span><span class="n">receive_text</span><span class="p">()</span> <span class="o">==</span> <span class="s1">&#39;ping&#39;</span>
+        <span class="k">with</span> <span class="n">client</span><span class="o">.</span><span class="n">websocket_connect</span><span class="p">(</span><span class="s1">'/ws'</span><span class="p">)</span> <span class="k">as</span> <span class="n">ws</span><span class="p">:</span>
+            <span class="n">ws</span><span class="o">.</span><span class="n">send_text</span><span class="p">(</span><span class="s1">'ping'</span><span class="p">)</span>
+            <span class="k">assert</span> <span class="n">ws</span><span class="o">.</span><span class="n">receive_text</span><span class="p">()</span> <span class="o">==</span> <span class="s1">'ping'</span>
 </code></pre></div>
 <p>When the application closes (or rejects) the WebSocket,
 <code>receive_text</code> / <code>receive_bytes</code> raise
@@ -5893,16 +5893,16 @@ close code:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.testing</span><span class="w"> </span><span class="kn">import</span> <span class="n">WebSocketDisconnect</span>
 
 
-<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/ws-auth&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/ws-auth'</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">ws_auth</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="k">await</span> <span class="n">receive</span><span class="p">()</span>
-    <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;websocket.close&#39;</span><span class="p">,</span> <span class="s1">&#39;code&#39;</span><span class="p">:</span> <span class="mi">4401</span><span class="p">})</span>
+    <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">'type'</span><span class="p">:</span> <span class="s1">'websocket.close'</span><span class="p">,</span> <span class="s1">'code'</span><span class="p">:</span> <span class="mi">4401</span><span class="p">})</span>
 
 
 <span class="k">def</span><span class="w"> </span><span class="nf">test_ws_rejects_unauthenticated</span><span class="p">():</span>
     <span class="k">with</span> <span class="n">TestClient</span><span class="p">(</span><span class="n">app</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
         <span class="k">with</span> <span class="n">pytest</span><span class="o">.</span><span class="n">raises</span><span class="p">(</span><span class="n">WebSocketDisconnect</span><span class="p">)</span> <span class="k">as</span> <span class="n">excinfo</span><span class="p">:</span>
-            <span class="k">with</span> <span class="n">client</span><span class="o">.</span><span class="n">websocket_connect</span><span class="p">(</span><span class="s1">&#39;/ws-auth&#39;</span><span class="p">):</span>
+            <span class="k">with</span> <span class="n">client</span><span class="o">.</span><span class="n">websocket_connect</span><span class="p">(</span><span class="s1">'/ws-auth'</span><span class="p">):</span>
                 <span class="k">pass</span>
         <span class="k">assert</span> <span class="n">excinfo</span><span class="o">.</span><span class="n">value</span><span class="o">.</span><span class="n">code</span> <span class="o">==</span> <span class="mi">4401</span>
 </code></pre></div>
@@ -5911,20 +5911,20 @@ of frames and then closes, <code>ws.iter_text()</code> and
 <code>ws.iter_bytes()</code> consume the stream until the close arrives —
 the <code>WebSocketDisconnect</code> is caught and turned into normal
 iterator termination so the test reads as a single <code>for</code> loop:</p>
-<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/notifications&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/notifications'</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">notifications</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="k">await</span> <span class="n">receive</span><span class="p">()</span>                              <span class="c1"># websocket.connect</span>
-    <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;websocket.accept&#39;</span><span class="p">})</span>
+    <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">'type'</span><span class="p">:</span> <span class="s1">'websocket.accept'</span><span class="p">})</span>
     <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">3</span><span class="p">):</span>
-        <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;websocket.send&#39;</span><span class="p">,</span> <span class="s1">&#39;text&#39;</span><span class="p">:</span> <span class="sa">f</span><span class="s1">&#39;event-</span><span class="si">{</span><span class="n">n</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">})</span>
-    <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;websocket.close&#39;</span><span class="p">,</span> <span class="s1">&#39;code&#39;</span><span class="p">:</span> <span class="mi">1000</span><span class="p">})</span>
+        <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">'type'</span><span class="p">:</span> <span class="s1">'websocket.send'</span><span class="p">,</span> <span class="s1">'text'</span><span class="p">:</span> <span class="sa">f</span><span class="s1">'event-</span><span class="si">{</span><span class="n">n</span><span class="si">}</span><span class="s1">'</span><span class="p">})</span>
+    <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">'type'</span><span class="p">:</span> <span class="s1">'websocket.close'</span><span class="p">,</span> <span class="s1">'code'</span><span class="p">:</span> <span class="mi">1000</span><span class="p">})</span>
 
 
 <span class="k">def</span><span class="w"> </span><span class="nf">test_notifications_stream</span><span class="p">():</span>
     <span class="k">with</span> <span class="n">TestClient</span><span class="p">(</span><span class="n">app</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
-        <span class="k">with</span> <span class="n">client</span><span class="o">.</span><span class="n">websocket_connect</span><span class="p">(</span><span class="s1">&#39;/notifications&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">ws</span><span class="p">:</span>
+        <span class="k">with</span> <span class="n">client</span><span class="o">.</span><span class="n">websocket_connect</span><span class="p">(</span><span class="s1">'/notifications'</span><span class="p">)</span> <span class="k">as</span> <span class="n">ws</span><span class="p">:</span>
             <span class="n">messages</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">ws</span><span class="o">.</span><span class="n">iter_text</span><span class="p">())</span>
-    <span class="k">assert</span> <span class="n">messages</span> <span class="o">==</span> <span class="p">[</span><span class="s1">&#39;event-0&#39;</span><span class="p">,</span> <span class="s1">&#39;event-1&#39;</span><span class="p">,</span> <span class="s1">&#39;event-2&#39;</span><span class="p">]</span>
+    <span class="k">assert</span> <span class="n">messages</span> <span class="o">==</span> <span class="p">[</span><span class="s1">'event-0'</span><span class="p">,</span> <span class="s1">'event-1'</span><span class="p">,</span> <span class="s1">'event-2'</span><span class="p">]</span>
 </code></pre></div>
 <h3 id="lifespan-startup-and-shutdown">Lifespan startup and shutdown<a class="headerlink" href="#lifespan-startup-and-shutdown" title="Permanent link">&para;</a></h3>
 <p><code>TestClient</code> drives the ASGI <code>lifespan</code> protocol automatically
@@ -5933,18 +5933,18 @@ around the <code>with</code> block:</p>
 
 <span class="nd">@app</span><span class="o">.</span><span class="n">on_startup</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">_start</span><span class="p">():</span>
-    <span class="n">events</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s1">&#39;startup&#39;</span><span class="p">)</span>
+    <span class="n">events</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s1">'startup'</span><span class="p">)</span>
 
 <span class="nd">@app</span><span class="o">.</span><span class="n">on_shutdown</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">_stop</span><span class="p">():</span>
-    <span class="n">events</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s1">&#39;shutdown&#39;</span><span class="p">)</span>
+    <span class="n">events</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s1">'shutdown'</span><span class="p">)</span>
 
 
 <span class="k">def</span><span class="w"> </span><span class="nf">test_lifespan_runs</span><span class="p">():</span>
     <span class="k">with</span> <span class="n">TestClient</span><span class="p">(</span><span class="n">app</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
-        <span class="k">assert</span> <span class="n">events</span> <span class="o">==</span> <span class="p">[</span><span class="s1">&#39;startup&#39;</span><span class="p">]</span>
-        <span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;/&#39;</span><span class="p">)</span>
-    <span class="k">assert</span> <span class="n">events</span> <span class="o">==</span> <span class="p">[</span><span class="s1">&#39;startup&#39;</span><span class="p">,</span> <span class="s1">&#39;shutdown&#39;</span><span class="p">]</span>
+        <span class="k">assert</span> <span class="n">events</span> <span class="o">==</span> <span class="p">[</span><span class="s1">'startup'</span><span class="p">]</span>
+        <span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'/'</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">events</span> <span class="o">==</span> <span class="p">[</span><span class="s1">'startup'</span><span class="p">,</span> <span class="s1">'shutdown'</span><span class="p">]</span>
 </code></pre></div>
 <p>If a startup handler raises, <code>TestClient.__enter__</code> re-raises a
 <code>RuntimeError</code> describing the failure, so a broken startup
@@ -5955,9 +5955,9 @@ tolerated silently.</p>
 <h3 id="construction-options">Construction options<a class="headerlink" href="#construction-options" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="n">TestClient</span><span class="p">(</span>
     <span class="n">app</span><span class="p">,</span>
-    <span class="n">base_url</span><span class="o">=</span><span class="s1">&#39;http://testserver&#39;</span><span class="p">,</span>
+    <span class="n">base_url</span><span class="o">=</span><span class="s1">'http://testserver'</span><span class="p">,</span>
     <span class="n">raise_app_exceptions</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>    <span class="c1"># let handler exceptions bubble up</span>
-    <span class="n">root_path</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">,</span>                 <span class="c1"># ASGI scope[&#39;root_path&#39;]</span>
+    <span class="n">root_path</span><span class="o">=</span><span class="s1">''</span><span class="p">,</span>                 <span class="c1"># ASGI scope['root_path']</span>
     <span class="n">cookies</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
     <span class="n">headers</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
     <span class="n">follow_redirects</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
@@ -5968,7 +5968,8 @@ tests — handler tracebacks surface as the test failure.  Set it
 to <code>False</code> to assert on the 500 response the framework would
 emit to a real client.</p>
 <h2 id="end-to-end-with-blackbulls-clients">End-to-end with BlackBull's clients<a class="headerlink" href="#end-to-end-with-blackbulls-clients" title="Permanent link">&para;</a></h2>
-<p>BlackBull exports four async clients from <code>blackbull.client</code>:</p>
+<p>BlackBull bundles four async clients in <code>blackbull.client</code>, with
+testing and fault injection as their primary uses:</p>
 <table>
 <thead>
 <tr>
@@ -6002,6 +6003,10 @@ emit to a real client.</p>
 </table>
 <p>The pattern is: bind the app on an ephemeral port in a fixture,
 then <code>async with</code> a client at that port.</p>
+<p>Every client bounds connection establishment at <strong>30 seconds</strong> by
+default (<code>connect_timeout=</code>), raising <code>TimeoutError</code> when a peer
+accepts the connection and then stalls. Pass <code>connect_timeout=None</code>
+to opt out and impose your own deadline instead.</p>
 <h3 id="fixture-ephemeral-port-server">Fixture — ephemeral-port server<a class="headerlink" href="#fixture-ephemeral-port-server" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">asyncio</span>
 <span class="kn">import</span><span class="w"> </span><span class="nn">pytest_asyncio</span>
@@ -6011,12 +6016,12 @@ then <code>async with</code> a client at that port.</p>
 <span class="n">_app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">()</span>
 
 
-<span class="nd">@_app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/ping&#39;</span><span class="p">)</span>
+<span class="nd">@_app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/ping'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">ping</span><span class="p">():</span>
-    <span class="k">return</span> <span class="s2">&quot;pong&quot;</span>
+    <span class="k">return</span> <span class="s2">"pong"</span>
 
 
-<span class="nd">@_app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/echo&#39;</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;POST&#39;</span><span class="p">])</span>
+<span class="nd">@_app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/echo'</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="s1">'POST'</span><span class="p">])</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">echo</span><span class="p">(</span><span class="n">body</span><span class="p">:</span> <span class="nb">bytes</span><span class="p">):</span>
     <span class="k">return</span> <span class="n">body</span>
 
@@ -6049,26 +6054,26 @@ then <code>async with</code> a client at that port.</p>
 
 <span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">asyncio</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_ping</span><span class="p">(</span><span class="n">server_port</span><span class="p">):</span>
-    <span class="k">async</span> <span class="k">with</span> <span class="n">HTTP1Client</span><span class="p">(</span><span class="s1">&#39;localhost&#39;</span><span class="p">,</span> <span class="n">server_port</span><span class="p">)</span> <span class="k">as</span> <span class="n">c</span><span class="p">:</span>
-        <span class="n">res</span> <span class="o">=</span> <span class="k">await</span> <span class="n">c</span><span class="o">.</span><span class="n">request</span><span class="p">(</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">,</span> <span class="s1">&#39;/ping&#39;</span><span class="p">)</span>
+    <span class="k">async</span> <span class="k">with</span> <span class="n">HTTP1Client</span><span class="p">(</span><span class="s1">'localhost'</span><span class="p">,</span> <span class="n">server_port</span><span class="p">)</span> <span class="k">as</span> <span class="n">c</span><span class="p">:</span>
+        <span class="n">res</span> <span class="o">=</span> <span class="k">await</span> <span class="n">c</span><span class="o">.</span><span class="n">request</span><span class="p">(</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">,</span> <span class="s1">'/ping'</span><span class="p">)</span>
     <span class="k">assert</span> <span class="n">res</span><span class="o">.</span><span class="n">status</span> <span class="o">==</span> <span class="n">HTTPStatus</span><span class="o">.</span><span class="n">OK</span>
-    <span class="k">assert</span> <span class="n">res</span><span class="o">.</span><span class="n">body</span> <span class="o">==</span> <span class="sa">b</span><span class="s1">&#39;pong&#39;</span>
+    <span class="k">assert</span> <span class="n">res</span><span class="o">.</span><span class="n">body</span> <span class="o">==</span> <span class="sa">b</span><span class="s1">'pong'</span>
 
 
 <span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">asyncio</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_echo</span><span class="p">(</span><span class="n">server_port</span><span class="p">):</span>
-    <span class="k">async</span> <span class="k">with</span> <span class="n">HTTP1Client</span><span class="p">(</span><span class="s1">&#39;localhost&#39;</span><span class="p">,</span> <span class="n">server_port</span><span class="p">)</span> <span class="k">as</span> <span class="n">c</span><span class="p">:</span>
-        <span class="n">res</span> <span class="o">=</span> <span class="k">await</span> <span class="n">c</span><span class="o">.</span><span class="n">request</span><span class="p">(</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">POST</span><span class="p">,</span> <span class="s1">&#39;/echo&#39;</span><span class="p">,</span> <span class="n">body</span><span class="o">=</span><span class="sa">b</span><span class="s1">&#39;hello&#39;</span><span class="p">)</span>
-    <span class="k">assert</span> <span class="n">res</span><span class="o">.</span><span class="n">body</span> <span class="o">==</span> <span class="sa">b</span><span class="s1">&#39;hello&#39;</span>
+    <span class="k">async</span> <span class="k">with</span> <span class="n">HTTP1Client</span><span class="p">(</span><span class="s1">'localhost'</span><span class="p">,</span> <span class="n">server_port</span><span class="p">)</span> <span class="k">as</span> <span class="n">c</span><span class="p">:</span>
+        <span class="n">res</span> <span class="o">=</span> <span class="k">await</span> <span class="n">c</span><span class="o">.</span><span class="n">request</span><span class="p">(</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">POST</span><span class="p">,</span> <span class="s1">'/echo'</span><span class="p">,</span> <span class="n">body</span><span class="o">=</span><span class="sa">b</span><span class="s1">'hello'</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">res</span><span class="o">.</span><span class="n">body</span> <span class="o">==</span> <span class="sa">b</span><span class="s1">'hello'</span>
 
 
 <span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">asyncio</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_keep_alive</span><span class="p">(</span><span class="n">server_port</span><span class="p">):</span>
-    <span class="k">async</span> <span class="k">with</span> <span class="n">HTTP1Client</span><span class="p">(</span><span class="s1">&#39;localhost&#39;</span><span class="p">,</span> <span class="n">server_port</span><span class="p">)</span> <span class="k">as</span> <span class="n">c</span><span class="p">:</span>
-        <span class="n">r1</span> <span class="o">=</span> <span class="k">await</span> <span class="n">c</span><span class="o">.</span><span class="n">request</span><span class="p">(</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">,</span> <span class="s1">&#39;/ping&#39;</span><span class="p">)</span>
-        <span class="n">r2</span> <span class="o">=</span> <span class="k">await</span> <span class="n">c</span><span class="o">.</span><span class="n">request</span><span class="p">(</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">POST</span><span class="p">,</span> <span class="s1">&#39;/echo&#39;</span><span class="p">,</span> <span class="n">body</span><span class="o">=</span><span class="sa">b</span><span class="s1">&#39;second&#39;</span><span class="p">)</span>
-    <span class="k">assert</span> <span class="n">r1</span><span class="o">.</span><span class="n">body</span> <span class="o">==</span> <span class="sa">b</span><span class="s1">&#39;pong&#39;</span>
-    <span class="k">assert</span> <span class="n">r2</span><span class="o">.</span><span class="n">body</span> <span class="o">==</span> <span class="sa">b</span><span class="s1">&#39;second&#39;</span>
+    <span class="k">async</span> <span class="k">with</span> <span class="n">HTTP1Client</span><span class="p">(</span><span class="s1">'localhost'</span><span class="p">,</span> <span class="n">server_port</span><span class="p">)</span> <span class="k">as</span> <span class="n">c</span><span class="p">:</span>
+        <span class="n">r1</span> <span class="o">=</span> <span class="k">await</span> <span class="n">c</span><span class="o">.</span><span class="n">request</span><span class="p">(</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">,</span> <span class="s1">'/ping'</span><span class="p">)</span>
+        <span class="n">r2</span> <span class="o">=</span> <span class="k">await</span> <span class="n">c</span><span class="o">.</span><span class="n">request</span><span class="p">(</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">POST</span><span class="p">,</span> <span class="s1">'/echo'</span><span class="p">,</span> <span class="n">body</span><span class="o">=</span><span class="sa">b</span><span class="s1">'second'</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">r1</span><span class="o">.</span><span class="n">body</span> <span class="o">==</span> <span class="sa">b</span><span class="s1">'pong'</span>
+    <span class="k">assert</span> <span class="n">r2</span><span class="o">.</span><span class="n">body</span> <span class="o">==</span> <span class="sa">b</span><span class="s1">'second'</span>
 </code></pre></div>
 <p>The client persists the TCP connection across <code>request()</code>
 calls inside one <code>async with</code> block (HTTP/1.1 persistent
@@ -6078,11 +6083,11 @@ behaviour.  The <code>Host</code> header is injected automatically.</p>
 <p><code>request(...)</code>'s <code>body=</code> accepts an async generator for
 streaming uploads:</p>
 <div class="highlight"><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">chunks</span><span class="p">():</span>
-    <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="p">(</span><span class="sa">b</span><span class="s1">&#39;one &#39;</span><span class="p">,</span> <span class="sa">b</span><span class="s1">&#39;two &#39;</span><span class="p">,</span> <span class="sa">b</span><span class="s1">&#39;three&#39;</span><span class="p">):</span>
+    <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="p">(</span><span class="sa">b</span><span class="s1">'one '</span><span class="p">,</span> <span class="sa">b</span><span class="s1">'two '</span><span class="p">,</span> <span class="sa">b</span><span class="s1">'three'</span><span class="p">):</span>
         <span class="k">yield</span> <span class="n">c</span>
 
-<span class="k">async</span> <span class="k">with</span> <span class="n">HTTP1Client</span><span class="p">(</span><span class="s1">&#39;localhost&#39;</span><span class="p">,</span> <span class="n">server_port</span><span class="p">)</span> <span class="k">as</span> <span class="n">c</span><span class="p">:</span>
-    <span class="n">res</span> <span class="o">=</span> <span class="k">await</span> <span class="n">c</span><span class="o">.</span><span class="n">request</span><span class="p">(</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">POST</span><span class="p">,</span> <span class="s1">&#39;/echo&#39;</span><span class="p">,</span> <span class="n">body</span><span class="o">=</span><span class="n">chunks</span><span class="p">())</span>
+<span class="k">async</span> <span class="k">with</span> <span class="n">HTTP1Client</span><span class="p">(</span><span class="s1">'localhost'</span><span class="p">,</span> <span class="n">server_port</span><span class="p">)</span> <span class="k">as</span> <span class="n">c</span><span class="p">:</span>
+    <span class="n">res</span> <span class="o">=</span> <span class="k">await</span> <span class="n">c</span><span class="o">.</span><span class="n">request</span><span class="p">(</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">POST</span><span class="p">,</span> <span class="s1">'/echo'</span><span class="p">,</span> <span class="n">body</span><span class="o">=</span><span class="n">chunks</span><span class="p">())</span>
 </code></pre></div>
 <p>For streaming <strong>responses</strong>, use <code>client.stream(...)</code> instead of
 <code>request(...)</code> to consume the body chunk-by-chunk without
@@ -6096,13 +6101,13 @@ advertises <code>h2</code>) or <code>HTTP1Client</code> otherwise:</p>
 <span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.client</span><span class="w"> </span><span class="kn">import</span> <span class="n">Client</span>
 
 <span class="n">ctx</span> <span class="o">=</span> <span class="n">ssl</span><span class="o">.</span><span class="n">create_default_context</span><span class="p">()</span>
-<span class="n">ctx</span><span class="o">.</span><span class="n">set_alpn_protocols</span><span class="p">([</span><span class="s1">&#39;h2&#39;</span><span class="p">,</span> <span class="s1">&#39;http/1.1&#39;</span><span class="p">])</span>
+<span class="n">ctx</span><span class="o">.</span><span class="n">set_alpn_protocols</span><span class="p">([</span><span class="s1">'h2'</span><span class="p">,</span> <span class="s1">'http/1.1'</span><span class="p">])</span>
 <span class="n">ctx</span><span class="o">.</span><span class="n">check_hostname</span> <span class="o">=</span> <span class="kc">False</span>
 <span class="n">ctx</span><span class="o">.</span><span class="n">verify_mode</span> <span class="o">=</span> <span class="n">ssl</span><span class="o">.</span><span class="n">CERT_NONE</span>             <span class="c1"># test cert</span>
 
-<span class="k">async</span> <span class="k">with</span> <span class="n">Client</span><span class="p">(</span><span class="s1">&#39;localhost&#39;</span><span class="p">,</span> <span class="n">tls_port</span><span class="p">,</span> <span class="n">ssl</span><span class="o">=</span><span class="n">ctx</span><span class="p">)</span> <span class="k">as</span> <span class="n">c</span><span class="p">:</span>
+<span class="k">async</span> <span class="k">with</span> <span class="n">Client</span><span class="p">(</span><span class="s1">'localhost'</span><span class="p">,</span> <span class="n">tls_port</span><span class="p">,</span> <span class="n">ssl</span><span class="o">=</span><span class="n">ctx</span><span class="p">)</span> <span class="k">as</span> <span class="n">c</span><span class="p">:</span>
     <span class="c1"># c is HTTP2Client or HTTP1Client depending on what the server picked</span>
-    <span class="n">res</span> <span class="o">=</span> <span class="k">await</span> <span class="n">c</span><span class="o">.</span><span class="n">request</span><span class="p">(</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">,</span> <span class="s1">&#39;/ping&#39;</span><span class="p">)</span>
+    <span class="n">res</span> <span class="o">=</span> <span class="k">await</span> <span class="n">c</span><span class="o">.</span><span class="n">request</span><span class="p">(</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">,</span> <span class="s1">'/ping'</span><span class="p">)</span>
 </code></pre></div>
 <p>The cert fixture pattern mirrors how BlackBull's own
 conformance tests handle TLS — see
@@ -6116,15 +6121,20 @@ session for sending / receiving frames:</p>
 
 <span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">asyncio</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_ws_echo</span><span class="p">(</span><span class="n">server_port</span><span class="p">):</span>
-    <span class="k">async</span> <span class="k">with</span> <span class="n">WebSocketClient</span><span class="p">(</span><span class="s1">&#39;localhost&#39;</span><span class="p">,</span> <span class="n">server_port</span><span class="p">)</span><span class="o">.</span><span class="n">connect</span><span class="p">(</span><span class="s1">&#39;/ws&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">session</span><span class="p">:</span>
-        <span class="k">await</span> <span class="n">session</span><span class="o">.</span><span class="n">send</span><span class="p">(</span><span class="s1">&#39;hello&#39;</span><span class="p">)</span>
-        <span class="n">msg</span> <span class="o">=</span> <span class="k">await</span> <span class="n">session</span><span class="o">.</span><span class="n">recv</span><span class="p">()</span>
-        <span class="k">assert</span> <span class="n">msg</span> <span class="o">==</span> <span class="s1">&#39;hello&#39;</span>
+    <span class="k">async</span> <span class="k">with</span> <span class="n">WebSocketClient</span><span class="p">(</span><span class="s1">'localhost'</span><span class="p">,</span> <span class="n">server_port</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
+        <span class="n">session</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">connect</span><span class="p">(</span><span class="s1">'/ws'</span><span class="p">)</span>
+        <span class="k">await</span> <span class="n">session</span><span class="o">.</span><span class="n">send_text</span><span class="p">(</span><span class="s1">'hello'</span><span class="p">)</span>
+        <span class="n">event</span> <span class="o">=</span> <span class="k">await</span> <span class="n">session</span><span class="o">.</span><span class="n">receive</span><span class="p">()</span>
+        <span class="k">assert</span> <span class="n">event</span><span class="p">[</span><span class="s1">'text'</span><span class="p">]</span> <span class="o">==</span> <span class="s1">'hello'</span>
+        <span class="k">await</span> <span class="n">session</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
 </code></pre></div>
-<p><code>send</code> / <code>recv</code> handle both text and binary frames; fragmented
-messages are reassembled transparently (matching the
-server-side semantics — see
+<p><code>send_text</code> / <code>send_bytes</code> cover both frame types and <code>receive</code>
+returns the next event; fragmented messages are reassembled
+transparently (matching the server-side semantics — see
 <a href="../websockets/#fragmented-messages">WebSockets</a>).</p>
+<p><code>connect()</code> takes its own <code>response_timeout</code> (default <strong>5 s</strong>): a
+peer can accept the connection and then never send the 101, which
+the transport-level <code>connect_timeout</code> does not cover.</p>
 <h2 id="in-process-integration-with-httpx">In-process integration with <code>httpx</code><a class="headerlink" href="#in-process-integration-with-httpx" title="Permanent link">&para;</a></h2>
 <p>When socket fidelity isn't important (most application tests)
 and you want a faster, fully hermetic harness,
@@ -6139,21 +6149,21 @@ drives the app over an in-process channel — no port, no TCP:</p>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_register_and_list_tasks</span><span class="p">():</span>
     <span class="k">async</span> <span class="k">with</span> <span class="n">httpx</span><span class="o">.</span><span class="n">AsyncClient</span><span class="p">(</span>
         <span class="n">transport</span><span class="o">=</span><span class="n">httpx</span><span class="o">.</span><span class="n">ASGITransport</span><span class="p">(</span><span class="n">app</span><span class="o">=</span><span class="n">app</span><span class="p">),</span>
-        <span class="n">base_url</span><span class="o">=</span><span class="s1">&#39;http://test&#39;</span><span class="p">,</span>
+        <span class="n">base_url</span><span class="o">=</span><span class="s1">'http://test'</span><span class="p">,</span>
     <span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
-        <span class="n">r</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="s1">&#39;/register&#39;</span><span class="p">,</span>
-                              <span class="n">json</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;username&#39;</span><span class="p">:</span> <span class="s1">&#39;alice&#39;</span><span class="p">,</span> <span class="s1">&#39;password&#39;</span><span class="p">:</span> <span class="s1">&#39;secret&#39;</span><span class="p">})</span>
+        <span class="n">r</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="s1">'/register'</span><span class="p">,</span>
+                              <span class="n">json</span><span class="o">=</span><span class="p">{</span><span class="s1">'username'</span><span class="p">:</span> <span class="s1">'alice'</span><span class="p">,</span> <span class="s1">'password'</span><span class="p">:</span> <span class="s1">'secret'</span><span class="p">})</span>
         <span class="k">assert</span> <span class="n">r</span><span class="o">.</span><span class="n">status_code</span> <span class="o">==</span> <span class="mi">200</span>
-        <span class="n">token</span> <span class="o">=</span> <span class="n">r</span><span class="o">.</span><span class="n">json</span><span class="p">()[</span><span class="s1">&#39;token&#39;</span><span class="p">]</span>
+        <span class="n">token</span> <span class="o">=</span> <span class="n">r</span><span class="o">.</span><span class="n">json</span><span class="p">()[</span><span class="s1">'token'</span><span class="p">]</span>
 
-        <span class="n">r</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="s1">&#39;/tasks&#39;</span><span class="p">,</span>
-                              <span class="n">json</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;title&#39;</span><span class="p">:</span> <span class="s1">&#39;Buy milk&#39;</span><span class="p">},</span>
-                              <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;Authorization&#39;</span><span class="p">:</span> <span class="sa">f</span><span class="s1">&#39;Bearer </span><span class="si">{</span><span class="n">token</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">})</span>
+        <span class="n">r</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="s1">'/tasks'</span><span class="p">,</span>
+                              <span class="n">json</span><span class="o">=</span><span class="p">{</span><span class="s1">'title'</span><span class="p">:</span> <span class="s1">'Buy milk'</span><span class="p">},</span>
+                              <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s1">'Authorization'</span><span class="p">:</span> <span class="sa">f</span><span class="s1">'Bearer </span><span class="si">{</span><span class="n">token</span><span class="si">}</span><span class="s1">'</span><span class="p">})</span>
         <span class="k">assert</span> <span class="n">r</span><span class="o">.</span><span class="n">status_code</span> <span class="o">==</span> <span class="mi">201</span>
 
-        <span class="n">r</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;/tasks&#39;</span><span class="p">,</span>
-                             <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;Authorization&#39;</span><span class="p">:</span> <span class="sa">f</span><span class="s1">&#39;Bearer </span><span class="si">{</span><span class="n">token</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">})</span>
-        <span class="k">assert</span> <span class="n">r</span><span class="o">.</span><span class="n">json</span><span class="p">()[</span><span class="mi">0</span><span class="p">][</span><span class="s1">&#39;title&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;Buy milk&#39;</span>
+        <span class="n">r</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'/tasks'</span><span class="p">,</span>
+                             <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s1">'Authorization'</span><span class="p">:</span> <span class="sa">f</span><span class="s1">'Bearer </span><span class="si">{</span><span class="n">token</span><span class="si">}</span><span class="s1">'</span><span class="p">})</span>
+        <span class="k">assert</span> <span class="n">r</span><span class="o">.</span><span class="n">json</span><span class="p">()[</span><span class="mi">0</span><span class="p">][</span><span class="s1">'title'</span><span class="p">]</span> <span class="o">==</span> <span class="s1">'Buy milk'</span>
 </code></pre></div>
 <p><code>httpx[http2]</code> lets you pass <code>http2=True</code> and drive the HTTP/2
 path through the same in-process adapter.</p>
@@ -6181,24 +6191,24 @@ event dicts:</p>
 <span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">()</span>
 
 
-<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/ping&#39;</span><span class="p">)</span>
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/ping'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">ping</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
-    <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">JSONResponse</span><span class="p">({</span><span class="s1">&#39;pong&#39;</span><span class="p">:</span> <span class="kc">True</span><span class="p">}))</span>
+    <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">JSONResponse</span><span class="p">({</span><span class="s1">'pong'</span><span class="p">:</span> <span class="kc">True</span><span class="p">}))</span>
 
 
-<span class="k">def</span><span class="w"> </span><span class="nf">make_scope</span><span class="p">(</span><span class="n">method</span><span class="o">=</span><span class="s1">&#39;GET&#39;</span><span class="p">,</span> <span class="n">path</span><span class="o">=</span><span class="s1">&#39;/ping&#39;</span><span class="p">):</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">make_scope</span><span class="p">(</span><span class="n">method</span><span class="o">=</span><span class="s1">'GET'</span><span class="p">,</span> <span class="n">path</span><span class="o">=</span><span class="s1">'/ping'</span><span class="p">):</span>
     <span class="k">return</span> <span class="p">{</span>
-        <span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;http&#39;</span><span class="p">,</span>
-        <span class="s1">&#39;method&#39;</span><span class="p">:</span> <span class="n">method</span><span class="p">,</span>
-        <span class="s1">&#39;path&#39;</span><span class="p">:</span> <span class="n">path</span><span class="p">,</span>
-        <span class="s1">&#39;query_string&#39;</span><span class="p">:</span> <span class="sa">b</span><span class="s1">&#39;&#39;</span><span class="p">,</span>
-        <span class="s1">&#39;headers&#39;</span><span class="p">:</span> <span class="n">Headers</span><span class="p">([]),</span>
-        <span class="s1">&#39;state&#39;</span><span class="p">:</span> <span class="p">{},</span>
+        <span class="s1">'type'</span><span class="p">:</span> <span class="s1">'http'</span><span class="p">,</span>
+        <span class="s1">'method'</span><span class="p">:</span> <span class="n">method</span><span class="p">,</span>
+        <span class="s1">'path'</span><span class="p">:</span> <span class="n">path</span><span class="p">,</span>
+        <span class="s1">'query_string'</span><span class="p">:</span> <span class="sa">b</span><span class="s1">''</span><span class="p">,</span>
+        <span class="s1">'headers'</span><span class="p">:</span> <span class="n">Headers</span><span class="p">([]),</span>
+        <span class="s1">'state'</span><span class="p">:</span> <span class="p">{},</span>
     <span class="p">}</span>
 
 
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">fake_receive</span><span class="p">():</span>
-    <span class="k">return</span> <span class="p">{</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;http.request&#39;</span><span class="p">,</span> <span class="s1">&#39;body&#39;</span><span class="p">:</span> <span class="sa">b</span><span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;more_body&#39;</span><span class="p">:</span> <span class="kc">False</span><span class="p">}</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s1">'type'</span><span class="p">:</span> <span class="s1">'http.request'</span><span class="p">,</span> <span class="s1">'body'</span><span class="p">:</span> <span class="sa">b</span><span class="s1">''</span><span class="p">,</span> <span class="s1">'more_body'</span><span class="p">:</span> <span class="kc">False</span><span class="p">}</span>
 
 
 <span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">asyncio</span>
@@ -6209,10 +6219,10 @@ event dicts:</p>
         <span class="n">events</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">event</span><span class="p">)</span>
 
     <span class="k">await</span> <span class="n">app</span><span class="p">(</span><span class="n">make_scope</span><span class="p">(),</span> <span class="n">fake_receive</span><span class="p">,</span> <span class="n">fake_send</span><span class="p">)</span>
-    <span class="n">start</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">e</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">events</span> <span class="k">if</span> <span class="n">e</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;http.response.start&#39;</span><span class="p">)</span>
-    <span class="n">body</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">e</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">events</span> <span class="k">if</span> <span class="n">e</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;http.response.body&#39;</span><span class="p">)</span>
-    <span class="k">assert</span> <span class="n">start</span><span class="p">[</span><span class="s1">&#39;status&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="mi">200</span>
-    <span class="k">assert</span> <span class="sa">b</span><span class="s1">&#39;&quot;pong&quot;&#39;</span> <span class="ow">in</span> <span class="n">body</span><span class="p">[</span><span class="s1">&#39;body&#39;</span><span class="p">]</span>
+    <span class="n">start</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">e</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">events</span> <span class="k">if</span> <span class="n">e</span><span class="p">[</span><span class="s1">'type'</span><span class="p">]</span> <span class="o">==</span> <span class="s1">'http.response.start'</span><span class="p">)</span>
+    <span class="n">body</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">e</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">events</span> <span class="k">if</span> <span class="n">e</span><span class="p">[</span><span class="s1">'type'</span><span class="p">]</span> <span class="o">==</span> <span class="s1">'http.response.body'</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">start</span><span class="p">[</span><span class="s1">'status'</span><span class="p">]</span> <span class="o">==</span> <span class="mi">200</span>
+    <span class="k">assert</span> <span class="sa">b</span><span class="s1">'"pong"'</span> <span class="ow">in</span> <span class="n">body</span><span class="p">[</span><span class="s1">'body'</span><span class="p">]</span>
 </code></pre></div>
 <p>Useful when you want to assert on the raw ASGI event sequence.
 For anything routing-shaped, prefer <code>native</code> — it costs almost
@@ -6231,8 +6241,8 @@ header mutation, or <code>state</code> injection.  Drive it with the same
     <span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.headers</span><span class="w"> </span><span class="kn">import</span> <span class="n">Headers</span>
     <span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.response</span><span class="w"> </span><span class="kn">import</span> <span class="n">wrap_native_send</span>
 
-    <span class="n">conn</span> <span class="o">=</span> <span class="n">Connection</span><span class="p">(</span><span class="n">method</span><span class="o">=</span><span class="s1">&#39;GET&#39;</span><span class="p">,</span> <span class="n">path</span><span class="o">=</span><span class="s1">&#39;/tasks&#39;</span><span class="p">,</span> <span class="n">raw_path</span><span class="o">=</span><span class="sa">b</span><span class="s1">&#39;/tasks&#39;</span><span class="p">,</span>
-                      <span class="n">headers</span><span class="o">=</span><span class="n">Headers</span><span class="p">([]),</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;http&#39;</span><span class="p">)</span>
+    <span class="n">conn</span> <span class="o">=</span> <span class="n">Connection</span><span class="p">(</span><span class="n">method</span><span class="o">=</span><span class="s1">'GET'</span><span class="p">,</span> <span class="n">path</span><span class="o">=</span><span class="s1">'/tasks'</span><span class="p">,</span> <span class="n">raw_path</span><span class="o">=</span><span class="sa">b</span><span class="s1">'/tasks'</span><span class="p">,</span>
+                      <span class="n">headers</span><span class="o">=</span><span class="n">Headers</span><span class="p">([]),</span> <span class="nb">type</span><span class="o">=</span><span class="s1">'http'</span><span class="p">)</span>
 
     <span class="n">events</span> <span class="o">=</span> <span class="p">[]</span>
     <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">collect</span><span class="p">(</span><span class="n">event</span><span class="p">):</span>

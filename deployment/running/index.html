@@ -5174,13 +5174,13 @@ deployment surface.</p>
 <span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">port</span><span class="o">=</span><span class="mi">8000</span><span class="p">)</span>
 
 <span class="c1"># HTTPS + HTTP/2 via ALPN on :8443</span>
-<span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">port</span><span class="o">=</span><span class="mi">8443</span><span class="p">,</span> <span class="n">certfile</span><span class="o">=</span><span class="s1">&#39;cert.pem&#39;</span><span class="p">,</span> <span class="n">keyfile</span><span class="o">=</span><span class="s1">&#39;key.pem&#39;</span><span class="p">)</span>
+<span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">port</span><span class="o">=</span><span class="mi">8443</span><span class="p">,</span> <span class="n">certfile</span><span class="o">=</span><span class="s1">'cert.pem'</span><span class="p">,</span> <span class="n">keyfile</span><span class="o">=</span><span class="s1">'key.pem'</span><span class="p">)</span>
 
 <span class="c1"># Multi-worker (pre-forks N workers; master holds the listening sockets)</span>
-<span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">port</span><span class="o">=</span><span class="mi">8443</span><span class="p">,</span> <span class="n">certfile</span><span class="o">=</span><span class="s1">&#39;cert.pem&#39;</span><span class="p">,</span> <span class="n">keyfile</span><span class="o">=</span><span class="s1">&#39;key.pem&#39;</span><span class="p">,</span> <span class="n">workers</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span>
+<span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">port</span><span class="o">=</span><span class="mi">8443</span><span class="p">,</span> <span class="n">certfile</span><span class="o">=</span><span class="s1">'cert.pem'</span><span class="p">,</span> <span class="n">keyfile</span><span class="o">=</span><span class="s1">'key.pem'</span><span class="p">,</span> <span class="n">workers</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span>
 
 <span class="c1"># Development: hot-reload when *.py files change</span>
-<span class="c1"># Requires the [reload] extra: pip install &#39;blackbull[reload]&#39;</span>
+<span class="c1"># Requires the [reload] extra: pip install 'blackbull[reload]'</span>
 <span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">port</span><span class="o">=</span><span class="mi">8000</span><span class="p">,</span> <span class="n">reload</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 </code></pre></div>
 <p><code>app.run()</code> is <strong>synchronous</strong> — it internalises <code>asyncio.run</code>
@@ -5201,10 +5201,10 @@ on the bound <a href="../../guide/configuration/#declarative-startup-with-appcon
 settings once keeps <code>__main__</code> to a single line:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">BlackBull</span><span class="p">,</span> <span class="n">AppConfig</span>
 
-<span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">(</span><span class="n">config</span><span class="o">=</span><span class="n">AppConfig</span><span class="p">(</span><span class="n">port</span><span class="o">=</span><span class="mi">8443</span><span class="p">,</span> <span class="n">certfile</span><span class="o">=</span><span class="s1">&#39;cert.pem&#39;</span><span class="p">,</span>
-                                 <span class="n">keyfile</span><span class="o">=</span><span class="s1">&#39;key.pem&#39;</span><span class="p">,</span> <span class="n">workers</span><span class="o">=</span><span class="mi">4</span><span class="p">))</span>
+<span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">(</span><span class="n">config</span><span class="o">=</span><span class="n">AppConfig</span><span class="p">(</span><span class="n">port</span><span class="o">=</span><span class="mi">8443</span><span class="p">,</span> <span class="n">certfile</span><span class="o">=</span><span class="s1">'cert.pem'</span><span class="p">,</span>
+                                 <span class="n">keyfile</span><span class="o">=</span><span class="s1">'key.pem'</span><span class="p">,</span> <span class="n">workers</span><span class="o">=</span><span class="mi">4</span><span class="p">))</span>
 
-<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s1">'__main__'</span><span class="p">:</span>
     <span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
 </code></pre></div>
 <h2 id="2-blackbull-cli-useful-for-systemd-docker-paas">2. <code>blackbull</code> CLI — useful for systemd, Docker, PaaS<a class="headerlink" href="#2-blackbull-cli-useful-for-systemd-docker-paas" title="Permanent link">&para;</a></h2>
@@ -5248,7 +5248,7 @@ socket before forking a test subprocess, instantiate
 <div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">asyncio</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.server</span><span class="w"> </span><span class="kn">import</span> <span class="n">ASGIServer</span>
 
-<span class="n">server</span> <span class="o">=</span> <span class="n">ASGIServer</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">certfile</span><span class="o">=</span><span class="s1">&#39;cert.pem&#39;</span><span class="p">,</span> <span class="n">keyfile</span><span class="o">=</span><span class="s1">&#39;key.pem&#39;</span><span class="p">)</span>
+<span class="n">server</span> <span class="o">=</span> <span class="n">ASGIServer</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">certfile</span><span class="o">=</span><span class="s1">'cert.pem'</span><span class="p">,</span> <span class="n">keyfile</span><span class="o">=</span><span class="s1">'key.pem'</span><span class="p">)</span>
 <span class="n">server</span><span class="o">.</span><span class="n">open_socket</span><span class="p">(</span><span class="mi">8443</span><span class="p">)</span>
 <span class="k">await</span> <span class="n">server</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
 </code></pre></div>

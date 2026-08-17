@@ -5144,11 +5144,11 @@ a port:</p>
 
 <span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">()</span>
 
-<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/&#39;</span><span class="p">)</span>
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">index</span><span class="p">():</span>
-    <span class="k">return</span> <span class="s2">&quot;HTTP here; raw TCP echo on :9000.&quot;</span>
+    <span class="k">return</span> <span class="s2">"HTTP here; raw TCP echo on :9000."</span>
 
-<span class="nd">@app</span><span class="o">.</span><span class="n">raw_handler</span><span class="p">(</span><span class="s1">&#39;echo&#39;</span><span class="p">,</span> <span class="n">port</span><span class="o">=</span><span class="mi">9000</span><span class="p">)</span>
+<span class="nd">@app</span><span class="o">.</span><span class="n">raw_handler</span><span class="p">(</span><span class="s1">'echo'</span><span class="p">,</span> <span class="n">port</span><span class="o">=</span><span class="mi">9000</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">echo</span><span class="p">(</span><span class="n">reader</span><span class="p">,</span> <span class="n">writer</span><span class="p">,</span> <span class="n">ctx</span><span class="p">):</span>
     <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
         <span class="n">data</span> <span class="o">=</span> <span class="k">await</span> <span class="n">reader</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="mi">1024</span><span class="p">)</span>
@@ -5250,7 +5250,7 @@ deliberate:</p>
 <p><code>message_received</code> / <code>message_sent</code> are emitted by the handler itself when it has
 parsed an application-level message, via the aggregator on <code>ctx</code>:</p>
 <div class="highlight"><pre><span></span><code><span class="k">if</span> <span class="n">ctx</span><span class="o">.</span><span class="n">aggregator</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-    <span class="k">await</span> <span class="n">ctx</span><span class="o">.</span><span class="n">aggregator</span><span class="o">.</span><span class="n">on_message_received</span><span class="p">(</span><span class="s1">&#39;echo&#39;</span><span class="p">,</span> <span class="s1">&#39;data&#39;</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">data</span><span class="p">))</span>
+    <span class="k">await</span> <span class="n">ctx</span><span class="o">.</span><span class="n">aggregator</span><span class="o">.</span><span class="n">on_message_received</span><span class="p">(</span><span class="s1">'echo'</span><span class="p">,</span> <span class="s1">'data'</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">data</span><span class="p">))</span>
 </code></pre></div>
 <p><code>connection_accepted</code> and <code>connection_closed</code> fire automatically.</p>
 <h2 id="limitations">Limitations<a class="headerlink" href="#limitations" title="Permanent link">&para;</a></h2>

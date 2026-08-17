@@ -5130,20 +5130,20 @@ test coverage behind the standards-compliance claims.</p>
 </ul>
 <h2 id="install">Install<a class="headerlink" href="#install" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>blackbull<span class="w">                        </span><span class="c1"># core</span>
-pip<span class="w"> </span>install<span class="w"> </span><span class="s1">&#39;blackbull[compression]&#39;</span><span class="w">         </span><span class="c1"># gzip / brotli / zstandard</span>
-pip<span class="w"> </span>install<span class="w"> </span><span class="s1">&#39;blackbull[reload]&#39;</span><span class="w">              </span><span class="c1"># watchfiles for --reload</span>
-pip<span class="w"> </span>install<span class="w"> </span><span class="s1">&#39;blackbull[speed]&#39;</span><span class="w">               </span><span class="c1"># uvloop</span>
+pip<span class="w"> </span>install<span class="w"> </span><span class="s1">'blackbull[compression]'</span><span class="w">         </span><span class="c1"># gzip / brotli / zstandard</span>
+pip<span class="w"> </span>install<span class="w"> </span><span class="s1">'blackbull[reload]'</span><span class="w">              </span><span class="c1"># watchfiles for --reload</span>
+pip<span class="w"> </span>install<span class="w"> </span><span class="s1">'blackbull[speed]'</span><span class="w">               </span><span class="c1"># uvloop</span>
 </code></pre></div>
 <h2 id="hello-world">Hello world<a class="headerlink" href="#hello-world" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">BlackBull</span>
 
 <span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">()</span>
 
-<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/&#39;</span><span class="p">)</span>
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">hello</span><span class="p">():</span>
-    <span class="k">return</span> <span class="s2">&quot;Hello, world!&quot;</span>
+    <span class="k">return</span> <span class="s2">"Hello, world!"</span>
 
-<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s1">'__main__'</span><span class="p">:</span>
     <span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">port</span><span class="o">=</span><span class="mi">8000</span><span class="p">)</span>
 </code></pre></div>
 <div class="highlight"><pre><span></span><code>$<span class="w"> </span>python<span class="w"> </span>myapp.py

@@ -5173,7 +5173,7 @@ HTTP/2 port and no upgrade dance.</p>
 ALPN behaviour you get for free, and mutual TLS (mTLS) when you
 need it.</p>
 <h2 id="quick-start">Quick start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">port</span><span class="o">=</span><span class="mi">8443</span><span class="p">,</span> <span class="n">certfile</span><span class="o">=</span><span class="s1">&#39;cert.pem&#39;</span><span class="p">,</span> <span class="n">keyfile</span><span class="o">=</span><span class="s1">&#39;key.pem&#39;</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">port</span><span class="o">=</span><span class="mi">8443</span><span class="p">,</span> <span class="n">certfile</span><span class="o">=</span><span class="s1">'cert.pem'</span><span class="p">,</span> <span class="n">keyfile</span><span class="o">=</span><span class="s1">'key.pem'</span><span class="p">)</span>
 </code></pre></div>
 <p>Or via the CLI:</p>
 <div class="highlight"><pre><span></span><code>blackbull<span class="w"> </span>myapp:app<span class="w"> </span>--bind<span class="w"> </span><span class="m">0</span>.0.0.0:8443<span class="w"> </span><span class="se">\</span>
@@ -5190,8 +5190,8 @@ need it.</p>
 </ul>
 <h2 id="self-signed-certificate-for-local-https">Self-signed certificate for local HTTPS<a class="headerlink" href="#self-signed-certificate-for-local-https" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>openssl<span class="w"> </span>req<span class="w"> </span>-x509<span class="w"> </span>-newkey<span class="w"> </span>rsa:4096<span class="w"> </span>-keyout<span class="w"> </span>key.pem<span class="w"> </span>-out<span class="w"> </span>cert.pem<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>-days<span class="w"> </span><span class="m">365</span><span class="w"> </span>-nodes<span class="w"> </span>-subj<span class="w"> </span><span class="s1">&#39;/CN=localhost&#39;</span><span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>-addext<span class="w"> </span><span class="s1">&#39;subjectAltName=DNS:localhost,IP:127.0.0.1&#39;</span>
+<span class="w">    </span>-days<span class="w"> </span><span class="m">365</span><span class="w"> </span>-nodes<span class="w"> </span>-subj<span class="w"> </span><span class="s1">'/CN=localhost'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>-addext<span class="w"> </span><span class="s1">'subjectAltName=DNS:localhost,IP:127.0.0.1'</span>
 </code></pre></div>
 <p>Then start the server:</p>
 <div class="highlight"><pre><span></span><code>python<span class="w"> </span>app.py<span class="w"> </span>--cert<span class="w"> </span>cert.pem<span class="w"> </span>--key<span class="w"> </span>key.pem<span class="w"> </span>--port<span class="w"> </span><span class="m">8443</span>
@@ -5224,9 +5224,9 @@ trusted CA.  Set it up before starting the server:</p>
 <span class="c1"># ... define routes ...</span>
 
 <span class="c1"># Build the server manually so we can configure mTLS before accepting connections.</span>
-<span class="n">server</span> <span class="o">=</span> <span class="n">ASGIServer</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">certfile</span><span class="o">=</span><span class="s1">&#39;cert.pem&#39;</span><span class="p">,</span> <span class="n">keyfile</span><span class="o">=</span><span class="s1">&#39;key.pem&#39;</span><span class="p">)</span>
+<span class="n">server</span> <span class="o">=</span> <span class="n">ASGIServer</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">certfile</span><span class="o">=</span><span class="s1">'cert.pem'</span><span class="p">,</span> <span class="n">keyfile</span><span class="o">=</span><span class="s1">'key.pem'</span><span class="p">)</span>
 <span class="n">server</span><span class="o">.</span><span class="n">open_socket</span><span class="p">(</span><span class="mi">8443</span><span class="p">)</span>
-<span class="n">server</span><span class="o">.</span><span class="n">configure_mtls</span><span class="p">(</span><span class="n">ca_cert</span><span class="o">=</span><span class="s1">&#39;ca.pem&#39;</span><span class="p">)</span>   <span class="c1"># enables CERT_REQUIRED</span>
+<span class="n">server</span><span class="o">.</span><span class="n">configure_mtls</span><span class="p">(</span><span class="n">ca_cert</span><span class="o">=</span><span class="s1">'ca.pem'</span><span class="p">)</span>   <span class="c1"># enables CERT_REQUIRED</span>
 <span class="n">asyncio</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">server</span><span class="o">.</span><span class="n">run</span><span class="p">())</span>
 </code></pre></div>
 <p><code>configure_mtls</code> raises <code>RuntimeError</code> if called before TLS is
@@ -5234,17 +5234,17 @@ configured (i.e. before <code>certfile</code> and <code>keyfile</code> are provi
 <h3 id="generating-a-test-ca-and-client-certificate">Generating a test CA and client certificate<a class="headerlink" href="#generating-a-test-ca-and-client-certificate" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="c1"># CA</span>
 openssl<span class="w"> </span>req<span class="w"> </span>-x509<span class="w"> </span>-newkey<span class="w"> </span>rsa:4096<span class="w"> </span>-keyout<span class="w"> </span>ca.key<span class="w"> </span>-out<span class="w"> </span>ca.pem<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>-days<span class="w"> </span><span class="m">365</span><span class="w"> </span>-nodes<span class="w"> </span>-subj<span class="w"> </span><span class="s1">&#39;/CN=Test CA&#39;</span>
+<span class="w">    </span>-days<span class="w"> </span><span class="m">365</span><span class="w"> </span>-nodes<span class="w"> </span>-subj<span class="w"> </span><span class="s1">'/CN=Test CA'</span>
 
 <span class="c1"># Server cert signed by the CA</span>
 openssl<span class="w"> </span>req<span class="w"> </span>-newkey<span class="w"> </span>rsa:4096<span class="w"> </span>-keyout<span class="w"> </span>key.pem<span class="w"> </span>-out<span class="w"> </span>server.csr<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>-nodes<span class="w"> </span>-subj<span class="w"> </span><span class="s1">&#39;/CN=localhost&#39;</span>
+<span class="w">    </span>-nodes<span class="w"> </span>-subj<span class="w"> </span><span class="s1">'/CN=localhost'</span>
 openssl<span class="w"> </span>x509<span class="w"> </span>-req<span class="w"> </span>-in<span class="w"> </span>server.csr<span class="w"> </span>-CA<span class="w"> </span>ca.pem<span class="w"> </span>-CAkey<span class="w"> </span>ca.key<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>-CAcreateserial<span class="w"> </span>-out<span class="w"> </span>cert.pem<span class="w"> </span>-days<span class="w"> </span><span class="m">365</span>
 
 <span class="c1"># Client cert signed by the CA</span>
 openssl<span class="w"> </span>req<span class="w"> </span>-newkey<span class="w"> </span>rsa:4096<span class="w"> </span>-keyout<span class="w"> </span>client.key<span class="w"> </span>-out<span class="w"> </span>client.csr<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>-nodes<span class="w"> </span>-subj<span class="w"> </span><span class="s1">&#39;/CN=client&#39;</span>
+<span class="w">    </span>-nodes<span class="w"> </span>-subj<span class="w"> </span><span class="s1">'/CN=client'</span>
 openssl<span class="w"> </span>x509<span class="w"> </span>-req<span class="w"> </span>-in<span class="w"> </span>client.csr<span class="w"> </span>-CA<span class="w"> </span>ca.pem<span class="w"> </span>-CAkey<span class="w"> </span>ca.key<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>-CAcreateserial<span class="w"> </span>-out<span class="w"> </span>client.pem<span class="w"> </span>-days<span class="w"> </span><span class="m">365</span>
 </code></pre></div>

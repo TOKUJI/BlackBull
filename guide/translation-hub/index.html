@@ -5096,7 +5096,7 @@ invocation.  The glue is ordinary application code.</p>
 <a href="https://github.com/tokuji/BlackBull/blob/master/examples/translation_hub.py"><code>examples/translation_hub.py</code></a>
 — run it and drive all four protocols at once:</p>
 <div class="highlight"><pre><span></span><code>python<span class="w"> </span>examples/translation_hub.py
-mosquitto_pub<span class="w"> </span>-t<span class="w"> </span><span class="s1">&#39;sensors/kitchen/temperature&#39;</span><span class="w"> </span>-m<span class="w"> </span><span class="s1">&#39;21.5&#39;</span><span class="w"> </span>-p<span class="w"> </span><span class="m">1883</span><span class="w"> </span>-V<span class="w"> </span><span class="m">5</span>
+mosquitto_pub<span class="w"> </span>-t<span class="w"> </span><span class="s1">'sensors/kitchen/temperature'</span><span class="w"> </span>-m<span class="w"> </span><span class="s1">'21.5'</span><span class="w"> </span>-p<span class="w"> </span><span class="m">1883</span><span class="w"> </span>-V<span class="w"> </span><span class="m">5</span>
 curl<span class="w"> </span>-N<span class="w"> </span>http://localhost:8000/events<span class="w">            </span><span class="c1"># the reading, over SSE</span>
 curl<span class="w"> </span>http://localhost:8000/rooms/kitchen/stats<span class="w">  </span><span class="c1"># REST -&gt; gRPC translation</span>
 </code></pre></div>
@@ -5112,7 +5112,7 @@ the tap layer itself takes:</p>
     <span class="k">def</span><span class="w"> </span><span class="nf">publish</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">item</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
         <span class="k">for</span> <span class="n">q</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_queues</span><span class="p">:</span>
             <span class="k">if</span> <span class="n">q</span><span class="o">.</span><span class="n">full</span><span class="p">():</span>
-                <span class="n">q</span><span class="o">.</span><span class="n">get_nowait</span><span class="p">()</span>          <span class="c1"># drop that subscriber&#39;s oldest</span>
+                <span class="n">q</span><span class="o">.</span><span class="n">get_nowait</span><span class="p">()</span>          <span class="c1"># drop that subscriber's oldest</span>
             <span class="n">q</span><span class="o">.</span><span class="n">put_nowait</span><span class="p">(</span><span class="n">item</span><span class="p">)</span>
 </code></pre></div>
 <p>That is the entire "message bus".  No broker process, no serialization
@@ -5121,21 +5121,21 @@ Python object.</p>
 <h2 id="mqtt-websocket-sse">MQTT → WebSocket / SSE<a class="headerlink" href="#mqtt-websocket-sse" title="Permanent link">&para;</a></h2>
 <p>An <a href="../mqtt/"><code>@mqtt.on_message</code> tap</a> translates each device publish into
 a hub item; <code>{room}</code> captures work like HTTP path params:</p>
-<div class="highlight"><pre><span></span><code><span class="nd">@mqtt</span><span class="o">.</span><span class="n">on_message</span><span class="p">(</span><span class="n">topic</span><span class="o">=</span><span class="s1">&#39;sensors/</span><span class="si">{room}</span><span class="s1">/temperature&#39;</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="nd">@mqtt</span><span class="o">.</span><span class="n">on_message</span><span class="p">(</span><span class="n">topic</span><span class="o">=</span><span class="s1">'sensors/</span><span class="si">{room}</span><span class="s1">/temperature'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">on_temperature</span><span class="p">(</span><span class="n">msg</span><span class="p">:</span> <span class="n">Message</span><span class="p">,</span> <span class="n">room</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
-    <span class="n">hub</span><span class="o">.</span><span class="n">publish</span><span class="p">({</span><span class="s1">&#39;room&#39;</span><span class="p">:</span> <span class="n">room</span><span class="p">,</span> <span class="s1">&#39;temperature&#39;</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">msg</span><span class="o">.</span><span class="n">payload</span><span class="p">)})</span>
+    <span class="n">hub</span><span class="o">.</span><span class="n">publish</span><span class="p">({</span><span class="s1">'room'</span><span class="p">:</span> <span class="n">room</span><span class="p">,</span> <span class="s1">'temperature'</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">msg</span><span class="o">.</span><span class="n">payload</span><span class="p">)})</span>
 </code></pre></div>
 <p>The WebSocket handler subscribes to the hub and forwards items as text
 frames, while also watching <code>receive()</code> so a client close ends the
 handler.  The SSE side is even shorter — an async generator wrapped in
 <code>EventSourceResponse</code>:</p>
-<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/events&#39;</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/events'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">sse_feed</span><span class="p">():</span>
     <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">readings</span><span class="p">():</span>
         <span class="n">q</span> <span class="o">=</span> <span class="n">hub</span><span class="o">.</span><span class="n">subscribe</span><span class="p">()</span>
         <span class="k">try</span><span class="p">:</span>
             <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
-                <span class="k">yield</span> <span class="p">{</span><span class="s1">&#39;event&#39;</span><span class="p">:</span> <span class="s1">&#39;reading&#39;</span><span class="p">,</span> <span class="s1">&#39;data&#39;</span><span class="p">:</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="k">await</span> <span class="n">q</span><span class="o">.</span><span class="n">get</span><span class="p">())}</span>
+                <span class="k">yield</span> <span class="p">{</span><span class="s1">'event'</span><span class="p">:</span> <span class="s1">'reading'</span><span class="p">,</span> <span class="s1">'data'</span><span class="p">:</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="k">await</span> <span class="n">q</span><span class="o">.</span><span class="n">get</span><span class="p">())}</span>
         <span class="k">finally</span><span class="p">:</span>
             <span class="n">hub</span><span class="o">.</span><span class="n">unsubscribe</span><span class="p">(</span><span class="n">q</span><span class="p">)</span>
     <span class="k">return</span> <span class="n">EventSourceResponse</span><span class="p">(</span><span class="n">readings</span><span class="p">())</span>
@@ -5148,16 +5148,16 @@ ways at once: natively (any gRPC client calling <code>hub.Telemetry/RoomStats</c
 on the same port, h2c or TLS), and through a REST route that performs the
 translation in-process — build a <code>GrpcContext</code>, invoke the registered
 method, and map <code>GrpcStatus</code> onto an HTTP status:</p>
-<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/rooms/</span><span class="si">{room}</span><span class="s1">/stats&#39;</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/rooms/</span><span class="si">{room}</span><span class="s1">/stats'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">rest_room_stats</span><span class="p">(</span><span class="n">room</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">scope</span><span class="p">:</span> <span class="nb">dict</span><span class="p">):</span>
-    <span class="n">handler</span> <span class="o">=</span> <span class="n">grpc</span><span class="o">.</span><span class="n">lookup</span><span class="p">(</span><span class="s1">&#39;/hub.Telemetry/RoomStats&#39;</span><span class="p">)</span>
+    <span class="n">handler</span> <span class="o">=</span> <span class="n">grpc</span><span class="o">.</span><span class="n">lookup</span><span class="p">(</span><span class="s1">'/hub.Telemetry/RoomStats'</span><span class="p">)</span>
     <span class="n">context</span> <span class="o">=</span> <span class="n">GrpcContext</span><span class="p">(</span><span class="n">scope</span><span class="p">)</span>
     <span class="k">try</span><span class="p">:</span>
         <span class="n">payload</span> <span class="o">=</span> <span class="k">await</span> <span class="n">handler</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">room</span><span class="p">)</span><span class="o">.</span><span class="n">encode</span><span class="p">(),</span> <span class="n">context</span><span class="p">)</span>
     <span class="k">except</span> <span class="n">GrpcError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
-        <span class="k">return</span> <span class="n">JSONResponse</span><span class="p">({</span><span class="s1">&#39;error&#39;</span><span class="p">:</span> <span class="n">exc</span><span class="o">.</span><span class="n">details</span> <span class="ow">or</span> <span class="n">exc</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">name</span><span class="p">},</span>
+        <span class="k">return</span> <span class="n">JSONResponse</span><span class="p">({</span><span class="s1">'error'</span><span class="p">:</span> <span class="n">exc</span><span class="o">.</span><span class="n">details</span> <span class="ow">or</span> <span class="n">exc</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">name</span><span class="p">},</span>
                             <span class="n">status</span><span class="o">=</span><span class="n">HTTPStatus</span><span class="p">(</span><span class="n">_GRPC_TO_HTTP</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">exc</span><span class="o">.</span><span class="n">status</span><span class="p">,</span> <span class="mi">500</span><span class="p">)))</span>
-    <span class="k">return</span> <span class="n">Response</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">content_type</span><span class="o">=</span><span class="s1">&#39;application/json&#39;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">Response</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">content_type</span><span class="o">=</span><span class="s1">'application/json'</span><span class="p">)</span>
 </code></pre></div>
 <p><code>context.abort(GrpcStatus.NOT_FOUND, ...)</code> in the service surfaces as a
 <code>NOT_FOUND</code> status trailer to gRPC clients and as a <code>404</code> JSON error to

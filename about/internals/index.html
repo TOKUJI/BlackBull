@@ -6435,7 +6435,7 @@ means <code>bytes.translate</code>, <code>bytes.find</code>, <code>bytes.split</
 <code>bytes.count</code>, and precompiled regexes — and it means resisting the
 intuition that fewer allocations or fewer passes must be faster.</p>
 <p>The idiom used throughout <code>_parse</code> is a <strong>delete-the-allowed table</strong>:</p>
-<div class="highlight"><pre><span></span><code><span class="n">_TCHAR_OCTETS</span> <span class="o">=</span> <span class="sa">b</span><span class="s2">&quot;!#$%&amp;&#39;*+-.^_`|~0123456789ABC...xyz&quot;</span>
+<div class="highlight"><pre><span></span><code><span class="n">_TCHAR_OCTETS</span> <span class="o">=</span> <span class="sa">b</span><span class="s2">"!#$%&amp;'*+-.^_`|~0123456789ABC...xyz"</span>
 
 <span class="k">if</span> <span class="n">key</span><span class="o">.</span><span class="n">translate</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="n">_TCHAR_OCTETS</span><span class="p">):</span>   <span class="c1"># non-empty ⇒ a non-token octet</span>
     <span class="k">raise</span> <span class="n">BadRequestError</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>

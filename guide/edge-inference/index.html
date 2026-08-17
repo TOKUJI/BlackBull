@@ -5185,12 +5185,12 @@ model, yield one SSE event per token
 
 <span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">()</span>
 
-<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/generate&#39;</span><span class="p">)</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">generate</span><span class="p">(</span><span class="n">prompt</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;Hello, edge&#39;</span><span class="p">):</span>
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/generate'</span><span class="p">)</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">generate</span><span class="p">(</span><span class="n">prompt</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">'Hello, edge'</span><span class="p">):</span>
     <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">events</span><span class="p">():</span>
         <span class="k">async</span> <span class="k">for</span> <span class="n">token</span> <span class="ow">in</span> <span class="n">fake_model</span><span class="p">(</span><span class="n">prompt</span><span class="p">):</span>
-            <span class="k">yield</span> <span class="p">{</span><span class="s1">&#39;event&#39;</span><span class="p">:</span> <span class="s1">&#39;token&#39;</span><span class="p">,</span> <span class="s1">&#39;data&#39;</span><span class="p">:</span> <span class="n">token</span><span class="p">}</span>
-        <span class="k">yield</span> <span class="p">{</span><span class="s1">&#39;event&#39;</span><span class="p">:</span> <span class="s1">&#39;done&#39;</span><span class="p">,</span> <span class="s1">&#39;data&#39;</span><span class="p">:</span> <span class="s1">&#39;&#39;</span><span class="p">}</span>
+            <span class="k">yield</span> <span class="p">{</span><span class="s1">'event'</span><span class="p">:</span> <span class="s1">'token'</span><span class="p">,</span> <span class="s1">'data'</span><span class="p">:</span> <span class="n">token</span><span class="p">}</span>
+        <span class="k">yield</span> <span class="p">{</span><span class="s1">'event'</span><span class="p">:</span> <span class="s1">'done'</span><span class="p">,</span> <span class="s1">'data'</span><span class="p">:</span> <span class="s1">''</span><span class="p">}</span>
     <span class="k">return</span> <span class="n">EventSourceResponse</span><span class="p">(</span><span class="n">events</span><span class="p">())</span>
 </code></pre></div>
 <p><code>prompt</code> resolves from the query string, which keeps the endpoint
@@ -5202,7 +5202,7 @@ reaches the client while the rest are still being generated.</p>
 <code>/generate</code> streams multiplex over one connection instead of
 queueing head-of-line behind each other. No extra setup is needed —
 cleartext <strong>h2c</strong> is detected from the connection preface:</p>
-<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>--http2-prior-knowledge<span class="w"> </span>-N<span class="w"> </span><span class="s1">&#39;http://localhost:8000/generate?prompt=hi&#39;</span>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>--http2-prior-knowledge<span class="w"> </span>-N<span class="w"> </span><span class="s1">'http://localhost:8000/generate?prompt=hi'</span>
 </code></pre></div>
 <p>Browsers require HTTP/2 over TLS; pass <code>certfile=</code> / <code>keyfile=</code> to
 <code>app.run</code> and ALPN negotiates <code>h2</code> on the same port
@@ -5244,11 +5244,11 @@ keeping the latest reading per device for the HTTP side to report:</p>
 <span class="n">mqtt</span> <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">add_extension</span><span class="p">(</span><span class="n">MQTTExtension</span><span class="p">(</span><span class="n">port</span><span class="o">=</span><span class="mi">1883</span><span class="p">))</span>
 <span class="n">_readings</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>
 
-<span class="nd">@mqtt</span><span class="o">.</span><span class="n">on_message</span><span class="p">(</span><span class="n">topic</span><span class="o">=</span><span class="s1">&#39;sensors/</span><span class="si">{device}</span><span class="s1">/</span><span class="si">{metric}</span><span class="s1">&#39;</span><span class="p">)</span>
+<span class="nd">@mqtt</span><span class="o">.</span><span class="n">on_message</span><span class="p">(</span><span class="n">topic</span><span class="o">=</span><span class="s1">'sensors/</span><span class="si">{device}</span><span class="s1">/</span><span class="si">{metric}</span><span class="s1">'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">on_reading</span><span class="p">(</span><span class="n">msg</span><span class="p">:</span> <span class="n">Message</span><span class="p">,</span> <span class="n">device</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">metric</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
     <span class="n">_readings</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="n">device</span><span class="p">,</span> <span class="p">{})[</span><span class="n">metric</span><span class="p">]</span> <span class="o">=</span> <span class="n">msg</span><span class="o">.</span><span class="n">payload</span><span class="o">.</span><span class="n">decode</span><span class="p">()</span>
 
-<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/devices&#39;</span><span class="p">)</span>
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/devices'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">devices</span><span class="p">():</span>
     <span class="k">return</span> <span class="n">_readings</span>
 </code></pre></div>
@@ -5262,10 +5262,10 @@ door. <strong>Shared subscriptions</strong> (MQTT 5 §4.8.2) turn a topic into a
 load-balanced work queue: every worker that subscribes to the same
 <code>$share/{group}/{filter}</code> joins a share group, and the broker gives
 each matching message to exactly <strong>one</strong> member, round-robin.</p>
-<div class="highlight"><pre><span></span><code>mosquitto_sub<span class="w"> </span>-t<span class="w"> </span><span class="s1">&#39;$share/workers/jobs/#&#39;</span><span class="w"> </span>-p<span class="w"> </span><span class="m">1883</span><span class="w"> </span>-V<span class="w"> </span><span class="m">5</span><span class="w">    </span><span class="c1"># worker 1</span>
-mosquitto_sub<span class="w"> </span>-t<span class="w"> </span><span class="s1">&#39;$share/workers/jobs/#&#39;</span><span class="w"> </span>-p<span class="w"> </span><span class="m">1883</span><span class="w"> </span>-V<span class="w"> </span><span class="m">5</span><span class="w">    </span><span class="c1"># worker 2</span>
-mosquitto_pub<span class="w"> </span>-t<span class="w"> </span><span class="s1">&#39;jobs/generate&#39;</span><span class="w"> </span>-m<span class="w"> </span><span class="s1">&#39;{&quot;prompt&quot;: &quot;job-1&quot;}&#39;</span><span class="w"> </span>-p<span class="w"> </span><span class="m">1883</span><span class="w"> </span>-V<span class="w"> </span><span class="m">5</span>
-mosquitto_pub<span class="w"> </span>-t<span class="w"> </span><span class="s1">&#39;jobs/generate&#39;</span><span class="w"> </span>-m<span class="w"> </span><span class="s1">&#39;{&quot;prompt&quot;: &quot;job-2&quot;}&#39;</span><span class="w"> </span>-p<span class="w"> </span><span class="m">1883</span><span class="w"> </span>-V<span class="w"> </span><span class="m">5</span>
+<div class="highlight"><pre><span></span><code>mosquitto_sub<span class="w"> </span>-t<span class="w"> </span><span class="s1">'$share/workers/jobs/#'</span><span class="w"> </span>-p<span class="w"> </span><span class="m">1883</span><span class="w"> </span>-V<span class="w"> </span><span class="m">5</span><span class="w">    </span><span class="c1"># worker 1</span>
+mosquitto_sub<span class="w"> </span>-t<span class="w"> </span><span class="s1">'$share/workers/jobs/#'</span><span class="w"> </span>-p<span class="w"> </span><span class="m">1883</span><span class="w"> </span>-V<span class="w"> </span><span class="m">5</span><span class="w">    </span><span class="c1"># worker 2</span>
+mosquitto_pub<span class="w"> </span>-t<span class="w"> </span><span class="s1">'jobs/generate'</span><span class="w"> </span>-m<span class="w"> </span><span class="s1">'{"prompt": "job-1"}'</span><span class="w"> </span>-p<span class="w"> </span><span class="m">1883</span><span class="w"> </span>-V<span class="w"> </span><span class="m">5</span>
+mosquitto_pub<span class="w"> </span>-t<span class="w"> </span><span class="s1">'jobs/generate'</span><span class="w"> </span>-m<span class="w"> </span><span class="s1">'{"prompt": "job-2"}'</span><span class="w"> </span>-p<span class="w"> </span><span class="m">1883</span><span class="w"> </span>-V<span class="w"> </span><span class="m">5</span>
 </code></pre></div>
 <p><code>job-1</code> and <code>job-2</code> land on different workers. Scaling the pool is
 starting another subscriber — no queue server, no client library
@@ -5314,9 +5314,9 @@ messages).</p>
 python<span class="w"> </span>examples/edge_inference.py
 </code></pre></div>
 <p>Then, in other terminals:</p>
-<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-N<span class="w"> </span><span class="s1">&#39;http://localhost:8000/generate?prompt=hello+edge&#39;</span><span class="w">   </span><span class="c1"># SSE tokens</span>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-N<span class="w"> </span><span class="s1">'http://localhost:8000/generate?prompt=hello+edge'</span><span class="w">   </span><span class="c1"># SSE tokens</span>
 open<span class="w"> </span>http://localhost:8000/<span class="w">                                  </span><span class="c1"># browser demo</span>
-mosquitto_pub<span class="w"> </span>-t<span class="w"> </span><span class="s1">&#39;sensors/pi-cam-1/temperature&#39;</span><span class="w"> </span>-m<span class="w"> </span><span class="s1">&#39;41.2&#39;</span><span class="w"> </span>-p<span class="w"> </span><span class="m">1883</span><span class="w"> </span>-V<span class="w"> </span><span class="m">5</span>
+mosquitto_pub<span class="w"> </span>-t<span class="w"> </span><span class="s1">'sensors/pi-cam-1/temperature'</span><span class="w"> </span>-m<span class="w"> </span><span class="s1">'41.2'</span><span class="w"> </span>-p<span class="w"> </span><span class="m">1883</span><span class="w"> </span>-V<span class="w"> </span><span class="m">5</span>
 curl<span class="w"> </span>http://localhost:8000/devices
 </code></pre></div>
 <p>The example is dependency-free — the "model" is canned tokens — so

@@ -5376,26 +5376,26 @@ attached by default, so nothing is printed until you opt in.</p>
 <h2 id="access-log-blackbullaccess">Access log — <code>blackbull.access</code><a class="headerlink" href="#access-log-blackbullaccess" title="Permanent link">&para;</a></h2>
 <p>For every completed HTTP/1.1 request the server emits one <code>INFO</code>
 record on the <code>blackbull.access</code> logger.  Default format:</p>
-<div class="highlight"><pre><span></span><code>{client_ip} &quot;{method} {path} HTTP/{version}&quot; {status} {bytes} {duration}ms
+<div class="highlight"><pre><span></span><code>{client_ip} "{method} {path} HTTP/{version}" {status} {bytes} {duration}ms
 </code></pre></div>
 <p>Example:</p>
-<div class="highlight"><pre><span></span><code>203.0.113.42 &quot;POST /tasks HTTP/1.1&quot; 201 87 3ms
+<div class="highlight"><pre><span></span><code>203.0.113.42 "POST /tasks HTTP/1.1" 201 87 3ms
 </code></pre></div>
 <p>Enable to stdout the same way as any Python logger:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">logging</span>
 
 <span class="n">handler</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">StreamHandler</span><span class="p">()</span>
-<span class="n">handler</span><span class="o">.</span><span class="n">setFormatter</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">Formatter</span><span class="p">(</span><span class="s1">&#39;</span><span class="si">%(asctime)s</span><span class="s1"> </span><span class="si">%(message)s</span><span class="s1">&#39;</span><span class="p">))</span>
-<span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s1">&#39;blackbull.access&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">addHandler</span><span class="p">(</span><span class="n">handler</span><span class="p">)</span>
-<span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s1">&#39;blackbull.access&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">setLevel</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">INFO</span><span class="p">)</span>
+<span class="n">handler</span><span class="o">.</span><span class="n">setFormatter</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">Formatter</span><span class="p">(</span><span class="s1">'</span><span class="si">%(asctime)s</span><span class="s1"> </span><span class="si">%(message)s</span><span class="s1">'</span><span class="p">))</span>
+<span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s1">'blackbull.access'</span><span class="p">)</span><span class="o">.</span><span class="n">addHandler</span><span class="p">(</span><span class="n">handler</span><span class="p">)</span>
+<span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s1">'blackbull.access'</span><span class="p">)</span><span class="o">.</span><span class="n">setLevel</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">INFO</span><span class="p">)</span>
 </code></pre></div>
 <p>To a rotating file:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">logging.handlers</span><span class="w"> </span><span class="kn">import</span> <span class="n">RotatingFileHandler</span>
 
-<span class="n">fh</span> <span class="o">=</span> <span class="n">RotatingFileHandler</span><span class="p">(</span><span class="s1">&#39;access.log&#39;</span><span class="p">,</span> <span class="n">maxBytes</span><span class="o">=</span><span class="mi">10_000_000</span><span class="p">,</span> <span class="n">backupCount</span><span class="o">=</span><span class="mi">5</span><span class="p">)</span>
-<span class="n">fh</span><span class="o">.</span><span class="n">setFormatter</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">Formatter</span><span class="p">(</span><span class="s1">&#39;</span><span class="si">%(message)s</span><span class="s1">&#39;</span><span class="p">))</span>
-<span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s1">&#39;blackbull.access&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">addHandler</span><span class="p">(</span><span class="n">fh</span><span class="p">)</span>
-<span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s1">&#39;blackbull.access&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">setLevel</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">INFO</span><span class="p">)</span>
+<span class="n">fh</span> <span class="o">=</span> <span class="n">RotatingFileHandler</span><span class="p">(</span><span class="s1">'access.log'</span><span class="p">,</span> <span class="n">maxBytes</span><span class="o">=</span><span class="mi">10_000_000</span><span class="p">,</span> <span class="n">backupCount</span><span class="o">=</span><span class="mi">5</span><span class="p">)</span>
+<span class="n">fh</span><span class="o">.</span><span class="n">setFormatter</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">Formatter</span><span class="p">(</span><span class="s1">'</span><span class="si">%(message)s</span><span class="s1">'</span><span class="p">))</span>
+<span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s1">'blackbull.access'</span><span class="p">)</span><span class="o">.</span><span class="n">addHandler</span><span class="p">(</span><span class="n">fh</span><span class="p">)</span>
+<span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s1">'blackbull.access'</span><span class="p">)</span><span class="o">.</span><span class="n">setLevel</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">INFO</span><span class="p">)</span>
 </code></pre></div>
 <p>The record is emitted in a <code>finally</code> block after the response
 completes — even if the app raises an unhandled exception.  When
@@ -5450,9 +5450,9 @@ available in a custom <code>logging.Formatter</code> format string:</p>
 </tbody>
 </table>
 <p>Custom format:</p>
-<div class="highlight"><pre><span></span><code><span class="n">fmt</span> <span class="o">=</span> <span class="p">(</span><span class="s1">&#39;</span><span class="si">%(asctime)s</span><span class="s1"> </span><span class="si">%(client_ip)s</span><span class="s1"> &quot;</span><span class="si">%(method)s</span><span class="s1"> </span><span class="si">%(path)s</span><span class="s1">&quot; &#39;</span>
-       <span class="s1">&#39;</span><span class="si">%(status)s</span><span class="s1"> </span><span class="si">%(response_bytes)d</span><span class="s1"> </span><span class="si">%(duration_ms).0f</span><span class="s1">ms&#39;</span><span class="p">)</span>
-<span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s1">&#39;blackbull.access&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">handlers</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">setFormatter</span><span class="p">(</span>
+<div class="highlight"><pre><span></span><code><span class="n">fmt</span> <span class="o">=</span> <span class="p">(</span><span class="s1">'</span><span class="si">%(asctime)s</span><span class="s1"> </span><span class="si">%(client_ip)s</span><span class="s1"> "</span><span class="si">%(method)s</span><span class="s1"> </span><span class="si">%(path)s</span><span class="s1">" '</span>
+       <span class="s1">'</span><span class="si">%(status)s</span><span class="s1"> </span><span class="si">%(response_bytes)d</span><span class="s1"> </span><span class="si">%(duration_ms).0f</span><span class="s1">ms'</span><span class="p">)</span>
+<span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s1">'blackbull.access'</span><span class="p">)</span><span class="o">.</span><span class="n">handlers</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">setFormatter</span><span class="p">(</span>
     <span class="n">logging</span><span class="o">.</span><span class="n">Formatter</span><span class="p">(</span><span class="n">fmt</span><span class="p">)</span>
 <span class="p">)</span>
 </code></pre></div>
@@ -5523,9 +5523,9 @@ handler can attach extra attributes:</p>
 
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">request_id_mw</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">,</span> <span class="n">call_next</span><span class="p">):</span>
     <span class="n">req_id</span> <span class="o">=</span> <span class="n">uuid</span><span class="o">.</span><span class="n">uuid4</span><span class="p">()</span><span class="o">.</span><span class="n">hex</span>
-    <span class="n">conn</span><span class="o">.</span><span class="n">state</span><span class="p">[</span><span class="s1">&#39;request_id&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">req_id</span>
+    <span class="n">conn</span><span class="o">.</span><span class="n">state</span><span class="p">[</span><span class="s1">'request_id'</span><span class="p">]</span> <span class="o">=</span> <span class="n">req_id</span>
     <span class="c1"># Attach to the access log record so it appears in log output</span>
-    <span class="n">record</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">state</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;access_log&#39;</span><span class="p">)</span>
+    <span class="n">record</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">state</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'access_log'</span><span class="p">)</span>
     <span class="k">if</span> <span class="n">record</span><span class="p">:</span>
         <span class="n">record</span><span class="o">.</span><span class="n">request_id</span> <span class="o">=</span> <span class="n">req_id</span>   <span class="c1"># arbitrary extra attribute</span>
     <span class="k">await</span> <span class="n">call_next</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">)</span>
@@ -5533,15 +5533,15 @@ handler can attach extra attributes:</p>
 <p>A custom <code>logging.Filter</code> can then surface the attribute:</p>
 <div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">AccessLogFilter</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">Filter</span><span class="p">):</span>
     <span class="k">def</span><span class="w"> </span><span class="nf">filter</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">record</span><span class="p">):</span>
-        <span class="n">record</span><span class="o">.</span><span class="n">request_id</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">record</span><span class="p">,</span> <span class="s1">&#39;request_id&#39;</span><span class="p">,</span> <span class="s1">&#39;-&#39;</span><span class="p">)</span>
+        <span class="n">record</span><span class="o">.</span><span class="n">request_id</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">record</span><span class="p">,</span> <span class="s1">'request_id'</span><span class="p">,</span> <span class="s1">'-'</span><span class="p">)</span>
         <span class="k">return</span> <span class="kc">True</span>
 
 <span class="n">handler</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">StreamHandler</span><span class="p">()</span>
 <span class="n">handler</span><span class="o">.</span><span class="n">addFilter</span><span class="p">(</span><span class="n">AccessLogFilter</span><span class="p">())</span>
 <span class="n">handler</span><span class="o">.</span><span class="n">setFormatter</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">Formatter</span><span class="p">(</span>
-    <span class="s1">&#39;</span><span class="si">%(message)s</span><span class="s1"> req_id=</span><span class="si">%(request_id)s</span><span class="s1">&#39;</span>
+    <span class="s1">'</span><span class="si">%(message)s</span><span class="s1"> req_id=</span><span class="si">%(request_id)s</span><span class="s1">'</span>
 <span class="p">))</span>
-<span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s1">&#39;blackbull.access&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">addHandler</span><span class="p">(</span><span class="n">handler</span><span class="p">)</span>
+<span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s1">'blackbull.access'</span><span class="p">)</span><span class="o">.</span><span class="n">addHandler</span><span class="p">(</span><span class="n">handler</span><span class="p">)</span>
 </code></pre></div>
 <h2 id="framework-debug-log-blackbull">Framework debug log — <code>blackbull</code><a class="headerlink" href="#framework-debug-log-blackbull" title="Permanent link">&para;</a></h2>
 <p>Internal framework events (frame parsing, HPACK, routing
@@ -5553,7 +5553,7 @@ and its children (<code>blackbull.server.server</code>,
 
 <span class="n">logging</span><span class="o">.</span><span class="n">basicConfig</span><span class="p">(</span><span class="n">level</span><span class="o">=</span><span class="n">logging</span><span class="o">.</span><span class="n">DEBUG</span><span class="p">)</span>
 <span class="c1"># or target just the server layer:</span>
-<span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s1">&#39;blackbull.server&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">setLevel</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">DEBUG</span><span class="p">)</span>
+<span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s1">'blackbull.server'</span><span class="p">)</span><span class="o">.</span><span class="n">setLevel</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">DEBUG</span><span class="p">)</span>
 </code></pre></div>
 <p>This is separate from the access log so that production
 deployments can enable access logging without flooding logs with
@@ -5618,18 +5618,18 @@ curl<span class="w"> </span>http://localhost:8000/tasks
 
 <span class="c1"># Inspect the database</span>
 sqlite3<span class="w"> </span>examples/LoggingExample/logs.db<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span><span class="s2">&quot;SELECT client_ip, method, path, status, duration_ms FROM access_logs;&quot;</span>
+<span class="w">    </span><span class="s2">"SELECT client_ip, method, path, status, duration_ms FROM access_logs;"</span>
 </code></pre></div>
 <p>The shape of the wiring:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">queue</span><span class="o">,</span><span class="w"> </span><span class="nn">logging</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">logging.handlers</span><span class="w"> </span><span class="kn">import</span> <span class="n">QueueHandler</span><span class="p">,</span> <span class="n">QueueListener</span>
 
 <span class="n">_log_queue</span>    <span class="o">=</span> <span class="n">queue</span><span class="o">.</span><span class="n">Queue</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>          <span class="c1"># unbounded</span>
-<span class="n">_json_handler</span> <span class="o">=</span> <span class="n">JsonHTTPHandler</span><span class="p">(</span><span class="s1">&#39;localhost:9000&#39;</span><span class="p">)</span>
+<span class="n">_json_handler</span> <span class="o">=</span> <span class="n">JsonHTTPHandler</span><span class="p">(</span><span class="s1">'localhost:9000'</span><span class="p">)</span>
 <span class="n">_listener</span>     <span class="o">=</span> <span class="n">QueueListener</span><span class="p">(</span><span class="n">_log_queue</span><span class="p">,</span> <span class="n">_json_handler</span><span class="p">,</span>
                               <span class="n">respect_handler_level</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 
-<span class="n">_access_logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s1">&#39;example.access&#39;</span><span class="p">)</span>
+<span class="n">_access_logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s1">'example.access'</span><span class="p">)</span>
 <span class="n">_access_logger</span><span class="o">.</span><span class="n">addHandler</span><span class="p">(</span><span class="n">QueueHandler</span><span class="p">(</span><span class="n">_log_queue</span><span class="p">))</span>
 <span class="n">_access_logger</span><span class="o">.</span><span class="n">setLevel</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">INFO</span><span class="p">)</span>
 
@@ -5644,16 +5644,16 @@ sqlite3<span class="w"> </span>examples/LoggingExample/logs.db<span class="w"> <
     <span class="n">_listener</span><span class="o">.</span><span class="n">stop</span><span class="p">()</span>
 
 
-<span class="nd">@app</span><span class="o">.</span><span class="n">on</span><span class="p">(</span><span class="s1">&#39;request_completed&#39;</span><span class="p">)</span>
+<span class="nd">@app</span><span class="o">.</span><span class="n">on</span><span class="p">(</span><span class="s1">'request_completed'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">log_response</span><span class="p">(</span><span class="n">event</span><span class="p">):</span>
     <span class="n">d</span> <span class="o">=</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span>
-    <span class="n">_access_logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;</span><span class="si">%s</span><span class="s1"> </span><span class="si">%s</span><span class="s1"> → </span><span class="si">%s</span><span class="s1"> (</span><span class="si">%.1f</span><span class="s1"> ms)&#39;</span><span class="p">,</span>
-                        <span class="n">d</span><span class="p">[</span><span class="s1">&#39;method&#39;</span><span class="p">],</span> <span class="n">d</span><span class="p">[</span><span class="s1">&#39;path&#39;</span><span class="p">],</span> <span class="n">d</span><span class="p">[</span><span class="s1">&#39;status&#39;</span><span class="p">],</span> <span class="n">d</span><span class="p">[</span><span class="s1">&#39;duration_ms&#39;</span><span class="p">],</span>
-                        <span class="n">extra</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;client_ip&#39;</span><span class="p">:</span> <span class="n">d</span><span class="p">[</span><span class="s1">&#39;client_ip&#39;</span><span class="p">]</span> <span class="ow">or</span> <span class="s1">&#39;-&#39;</span><span class="p">,</span>
-                               <span class="s1">&#39;method&#39;</span><span class="p">:</span> <span class="n">d</span><span class="p">[</span><span class="s1">&#39;method&#39;</span><span class="p">],</span> <span class="s1">&#39;path&#39;</span><span class="p">:</span> <span class="n">d</span><span class="p">[</span><span class="s1">&#39;path&#39;</span><span class="p">],</span>
-                               <span class="s1">&#39;status&#39;</span><span class="p">:</span> <span class="n">d</span><span class="p">[</span><span class="s1">&#39;status&#39;</span><span class="p">],</span>
-                               <span class="s1">&#39;response_bytes&#39;</span><span class="p">:</span> <span class="n">d</span><span class="p">[</span><span class="s1">&#39;response_bytes&#39;</span><span class="p">],</span>
-                               <span class="s1">&#39;duration_ms&#39;</span><span class="p">:</span> <span class="n">d</span><span class="p">[</span><span class="s1">&#39;duration_ms&#39;</span><span class="p">]})</span>
+    <span class="n">_access_logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">'</span><span class="si">%s</span><span class="s1"> </span><span class="si">%s</span><span class="s1"> → </span><span class="si">%s</span><span class="s1"> (</span><span class="si">%.1f</span><span class="s1"> ms)'</span><span class="p">,</span>
+                        <span class="n">d</span><span class="p">[</span><span class="s1">'method'</span><span class="p">],</span> <span class="n">d</span><span class="p">[</span><span class="s1">'path'</span><span class="p">],</span> <span class="n">d</span><span class="p">[</span><span class="s1">'status'</span><span class="p">],</span> <span class="n">d</span><span class="p">[</span><span class="s1">'duration_ms'</span><span class="p">],</span>
+                        <span class="n">extra</span><span class="o">=</span><span class="p">{</span><span class="s1">'client_ip'</span><span class="p">:</span> <span class="n">d</span><span class="p">[</span><span class="s1">'client_ip'</span><span class="p">]</span> <span class="ow">or</span> <span class="s1">'-'</span><span class="p">,</span>
+                               <span class="s1">'method'</span><span class="p">:</span> <span class="n">d</span><span class="p">[</span><span class="s1">'method'</span><span class="p">],</span> <span class="s1">'path'</span><span class="p">:</span> <span class="n">d</span><span class="p">[</span><span class="s1">'path'</span><span class="p">],</span>
+                               <span class="s1">'status'</span><span class="p">:</span> <span class="n">d</span><span class="p">[</span><span class="s1">'status'</span><span class="p">],</span>
+                               <span class="s1">'response_bytes'</span><span class="p">:</span> <span class="n">d</span><span class="p">[</span><span class="s1">'response_bytes'</span><span class="p">],</span>
+                               <span class="s1">'duration_ms'</span><span class="p">:</span> <span class="n">d</span><span class="p">[</span><span class="s1">'duration_ms'</span><span class="p">]})</span>
 </code></pre></div>
 <p><code>QueueHandler.emit()</code> puts the record in the queue and returns
 immediately.  <code>QueueListener</code> runs in a daemon thread and calls
@@ -5782,10 +5782,10 @@ counter emits one summary record per suppressed cap:</p>
 <span class="k">class</span><span class="w"> </span><span class="nc">CapsHandler</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">Handler</span><span class="p">):</span>
     <span class="k">def</span><span class="w"> </span><span class="nf">emit</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">record</span><span class="p">):</span>
         <span class="c1"># Forward to your metrics pipeline, page on certain caps, etc.</span>
-        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[CAP] </span><span class="si">{</span><span class="n">record</span><span class="o">.</span><span class="n">cap</span><span class="si">}</span><span class="s2"> requested=</span><span class="si">{</span><span class="n">record</span><span class="o">.</span><span class="n">requested</span><span class="si">}</span><span class="s2"> &quot;</span>
-              <span class="sa">f</span><span class="s2">&quot;limit=</span><span class="si">{</span><span class="n">record</span><span class="o">.</span><span class="n">limit</span><span class="si">}</span><span class="s2"> peer=</span><span class="si">{</span><span class="n">record</span><span class="o">.</span><span class="n">peer</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"[CAP] </span><span class="si">{</span><span class="n">record</span><span class="o">.</span><span class="n">cap</span><span class="si">}</span><span class="s2"> requested=</span><span class="si">{</span><span class="n">record</span><span class="o">.</span><span class="n">requested</span><span class="si">}</span><span class="s2"> "</span>
+              <span class="sa">f</span><span class="s2">"limit=</span><span class="si">{</span><span class="n">record</span><span class="o">.</span><span class="n">limit</span><span class="si">}</span><span class="s2"> peer=</span><span class="si">{</span><span class="n">record</span><span class="o">.</span><span class="n">peer</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
 
-<span class="n">caps</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s1">&#39;blackbull.caps&#39;</span><span class="p">)</span>
+<span class="n">caps</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s1">'blackbull.caps'</span><span class="p">)</span>
 <span class="n">caps</span><span class="o">.</span><span class="n">addHandler</span><span class="p">(</span><span class="n">CapsHandler</span><span class="p">())</span>
 <span class="n">caps</span><span class="o">.</span><span class="n">setLevel</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">WARNING</span><span class="p">)</span>
 </code></pre></div>

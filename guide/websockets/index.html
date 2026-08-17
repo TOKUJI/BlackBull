@@ -5399,7 +5399,7 @@ parameter and the framework hands you the connection as an object:</p>
 
 <span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">()</span>
 
-<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/ws&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/ws'</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">ws_handler</span><span class="p">(</span><span class="n">ws</span><span class="p">:</span> <span class="n">WebSocket</span><span class="p">):</span>
     <span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">accept</span><span class="p">()</span>
     <span class="k">async</span> <span class="k">for</span> <span class="n">message</span> <span class="ow">in</span> <span class="n">ws</span><span class="p">:</span>
@@ -5458,21 +5458,21 @@ is readable via <code>ws.accepted</code>, <code>ws.client_disconnected</code>, a
 <p>The parameter is matched by annotation first, so <code>ws: WebSocket</code> works under
 any name.  Un-annotated, the names <code>ws</code> and <code>websocket</code> are recognised.  You
 can take the <code>Connection</code> alongside it:</p>
-<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/room/</span><span class="si">{name}</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/room/</span><span class="si">{name}</span><span class="s1">'</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">room</span><span class="p">(</span><span class="n">ws</span><span class="p">:</span> <span class="n">WebSocket</span><span class="p">,</span> <span class="n">conn</span><span class="p">:</span> <span class="n">Connection</span><span class="p">):</span>
     <span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">accept</span><span class="p">()</span>
-    <span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">send_text</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;welcome to </span><span class="si">{</span><span class="n">conn</span><span class="o">.</span><span class="n">path_params</span><span class="p">[</span><span class="s2">&quot;name&quot;</span><span class="p">]</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+    <span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">send_text</span><span class="p">(</span><span class="sa">f</span><span class="s1">'welcome to </span><span class="si">{</span><span class="n">conn</span><span class="o">.</span><span class="n">path_params</span><span class="p">[</span><span class="s2">"name"</span><span class="p">]</span><span class="si">}</span><span class="s1">'</span><span class="p">)</span>
 </code></pre></div>
 <p>A parameter that is none of the recognised kinds is a <code>TypeError</code> <strong>at
 registration</strong>, not on the first connection.</p>
 <h3 id="injected-parameters">Injected parameters<a class="headerlink" href="#injected-parameters" title="Permanent link">&para;</a></h3>
 <p>A WebSocket handler declares what it needs the same way an HTTP handler does
 — path params, query params, and <code>Depends</code> all resolve from the signature:</p>
-<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/rooms/</span><span class="si">{room}</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/rooms/</span><span class="si">{room}</span><span class="s1">'</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">chat</span><span class="p">(</span><span class="n">ws</span><span class="p">:</span> <span class="n">WebSocket</span><span class="p">,</span> <span class="n">room</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">since</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span>
                <span class="n">db</span><span class="o">=</span><span class="n">Depends</span><span class="p">(</span><span class="n">get_db</span><span class="p">)):</span>
     <span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">accept</span><span class="p">()</span>
-    <span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">send_text</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">room</span><span class="si">}</span><span class="s1"> from </span><span class="si">{</span><span class="n">since</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+    <span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">send_text</span><span class="p">(</span><span class="sa">f</span><span class="s1">'</span><span class="si">{</span><span class="n">room</span><span class="si">}</span><span class="s1"> from </span><span class="si">{</span><span class="n">since</span><span class="si">}</span><span class="s1">'</span><span class="p">)</span>
 </code></pre></div>
 <table>
 <thead>
@@ -5529,12 +5529,12 @@ holding a dead one.</p>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">open_pool</span><span class="p">():</span>
     <span class="n">app</span><span class="o">.</span><span class="n">state</span><span class="o">.</span><span class="n">pool</span> <span class="o">=</span> <span class="k">await</span> <span class="n">asyncpg</span><span class="o">.</span><span class="n">create_pool</span><span class="p">(</span><span class="n">DSN</span><span class="p">)</span>
 
-<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/rooms/</span><span class="si">{room}</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/rooms/</span><span class="si">{room}</span><span class="s1">'</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">chat</span><span class="p">(</span><span class="n">ws</span><span class="p">:</span> <span class="n">WebSocket</span><span class="p">,</span> <span class="n">room</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">user</span><span class="o">=</span><span class="n">Depends</span><span class="p">(</span><span class="n">current_user</span><span class="p">)):</span>
     <span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">accept</span><span class="p">()</span>
     <span class="k">async</span> <span class="k">for</span> <span class="n">message</span> <span class="ow">in</span> <span class="n">ws</span><span class="p">:</span>                       <span class="c1"># user: per connection ✓</span>
         <span class="k">async</span> <span class="k">with</span> <span class="n">app</span><span class="o">.</span><span class="n">state</span><span class="o">.</span><span class="n">pool</span><span class="o">.</span><span class="n">acquire</span><span class="p">()</span> <span class="k">as</span> <span class="n">db</span><span class="p">:</span>  <span class="c1"># db: per use ✓</span>
-            <span class="k">await</span> <span class="n">db</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s1">&#39;insert into messages …&#39;</span><span class="p">,</span> <span class="n">room</span><span class="p">,</span> <span class="n">message</span><span class="p">)</span>
+            <span class="k">await</span> <span class="n">db</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s1">'insert into messages …'</span><span class="p">,</span> <span class="n">room</span><span class="p">,</span> <span class="n">message</span><span class="p">)</span>
 </code></pre></div>
 <p><strong>Write cleanup in a <code>finally</code>.</strong> Teardown runs whenever the handler exits —
 clean close, <code>WebSocketDisconnect</code>, or an exception — but cleanup written
@@ -5552,10 +5552,10 @@ by exception far more often than a request does:</p>
 <h3 id="rejecting-a-connection">Rejecting a connection<a class="headerlink" href="#rejecting-a-connection" title="Permanent link">&para;</a></h3>
 <p>Call <code>close()</code> without accepting.  The client's <code>connect()</code> fails outright,
 rather than seeing a connection open and immediately shut:</p>
-<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/private&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/private'</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">private</span><span class="p">(</span><span class="n">ws</span><span class="p">:</span> <span class="n">WebSocket</span><span class="p">):</span>
     <span class="k">if</span> <span class="ow">not</span> <span class="n">authorized</span><span class="p">(</span><span class="n">ws</span><span class="o">.</span><span class="n">headers</span><span class="p">):</span>
-        <span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">close</span><span class="p">(</span><span class="mi">4401</span><span class="p">,</span> <span class="s1">&#39;unauthorized&#39;</span><span class="p">)</span>
+        <span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">close</span><span class="p">(</span><span class="mi">4401</span><span class="p">,</span> <span class="s1">'unauthorized'</span><span class="p">)</span>
         <span class="k">return</span>
     <span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">accept</span><span class="p">()</span>
     <span class="o">...</span>
@@ -5565,14 +5565,14 @@ rather than seeing a connection open and immediately shut:</p>
 peer left.  When you do, call <code>receive()</code> directly:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">WebSocketDisconnect</span>
 
-<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/audited&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/audited'</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">audited</span><span class="p">(</span><span class="n">ws</span><span class="p">:</span> <span class="n">WebSocket</span><span class="p">):</span>
     <span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">accept</span><span class="p">()</span>
     <span class="k">try</span><span class="p">:</span>
         <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
             <span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">send_text</span><span class="p">(</span><span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">receive_text</span><span class="p">())</span>
     <span class="k">except</span> <span class="n">WebSocketDisconnect</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
-        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;closed: </span><span class="si">%s</span><span class="s1"> </span><span class="si">%s</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">exc</span><span class="o">.</span><span class="n">code</span><span class="p">,</span> <span class="n">exc</span><span class="o">.</span><span class="n">reason</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">'closed: </span><span class="si">%s</span><span class="s1"> </span><span class="si">%s</span><span class="s1">'</span><span class="p">,</span> <span class="n">exc</span><span class="o">.</span><span class="n">code</span><span class="p">,</span> <span class="n">exc</span><span class="o">.</span><span class="n">reason</span><span class="p">)</span>
 </code></pre></div>
 <h2 id="the-raw-event-form">The raw event form<a class="headerlink" href="#the-raw-event-form" title="Permanent link">&para;</a></h2>
 <p>The <code>(conn, receive, send)</code> triplet keeps working exactly as before, and is
@@ -5581,16 +5581,16 @@ that introduced the object (v0.63.0), and there is no plan to remove it.
 Reach for it when you need to see the events themselves: writing middleware,
 driving the handshake in an unusual order, or handling an event the object
 does not model.</p>
-<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/ws-raw&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/ws-raw'</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">ws_raw</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
-    <span class="k">await</span> <span class="n">receive</span><span class="p">()</span>                          <span class="c1"># consume &#39;websocket.connect&#39;</span>
-    <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;websocket.accept&#39;</span><span class="p">})</span>
+    <span class="k">await</span> <span class="n">receive</span><span class="p">()</span>                          <span class="c1"># consume 'websocket.connect'</span>
+    <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">'type'</span><span class="p">:</span> <span class="s1">'websocket.accept'</span><span class="p">})</span>
     <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
         <span class="n">event</span> <span class="o">=</span> <span class="k">await</span> <span class="n">receive</span><span class="p">()</span>
-        <span class="k">if</span> <span class="n">event</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;websocket.disconnect&#39;</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">event</span><span class="p">[</span><span class="s1">'type'</span><span class="p">]</span> <span class="o">==</span> <span class="s1">'websocket.disconnect'</span><span class="p">:</span>
             <span class="k">break</span>
-        <span class="n">text</span> <span class="o">=</span> <span class="n">event</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;text&#39;</span><span class="p">)</span> <span class="ow">or</span> <span class="n">event</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;bytes&#39;</span><span class="p">,</span> <span class="sa">b</span><span class="s1">&#39;&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">decode</span><span class="p">()</span>
-        <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;websocket.send&#39;</span><span class="p">,</span> <span class="s1">&#39;text&#39;</span><span class="p">:</span> <span class="n">text</span><span class="p">})</span>
+        <span class="n">text</span> <span class="o">=</span> <span class="n">event</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'text'</span><span class="p">)</span> <span class="ow">or</span> <span class="n">event</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'bytes'</span><span class="p">,</span> <span class="sa">b</span><span class="s1">''</span><span class="p">)</span><span class="o">.</span><span class="n">decode</span><span class="p">()</span>
+        <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">'type'</span><span class="p">:</span> <span class="s1">'websocket.send'</span><span class="p">,</span> <span class="s1">'text'</span><span class="p">:</span> <span class="n">text</span><span class="p">})</span>
 </code></pre></div>
 <p>The two forms are the same connection seen at different levels: the object's
 methods emit exactly these events, so framing, fragmentation, and close
@@ -5602,19 +5602,19 @@ registration, by whether its signature contains both <code>receive</code> and <c
 inner handler can skip that boilerplate:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.middleware</span><span class="w"> </span><span class="kn">import</span> <span class="n">websocket</span>
 
-<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/chat&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">,</span> <span class="n">middlewares</span><span class="o">=</span><span class="p">[</span><span class="n">websocket</span><span class="p">])</span>
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/chat'</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">,</span> <span class="n">middlewares</span><span class="o">=</span><span class="p">[</span><span class="n">websocket</span><span class="p">])</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">chat</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="c1"># Connection already accepted; go straight to reading messages</span>
     <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
         <span class="n">event</span> <span class="o">=</span> <span class="k">await</span> <span class="n">receive</span><span class="p">()</span>
-        <span class="k">if</span> <span class="n">event</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;websocket.disconnect&#39;</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">event</span><span class="p">[</span><span class="s1">'type'</span><span class="p">]</span> <span class="o">==</span> <span class="s1">'websocket.disconnect'</span><span class="p">:</span>
             <span class="k">break</span>
-        <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;websocket.send&#39;</span><span class="p">,</span> <span class="s1">&#39;text&#39;</span><span class="p">:</span> <span class="n">event</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;text&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">)})</span>
+        <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">'type'</span><span class="p">:</span> <span class="s1">'websocket.send'</span><span class="p">,</span> <span class="s1">'text'</span><span class="p">:</span> <span class="n">event</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'text'</span><span class="p">,</span> <span class="s1">''</span><span class="p">)})</span>
 </code></pre></div>
 <p>It works with the <code>WebSocket</code> object too — it records the completed
 handshake on the connection, and the object adopts that state instead of
 waiting for a <code>websocket.connect</code> that has already been consumed:</p>
-<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/chat&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">,</span> <span class="n">middlewares</span><span class="o">=</span><span class="p">[</span><span class="n">websocket</span><span class="p">])</span>
+<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/chat'</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">,</span> <span class="n">middlewares</span><span class="o">=</span><span class="p">[</span><span class="n">websocket</span><span class="p">])</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">chat</span><span class="p">(</span><span class="n">ws</span><span class="p">:</span> <span class="n">WebSocket</span><span class="p">):</span>
     <span class="k">async</span> <span class="k">for</span> <span class="n">message</span> <span class="ow">in</span> <span class="n">ws</span><span class="p">:</span>        <span class="c1"># already accepted</span>
         <span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">send</span><span class="p">(</span><span class="n">message</span><span class="p">)</span>
@@ -5673,13 +5673,13 @@ as <code>TypedDict</code>s, so a type checker can narrow them on the <code>type<
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">chat</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">:</span> <span class="n">ASGIReceiveCallable</span><span class="p">,</span> <span class="n">send</span><span class="p">:</span> <span class="n">ASGISendCallable</span><span class="p">):</span>
     <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
         <span class="n">event</span> <span class="o">=</span> <span class="k">await</span> <span class="n">receive</span><span class="p">()</span>
-        <span class="k">if</span> <span class="n">event</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="n">ASGIEvent</span><span class="o">.</span><span class="n">WS_DISCONNECT</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">event</span><span class="p">[</span><span class="s1">'type'</span><span class="p">]</span> <span class="o">==</span> <span class="n">ASGIEvent</span><span class="o">.</span><span class="n">WS_DISCONNECT</span><span class="p">:</span>
             <span class="k">break</span>
-        <span class="k">if</span> <span class="n">event</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="n">ASGIEvent</span><span class="o">.</span><span class="n">WS_RECEIVE</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">event</span><span class="p">[</span><span class="s1">'type'</span><span class="p">]</span> <span class="o">==</span> <span class="n">ASGIEvent</span><span class="o">.</span><span class="n">WS_RECEIVE</span><span class="p">:</span>
             <span class="c1"># Narrowed to WebSocketReceiveEvent: `text` and `bytes` are known</span>
             <span class="c1"># keys here, and both are Optional — BlackBull always sets both,</span>
             <span class="c1"># with one of them None.</span>
-            <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;websocket.send&#39;</span><span class="p">,</span> <span class="s1">&#39;text&#39;</span><span class="p">:</span> <span class="n">event</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;text&#39;</span><span class="p">)</span> <span class="ow">or</span> <span class="s1">&#39;&#39;</span><span class="p">})</span>
+            <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">'type'</span><span class="p">:</span> <span class="s1">'websocket.send'</span><span class="p">,</span> <span class="s1">'text'</span><span class="p">:</span> <span class="n">event</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'text'</span><span class="p">)</span> <span class="ow">or</span> <span class="s1">''</span><span class="p">})</span>
 </code></pre></div>
 <p><code>FragmentAssembler</code> has already reassembled fragments by this point, so a
 <code>websocket.receive</code> event is always one complete message — which is why the
@@ -5756,7 +5756,7 @@ HTTP/1.1 for WebSocket, so most apps do not need to enable
 RFC 8441.</p>
 <h2 id="subprotocol-negotiation">Subprotocol negotiation<a class="headerlink" href="#subprotocol-negotiation" title="Permanent link">&para;</a></h2>
 <p>Register the protocols the server supports before starting:</p>
-<div class="highlight"><pre><span></span><code><span class="n">app</span><span class="o">.</span><span class="n">available_ws_protocols</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;chat&#39;</span><span class="p">,</span> <span class="s1">&#39;superchat&#39;</span><span class="p">]</span>
+<div class="highlight"><pre><span></span><code><span class="n">app</span><span class="o">.</span><span class="n">available_ws_protocols</span> <span class="o">=</span> <span class="p">[</span><span class="s1">'chat'</span><span class="p">,</span> <span class="s1">'superchat'</span><span class="p">]</span>
 </code></pre></div>
 <p>BlackBull picks the first protocol from the client's
 <code>Sec-WebSocket-Protocol</code> offer that appears in this list and
@@ -5806,12 +5806,12 @@ transparently — the app always receives one <code>websocket.receive</code>
 event containing the full payload, regardless of how many frames
 the client used.</p>
 <p>A fragmented sequence on the wire:</p>
-<div class="highlight"><pre><span></span><code>FIN=0, opcode=TEXT,  payload=b&#39;hel&#39;   ← opener
-FIN=0, opcode=0x0,   payload=b&#39;lo&#39;    ← continuation
-FIN=1, opcode=0x0,   payload=b&#39;&#39;      ← final continuation
+<div class="highlight"><pre><span></span><code>FIN=0, opcode=TEXT,  payload=b'hel'   ← opener
+FIN=0, opcode=0x0,   payload=b'lo'    ← continuation
+FIN=1, opcode=0x0,   payload=b''      ← final continuation
 </code></pre></div>
 <p>The app sees a single event:</p>
-<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;websocket.receive&#39;</span><span class="p">,</span> <span class="s1">&#39;text&#39;</span><span class="p">:</span> <span class="s1">&#39;hello&#39;</span><span class="p">,</span> <span class="s1">&#39;bytes&#39;</span><span class="p">:</span> <span class="kc">None</span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="s1">'type'</span><span class="p">:</span> <span class="s1">'websocket.receive'</span><span class="p">,</span> <span class="s1">'text'</span><span class="p">:</span> <span class="s1">'hello'</span><span class="p">,</span> <span class="s1">'bytes'</span><span class="p">:</span> <span class="kc">None</span><span class="p">}</span>
 </code></pre></div>
 <p>— or, through the <code>WebSocket</code> object, one iteration of <code>async for</code> yielding
 the <code>str</code> <code>'hello'</code>.</p>

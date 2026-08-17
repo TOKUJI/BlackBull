@@ -5323,15 +5323,15 @@ groups, and a brief pointer to WebSocket routes.</p>
 
 <span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">()</span>
 
-<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">],</span> <span class="n">path</span><span class="o">=</span><span class="s1">&#39;/tasks&#39;</span><span class="p">)</span>
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">],</span> <span class="n">path</span><span class="o">=</span><span class="s1">'/tasks'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">list_tasks</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
-    <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">Response</span><span class="p">(</span><span class="sa">b</span><span class="s1">&#39;[]&#39;</span><span class="p">))</span>
+    <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">Response</span><span class="p">(</span><span class="sa">b</span><span class="s1">'[]'</span><span class="p">))</span>
 </code></pre></div>
 <p><code>methods</code> defaults to <code>[HTTPMethod.GET]</code>.  Pass a list to accept
 multiple methods on the same handler:</p>
-<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">,</span> <span class="n">HTTPMethod</span><span class="o">.</span><span class="n">HEAD</span><span class="p">],</span> <span class="n">path</span><span class="o">=</span><span class="s1">&#39;/healthz&#39;</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">,</span> <span class="n">HTTPMethod</span><span class="o">.</span><span class="n">HEAD</span><span class="p">],</span> <span class="n">path</span><span class="o">=</span><span class="s1">'/healthz'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">healthz</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
-    <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">Response</span><span class="p">(</span><span class="sa">b</span><span class="s1">&#39;ok&#39;</span><span class="p">))</span>
+    <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">Response</span><span class="p">(</span><span class="sa">b</span><span class="s1">'ok'</span><span class="p">))</span>
 </code></pre></div>
 <p>Any valid method token is accepted, as a string or an <code>HTTPMethod</code>
 member — extension methods (<code>PROPFIND</code>, vendor tokens) route the same
@@ -5347,7 +5347,7 @@ BlackBull exports the method as a plain-string constant:</p>
 
 <span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">()</span>
 
-<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/search&#39;</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">QUERY</span><span class="p">])</span>
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/search'</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">QUERY</span><span class="p">])</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">search</span><span class="p">(</span><span class="n">body</span><span class="p">:</span> <span class="nb">bytes</span><span class="p">):</span>
     <span class="k">return</span> <span class="n">run_query</span><span class="p">(</span><span class="n">body</span><span class="p">)</span>          <span class="c1"># the whole query rides in the body</span>
 </code></pre></div>
@@ -5362,8 +5362,8 @@ rely on it.</p>
 understands and enforce them.  Pass <code>accept_query=[...]</code> to <code>route()</code>:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">BlackBull</span><span class="p">,</span> <span class="n">QUERY</span><span class="p">,</span> <span class="n">UnprocessableQuery</span>
 
-<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/search&#39;</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">QUERY</span><span class="p">],</span>
-           <span class="n">accept_query</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;application/sql&#39;</span><span class="p">,</span> <span class="s1">&#39;text/plain&#39;</span><span class="p">])</span>
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/search'</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">QUERY</span><span class="p">],</span>
+           <span class="n">accept_query</span><span class="o">=</span><span class="p">[</span><span class="s1">'application/sql'</span><span class="p">,</span> <span class="s1">'text/plain'</span><span class="p">])</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">search</span><span class="p">(</span><span class="n">body</span><span class="p">:</span> <span class="nb">bytes</span><span class="p">):</span>
     <span class="k">try</span><span class="p">:</span>
         <span class="n">plan</span> <span class="o">=</span> <span class="n">compile_query</span><span class="p">(</span><span class="n">body</span><span class="p">)</span>
@@ -5401,9 +5401,9 @@ route still receive the <code>Accept-Query</code> header but are not Content-Typ
 <p>Use <code>{name}</code> segments in the path string.  Captured values are
 available as <code>conn.path_params</code> (and, in the simplified form,
 injected as named arguments):</p>
-<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/tasks/</span><span class="si">{task_id}</span><span class="s1">&#39;</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/tasks/</span><span class="si">{task_id}</span><span class="s1">'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_task</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
-    <span class="n">task_id</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">path_params</span><span class="p">[</span><span class="s1">&#39;task_id&#39;</span><span class="p">]</span>       <span class="c1"># str (default converter)</span>
+    <span class="n">task_id</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">path_params</span><span class="p">[</span><span class="s1">'task_id'</span><span class="p">]</span>       <span class="c1"># str (default converter)</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">Response</span><span class="p">(</span><span class="n">task_id</span><span class="o">.</span><span class="n">encode</span><span class="p">()))</span>
 </code></pre></div>
 <p><code>{name}</code> (no converter) matches <code>[^/]+</code> and injects a <code>str</code>.  Append
@@ -5415,9 +5415,9 @@ the captured values are injected into <code>conn.path_params</code> — the
 same place as <code>{name}</code> parameters:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
 
-<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s1">&#39;^/items/(?P&lt;id&gt;\d+)$&#39;</span><span class="p">))</span>
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s1">'^/items/(?P&lt;id&gt;\d+)$'</span><span class="p">))</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_item</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
-    <span class="n">item_id</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">path_params</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">]</span>
+    <span class="n">item_id</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">path_params</span><span class="p">[</span><span class="s1">'id'</span><span class="p">]</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">Response</span><span class="p">(</span><span class="n">item_id</span><span class="o">.</span><span class="n">encode</span><span class="p">()))</span>
 </code></pre></div>
 <h2 id="typed-routes">Typed routes<a class="headerlink" href="#typed-routes" title="Permanent link">&para;</a></h2>
@@ -5457,17 +5457,17 @@ pattern and the Python type injected into the handler:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">uuid</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">http</span><span class="w"> </span><span class="kn">import</span> <span class="n">HTTPMethod</span>
 
-<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/items/{id:int}&#39;</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">)</span>
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/items/{id:int}'</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_item</span><span class="p">(</span><span class="nb">id</span><span class="p">:</span> <span class="nb">int</span><span class="p">):</span>
-    <span class="k">return</span> <span class="p">{</span><span class="s1">&#39;id&#39;</span><span class="p">:</span> <span class="nb">id</span><span class="p">}</span>            <span class="c1"># id is already int, not a string</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s1">'id'</span><span class="p">:</span> <span class="nb">id</span><span class="p">}</span>            <span class="c1"># id is already int, not a string</span>
 
-<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/users/{uid:uuid}&#39;</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">)</span>
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/users/{uid:uuid}'</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_user</span><span class="p">(</span><span class="n">uid</span><span class="p">:</span> <span class="n">uuid</span><span class="o">.</span><span class="n">UUID</span><span class="p">):</span>
-    <span class="k">return</span> <span class="p">{</span><span class="s1">&#39;uid&#39;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">uid</span><span class="p">)}</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s1">'uid'</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">uid</span><span class="p">)}</span>
 
-<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/files/{rest:path}&#39;</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">)</span>
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/files/{rest:path}'</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_file</span><span class="p">(</span><span class="n">rest</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>   <span class="c1"># rest may contain slashes</span>
-    <span class="k">return</span> <span class="p">{</span><span class="s1">&#39;path&#39;</span><span class="p">:</span> <span class="n">rest</span><span class="p">}</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s1">'path'</span><span class="p">:</span> <span class="n">rest</span><span class="p">}</span>
 </code></pre></div>
 <p>Using <code>{id:int}</code> means a request to <code>/items/abc</code> returns 404 (the
 router doesn't match) rather than being routed in and then failing
@@ -5475,11 +5475,11 @@ to convert.</p>
 <h3 id="url-reverse-lookup">URL reverse lookup<a class="headerlink" href="#url-reverse-lookup" title="Permanent link">&para;</a></h3>
 <p>Register a route with a <code>name=</code> keyword, then build its path from
 parameters:</p>
-<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/items/{id:int}&#39;</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s1">&#39;item-detail&#39;</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/items/{id:int}'</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s1">'item-detail'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_item</span><span class="p">(</span><span class="nb">id</span><span class="p">:</span> <span class="nb">int</span><span class="p">):</span>
-    <span class="k">return</span> <span class="p">{</span><span class="s1">&#39;id&#39;</span><span class="p">:</span> <span class="nb">id</span><span class="p">}</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s1">'id'</span><span class="p">:</span> <span class="nb">id</span><span class="p">}</span>
 
-<span class="n">app</span><span class="o">.</span><span class="n">url_path_for</span><span class="p">(</span><span class="s1">&#39;item-detail&#39;</span><span class="p">,</span> <span class="nb">id</span><span class="o">=</span><span class="mi">42</span><span class="p">)</span>   <span class="c1"># → &#39;/items/42&#39;</span>
+<span class="n">app</span><span class="o">.</span><span class="n">url_path_for</span><span class="p">(</span><span class="s1">'item-detail'</span><span class="p">,</span> <span class="nb">id</span><span class="o">=</span><span class="mi">42</span><span class="p">)</span>   <span class="c1"># → '/items/42'</span>
 </code></pre></div>
 <p><code>url_path_for</code> raises <code>KeyError</code> for unknown names and <code>ValueError</code>
 when required parameters are missing.</p>
@@ -5504,26 +5504,26 @@ raises <code>RuntimeError</code>.</p>
 
 <span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">()</span>
 
-<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/greet/{name:str}&#39;</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s1">&#39;greet&#39;</span><span class="p">)</span>
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/greet/{name:str}'</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s1">'greet'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">greet</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
-    <span class="k">return</span> <span class="sa">f</span><span class="s1">&#39;Hello, </span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s1">!&#39;</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s1">'Hello, </span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s1">!'</span>
 
-<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/double/{n:int}&#39;</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s1">&#39;double&#39;</span><span class="p">)</span>
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/double/{n:int}'</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s1">'double'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">double</span><span class="p">(</span><span class="n">n</span><span class="p">:</span> <span class="nb">int</span><span class="p">):</span>
-    <span class="k">return</span> <span class="p">{</span><span class="s1">&#39;input&#39;</span><span class="p">:</span> <span class="n">n</span><span class="p">,</span> <span class="s1">&#39;result&#39;</span><span class="p">:</span> <span class="n">n</span> <span class="o">*</span> <span class="mi">2</span><span class="p">}</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s1">'input'</span><span class="p">:</span> <span class="n">n</span><span class="p">,</span> <span class="s1">'result'</span><span class="p">:</span> <span class="n">n</span> <span class="o">*</span> <span class="mi">2</span><span class="p">}</span>
 
-<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>
-    <span class="nb">print</span><span class="p">(</span><span class="n">app</span><span class="o">.</span><span class="n">url_path_for</span><span class="p">(</span><span class="s1">&#39;greet&#39;</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s1">&#39;Alice&#39;</span><span class="p">))</span>   <span class="c1"># /greet/Alice</span>
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s1">'__main__'</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">app</span><span class="o">.</span><span class="n">url_path_for</span><span class="p">(</span><span class="s1">'greet'</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s1">'Alice'</span><span class="p">))</span>   <span class="c1"># /greet/Alice</span>
     <span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">port</span><span class="o">=</span><span class="mi">8000</span><span class="p">)</span>
 </code></pre></div>
 <p>A failing example:</p>
-<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/double/{n:int}&#39;</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/double/{n:int}'</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">double</span><span class="p">(</span><span class="n">n</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>      <span class="c1"># converter is int, annotation is str</span>
-    <span class="k">return</span> <span class="sa">f</span><span class="s1">&#39;double of </span><span class="si">{</span><span class="n">n</span><span class="si">}</span><span class="s1">&#39;</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s1">'double of </span><span class="si">{</span><span class="n">n</span><span class="si">}</span><span class="s1">'</span>
 </code></pre></div>
 <p>Output before the server binds:</p>
-<div class="highlight"><pre><span></span><code>ConfigurationError: Route &#39;/double/{n:int}&#39; param &#39;n&#39;: converter &#39;int&#39; yields &#39;int&#39;
-but annotation is &lt;class &#39;str&#39;&gt;: int is not an instance of str
+<div class="highlight"><pre><span></span><code>ConfigurationError: Route '/double/{n:int}' param 'n': converter 'int' yields 'int'
+but annotation is &lt;class 'str'&gt;: int is not an instance of str
 </code></pre></div>
 <h2 id="route-groups">Route groups<a class="headerlink" href="#route-groups" title="Permanent link">&para;</a></h2>
 <p><code>app.group(middlewares=[...])</code> returns a <code>RouteGroup</code> whose
@@ -5532,18 +5532,18 @@ registered through it.</p>
 <div class="highlight"><pre><span></span><code><span class="n">public</span>    <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="n">middlewares</span><span class="o">=</span><span class="p">[</span><span class="n">error_mw</span><span class="p">,</span> <span class="n">logging_mw</span><span class="p">])</span>
 <span class="n">protected</span> <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="n">middlewares</span><span class="o">=</span><span class="p">[</span><span class="n">error_mw</span><span class="p">,</span> <span class="n">logging_mw</span><span class="p">,</span> <span class="n">auth_mw</span><span class="p">])</span>
 
-<span class="nd">@public</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">],</span> <span class="n">path</span><span class="o">=</span><span class="s1">&#39;/&#39;</span><span class="p">)</span>
+<span class="nd">@public</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">],</span> <span class="n">path</span><span class="o">=</span><span class="s1">'/'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">index</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
-    <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">Response</span><span class="p">(</span><span class="sa">b</span><span class="s1">&#39;&lt;h1&gt;Login&lt;/h1&gt;&#39;</span><span class="p">))</span>
+    <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">Response</span><span class="p">(</span><span class="sa">b</span><span class="s1">'&lt;h1&gt;Login&lt;/h1&gt;'</span><span class="p">))</span>
 
-<span class="nd">@protected</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">],</span> <span class="n">path</span><span class="o">=</span><span class="s1">&#39;/tasks&#39;</span><span class="p">)</span>
+<span class="nd">@protected</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">],</span> <span class="n">path</span><span class="o">=</span><span class="s1">'/tasks'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_tasks</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="k">return</span> <span class="p">[]</span>                               <span class="c1"># → JSONResponse</span>
 </code></pre></div>
 <p>Per-route <code>middlewares=[...]</code> are <strong>appended after</strong> the group
 middlewares:</p>
 <div class="highlight"><pre><span></span><code><span class="c1"># Effective chain: error_mw → logging_mw → auth_mw → json_body_mw → create_task</span>
-<span class="nd">@protected</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">POST</span><span class="p">],</span> <span class="n">path</span><span class="o">=</span><span class="s1">&#39;/tasks&#39;</span><span class="p">,</span>
+<span class="nd">@protected</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">POST</span><span class="p">],</span> <span class="n">path</span><span class="o">=</span><span class="s1">'/tasks'</span><span class="p">,</span>
                  <span class="n">middlewares</span><span class="o">=</span><span class="p">[</span><span class="n">json_body_mw</span><span class="p">])</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">create_task</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="o">...</span>
@@ -5553,7 +5553,7 @@ middlewares:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">WebSocket</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">Scheme</span>
 
-<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/ws&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/ws'</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">ws_handler</span><span class="p">(</span><span class="n">ws</span><span class="p">:</span> <span class="n">WebSocket</span><span class="p">):</span>
     <span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">accept</span><span class="p">()</span>
     <span class="k">async</span> <span class="k">for</span> <span class="n">message</span> <span class="ow">in</span> <span class="n">ws</span><span class="p">:</span>

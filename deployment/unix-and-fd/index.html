@@ -5135,7 +5135,7 @@ blackbull<span class="w"> </span>myapp:app<span class="w"> </span>--bind<span cl
 upstream<span class="w"> </span>blackbull<span class="w"> </span><span class="o">{</span><span class="w"> </span>server<span class="w"> </span>unix:/run/blackbull.sock<span class="p">;</span><span class="w"> </span><span class="o">}</span>
 </code></pre></div>
 <div class="highlight"><pre><span></span><code><span class="c1"># In Python</span>
-<span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">unix_path</span><span class="o">=</span><span class="s1">&#39;/run/blackbull.sock&#39;</span><span class="p">)</span>
+<span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">unix_path</span><span class="o">=</span><span class="s1">'/run/blackbull.sock'</span><span class="p">)</span>
 </code></pre></div>
 <p>The socket file is created with mode <code>0660</code> so a reverse proxy
 running in the same group can connect without a <code>chmod</code>.  A

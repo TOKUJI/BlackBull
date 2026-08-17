@@ -5161,7 +5161,7 @@ only.</p>
 <p>Install the <code>reload</code> extra — it pulls in
 <a href="https://watchfiles.helpmanual.io/"><code>watchfiles</code></a>, the
 notify-driven file watcher:</p>
-<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span><span class="s1">&#39;blackbull[reload]&#39;</span>
+<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span><span class="s1">'blackbull[reload]'</span>
 </code></pre></div>
 <h2 id="use">Use<a class="headerlink" href="#use" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="c1"># Watch the current working directory</span>
@@ -5172,7 +5172,7 @@ blackbull<span class="w"> </span>myapp:app<span class="w"> </span>--reload<span 
 
 <span class="c1"># In Python</span>
 app.run<span class="o">(</span><span class="nv">port</span><span class="o">=</span><span class="m">8000</span>,<span class="w"> </span><span class="nv">reload</span><span class="o">=</span>True<span class="o">)</span>
-app.run<span class="o">(</span><span class="nv">port</span><span class="o">=</span><span class="m">8000</span>,<span class="w"> </span><span class="nv">reload</span><span class="o">=</span>True,<span class="w"> </span><span class="nv">reload_paths</span><span class="o">=[</span><span class="s1">&#39;src&#39;</span>,<span class="w"> </span><span class="s1">&#39;templates&#39;</span><span class="o">])</span>
+app.run<span class="o">(</span><span class="nv">port</span><span class="o">=</span><span class="m">8000</span>,<span class="w"> </span><span class="nv">reload</span><span class="o">=</span>True,<span class="w"> </span><span class="nv">reload_paths</span><span class="o">=[</span><span class="s1">'src'</span>,<span class="w"> </span><span class="s1">'templates'</span><span class="o">])</span>
 </code></pre></div>
 <h2 id="how-it-works">How it works<a class="headerlink" href="#how-it-works" title="Permanent link">&para;</a></h2>
 <p>When <code>--reload</code> is on, BlackBull's master process:</p>
@@ -5193,7 +5193,7 @@ attributed rather than guessed at:</p>
 <div class="highlight"><pre><span></span><code>auto-reload: watching /srv/app for *.py changes     # watcher armed
 auto-reload: change detected in /srv/app/views.py   # watcher saw the save
 reload: change detected — recycling workers         # master acted on it
-reload: execv /usr/bin/python argv=[...]            # master re-exec&#39;d
+reload: execv /usr/bin/python argv=[...]            # master re-exec'd
 </code></pre></div>
 <p>A missing line names the stage that stalled: no <code>change detected</code>
 means the watcher never saw the edit (see the clock caveat below);
