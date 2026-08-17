@@ -198,6 +198,32 @@ have already been imported will not activate `@log` logging for
 already-decorated functions.  Configure `DEBUG` level before
 importing framework modules, or restart the process.
 
+### The same applies to internal `DEBUG` logging
+
+Framework modules on a per-request path — request dispatch, HTTP/2
+frame parsing, the response senders — read the `DEBUG` level once
+at import and branch on the result, for the same reason `@log`
+does.  A `logger.debug(...)` call that emits nothing is not free:
+the call happens, its arguments are built, and the level is
+checked, which measured at 24 bytecode instructions per site.
+HTTP/2 was making twenty such calls per request.
+
+So **configure `DEBUG` before importing `blackbull`** if you want
+internal debug output:
+
+```python
+import logging
+logging.basicConfig(level=logging.DEBUG)   # before the import below
+
+from blackbull import BlackBull
+```
+
+Raising the level afterwards still affects `WARNING`/`ERROR` and
+the access log, which are checked per call as usual; it will not
+switch on the per-request `DEBUG` traces.  Those paths emit around
+twenty lines per request, so they are a development setting rather
+than something to enable on a running server.
+
 ## Forwarding logs to a remote server
 
 `logging.Handler.emit()` is synchronous.  Calling a blocking HTTP

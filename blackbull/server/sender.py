@@ -27,7 +27,13 @@ from ..asgi import (
 from ..headers import Headers, HeaderList
 from ..native import NativeResponse, NativeWSMessage
 
+from ..logger import debug_gate  # noqa: E402
 logger = logging.getLogger(__name__)
+#: Read once at import: a disabled ``logger.debug`` on a per-request path
+#: costs 24 executed instructions to emit nothing.  Same bargain as
+#: ``@log`` — see :func:`blackbull.logger.debug_gate`.
+_DEBUG = debug_gate(logger)
+
 
 _CRLF = b'\r\n'
 
@@ -332,9 +338,10 @@ class AsyncioWriter(AbstractWriter):
             # (SSL aborted, FD already reaped by a sibling task, etc.);
             # swallowing here lets us still raise ConnectionResetError
             # below so the peer-disconnect handling runs uniformly.
-            logger.debug(
-                'write timeout: transport.close() also failed (%s) — '
-                'continuing with ConnectionResetError', close_exc)
+            if _DEBUG:
+                logger.debug(
+                    'write timeout: transport.close() also failed (%s) — '
+                    'continuing with ConnectionResetError', close_exc)
         raise ConnectionResetError(
             f'write timeout after {self._write_timeout:.1f}s'
         ) from None
@@ -517,12 +524,14 @@ class BaseSender(ABC):
             await write_fn(arg)
         except (ConnectionResetError, BrokenPipeError) as exc:
             self._closed = True
-            logger.debug('sender: peer closed write side (%s)', exc.__class__.__name__)
+            if _DEBUG:
+                logger.debug('sender: peer closed write side (%s)', exc.__class__.__name__)
         except OSError as exc:
             # SSLEOFError / SSLZeroReturnError land here on TLS connections
             # whose peer dropped without a proper close-notify.
             self._closed = True
-            logger.debug('sender: write failed on closed TLS transport (%s)', exc.__class__.__name__)
+            if _DEBUG:
+                logger.debug('sender: write failed on closed TLS transport (%s)', exc.__class__.__name__)
 
     async def _write(self, data: bytes):
         """Flush *data* through the writer (peer-close tolerant)."""
@@ -1417,7 +1426,8 @@ class HTTP2Sender(BaseSender):
                        headers: HeaderList = []):
         # Control-plane: raw frame object (SETTINGS, PING ACK, WINDOW_UPDATE, …)
         if isinstance(body, FrameBase):
-            logger.debug('HTTP2Sender raw frame: %r', body)
+            if _DEBUG:
+                logger.debug('HTTP2Sender raw frame: %r', body)
             await self._write(body.save())
             return
 
@@ -1507,7 +1517,8 @@ class HTTP2Sender(BaseSender):
 
         elif isinstance(body, dict):
             event_type = body.get('type', '')
-            logger.debug('HTTP2Sender event: %r', event_type)
+            if _DEBUG:
+                logger.debug('HTTP2Sender event: %r', event_type)
 
             # RFC 9113 §8.1 — frames after END_STREAM are a protocol error.
             # Drop the event with a warning rather than writing a frame that

@@ -14,7 +14,7 @@ from typing import Protocol, runtime_checkable
 
 from ..actor import Actor, Message
 from ..event_aggregator import EventAggregator
-from ..logger import log
+from ..logger import log, debug_gate
 from ..protocol.frame import FrameFactory
 from ..protocol.frame_types import (
     ErrorCodes, FrameBase, FrameTypes,
@@ -43,6 +43,11 @@ from ..asgi import (ASGIEvent, ASGIReceiveCallable, ASGISendCallable,
 from .http1_actor import RequestActor
 
 logger = logging.getLogger(__name__)
+#: Read once at import: a disabled ``logger.debug`` on a per-request path
+#: costs 24 executed instructions to emit nothing.  Same bargain as
+#: ``@log`` — see :func:`blackbull.logger.debug_gate`.
+_DEBUG = debug_gate(logger)
+
 
 
 @runtime_checkable
@@ -570,8 +575,9 @@ class HTTP2Actor(Actor):
             try:
                 await self.send_frame(self.factory.window_update(0, balance))
             except Exception:
-                logger.debug('post-stream connection credit replay failed',
-                             exc_info=True)
+                if _DEBUG:
+                    logger.debug('post-stream connection credit replay failed',
+                                 exc_info=True)
 
         # Callers may be sync done-callbacks — schedule the replay.  Prefer
         # the connection TaskGroup so run() awaits it; fall back to a bare
@@ -684,8 +690,9 @@ class HTTP2Actor(Actor):
         except Exception:
             # The writer may already be closed (e.g. peer hung up).  We
             # have done our part; let the frame loop drain.
-            logger.debug('writer.close raised on connection-error path',
-                         exc_info=True)
+            if _DEBUG:
+                logger.debug('writer.close raised on connection-error path',
+                             exc_info=True)
 
     def _make_done_cb(
         self, stream_id: int, *, is_ws: bool = False,
@@ -914,8 +921,9 @@ class HTTP2Actor(Actor):
     async def _probe_peer(self) -> None:
         """Ask a silent peer whether it is still there (RFC 9113 §6.7)."""
         self._probe_sent_at = asyncio.get_running_loop().time()
-        logger.debug('HTTP/2 idle %.1fs — probing with PING',
-                     self._h2_idle_timeout)
+        if _DEBUG:
+            logger.debug('HTTP/2 idle %.1fs — probing with PING',
+                         self._h2_idle_timeout)
         with contextlib.suppress(Exception):
             await self.send_frame(self.factory.create(
                 FrameTypes.PING, 0, 0, data=b'\x00' * 8))
@@ -1366,8 +1374,9 @@ class HTTP2Actor(Actor):
         # parse_payload sets the flag for field-level violations; parse_headers
         # sets it for missing/empty required pseudo-headers.
         if getattr(frame, 'malformed', False):
-            logger.debug('Stream %d malformed HEADERS — %s',
-                         stream.stream_id, frame.malformed_reason)
+            if _DEBUG:
+                logger.debug('Stream %d malformed HEADERS — %s',
+                             stream.stream_id, frame.malformed_reason)
             await self.send_frame(
                 self.factory.rst_stream(stream.stream_id, ErrorCodes.PROTOCOL_ERROR))
             return True
@@ -1494,8 +1503,9 @@ class HTTP2Actor(Actor):
         # RFC 9113 §8.1.1 / §8.2.1 — same malformed-HEADERS check as the direct
         # HEADERS path; reject with RST_STREAM PROTOCOL_ERROR.
         if getattr(header_frame, 'malformed', False):
-            logger.debug('Stream %d malformed HEADERS (via CONTINUATION) — %s',
-                         stream.stream_id, header_frame.malformed_reason)
+            if _DEBUG:
+                logger.debug('Stream %d malformed HEADERS (via CONTINUATION) — %s',
+                             stream.stream_id, header_frame.malformed_reason)
             await self.send_frame(
                 self.factory.rst_stream(stream.stream_id, ErrorCodes.PROTOCOL_ERROR))
             return True
