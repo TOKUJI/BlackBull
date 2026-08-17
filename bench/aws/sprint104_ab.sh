@@ -204,6 +204,17 @@ REF_BASE="$REF_BASE" REF_TREAT="$REF_TREAT" PATHSPEC=blackbull/ \
     THREADS="$THREADS" CONNS="$CONNS" PORT="$PORT" \
     bash "$(dirname "$0")/ab.sh" launch || exit 1
 
+# From here the instance holds data that exists nowhere else: the runner is
+# nohup'd on the box and writes raw.tsv there, and nothing has been pulled yet.
+# So the EXIT trap must stop tearing down.  Without this, a signal to this
+# driver — the agent driving it being stopped, a terminal closing — runs
+# down.sh and destroys an hour of measurement that was otherwise complete and
+# recoverable.  The instance's own scheduled poweroff plus terminate-on-
+# shutdown remain the backstop, so nothing is orphaned either way; the choice
+# here is only between "lose the data now" and "keep it until someone pulls
+# it, or the timer fires".
+TEARDOWN_SKIP=1
+
 echo ">>> bench/aws/ab.sh finish (TEARDOWN=0 — the EXIT trap owns teardown) ..."
 AB_POLLS="$AB_POLLS" AB_POLL_INTERVAL="$AB_POLL_INTERVAL" \
     TEARDOWN=0 bash "$(dirname "$0")/ab.sh" finish
@@ -217,6 +228,11 @@ if [ "$finish_rc" != "0" ]; then
     TEARDOWN_SKIP=1
     exit 3
 fi
+
+# finish pulled the results, so they now exist locally and the instance is
+# expendable again — re-arm the trap so a normal completion still tears down
+# rather than leaving a box idling until its poweroff timer.
+TEARDOWN_SKIP=0
 
 # ---------------------------------------------------------------------------
 # Step 4 — local analysis (EC2 is monomodal: pooled Welch + round-paired,
