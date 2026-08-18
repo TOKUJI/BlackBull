@@ -308,11 +308,9 @@ no red-team exercise, no volumetric-DoS protection.
   figure confirmed on EC2.
 
   Attribution then moved to counting *executed instructions* per request, which
-  is exact where this box's timing is not.  It said two things worth recording.
-  About **40 % of the added cost was not the limits at all** but the receive
-  path's ownership split, which shipped in the same window; and the HTTP/2
-  instruction ratio (+1.85 %) matched that lane's measured throughput loss
-  exactly, so the count is a usable stand-in for it.
+  is deterministic where this box's timing is not.  Its most useful finding:
+  about **40 % of the added cost was not the limits at all** but the receive
+  path's ownership split, which shipped in the same window.
 
   Four further changes brought the instruction cost against `v0.76.1` from
   +2.23 % to +0.19 % on `/conn` and from +1.85 % to +0.29 % on HTTP/2 — the
@@ -321,12 +319,16 @@ no red-team exercise, no volumetric-DoS protection.
   confirmed both lanes are **bounded within ±1 %** of `v0.76.1`, which is the
   bound the original regression was measured against, but did not reach the
   stricter ±0.5 % target: HTTP/2 `/1kb` keeps a real, CI-confirmed residual of
-  **−0.35 % to −0.42 %** (91–89 % of the original −3.75 % recovered) that
-  matches the instruction-count prediction closely; `/conn` did not resolve
-  either way — its confidence interval cannot rule out zero or a cost
-  approaching −1 % at every trim level but one, though a regression larger
-  than 1 % is excluded.  Neither is release-blocking on this evidence;
-  further reduction remains an open, non-blocking candidate.
+  **−0.35 % to −0.42 %** (91–89 % of the original −3.75 % recovered);
+  `/conn` did not resolve either way — its confidence interval cannot rule out
+  zero or a cost approaching −1 % at every trim level but one, though a
+  regression larger than 1 % is excluded.  Neither is release-blocking on this
+  evidence; further reduction remains an open, non-blocking candidate.
+
+  The instruction count under-predicted both lanes (by 1.2–1.5× on HTTP/2 and
+  1.6–2.4× on `/conn`) — it counts Python bytecode, not the C-level work,
+  syscalls, allocation and GC underneath it.  Treat any "N % of the lane"
+  figure derived from it as a **lower bound**, not an estimate.
 
   What the limits themselves now cost, and what was taken back:
   - the declared-body check reads the length `_validate_message_framing`
