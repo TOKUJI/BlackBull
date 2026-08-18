@@ -34,7 +34,7 @@ Named non-goals — real limits, not oversights:
 | Connection slots | opening connections and holding them | `BB_MAX_CONNECTIONS`, plus idle and header deadlines |
 | Task slots | opening HTTP/2 streams | `BB_H2_MAX_CONCURRENT_STREAMS`, per-connection handler semaphore |
 | Write path | requesting a response and refusing to read it | `BB_WRITE_TIMEOUT`, on the socket drain *and* on the HTTP/2 flow-control wait |
-| Broker state | subscribing without acknowledging; retaining messages | `BB_MQTT_MAX_QUEUED_MESSAGES`, `BB_MQTT_MAX_RETAINED` |
+| Broker state | subscribing without acknowledging; subscribing to endless filters; retaining messages; leaving sessions behind | `BB_MQTT_MAX_QUEUED_MESSAGES`, `BB_MQTT_MAX_SUBSCRIPTIONS`, `BB_MQTT_MAX_RETAINED`, `BB_MQTT_MAX_SESSIONS` |
 
 ## The invariant
 
@@ -58,7 +58,7 @@ pieces. Each row below names the knob for each column.
 | WebSocket frame | `BB_WS_MAX_FRAME_PAYLOAD` 64 MiB | — | — |
 | WebSocket message | per frame | `BB_WS_MAX_MESSAGE_SIZE` 16 MiB | — *(see qualification 3)* |
 | MQTT packet | `BB_MQTT_MAX_PACKET_SIZE` 1 MiB | same, before buffering | keep-alive × 1.5 |
-| MQTT session state | 16-bit packet-identifier space | `BB_MQTT_MAX_QUEUED_MESSAGES` 1000 | session expiry |
+| MQTT session state | `BB_MQTT_MAX_SUBSCRIPTIONS` 1000, `BB_MQTT_MAX_QUEUED_MESSAGES` 1000, 16-bit packet-identifier space | `BB_MQTT_MAX_SESSIONS` 10000 | Session Expiry Interval, swept *(see qualification 4)* |
 | MQTT retained store | — | `BB_MQTT_MAX_RETAINED` 10000 | — |
 | Connections | — | `BB_MAX_CONNECTIONS` (derived) | detect deadline, keep-alive |
 
@@ -107,9 +107,9 @@ Three rungs, and the difference between them is what an operator has to do:
 | HTTP/2 | `bounded-by-default` | includes control-frame rate metering and PING-based liveness |
 | gRPC | `bounded-by-default` | own message bounds, plus everything HTTP/2 provides |
 | WebSocket | `bounded-by-default` | message bounded post-reassembly and post-inflation; see qualification 3 |
-| MQTT | `bounded-by-default` | limits are also *advertised* in CONNACK, so conforming clients stay inside them |
+| MQTT | `bounded-by-default` | limits are also *advertised* in CONNACK, so conforming clients stay inside them; see qualification 4 |
 
-**Three qualifications, stated here rather than in a footnote**, because they
+**Four qualifications, stated here rather than in a footnote**, because they
 are the difference between the label and the whole truth:
 
 1. **There is no total request-duration bound by default.**
@@ -138,6 +138,15 @@ are the difference between the label and the whole truth:
    If you serve WebSocket to untrusted peers, set `BB_MAX_CONNECTIONS`
    explicitly, and send application-level pings from your handler if you need
    dead peers evicted sooner.
+
+4. **An MQTT session that never expires is bounded by the total, not by the
+   clock.** §3.1.2.11.2 defines a Session Expiry Interval of `0xFFFFFFFF` as
+   *does not expire*, and BlackBull honours it. Such a session is collected by
+   nothing; what bounds it is `BB_MQTT_MAX_SESSIONS`, at which a CONNECT for an
+   unknown Client Identifier is refused with `0x97 (Quota Exceeded)`. Sessions
+   with a finite interval are swept by a timer armed at the earliest pending
+   deadline, so they cost nothing while none is pending. Sessions live in
+   memory only and do not survive a restart.
 
 ## Defaults and deployment checklist
 
@@ -179,6 +188,7 @@ Every claim on this page is backed by a test or an external conformance suite.
 | A slow drip is closed at the shipped default | `tests/conformance/http1/test_rfc9112_slowloris.py::TestBodyTrickle` |
 | WebSocket message bounds, including that a bomb is never materialised | `tests/unit/test_ws_message_bounds.py` |
 | MQTT packet, backlog and retained-store bounds | `tests/unit/test_mqtt_resource_bounds.py` |
+| MQTT session count, subscription count and expiry sweep | `tests/unit/test_mqtt_session_bounds.py` |
 | HTTP/2 time bounds, including that a responsive peer is never closed | `tests/unit/test_h2_time_bounds.py` |
 | Frame-rate metering | `tests/unit/test_rate_window.py`, `tests/unit/test_frame_rate_metering.py` |
 | Derived connection cap | `tests/unit/test_max_connections_default.py` |

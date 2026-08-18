@@ -78,12 +78,14 @@ The following are in scope for security reports:
   one: the request body by total size and by delivery rate
   (`BB_MAX_BODY_SIZE`, `BB_MIN_BODY_RATE`), the WebSocket message a
   handler receives — reassembled *and* inflated
-  (`BB_WS_MAX_MESSAGE_SIZE`), the MQTT packet, outbound queue and
-  retained store, the HTTP/2 time bounds (`BB_H2_IDLE_TIMEOUT`,
+  (`BB_WS_MAX_MESSAGE_SIZE`), the MQTT packet, outbound queue,
+  retained store and session state (`BB_MQTT_MAX_SUBSCRIPTIONS`,
+  `BB_MQTT_MAX_SESSIONS`, and the Session Expiry Interval the client
+  declares), the HTTP/2 time bounds (`BB_H2_IDLE_TIMEOUT`,
   `BB_HEADER_TIMEOUT`), the per-type control-frame rate
   (`BB_FRAME_RATE_LIMIT`), and the connection cap
   (`BB_MAX_CONNECTIONS`).  `docs/about/security-model.md` states what
-  each one guarantees and the two qualifications on those guarantees.
+  each one guarantees and the qualifications on those guarantees.
   A path that grows without a bound, or past a configured one, is a
   security report.
 - Middleware shipped in `blackbull/middleware/` (Compression,

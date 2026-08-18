@@ -159,6 +159,22 @@ so the editable install's metadata catches up.
   live: 146 tests, 145 passed, 1 skipped, 0 failed.
   The Rapid Reset budget was a class constant (`HTTP2Actor._RST_RATE_LIMIT`,
   20/s); it is now this knob, at the same default.
+- **`BB_MQTT_MAX_SUBSCRIPTIONS`** (default `1000`) and
+  **`BB_MQTT_MAX_SESSIONS`** (default `10000`) — the unit and total bounds on
+  MQTT session state, which had neither.  A session's Topic Filter list was
+  appended to without limit, so one connected client could grow broker memory
+  (and, with it, the per-PUBLISH routing walk) without opening a second
+  connection; and the session table itself had no cap, which matters because
+  §3.1.2.11.2 defines a Session Expiry Interval of `0xFFFFFFFF` as *does not
+  expire* — a peer cycling Client Identifiers could pin one entry per
+  identifier while breaking no rule.  At the subscription cap a **new** filter
+  is refused with `0x97 (Quota Exceeded)` in the SUBACK (§3.9.3) while
+  re-subscribing to one the session already holds still works, since §3.8.4
+  makes that a replacement; at the session cap a CONNECT for an **unknown**
+  Client Identifier is refused with `0x97` in the CONNACK and the connection
+  closed, while a client resuming a session already in the table is admitted,
+  because refusing it frees nothing.  Both log to `blackbull.caps`; `0`
+  disables either.
 
 ### Security
 
@@ -374,6 +390,24 @@ no red-team exercise, no volumetric-DoS protection.
   the period it states; the frame-rate meters and the body-cap state were
   likewise left, because they are the checks rather than the way they are
   written.
+
+### Fixed
+
+- **MQTT Session Expiry Interval is now enforced.**  `_expiry` was recorded on
+  CONNECT and read in exactly one place — a `<= 0` test at detach — so every
+  session that declared a non-zero interval was retained for the life of the
+  process.  Sessions with a finite interval are now removed when it elapses,
+  driven by a single one-shot timer armed at the earliest pending deadline, so
+  a broker with nothing pending holds no timer at all.  Three consequences of
+  the same defect are fixed with it: a reconnect took `max(old, new)` of the
+  intervals, so one CONNECT at `0xFFFFFFFF` pinned the session permanently and
+  the client could never shorten it (§3.1.2.11.2 makes the new value the
+  session's value); a reconnect to an elapsed session answered
+  `session_present=True` and replayed its unacknowledged messages, resurrecting
+  deliveries the client had already accounted for; and `DISCONNECT` carried a
+  Session Expiry Interval (§3.14.2.2.2) that never reached the broker — it is
+  now honoured when it shortens the interval and refused when it would raise a
+  zero one, which that section makes a Protocol Error.
 
 ## [0.76.1] — 2026-08-14
 

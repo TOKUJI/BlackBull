@@ -323,6 +323,30 @@ BB_MQTT_MAX_RETAINED
     stored must use QoS ≥ 1.  The operator sees every refusal in the
     ``blackbull.caps`` log regardless.  ``0`` disables the cap.  Default:
     ``10000``.
+BB_MQTT_MAX_SUBSCRIPTIONS
+    Maximum Topic Filters one session may hold — the *unit* bound on
+    session state, whose total is ``BB_MQTT_MAX_SESSIONS`` and whose time
+    bound is the Session Expiry Interval the client declares.  Without
+    it a single connected client grows broker memory without limit, and
+    with it the per-PUBLISH routing walk, since routing tests every
+    filter of every connected session.  At the cap a **new** filter is
+    refused with ``0x97 (Quota Exceeded)`` in the SUBACK and logged;
+    re-subscribing to a filter the session already holds always works
+    (§3.8.4 makes that a replacement, so it occupies no new slot).
+    ``0`` disables the cap.  Default: ``1000``.
+BB_MQTT_MAX_SESSIONS
+    Maximum sessions the broker retains — the *total* bound on session
+    state, whose unit is ``BB_MQTT_MAX_SUBSCRIPTIONS`` plus
+    ``BB_MQTT_MAX_QUEUED_MESSAGES`` and whose time bound is the Session
+    Expiry Interval.  A session outlives its connection by design, and
+    §3.1.2.11.2 defines ``0xFFFFFFFF`` as *never expires*, so a peer
+    cycling Client Identifiers can pin one entry per identifier while
+    breaking no rule.  At the cap a CONNECT for an **unknown** Client
+    Identifier is refused with ``0x97 (Quota Exceeded)`` in the CONNACK
+    and the connection closed; a client resuming a session already in
+    the table is admitted, since refusing it frees nothing.  Expired
+    sessions are swept before the cap is applied, so it binds live state
+    only.  ``0`` disables the cap.  Default: ``10000``.
 BB_COMPRESSION_MIN_SIZE
     Minimum response body size in bytes below which
     :class:`~blackbull.middleware.compression.Compression` skips
@@ -832,6 +856,14 @@ class Settings:
     #: BB_MQTT_MAX_RETAINED above.
     mqtt_max_retained: int = 10000
 
+    #: Per-session bound on the number of Topic Filters a session holds.
+    #: See BB_MQTT_MAX_SUBSCRIPTIONS above.
+    mqtt_max_subscriptions: int = 1000
+
+    #: Total bound on the number of sessions the broker retains.  See
+    #: BB_MQTT_MAX_SESSIONS above.
+    mqtt_max_sessions: int = 10000
+
     #: Maximum size (bytes) of a message as the *application* receives it —
     #: post-reassembly, post-inflation.  The frame cap above bounds one
     #: compressed frame on the wire; this bounds what that frame becomes.
@@ -977,6 +1009,9 @@ def get_settings() -> Settings:
         mqtt_max_queued_messages=_int_env_nonneg(
             'BB_MQTT_MAX_QUEUED_MESSAGES', 1000),
         mqtt_max_retained=_int_env_nonneg('BB_MQTT_MAX_RETAINED', 10000),
+        mqtt_max_subscriptions=_int_env_nonneg(
+            'BB_MQTT_MAX_SUBSCRIPTIONS', 1000),
+        mqtt_max_sessions=_int_env_nonneg('BB_MQTT_MAX_SESSIONS', 10000),
         use_uvloop=_bool_env('BB_UVLOOP', False),
         h2_active_streams_1w=_int_env_nonneg('BB_H2_ACTIVE_STREAMS_1W', 20),
         h2_active_streams=_int_env_nonneg('BB_H2_ACTIVE_STREAMS', 20),

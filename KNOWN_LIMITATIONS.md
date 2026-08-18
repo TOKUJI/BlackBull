@@ -124,8 +124,10 @@ raw-protocol bridge, so it inherits both constraints above.  Beyond those:
 **State does not survive a restart.**  Subscriptions, sessions, and retained
 messages live in the one serving process — not shared across workers, not
 persisted.  A restart, or a worker-0 respawn after a crash, clears all
-session and retained state.  Sessions are kept for the process lifetime
-rather than expired on a timer.
+session and retained state.  A session with a finite Session Expiry
+Interval is removed once the interval elapses; `0xFFFFFFFF` means *does
+not expire* (§3.1.2.11.2) and is honoured, so such a session is bounded
+by `BB_MQTT_MAX_SESSIONS` and by nothing else.
 
 **Nothing is queued for offline sessions.**  A disconnected client with a
 live session (`Session Expiry Interval > 0`) gets §4.4 replay of its

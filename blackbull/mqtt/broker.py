@@ -12,6 +12,7 @@ subscribers during a peer's teardown with no special-casing.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections import deque
 from dataclasses import dataclass, field, replace
@@ -34,6 +35,9 @@ logger = logging.getLogger(__name__)
 # PUBLISH→PUBREC, outbound PUBLISH→PUBREL — reads as one word rather than a
 # bare string literal scattered across the handlers.
 _QOS2_IN_PUBREC_SENT = 'PUBREC_SENT'      # inbound: PUBREC sent, awaiting PUBREL
+#: §3.1.2.11.2 — the Session Expiry Interval meaning "does not expire".
+_EXPIRY_NEVER = 0xFFFFFFFF
+
 _QOS2_OUT_PUBLISH_SENT = 'PUBLISH_SENT'   # outbound: PUBLISH sent, awaiting PUBREC
 _QOS2_OUT_PUBREL_SENT = 'PUBREL_SENT'     # outbound: PUBREL sent, awaiting PUBCOMP
 
@@ -83,8 +87,26 @@ class ClientPubcomp(ActorMessage):
 
 @dataclass
 class Detach(ActorMessage):
-    """A client's connection is ending (``graceful=False`` fires its Will)."""
+    """A client's connection is ending (``graceful=False`` fires its Will).
+
+    ``session_expiry_interval`` carries the property of the same name from
+    the client's DISCONNECT (§3.14.2.2.2), which may shorten — but never
+    lengthen — what its CONNECT declared.  ``None`` means the packet did
+    not carry one, or the connection ended without a DISCONNECT at all.
+    """
     graceful: bool = field(default=True, compare=False, repr=False)
+    session_expiry_interval: int | None = field(
+        default=None, compare=False, repr=False)
+
+
+@dataclass
+class _SweepExpired(ActorMessage):
+    """Self-message posted by the expiry timer.
+
+    The timer callback must not touch ``_sessions`` directly: the actor
+    model makes the inbox loop the only writer of an actor's state, and a
+    ``TimerHandle`` fires outside it.  So the callback only enqueues this.
+    """
 
 
 # -- Level A messages: broker -> connection actor ---------------------------
@@ -166,7 +188,14 @@ def _new_broker_session() -> dict[str, Any]:
         # protocol default when the property is absent — a real bound, not
         # "unlimited", which is why it can be stored as a plain number.
         'receive_maximum': 65535,
+        # The interval the client declared (§3.1.2.11.2), and the monotonic
+        # instant it resolves to.  They are separate because the interval is
+        # session state that survives a reconnect, while the deadline only
+        # exists while the client is *away*: ``None`` means either connected
+        # or 0xFFFFFFFF ("does not expire"), and both are states no sweep
+        # may collect.
         '_expiry': 0,
+        '_expires_at': None,
         '_next_pid': 0,
     }
 
@@ -182,7 +211,9 @@ class BrokerActor(Actor):
     def __init__(self, *, max_retained: int | None = None,
                  max_queued: int | None = None,
                  receive_maximum: int | None = None,
-                 max_packet_size: int | None = None) -> None:
+                 max_packet_size: int | None = None,
+                 max_subscriptions: int | None = None,
+                 max_sessions: int | None = None) -> None:
         super().__init__()
         # The broker advertises ``maximum_packet_size`` but does not enforce it
         # — the framer does, one layer down, because that is where the bytes
@@ -198,6 +229,16 @@ class BrokerActor(Actor):
                                  if receive_maximum is None else receive_maximum)
         self._max_packet_size = (settings.mqtt_max_packet_size
                                  if max_packet_size is None else max_packet_size)
+        # The three columns of one triad, on one row of state.  ``one unit``
+        # is a session's own size (this cap plus ``_max_queued`` and the
+        # 16-bit packet-identifier space), ``total`` is how many sessions may
+        # exist, and ``time`` is the Session Expiry Interval each client
+        # declares — enforced by ``_sweep_expired`` below.
+        self._max_subscriptions = (settings.mqtt_max_subscriptions
+                                   if max_subscriptions is None
+                                   else max_subscriptions)
+        self._max_sessions = (settings.mqtt_max_sessions
+                              if max_sessions is None else max_sessions)
         self._clients = {}          # client_id -> live connection Actor
         self._client_by_conn = {}   # id(conn) -> client_id
         self._sessions = {}         # client_id -> session dict
@@ -209,6 +250,23 @@ class BrokerActor(Actor):
         # first: no registry to keep in sync across SUBSCRIBE / UNSUBSCRIBE /
         # session expiry); only the rotation position is stored.
         self._share_rotation: dict[tuple[str, str], int] = {}
+        # One-shot handle armed at the earliest pending session deadline, in
+        # the spirit of ``ConnectionDeadline``: no periodic tick, and nothing
+        # armed at all while no detached session can expire — an app that
+        # loads the MQTT extension but sees no traffic pays no wakeup.
+        self._expiry_timer: asyncio.TimerHandle | None = None
+
+    def close(self) -> None:
+        """Release loop resources the actor owns outside its inbox.
+
+        Only the expiry handle qualifies today.  Cancelling the broker task
+        does not cancel it: a ``TimerHandle`` lives in the loop's timer heap
+        and holds a bound method of this object, so an armed one outlives
+        the actor and then posts into an inbox nobody reads.
+        """
+        if self._expiry_timer is not None:
+            self._expiry_timer.cancel()
+            self._expiry_timer = None
 
     # -- dispatch -----------------------------------------------------------
 
@@ -232,7 +290,10 @@ class BrokerActor(Actor):
             self._clear_pending(msg.sender, 'pending_qos1_out', msg.packet_id)
             await self._drain_outbound(msg.sender)
         elif isinstance(msg, Detach):
-            await self._on_detach(msg.sender, msg.graceful)
+            await self._on_detach(msg.sender, msg.graceful,
+                                  msg.session_expiry_interval)
+        elif isinstance(msg, _SweepExpired):
+            self._sweep_expired()
         else:  # pragma: no cover - connection actor sends only the above
             logger.debug('BrokerActor ignoring %s', type(msg).__name__)
 
@@ -309,6 +370,30 @@ class BrokerActor(Actor):
             self._auto_seq += 1
             client_id = f'auto-{self._auto_seq}'
 
+        # Collect what has already expired before deciding anything about
+        # this CONNECT: whether the session resumes, and whether the table
+        # is full, must both be answered against live state only.
+        self._sweep_expired()
+
+        # The *total* column.  Checked before any registration below, so a
+        # refusal leaves no half-attached client behind — and only for a
+        # Client Identifier the table does not already hold, because
+        # resuming an existing session consumes no new slot and refusing it
+        # would free nothing.
+        if (self._max_sessions
+                and client_id not in self._sessions
+                and len(self._sessions) >= self._max_sessions):
+            log_cap_hit('mqtt_max_sessions',
+                        requested=len(self._sessions) + 1,
+                        limit=self._max_sessions,
+                        scope_path=client_id,
+                        protocol='mqtt')
+            await conn.send(Send(packet=MQTTConnack(
+                session_present=False,
+                reason_code=ReasonCode.QUOTA_EXCEEDED)))
+            await conn.send(Close(reason_code=ReasonCode.QUOTA_EXCEEDED))
+            return
+
         # §3.1.4-3 — a second CONNECT for a Client Identifier that is already
         # connected takes the session over: the previous Network Connection MUST
         # be disconnected (DISCONNECT 0x8E, then close).  Dropping its
@@ -356,7 +441,12 @@ class BrokerActor(Actor):
                 # by a test) so the rest of the broker can rely on all keys.
                 for key, default in _new_broker_session().items():
                     session.setdefault(key, default)
-                session['_expiry'] = max(session.get('_expiry', 0), expiry)
+                # §3.1.2.11.2 — the interval this CONNECT declares *is* the
+                # session's interval.  Taking the larger of old and new meant
+                # one connection at 0xFFFFFFFF pinned the session for the
+                # life of the process and the client could never take it
+                # back.
+                session['_expiry'] = expiry
             else:
                 session = _new_broker_session()
                 session['_expiry'] = expiry
@@ -367,6 +457,11 @@ class BrokerActor(Actor):
         # this is session state, so a Clean Start = 0 reconnect that omits the
         # property keeps what the client last declared rather than silently
         # widening its window.
+        # Connected again: the away-clock stops.  A session with a live
+        # connection is not a candidate for the sweep at any interval.
+        session['_expires_at'] = None
+        self._arm_expiry_timer()
+
         declared = connect.properties.get('receive_maximum')
         if declared:
             session['receive_maximum'] = declared
@@ -425,6 +520,23 @@ class BrokerActor(Actor):
             # §3.8.4 — a SUBSCRIBE for an existing Topic Filter replaces its
             # prior subscription (and its options) rather than adding a second.
             existed = any(s[0] == topic_filter for s in session['subscriptions'])
+            # The *unit* column: one session's own size.  The cap binds only
+            # a filter the session does not already hold — a replacement
+            # occupies no new slot, and locking a client out of changing the
+            # QoS of a subscription it already has would leave it worse off
+            # than one that never subscribed while freeing nothing.  §3.9.3
+            # makes 0x97 a valid SUBACK reason code, so the refusal travels
+            # in the acknowledgement the client is already waiting for.
+            if (self._max_subscriptions
+                    and not existed
+                    and len(session['subscriptions']) >= self._max_subscriptions):
+                log_cap_hit('mqtt_max_subscriptions',
+                            requested=len(session['subscriptions']) + 1,
+                            limit=self._max_subscriptions,
+                            scope_path=topic_filter,
+                            protocol='mqtt')
+                reason_codes.append(ReasonCode.QUOTA_EXCEEDED)
+                continue
             subs = [s for s in session['subscriptions'] if s[0] != topic_filter]
             subs.append((topic_filter, qos, opts))
             session['subscriptions'] = subs
@@ -457,6 +569,53 @@ class BrokerActor(Actor):
                 stale.discard(_parse_share(topic_filter))
         for share in stale:
             self._share_rotation.pop(share, None)
+
+    # -- session expiry (§3.1.2.11.2) ---------------------------------------
+
+    def _sweep_expired(self) -> None:
+        """Drop every session whose Session Expiry Interval has elapsed.
+
+        This is what makes the *time* column of the session-state row a
+        bound rather than a stored number.  It runs from the timer below
+        and, additionally, before any decision that must not see a session
+        the broker has already promised to discard — resuming one, or
+        applying the total cap to a table that is partly rubble.
+        """
+        now = asyncio.get_running_loop().time()
+        expired = [cid for cid, session in self._sessions.items()
+                   if (at := session.get('_expires_at')) is not None and at <= now]
+        for client_id in expired:
+            session = self._sessions.pop(client_id)
+            logger.debug('MQTT session %r expired', client_id)
+            self._prune_share_rotation([s[0] for s in session['subscriptions']])
+        self._arm_expiry_timer()
+
+    def _arm_expiry_timer(self) -> None:
+        """(Re-)arm the single handle at the earliest pending deadline.
+
+        Nothing pending means nothing armed — the idle broker holds no
+        timer at all, which is the whole reason this is one-shot rather
+        than a tick.
+        """
+        if self._expiry_timer is not None:
+            self._expiry_timer.cancel()
+            self._expiry_timer = None
+        deadlines = [at for session in self._sessions.values()
+                     if (at := session.get('_expires_at')) is not None]
+        if not deadlines:
+            return
+        loop = asyncio.get_running_loop()
+        delay = max(0.0, min(deadlines) - loop.time())
+        self._expiry_timer = loop.call_later(delay, self._post_sweep)
+
+    def _post_sweep(self) -> None:
+        """Timer callback — enqueue, never mutate.
+
+        ``put_nowait`` rather than ``send``: a callback is not a coroutine,
+        and the inbox is unbounded, so this cannot block or drop.
+        """
+        self._expiry_timer = None
+        self._inbox.put_nowait(_SweepExpired())
 
     async def _on_unsubscribe(self, conn, unsubscribe) -> None:
         session = self._session_for(conn)
@@ -721,7 +880,7 @@ class BrokerActor(Actor):
                 session['pending_qos2_out'][packet_id] = {
                     'state': _QOS2_OUT_PUBREL_SENT}
 
-    async def _on_detach(self, conn, graceful) -> None:
+    async def _on_detach(self, conn, graceful, session_expiry_interval=None) -> None:
         client_id = self._client_by_conn.pop(id(conn), None)
         if client_id is None:
             return
@@ -740,7 +899,32 @@ class BrokerActor(Actor):
                 self._store_retained(will)
             await self._route(will)
         session = self._sessions.get(client_id)
-        if session is not None and session.get('_expiry', 0) <= 0:
+        if session is None:
+            return
+        # §3.14.2.2.2 — DISCONNECT may carry its own Session Expiry Interval.
+        # It may shorten what CONNECT declared but not lengthen it: raising a
+        # zero interval is a Protocol Error there, and honouring it would let
+        # a client resurrect, at the moment of leaving, a session it had told
+        # the broker to discard.
+        declared = session.get('_expiry', 0)
+        if session_expiry_interval is not None:
+            if declared > 0:
+                declared = session['_expiry'] = session_expiry_interval
+            else:
+                logger.debug(
+                    'MQTT %r sent a non-zero Session Expiry Interval in '
+                    'DISCONNECT for a session that declared 0 — ignored '
+                    '(§3.14.2.2.2 Protocol Error)', client_id)
+        if declared <= 0:
             self._sessions.pop(client_id, None)
             self._prune_share_rotation(
                 [s[0] for s in session['subscriptions']])
+            self._arm_expiry_timer()
+            return
+        # The session outlives the connection from here.  0xFFFFFFFF means it
+        # never expires (§3.1.2.11.2), so it gets no deadline — the *total*
+        # cap, not the clock, is what bounds that case.
+        if declared != _EXPIRY_NEVER:
+            session['_expires_at'] = \
+                asyncio.get_running_loop().time() + declared
+            self._arm_expiry_timer()

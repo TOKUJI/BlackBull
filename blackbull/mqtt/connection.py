@@ -321,7 +321,12 @@ class MQTT5Actor(Actor):
         elif isinstance(message, MQTTDisconnect):
             # "Disconnect with Will Message" keeps the Will; anything else is graceful.
             self.graceful = message.reason_code != ReasonCode.DISCONNECT_WITH_WILL
-            await broker.send(Detach(graceful=self.graceful, sender=self))
+            # §3.14.2.2.2 — DISCONNECT may carry a Session Expiry Interval;
+            # the broker decides whether it may be honoured.
+            await broker.send(Detach(
+                graceful=self.graceful, sender=self,
+                session_expiry_interval=(message.properties or {}).get(
+                    'session_expiry_interval')))
             self._done = True
         else:  # pragma: no cover - decode_packet yields only known types
             logger.debug('MQTT connection ignoring %s', type(message).__name__)

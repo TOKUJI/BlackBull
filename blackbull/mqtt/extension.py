@@ -147,3 +147,5 @@ class MQTTExtension(Extension):
                 with contextlib.suppress(asyncio.CancelledError):
                     await asyncio.gather(task)
                 setattr(self, attr, None)
+        # Cancelling the task does not reach what the actor armed on the loop.
+        self._broker.close()
