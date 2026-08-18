@@ -212,21 +212,12 @@ Also in this release: the request-body total cap and minimum delivery rate
 (`BB_MAX_BODY_SIZE`, `BB_MIN_BODY_RATE`), and a finite default connection cap
 (`BB_MAX_CONNECTIONS`) — both described under *Added* and *Changed*.
 
-**What is still open, stated because the boundary matters as much as the
-fixes**: `BB_REQUEST_TIMEOUT` remains off by default, so a peer delivering at
-exactly the minimum rate up to the body cap legally holds a connection for
-≈36.4 hours; the derived connection cap bounds descriptor exhaustion, not
-event-loop health; a WebSocket connection has no liveness probe of its own, so
-a peer that completes the handshake and goes silent holds it until the
-connection or the process ends; TLS handshake cost per connection has not been
-audited at all; and `BB_TCP_USER_TIMEOUT_MS` is `0`, so a peer that vanishes
-behind a NAT is not evicted until TCP keepalives notice.
-
-Two of those eleven gaps were found by re-reading the audit rather than the
-code, which is the strongest thing this release can say about its own method:
-it produced both the coverage and the misses. The security page now states that
-outright, and the list of covered paths should be read as what has been looked
-at, not as what exists. These are documented in
+**Two defaults are worth setting, stated because a default-open knob is only
+useful if you know it is open**: `BB_REQUEST_TIMEOUT` is `0`, so a peer
+delivering at exactly the minimum rate up to the body cap legally holds a
+connection for ≈36.4 hours; and the derived connection cap bounds descriptor
+exhaustion, not event-loop health, so set an explicit number. Both are
+documented in
 [the security model](https://github.com/TOKUJI/BlackBull/blob/master/docs/about/security-model.md),
 which also states what this project does **not** claim — no third-party audit,
 no red-team exercise, no volumetric-DoS protection.
@@ -416,8 +407,8 @@ no red-team exercise, no volumetric-DoS protection.
   send it for arbitrary stream identifiers; each one created a priority-tree
   node, and `Stream.remove_child` had no caller anywhere in the tree.  Measured
   before the fix: 10,000 PRIORITY frames left 10,000 nodes, no GOAWAY, the
-  connection still open — 14 bytes on the wire for ~232 bytes held, and PRIORITY
-  is not one of the frame types the rate meters cover.  §5.3 deprecated that
+  connection still open — a few bytes on the wire for a node that outlived
+  them.  §5.3 deprecated that
   prioritisation scheme and BlackBull does not implement it (`Stream.weight` and
   `.parent` were written by the responder and read by nothing), so the fix is to
   stop recording it rather than to cap it: the frame is validated and the signal

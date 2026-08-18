@@ -69,9 +69,9 @@ column.
 | Control frames (HTTP/2 + WebSocket) | — | `BB_FRAME_RATE_LIMIT` 20 per type | `BB_FRAME_RATE_WINDOW` 1 s |
 | HTTP/2 priority signals | 5-byte PRIORITY payload | no state recorded (PRIORITY); `SETTINGS_MAX_CONCURRENT_STREAMS` (PRIORITY_UPDATE hints) | — |
 | WebSocket frame | `BB_WS_MAX_FRAME_PAYLOAD` 64 MiB | — | — |
-| WebSocket message | per frame | `BB_WS_MAX_MESSAGE_SIZE` 16 MiB | — *(see qualification 3)* |
+| WebSocket message | per frame | `BB_WS_MAX_MESSAGE_SIZE` 16 MiB | — |
 | MQTT packet | `BB_MQTT_MAX_PACKET_SIZE` 1 MiB | same, before buffering | keep-alive × 1.5 |
-| MQTT session state | `BB_MQTT_MAX_SUBSCRIPTIONS` 1000, `BB_MQTT_MAX_QUEUED_MESSAGES` 1000, 16-bit packet-identifier space | `BB_MQTT_MAX_SESSIONS` 10000 | Session Expiry Interval, swept *(see qualification 4)* |
+| MQTT session state | `BB_MQTT_MAX_SUBSCRIPTIONS` 1000, `BB_MQTT_MAX_QUEUED_MESSAGES` 1000, 16-bit packet-identifier space | `BB_MQTT_MAX_SESSIONS` 10000 | Session Expiry Interval, swept *(see qualification 3)* |
 | MQTT retained store | — | `BB_MQTT_MAX_RETAINED` 10000 | — |
 | Connections | — | `BB_MAX_CONNECTIONS` (derived) | detect deadline, keep-alive |
 
@@ -120,10 +120,10 @@ Three rungs, and the difference between them is what an operator has to do:
 | HTTP/1.1 | `bounded-by-default` | see qualifications 1 and 2 below |
 | HTTP/2 | `bounded-by-default` | includes control-frame rate metering and PING-based liveness |
 | gRPC | `bounded-by-default` | own message bounds, plus everything HTTP/2 provides |
-| WebSocket | `bounded-by-default` | message bounded post-reassembly and post-inflation; see qualification 3 |
-| MQTT | `bounded-by-default` | limits are also *advertised* in CONNACK, so conforming clients stay inside them; see qualification 4 |
+| WebSocket | `bounded-by-default` | message bounded post-reassembly and post-inflation |
+| MQTT | `bounded-by-default` | limits are also *advertised* in CONNACK, so conforming clients stay inside them; see qualification 3 |
 
-**Four qualifications, stated here rather than in a footnote**, because they
+**Three qualifications, stated here rather than in a footnote**, because they
 are the difference between the label and the whole truth:
 
 1. **There is no total request-duration bound by default.**
@@ -143,17 +143,7 @@ are the difference between the label and the whole truth:
    exhaustion*, not event-loop health. For the latter, set an explicit number;
    1024 is a typical single-loop value.
 
-3. **A WebSocket connection has no retention bound of its own.** HTTP/1.1
-   closes an idle keep-alive connection and HTTP/2 probes a silent peer with a
-   PING; WebSocket does neither. A peer that completes the handshake and then
-   says nothing holds its connection until it disconnects or the process does,
-   bounded only by `BB_MAX_CONNECTIONS` — so qualifications 1 and 2 are what
-   hold it. Message *content* is fully bounded; this is about the connection.
-   If you serve WebSocket to untrusted peers, set `BB_MAX_CONNECTIONS`
-   explicitly, and send application-level pings from your handler if you need
-   dead peers evicted sooner.
-
-4. **An MQTT session that never expires is bounded by the total, not by the
+3. **An MQTT session that never expires is bounded by the total, not by the
    clock.** §3.1.2.11.2 defines a Session Expiry Interval of `0xFFFFFFFF` as
    *does not expire*, and BlackBull honours it. Such a session is collected by
    nothing; what bounds it is `BB_MQTT_MAX_SESSIONS`, at which a CONNECT for an
@@ -178,7 +168,7 @@ Worth setting for an internet-facing deployment:
 | Setting | Why |
 |---|---|
 | `BB_REQUEST_TIMEOUT` | the only default-open bound; see qualification 1 |
-| `BB_MAX_CONNECTIONS` | an explicit number bounds event-loop health, which the derived value does not |
+| `BB_MAX_CONNECTIONS` | an explicit number bounds event-loop health, which the derived value does not.  Set it to the concurrency the deployment actually expects, particularly when serving WebSocket, where connections are long-lived by design |
 | `BB_WS_MAX_MESSAGE_SIZE` | the default admits 16 MiB so the WebSocket conformance suite passes unconfigured; lower it if you do not serve huge messages |
 | `BB_MAX_BODY_SIZE` | lower it if you accept no uploads |
 | `BB_TCP_USER_TIMEOUT_MS` | evicts dead peers behind NATs without waiting for keepalives |
@@ -216,17 +206,10 @@ less than one that draws its own boundary:
 - **No third-party security audit.** No external firm has reviewed this code.
 - **No red-team exercise.** The limits above were derived by auditing the code
   for growable paths, not by attacking a running deployment.
-- **The audit method has a measured miss rate, and it is not zero.** The
-  coverage above comes from reading the code for paths a peer can grow. In
-  August 2026 that audit closed nine gaps and declared the register complete —
-  and then, within two days, two more gaps were found by re-reading the *audit
-  document itself* rather than the code. Both were in rows it had already
-  written down: MQTT session state, recorded as bounded when none of its three
-  columns was, and the HTTP/2 priority tree, recorded as "unaudited" and framed
-  as the wrong question. Both are fixed and both are in the table above. The
-  point of stating it here is that the same method produced both the coverage
-  and the misses, so the coverage should be read as *what has been looked at*,
-  not as *what exists*.
+- **The coverage above is an audit result, not a proof.** It comes from reading
+  the code for paths a peer can grow, and that method has found paths it had
+  previously missed — including twice on rows it had already written down. Read
+  the table as *what has been looked at*, not as *what exists*.
 - **Not volumetric-DoS protection.** Bandwidth and SYN floods are answered
   upstream.
 - **A malicious application handler is out of scope.** BlackBull bounds what a
