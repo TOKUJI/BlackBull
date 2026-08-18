@@ -47,11 +47,18 @@ per-connection `TaskGroup` supervision.
 
 ## Fault injection — the differentiator
 
-Because BlackBull owns its HTTP/2 implementation, it can be instructed to
+Because BlackBull owns its HTTP implementations, it can be instructed to
 **misbehave on command**: half-closed streams, exhausted flow-control
-windows, illegal SETTINGS frames, trailers where none belong — crafted from a
-Python script. A delegating stack cannot easily do this, because the
-misbehaviour would have to be programmed into a third-party protocol library.
+windows, illegal SETTINGS frames, trailers where none belong on HTTP/2; a
+status line delivered a byte at a time, a `Content-Length` that lies, a
+chunked body that stops mid-chunk on HTTP/1.1 — all crafted from a Python
+script. A delegating stack cannot easily do this, because the misbehaviour
+would have to be programmed into a third-party protocol library.
+
+The same ownership creates the obligation that goes with it: the fault
+servers assemble their own bytes rather than calling the production send
+path, because a breaker sharing the production serialiser cannot emit a fault
+that serialiser has.
 
 That makes BlackBull a portable conformance test bench: if you maintain an
 HTTP client, proxy, or middleware, you can drive it against adversarial

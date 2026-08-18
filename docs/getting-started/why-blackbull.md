@@ -33,10 +33,13 @@ learning HTTP/2 internals or prototyping protocol-level behaviour.
 
 ### You need to test protocol edge cases
 
-BlackBull ships a programmable fault-injection framework: craft malformed
-HTTP/2 frames, simulate connection drops mid-stream, run differential oracles
-against a reference implementation. If your product depends on HTTP/2
-correctness under adverse conditions, this toolchain is unusual and useful.
+BlackBull ships a programmable fault-injection framework, in both roles and
+on both HTTP protocols: craft malformed HTTP/2 frames at your client,
+misbehave as an HTTP/1.1 server against it, drive a target server through
+slowloris-style misbehaviour, and simulate connection drops mid-stream. The
+differential oracle — same scenario against two servers, responses compared —
+is HTTP/1.1. If your product depends on HTTP correctness under adverse
+conditions, this toolchain is unusual and useful.
 
 ### You deploy to ARM, RISC-V, or constrained environments
 

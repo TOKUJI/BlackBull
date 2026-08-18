@@ -106,5 +106,8 @@ Envoy's gRPC-JSON transcoder, and the web server.  Each hop adds a
 serialization boundary, a network hop, a config file, and a failure mode.
 Here the entire hub is one `python` invocation whose "config" is the
 example file itself — and every protocol conversation is observable with
-the same [event API](events.md) and [fault-injection](fault_injection.md)
-tooling the rest of BlackBull uses.
+the same [event API](events.md) the rest of BlackBull uses.
+
+(The [fault-injection](fault_injection.md) toolkit does **not** stretch
+this far: it covers HTTP/1.1 and HTTP/2.  gRPC gets transport-layer
+misbehaviour because it rides HTTP/2, and MQTT is out of scope.)

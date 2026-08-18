@@ -46,6 +46,16 @@ from .scenario_h1 import (
     StepOp,
 )
 from ._tls import make_self_signed_h2_context
+from .h1_server import (
+    H1FaultServer,
+    H1FaultServerError,
+)
+from .scenario_h1_server import (
+    CloseConnection,
+    ScenarioH1Server,
+    ScenarioH1ServerResult,
+    WaitForRequest,
+)
 from .h2_server import (
     CLIENT_PREFACE,
     H2FaultServer,
@@ -74,6 +84,9 @@ __all__ = [
     "CLIENT_PREFACE",
     "Category",
     "CloseGracefully",
+    "CloseConnection",
+    "H1FaultServer",
+    "H1FaultServerError",
     "H2Abort",
     "H2FaultServer",
     "H2FaultServerError",
@@ -82,6 +95,8 @@ __all__ = [
     "PER_REQUEST_TIMEOUT_S",
     "ReadResponse",
     "Scenario",
+    "ScenarioH1Server",
+    "ScenarioH1ServerResult",
     "ScenarioH2",
     "ScenarioH2Result",
     "ScenarioResult",
@@ -94,6 +109,7 @@ __all__ = [
     "StepOp",
     "StepOpH2",
     "WaitForClientFrame",
+    "WaitForRequest",
     "categorize",
     "frame_matches",
     "make_self_signed_h2_context",
