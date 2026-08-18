@@ -43,9 +43,21 @@ jobs:
       - name: Install pip-audit
         run: pip install pip-audit
 
-      # Audit BlackBull's declared dependencies (runtime + ``compression``
-      # extra) directly via ``pip-audit --requirement``.  This covers
-      # h2, hpack, beartype, brotli, zstandard.
+      # Audit **every** declared dependency — runtime and all extras —
+      # directly via ``pip-audit --requirement``.
+      #
+      # This used to cover runtime plus the ``compression`` extra only: four
+      # packages out of twenty-nine.  ``cryptography`` (fault-injection),
+      # ``httpx`` (testing + fault-injection), ``uvloop`` (speed) and
+      # ``watchfiles`` (reload) were all unaudited, while ``SECURITY.md``
+      # told readers we monitor pip-audit for "our dependency tree" and
+      # named uvloop and watchfiles specifically.  Enumerating the extras
+      # rather than listing them by name is what stops that drift returning
+      # the next time one is added.
+      #
+      # ``blackbull-protobuf`` is our own sibling package and is audited
+      # like any other name — it resolves from PyPI, and an advisory
+      # against it is one we would want to see here.
       #
       # We do NOT install BlackBull itself: at release-prep time
       # (e.g. v0.29.0a1) the new version isn't on PyPI yet, so any
@@ -63,8 +75,16 @@ jobs:
           with open('pyproject.toml', 'rb') as f:
               cfg = tomllib.load(f)
           deps = list(cfg['project'].get('dependencies', []))
-          deps += list(cfg['project'].get('optional-dependencies', {}).get('compression', []))
-          print('\n'.join(deps))
+          for extra, items in cfg['project'].get('optional-dependencies', {}).items():
+              deps += list(items)
+          # Order-stable and de-duplicated so the log diffs cleanly between
+          # runs; several packages appear in more than one extra.
+          seen, unique = set(), []
+          for d in deps:
+              if d not in seen:
+                  seen.add(d)
+                  unique.append(d)
+          print('\n'.join(unique))
           " > audit-deps.txt
           echo '--- audit-deps.txt ---'
           cat audit-deps.txt
