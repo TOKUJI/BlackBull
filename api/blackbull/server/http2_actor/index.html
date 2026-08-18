@@ -4343,6 +4343,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../rate_window/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    rate_window
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../read_buffer/" class="md-nav__link">
         
   
@@ -4924,6 +4952,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../../../about/security-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../../../about/internals/" class="md-nav__link">
         
   
@@ -5302,6 +5358,9 @@ path (same behaviour as the pre-Actor HTTP2Handler).</p>
     <div class="doc doc-contents ">
 
         <p>Send a raw HTTP/2 frame via the control-plane sender.</p>
+<p>Every emitted RST_STREAM passes through here, which is what makes
+this the one place the G8 blind spot can be closed without dusting
+the counter across a dozen refusal sites.</p>
 
 
     </div>

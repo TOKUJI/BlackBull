@@ -16,7 +16,7 @@
         <link rel="prev" href="../architecture/">
       
       
-        <link rel="next" href="../internals/">
+        <link rel="next" href="../security-model/">
       
       
         
@@ -4210,6 +4210,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/server/rate_window/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    rate_window
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/server/read_buffer/" class="md-nav__link">
         
   
@@ -5001,6 +5029,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../security-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../internals/" class="md-nav__link">
         
   
@@ -5413,6 +5469,10 @@ framing).  ~250 conformance test functions across the
 <td>Slowloris partial-headers defence (<code>BB_HEADER_TIMEOUT</code>)</td>
 </tr>
 <tr>
+<td><a href="https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_rfc9110_body_cap.py"><code>test_rfc9110_body_cap.py</code></a></td>
+<td><code>BB_MAX_BODY_SIZE</code> → 413 on both framings, refused before the body is read, and the connection close that stops a refusal becoming a smuggling window</td>
+</tr>
+<tr>
 <td><a href="https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_http1_dispatch.py"><code>test_http1_dispatch.py</code></a></td>
 <td>ASGI dispatch — 1xx / 204 / 304 body suppression (RFC 9110 §15), auto-headers</td>
 </tr>
@@ -5448,7 +5508,8 @@ you can grep for the headline number.</p>
 <p>In-tree pytest tests under <code>tests/conformance/http2/</code> cover
 BlackBull-specific behaviour h2spec does not exercise (RFC 8441
 Extended CONNECT, CONTINUATION boundary cases, server-response
-shapes), and run in normal <code>pytest</code> runs.</p>
+shapes, and the <code>BB_MAX_BODY_SIZE</code> / <code>BB_MIN_BODY_RATE</code> refusals in
+<code>test_rfc9113_body_cap.py</code>), and run in normal <code>pytest</code> runs.</p>
 <h2 id="websocket-autobahntestsuite">WebSocket — Autobahn|Testsuite<a class="headerlink" href="#websocket-autobahntestsuite" title="Permanent link">&para;</a></h2>
 <p>The de-facto external conformance suite for WebSocket — ~500
 numbered cases over framing, control frames, UTF-8 validation,
@@ -5462,11 +5523,15 @@ python<span class="w"> </span>bench/conformance/autobahn_app.py<span class="w"> 
 bash<span class="w"> </span>bench/conformance/autobahn_run.sh<span class="w">               </span><span class="c1"># full fuzzingclient run</span>
 <span class="nv">CASES</span><span class="o">=</span><span class="s1">'1.*'</span><span class="w"> </span>bash<span class="w"> </span>bench/conformance/autobahn_run.sh<span class="w">   </span><span class="c1"># subset (e.g. all of §1.x)</span>
 </code></pre></div>
-<p>The §9 <em>Limits and performance</em> cases send single frames of
-4-64 MiB and need the per-frame payload cap to be at least the
-case size.  The shipped default (<code>BB_WS_MAX_FRAME_PAYLOAD</code>,
-64 MiB) accepts all of Autobahn's §9 cases; lower it for stricter
-exposure on untrusted-peer deployments.</p>
+<p>The §9 <em>Limits and performance</em> cases send messages up to 16 MiB
+(9.1.6 text / 9.2.6 binary; the fragmented 9.4.x cases top out at
+4 MiB), so both WebSocket size limits must be at least the case
+size.  The shipped defaults accept every §9 case with nothing
+configured — <code>BB_WS_MAX_FRAME_PAYLOAD</code> at 64 MiB and
+<code>BB_WS_MAX_MESSAGE_SIZE</code> at exactly the 16 MiB the suite needs.
+Lower either for stricter exposure on untrusted-peer deployments;
+that is a deviation from the configuration this suite was run
+under.</p>
 <p>Reports land in <code>bench/conformance/results/autobahn_&lt;timestamp&gt;/</code>
 with an HTML index — open <code>index.html</code> in a browser for the
 case-by-case breakdown.</p>

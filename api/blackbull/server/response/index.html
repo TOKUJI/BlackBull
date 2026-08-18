@@ -4218,6 +4218,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../rate_window/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    rate_window
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../read_buffer/" class="md-nav__link">
         
   
@@ -4372,6 +4400,17 @@
   
     <nav class="md-nav" aria-label="response">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.response.PriorityResponder" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PriorityResponder
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#blackbull.server.response.PriorityUpdateResponder" class="md-nav__link">
@@ -4913,6 +4952,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../../../about/security-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../../../about/internals/" class="md-nav__link">
         
   
@@ -5064,6 +5131,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.response.PriorityResponder" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PriorityResponder
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.response.PriorityUpdateResponder" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5171,6 +5249,65 @@
 
 
 
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.server.response.PriorityResponder" class="doc doc-heading">
+            <code>PriorityResponder</code>
+
+
+<a href="#blackbull.server.response.PriorityResponder" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="Responder (blackbull.server.response.Responder)" href="#blackbull.server.response.Responder">Responder</a></code></p>
+
+
+
+        <p>RFC 9113 §6.3 — validate the frame, then discard the signal.</p>
+<p>§5.3 deprecated the stream-dependency scheme and this server does not
+implement it: scheduling reads RFC 9218 extensible priorities
+(<code>Stream.priority_hint</code>), never the dependency tree.  Recording
+<code>weight</code> and <code>parent</code> therefore built state that nothing read —
+and, because §6.3 permits PRIORITY on an <em>idle</em> stream, state a peer
+could grow one node per 14-byte frame for the life of the connection,
+with no rate meter covering the frame type.  The exclusive branch made
+it worse than linear: it walked every child of root to rewrite that
+same unread field.</p>
+<p>What must not be discarded is the validation.  §5.3.1 makes a stream
+depending on itself a stream error, and h2spec asserts it.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
 
 <div class="doc doc-object doc-class">
 

@@ -4218,6 +4218,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../rate_window/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    rate_window
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../read_buffer/" class="md-nav__link">
         
   
@@ -4496,10 +4524,32 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.recipient.HTTP1Recipient.must_close" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        must_close
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.recipient.HTTP1Recipient.__call__" class="md-nav__link">
     <span class="md-ellipsis">
       
         __call__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.recipient.HTTP1Recipient.after_dispatch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        after_dispatch
       
     </span>
   </a>
@@ -5416,6 +5466,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../../../about/security-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../../../about/internals/" class="md-nav__link">
         
   
@@ -5745,10 +5823,32 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.recipient.HTTP1Recipient.must_close" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        must_close
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.recipient.HTTP1Recipient.__call__" class="md-nav__link">
     <span class="md-ellipsis">
       
         __call__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.recipient.HTTP1Recipient.after_dispatch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        after_dispatch
       
     </span>
   </a>
@@ -6581,6 +6681,14 @@ arrives; returns <code>None</code> while still accumulating.</p>
 <p>Raises <code>ProtocolError</code> on violations:
 - CONTINUATION frame with no fragmentation in progress (§5.4)
 - New TEXT/BINARY opener while a fragmented message is open (§5.4)</p>
+<p><em>max_total</em> bounds the reassembled message; <code>0</code> disables it.  The
+check runs <strong>before</strong> the append, so the frame that crosses the bound
+is refused rather than accumulated and then regretted — a bound
+enforced after the fact would have already paid for the attack.
+Raises :class:<code>MessageTooLarge</code>, which the caller turns into
+CLOSE 1009.  Note this bounds the <em>compressed</em> bytes when
+permessage-deflate is in play; the inflated size is bounded
+separately, because only one of the two is knowable here.</p>
 
 
 
@@ -6669,6 +6777,33 @@ bound to.  Subsequent calls return <code>{'type': 'http.disconnect'}</code>.</p>
 
 
 
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.server.recipient.HTTP1Recipient.must_close" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">must_close</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#blackbull.server.recipient.HTTP1Recipient.must_close" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>This connection cannot carry another request.</p>
+<p>Two causes, one consequence.  A chunked-framing violation leaves the
+byte stream desynced; a body refused for size leaves octets we
+deliberately did not read.  Either way the bytes that follow are the
+peer's to choose, and parsing them as the next request line is the
+request-smuggling shape — so the answer is to close, not to resynchronise.</p>
+
+    </div>
+
+</div>
+
 
 
 
@@ -6697,6 +6832,30 @@ or an external host.  <code>Connection.body()</code> / <code>stream()</code> tak
 <code>_done</code>, which :meth:<code>next_chunk</code> has just set, so a Content-Length
 body still ends on its last data event while a chunked body still
 ends on a separate empty one.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.server.recipient.HTTP1Recipient.after_dispatch" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">after_dispatch</span><span class="p">()</span></code>
+
+<a href="#blackbull.server.recipient.HTTP1Recipient.after_dispatch" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>What the connection should do now the handler has answered.</p>
+<p>One question, because it is one judgement.  The actor used to ask
+<code>must_close</code> and then <code>needs_drain()</code> and combine the two, which
+put the verdict in the caller and left the two predicates free to
+drift apart — the recipient is the object that knows whether the
+message boundary survived, so it should say what follows from that.</p>
+<p>Also one call per request instead of two on the keep-alive path.</p>
 
 
     </div>
@@ -6769,9 +6928,11 @@ close the connection rather than keep it alive.</p>
         <p>True if a declared request body may still be buffered unread.</p>
 <p>A handler that ignores <code>receive</code> (e.g. a 404/405 response to a POST)
 leaves the body bytes in the reader; the next keep-alive request would
-then parse them as its request line.  The actor consults this after
-dispatch to decide whether to drain.  A body-less request (GET, no
+then parse them as its request line.  A body-less request (GET, no
 Content-Length, not chunked) never needs draining.</p>
+<p>Kept as the named question it is, for tests and for a directly-driven
+recipient; the actor asks :meth:<code>after_dispatch</code> instead, which answers
+this and <code>must_close</code> in one call.</p>
 
 
     </div>
@@ -6994,7 +7155,8 @@ with a flag — saves one <code>asyncio.Queue</code> allocation per body-less re
 
         <p>Enqueue a DATA frame event.  Returns False when the frame must be
 refused (the caller answers RST_STREAM): queue full in legacy mode;
-inbound-window overrun or a tiny-frame flood in consume-crediting mode.</p>
+inbound-window overrun, a tiny-frame flood, or a body limit
+(<code>BB_MAX_BODY_SIZE</code> / <code>BB_MIN_BODY_RATE</code>) in consume-crediting mode.</p>
 
 
     </div>

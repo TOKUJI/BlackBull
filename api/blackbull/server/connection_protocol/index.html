@@ -4022,6 +4022,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.connection_protocol.BufferReader.discard" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        discard
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.connection_protocol.BufferReader.fill" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4083,10 +4094,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol.ConnectionProtocol.buffer" class="md-nav__link">
+  <a href="#blackbull.server.connection_protocol.ConnectionProtocol.peer_closed" class="md-nav__link">
     <span class="md-ellipsis">
       
-        buffer
+        peer_closed
       
     </span>
   </a>
@@ -4417,6 +4428,34 @@
     
   
     protocol_registry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rate_window/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    rate_window
   
 
     
@@ -5018,6 +5057,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../../../about/security-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../../../about/internals/" class="md-nav__link">
         
   
@@ -5181,6 +5248,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.connection_protocol.BufferReader.discard" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        discard
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.connection_protocol.BufferReader.fill" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5242,10 +5320,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol.ConnectionProtocol.buffer" class="md-nav__link">
+  <a href="#blackbull.server.connection_protocol.ConnectionProtocol.peer_closed" class="md-nav__link">
     <span class="md-ellipsis">
       
-        buffer
+        peer_closed
       
     </span>
   </a>
@@ -5381,15 +5459,31 @@ so the body recipient and the WebSocket/h2c successors work unchanged, and adds
 :meth:<code>BufferReader.read_head</code> — the one-scan header read the H/1.1 actor uses
 instead of a <code>readuntil</code> per line.</p>
 <p><strong>The two classes split decision from execution.</strong>  The reader owns the receive
-competence — whether a high-water crossing should pause, when to wait, and
-when a hand a grown buffer back — because reading is the only activity that
-knows both what was asked for and what was consumed.  The protocol owns the
-socket: the transport callbacks, the rendezvous future, the two flow-control
-calls it makes when the reader asks, and the byte-level high-water comparison
-(a threshold, not a judgement — the reader decides what a crossing means).
-Before the split the stop-reading test sat in
-:meth:<code>ConnectionProtocol.buffer_updated</code> and reconstructed the reader's
+competence — whether a high-water crossing should pause, when to wait, when a
+grown buffer goes back, and what to throw away on a lingering close — because
+reading is the only activity that knows both what was asked for and what was
+consumed.  The protocol owns the socket: the transport callbacks, the
+rendezvous future, the two flow-control calls it makes when the reader asks,
+and the byte-level high-water comparison (a threshold, not a judgement — the
+reader decides what a crossing means).  Before the split the stop-reading test
+sat in :meth:<code>ConnectionProtocol.buffer_updated</code> and reconstructed the reader's
 state from outside — resident bytes plus a guess at whether anyone was parked.</p>
+<p><strong>Published fields are facts, never shared state.</strong>  Crossing the boundary with
+a <em>call</em> is what the arrival path cannot afford — an EC2 /conn A/B measured one
+there at the same order as a whole regression — so the two sides publish the
+few facts the other consults (<code>BufferReader.read_offer</code>,
+<code>ConnectionProtocol.reading_paused</code>, <code>ReadBuffer.drained_boundary</code>).  That
+trade is only safe under one rule, and the rule is what keeps "published" from
+decaying into "shared":</p>
+<pre><code>A published field has exactly one writer — its owner.  Reading it across
+the boundary is free; changing it is a method call on the owner, gated on
+a cheap read so it happens only when a change is actually due.
+</code></pre>
+<p><code>maybe_pause</code> and :meth:<code>ReadBuffer.consume_boundary</code> are that gate: both are
+reached only on the rare edge, so the poll stays an attribute read and the
+transition stays with the object whose state it is.  Encapsulation is normally
+what <em>enforces</em> ownership; publishing gives that up, so the rule has to be
+written down and tested — see <code>tests/unit/test_receive_decisions.py</code>.</p>
 <p>Because peeked bytes stay resident, protocol detection can decide without
 consuming: there is nothing to replay to the winning binding, which is what
 retires <code>PrefixReader</code> on this path.</p>
@@ -5441,9 +5535,10 @@ that knows both the demand (<code>read(n)</code>, :meth:<code>read_head</code>) 
 consumption (<code>take</code>), so everything that follows from the pair is
 decided here and merely <em>executed</em> on the transport: whether a high-water
 crossing pauses the peer (:meth:<code>maybe_pause</code>), when to let it go again
-(:meth:<code>_consumed</code>), and when a grown allocation goes back to the floor
-(:meth:<code>_at_boundary</code>).  The protocol below owns the socket, not the
-judgement about it.</p>
+(:meth:<code>_consumed</code>), how much the next recv should be able to deliver
+(the offer published around a park), and when a grown allocation goes back
+to the floor (:meth:<code>_at_boundary</code>).  The protocol below owns the socket,
+not the judgement about it.</p>
 <p>Deliberately not on :class:<code>~.recipient.AbstractReader</code>: two of its three
 implementations have no transport to pause, so promoting this competence to
 the interface would force a no-op onto them.</p>
@@ -5468,6 +5563,43 @@ the interface would force a no-op onto them.</p>
 
 
 
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.server.connection_protocol.BufferReader.discard" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">discard</span><span class="p">(</span><span class="n">max_bytes</span><span class="p">,</span> <span class="n">deadline</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.server.connection_protocol.BufferReader.discard" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Read and throw away up to <em>max_bytes</em>, until EOF or <em>deadline</em>.</p>
+<p>The lingering close needs the peer's remaining bytes gone so the kernel
+does not answer our close with an RST — which would discard the
+response we already wrote.  Throwing bytes away is still <em>reading</em>
+them: it has a demand (<em>max_bytes</em>) and it consumes, which is exactly
+the pair that makes a thing this reader's.  Doing it on the protocol
+with a direct <code>ReadBuffer.consume</code> gave the connection a second
+receive path that skipped every decision this one makes.</p>
+<p><code>consume</code> rather than <code>take</code>: the bytes are not wanted, so there is
+no reason to copy them out.  Both bounds are the caller's to set and
+both matter — an unbounded read hands an attacker the very thing a
+refused request was declining to read, and a read with no deadline lets
+a slow peer hold a connection that has already been answered.</p>
+<p>Returns the number of bytes discarded.  Errors are the caller's to
+absorb: this runs on the teardown path, where the response is already
+on the wire.</p>
+
+
+    </div>
+
+</div>
 
 <div class="doc doc-object doc-function">
 
@@ -5573,6 +5705,13 @@ any single read larger than the mark deadlocks: a WebSocket frame, or
 a <code>chunked</code> chunk whose size the peer chose.
 <code>asyncio.StreamReader._wait_for_data</code> resumes here for the same
 reason.</p>
+<p>Parking is also the only moment a recv-size demand can be <em>consulted</em>,
+so the two readers that have one publish it immediately around their
+call to this (see :attr:<code>read_offer</code>).  It is not
+published here, taking a <em>want</em> argument, because the readers that park
+without a size — <code>read_head</code> on every request, <code>readuntil</code>,
+<code>fill</code> — would then pay a pair of stores to declare nothing, which
+measured as the header path funding what the body path saves.</p>
 
 
     </div>
@@ -5635,19 +5774,25 @@ whether a crossing pauses the peer is the Reader's call.</p>
 
 
 
-<h4 id="blackbull.server.connection_protocol.ConnectionProtocol.buffer" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">buffer</span></code>
+<h4 id="blackbull.server.connection_protocol.ConnectionProtocol.peer_closed" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">peer_closed</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-property"><code>property</code></small>
   </span>
 
-<a href="#blackbull.server.connection_protocol.ConnectionProtocol.buffer" class="headerlink" title="Permanent link">&para;</a></h4>
+<a href="#blackbull.server.connection_protocol.ConnectionProtocol.peer_closed" class="headerlink" title="Permanent link">&para;</a></h4>
 
 
     <div class="doc doc-contents ">
 
-        <p>The connection's buffer, for a successor taking the stream over.</p>
+        <p>The transport signalled EOF: the peer will send nothing more.</p>
+<p>A fact about the socket, which is why it lives here.  It is <strong>not</strong>
+the same question as :meth:<code>BufferReader.at_eof</code> — bytes already
+delivered are still there to be served after the peer has gone, so a
+reader is at EOF only when this is true <em>and</em> its buffer is empty.
+One name for both questions made every call site a guess about which
+was meant.</p>
 
     </div>
 

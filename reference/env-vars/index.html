@@ -1538,6 +1538,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#mqtt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MQTT
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#compression" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4391,6 +4402,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/server/rate_window/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    rate_window
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/server/read_buffer/" class="md-nav__link">
         
   
@@ -4972,6 +5011,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../about/security-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../about/internals/" class="md-nav__link">
         
   
@@ -5199,6 +5266,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#mqtt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MQTT
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#compression" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5345,8 +5423,8 @@ first-hit-then-summary rate-limit model.</p>
 <tbody>
 <tr>
 <td><code>BB_MAX_CONNECTIONS</code></td>
-<td><code>0</code> (uncapped)</td>
-<td>Maximum simultaneous TCP connections <strong>per worker</strong>.  When the cap is reached, new connections receive HTTP/1.1 <code>503 Service Unavailable</code> with <code>Retry-After: 1</code> before close — a well-formed response so load-balancers / health-checks can interpret it correctly.  <code>0</code> disables the cap (rely on OS file-descriptor limit instead).  Multi-worker servers multiply the ceiling (<code>workers × max_connections</code>).  Production deployments on untrusted hosts should set this to a finite ceiling — 1024 is a typical single-loop value.</td>
+<td><code>auto</code></td>
+<td>Maximum simultaneous TCP connections <strong>per worker</strong>.  At the cap, new connections receive HTTP/1.1 <code>503 Service Unavailable</code> with <code>Retry-After: 1</code> before close — a well-formed response so load-balancers and health-checks can interpret it correctly.  Accepts <code>auto</code>, <code>0</code> (uncapped), or a number.<br><br><strong><code>auto</code> derives the cap from the process's own <code>RLIMIT_NOFILE</code></strong>, less a 64-descriptor reserve for listeners, the event loop's selector, log files and your application's own descriptors.  A cap above the fd budget would be decorative — <code>accept()</code> fails with <code>EMFILE</code> before the cap is ever consulted, and the peer gets a dropped connection instead of the 503 — so the derived value can only refuse connections the OS was going to refuse anyway.  That is what makes a finite default safe to ship, and it follows your own intent: raising the fd limit is how you say how large this process may become.  The resolved value is logged at startup.<br><br>An explicit number is honoured as given, not clamped to the fd budget.  Note the derived cap bounds <em>descriptor exhaustion</em>, not event-loop health — a ceiling reflecting what one asyncio loop serves well is a policy number that depends on your workload, so set it explicitly; 1024 is a typical single-loop value.  Multi-worker servers multiply the ceiling (<code>workers × max_connections</code>).</td>
 </tr>
 <tr>
 <td><code>BB_REQUEST_TIMEOUT</code></td>
@@ -5356,7 +5434,7 @@ first-hit-then-summary rate-limit model.</p>
 <tr>
 <td><code>BB_HEADER_TIMEOUT</code></td>
 <td><code>10.0</code></td>
-<td>Seconds an HTTP/1.1 client has to deliver the complete header block (request-line + headers + <code>CRLFCRLF</code>).  Primary slowloris defence — without it, an attacker can hold a connection open indefinitely by dripping bytes.  Server answers <code>408 Request Timeout</code> and closes.  <code>0</code> disables.</td>
+<td>Seconds an HTTP/1.1 client has to deliver the complete header block (request-line + headers + <code>CRLFCRLF</code>).  Primary slowloris defence — without it, an attacker can hold a connection open indefinitely by dripping bytes.  Server answers <code>408 Request Timeout</code> and closes.  Also bounds an HTTP/2 header block opened with HEADERS and never finished with END_HEADERS; there the answer is <code>GOAWAY(ENHANCE_YOUR_CALM)</code>, because HPACK state is connection-wide and a block whose bytes never arrived leaves the decoder unable to read any later one.  <code>0</code> disables.</td>
 </tr>
 <tr>
 <td><code>BB_BODY_TIMEOUT</code></td>
@@ -5366,7 +5444,7 @@ first-hit-then-summary rate-limit model.</p>
 <tr>
 <td><code>BB_WRITE_TIMEOUT</code></td>
 <td><code>30.0</code></td>
-<td>Seconds the server will wait for a single response write to flush to the peer (via <code>StreamWriter.drain()</code>), or for one megabyte of a <code>sendfile</code> transfer to make progress.  Defends against the <em>slow-read</em> shape of slowloris: a client that reads the response 1 byte/sec eventually fills the kernel send buffer and our drain blocks indefinitely.  The bound is per write, not per response, so a legitimately large static file is never cut off for its size — only for stalling.  On timeout the transport is force-closed and the failure surfaces as a peer-side <code>ConnectionResetError</code> for the sender's existing error path.  Enforced by the shared deadline scanner, so the timeout fires within <code>BB_DEADLINE_TICK_MS</code> of the requested instant rather than exactly on it — ~1 % slop at the 30 s default, and no per-response timer on the hot path.  <code>0</code> disables.</td>
+<td>Seconds the server will wait for a single response write to flush to the peer (via <code>StreamWriter.drain()</code>), or for one megabyte of a <code>sendfile</code> transfer to make progress.  Defends against the <em>slow-read</em> shape of slowloris: a client that reads the response 1 byte/sec eventually fills the kernel send buffer and our drain blocks indefinitely.  The bound is per write, not per response, so a legitimately large static file is never cut off for its size — only for stalling.  On timeout the transport is force-closed and the failure surfaces as a peer-side <code>ConnectionResetError</code> for the sender's existing error path.  On HTTP/2 the same knob bounds a second wait: a stream blocked on flow-control credit the peer never grants (the <em>data dribble</em> shape of CVE-2019-9511) gives up and sends <code>RST_STREAM(CANCEL)</code> rather than parking its task forever.  Enforced by the shared deadline scanner, so the drain timeout fires within <code>BB_DEADLINE_TICK_MS</code> of the requested instant rather than exactly on it — ~1 % slop at the 30 s default, and no per-response timer on the hot path.  <code>0</code> disables.</td>
 </tr>
 <tr>
 <td><code>BB_KEEP_ALIVE_TIMEOUT</code></td>
@@ -5397,6 +5475,21 @@ first-hit-then-summary rate-limit model.</p>
 <td><code>BB_BODY_CHUNK_MAX</code></td>
 <td><code>524288</code></td>
 <td>Per-read bound (bytes) for a <code>Content-Length</code> request body.  Reads are up-to-n and transport-paced: each returns whatever the peer has delivered so far, up to this cap, and never blocks waiting to fill it — so a slow peer yields small slices (no read is a latency commitment <code>BB_BODY_TIMEOUT</code> might not deliver) while a fast one earns fewer, larger ones.  The cap is a memory bound, not a latency one: it limits how much a single read may materialise per connection.  Values below <code>BB_BODY_CHUNK_SIZE</code> are raised to it.</td>
+</tr>
+<tr>
+<td><code>BB_MAX_BODY_SIZE</code></td>
+<td><code>31457280</code> (30 MiB)</td>
+<td>Maximum total request-body octets accepted for one request, on <strong>HTTP/1.1 and HTTP/2 alike</strong>.  Without it the peer picks how much memory a request costs: <code>BB_BODY_CHUNK_MAX</code> bounds a single read, never the sum, and <code>conn.body()</code> accumulates whatever arrives.  A declared <code>Content-Length</code> over the cap is refused at head time, before a body octet is read; a <code>chunked</code> (H1) or undeclared (H2) body is refused the moment the running total passes it.  <strong>HTTP/1.1</strong> answers <code>413 Content Too Large</code> and <strong>closes the connection</strong> — the octets we declined are still arriving, so reading the next request out of them is the request-smuggling shape.  <strong>HTTP/2</strong> answers <code>413</code> + <code>RST_STREAM(NO_ERROR)</code> for a declared body (RFC 9113 §8.1) and <code>RST_STREAM(ENHANCE_YOUR_CALM)</code> for one discovered mid-stream; the connection survives, because every stream is framed explicitly.  30 MiB is the same class as Kestrel's <code>MaxRequestBodySize</code> (30,000,000 bytes = 28.6 MiB — near, not equal); nginx defaults to 1 MB, axum to 2 MB.  <code>0</code> disables the cap (uvicorn's behaviour — the app then owns the 413 decision).</td>
+</tr>
+<tr>
+<td><code>BB_MIN_BODY_RATE</code></td>
+<td><code>240.0</code></td>
+<td>Minimum sustained request-body delivery rate in <strong>bytes per second</strong>; below it, past <code>BB_MIN_BODY_RATE_GRACE</code>, the request is abandoned (HTTP/1.1: the same <code>http.disconnect</code> + close as <code>BB_BODY_TIMEOUT</code>; HTTP/2: <code>RST_STREAM(ENHANCE_YOUR_CALM)</code>).  The rate is averaged over a sliding window one grace period wide — a peer that delivered early and then stalled is judged on the stalled window, not on the lifetime average, so a burst cannot shelter a drip.  This is the anti-trickle half of the body defence: a transport-paced read returns on <em>any</em> arrival, so <code>BB_BODY_TIMEOUT</code> degrades from "fill a slice in 30 s" to "send something every 30 s" — which a one-byte drip always satisfies, holding a connection open indefinitely.  A rate is what a drip cannot fake.  Matches Kestrel <code>MinRequestBodyDataRate</code>.  <code>0</code> disables the detector.</td>
+</tr>
+<tr>
+<td><code>BB_MIN_BODY_RATE_GRACE</code></td>
+<td><code>5.0</code></td>
+<td>Seconds of body delivery before <code>BB_MIN_BODY_RATE</code> starts being enforced — the slow-start allowance, so nothing is judged on its first packets.  Also the width of the rate window the average is taken over.  What is measured differs by protocol, and deliberately: <strong>HTTP/1.1</strong> counts only time spent <em>waiting on the transport</em>, so a handler that writes each chunk to a slow disk is never mistaken for a slow peer; <strong>HTTP/2</strong> counts wall clock from the first DATA frame (frames arrive whether or not the handler reads), and instead exempts a peer that our own closed inbound window back-pressured.</td>
 </tr>
 <tr>
 <td><code>BB_STREAM_QUEUE_DEPTH</code></td>
@@ -5568,14 +5661,89 @@ or drop to <code>INFO</code> to surface the rate-limit summary records.</p>
 <td>Negotiate <code>permessage-deflate</code> (RFC 7692) on the inbound handshake when the peer offers it.</td>
 </tr>
 <tr>
+<td><code>BB_WS_MAX_FRAME_PAYLOAD</code></td>
+<td><code>67108864</code> (64 MiB)</td>
+<td>Maximum declared payload length of a single inbound frame, checked against the header <strong>before</strong> any payload byte is read — RFC 6455 §5.2 permits a peer to advertise 2<sup>63</sup>−1.  Exceeding it closes with 1009 (Message Too Big).</td>
+</tr>
+<tr>
+<td><code>BB_WS_MAX_MESSAGE_SIZE</code></td>
+<td><code>16777216</code> (16 MiB)</td>
+<td>Maximum size of a message <strong>as your handler receives it</strong> — after fragment reassembly and after decompression.  This is the bound the frame cap cannot express: permessage-deflate ratios reach 1028.8:1 in this tree, so a frame far under the frame cap can still inflate to gigabytes, and fragmentation accumulates frames that are each individually legal.  Exceeding it closes with 1009 and logs a <code>ws_max_message_size</code> cap hit.  <code>0</code> disables.  The default is the largest message the Autobahn suite sends, so conformance passes unconfigured; <strong>lower it if your application does not serve huge messages</strong> — at the ratio above, 16 MiB of server memory costs a peer roughly 16 KiB of bandwidth.</td>
+</tr>
+<tr>
 <td><code>BB_H2_ENABLE_WEBSOCKET</code></td>
 <td><code>0</code></td>
 <td>Advertise <code>SETTINGS_ENABLE_CONNECT_PROTOCOL=1</code> (RFC 8441 §3) so peers may bootstrap WebSocket over HTTP/2 via Extended CONNECT.  Off by default — this path has fewer conformance tests than the HTTP/1.1 Upgrade path and few clients use it.  When enabling this on a BlackBull instance that terminates TLS/HTTP/2 directly (no nginx / L7 proxy in front), also set <code>BB_MAX_CONNECTIONS</code> to a finite value and review <code>BB_H2_WS_MAX_STREAMS_PER_CONNECTION</code>.  The recommended production shape (nginx terminating TLS/HTTP/2, BlackBull behind it on HTTP/1.1) eliminates the RFC 8441 attack surface entirely because nginx does not forward Extended CONNECT to the backend.</td>
 </tr>
 <tr>
+<td><code>BB_FRAME_RATE_LIMIT</code></td>
+<td><code>20</code></td>
+<td>Maximum number of each metered control frame a peer may send per <code>BB_FRAME_RATE_WINDOW</code>, <strong>per type, per connection</strong>.  Several attack shapes share one form — a frame cheap to send that obliges the server to a small piece of work — so no byte budget can see them and only a count can.  Metered: HTTP/2 <code>RST_STREAM</code> (CVE-2023-44487 Rapid Reset, inbound <strong>and</strong> server-emitted), <code>PING</code> (CVE-2019-9512), <code>SETTINGS</code> (CVE-2019-9515), zero-length <code>CONTINUATION</code>/<code>DATA</code> (CVE-2019-9518 — invisible to <code>BB_HEADER_MAX_TOTAL</code>, which counts bytes), and WebSocket control frames.  Each type has its own budget, so a peer may spend its allowance of PINGs <em>and</em> of SETTINGS without the two competing.  Over the budget: <code>GOAWAY(ENHANCE_YOUR_CALM)</code> on HTTP/2, close <code>1008</code> on WebSocket, plus a <code>frame_rate</code> cap hit.  <code>0</code> disables all frame-rate metering.</td>
+</tr>
+<tr>
+<td><code>BB_FRAME_RATE_WINDOW</code></td>
+<td><code>1.0</code></td>
+<td>Width in seconds of the rolling window <code>BB_FRAME_RATE_LIMIT</code> counts within.</td>
+</tr>
+<tr>
+<td><code>BB_H2_IDLE_TIMEOUT</code></td>
+<td><code>300.0</code></td>
+<td>Seconds of complete silence before the server probes the peer with a PING.  HTTP/2 connections are <em>meant</em> to be long-lived and idle — a browser holds one across a page's lifetime, a gRPC channel idles between calls — so this probes rather than reaps: a peer that answers is never closed, and any inbound frame counts as an answer.  <code>0</code> disables probing, leaving a silent connection bounded only by <code>BB_MAX_CONNECTIONS</code>.</td>
+</tr>
+<tr>
+<td><code>BB_H2_PING_TIMEOUT</code></td>
+<td><code>30.0</code></td>
+<td>Seconds to wait for any frame after a liveness PING before concluding the peer is gone and closing with <code>GOAWAY(NO_ERROR)</code>.  Only meaningful when <code>BB_H2_IDLE_TIMEOUT</code> is non-zero.</td>
+</tr>
+<tr>
 <td><code>BB_H2_WS_MAX_STREAMS_PER_CONNECTION</code></td>
 <td><code>5</code></td>
 <td>Maximum concurrent WebSocket (RFC 8441 Extended CONNECT) streams per HTTP/2 connection.  Caps the per-connection blast radius of WS-over-H2 stream-exhaustion attacks.  <code>0</code> disables the cap (no upper bound beyond <code>BB_H2_MAX_CONCURRENT_STREAMS</code>).  Only meaningful when <code>BB_H2_ENABLE_WEBSOCKET=1</code>.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="mqtt">MQTT<a class="headerlink" href="#mqtt" title="Permanent link">&para;</a></h2>
+<p>Every limit here is also <strong>advertised</strong> to the client in CONNACK where MQTT 5
+has a property for it, so a conforming client stays inside the bounds without
+ever meeting the enforcement path.</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Controls</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>BB_MQTT_MAX_PACKET_SIZE</code></td>
+<td><code>1048576</code> (1 MiB)</td>
+<td>Maximum size of one inbound control packet, advertised as <code>Maximum Packet Size</code> (§3.2.2.3.6).  Checked against the declared Remaining Length as soon as the fixed header is readable, so an over-size packet is refused <strong>without buffering its payload</strong> — MQTT 5 lets a peer declare 268,435,455 bytes (256 MiB) and then dribble them.  Over the cap the broker answers <code>DISCONNECT</code> with <strong>0x95 (Packet Too Large)</strong> and closes.  <code>0</code> disables.</td>
+</tr>
+<tr>
+<td><code>BB_MQTT_RECEIVE_MAXIMUM</code></td>
+<td><code>64</code></td>
+<td>The broker's own <code>Receive Maximum</code> (§3.2.2.3.3): how many QoS&gt;0 PUBLISH packets a client may have in flight towards the broker before waiting for acknowledgements.  <strong>This is a promise a conforming client keeps, not a gate the broker closes</strong> — nothing counts a non-conforming client's in-flight publishes against it; what bounds that direction is the 16-bit packet-identifier space and <code>BB_MQTT_MAX_PACKET_SIZE</code>.  The <em>client's</em> Receive Maximum, in the outbound direction, <strong>is</strong> enforced (see <code>BB_MQTT_MAX_QUEUED_MESSAGES</code>).</td>
+</tr>
+<tr>
+<td><code>BB_MQTT_MAX_QUEUED_MESSAGES</code></td>
+<td><code>1000</code></td>
+<td>Per-session bound on QoS&gt;0 messages held while the <strong>client's</strong> Receive Maximum window is full.  §4.9 forbids sending more than that many unacknowledged PUBLISH packets, so a client that subscribes and never acknowledges would otherwise make the broker hold every matching message for the life of its session.  At the bound the newest message is refused and a cap hit logged — the oldest are kept, because a subscriber is owed what it was promised first and has no way to detect a silently dropped message.  <code>0</code> disables.</td>
+</tr>
+<tr>
+<td><code>BB_MQTT_MAX_RETAINED</code></td>
+<td><code>10000</code></td>
+<td>Maximum number of topics holding a retained message.  Retained messages are permanent by design, so one PUBLISH per topic grows broker memory forever without a bound.  At the cap a retained publish to a <strong>new</strong> topic is refused; updating or deleting an already-retained topic always works, so a client can never be locked out of correcting its own state, and the message is still delivered to current subscribers — only the storage is declined.  How the publisher learns depends on its QoS, because that decides whether the protocol has a channel for the answer: <strong>QoS 1 and 2</strong> get <code>0x97 (Quota Exceeded)</code> in the PUBACK/PUBREC; <strong>QoS 0 is not told</strong> — it has no acknowledgement (§3.3.4), and closing the connection over a storage quota would be disproportionate and would destroy a live delivery that succeeded.  Use QoS ≥ 1 if you need to know your retained state was stored.  The operator sees every refusal in <code>blackbull.caps</code> either way.  <code>0</code> disables.</td>
+</tr>
+<tr>
+<td><code>BB_MQTT_MAX_SUBSCRIPTIONS</code></td>
+<td><code>1000</code></td>
+<td>Maximum Topic Filters one session may hold — the <strong>unit</strong> bound on session state, whose total is <code>BB_MQTT_MAX_SESSIONS</code> and whose time bound is the Session Expiry Interval the client declares.  Without it one connected client grows broker memory without limit, and with it the per-PUBLISH routing walk, since routing tests every filter of every connected session.  At the cap a <strong>new</strong> filter is refused with <code>0x97 (Quota Exceeded)</code> in the SUBACK and a cap hit logged; re-subscribing to a filter the session already holds always works, because §3.8.4 makes that a replacement rather than an addition, so it occupies no new slot.  <code>0</code> disables.</td>
+</tr>
+<tr>
+<td><code>BB_MQTT_MAX_SESSIONS</code></td>
+<td><code>10000</code></td>
+<td>Maximum sessions the broker retains — the <strong>total</strong> bound on session state.  A session outlives its connection by design, and §3.1.2.11.2 defines <code>0xFFFFFFFF</code> as <em>never expires</em>, so a peer cycling Client Identifiers can pin one entry per identifier while breaking no rule.  At the cap a CONNECT for an <strong>unknown</strong> Client Identifier is refused with <code>0x97 (Quota Exceeded)</code> in the CONNACK and the connection closed; a client resuming a session the table already holds is admitted, because refusing it frees nothing.  Expired sessions are swept first, so the cap binds live state only.  <code>0</code> disables.</td>
 </tr>
 </tbody>
 </table>

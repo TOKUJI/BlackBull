@@ -665,6 +665,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#the-body-has-a-ceiling-and-it-is-not-the-handlers-job" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The body has a ceiling, and it is not the handler's job
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#noticing-that-the-client-left" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4553,6 +4564,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/server/rate_window/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    rate_window
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/server/read_buffer/" class="md-nav__link">
         
   
@@ -5134,6 +5173,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../about/security-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../about/internals/" class="md-nav__link">
         
   
@@ -5294,6 +5361,17 @@
   
     <nav class="md-nav" aria-label="Reading the request body">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-body-has-a-ceiling-and-it-is-not-the-handlers-job" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The body has a ceiling, and it is not the handler's job
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#noticing-that-the-client-left" class="md-nav__link">
@@ -5712,6 +5790,26 @@ handler itself).</p>
 returns one chunk with <code>more_body=True</code> until the final chunk
 arrives with <code>more_body=False</code>.  <code>read_body</code> is a convenience
 wrapper that buffers all chunks before returning.</p>
+<h3 id="the-body-has-a-ceiling-and-it-is-not-the-handlers-job">The body has a ceiling, and it is not the handler's job<a class="headerlink" href="#the-body-has-a-ceiling-and-it-is-not-the-handlers-job" title="Permanent link">&para;</a></h3>
+<p>Two limits apply before your handler sees a byte, on HTTP/1.1 and
+HTTP/2 alike:</p>
+<ul>
+<li><strong><code>BB_MAX_BODY_SIZE</code></strong> (30 MiB) — the total the request may deliver.
+  A declared <code>Content-Length</code> over the cap is answered <strong>413 Content
+  Too Large</strong> without reading the body at all, so the handler is never
+  entered; an undeclared or chunked body over it is refused mid-stream.</li>
+<li><strong><code>BB_MIN_BODY_RATE</code></strong> (240 B/s, after a 5 s grace) — the slowest a
+  peer may deliver.  Below it the request is abandoned, the same way
+  <code>BB_BODY_TIMEOUT</code> abandons a silent one.</li>
+</ul>
+<p>An upload endpoint that legitimately accepts more raises the cap
+(<code>BB_MAX_BODY_SIZE=104857600</code>); <code>0</code> disables it and hands the 413
+decision back to the application.  Both are documented in full under
+<a href="../../reference/env-vars/">environment variables</a>.</p>
+<p>A handler <em>can</em> still see a 413: when a chunked HTTP/1.1 body crosses
+the cap mid-stream, <code>receive()</code> raises <code>HTTPException(413)</code>, which the
+dispatcher answers like any other status-carrying error — so an
+<code>@app.on_error(413)</code> handler is honoured.</p>
 <h3 id="noticing-that-the-client-left">Noticing that the client left<a class="headerlink" href="#noticing-that-the-client-left" title="Permanent link">&para;</a></h3>
 <p><code>conn.disconnected</code> is <code>True</code> once the client dropped mid-request.  It is
 worth checking in a loop whose result nobody is waiting for any more:</p>

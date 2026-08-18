@@ -2838,6 +2838,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.logger.debug_gate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        debug_gate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.logger.enqueue_access_log" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4363,6 +4374,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../server/rate_window/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    rate_window
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../server/read_buffer/" class="md-nav__link">
         
   
@@ -4944,6 +4983,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../../about/security-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../../about/internals/" class="md-nav__link">
         
   
@@ -5110,6 +5177,17 @@
     <span class="md-ellipsis">
       
         JsonFormatter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.logger.debug_gate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        debug_gate
       
     </span>
   </a>
@@ -5361,6 +5439,44 @@ event loop, exactly as with the plain-text default.</p>
 
 </div>
 
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.logger.debug_gate" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">debug_gate</span><span class="p">(</span><span class="n">logger</span><span class="p">)</span></code>
+
+<a href="#blackbull.logger.debug_gate" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Whether <em>logger</em> wants DEBUG, decided once at import.</p>
+<p><code>logger.debug(...)</code> is not free when DEBUG is off.  The call still
+happens, <code>Logger.debug</code> still calls <code>isEnabledFor</code>, the arguments are
+still evaluated — 24 executed bytecode instructions to emit nothing,
+measured.  Guarding with <code>isEnabledFor</code> yourself saves 6 of those,
+because that <em>is</em> what <code>debug</code> does; only a value settled at import
+brings it down to 4 (one global read and a branch).</p>
+<p>So modules on a per-request path do::</p>
+<pre><code>_DEBUG = debug_gate(logger)
+...
+if _DEBUG:
+    logger.debug('...', x)
+</code></pre>
+<p>This is the same bargain :func:<code>log</code> already makes and
+<code>docs/guide/logging.md</code> already documents: the level is read at import,
+so raising it afterwards does not switch these on.  Configure <code>DEBUG</code>
+before importing the framework, or restart.  The paths this guards emit
+around twenty lines per request, which is not something a running server
+is switched into anyway.</p>
+<p>Returns a plain bool rather than a callable on purpose — a callable would
+reintroduce the call this exists to remove.</p>
+
+
+    </div>
+
+</div>
 
 <div class="doc doc-object doc-function">
 

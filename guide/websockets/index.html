@@ -870,6 +870,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#message-size-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Message size limits
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#read-ahead-and-back-pressure" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4453,6 +4464,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/server/rate_window/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    rate_window
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/server/read_buffer/" class="md-nav__link">
         
   
@@ -5034,6 +5073,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../about/security-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../about/internals/" class="md-nav__link">
         
   
@@ -5338,6 +5405,17 @@
     <span class="md-ellipsis">
       
         Fragmented messages
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#message-size-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Message size limits
       
     </span>
   </a>
@@ -5843,6 +5921,57 @@ fragmented message.</p>
 </tr>
 </tbody>
 </table>
+<h2 id="message-size-limits">Message size limits<a class="headerlink" href="#message-size-limits" title="Permanent link">&para;</a></h2>
+<p>Two limits bound an inbound message, and they are deliberately not the
+same limit:</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Bounds</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>BB_WS_MAX_FRAME_PAYLOAD</code></td>
+<td>64 MiB</td>
+<td>one frame, as it arrives on the wire</td>
+</tr>
+<tr>
+<td><code>BB_WS_MAX_MESSAGE_SIZE</code></td>
+<td>16 MiB</td>
+<td>the message your handler receives</td>
+</tr>
+</tbody>
+</table>
+<p>The second exists because the first cannot see what a frame <em>becomes</em>.
+Two paths grow a message after the frame check has already passed:</p>
+<ul>
+<li><strong>Decompression.</strong> With <code>permessage-deflate</code> negotiated, the frame on
+  the wire is compressed.  Deflate ratios measured in this tree reach
+  <strong>1028.8:1</strong>, so a 1 MiB frame — comfortably legal under the frame cap
+  — inflates to roughly 1 GiB.</li>
+<li><strong>Fragmentation.</strong> Each continuation frame is individually legal; the
+  sum is what costs memory.</li>
+</ul>
+<p><code>BB_WS_MAX_MESSAGE_SIZE</code> is therefore expressed in terms of what your
+handler is handed: post-reassembly, post-inflation.  The running total is
+checked <em>before</em> each fragment is appended, and decompression is bounded
+by zlib itself, so an over-sized message is refused without ever being
+built.</p>
+<p>A message over the limit closes the connection with <strong>1009 (Message Too
+Big)</strong> — RFC 6455 §7.4.1 defines the code for exactly this — and records
+a <code>ws_max_message_size</code> cap hit on <code>blackbull.caps</code> (see
+<a href="../logging/#cap-hit-log-blackbullcaps">Logging</a>).</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># An application whose largest legitimate message is 256 KiB</span>
+<span class="nv">BB_WS_MAX_MESSAGE_SIZE</span><span class="o">=</span><span class="m">262144</span><span class="w"> </span>python<span class="w"> </span>app.py
+</code></pre></div>
+<p>The default is the largest message the Autobahn test suite sends, chosen
+so conformance passes with nothing configured.  <strong>If your application
+does not serve huge messages, lower it.</strong>  The default bounds the
+amplification but does not remove it: at the ratio above, a peer still
+buys 16 MiB of your memory for about 16 KiB of its own bandwidth.</p>
 <h2 id="read-ahead-and-back-pressure">Read-ahead and back-pressure<a class="headerlink" href="#read-ahead-and-back-pressure" title="Permanent link">&para;</a></h2>
 <p><code>BB_WS_QUEUE_DEPTH</code> selects how far ahead of your handler the
 connection reads.  It defaults to <code>0</code>.</p>

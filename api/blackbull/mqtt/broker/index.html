@@ -3275,6 +3275,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="BrokerActor">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.broker.BrokerActor.close" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        close
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -4337,6 +4354,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../server/rate_window/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    rate_window
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../server/read_buffer/" class="md-nav__link">
         
   
@@ -4918,6 +4963,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../../../about/security-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../../../about/internals/" class="md-nav__link">
         
   
@@ -5087,6 +5160,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="BrokerActor">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.broker.BrokerActor.close" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        close
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
         
@@ -5292,6 +5382,28 @@ state — the design goal of the actor split.</p>
 
 
 
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.mqtt.broker.BrokerActor.close" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">close</span><span class="p">()</span></code>
+
+<a href="#blackbull.mqtt.broker.BrokerActor.close" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Release loop resources the actor owns outside its inbox.</p>
+<p>Only the expiry handle qualifies today.  Cancelling the broker task
+does not cancel it: a <code>TimerHandle</code> lives in the loop's timer heap
+and holds a bound method of this object, so an armed one outlives
+the actor and then posts into an inbox nobody reads.</p>
+
+
+    </div>
+
+</div>
+
 
 
   </div>
@@ -5384,6 +5496,10 @@ state — the design goal of the actor split.</p>
 
 
         <p>A client's connection is ending (<code>graceful=False</code> fires its Will).</p>
+<p><code>session_expiry_interval</code> carries the property of the same name from
+the client's DISCONNECT (§3.14.2.2.2), which may shorten — but never
+lengthen — what its CONNECT declared.  <code>None</code> means the packet did
+not carry one, or the connection ended without a DISCONNECT at all.</p>
 
 
 

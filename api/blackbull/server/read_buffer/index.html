@@ -13,7 +13,7 @@
         <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/server/read_buffer/">
       
       
-        <link rel="prev" href="../protocol_registry/">
+        <link rel="prev" href="../rate_window/">
       
       
         <link rel="next" href="../recipient/">
@@ -4215,6 +4215,34 @@
                 
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../rate_window/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    rate_window
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
     
   
   
@@ -4361,6 +4389,17 @@
     <span class="md-ellipsis">
       
         consume
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.read_buffer.ReadBuffer.consume_boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        consume_boundary
       
     </span>
   </a>
@@ -5012,6 +5051,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../../../about/security-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../../../about/internals/" class="md-nav__link">
         
   
@@ -5234,6 +5301,17 @@
     <span class="md-ellipsis">
       
         consume
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.read_buffer.ReadBuffer.consume_boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        consume_boundary
       
     </span>
   </a>
@@ -5564,6 +5642,34 @@ another one.</p>
     <div class="doc doc-contents ">
 
         <p>Advance past <em>n</em> bytes handed out by :meth:<code>view</code>.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.server.read_buffer.ReadBuffer.consume_boundary" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">consume_boundary</span><span class="p">()</span></code>
+
+<a href="#blackbull.server.read_buffer.ReadBuffer.consume_boundary" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Take the raised boundary, and start the next message's accounting.</p>
+<p>The reader polls :attr:<code>drained_boundary</code> on every consuming read —
+cheap, and true only rarely — and calls this when it is set.  Clearing
+it here rather than at the call site is the whole point: the flag and
+the peak are this object's state, so the transition that ends a
+message's accounting is this object's to make.  A consumer that reset
+them itself would be an edge-triggered signal with the reset on the
+wrong side, and the edge would go to whichever consumer reached it
+first.</p>
+<p>Called only on a real boundary, so the cost is a rare call rather than
+a per-read one — the same shape as the reader's own <code>maybe_pause</code>.</p>
 
 
     </div>

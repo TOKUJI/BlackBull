@@ -3320,6 +3320,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="PacketFramer">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.connection.PacketFramer.buffered" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        buffered
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.connection.PacketTooLarge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PacketTooLarge
+      
+    </span>
+  </a>
+  
 </li>
         
           <li class="md-nav__item">
@@ -4332,6 +4360,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../server/rate_window/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    rate_window
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../server/read_buffer/" class="md-nav__link">
         
   
@@ -4913,6 +4969,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../../../about/security-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../../../about/internals/" class="md-nav__link">
         
   
@@ -5100,6 +5184,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="PacketFramer">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.connection.PacketFramer.buffered" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        buffered
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.connection.PacketTooLarge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PacketTooLarge
+      
+    </span>
+  </a>
+  
 </li>
         
           <li class="md-nav__item">
@@ -5282,12 +5394,90 @@ framing/resync state machine lives here rather than inline in the read loop:</p>
 <li>an <strong>incomplete</strong> packet simply ends the current iteration — the partial
   bytes stay buffered for the next :meth:<code>feed</code> (TCP will deliver the rest),</li>
 <li>a <strong>hard decode error</strong> (reserved flag bits, unknown type — the junk a
-  desynchronised stream produces) drops one byte and resyncs.</li>
+  desynchronised stream produces) resyncs to the next plausible header,</li>
+<li>a packet whose <strong>declared</strong> size exceeds <em>max_packet_size</em> raises
+  :class:<code>PacketTooLarge</code> from the fixed header, before its body is
+  waited for.  MQTT 5 lets a peer declare 268,435,455 bytes and then
+  dribble them; a framer that judged the packet only once it was
+  complete would already have paid for the attack.</li>
 </ul>
 <p>This replaces explicit <code>stalled_len</code> bookkeeping.  The <code>bytes(...)</code>
 snapshot at the decode boundary stays because the codec's input contract is
 deliberately <code>bytes</code>; a zero-copy framer would mean widening that contract
 to the buffer protocol (deferred).</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.mqtt.connection.PacketFramer.buffered" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">buffered</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#blackbull.mqtt.connection.PacketFramer.buffered" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Bytes held for the next feed — the thing a size bound must keep small.</p>
+
+    </div>
+
+</div>
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.mqtt.connection.PacketTooLarge" class="doc doc-heading">
+            <code>PacketTooLarge</code>
+
+
+<a href="#blackbull.mqtt.connection.PacketTooLarge" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="Exception">Exception</span></code></p>
+
+
+
+        <p>A packet declared more bytes than <code>BB_MQTT_MAX_PACKET_SIZE</code> allows.</p>
+<p>Carries the declared size rather than a buffered one: the whole point
+of the check is that the payload is refused on the strength of the
+fixed header, so there is nothing buffered to report.</p>
 
 
 

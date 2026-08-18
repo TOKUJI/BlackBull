@@ -4360,6 +4360,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../rate_window/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    rate_window
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../read_buffer/" class="md-nav__link">
         
   
@@ -4941,6 +4969,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../../../about/security-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../../../about/internals/" class="md-nav__link">
         
   
@@ -5342,7 +5398,7 @@ the sliding-window context carries forward across messages.</p>
 
 
 <h4 id="blackbull.server.permessage_deflate.InboundDecompressor.decompress" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">decompress</span><span class="p">(</span><span class="n">payload</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">decompress</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">max_length</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 <a href="#blackbull.server.permessage_deflate.InboundDecompressor.decompress" class="headerlink" title="Permanent link">&para;</a></h4>
 
@@ -5350,6 +5406,17 @@ the sliding-window context carries forward across messages.</p>
     <div class="doc doc-contents ">
 
         <p>Inflate one whole compressed message.  Raises <code>zlib.error</code> on bad data.</p>
+<p>With <em>max_length</em> set, the inflated output is bounded by zlib
+itself rather than measured after the fact: a bomb is refused
+without ever being built.  Asking for <code>max_length + 1</code> is what
+makes "exactly at the bound" and "one byte over" distinguishable
+in a single call — zlib stops at the byte it was given, so a
+return of exactly <code>max_length</code> bytes is ambiguous on its own.</p>
+<p>Raises :class:<code>MessageTooLarge</code> when the peer's message inflates
+past the bound.  <code>unconsumed_tail</code> is the other half of that
+check: zlib stops early when it hits the limit, so leftover input
+means there was more to come even if the output landed on the
+boundary.</p>
 
 
     </div>

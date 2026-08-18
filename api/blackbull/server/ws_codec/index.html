@@ -4218,6 +4218,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../rate_window/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    rate_window
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../read_buffer/" class="md-nav__link">
         
   
@@ -4546,6 +4574,17 @@
     <span class="md-ellipsis">
       
         FramePayloadTooLarge
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.ws_codec.MessageTooLarge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MessageTooLarge
       
     </span>
   </a>
@@ -4940,6 +4979,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../../../about/security-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../../../about/internals/" class="md-nav__link">
         
   
@@ -5102,6 +5169,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.ws_codec.MessageTooLarge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MessageTooLarge
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.ws_codec.WSFrameHeader" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5252,6 +5330,64 @@ module-level functions directly.</p>
 declared payload length exceeds it.  The caller is responsible for
 translating this into a WebSocket-level CLOSE (RFC 6455 §7.4.1
 code 1009 MESSAGE_TOO_BIG) — the codec stays protocol-agnostic.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.server.ws_codec.MessageTooLarge" class="doc doc-heading">
+            <code>MessageTooLarge</code>
+
+
+<a href="#blackbull.server.ws_codec.MessageTooLarge" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="Exception">Exception</span></code></p>
+
+
+
+        <p>Raised when a <em>message</em> outgrows its bound.</p>
+<p>Sibling of :class:<code>FramePayloadTooLarge</code>, one layer up: that one is
+about a frame on the wire, this one about what the application would
+be handed once fragments are joined and permessage-deflate has
+inflated.  A frame small enough to pass the frame cap can still
+produce a message that does not — which is the whole reason both
+exist.  Same division of labour: the caller translates this into
+CLOSE 1009 (RFC 6455 §7.4.1); the codec stays protocol-agnostic.</p>
+<p><em>produced</em> is what the message had reached when the bound tripped,
+not what it would eventually have been — nothing here ever computes
+the size of a payload it refused to build.</p>
 
 
 

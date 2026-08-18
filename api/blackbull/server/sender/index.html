@@ -4218,6 +4218,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../rate_window/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    rate_window
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../read_buffer/" class="md-nav__link">
         
   
@@ -4534,6 +4562,17 @@
     <span class="md-ellipsis">
       
         ConnectionWindow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.sender.FlowControlStalled" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FlowControlStalled
       
     </span>
   </a>
@@ -5146,6 +5185,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../../../about/security-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../../../about/internals/" class="md-nav__link">
         
   
@@ -5429,6 +5496,17 @@
     <span class="md-ellipsis">
       
         ConnectionWindow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.sender.FlowControlStalled" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FlowControlStalled
       
     </span>
   </a>
@@ -6062,6 +6140,42 @@ connection-level <code>WINDOW_UPDATE</code> (it already tracks every live sender
 
 
   </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.server.sender.FlowControlStalled" class="doc doc-heading">
+            <code>FlowControlStalled</code>
+
+
+<a href="#blackbull.server.sender.FlowControlStalled" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="Exception">Exception</span></code></p>
+
+
+
+        <p>The peer never granted the flow-control credit it was asked for.</p>
+<p>Distinct from a write failure: the socket is fine and the peer is
+answering — it simply declines to accept the response it requested,
+which is the "data dribble" shape of CVE-2019-9511.  Carried as its
+own type so the stream ends with <code>RST_STREAM(CANCEL)</code> (a stream we
+gave up on) rather than <code>INTERNAL_ERROR</code> (a server that broke).</p>
+
+
+
+
+
+
+
+
 
     </div>
 

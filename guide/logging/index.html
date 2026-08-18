@@ -1061,6 +1061,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#the-same-applies-to-internal-debug-logging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The same applies to internal DEBUG logging
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -4431,6 +4442,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/server/rate_window/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    rate_window
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/server/read_buffer/" class="md-nav__link">
         
   
@@ -5012,6 +5051,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../about/security-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../about/internals/" class="md-nav__link">
         
   
@@ -5228,6 +5295,17 @@
     <span class="md-ellipsis">
       
         @log decorator
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-same-applies-to-internal-debug-logging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The same applies to internal DEBUG logging
       
     </span>
   </a>
@@ -5578,6 +5656,26 @@ frame or level-check overhead in production.</p>
 have already been imported will not activate <code>@log</code> logging for
 already-decorated functions.  Configure <code>DEBUG</code> level before
 importing framework modules, or restart the process.</p>
+<h3 id="the-same-applies-to-internal-debug-logging">The same applies to internal <code>DEBUG</code> logging<a class="headerlink" href="#the-same-applies-to-internal-debug-logging" title="Permanent link">&para;</a></h3>
+<p>Framework modules on a per-request path — request dispatch, HTTP/2
+frame parsing, the response senders — read the <code>DEBUG</code> level once
+at import and branch on the result, for the same reason <code>@log</code>
+does.  A <code>logger.debug(...)</code> call that emits nothing is not free:
+the call happens, its arguments are built, and the level is
+checked, which measured at 24 bytecode instructions per site.
+HTTP/2 was making twenty such calls per request.</p>
+<p>So <strong>configure <code>DEBUG</code> before importing <code>blackbull</code></strong> if you want
+internal debug output:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">logging</span>
+<span class="n">logging</span><span class="o">.</span><span class="n">basicConfig</span><span class="p">(</span><span class="n">level</span><span class="o">=</span><span class="n">logging</span><span class="o">.</span><span class="n">DEBUG</span><span class="p">)</span>   <span class="c1"># before the import below</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">BlackBull</span>
+</code></pre></div>
+<p>Raising the level afterwards still affects <code>WARNING</code>/<code>ERROR</code> and
+the access log, which are checked per call as usual; it will not
+switch on the per-request <code>DEBUG</code> traces.  Those paths emit around
+twenty lines per request, so they are a development setting rather
+than something to enable on a running server.</p>
 <h2 id="forwarding-logs-to-a-remote-server">Forwarding logs to a remote server<a class="headerlink" href="#forwarding-logs-to-a-remote-server" title="Permanent link">&para;</a></h2>
 <p><code>logging.Handler.emit()</code> is synchronous.  Calling a blocking HTTP
 request directly from <code>emit</code> would stall the asyncio event loop.
@@ -5695,6 +5793,14 @@ record on <code>blackbull.caps</code> when it fires.  Coverage:</p>
 <td>body bytes didn't arrive in time</td>
 </tr>
 <tr>
+<td><code>BB_MAX_BODY_SIZE</code></td>
+<td>request body over the total cap (H/1.1 + H/2; <code>requested</code> is the declared length at head time, the running total mid-stream)</td>
+</tr>
+<tr>
+<td><code>BB_MIN_BODY_RATE</code></td>
+<td>body delivered below the minimum rate past the grace period — <code>requested</code> is the observed rate in bytes/second</td>
+</tr>
+<tr>
 <td><code>BB_REQUEST_TIMEOUT</code></td>
 <td>handler exceeded per-request budget (H/1.1 + H/2)</td>
 </tr>
@@ -5705,6 +5811,26 @@ record on <code>blackbull.caps</code> when it fires.  Coverage:</p>
 <tr>
 <td><code>BB_WS_MAX_FRAME_PAYLOAD</code></td>
 <td>WebSocket frame declared length exceeded</td>
+</tr>
+<tr>
+<td><code>BB_WS_MAX_MESSAGE_SIZE</code></td>
+<td>WebSocket message over the total cap post-reassembly / post-inflation — <code>requested</code> is the size reached when the bound tripped, never the size the message would have become</td>
+</tr>
+<tr>
+<td><code>BB_FRAME_RATE_LIMIT</code></td>
+<td>A metered control frame exceeded its per-type budget (H/2 <code>RST_STREAM</code> — inbound or server-emitted — <code>PING</code>, <code>SETTINGS</code>, zero-length frames; WebSocket control frames).  Logged as cap name <code>frame_rate</code>; <code>protocol</code> says which protocol</td>
+</tr>
+<tr>
+<td><code>BB_MQTT_MAX_PACKET_SIZE</code></td>
+<td>MQTT packet declared larger than the cap — <code>requested</code> is the declared size, since the payload is refused unread</td>
+</tr>
+<tr>
+<td><code>BB_MQTT_MAX_QUEUED_MESSAGES</code></td>
+<td>MQTT session backlog full while the client's Receive Maximum window was; <code>scope_path</code> carries the topic</td>
+</tr>
+<tr>
+<td><code>BB_MQTT_MAX_RETAINED</code></td>
+<td>MQTT retained publish to a new topic refused at the store cap; <code>scope_path</code> carries the topic</td>
 </tr>
 <tr>
 <td><code>BB_H2_MAX_CONCURRENT_STREAMS</code></td>
