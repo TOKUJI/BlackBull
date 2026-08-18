@@ -56,7 +56,6 @@ import logging
 import time
 from collections import OrderedDict
 
-from ..asgi import ASGIEvent
 from ..connection import Connection
 from ..native import NativeResponse
 from .utils import as_middleware

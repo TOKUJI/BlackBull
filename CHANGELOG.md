@@ -29,6 +29,15 @@ BlackBull uses [ZeroVer](https://0ver.org/) prior to a 1.0 commitment:
   the MQTT-broker debut plus its actor-model rebuild and the protocol-agnostic
   connection dispatcher.  Normal per-sprint versioning resumes at the next
   sprint close as `v0.45.0`.
+- **Exception (2026-08-16)**: the attack-resistance programme ships as **one**
+  MINOR when it is complete, not one release per sprint.  It spans several
+  sprints (request-body limits, WebSocket message bounds, MQTT resource
+  bounds, HTTP/2 time bounds, frame-rate metering) and its deliverable is a
+  *coherent* resource-governance surface — a partial release would advertise a
+  security posture the code does not hold yet, and would ask adopters to
+  re-read the same subject three times.  Sprints inside the programme close
+  without cutting a release; `[Unreleased]` accumulates until the last one
+  lands.
 - `PATCH` covers bug fixes, security fixes, and harness work — whether they
   land between sprints or close one.
 - No `1.0.0` until the framework's identity (pure-Python H1 parser,
@@ -51,9 +60,238 @@ so the editable install's metadata catches up.
   ever a latency commitment `BB_BODY_TIMEOUT` might not deliver); a fast one
   earns fewer, larger ones.  `BB_BODY_CHUNK_SIZE` now applies only to the
   chunked-transfer path.
+- **`BB_MAX_BODY_SIZE`** (default `31457280`, 30 MiB) — total request-body
+  ceiling, enforced on HTTP/1.1 and HTTP/2 alike.  A declared `Content-Length`
+  over the cap is refused at head time, before a body octet is read; an
+  undeclared or chunked body is refused the moment the running total passes it.
+  HTTP/1.1 answers **413 Content Too Large** and closes the connection (the
+  refused octets are still arriving, so keep-alive would parse them as the next
+  request); HTTP/2 answers 413 + `RST_STREAM(NO_ERROR)` before dispatch, or
+  `RST_STREAM(ENHANCE_YOUR_CALM)` mid-stream, and keeps the connection.  The
+  30 MiB default is the same class as Kestrel's `MaxRequestBodySize`
+  (30,000,000 bytes = 28.6 MiB); `0` disables the cap.
+  **This is a behaviour change**: a request body over 30 MiB is now rejected by
+  the server unless the cap is raised.
+- **`BB_MIN_BODY_RATE`** (default `240.0` B/s) and **`BB_MIN_BODY_RATE_GRACE`**
+  (default `5.0` s) — minimum sustained body-delivery rate, the anti-trickle
+  defence transport-paced reads made necessary: an up-to-n read returns on any
+  arrival, so `BB_BODY_TIMEOUT` alone degrades to "send *something* every 30 s",
+  which a one-byte drip satisfies indefinitely.  Below the rate, past the grace
+  period, the request is abandoned.  Matches Kestrel's
+  `MinRequestBodyDataRate`; `0` disables.  What the rate is measured against
+  differs by protocol on purpose — HTTP/1.1 counts only time spent waiting on
+  the transport (so a slow handler is never mistaken for a slow peer), HTTP/2
+  counts wall clock but exempts a peer our own closed inbound window
+  back-pressured.
+- **`BB_WS_MAX_MESSAGE_SIZE`** (default `16777216`, 16 MiB) — bounds a
+  WebSocket message *as the application receives it*: after fragment
+  reassembly and after `permessage-deflate` inflation.  `BB_WS_MAX_FRAME_PAYLOAD`
+  bounds a frame on the wire and cannot express this — deflate ratios measured
+  in this tree reach **1028.8:1**, so a 1 MiB frame inflates to roughly 1 GiB,
+  and a fragmented message accumulates frames that are each individually legal.
+  Over the bound closes with **1009 Message Too Big** (RFC 6455 §7.4.1) and
+  logs a `ws_max_message_size` cap hit.  `0` disables.  The default admits the
+  largest message the Autobahn suite sends, so conformance passes unconfigured;
+  applications that do not serve huge messages should lower it.
+  **This is a behaviour change**: a WebSocket message over 16 MiB now closes
+  the connection unless the bound is raised.
+- **MQTT resource bounds** — the broker now answers the three questions every
+  other protocol here already answered, and **advertises** each answer in
+  CONNACK where MQTT 5 has a property for it, so a conforming client never
+  meets the enforcement path:
+    - **`BB_MQTT_MAX_PACKET_SIZE`** (default `1048576`, 1 MiB), advertised as
+      `Maximum Packet Size` (§3.2.2.3.6).  Judged from the declared Remaining
+      Length as soon as the fixed header is readable — MQTT 5 permits a peer to
+      declare 268,435,455 bytes and dribble them, so the payload is refused
+      unread.  Over the cap: `DISCONNECT` **0x95 Packet Too Large**, connection
+      closed.
+    - **`BB_MQTT_RECEIVE_MAXIMUM`** (default `64`), advertised as
+      `Receive Maximum` (§3.2.2.3.3).
+    - **`BB_MQTT_MAX_QUEUED_MESSAGES`** (default `1000`) — per-session bound on
+      QoS>0 messages held while the *client's* Receive Maximum window is full.
+      The client's `receive_maximum` was decoded but never honoured, so a
+      subscriber that never acknowledged made the broker hold every matching
+      message for the life of its session.  At the bound the newest message is
+      refused and the oldest kept.
+    - **`BB_MQTT_MAX_RETAINED`** (default `10000`) — retained messages are
+      permanent by design, so the store needed a total.  At the cap a retained
+      publish to a *new* topic is refused; updating and deleting an
+      already-retained topic always work.
+  **This is a behaviour change** for a broker exposed to peers that send
+  packets over 1 MiB, retain more than 10,000 topics, or rely on an unbounded
+  offline backlog.
+- **HTTP/2 now has a time axis.**  `HTTP2Actor` previously held no deadline of
+  any kind: a peer could open a header block and dribble CONTINUATION forever,
+  complete the preface and go silent, or request a large response and never
+  open its flow-control window — each holding a connection, its actor task and
+  its buffers indefinitely, at no cost to itself.  Three bounds, reusing
+  HTTP/1.1's knobs rather than inventing HTTP/2 vocabulary:
+    - **`BB_HEADER_TIMEOUT`** now also bounds an HTTP/2 header block opened
+      without END_HEADERS.  Answered with `GOAWAY(ENHANCE_YOUR_CALM)` rather
+      than a stream reset, because HPACK state is connection-wide: a block
+      whose bytes never arrived leaves the decoder unable to read any later one.
+    - **`BB_WRITE_TIMEOUT`** now also bounds waiting for `WINDOW_UPDATE` (the
+      *data dribble* shape of CVE-2019-9511).  The stream gives up with
+      `RST_STREAM(CANCEL)` instead of parking its task forever.
+    - **`BB_H2_IDLE_TIMEOUT`** (default `300.0`) and **`BB_H2_PING_TIMEOUT`**
+      (default `30.0`) — a silent connection is *probed* with a PING, not
+      reaped.  Idle HTTP/2 connections are normal (a browser holds one across a
+      page's lifetime; a gRPC channel idles between calls), so a peer that
+      answers is never closed and any inbound frame counts as an answer.  A
+      peer that does not answer gets `GOAWAY(NO_ERROR)`.  `0` disables probing.
+  h2spec: 146 tests, 145 passed, 1 skipped, 0 failed — no bound fires during a
+  conformance case.
+- **`BB_FRAME_RATE_LIMIT`** (default `20`) and **`BB_FRAME_RATE_WINDOW`**
+  (default `1.0`) — a per-type, per-connection budget for control frames that
+  are cheap to send and oblige the server to work.  BlackBull metered exactly
+  one frame type (inbound `RST_STREAM`, from the Rapid Reset work); four more
+  shapes had no meter at all:
+    - HTTP/2 `PING` flood (CVE-2019-9512) — one ACK write per frame;
+    - HTTP/2 `SETTINGS` flood (CVE-2019-9515) — one ACK write per frame;
+    - zero-length `CONTINUATION` / `DATA` (CVE-2019-9518's shape) — a parse and
+      a loop turn for **no bytes at all**, so `BB_HEADER_MAX_TOTAL`, which
+      counts bytes, never saw them;
+    - WebSocket control-frame flood — one PONG write per PING.
+  Each type gets its own budget, so a peer may legitimately spend its PING
+  allowance *and* its SETTINGS allowance.  Over the budget:
+  `GOAWAY(ENHANCE_YOUR_CALM)` on HTTP/2, close `1008` on WebSocket, plus a
+  `frame_rate` cap hit.  `0` disables metering.  h2spec re-run with the meters
+  live: 146 tests, 145 passed, 1 skipped, 0 failed.
+  The Rapid Reset budget was a class constant (`HTTP2Actor._RST_RATE_LIMIT`,
+  20/s); it is now this knob, at the same default.
+- **`BB_MQTT_MAX_SUBSCRIPTIONS`** (default `1000`) and
+  **`BB_MQTT_MAX_SESSIONS`** (default `10000`) — the unit and total bounds on
+  MQTT session state, which had neither.  A session's Topic Filter list was
+  appended to without limit, so one connected client could grow broker memory
+  (and, with it, the per-PUBLISH routing walk) without opening a second
+  connection; and the session table itself had no cap, which matters because
+  §3.1.2.11.2 defines a Session Expiry Interval of `0xFFFFFFFF` as *does not
+  expire* — a peer cycling Client Identifiers could pin one entry per
+  identifier while breaking no rule.  At the subscription cap a **new** filter
+  is refused with `0x97 (Quota Exceeded)` in the SUBACK (§3.9.3) while
+  re-subscribing to one the session already holds still works, since §3.8.4
+  makes that a replacement; at the session cap a CONNECT for an **unknown**
+  Client Identifier is refused with `0x97` in the CONNACK and the connection
+  closed, while a client resuming a session already in the table is admitted,
+  because refusing it frees nothing.  Both log to `blackbull.caps`; `0`
+  disables either.
+
+### Security
+
+An audit of the paths a peer can make the server allocate on found nine gaps.
+Re-reading that audit afterwards found two more, in rows it had already written
+down — so eleven are closed here, and the count is the point: **this is a pass
+over the surface, not a finished job.** They are listed plainly rather than
+folded into the feature notes above: BlackBull has no known production adopters
+and none of these was reported from the field, but a security page that appears
+quietly after silent fixes is worth less than the fixes.
+
+The organising defect was one shape repeated — **a cap on one unit standing in
+for a cap on the total**. The frame was bounded and the message was not; the
+packet was bounded and the session state was not. Ten of the eleven are that
+shape. The eleventh is the one worth remembering, because it needed a different
+question: the HTTP/2 priority tree had no total because nothing ever *read*
+what it stored, so it was never counted as storage at all. **A write with no
+reader is still a growable path.**
+
+| What was unbounded | Reachable by | Now |
+|---|---|---|
+| WebSocket message after `permessage-deflate` inflation | one compressed frame; ratios measured at **1028.8:1** in this codebase, so a 1 MiB frame inflated to ~1 GiB | `BB_WS_MAX_MESSAGE_SIZE`, enforced by zlib's own `max_length` so the payload is never built |
+| WebSocket message across fragments | N continuation frames, each individually legal | same knob, checked before each append |
+| MQTT packet | declaring a Remaining Length up to the 256 MiB spec ceiling and dribbling it | `BB_MQTT_MAX_PACKET_SIZE`, judged from the header before buffering |
+| MQTT session backlog | subscribing and never acknowledging | client's `Receive Maximum` honoured; excess bounded by `BB_MQTT_MAX_QUEUED_MESSAGES` |
+| MQTT retained store | one retained PUBLISH per distinct topic, forever | `BB_MQTT_MAX_RETAINED` |
+| HTTP/2 connection time — no deadline of any kind existed in the actor | opening a header block and dribbling CONTINUATION; going silent after the preface; never opening the flow-control window | `BB_HEADER_TIMEOUT`, `BB_H2_IDLE_TIMEOUT` + `BB_H2_PING_TIMEOUT`, `BB_WRITE_TIMEOUT` |
+| HTTP/2 PING / SETTINGS / zero-length frame floods | one ACK write or one loop turn per frame, at no byte cost (CVE-2019-9512 / -9515 / -9518 shapes) | `BB_FRAME_RATE_LIMIT` per type |
+| WebSocket control-frame flood | one PONG write per PING | same meter |
+| Rapid Reset counter's blind spot | provoking *server-emitted* resets rather than sending them | emitted resets counted in the same window |
+| MQTT session state — subscriptions per session, sessions per broker, and an expiry that was recorded but never enforced | one CONNECT per Client Identifier at `session_expiry_interval = 0xFFFFFFFF`, which §3.1.2.11.2 defines as *never expires*; or one client subscribing to endless filters | `BB_MQTT_MAX_SUBSCRIPTIONS`, `BB_MQTT_MAX_SESSIONS`, and a one-shot expiry sweep |
+| HTTP/2 priority-tree growth | PRIORITY for arbitrary idle stream ids — legal under §6.3, unmetered, and measured at 10,000 frames → 10,000 nodes that nothing removed | the state was never read, so it is no longer recorded at all; PRIORITY_UPDATE hints bounded by `SETTINGS_MAX_CONCURRENT_STREAMS` |
+
+Also in this release: the request-body total cap and minimum delivery rate
+(`BB_MAX_BODY_SIZE`, `BB_MIN_BODY_RATE`), and a finite default connection cap
+(`BB_MAX_CONNECTIONS`) — both described under *Added* and *Changed*.
+
+**Two defaults are worth setting, stated because a default-open knob is only
+useful if you know it is open**: `BB_REQUEST_TIMEOUT` is `0`, so a peer
+delivering at exactly the minimum rate up to the body cap legally holds a
+connection for ≈36.4 hours; and the derived connection cap bounds descriptor
+exhaustion, not event-loop health, so set an explicit number. Both are
+documented in
+[the security model](https://github.com/TOKUJI/BlackBull/blob/master/docs/about/security-model.md),
+which also states what this project does **not** claim — no third-party audit,
+no red-team exercise, no volumetric-DoS protection.
 
 ### Changed
 
+- **`blackbull.__all__` now states the public surface, and two names that
+  leaked into it are gone.**  The package ships `py.typed`, and for an
+  inline-typed package the typing spec treats `from .x import Y` in
+  `__init__.py` as a *private* import unless it is re-exported — so the 37
+  names this package intends you to import were not formally part of its typed
+  contract.  They are now.
+
+  Two of the names previously reachable were accidents of implementation, and
+  have been bound privately:
+
+  - `blackbull.logging` resolved to the **standard library** `logging` module —
+    an artifact of `import logging` at the top of `__init__.py`, and confusing
+    next to the real `blackbull.logger`.
+  - `blackbull.PackageNotFoundError` was `importlib.metadata`'s exception,
+    imported only to detect a source checkout.
+
+  Neither was documented and neither is used anywhere in the tree, so this
+  should be invisible; if you were importing either from `blackbull`, take them
+  from `logging` and `importlib.metadata` directly.  Submodules
+  (`blackbull.server`, `blackbull.middleware`, …) are deliberately *not* in
+  `__all__` and are unaffected — import them by path as before.  `Request`, the
+  deprecated `Connection` alias, is also excluded so `import *` no longer risks
+  a `DeprecationWarning` for code that never asked for it.
+
+- **Internal `DEBUG` logging is now decided at import, not per call.**  A
+  `logger.debug(...)` that emits nothing is not free — the call happens, its
+  arguments are built, and the level is checked — and the framework was making
+  twenty of them per HTTP/2 request and three per HTTP/1.1 request, measured at
+  4.5 % and 1.7 % of those lanes.  The per-request modules (request dispatch,
+  HTTP/2 frame parsing, the response senders) now read the level once at import
+  and branch on the result.
+
+  **What this changes for you**: raising the log level to `DEBUG` *after*
+  importing `blackbull` no longer switches on those internal traces.
+  Configure it first:
+
+  ```python
+  import logging
+  logging.basicConfig(level=logging.DEBUG)   # before the import below
+  from blackbull import BlackBull
+  ```
+
+  This is the bargain the `@log` decorator has always made, and the caveat in
+  `docs/guide/logging.md` now covers internal debug logging generally rather
+  than only `@log`.  `WARNING`/`ERROR` and the access log are unaffected and
+  are still checked per call.  The paths this gates emit around twenty lines
+  per request, so they are a development setting rather than something to
+  enable on a running server.
+
+- **`BB_MAX_CONNECTIONS` now defaults to a finite, derived value** instead of
+  `0` (uncapped).  It accepts `auto` (the new default), `0`, or a number.
+  `auto` derives the cap from the process's own `RLIMIT_NOFILE`, less a
+  64-descriptor reserve for listeners, the event loop's selector, log files and
+  the application's own descriptors.
+  The value is derived rather than picked because a cap above the fd budget is
+  decorative: `accept()` fails with `EMFILE` before the cap is consulted, and
+  the peer gets a dropped connection instead of the `503` + `Retry-After` the
+  mechanism exists to send.  Derived, it can only refuse connections the OS was
+  going to refuse anyway — which is what makes a finite default safe to ship —
+  and it follows the operator's own intent, since raising the fd limit is how
+  you say how large a process may become.  The resolved value is logged at
+  startup, because a derived default nobody can see is a default nobody can
+  size.
+  An explicit number is still honoured as given and is *not* clamped to the fd
+  budget.  **This bounds descriptor exhaustion, not event-loop health**: a
+  ceiling reflecting what one asyncio loop serves well is a policy number that
+  depends on the workload, so set it explicitly (1024 is a typical single-loop
+  value).
 - **Transport-paced `Content-Length` body delivery** — the body-read slice is
   no longer a fixed `readexactly(chunk_size)` per `http.request` event; each
   read returns whatever the transport has delivered, up to `BB_BODY_CHUNK_MAX`.
@@ -75,6 +313,130 @@ so the editable install's metadata catches up.
     guess "is anybody waiting" from the rendezvous future, which clears when a
     reader is *woken*, so arrivals in that window cost a
     `pause_reading`/`resume_reading` pair that the next park undid.
+  - The reader's transport offer is now *published* (`ConnectionProtocol.read_offer`)
+    rather than polled through a method call — the mirror of `reading_paused`
+    going the other way.  `get_buffer` runs on every arrival on every
+    connection, including the ones that never read a body, so the decision is
+    kept out of that path on principle rather than measured into it — an EC2
+    A/B on `/conn` puts the change at +0.13 % (95 % CI [−0.13, +0.39]), i.e.
+    no throughput claim either way.  Ownership is unchanged: the party that
+    decides is the party that writes.
+- **Server-emitted `RST_STREAM` frames now count toward the Rapid Reset
+  budget.**  The meter watched inbound resets only, so a peer could get the
+  same stream-slot churn for free by *provoking* ours — protocol violations,
+  window overruns, and (new in this release) the body-size and body-rate
+  refusals are all reachable on demand.  A stream reset is a stream reset
+  whoever sent it.  **Deliberate consequence**: a client that repeatedly trips
+  a legitimate limit — an upload loop over `BB_MAX_BODY_SIZE`, say —
+  eventually loses its connection.  That is the correct outcome for a client
+  behaving abusively even unintentionally; the cap-hit log names which limit it
+  kept tripping so an operator can tell the two apart.
+- **MQTT is visible in `blackbull.caps`.**  The broker previously had no
+  `log_cap_hit` call anywhere, so nothing it refused reached the operational
+  channel every other protocol reports through.  Each of the new limits emits
+  one, with the topic in `scope_path`.
+- **MQTT framer resync is linear, not quadratic.**  A desynchronised stream
+  used to drop one byte and re-decode from the start, so a junk run cost a
+  decode attempt per byte — and the length of a junk run is the peer's choice.
+  It now skips to the next byte that could plausibly begin a packet (a
+  control-packet type of `0` is reserved, §2.1.2) before asking the decoder
+  again.
+- **WebSocket cap-hit records now carry the request path.**  The WebSocket
+  actor passes its `Connection` to the recipient, so `ws_max_frame_payload` and
+  `ws_max_message_size` report with `scope_path` set instead of `None` — the
+  one field an operator needs to act on the record.
+- **A refused body ends the HTTP/1.1 connection.**  `HTTP1Recipient.must_close`
+  makes explicit what a desynced chunked stream already implied, and extends it
+  to a body refused for size: the actor breaks the keep-alive loop instead of
+  reading the next request out of octets the peer chose.
+- **The cost of the new limits, measured and then worked down.**  The close A/B
+  for this programme found a regression against `v0.76.1`: HTTP/1.1 `/conn`
+  −1.98 % and HTTP/2 `/1kb` −3.75 % (EC2 m7a.2xlarge, 8 rounds ABBA with a
+  passing A/A null).  Paying the limits once per connection instead of once per
+  request roughly halved it — to −1.06 % and −1.85 % — and that is the last
+  figure confirmed on EC2.
+
+  Attribution then moved to counting *executed instructions* per request, which
+  is deterministic where this box's timing is not.  Its most useful finding:
+  about **40 % of the added cost was not the limits at all** but the receive
+  path's ownership split, which shipped in the same window.
+
+  Four further changes brought the instruction cost against `v0.76.1` from
+  +2.23 % to +0.19 % on `/conn` and from +1.85 % to +0.29 % on HTTP/2 — the
+  largest of them being the DEBUG-logging gate below, which was never about
+  the limits.  A second EC2 A/B (20 rounds, targeting ±0.5 % equivalence)
+  confirmed both lanes are **bounded within ±1 %** of `v0.76.1`, which is the
+  bound the original regression was measured against, but did not reach the
+  stricter ±0.5 % target: HTTP/2 `/1kb` keeps a real, CI-confirmed residual of
+  **−0.35 % to −0.42 %** (91–89 % of the original −3.75 % recovered);
+  `/conn` did not resolve either way — its confidence interval cannot rule out
+  zero or a cost approaching −1 % at every trim level but one, though a
+  regression larger than 1 % is excluded.  Neither is release-blocking on this
+  evidence; further reduction remains an open, non-blocking candidate.
+
+  The instruction count under-predicted both lanes (by 1.2–1.5× on HTTP/2 and
+  1.6–2.4× on `/conn`) — it counts Python bytecode, not the C-level work,
+  syscalls, allocation and GC underneath it.  Treat any "N % of the lane"
+  figure derived from it as a **lower bound**, not an estimate.
+
+  What the limits themselves now cost, and what was taken back:
+  - the declared-body check reads the length `_validate_message_framing`
+    already validated, instead of asking the header store again — a request
+    with no `Content-Length` was paying an index miss plus the `bytes.lower()`
+    allocation of the fallback probe;
+  - `HTTP2Recipient` and `HTTP2Sender` are handed their limits by the
+    connection's actor rather than resolving settings themselves.  One of each
+    is built per stream, so a function-level import was being resolved through
+    `importlib._bootstrap` on every request;
+  - the HTTP/2 declared-body refusal is a comparison at the call site, so the
+    common answer — no — costs neither a coroutine nor a method call per
+    stream;
+  - the HTTP/1.1 actor asks the recipient one question after dispatch
+    (`after_dispatch`) rather than combining two predicates itself.
+
+  Behaviour is unchanged in every case.  `BB_H2_IDLE_TIMEOUT`'s per-frame clock
+  read was left alone deliberately, because it is what makes that bound mean
+  the period it states; the frame-rate meters and the body-cap state were
+  likewise left, because they are the checks rather than the way they are
+  written.
+
+### Fixed
+
+- **A PRIORITY flood no longer grows HTTP/2 server state.**  RFC 9113 §6.3
+  permits PRIORITY for a stream in any state, including idle, so a peer could
+  send it for arbitrary stream identifiers; each one created a priority-tree
+  node, and `Stream.remove_child` had no caller anywhere in the tree.  Measured
+  before the fix: 10,000 PRIORITY frames left 10,000 nodes, no GOAWAY, the
+  connection still open — a few bytes on the wire for a node that outlived
+  them.  §5.3 deprecated that
+  prioritisation scheme and BlackBull does not implement it (`Stream.weight` and
+  `.parent` were written by the responder and read by nothing), so the fix is to
+  stop recording it rather than to cap it: the frame is validated and the signal
+  dropped.  The exclusive-dependency branch went with it, which had walked every
+  child of root to rewrite that same unread field — quadratic on top of
+  unbounded.  §5.3.1's self-dependency check is unchanged and h2spec is
+  unchanged at 146 tests, 145 passed, 1 skipped, 0 failed.  RFC 9218
+  `PRIORITY_UPDATE` still pre-creates a node so a hint arriving before HEADERS
+  survives to meet it, now bounded by `SETTINGS_MAX_CONCURRENT_STREAMS` as §7
+  permits, with `h2_priority_update_buffer` logged over the bound.  `Priority`
+  frame construction also logged one `INFO` record per frame on the grounds that
+  "PRIORITY frames are rare" — true only of well-behaved peers; it is now DEBUG
+  behind the module gate.
+- **MQTT Session Expiry Interval is now enforced.**  `_expiry` was recorded on
+  CONNECT and read in exactly one place — a `<= 0` test at detach — so every
+  session that declared a non-zero interval was retained for the life of the
+  process.  Sessions with a finite interval are now removed when it elapses,
+  driven by a single one-shot timer armed at the earliest pending deadline, so
+  a broker with nothing pending holds no timer at all.  Three consequences of
+  the same defect are fixed with it: a reconnect took `max(old, new)` of the
+  intervals, so one CONNECT at `0xFFFFFFFF` pinned the session permanently and
+  the client could never shorten it (§3.1.2.11.2 makes the new value the
+  session's value); a reconnect to an elapsed session answered
+  `session_present=True` and replayed its unacknowledged messages, resurrecting
+  deliveries the client had already accounted for; and `DISCONNECT` carried a
+  Session Expiry Interval (§3.14.2.2.2) that never reached the broker — it is
+  now honoured when it shortens the interval and refused when it would raise a
+  zero one, which that section makes a Protocol Error.
 
 ## [0.76.2] — 2026-08-17
 

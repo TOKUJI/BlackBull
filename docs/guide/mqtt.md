@@ -101,6 +101,8 @@ conformance matrix:
 | Session takeover | a second CONNECT for a live Client Identifier disconnects the prior connection with `0x8E` (§3.1.4) |
 | Properties | the full MQTT 5 property set (§2.2.2.2) on every packet that carries properties |
 | Sessions | subscriptions and pending QoS state preserved across reconnects with Clean Start = 0 |
+| Flow control | the client's `Receive Maximum` (§3.1.2.11.3) is enforced in the outbound direction; the broker's own is advertised in CONNACK as a promise to conforming clients |
+| Resource limits | packet size, session backlog, subscription and session counts, and retained-store size are bounded; the ones MQTT 5 has a property for are advertised — see below |
 
 The wire codec lives in `blackbull.mqtt.messages` (the 15 control-packet
 dataclasses, `encode_packet` / `decode_packet`, the property system, reason
@@ -151,6 +153,80 @@ Semantics worth knowing:
   it a Protocol Error (§3.8.3.1), and the broker disconnects with `0x82`.
 - Malformed forms (`$share/g`, an empty ShareName, a wildcard in the ShareName,
   or an empty filter portion) are rejected per-entry with `0x8F`.
+
+## Resource limits
+
+An MQTT broker holds state on a client's behalf: buffered packet bytes, unacked
+messages, retained messages that outlive the session that published them. Each
+of those is bounded, and each bound is **advertised in CONNACK** where MQTT 5
+has a property for it — so a conforming client stays inside the limits without
+ever meeting the enforcement path.
+
+| Limit | Default | Advertised as | Over the limit |
+|---|---|---|---|
+| `BB_MQTT_MAX_PACKET_SIZE` | 1 MiB | `Maximum Packet Size` (§3.2.2.3.6) | `DISCONNECT` **0x95 Packet Too Large**, connection closed |
+| `BB_MQTT_RECEIVE_MAXIMUM` | 64 | `Receive Maximum` (§3.2.2.3.3) | a conforming client waits — a promise, not a gate (see below) |
+| `BB_MQTT_MAX_QUEUED_MESSAGES` | 1000 | — (a broker-side total) | newest message refused, cap hit logged |
+| `BB_MQTT_MAX_RETAINED` | 10000 | — (a broker-side total) | retained publish to a *new* topic refused; `0x97` in the PUBACK/PUBREC at QoS ≥ 1 |
+| `BB_MQTT_MAX_SUBSCRIPTIONS` | 1000 | — (a per-session unit) | a *new* Topic Filter refused with `0x97` in the SUBACK; re-subscribing to one the session holds always works |
+| `BB_MQTT_MAX_SESSIONS` | 10000 | — (a broker-side total) | CONNECT for an *unknown* Client Identifier refused with `0x97` in the CONNACK, connection closed; a resuming client is admitted |
+
+Five properties of these limits are worth knowing before you tune them:
+
+**The packet limit is judged from the header.** MQTT 5 lets a peer declare a
+Remaining Length of 268,435,455 bytes (256 MiB) and then deliver it slowly. The
+check runs as soon as the fixed header is readable, so the payload is never
+buffered — the broker refuses on what the peer *claimed*, not on what it
+managed to send.
+
+**The backlog exists because flow control is not a licence to forget.** When a
+client's `Receive Maximum` window is full, matching messages are held rather
+than dropped: the client asked the broker to slow down, not to lose its
+messages. But "hold everything" is how a subscriber that never acknowledges
+turns a subscription into a leak, so the queue is bounded too. At the bound the
+**newest** message is refused and the oldest kept — a subscriber is owed what it
+was promised first, and has no way to detect a message silently dropped from the
+middle.
+
+**Retained messages are capped by topic count, and correction is always
+allowed.** At the cap, a retained publish to a *new* topic is refused, but
+updating or deleting an already-retained topic still works. A client locked out
+of correcting its own retained state would be worse off than one that could
+never set it — and deleting (a zero-length retained payload, §3.3.2.3) is what
+frees the room being contended for. The message is still delivered to current
+subscribers; only the storage is declined.
+
+How the publisher finds out depends on the QoS it chose, because that is what
+decides whether the protocol has a channel for the answer. **QoS 1 and 2**
+receive `0x97 (Quota Exceeded)` in the PUBACK or PUBREC. **QoS 0 is not told**
+— it has no acknowledgement (§3.3.4), and closing the connection over a storage
+quota would be disproportionate as well as destroying a live delivery that
+succeeded. If you need to know your retained state was stored, publish it at
+QoS ≥ 1.
+
+**Session state is bounded on all three axes, and one of them is the client's
+to choose.** How big one session may be is `BB_MQTT_MAX_SUBSCRIPTIONS` plus
+`BB_MQTT_MAX_QUEUED_MESSAGES`; how many may exist is `BB_MQTT_MAX_SESSIONS`;
+how long a session outlives its connection is the Session Expiry Interval the
+client declares in CONNECT (and may shorten in DISCONNECT, §3.14.2.2.2). The
+third is the one you do not control — and §3.1.2.11.2 lets a client declare
+`0xFFFFFFFF`, meaning *never expires*. That is legal, BlackBull honours it, and
+it is exactly why the total exists: a peer cycling Client Identifiers with a
+never-expiring interval is bounded by `BB_MQTT_MAX_SESSIONS` and by nothing
+else. At that cap a CONNECT for an unknown Client Identifier is refused with
+`0x97`; a client resuming a session already in the table is admitted, because
+refusing it would free nothing.
+
+**One limit is advertised but not enforced, and it is worth knowing which.**
+`BB_MQTT_RECEIVE_MAXIMUM` tells a client how many QoS>0 publishes it may have
+in flight *towards* the broker. Nothing counts a non-conforming client's
+against it; what bounds that direction is the 16-bit packet-identifier space
+and the packet size cap. The **client's** Receive Maximum, in the outbound
+direction, is enforced — that is what `BB_MQTT_MAX_QUEUED_MESSAGES` backs.
+
+Every refusal above emits a record on `blackbull.caps` (see
+[Logging](logging.md#cap-hit-log-blackbullcaps)), so a limit that fires is a
+limit you can see fire.
 
 ## Trying it with Mosquitto
 
@@ -253,5 +329,9 @@ interacts with `--reload` and `SO_REUSEPORT`.
   HTTP, however, scales across all workers: `app.run(workers=4)` alongside the
   broker runs HTTP on every worker and the broker on worker 0. (`--reload` still
   pins `workers=1` when a broker is registered.)
-- **In-memory sessions.** Sessions are retained for the process lifetime rather
-  than expired on a timer; restarting the broker clears all session state.
+- **In-memory sessions.** Session state lives in the broker process and does
+  not survive a restart. A session with a finite Session Expiry Interval is
+  removed once the interval elapses (§3.1.2.11.2), by a one-shot timer armed at
+  the earliest pending deadline — so a broker with nothing pending holds no
+  timer at all. `0xFFFFFFFF` means *does not expire*, and BlackBull honours it:
+  such a session is bounded by `BB_MQTT_MAX_SESSIONS`, not by the clock.

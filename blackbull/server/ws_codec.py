@@ -144,6 +144,29 @@ class FramePayloadTooLarge(Exception):
         self.maximum = maximum
 
 
+class MessageTooLarge(Exception):
+    """Raised when a *message* outgrows its bound.
+
+    Sibling of :class:`FramePayloadTooLarge`, one layer up: that one is
+    about a frame on the wire, this one about what the application would
+    be handed once fragments are joined and permessage-deflate has
+    inflated.  A frame small enough to pass the frame cap can still
+    produce a message that does not — which is the whole reason both
+    exist.  Same division of labour: the caller translates this into
+    CLOSE 1009 (RFC 6455 §7.4.1); the codec stays protocol-agnostic.
+
+    *produced* is what the message had reached when the bound tripped,
+    not what it would eventually have been — nothing here ever computes
+    the size of a payload it refused to build.
+    """
+
+    def __init__(self, produced: int, maximum: int):
+        super().__init__(
+            f'message reached {produced} bytes, over the maximum {maximum}')
+        self.produced = produced
+        self.maximum = maximum
+
+
 async def read_payload(
     reader, masked: bool, length: int, *, max_length: int | None = None,
 ) -> bytes:

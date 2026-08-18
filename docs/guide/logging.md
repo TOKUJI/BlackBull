@@ -198,6 +198,32 @@ have already been imported will not activate `@log` logging for
 already-decorated functions.  Configure `DEBUG` level before
 importing framework modules, or restart the process.
 
+### The same applies to internal `DEBUG` logging
+
+Framework modules on a per-request path — request dispatch, HTTP/2
+frame parsing, the response senders — read the `DEBUG` level once
+at import and branch on the result, for the same reason `@log`
+does.  A `logger.debug(...)` call that emits nothing is not free:
+the call happens, its arguments are built, and the level is
+checked, which measured at 24 bytecode instructions per site.
+HTTP/2 was making twenty such calls per request.
+
+So **configure `DEBUG` before importing `blackbull`** if you want
+internal debug output:
+
+```python
+import logging
+logging.basicConfig(level=logging.DEBUG)   # before the import below
+
+from blackbull import BlackBull
+```
+
+Raising the level afterwards still affects `WARNING`/`ERROR` and
+the access log, which are checked per call as usual; it will not
+switch on the per-request `DEBUG` traces.  Those paths emit around
+twenty lines per request, so they are a development setting rather
+than something to enable on a running server.
+
 ## Forwarding logs to a remote server
 
 `logging.Handler.emit()` is synchronous.  Calling a blocking HTTP
@@ -293,9 +319,16 @@ record on `blackbull.caps` when it fires.  Coverage:
 | `BB_HEADER_MAX_LINE` | per-line header limit exceeded |
 | `BB_HEADER_MAX_TOTAL` | aggregate header block exceeded (H/1.1 + H/2 CONTINUATION) |
 | `BB_BODY_TIMEOUT` | body bytes didn't arrive in time |
+| `BB_MAX_BODY_SIZE` | request body over the total cap (H/1.1 + H/2; `requested` is the declared length at head time, the running total mid-stream) |
+| `BB_MIN_BODY_RATE` | body delivered below the minimum rate past the grace period — `requested` is the observed rate in bytes/second |
 | `BB_REQUEST_TIMEOUT` | handler exceeded per-request budget (H/1.1 + H/2) |
 | `BB_WRITE_TIMEOUT` | drain stalled (slow-read peer) |
 | `BB_WS_MAX_FRAME_PAYLOAD` | WebSocket frame declared length exceeded |
+| `BB_WS_MAX_MESSAGE_SIZE` | WebSocket message over the total cap post-reassembly / post-inflation — `requested` is the size reached when the bound tripped, never the size the message would have become |
+| `BB_FRAME_RATE_LIMIT` | A metered control frame exceeded its per-type budget (H/2 `RST_STREAM` — inbound or server-emitted — `PING`, `SETTINGS`, zero-length frames; WebSocket control frames).  Logged as cap name `frame_rate`; `protocol` says which protocol |
+| `BB_MQTT_MAX_PACKET_SIZE` | MQTT packet declared larger than the cap — `requested` is the declared size, since the payload is refused unread |
+| `BB_MQTT_MAX_QUEUED_MESSAGES` | MQTT session backlog full while the client's Receive Maximum window was; `scope_path` carries the topic |
+| `BB_MQTT_MAX_RETAINED` | MQTT retained publish to a new topic refused at the store cap; `scope_path` carries the topic |
 | `BB_H2_MAX_CONCURRENT_STREAMS` | HTTP/2 stream-open guard tripped |
 | `BB_H2_WS_MAX_STREAMS_PER_CONNECTION` | RFC 8441 WebSocket stream cap tripped |
 | `BB_COMPRESSION_MAX_INFLIGHT` | Compression middleware bypassed (executor saturated) |

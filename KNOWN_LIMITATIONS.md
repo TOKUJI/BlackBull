@@ -48,10 +48,14 @@ isn't yet broad enough to promote this to default-on.
 directly (no nginx / L7 proxy in front), the server is exposed
 to stream-exhaustion attacks — an attacker can open up to
 `BB_H2_MAX_CONCURRENT_STREAMS` (default 100) Extended CONNECT
-streams per connection, multiplied by `BB_MAX_CONNECTIONS`
-(default `0` = unbounded), holding all of them idle.  Mitigate
-by setting `BB_MAX_CONNECTIONS` to a finite value and relying on
-`BB_H2_WS_MAX_STREAMS_PER_CONNECTION` (default `5`).  The
+streams per connection, multiplied by `BB_MAX_CONNECTIONS`,
+holding all of them idle.  `BB_MAX_CONNECTIONS` now defaults to a
+finite value derived from the process's `RLIMIT_NOFILE`, so the
+product is bounded out of the box — but only as tightly as that
+descriptor budget, which on a default Linux host is large.  Set it
+explicitly to the concurrency the deployment actually expects, and
+rely on `BB_H2_WS_MAX_STREAMS_PER_CONNECTION` (default `5`) for the
+per-connection half.  The
 recommended production shape — nginx terminating TLS/HTTP/2
 with BlackBull on HTTP/1.1 behind it — eliminates this surface
 entirely because nginx does not forward RFC 8441 Extended
@@ -66,14 +70,19 @@ connection preface and switches to h2c — there is no separate
 the same port serves both protocols at the framework's
 discretion.
 
-### Slowloris response is correct but not quantitatively characterised
+### Slowloris: the cut-off is measured, the saturation curve is not
 
 Three timeouts (`BB_HEADER_TIMEOUT`, `BB_BODY_TIMEOUT`,
-`BB_KEEP_ALIVE_TIMEOUT`) defend against partial-data attacks;
-tests verify a 408 is returned.  What's *not* characterised is
-the exact "with N slow connections, first new connection
-accepted within M ms" curve — only the qualitative claim "RFC
-9110 §15.5.9 compliant 408 plus the three timeouts work".
+`BB_KEEP_ALIVE_TIMEOUT`) plus a minimum delivery rate
+(`BB_MIN_BODY_RATE`, 240 B/s after a 5 s grace) defend against
+partial-data attacks; tests verify a 408, and a run against the real
+slow-drip harness cut a trickling body at 6.0 s with the rate
+detector on, against >26 s with `BB_MIN_BODY_RATE=0`.
+
+What is still *not* characterised is the saturation curve — the
+"with N slow connections, first new connection accepted within M ms"
+shape.  The per-connection defence is measured; the fleet-level
+behaviour under many simultaneous slow peers is not.
 
 ### HTTP QUERY (RFC 10008): `Accept-Query` is not synthesised on OPTIONS
 
@@ -115,8 +124,10 @@ raw-protocol bridge, so it inherits both constraints above.  Beyond those:
 **State does not survive a restart.**  Subscriptions, sessions, and retained
 messages live in the one serving process — not shared across workers, not
 persisted.  A restart, or a worker-0 respawn after a crash, clears all
-session and retained state.  Sessions are kept for the process lifetime
-rather than expired on a timer.
+session and retained state.  A session with a finite Session Expiry
+Interval is removed once the interval elapses; `0xFFFFFFFF` means *does
+not expire* (§3.1.2.11.2) and is honoured, so such a session is bounded
+by `BB_MQTT_MAX_SESSIONS` and by nothing else.
 
 **Nothing is queued for offline sessions.**  A disconnected client with a
 live session (`Session Expiry Interval > 0`) gets §4.4 replay of its

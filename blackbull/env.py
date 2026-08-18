@@ -15,12 +15,26 @@ BB_MAX_CONNECTIONS
     Maximum simultaneous TCP connections accepted per worker.  When the
     cap is reached, new connections receive HTTP/1.1 ``503 Service
     Unavailable`` with ``Retry-After: 1`` (a load-balancer-friendly
-    response, not a silent reset).  ``0`` disables the cap and relies
-    on the OS file-descriptor limit instead.  Default: ``0`` (uncapped).
-    Production deployments on untrusted hosts should set this to a
-    finite ceiling — 1024 is a sensible single-loop value; multi-worker
-    deployments multiply (so ``workers=8`` × ``BB_MAX_CONNECTIONS=1024``
-    → 8K connections per process).
+    response, not a silent reset).
+    Accepts ``auto`` (the default), ``0`` to disable the cap, or an
+    explicit number.
+    **``auto`` derives the cap from this process's own ``RLIMIT_NOFILE``**,
+    less a small reserve for listeners, the event loop's selector, log
+    files and the application's own descriptors.  A cap above the fd
+    budget would be decorative — ``accept()`` fails with ``EMFILE`` before
+    the cap is consulted, and the peer gets a dropped connection instead
+    of the 503 — so the derived value can only refuse connections the OS
+    was going to refuse anyway.  That is what makes a finite default safe
+    to ship, and it follows the operator's own intent: raising the fd
+    limit is how you say how large this process may become.  The resolved
+    value is logged at startup, because a derived default nobody can see
+    is a default nobody can size.
+    An explicit number is honoured as given, not clamped to the fd budget.
+    Note this bounds *descriptor exhaustion*, not event-loop health: a
+    ceiling reflecting what one asyncio loop serves well is a policy
+    number that depends on the workload — set it explicitly; 1024 is a
+    typical single-loop value.  Multi-worker deployments multiply (so
+    ``workers=8`` × ``BB_MAX_CONNECTIONS=1024`` → 8K per process).
 BB_STREAM_QUEUE_DEPTH
     ``asyncio.Queue`` depth for HTTP/2 per-stream request-body events.
     Limits memory growth when an ASGI handler is slower than the client.
@@ -195,11 +209,144 @@ BB_WS_MAX_FRAME_PAYLOAD
     before any body bytes arrive.  This cap is enforced on the
     declared length in the frame header (before reading bytes off the
     wire) and triggers ``CLOSE`` with status code 1009 (MESSAGE_TOO_BIG)
-    when exceeded.  Default: ``67108864`` (64 MiB) — large enough to
-    pass the Autobahn|Testsuite 9.x large-message cases while still
-    bounding per-connection memory use.  Lower for stricter exposure
-    (e.g. ``1048576`` for 1 MiB matching the
-    ``python-websockets`` default).
+    when exceeded.  Default: ``67108864`` (64 MiB) — comfortably above
+    the largest frame the Autobahn|Testsuite sends (16 MiB, case 9.1.6)
+    while still bounding per-connection memory use.  Lower for stricter
+    exposure (e.g. ``1048576`` for 1 MiB matching the
+    ``python-websockets`` default).  This bounds the frame *as it
+    arrives on the wire*; what the application is handed after
+    reassembly and inflation is bounded by ``BB_WS_MAX_MESSAGE_SIZE``.
+BB_WS_MAX_MESSAGE_SIZE
+    Maximum size (bytes) of a WebSocket message **as the application
+    receives it** — after fragment reassembly and after
+    permessage-deflate inflation.  This is the bound
+    ``BB_WS_MAX_FRAME_PAYLOAD`` cannot express: that one caps a single
+    compressed frame on the wire, and deflate ratios in this tree
+    measure 1028.8:1, so a frame at that cap inflates to ~64 GiB with
+    nothing between the peer and the allocator.  Fragmentation is the
+    same defect without the compression: N frames each under the frame
+    cap accumulate with no total.
+    Exceeding it closes with 1009 (MESSAGE_TOO_BIG, RFC 6455 §7.4.1) and
+    logs a ``ws_max_message_size`` cap hit.  ``0`` disables the cap.
+    Default: ``16777216`` (16 MiB) — the largest message the
+    Autobahn|Testsuite sends (9.1.6 text / 9.2.6 binary), so the suite
+    stays green on shipped defaults.  An application that does not serve
+    huge messages should lower this: at the measured ratio a peer still
+    buys 16 MiB of server memory for ~16 KiB of upstream bandwidth.
+BB_FRAME_RATE_LIMIT
+    Maximum number of each metered control frame a peer may send per
+    ``BB_FRAME_RATE_WINDOW``, **per type, per connection**.  Several
+    attack shapes share one form: a frame that is cheap to send and
+    obliges the server to a small piece of work per frame, so no byte
+    budget can see them and only a count can.  Metered:
+    HTTP/2 ``RST_STREAM`` (CVE-2023-44487 Rapid Reset — inbound *and*
+    server-emitted), ``PING`` (CVE-2019-9512), ``SETTINGS``
+    (CVE-2019-9515), zero-length ``CONTINUATION``/``DATA``
+    (CVE-2019-9518 — invisible to ``BB_HEADER_MAX_TOTAL``, which counts
+    bytes), and WebSocket control frames.
+    Each type gets its own budget, so a peer may legitimately spend its
+    allowance of PINGs *and* of SETTINGS without the two competing.
+    Exceeding it closes the connection (``GOAWAY(ENHANCE_YOUR_CALM)`` on
+    HTTP/2, close ``1008`` on WebSocket) and logs a ``frame_rate`` cap
+    hit naming the frame type.  ``0`` disables all frame-rate metering.
+    Default: ``20`` — generous for legitimate peers (browser navigation
+    plus prefetch cancellation rarely exceeds ~10 RST/s) and limiting for
+    the attack shapes, which run to thousands per second.
+BB_FRAME_RATE_WINDOW
+    Width in seconds of the rolling window ``BB_FRAME_RATE_LIMIT``
+    counts within.  Default: ``1.0``.
+BB_H2_IDLE_TIMEOUT
+    Seconds of complete silence on an HTTP/2 connection before the
+    server probes the peer with a PING.  HTTP/2 connections are *meant*
+    to be long-lived and idle — a browser holds one across a page's
+    lifetime and a gRPC channel idles between calls — so reaping on
+    idleness alone would break both.  Probing distinguishes *idle* from
+    *gone*: a peer that answers is never closed, and one that does not
+    answer within ``BB_H2_PING_TIMEOUT`` gets ``GOAWAY(NO_ERROR)`` and a
+    close.  Any inbound frame counts as an answer.  ``0`` disables the
+    probe entirely, leaving a silent connection bounded only by
+    ``BB_MAX_CONNECTIONS``.  Default: ``300.0`` (5 minutes).
+BB_H2_PING_TIMEOUT
+    Seconds to wait for any frame after a liveness PING before
+    concluding the peer is gone and closing with ``GOAWAY(NO_ERROR)``.
+    Only meaningful when ``BB_H2_IDLE_TIMEOUT`` is non-zero.
+    Default: ``30.0``.
+BB_MQTT_MAX_PACKET_SIZE
+    Maximum size (bytes) of a single inbound MQTT control packet,
+    advertised to clients as the ``Maximum Packet Size`` property in
+    CONNACK (§3.2.2.3.6) so a conforming client never sends one.  The
+    check runs on the declared Remaining Length as soon as the fixed
+    header is readable, so an over-size packet is refused **without
+    buffering its payload** — MQTT 5 permits a peer to declare
+    268,435,455 bytes (256 MiB) and dribble them.  Over the cap the
+    broker answers ``DISCONNECT`` with reason code **0x95 (Packet Too
+    Large)** and closes.  ``0`` disables the cap.  Default:
+    ``1048576`` (1 MiB) — MQTT payloads are overwhelmingly small, so a
+    limit that admits a megabyte still admits every realistic message
+    while refusing the spec ceiling.
+BB_MQTT_RECEIVE_MAXIMUM
+    The broker's own ``Receive Maximum`` (§3.2.2.3.3), advertised in
+    CONNACK: how many QoS>0 PUBLISH packets a client may have in flight
+    towards the broker before it must wait for acknowledgements.
+    **This is a promise a conforming client keeps, not a gate the broker
+    closes** — nothing counts a non-conforming client's in-flight
+    publishes against it.  What bounds that direction is the 16-bit
+    packet-identifier space and ``BB_MQTT_MAX_PACKET_SIZE``.  The
+    *client's* Receive Maximum, in the outbound direction, **is**
+    enforced — see ``BB_MQTT_MAX_QUEUED_MESSAGES``.  Default: ``64``.
+BB_MQTT_MAX_QUEUED_MESSAGES
+    Maximum QoS>0 messages held per session while the client's own
+    ``Receive Maximum`` window is full.  MQTT 5 §4.9 forbids sending
+    more than that many unacknowledged PUBLISH packets, so a client that
+    subscribes and never acknowledges would otherwise make the broker
+    hold every matching message for the life of the session.  Beyond
+    this bound the newest message is **refused** rather than an older one
+    silently discarded, and a cap hit is logged.  ``0`` disables the
+    bound (unbounded backlog — not recommended on an exposed broker).
+    Default: ``1000``.
+BB_MQTT_MAX_RETAINED
+    Maximum number of distinct topics holding a retained message
+    (§3.3.1.3).  A retained message is permanent by design, so without a
+    bound one PUBLISH per topic grows broker memory forever.  At the cap
+    a retained publish to a **new** topic is refused and logged;
+    updating or deleting an already-retained topic always works, so a
+    client can never be locked out of correcting its own state.  The
+    message is still delivered to current subscribers — only the storage
+    is declined.
+    How the publisher learns depends on the QoS it chose, because that is
+    what decides whether the protocol has a channel for the answer:
+    **QoS 1 and 2** receive ``0x97 (Quota Exceeded)`` in the PUBACK or
+    PUBREC; **QoS 0 is not told at all** — it has no acknowledgement
+    (§3.3.4), and closing the connection over a storage quota would be
+    disproportionate and would also destroy a live delivery that
+    succeeded.  A publisher that needs to know its retained state was
+    stored must use QoS ≥ 1.  The operator sees every refusal in the
+    ``blackbull.caps`` log regardless.  ``0`` disables the cap.  Default:
+    ``10000``.
+BB_MQTT_MAX_SUBSCRIPTIONS
+    Maximum Topic Filters one session may hold — the *unit* bound on
+    session state, whose total is ``BB_MQTT_MAX_SESSIONS`` and whose time
+    bound is the Session Expiry Interval the client declares.  Without
+    it a single connected client grows broker memory without limit, and
+    with it the per-PUBLISH routing walk, since routing tests every
+    filter of every connected session.  At the cap a **new** filter is
+    refused with ``0x97 (Quota Exceeded)`` in the SUBACK and logged;
+    re-subscribing to a filter the session already holds always works
+    (§3.8.4 makes that a replacement, so it occupies no new slot).
+    ``0`` disables the cap.  Default: ``1000``.
+BB_MQTT_MAX_SESSIONS
+    Maximum sessions the broker retains — the *total* bound on session
+    state, whose unit is ``BB_MQTT_MAX_SUBSCRIPTIONS`` plus
+    ``BB_MQTT_MAX_QUEUED_MESSAGES`` and whose time bound is the Session
+    Expiry Interval.  A session outlives its connection by design, and
+    §3.1.2.11.2 defines ``0xFFFFFFFF`` as *never expires*, so a peer
+    cycling Client Identifiers can pin one entry per identifier while
+    breaking no rule.  At the cap a CONNECT for an **unknown** Client
+    Identifier is refused with ``0x97 (Quota Exceeded)`` in the CONNACK
+    and the connection closed; a client resuming a session already in
+    the table is admitted, since refusing it frees nothing.  Expired
+    sessions are swept before the cap is applied, so it binds live state
+    only.  ``0`` disables the cap.  Default: ``10000``.
 BB_COMPRESSION_MIN_SIZE
     Minimum response body size in bytes below which
     :class:`~blackbull.middleware.compression.Compression` skips
@@ -265,6 +412,7 @@ BB_CPU_PINNING
 import dataclasses
 import functools as _functools
 import os
+import resource
 from enum import StrEnum
 
 
@@ -307,6 +455,61 @@ def _int_env_nonneg(name: str, default: int) -> int:
     except ValueError:
         return default
     return value if value >= 0 else default
+
+
+#: File descriptors held back from the connection budget when
+#: ``BB_MAX_CONNECTIONS`` derives its value: the listening sockets, the
+#: event loop's own selector, log files, and whatever the application
+#: keeps open (a database pool being the usual case).  Handing every
+#: descriptor to connections would move the failure from "a connection is
+#: refused" — which the peer can retry — to "a request already accepted
+#: cannot open its database connection", which it cannot.
+FD_RESERVE = 64
+
+
+def resolve_max_connections(raw: str | None) -> int:
+    """Resolve ``BB_MAX_CONNECTIONS`` — ``auto``, ``0``, or a number.
+
+    ``auto`` (the default) derives the cap from this process's own
+    ``RLIMIT_NOFILE``.  A cap above the file-descriptor budget is
+    decorative: ``accept()`` fails with ``EMFILE`` before the cap is
+    consulted, so the peer gets a dropped connection instead of the
+    ``503 + Retry-After`` the mechanism exists to send.  Derived, the cap
+    can only refuse connections the OS was going to refuse anyway — which
+    is what makes a finite default safe to ship — and it tracks the
+    operator's own intent, since raising the fd limit is how an operator
+    states how large this process may become.
+
+    An explicit number is honoured as given, *not* clamped to the fd
+    budget: an operator who names a number means it, and silently running
+    a different one would make the live configuration differ from the
+    configured one with nothing to show for it.  ``0`` disables the cap.
+
+    Note this bounds *descriptor exhaustion*, not event-loop health.  A
+    ceiling reflecting what one asyncio loop serves well is a policy
+    number that depends on the workload — set it explicitly; 1024 is a
+    typical single-loop value.
+    """
+    if raw is None or raw.strip().lower() in ('', 'auto'):
+        try:
+            soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        except Exception:  # pragma: no cover - non-POSIX or restricted host
+            return 0
+        if soft in (resource.RLIM_INFINITY, -1):
+            # No fd ceiling to derive from; an arbitrary number here would
+            # be a policy the operator never chose.
+            return 0
+        # Never fall to 0 — in this server's vocabulary 0 means *uncapped*,
+        # so an arithmetic slip would turn the tightest host into the least
+        # protected one.
+        return max(1, soft - FD_RESERVE)
+    try:
+        value = int(raw)
+    except ValueError:
+        return resolve_max_connections('auto')
+    if value < 0:
+        return resolve_max_connections('auto')
+    return value
 
 
 def _float_env_nonneg(name: str, default: float) -> float:
@@ -362,6 +565,12 @@ class Settings:
     #: 1024 is a typical single-asyncio-loop ceiling, and multi-worker
     #: deployments multiply (so ``workers=8`` × ``BB_MAX_CONNECTIONS=1024``
     #: → 8K connections per process).
+    #:
+    #: Resolved by :func:`resolve_max_connections` — the default is
+    #: ``auto``, derived from ``RLIMIT_NOFILE``.  The dataclass default
+    #: below is only the fallback for a directly-constructed ``Settings``
+    #: (tests); ``0`` there keeps such a construction unbounded rather
+    #: than silently capped by whatever host the test happens to run on.
     max_connections: int = 0
 
     #: asyncio.Queue depth for HTTP/2 per-stream request-body events.
@@ -526,6 +735,55 @@ class Settings:
     #: over fast links.  Values below ``body_chunk_size`` are raised to it.
     body_chunk_max: int = 524288
 
+    #: Maximum total request-body octets accepted for one request.  Over the
+    #: cap the server answers **413 Content Too Large** and closes: a declared
+    #: ``Content-Length`` is refused at head time, before a body byte is read,
+    #: and a ``chunked`` body is refused the moment the running total passes
+    #: the cap.  Without it a peer chooses how much memory the server spends —
+    #: ``conn.body()`` accumulates whatever arrives, and the per-read bound
+    #: (``body_chunk_max``) limits one read, not the sum of them.
+    #:
+    #: The connection always closes on a refusal, on both framings: the
+    #: unread octets are attacker-chosen, so parsing whatever follows them as
+    #: the next request is the request-smuggling shape.
+    #:
+    #: 30 MiB is the same class as Kestrel's ``MaxRequestBodySize`` (30,000,000
+    #: bytes = 28.6 MiB — near, not equal: this one is a round binary value);
+    #: nginx defaults to 1 MB, axum to 2 MB.  Raise it for an upload endpoint,
+    #: or set ``0`` to
+    #: disable the cap entirely (uvicorn's behaviour — the app then owns the
+    #: 413 decision).
+    max_body_size: int = 31457280
+
+    #: Minimum sustained request-body delivery rate in **bytes per second**.
+    #: Below it, past the grace period, the connection is abandoned the same
+    #: way ``body_timeout`` abandons a silent one.  The rate is averaged over a
+    #: sliding window one grace period wide (``min_body_rate_grace``): a peer
+    #: that delivered early and then stalled is judged on the stalled window,
+    #: not on the lifetime average, so a burst cannot shelter a subsequent
+    #: drip.
+    #:
+    #: This is the anti-trickle half of the body defence, and it exists
+    #: because a transport-paced read cannot be one: each read returns
+    #: whatever has arrived, so ``body_timeout`` degrades from "fill a slice
+    #: in 30 s" to "send *something* every 30 s" — which a one-byte drip
+    #: always satisfies, holding a connection open indefinitely.  A rate is
+    #: the thing a drip cannot fake.
+    #:
+    #: 240 B/s over a 5 s grace matches Kestrel's ``MinRequestBodyDataRate``
+    #: defaults.  ``0`` disables the detector.
+    min_body_rate: float = 240.0
+
+    #: Seconds of body-read waiting before ``min_body_rate`` starts being
+    #: enforced — the slow-start allowance, so a connection is never judged
+    #: on its first few packets.
+    #:
+    #: Only time spent *waiting on the transport* counts, never time the
+    #: handler spent between reads: the rate is evidence about the peer, and
+    #: a handler that writes each chunk to a slow disk must not be mistaken
+    #: for one.
+    min_body_rate_grace: float = 5.0
+
     #: Per-stream HTTP/2 flow-control window advertised in the server's SETTINGS.
     #: 65535 is the RFC 9113 §6.9.2 default.  Production deployments serving
     #: large responses should raise this — see
@@ -566,6 +824,51 @@ class Settings:
     #: WebSocket frame.  See BB_WS_MAX_FRAME_PAYLOAD docstring above for
     #: the security rationale.  Default 64 MiB.
     ws_max_frame_payload: int = 64 * 1024 * 1024
+
+    #: Per-type, per-connection budget for metered control frames.  See
+    #: BB_FRAME_RATE_LIMIT above; ``0`` disables all frame-rate metering.
+    frame_rate_limit: int = 20
+
+    #: Width in seconds of the frame-rate window.  See BB_FRAME_RATE_WINDOW.
+    frame_rate_window: float = 1.0
+
+    #: Seconds of silence on an HTTP/2 connection before probing the peer
+    #: with a PING; ``0`` disables the probe.  See BB_H2_IDLE_TIMEOUT above.
+    h2_idle_timeout: float = 300.0
+
+    #: Seconds to wait for any frame after a liveness PING before closing
+    #: with GOAWAY(NO_ERROR).  See BB_H2_PING_TIMEOUT above.
+    h2_ping_timeout: float = 30.0
+
+    #: Maximum size (bytes) of one inbound MQTT control packet, checked on
+    #: the declared Remaining Length before the payload is buffered and
+    #: advertised in CONNACK.  See BB_MQTT_MAX_PACKET_SIZE above.
+    mqtt_max_packet_size: int = 1024 * 1024
+
+    #: The broker's own Receive Maximum (§3.2.2.3.3), advertised in CONNACK.
+    mqtt_receive_maximum: int = 64
+
+    #: Per-session bound on QoS>0 messages held while the client's Receive
+    #: Maximum window is full.  See BB_MQTT_MAX_QUEUED_MESSAGES above.
+    mqtt_max_queued_messages: int = 1000
+
+    #: Maximum number of topics holding a retained message.  See
+    #: BB_MQTT_MAX_RETAINED above.
+    mqtt_max_retained: int = 10000
+
+    #: Per-session bound on the number of Topic Filters a session holds.
+    #: See BB_MQTT_MAX_SUBSCRIPTIONS above.
+    mqtt_max_subscriptions: int = 1000
+
+    #: Total bound on the number of sessions the broker retains.  See
+    #: BB_MQTT_MAX_SESSIONS above.
+    mqtt_max_sessions: int = 10000
+
+    #: Maximum size (bytes) of a message as the *application* receives it —
+    #: post-reassembly, post-inflation.  The frame cap above bounds one
+    #: compressed frame on the wire; this bounds what that frame becomes.
+    #: See BB_WS_MAX_MESSAGE_SIZE above.  Default 16 MiB, ``0`` disables.
+    ws_max_message_size: int = 16 * 1024 * 1024
 
     #: Per-connection asyncio.Semaphore cap on running stream handlers when
     #: running with a single worker (0 = disabled).  Defaults to 20 so that
@@ -650,7 +953,8 @@ def get_settings() -> Settings:
     return Settings(
         env=env,
         workers=_int_env('BB_WORKERS', 1),
-        max_connections=_int_env_nonneg('BB_MAX_CONNECTIONS', 0),
+        max_connections=resolve_max_connections(
+            os.environ.get('BB_MAX_CONNECTIONS')),
         stream_queue_depth=_int_env('BB_STREAM_QUEUE_DEPTH', 64),
         ws_queue_depth=_int_env('BB_WS_QUEUE_DEPTH', 0),
         async_logging=_bool_env('BB_ASYNC_LOGGING', True),
@@ -678,6 +982,9 @@ def get_settings() -> Settings:
         force_asgi_scope=_bool_env('BB_FORCE_ASGI_SCOPE', False),
         body_chunk_size=_int_env('BB_BODY_CHUNK_SIZE', 65536),
         body_chunk_max=_int_env('BB_BODY_CHUNK_MAX', 524288),
+        max_body_size=_int_env_nonneg('BB_MAX_BODY_SIZE', 31457280),
+        min_body_rate=_float_env_nonneg('BB_MIN_BODY_RATE', 240.0),
+        min_body_rate_grace=_float_env_nonneg('BB_MIN_BODY_RATE_GRACE', 5.0),
         # RFC 9113 §6.9.2 default initial window size.  See
         # docs/reference/env-vars.md "Performance recommendations" for the
         # values commonly used on tuned production deployments.
@@ -690,6 +997,21 @@ def get_settings() -> Settings:
         ws_permessage_deflate=_bool_env('BB_WS_PERMESSAGE_DEFLATE', True),
         ws_max_frame_payload=_int_env_nonneg(
             'BB_WS_MAX_FRAME_PAYLOAD', 64 * 1024 * 1024),
+        ws_max_message_size=_int_env_nonneg(
+            'BB_WS_MAX_MESSAGE_SIZE', 16 * 1024 * 1024),
+        frame_rate_limit=_int_env_nonneg('BB_FRAME_RATE_LIMIT', 20),
+        frame_rate_window=_float_env_nonneg('BB_FRAME_RATE_WINDOW', 1.0),
+        h2_idle_timeout=_float_env_nonneg('BB_H2_IDLE_TIMEOUT', 300.0),
+        h2_ping_timeout=_float_env_nonneg('BB_H2_PING_TIMEOUT', 30.0),
+        mqtt_max_packet_size=_int_env_nonneg(
+            'BB_MQTT_MAX_PACKET_SIZE', 1024 * 1024),
+        mqtt_receive_maximum=_int_env_nonneg('BB_MQTT_RECEIVE_MAXIMUM', 64),
+        mqtt_max_queued_messages=_int_env_nonneg(
+            'BB_MQTT_MAX_QUEUED_MESSAGES', 1000),
+        mqtt_max_retained=_int_env_nonneg('BB_MQTT_MAX_RETAINED', 10000),
+        mqtt_max_subscriptions=_int_env_nonneg(
+            'BB_MQTT_MAX_SUBSCRIPTIONS', 1000),
+        mqtt_max_sessions=_int_env_nonneg('BB_MQTT_MAX_SESSIONS', 10000),
         use_uvloop=_bool_env('BB_UVLOOP', False),
         h2_active_streams_1w=_int_env_nonneg('BB_H2_ACTIVE_STREAMS_1W', 20),
         h2_active_streams=_int_env_nonneg('BB_H2_ACTIVE_STREAMS', 20),

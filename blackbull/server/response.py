@@ -4,6 +4,7 @@ from ..protocol.frame_types import (
 )
 import logging
 from ..logger import log
+from .cap_log import log_cap_hit
 
 logger = logging.getLogger(__name__)
 
@@ -218,34 +219,28 @@ class SettingsResponder(Responder):
 
 
 class PriorityResponder(Responder):
+    """RFC 9113 §6.3 — validate the frame, then discard the signal.
+
+    §5.3 deprecated the stream-dependency scheme and this server does not
+    implement it: scheduling reads RFC 9218 extensible priorities
+    (``Stream.priority_hint``), never the dependency tree.  Recording
+    ``weight`` and ``parent`` therefore built state that nothing read —
+    and, because §6.3 permits PRIORITY on an *idle* stream, state a peer
+    could grow one node per 14-byte frame for the life of the connection,
+    with no rate meter covering the frame type.  The exclusive branch made
+    it worse than linear: it walked every child of root to rewrite that
+    same unread field.
+
+    What must not be discarded is the validation.  §5.3.1 makes a stream
+    depending on itself a stream error, and h2spec asserts it.
+    """
+
     async def respond(self, handler):
         # RFC 9113 §5.3.1 — a stream cannot depend on itself; this is a
         # stream error of type PROTOCOL_ERROR.
         if self.frame.dependent_stream == self.frame.stream_id:
             await handler.send_frame(handler.factory.rst_stream(
                 self.frame.stream_id, ErrorCodes.PROTOCOL_ERROR))
-            return
-
-        if self.frame.exclusion:
-            for x in handler.root_stream.get_children():
-                if x.parent == self.frame.dependent_stream:
-                    x.parent = self.frame.stream_id
-
-        stream_id = self.frame.stream_id  # to be shorten the description
-        stream = handler.root_stream.find_child(stream_id)
-
-        if not stream:
-            # RFC 9113 §5.3.1 — a dependency on an unknown (or pruned-as-closed)
-            # stream is treated as a dependency on stream 0.  Previously
-            # find_child returned None and .add_child() raised AttributeError,
-            # unwinding the frame loop and killing every stream on the
-            # connection without a GOAWAY.
-            parent = handler.root_stream.find_child(self.frame.dependent_stream)
-            if parent is None:
-                parent = handler.root_stream
-            stream = parent.add_child(stream_id)
-
-        stream.weight = self.frame.weight
 
     FRAME_TYPE = FrameTypes.PRIORITY
 
@@ -265,7 +260,17 @@ class PriorityUpdateResponder(Responder):
         stream = handler.find_stream(self.frame.prioritized_stream_id)
         if stream is None:
             # PRIORITY_UPDATE arrived before HEADERS — pre-create the stream
-            # so the hint is available when HEADERS arrives later.
+            # so the hint is available when HEADERS arrives later.  RFC 9218
+            # §7 permits limiting how many such hints are buffered, and the
+            # limit has to exist: this is the one path on which a peer can
+            # still make the priority tree grow, and a hint for more streams
+            # than it may have open at once is a hint it can never redeem.
+            if len(handler.root_stream.children) >= handler.max_concurrent_streams:
+                log_cap_hit('h2_priority_update_buffer',
+                            requested=len(handler.root_stream.children) + 1,
+                            limit=handler.max_concurrent_streams,
+                            protocol='http/2')
+                return
             handler.root_stream.add_child(self.frame.prioritized_stream_id)
             stream = handler.find_stream(self.frame.prioritized_stream_id)
         if stream is not None:

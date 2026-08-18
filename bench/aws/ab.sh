@@ -24,6 +24,8 @@
 #   WRK_SCRIPT / WRK_SCRIPT_ARGS (applied to every URL) — or per-URL forms
 #   WRK_SCRIPTS / WRK_SCRIPT_ARGSS (comma-separated, parallel to URL_PATHS;
 #   empty entries fall back to the single values)
+#   H2_PROFILES (comma-separated h2load URL paths — each runs ab_commit_h2.sh
+#   after the H1 lanes; '' = no H2 lane) with H2_CONNS/H2_STREAMS/H2_N/H2_WARMUP
 #   EXPECT_LINES (raw.tsv completeness per session; default 1+ROUNDS*8)
 #   AB_FINISH_LOG (finish progress log; default bench/results/ab-finish.log)
 #   AB_POLLS(=300) AB_POLL_INTERVAL(=10) — finish polling budget (~50 min)
@@ -61,6 +63,16 @@ WRK_SCRIPT_ARGS="${WRK_SCRIPT_ARGS:-}"
 #: single WRK_SCRIPT / WRK_SCRIPT_ARGS above (which default to '' = no script).
 WRK_SCRIPTS="${WRK_SCRIPTS:-}"
 WRK_SCRIPT_ARGSS="${WRK_SCRIPT_ARGSS:-}"
+#: H2_PROFILES — comma-separated h2load URL paths, each run as its own
+#: ab_commit_h2.sh session after the H1 lanes (default '' = no H2 lane).
+#: The H2 knobs below pass through to ab_commit_h2.sh.  The h2 raw.tsv has
+#: the same shape as the H1 one (header + ROUNDS*8 rows), so EXPECT_LINES
+#: and the finish poll cover both.
+H2_PROFILES="${H2_PROFILES:-}"
+H2_CONNS="${H2_CONNS:-32}"
+H2_STREAMS="${H2_STREAMS:-16}"
+H2_N="${H2_N:-100000}"
+H2_WARMUP="${H2_WARMUP:-10000}"
 EXPECT_LINES="${EXPECT_LINES:-$((1 + ROUNDS * 8))}"
 AB_FINISH_LOG="${AB_FINISH_LOG:-$REPO_ROOT/bench/results/ab-finish.log}"
 AB_POLLS="${AB_POLLS:-300}"
@@ -128,6 +140,19 @@ launch)
             printf 'env %s bash bench/peers/ab_commit.sh > %q 2>&1\n' \
                 "$(ab_env "$u" "${SCRIPTS[$i]:-$WRK_SCRIPT}" "${ARGSS[$i]:-$WRK_SCRIPT_ARGS}")" "$log"
         done
+        # H2 lanes run after the H1 lanes, same session, same refs.  ab_env
+        # already emits the vars ab_commit_h2.sh shares (REF_*, PATHSPEC,
+        # URL_PATH, ROUNDS, PORT, BB_*, PHASES, pinning); the h2load knobs
+        # are appended here.
+        if [ -n "$H2_PROFILES" ]; then
+            IFS=',' read -r -a H2URLS <<< "$H2_PROFILES"
+            for u in "${H2URLS[@]}"; do
+                log="bench/results/ec2-ab-h2-$(printf '%s' "${u#/}" | tr '/' '_').log"
+                printf 'env %s H2_CONNS=%q H2_STREAMS=%q H2_N=%q H2_WARMUP=%q bash bench/peers/ab_commit_h2.sh > %q 2>&1\n' \
+                    "$(ab_env "$u" '' '')" \
+                    "$H2_CONNS" "$H2_STREAMS" "$H2_N" "$H2_WARMUP" "$log"
+            done
+        fi
     } > "$RUNNER"
 
     scp "${SSH_OPTS[@]}" "$RUNNER" "$SERVER_REMOTE:$REMOTE_REPO/bench/results/ab_runner.sh" \
@@ -137,7 +162,7 @@ launch)
          chmod +x bench/results/ab_runner.sh && \
          nohup bash bench/results/ab_runner.sh </dev/null >/dev/null 2>&1 & echo launched"
     echo "ab_commit.sh launched on $SERVER_REMOTE"
-    echo "  profiles : ${URLS[*]}"
+    echo "  profiles : ${URLS[*]}${H2_PROFILES:+  h2: ${H2_PROFILES//,/, }}"
     echo "  base     : $REF_BASE   treat: $REF_TREAT"
     echo "  rounds   : $ROUNDS   duration: ${DURATION}s   phases: $PHASES"
     echo "  runner log per profile: bench/results/ec2-ab-*.log (on instance)"
@@ -158,7 +183,7 @@ finish)
         for i in $(seq 1 "$AB_POLLS"); do
             state=$(ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
                 "cd $REMOTE_REPO && n=\$(pgrep -f 'bench/results/ab_runner[.]sh' | wc -l); \
-                 c=0; for f in bench/results/ab-commit-*/raw.tsv; do [ -f \"\$f\" ] && \
+                 c=0; for f in bench/results/ab-commit-*/raw.tsv bench/results/ab-h2-*/raw.tsv; do [ -f \"\$f\" ] && \
                  [ \"\$(wc -l < \"\$f\")\" -ge $EXPECT_LINES ] && c=\$((c+1)); done; echo \"\$n \$c\"" \
                 2>/dev/null)
             runner="${state%% *}"
@@ -170,11 +195,12 @@ finish)
 
         echo "pulling results ..."
         for d in $(ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
-            "cd $REMOTE_REPO && ls -d bench/results/ab-commit-* 2>/dev/null"); do
+            "cd $REMOTE_REPO && ls -d bench/results/ab-commit-* bench/results/ab-h2-* 2>/dev/null"); do
             scp "${SSH_OPTS[@]}" -r "$SERVER_REMOTE:$REMOTE_REPO/$d" "$REPO_ROOT/bench/results/" \
                 && echo "scp OK: $d" || echo "SCP FAILED: $d"
         done
-        for f in "$REPO_ROOT"/bench/results/ab-commit-*/raw.tsv; do
+        for f in "$REPO_ROOT"/bench/results/ab-commit-*/raw.tsv \
+                 "$REPO_ROOT"/bench/results/ab-h2-*/raw.tsv; do
             [ -f "$f" ] && echo "raw.tsv lines: $f -> $(wc -l < "$f")"
         done
 

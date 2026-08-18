@@ -46,6 +46,36 @@ def log(fn):
         return wrapper
 
 
+def debug_gate(logger: logging.Logger) -> bool:
+    """Whether *logger* wants DEBUG, decided once at import.
+
+    ``logger.debug(...)`` is not free when DEBUG is off.  The call still
+    happens, ``Logger.debug`` still calls ``isEnabledFor``, the arguments are
+    still evaluated — 24 executed bytecode instructions to emit nothing,
+    measured.  Guarding with ``isEnabledFor`` yourself saves 6 of those,
+    because that *is* what ``debug`` does; only a value settled at import
+    brings it down to 4 (one global read and a branch).
+
+    So modules on a per-request path do::
+
+        _DEBUG = debug_gate(logger)
+        ...
+        if _DEBUG:
+            logger.debug('...', x)
+
+    This is the same bargain :func:`log` already makes and
+    ``docs/guide/logging.md`` already documents: the level is read at import,
+    so raising it afterwards does not switch these on.  Configure ``DEBUG``
+    before importing the framework, or restart.  The paths this guards emit
+    around twenty lines per request, which is not something a running server
+    is switched into anyway.
+
+    Returns a plain bool rather than a callable on purpose — a callable would
+    reintroduce the call this exists to remove.
+    """
+    return logger.isEnabledFor(logging.DEBUG)
+
+
 # https://stackoverflow.com/questions/384076/how-can-i-color-python-logging-output
 MAPPING = {
     'DEBUG'   : 37,  # white

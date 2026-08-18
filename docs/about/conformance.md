@@ -38,6 +38,7 @@ framing).  ~250 conformance test functions across the
 | [`test_rfc9112_pipelining.py`](https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_rfc9112_pipelining.py) | HTTP/1.1 pipelining with and without bodies |
 | [`test_rfc9112_smuggling.py`](https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_rfc9112_smuggling.py) | Request smuggling — CL.CL, CL.TE, TE.CL, TE.TE |
 | [`test_rfc9112_slowloris.py`](https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_rfc9112_slowloris.py) | Slowloris partial-headers defence (`BB_HEADER_TIMEOUT`) |
+| [`test_rfc9110_body_cap.py`](https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_rfc9110_body_cap.py) | `BB_MAX_BODY_SIZE` → 413 on both framings, refused before the body is read, and the connection close that stops a refusal becoming a smuggling window |
 | [`test_http1_dispatch.py`](https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_http1_dispatch.py) | ASGI dispatch — 1xx / 204 / 304 body suppression (RFC 9110 §15), auto-headers |
 
 ```bash
@@ -82,7 +83,8 @@ you can grep for the headline number.
 In-tree pytest tests under `tests/conformance/http2/` cover
 BlackBull-specific behaviour h2spec does not exercise (RFC 8441
 Extended CONNECT, CONTINUATION boundary cases, server-response
-shapes), and run in normal `pytest` runs.
+shapes, and the `BB_MAX_BODY_SIZE` / `BB_MIN_BODY_RATE` refusals in
+`test_rfc9113_body_cap.py`), and run in normal `pytest` runs.
 
 ## WebSocket — Autobahn|Testsuite
 
@@ -102,11 +104,15 @@ bash bench/conformance/autobahn_run.sh               # full fuzzingclient run
 CASES='1.*' bash bench/conformance/autobahn_run.sh   # subset (e.g. all of §1.x)
 ```
 
-The §9 *Limits and performance* cases send single frames of
-4-64 MiB and need the per-frame payload cap to be at least the
-case size.  The shipped default (`BB_WS_MAX_FRAME_PAYLOAD`,
-64 MiB) accepts all of Autobahn's §9 cases; lower it for stricter
-exposure on untrusted-peer deployments.
+The §9 *Limits and performance* cases send messages up to 16 MiB
+(9.1.6 text / 9.2.6 binary; the fragmented 9.4.x cases top out at
+4 MiB), so both WebSocket size limits must be at least the case
+size.  The shipped defaults accept every §9 case with nothing
+configured — `BB_WS_MAX_FRAME_PAYLOAD` at 64 MiB and
+`BB_WS_MAX_MESSAGE_SIZE` at exactly the 16 MiB the suite needs.
+Lower either for stricter exposure on untrusted-peer deployments;
+that is a deviation from the configuration this suite was run
+under.
 
 Reports land in `bench/conformance/results/autobahn_<timestamp>/`
 with an HTML index — open `index.html` in a browser for the

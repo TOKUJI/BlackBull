@@ -19,6 +19,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import zlib
 
+from .ws_codec import MessageTooLarge
+
 
 # RFC 7692 §7.1 — the four parameters that may appear in the offer/response.
 # We accept any window_bits value the peer offers in [8, 15]; we never demand
@@ -175,9 +177,34 @@ class InboundDecompressor:
         self._reset_per_message = reset_per_message
         self._inflater = zlib.decompressobj(wbits=self._wbits)
 
-    def decompress(self, payload: bytes) -> bytes:
-        """Inflate one whole compressed message.  Raises ``zlib.error`` on bad data."""
-        out = self._inflater.decompress(payload + _DEFLATE_TAIL)
+    def decompress(self, payload: bytes, *, max_length: int | None = None) -> bytes:
+        """Inflate one whole compressed message.  Raises ``zlib.error`` on bad data.
+
+        With *max_length* set, the inflated output is bounded by zlib
+        itself rather than measured after the fact: a bomb is refused
+        without ever being built.  Asking for ``max_length + 1`` is what
+        makes "exactly at the bound" and "one byte over" distinguishable
+        in a single call — zlib stops at the byte it was given, so a
+        return of exactly ``max_length`` bytes is ambiguous on its own.
+
+        Raises :class:`MessageTooLarge` when the peer's message inflates
+        past the bound.  ``unconsumed_tail`` is the other half of that
+        check: zlib stops early when it hits the limit, so leftover input
+        means there was more to come even if the output landed on the
+        boundary.
+        """
+        if max_length is None:
+            out = self._inflater.decompress(payload + _DEFLATE_TAIL)
+        else:
+            out = self._inflater.decompress(payload + _DEFLATE_TAIL,
+                                            max_length=max_length + 1)
+            if len(out) > max_length or self._inflater.unconsumed_tail:
+                # The inflater is now mid-message and its window holds a
+                # partial result.  The connection is closing, so dropping
+                # it is the honest end state — a reused inflater would
+                # decode the next message against a corrupt context.
+                self._inflater = zlib.decompressobj(wbits=self._wbits)
+                raise MessageTooLarge(len(out), max_length)
         if self._reset_per_message:
             self._inflater = zlib.decompressobj(wbits=self._wbits)
         return out

@@ -164,6 +164,24 @@ async def SocketManager(socket_cb_pairs, ssl_context):
             srv.close()
 
 
+def _max_connections_report(resolved: int) -> tuple[str, str]:
+    """Describe the connection cap in force, and where it came from.
+
+    ``BB_MAX_CONNECTIONS`` resolves to a plain integer long before it
+    reaches the server, so the number alone cannot say whether an
+    operator chose it or the fd budget did.  Calling a derived value
+    "explicit" would send someone hunting for a setting nobody wrote,
+    which is the opposite of what logging it is for.
+    """
+    import os  # noqa: PLC0415
+    raw = os.environ.get('BB_MAX_CONNECTIONS')
+    if not resolved:
+        return 'uncapped', 'no cap in force — relying on the OS descriptor limit'
+    if raw is None or raw.strip().lower() in ('', 'auto'):
+        return str(resolved), 'derived from RLIMIT_NOFILE (BB_MAX_CONNECTIONS=auto)'
+    return str(resolved), 'set explicitly via BB_MAX_CONNECTIONS'
+
+
 class Server:
     """An asyncio socket server that dispatches each connection through the
     app's :class:`~blackbull.server.protocol_registry.ProtocolRegistry`.
@@ -184,6 +202,13 @@ class Server:
                  **kwds):
         self.app = app
         self._max_connections = max_connections
+        # A derived default depends on the host, so the only way an operator
+        # learns the value in force is by being told it — including where it
+        # came from.  Reporting a derived number as "explicit" would send
+        # someone hunting for a setting nobody wrote.  The origin is read from
+        # the environment rather than passed in, because every caller that
+        # resolves the value throws that fact away.
+        logger.info('max_connections=%s (%s)', *_max_connections_report(max_connections))
         self._stream_queue_depth = stream_queue_depth
         self._ws_queue_depth = ws_queue_depth
         self._active_connections = 0

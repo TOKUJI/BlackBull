@@ -4,6 +4,8 @@ HTTP2Actor drives the HTTP/2 connection state machine for one TCP connection.
 StreamActor owns the lifetime of a single HTTP/2 stream.
 """
 import asyncio
+import contextlib
+import inspect
 import logging
 import time
 from collections.abc import Awaitable, Callable
@@ -12,7 +14,7 @@ from typing import Protocol, runtime_checkable
 
 from ..actor import Actor, Message
 from ..event_aggregator import EventAggregator
-from ..logger import log
+from ..logger import log, debug_gate
 from ..protocol.frame import FrameFactory
 from ..protocol.frame_types import (
     ErrorCodes, FrameBase, FrameTypes,
@@ -23,11 +25,13 @@ from ..connection import Connection
 from ..headers import Headers
 from .parser import parse_headers
 from .cap_log import log_cap_hit
+from .rate_window import RateWindow
 from .recipient import (AbstractReader, IncompleteReadError,
                         HTTP2Recipient, RecipientFactory,
                         _HTTP2_STREAM_QUEUE_DEPTH)
 from .response import ResponderFactory
-from .sender import AbstractWriter, ConnectionWindow, SenderFactory
+from .sender import (AbstractWriter, ConnectionWindow, FlowControlStalled,
+                     SenderFactory)
 from .access_log import (
     close_record as _close_record,
     close_ws_record as _close_ws_record,
@@ -39,6 +43,11 @@ from ..asgi import (ASGIEvent, ASGIReceiveCallable, ASGISendCallable,
 from .http1_actor import RequestActor
 
 logger = logging.getLogger(__name__)
+#: Read once at import: a disabled ``logger.debug`` on a per-request path
+#: costs 24 executed instructions to emit nothing.  Same bargain as
+#: ``@log`` — see :func:`blackbull.logger.debug_gate`.
+_DEBUG = debug_gate(logger)
+
 
 
 @runtime_checkable
@@ -208,6 +217,14 @@ class StreamActor(Actor):
                 self._conn, self._receive, self._send,
                 self._app, self._aggregator, self._force_asgi,
             ).run()
+        except FlowControlStalled:
+            # The peer asked for this response and then refused to accept it.
+            # CANCEL, not INTERNAL_ERROR: nothing here failed — we gave up on
+            # a stream the peer abandoned while holding it open.
+            await self._http2_actor.send_frame(
+                self._http2_actor.factory.rst_stream(
+                    self._stream_id, ErrorCodes.CANCEL)
+            )
         except Exception:
             await self._http2_actor.send_frame(
                 self._http2_actor.factory.rst_stream(
@@ -236,15 +253,6 @@ class HTTP2Actor(Actor):
     If *aggregator* is ``None`` the actor uses the legacy direct-dispatcher
     path (same behaviour as the pre-Actor HTTP2Handler).
     """
-
-    # CVE-2023-44487 (Rapid Reset) rolling-window thresholds.  20
-    # RST_STREAMs per second is generous for legitimate clients
-    # (browser navigation + prefetch cancellation rarely exceeds
-    # ~10/s) and limiting for the attack shape (CVE-2023-44487
-    # exploits routinely hit thousands/s).  Promote to env vars if a
-    # real workload surfaces that legitimately exceeds the threshold.
-    _RST_RATE_LIMIT: int = 20
-    _RST_RATE_WINDOW: float = 1.0  # seconds
 
     # Frame types whose payload size violation is a connection error
     # rather than a stream error (RFC 9113 §4.2).  Pre-computed as a
@@ -330,6 +338,18 @@ class HTTP2Actor(Actor):
         # ENHANCE_YOUR_CALM (RFC 6585 §5 / RFC 9113 §7) — the same
         # code nginx and Envoy use for this condition.
         self._header_max_total: int = _cfg.header_max_total
+        # Total request-body ceiling, shared with HTTP/1.1 (``BB_MAX_BODY_SIZE``).
+        # A declared over-cap body is refused at HEADERS; an undeclared one is
+        # counted by the recipient as DATA arrives.
+        self._max_body_size: int = _cfg.max_body_size
+        # The rest of the per-stream limits, resolved once here and handed to
+        # each stream's recipient and sender.  Connection-scoped on purpose:
+        # every one of these is process-wide configuration, and a stream is a
+        # request — reading them per stream would put a settings lookup, and
+        # the function-level import that reaches it, on the per-request path.
+        self._min_body_rate: float = _cfg.min_body_rate
+        self._min_body_rate_grace: float = _cfg.min_body_rate_grace
+        self._write_timeout: float = _cfg.write_timeout
         # Per-connection semaphore: caps concurrently-running stream handlers to
         # prevent a high-mux connection from starving other connections on the
         # same worker.  None means no cap.
@@ -346,6 +366,25 @@ class HTTP2Actor(Actor):
         )
         self._next_push_stream_id = 2
         self._task_group: asyncio.TaskGroup | None = None
+
+        # -- the time axis (see _liveness_watchdog) --------------------------
+        # HTTP/1.1 spends a ConnectionDeadline on the header block, each body
+        # read, and the idle window.  HTTP/2 cannot borrow that mechanism
+        # wholesale: it cancels the task parked in the read, and this actor's
+        # read is a frame loop the server usually intends to keep.  So the
+        # bounds are observed from a watchdog and enforced by ending the
+        # connection, never by interrupting a read mid-frame.
+        self._h2_idle_timeout: float = _cfg.h2_idle_timeout
+        self._h2_ping_timeout: float = _cfg.h2_ping_timeout
+        self._header_timeout: float = _cfg.header_timeout
+        # Monotonic time of the last frame from the peer.  Any frame counts as
+        # a sign of life, so this is the only liveness state a probe needs.
+        self._last_frame_at: float = 0.0
+        # Set when a header block is open (HEADERS/PUSH_PROMISE without
+        # END_HEADERS); the peer owes CONTINUATION from this moment.
+        self._header_block_since: float | None = None
+        # Set while a liveness PING is outstanding and unanswered.
+        self._probe_sent_at: float | None = None
 
         # Flow-control state — updated by SettingsResponder / WindowUpdateResponder
         # so that new stream senders start with the current peer-granted windows.
@@ -400,19 +439,33 @@ class HTTP2Actor(Actor):
         # frame handlers without calling run().
         self._force_asgi: bool = False
 
-        # CVE-2023-44487 (Rapid Reset) guard — rolling RST_STREAM rate.
-        # Attackers open a stream with HEADERS and immediately RST it,
-        # churning the per-stream allocations (Stream node, sender,
-        # recipient, HPACK context) without hitting
-        # ``max_concurrent_streams`` because the lifecycle is too fast
-        # for the counter to accumulate.  When the inbound RST_STREAM
-        # rate exceeds the threshold, the connection is closed with
-        # GOAWAY ENHANCE_YOUR_CALM.  Cheap counter, no allocation per
-        # RST; threshold/window are class constants today and can be
-        # promoted to env vars if a real workload surfaces that
-        # legitimately exceeds them.
-        self._rst_count: int = 0
-        self._rst_window_start: float = 0.0
+        # Frame-rate meters.  Four shapes share one form — a frame cheap
+        # for the peer to send that obliges the server to a small piece of
+        # work — so they share one mechanism (``RateWindow``) with a meter
+        # per counted thing:
+        #
+        #   RST_STREAM  CVE-2023-44487 (Rapid Reset).  Open a stream with
+        #               HEADERS, immediately RST it: the per-stream
+        #               allocations churn without ``max_concurrent_streams``
+        #               ever accumulating, because the lifecycle is too
+        #               short.  Counts resets *this server emits* too — a
+        #               stream reset is a stream reset whoever sent it, and
+        #               a peer can provoke ours by repeatedly tripping a
+        #               real limit.
+        #   PING        CVE-2019-9512.  One ACK write per frame.
+        #   SETTINGS    CVE-2019-9515.  One ACK write per frame.
+        #   empty       CVE-2019-9518's shape.  A zero-length CONTINUATION
+        #               costs a parse and a loop turn and adds *no bytes*,
+        #               so ``BB_HEADER_MAX_TOTAL`` — a byte budget — never
+        #               sees it.
+        #
+        # Separate meters so a peer may legitimately spend its allowance of
+        # each without the types competing for one shared budget.
+        _rate, _window = _cfg.frame_rate_limit, _cfg.frame_rate_window
+        self._rst_meter = RateWindow(_rate, _window)
+        self._ping_meter = RateWindow(_rate, _window)
+        self._settings_meter = RateWindow(_rate, _window)
+        self._empty_frame_meter = RateWindow(_rate, _window)
 
         # RFC 8441 stream-exhaustion guard — count of in-flight WebSocket
         # streams on this connection, capped at
@@ -465,6 +518,7 @@ class HTTP2Actor(Actor):
                 # have been changed by SETTINGS frames received before this
                 # stream opened.  The connection window is shared, not copied.
                 initial_window=self._peer_initial_window_size,
+                flow_control_timeout=self._write_timeout,
             )
             self._senders[stream_id] = sender
         return self._senders[stream_id]
@@ -495,6 +549,9 @@ class HTTP2Actor(Actor):
             queue_depth=self._stream_queue_depth,
             credit_callback=_credit,
             credit_budget=self._inbound_stream_window,
+            max_body=self._max_body_size,
+            min_rate=self._min_body_rate,
+            min_rate_grace=self._min_body_rate_grace,
         )
 
     def _release_recipient_credit(self, recipient) -> None:
@@ -518,8 +575,9 @@ class HTTP2Actor(Actor):
             try:
                 await self.send_frame(self.factory.window_update(0, balance))
             except Exception:
-                logger.debug('post-stream connection credit replay failed',
-                             exc_info=True)
+                if _DEBUG:
+                    logger.debug('post-stream connection credit replay failed',
+                                 exc_info=True)
 
         # Callers may be sync done-callbacks — schedule the replay.  Prefer
         # the connection TaskGroup so run() awaits it; fall back to a bare
@@ -556,8 +614,16 @@ class HTTP2Actor(Actor):
 
     @log
     async def send_frame(self, frame: FrameBase) -> None:
-        """Send a raw HTTP/2 frame via the control-plane sender."""
+        """Send a raw HTTP/2 frame via the control-plane sender.
+
+        Every emitted RST_STREAM passes through here, which is what makes
+        this the one place the G8 blind spot can be closed without dusting
+        the counter across a dozen refusal sites.
+        """
         await self._control_sender(frame)
+        if (frame.FrameType() == FrameTypes.RST_STREAM
+                and not self._goaway_sent):
+            await self._count_emitted_rst()
 
     def _validate_stream_state(
         self, stream: Stream, frame_type: FrameTypes,
@@ -624,8 +690,9 @@ class HTTP2Actor(Actor):
         except Exception:
             # The writer may already be closed (e.g. peer hung up).  We
             # have done our part; let the frame loop drain.
-            logger.debug('writer.close raised on connection-error path',
-                         exc_info=True)
+            if _DEBUG:
+                logger.debug('writer.close raised on connection-error path',
+                             exc_info=True)
 
     def _make_done_cb(
         self, stream_id: int, *, is_ws: bool = False,
@@ -737,11 +804,170 @@ class HTTP2Actor(Actor):
 
         self._recipients.clear()
 
+        self._last_frame_at = asyncio.get_running_loop().time()
+        self._probe_sent_at = None
+        self._header_block_since = None
+
         async with asyncio.TaskGroup() as tg:
             self._task_group = tg
-            await self._frame_loop(tg)
+            watchdog = tg.create_task(self._liveness_watchdog())
+            try:
+                await self._frame_loop(tg)
+            finally:
+                watchdog.cancel()
 
         self._task_group = None
+
+    async def _meter(self, window: RateWindow, what: str) -> bool:
+        """Count one frame; close the connection if the budget is spent.
+
+        Returns True when the caller should stop processing this frame —
+        the connection is ending either way, but the frame loop's
+        ``continue`` lets the peer read the GOAWAY before the close, which
+        is the difference between a diagnosable refusal and a reset socket.
+        """
+        if not window.hit():
+            return False
+        log_cap_hit('frame_rate',
+                    requested=window.count, limit=window.limit,
+                    protocol='http2')
+        await self._connection_error(
+            ErrorCodes.ENHANCE_YOUR_CALM,
+            f'{what} rate limit exceeded ({window.count} in {window.window}s)')
+        return True
+
+    async def _count_emitted_rst(self) -> None:
+        """Count a reset *this server* sent (audit G8).
+
+        The Rapid Reset meter watched inbound resets only, so a peer could
+        get the same stream-slot churn for free by provoking ours —
+        protocol violations, window overruns, and the body-size and
+        body-rate refusals added in Sprint 103 are all reachable on
+        demand.  A stream reset is a stream reset whoever sent it.
+
+        The consequence is deliberate and worth stating plainly: a client
+        that repeatedly trips a *legitimate* limit — an upload loop over
+        ``BB_MAX_BODY_SIZE``, say — eventually loses its connection.  That
+        is the correct outcome for a client behaving abusively even
+        unintentionally, and the cap-hit log names which limit it kept
+        tripping so the operator can tell the two apart.
+        """
+        if not self._rst_meter.hit():
+            return
+        log_cap_hit('frame_rate',
+                    requested=self._rst_meter.count, limit=self._rst_meter.limit,
+                    protocol='http2')
+        logger.warning(
+            'server-emitted RST_STREAM rate limit exceeded (%d in %ss) — '
+            'the peer is provoking resets faster than the budget allows',
+            self._rst_meter.count, self._rst_meter.window)
+        await self._close_connection(ErrorCodes.ENHANCE_YOUR_CALM)
+
+    async def _liveness_watchdog(self) -> None:
+        """Bound how long a peer may take, without touching the frame read.
+
+        Three questions, one loop, because all three are answered by
+        looking at a timestamp and all three end the connection:
+
+        * a header block open longer than ``BB_HEADER_TIMEOUT``;
+        * total silence longer than ``BB_H2_IDLE_TIMEOUT`` — answered with
+          a PING rather than a close, because an idle HTTP/2 connection is
+          normal and a dead one is not distinguishable from it without
+          asking;
+        * a probe unanswered for ``BB_H2_PING_TIMEOUT``.
+
+        The loop sleeps until the earliest deadline that currently
+        applies and re-evaluates on waking, so an idle connection costs
+        one wake-up per idle period rather than a fixed tick.
+
+        Ending the connection means closing the writer: the frame loop is
+        parked in a read, and closing the transport makes that read return
+        EOF, which is a path the loop already handles.  Cancelling it
+        instead would abandon a partially-read frame and leave the
+        teardown racing the stream tasks.
+        """
+        if self._h2_idle_timeout <= 0 and self._header_timeout <= 0:
+            return
+        loop = asyncio.get_running_loop()
+        while True:
+            now = loop.time()
+            if self._probe_sent_at is not None:
+                wake_at = self._probe_sent_at + self._h2_ping_timeout
+                expired = 'probe'
+            elif self._header_block_since is not None and self._header_timeout > 0:
+                wake_at = self._header_block_since + self._header_timeout
+                expired = 'header'
+            elif self._h2_idle_timeout > 0:
+                wake_at = self._last_frame_at + self._h2_idle_timeout
+                expired = 'idle'
+            else:
+                # Only the header bound is enabled and no block is open —
+                # nothing to watch until the frame loop opens one.
+                await asyncio.sleep(self._header_timeout)
+                continue
+
+            if wake_at > now:
+                await asyncio.sleep(wake_at - now)
+                continue  # state may have changed while we slept
+
+            if expired == 'header':
+                await self._end_for_stalled_header_block()
+                return
+            if expired == 'probe':
+                await self._end_for_unresponsive_peer()
+                return
+            await self._probe_peer()
+
+    async def _probe_peer(self) -> None:
+        """Ask a silent peer whether it is still there (RFC 9113 §6.7)."""
+        self._probe_sent_at = asyncio.get_running_loop().time()
+        if _DEBUG:
+            logger.debug('HTTP/2 idle %.1fs — probing with PING',
+                         self._h2_idle_timeout)
+        with contextlib.suppress(Exception):
+            await self.send_frame(self.factory.create(
+                FrameTypes.PING, 0, 0, data=b'\x00' * 8))
+
+    async def _end_for_stalled_header_block(self) -> None:
+        """A header block the peer opened and never finished.
+
+        Deliberately a connection error rather than a stream reset, even
+        though only one stream is nominally involved: HPACK state is
+        connection-wide and order-dependent, so a block whose bytes were
+        never fed leaves the decoder unable to read any later block.
+        Resetting the stream would keep a connection that can no longer
+        decode anything.
+        """
+        log_cap_hit('header_timeout',
+                    requested=self._header_timeout, limit=self._header_timeout,
+                    protocol='http2')
+        logger.warning('HTTP/2 header block incomplete after %.1fs — GOAWAY',
+                       self._header_timeout)
+        await self._close_connection(ErrorCodes.ENHANCE_YOUR_CALM)
+
+    async def _end_for_unresponsive_peer(self) -> None:
+        """The probe went unanswered: the peer is gone, not merely quiet.
+
+        ``NO_ERROR`` because nothing was violated — we asked a question
+        and got no reply, which is a fact about the network, not a
+        complaint about the peer.
+        """
+        logger.info('HTTP/2 peer did not answer the liveness PING in %.1fs '
+                    '— GOAWAY', self._h2_ping_timeout)
+        await self._close_connection(ErrorCodes.NO_ERROR)
+
+    async def _close_connection(self, error_code: int) -> None:
+        with contextlib.suppress(Exception):
+            await self.send_frame(self.factory.goaway(
+                self._last_peer_stream_id, error_code))
+        self._goaway_sent = True
+        with contextlib.suppress(Exception):
+            result = self._writer.close()
+            # AbstractWriter.close is async on the asyncio adapter and sync on
+            # the raw transports; accept both rather than make every caller
+            # know which one it holds.
+            if inspect.isawaitable(result):
+                await result
 
     async def _frame_loop(self, tg: asyncio.TaskGroup) -> None:
         """Read frames and dispatch stream tasks until EOF or GOAWAY."""
@@ -749,8 +975,24 @@ class HTTP2Actor(Actor):
         header_frame = None
         _tasks_since_yield = 0
         _yield_every = self._frame_yield_every
+        _loop = asyncio.get_running_loop()
+        # Bound once: this is read on every inbound frame, and the attribute
+        # walk is the avoidable half of the cost.  The clock read itself stays
+        # — it is what makes ``BB_H2_IDLE_TIMEOUT`` mean the period it says,
+        # and trading a stated time bound for a fraction of a microsecond is
+        # not a trade this server makes.
+        _loop_time = _loop.time
 
         while data := await self.receive():
+            # Any frame is a sign of life, so one timestamp answers both the
+            # idle question and the outstanding-probe one.  Matching a PING ACK
+            # by its opaque data would be more precise and no more true: a peer
+            # that sent us anything at all is there.  ``loop.time()``, not
+            # ``time.monotonic()``: the watchdog sleeps on the loop's clock,
+            # and two clocks that agree today are a bug waiting for a loop
+            # implementation that reads a different one.
+            self._last_frame_at = _loop_time()
+            self._probe_sent_at = None
             if self._goaway_sent:
                 # A previous frame triggered a connection error and the GOAWAY
                 # has been flushed.  Signal recipients before exiting:
@@ -803,17 +1045,26 @@ class HTTP2Actor(Actor):
             # stream and abusive RSTs on idle/unknown streams both
             # count toward the rolling budget.
             if frame_type == FrameTypes.RST_STREAM:
-                now = time.monotonic()
-                if now - self._rst_window_start > self._RST_RATE_WINDOW:
-                    self._rst_count = 0
-                    self._rst_window_start = now
-                self._rst_count += 1
-                if self._rst_count > self._RST_RATE_LIMIT:
-                    await self._connection_error(
-                        ErrorCodes.ENHANCE_YOUR_CALM,
-                        f'RST_STREAM rate limit exceeded '
-                        f'({self._rst_count} in '
-                        f'{self._RST_RATE_WINDOW}s)')
+                if await self._meter(self._rst_meter, 'RST_STREAM'):
+                    continue
+
+            # CVE-2019-9512 / CVE-2019-9515 — a PING or SETTINGS flood buys
+            # one ACK write per frame.  Metered before the responder runs, so
+            # the answer is refused rather than merely counted.
+            elif frame_type == FrameTypes.PING:
+                if await self._meter(self._ping_meter, 'PING'):
+                    continue
+            elif frame_type == FrameTypes.SETTINGS:
+                if await self._meter(self._settings_meter, 'SETTINGS'):
+                    continue
+
+            # CVE-2019-9518's shape — a zero-length frame costs a parse and a
+            # loop turn while adding nothing to any byte budget.  Only the
+            # count can see it, so the count is what is bounded.
+            if (frame.length == 0
+                    and frame_type in (FrameTypes.CONTINUATION, FrameTypes.DATA)):
+                if await self._meter(self._empty_frame_meter,
+                                     f'empty {frame_type.name}'):
                     continue
 
             # RFC 9113 §4.2 — a frame whose payload exceeds the receiver's
@@ -927,7 +1178,16 @@ class HTTP2Actor(Actor):
                         self._last_peer_stream_id = frame.stream_id
                         stream = self.root_stream.add_child(frame.stream_id)
                     elif frame_type == FrameTypes.PRIORITY:
-                        stream = self.root_stream.add_child(frame.stream_id)
+                        # §6.3 lets a peer prioritise a stream it has not
+                        # opened, so this frame is legal on an idle stream and
+                        # must not be an error.  It also must not *create*
+                        # anything: §5.3 deprecated the dependency scheme and
+                        # this server does not implement it (``Stream.weight``
+                        # and ``.parent`` are written by the responder and read
+                        # by nothing), so a node here would be state the peer
+                        # can grow and no one can use.  ``stream`` stays None;
+                        # the responder below still validates the frame.
+                        pass
                     else:
                         await self._connection_error(
                             ErrorCodes.PROTOCOL_ERROR,
@@ -978,12 +1238,15 @@ class HTTP2Actor(Actor):
                         if not spawned:
                             waiting_continuation = True
                             header_frame = frame
+                            # The peer now owes CONTINUATION; start its clock.
+                            self._header_block_since = _loop.time()
                 case FrameTypes.CONTINUATION:
                     send = self.make_sender(stream.stream_id)
                     spawned = await self._on_continuation_frame(
                         frame, stream, send, tg, header_frame, waiting_continuation)
                     if spawned:
                         waiting_continuation = False
+                        self._header_block_since = None
                 case FrameTypes.DATA:
                     await self._on_data_frame(frame, stream)
                 case FrameTypes.GOAWAY:
@@ -1120,8 +1383,9 @@ class HTTP2Actor(Actor):
         # parse_payload sets the flag for field-level violations; parse_headers
         # sets it for missing/empty required pseudo-headers.
         if getattr(frame, 'malformed', False):
-            logger.debug('Stream %d malformed HEADERS — %s',
-                         stream.stream_id, frame.malformed_reason)
+            if _DEBUG:
+                logger.debug('Stream %d malformed HEADERS — %s',
+                             stream.stream_id, frame.malformed_reason)
             await self.send_frame(
                 self.factory.rst_stream(stream.stream_id, ErrorCodes.PROTOCOL_ERROR))
             return True
@@ -1155,6 +1419,18 @@ class HTTP2Actor(Actor):
         # ASGI scope, derived once in ``_spawn_stream_task``.
         stream.expected_content_length = _extract_content_length(conn)
         stream.conn = conn
+
+        # Guard inline rather than through a predicate: a stream is a request,
+        # and a method call to answer "no" cost 21 executed instructions per
+        # request where the comparison costs seven.  ``declared > cap > 0``
+        # chains the two facts the refusal needs — a length was declared, and
+        # a cap is in force.  The refusal re-checks; it, not this, is the
+        # authority.
+        declared = stream.expected_content_length
+        if (declared is not None and declared > self._max_body_size > 0
+                and await self._refuse_oversized_declared_body(
+                    stream, conn, send)):
+            return True
 
         self._apply_priority_and_extensions(stream, conn)
         stream_recipient = self._make_stream_recipient(stream.stream_id)
@@ -1236,8 +1512,9 @@ class HTTP2Actor(Actor):
         # RFC 9113 §8.1.1 / §8.2.1 — same malformed-HEADERS check as the direct
         # HEADERS path; reject with RST_STREAM PROTOCOL_ERROR.
         if getattr(header_frame, 'malformed', False):
-            logger.debug('Stream %d malformed HEADERS (via CONTINUATION) — %s',
-                         stream.stream_id, header_frame.malformed_reason)
+            if _DEBUG:
+                logger.debug('Stream %d malformed HEADERS (via CONTINUATION) — %s',
+                             stream.stream_id, header_frame.malformed_reason)
             await self.send_frame(
                 self.factory.rst_stream(stream.stream_id, ErrorCodes.PROTOCOL_ERROR))
             return True
@@ -1261,14 +1538,64 @@ class HTTP2Actor(Actor):
                 self.factory.rst_stream(stream.stream_id, ErrorCodes.REFUSED_STREAM))
             return True
 
-        self._apply_priority_and_extensions(stream, conn)
         stream.conn = conn
+        # Guard inline rather than through a predicate: a stream is a request,
+        # and a method call to answer "no" cost 21 executed instructions per
+        # request where the comparison costs seven.  ``declared > cap > 0``
+        # chains the two facts the refusal needs — a length was declared, and
+        # a cap is in force.  The refusal re-checks; it, not this, is the
+        # authority.
+        declared = stream.expected_content_length
+        if (declared is not None and declared > self._max_body_size > 0
+                and await self._refuse_oversized_declared_body(
+                    stream, conn, send)):
+            return True
+
+        self._apply_priority_and_extensions(stream, conn)
         stream_recipient = self._make_stream_recipient(stream.stream_id)
         self._recipients[stream.stream_id] = stream_recipient
         # Same consumer gate and the same inline capture as the HEADERS path.
         log_record = _open_record(conn, self._aggregator)
         send._log_record = log_record
         self._spawn_stream_task(tg, stream.stream_id, conn, stream_recipient, send, log_record)
+        return True
+
+    async def _refuse_oversized_declared_body(self, stream, conn, send) -> bool:
+        """413 the stream whose head declared more body than the cap allows.
+
+        The HTTP/2 shape of the same guard HTTP/1.1 applies at head time, and
+        RFC 9113 §8.1 names the sequence exactly: send the complete response
+        before the request finishes, then ``RST_STREAM(NO_ERROR)`` to ask the
+        peer to stop sending a body we are not going to read.
+
+        The connection survives, which is the one place this differs from
+        HTTP/1.1 and the reason it can afford to be polite: HTTP/2 frames every
+        stream explicitly, so octets we refuse can never be re-read as the next
+        request.  On HTTP/1.1 they are the next bytes in the stream, so the
+        refusal has to end the connection.
+
+        A body with no ``content-length`` declares nothing and cannot be
+        answered here — ``HTTP2Recipient`` counts that one as DATA arrives.
+
+        Callers gate the call on the same comparison inline, so the common
+        answer costs no call at all; this re-checks because it, not the gate,
+        is where the limit is enforced — a caller that forgot the guard still
+        gets the right answer.
+        """
+        declared = stream.expected_content_length
+        cap = self._max_body_size
+        if not cap or declared is None or declared <= cap:
+            return False
+        logger.warning(
+            '413 Content Too Large — stream %d declares %d bytes, '
+            'BB_MAX_BODY_SIZE=%d', stream.stream_id, declared, cap)
+        log_cap_hit('max_body_size', requested=declared, limit=cap,
+                    scope_path=conn.path, protocol='http2')
+        await send(b'413 Content Too Large',
+                   HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                   [(b'content-type', b'text/plain')])
+        await self.send_frame(
+            self.factory.rst_stream(stream.stream_id, ErrorCodes.NO_ERROR))
         return True
 
     async def _on_data_frame(self, frame, stream: 'Stream') -> None:
@@ -1343,13 +1670,17 @@ class HTTP2Actor(Actor):
                 # RST_STREAM — the bytes are safe in the buffer.
                 pass
             else:
-                # True abuse backstop under consume-based crediting: the peer
-                # either overran the advertised inbound window it was never
-                # credited for, or dribbled a degenerate tiny-frame flood.  A
-                # conformant peer is back-pressured by the closing window and
-                # never reaches this.
+                # The recipient refused the frame: the peer overran the
+                # advertised inbound window it was never credited for, dribbled
+                # a degenerate tiny-frame flood, or broke a body limit
+                # (``BB_MAX_BODY_SIZE`` without a declaration to refuse at
+                # HEADERS, ``BB_MIN_BODY_RATE``).  Reset the stream — and tell
+                # the recipient, so a handler parked in ``receive()`` for a body
+                # that will never continue unwinds now rather than at the
+                # request timeout.
                 await self.send_frame(
                     self.factory.rst_stream(stream.stream_id, ErrorCodes.ENHANCE_YOUR_CALM))
+                recipient.put_disconnect()
         else:
             logger.warning('DATA for stream %d but no recipient found', stream.stream_id)
 
@@ -1549,13 +1880,18 @@ class HTTP2Actor(Actor):
                 self._peer_initial_window_size,
                 self._conn_window.size),
         )
-        push_recipient = RecipientFactory.http2(queue_depth=self._stream_queue_depth)
+        push_recipient = RecipientFactory.http2(
+            queue_depth=self._stream_queue_depth,
+            max_body=self._max_body_size,
+            min_rate=self._min_body_rate,
+            min_rate_grace=self._min_body_rate_grace)
         # Pushed requests have no body — same lazy-queue path as GETs with END_STREAM on HEADERS.
         push_recipient.mark_end_of_stream_on_headers()
         self._recipients[push_stream_id] = push_recipient
         push_sender = SenderFactory.http2(
             self._writer, self.factory, push_stream_id, push_callback=None,
-            conn_window=self._conn_window)
+            conn_window=self._conn_window,
+            flow_control_timeout=self._write_timeout)
         log_record = _start_record(pushed_conn)
         # Inline capture (Sprint 93 M1), same as the request path.
         push_sender._log_record = log_record

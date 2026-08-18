@@ -15,8 +15,13 @@ from hpack import Encoder
 from . import hpack_fastpath, structured_fields
 
 import logging
-from ..logger import log
+from ..logger import log, debug_gate
 logger = logging.getLogger(__name__)
+#: Read once at import: a disabled ``logger.debug`` on a per-request path
+#: costs 24 executed instructions to emit nothing.  Same bargain as
+#: ``@log`` — see :func:`blackbull.logger.debug_gate`.
+_DEBUG = debug_gate(logger)
+
 
 
 # RFC 7540 §6.9.2 — connection and stream flow-control windows both start
@@ -101,7 +106,7 @@ class FrameBase:
         self.stream_id = stream_id
         # Guarded: __init__ runs on every frame in both directions, so the
         # f-string must not be built when DEBUG is off.
-        if logger.isEnabledFor(logging.DEBUG):
+        if _DEBUG:
             logger.debug('type=%s, flag=%s, stream_id=%s and payload size=%s',
                          self.type_, self.flags, self.stream_id, self.length)
 
@@ -134,7 +139,7 @@ class FrameBase:
         res += self.flags.to_bytes(1, 'big', signed=False)
         res += self.stream_id.to_bytes(4, 'big', signed=False)
 
-        if logger.isEnabledFor(logging.DEBUG):
+        if _DEBUG:
             logger.debug('FrameBase is saving a frame %r', res)
         return res
 
@@ -170,7 +175,8 @@ class SettingFrame(FrameBase):
 
     def __init__(self, length: int, type_, flags: int, stream_id: int, *, data=None, **kwds):
         super().__init__(length, type_, flags, stream_id)
-        logger.debug('SettingFrame is called.')
+        if _DEBUG:
+            logger.debug('SettingFrame is called.')
         self._payload = data or b''
 
         payload = BytesIO(data or b'')
@@ -191,7 +197,8 @@ class SettingFrame(FrameBase):
             logger.error(f'unknown identifier: {identifier}, {parsed}')
             return
         setattr(self, attr, parsed)
-        logger.debug('{}: {}'.format(attr, parsed))
+        if _DEBUG:
+            logger.debug('{}: {}'.format(attr, parsed))
 
     def save(self):
         self.length = len(self._payload)
@@ -204,7 +211,8 @@ class WindowUpdate(FrameBase):
     FRAME_TYPE = FrameTypes.WINDOW_UPDATE
     def __init__(self, length: int, type_, flags: int, stream_id: int, *, data=None, **kwds):
         super(WindowUpdate, self).__init__(length, type_, flags, stream_id)
-        logger.debug('WindowUpdate is called.')
+        if _DEBUG:
+            logger.debug('WindowUpdate is called.')
 
         self.payload = data or b'\x00\x00\x00\x00'
         self.window_size = int.from_bytes(self.payload, 'big', signed=False)
@@ -277,7 +285,7 @@ class Headers(FrameBase):
         self.end_headers = HeaderFrameFlags.END_HEADERS & self.flags
         self.padded = HeaderFrameFlags.PADDED & self.flags
         self.priority = HeaderFrameFlags.PRIORITY & self.flags
-        if logger.isEnabledFor(logging.DEBUG):
+        if _DEBUG:
             logger.debug('Headers: stream_id=%d end_stream=%s end_headers=%s padded=%s priority=%s',
                          stream_id, bool(self.end_stream), bool(self.end_headers),
                          bool(self.padded), bool(self.priority))
@@ -334,8 +342,9 @@ class Headers(FrameBase):
             # Top bit is the exclusive-dependency flag; mask it off.
             self.stream_dependency = sd_raw & 0x7fffffff
             self.priority_weight = int.from_bytes(payload.read(1), 'big', signed=False)
-            logger.debug('stream_id=%d stream_dependency=%d priority_weight=%d',
-                         self.stream_id, self.stream_dependency, self.priority_weight)
+            if _DEBUG:
+                logger.debug('stream_id=%d stream_dependency=%d priority_weight=%d',
+                             self.stream_id, self.stream_dependency, self.priority_weight)
             # RFC 9113 §5.3.1 — a stream cannot depend on itself.
             if self.stream_dependency == self.stream_id:
                 self._mark_malformed(
@@ -346,7 +355,7 @@ class Headers(FrameBase):
         # raw=True keeps hpack output as bytes-bytes tuples and bypasses
         # hpack's _unicode_if_needed UTF-8 decode (~4% CPU under load).
         fields = self.decoder.decode(payload.read(remaining), raw=True)
-        debug = logger.isEnabledFor(logging.DEBUG)
+        debug = _DEBUG
 
         seen_regular = False
         for k, v in fields:
@@ -409,7 +418,8 @@ class Headers(FrameBase):
         PROTOCOL_ERROR rather than dispatching the request."""
         self.malformed = True
         self.malformed_reason = reason
-        logger.debug('Headers stream_id=%d malformed: %s', self.stream_id, reason)
+        if _DEBUG:
+            logger.debug('Headers stream_id=%d malformed: %s', self.stream_id, reason)
 
     @log
     def save(self):
@@ -438,7 +448,7 @@ class Headers(FrameBase):
         base = super().save()
         # Guarded: fires on every HEADERS write; the unguarded form also
         # allocated `base + payload` purely to log it.
-        if logger.isEnabledFor(logging.DEBUG):
+        if _DEBUG:
             logger.debug('Headers.save: %r', base + payload)
         return base + payload
 
@@ -519,8 +529,9 @@ class GoAway(FrameBase):
         self.last_stream_id = int.from_bytes(payload.read(4), 'big', signed=False)
         self.error_code = int.from_bytes(payload.read(4), 'big', signed=False)
         self.append_data = payload.read()
-        logger.debug('GoAway last_stream_id=%d error_code=%d append_data=%r',
-                     self.last_stream_id, self.error_code, self.append_data)
+        if _DEBUG:
+            logger.debug('GoAway last_stream_id=%d error_code=%d append_data=%r',
+                         self.last_stream_id, self.error_code, self.append_data)
 
     def save(self):
         base = super().save()
@@ -534,7 +545,8 @@ class RstStream(FrameBase):
     FRAME_TYPE = FrameTypes.RST_STREAM
     def __init__(self, length: int, type_, flags: int, stream_id: int, *, data=None, **kwds):
         super().__init__(length, type_, flags, stream_id)
-        logger.debug('RstStream is called.')
+        if _DEBUG:
+            logger.debug('RstStream is called.')
         data = data or b''
         if len(data) != 4:
             raise Exception('Frame size error')
@@ -549,7 +561,8 @@ class RstStream(FrameBase):
             self.error_code = raw
         # Lazy %-args defer formatting until the record is emitted; RST_STREAM
         # is rare and the arg is cheap, so no isEnabledFor guard is needed.
-        logger.debug('error_code: %s', self.error_code)
+        if _DEBUG:
+            logger.debug('error_code: %s', self.error_code)
 
     def save(self):
         base = super().save()
@@ -562,7 +575,8 @@ class Data(FrameBase):
 
     def __init__(self, length: int, type_, flags: int, stream_id: int, *, data=None, **kwds):
         super().__init__(length, type_, flags, stream_id)
-        logger.debug('Data is called.')
+        if _DEBUG:
+            logger.debug('Data is called.')
         self.end_stream = DataFrameFlags.END_STREAM & self.flags
         self.padded = DataFrameFlags.PADDED & self.flags
 
@@ -586,7 +600,8 @@ class Data(FrameBase):
             # conditional preserves BytesIO.read(length) semantics for the rare
             # over-long input without copying when it already fits.
             self.payload = data if len(data) == length else data[:length]
-        logger.debug(self.payload)
+        if _DEBUG:
+            logger.debug(self.payload)
 
     def save(self):
         self.length = len(self.payload)
@@ -603,7 +618,8 @@ class Priority(FrameBase):
     FRAME_TYPE = FrameTypes.PRIORITY
     def __init__(self, length: int, type_, flags: int, stream_id: int, *, data=None, **kwds):
         super().__init__(length, type_, flags, stream_id)
-        logger.debug('Priority is called.')
+        if _DEBUG:
+            logger.debug('Priority is called.')
 
         payload = BytesIO(data or b'')
 
@@ -613,11 +629,13 @@ class Priority(FrameBase):
         self.dependent_stream = _t & 0x7fffffff
         # RFC 7540 §6.3: wire value is weight − 1; add 1 to get true weight (1–256).
         self.weight = int.from_bytes(payload.read(1), 'big', signed=False) + 1
-        # Lazy %-args defer formatting until emit; PRIORITY frames are rare, so
-        # the plain call (no isEnabledFor guard) is enough.  The bare
-        # `logger.info(_t)` debug-leftover above was removed.
-        logger.info('exclusion: %s, dependent_stream: %s, weight: %s',
-                    self.exclusion, self.dependent_stream, self.weight)
+        # DEBUG behind the module gate, not INFO.  The justification for the
+        # unguarded INFO call was that PRIORITY frames are rare — which is a
+        # statement about well-behaved peers.  §6.3 lets any peer send them at
+        # line rate, and a log record per frame is its own amplification.
+        if _DEBUG:
+            logger.debug('Priority exclusion=%s dependent_stream=%s weight=%s',
+                         self.exclusion, self.dependent_stream, self.weight)
 
     def save(self):
         base = super().save()
@@ -634,18 +652,22 @@ class Ping(FrameBase):
     FRAME_TYPE = FrameTypes.PING
     def __init__(self, length: int, type_, flags: int, stream_id: int, *, data, **kwds):
         super().__init__(length, type_, flags, stream_id)
-        logger.debug('Ping is called.')
-        logger.debug('FRAME_SIZE: {}'.format(length))
+        if _DEBUG:
+            logger.debug('Ping is called.')
+        if _DEBUG:
+            logger.debug('FRAME_SIZE: {}'.format(length))
         if length != 8:
             raise Exception('FRAME_SIZE_ERROR: {}'.format(length))
 
         self.payload = data
-        logger.debug('payload is {}'.format(self.payload))
+        if _DEBUG:
+            logger.debug('payload is {}'.format(self.payload))
 
     def save(self):
         base = super().save()
         res = base + self.payload
-        logger.debug('Ping is saving: {}'.format(res))
+        if _DEBUG:
+            logger.debug('Ping is saving: {}'.format(res))
         return res
 
     def __eq__(self, other):
@@ -656,17 +678,21 @@ class Continuation(FrameBase):
     FRAME_TYPE = FrameTypes.CONTINUATION
     def __init__(self, length: int, type_, flags: int, stream_id: int, *, data=None, **kwds):
         super().__init__(length, type_, flags, stream_id)
-        logger.debug('Continuation is called.')
+        if _DEBUG:
+            logger.debug('Continuation is called.')
 
         self.payload = data
-        logger.debug('payload is %r', self.payload)
+        if _DEBUG:
+            logger.debug('payload is %r', self.payload)
         self.end_headers = HeaderFrameFlags.END_HEADERS & self.flags
-        logger.debug('end_headers = %r', self.end_headers > 0)
+        if _DEBUG:
+            logger.debug('end_headers = %r', self.end_headers > 0)
 
     def save(self):
         base = super().save()
         res = base + self.payload
-        logger.debug('Continuation is saving: %r', res)
+        if _DEBUG:
+            logger.debug('Continuation is saving: %r', res)
         return res
 
 
@@ -713,8 +739,9 @@ class PriorityUpdate(FrameBase):
         raw_id = int.from_bytes(buf.read(4), 'big') & 0x7FFFFFFF
         self.prioritized_stream_id = raw_id
         self.priority_field = buf.read().decode('ascii', errors='replace')
-        logger.debug('PriorityUpdate: stream=%d priority=%r',
-                     self.prioritized_stream_id, self.priority_field)
+        if _DEBUG:
+            logger.debug('PriorityUpdate: stream=%d priority=%r',
+                         self.prioritized_stream_id, self.priority_field)
 
     @property
     def parsed_priority(self) -> dict[str, int | bool]:

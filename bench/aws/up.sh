@@ -164,7 +164,7 @@ launch_one() {
         --instance-initiated-shutdown-behavior terminate \
         "${PLACEMENT_ARGS[@]}" \
         --block-device-mappings "[{\"DeviceName\":\"/dev/sda1\",\"Ebs\":{\"VolumeSize\":$VOLUME_SIZE_GB,\"VolumeType\":\"gp3\",\"DeleteOnTermination\":true}}]" \
-        --tag-specifications "ResourceType=instance,Tags=[{Key=$TAG_KEY,Value=$TAG_VALUE},{Key=Owner,Value=$USER},{Key=$ROLE_TAG_KEY,Value=$role}]" \
+        --tag-specifications "ResourceType=instance,Tags=[{Key=$TAG_KEY,Value=$TAG_VALUE},{Key=Owner,Value=${USER:-unknown}},{Key=$ROLE_TAG_KEY,Value=$role}]" \
         --count 1 \
         --query 'Instances[0].InstanceId' --output text)
     echo "  $role instance id: $iid" >&2

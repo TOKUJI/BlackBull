@@ -75,6 +75,9 @@ target/
 # pyenv
 .python-version
 
+# uv per-workspace state (created inside the workspace by dsh's sandbox env)
+.uv-python-bin/
+
 # celery beat schedule file
 celerybeat-schedule
 

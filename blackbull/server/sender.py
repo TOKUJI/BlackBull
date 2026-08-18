@@ -27,7 +27,13 @@ from ..asgi import (
 from ..headers import Headers, HeaderList
 from ..native import NativeResponse, NativeWSMessage
 
+from ..logger import debug_gate  # noqa: E402
 logger = logging.getLogger(__name__)
+#: Read once at import: a disabled ``logger.debug`` on a per-request path
+#: costs 24 executed instructions to emit nothing.  Same bargain as
+#: ``@log`` — see :func:`blackbull.logger.debug_gate`.
+_DEBUG = debug_gate(logger)
+
 
 _CRLF = b'\r\n'
 
@@ -332,9 +338,10 @@ class AsyncioWriter(AbstractWriter):
             # (SSL aborted, FD already reaped by a sibling task, etc.);
             # swallowing here lets us still raise ConnectionResetError
             # below so the peer-disconnect handling runs uniformly.
-            logger.debug(
-                'write timeout: transport.close() also failed (%s) — '
-                'continuing with ConnectionResetError', close_exc)
+            if _DEBUG:
+                logger.debug(
+                    'write timeout: transport.close() also failed (%s) — '
+                    'continuing with ConnectionResetError', close_exc)
         raise ConnectionResetError(
             f'write timeout after {self._write_timeout:.1f}s'
         ) from None
@@ -517,12 +524,14 @@ class BaseSender(ABC):
             await write_fn(arg)
         except (ConnectionResetError, BrokenPipeError) as exc:
             self._closed = True
-            logger.debug('sender: peer closed write side (%s)', exc.__class__.__name__)
+            if _DEBUG:
+                logger.debug('sender: peer closed write side (%s)', exc.__class__.__name__)
         except OSError as exc:
             # SSLEOFError / SSLZeroReturnError land here on TLS connections
             # whose peer dropped without a proper close-notify.
             self._closed = True
-            logger.debug('sender: write failed on closed TLS transport (%s)', exc.__class__.__name__)
+            if _DEBUG:
+                logger.debug('sender: write failed on closed TLS transport (%s)', exc.__class__.__name__)
 
     async def _write(self, data: bytes):
         """Flush *data* through the writer (peer-close tolerant)."""
@@ -925,6 +934,17 @@ class HTTP1Sender(BaseSender):
                     await self._write(chunk)
 
 
+class FlowControlStalled(Exception):
+    """The peer never granted the flow-control credit it was asked for.
+
+    Distinct from a write failure: the socket is fine and the peer is
+    answering — it simply declines to accept the response it requested,
+    which is the "data dribble" shape of CVE-2019-9511.  Carried as its
+    own type so the stream ends with ``RST_STREAM(CANCEL)`` (a stream we
+    gave up on) rather than ``INTERNAL_ERROR`` (a server that broke).
+    """
+
+
 class ConnectionWindow:
     """Shared HTTP/2 connection-level (stream 0) send flow-control window.
 
@@ -977,6 +997,7 @@ class HTTP2Sender(BaseSender):
         '_factory', '_stream_id', '_push_callback',
         '_conn_window', 'stream_window_size',
         'max_frame_size', '_window_open', '_end_stream_sent',
+        '_flow_control_timeout',
         '_buffered_status', '_buffered_headers', '_expect_trailers',
         '_buffered_body', '_auto_flush_task', '_log_record',
     )
@@ -984,7 +1005,8 @@ class HTTP2Sender(BaseSender):
     def __init__(self, writer: AbstractWriter, factory, stream_id: int,
                  push_callback=None,
                  conn_window: 'ConnectionWindow | None' = None,
-                 initial_window: int | None = None):
+                 initial_window: int | None = None,
+                 flow_control_timeout: float | None = None):
         super().__init__(writer)
         self._factory = factory
         self._stream_id = stream_id
@@ -1007,6 +1029,20 @@ class HTTP2Sender(BaseSender):
                                    if initial_window is None else initial_window)
         self.max_frame_size = DEFAULT_MAX_FRAME_SIZE
         self._window_open: asyncio.Event | None = None
+        # How long the peer may take to grant flow-control credit before the
+        # stream gives up.  Held here rather than read at the wait so a stalled
+        # write costs no settings lookup.
+        #
+        # Passed in by every caller that builds senders in bulk: one sender is
+        # created *per stream*, so resolving this here would put a
+        # function-level relative import — resolved through
+        # ``importlib._bootstrap`` on every execution — on the per-request
+        # path.  The fallback is for direct instantiation (tests, the
+        # experimental client).
+        if flow_control_timeout is None:
+            from ..env import get_settings  # noqa: PLC0415
+            flow_control_timeout = get_settings().write_timeout
+        self._flow_control_timeout: float = flow_control_timeout
         self._end_stream_sent: bool = False
         # Defer HEADERS write until first body event (mirrors HTTP1Sender).
         self._buffered_status: HTTPStatus | None = None
@@ -1205,7 +1241,27 @@ class HTTP2Sender(BaseSender):
                 if (self._conn_window.size > 0 and
                         self.stream_window_size > 0):
                     break
-                await self._window_open.wait()
+                # A peer that requests a large response and never opens its
+                # window parks this task forever (CVE-2019-9511's shape).
+                # ``BB_WRITE_TIMEOUT`` already bounds a stalled socket drain;
+                # this is the same question one layer up — how long may the
+                # peer take to accept what it asked for — so it is the same
+                # knob at a second enforcement point, not a new one.
+                if self._flow_control_timeout <= 0:
+                    await self._window_open.wait()
+                    continue
+                try:
+                    async with asyncio.timeout(self._flow_control_timeout):
+                        await self._window_open.wait()
+                except (asyncio.TimeoutError, TimeoutError) as exc:
+                    log_cap_hit('write_timeout',
+                                requested=self._flow_control_timeout,
+                                limit=self._flow_control_timeout,
+                                protocol='http2')
+                    raise FlowControlStalled(
+                        f'stream {self._stream_id}: peer sent no WINDOW_UPDATE '
+                        f'in {self._flow_control_timeout}s'
+                    ) from exc
 
             chunk_size = min(
                 self._conn_window.size,
@@ -1370,7 +1426,8 @@ class HTTP2Sender(BaseSender):
                        headers: HeaderList = []):
         # Control-plane: raw frame object (SETTINGS, PING ACK, WINDOW_UPDATE, …)
         if isinstance(body, FrameBase):
-            logger.debug('HTTP2Sender raw frame: %r', body)
+            if _DEBUG:
+                logger.debug('HTTP2Sender raw frame: %r', body)
             await self._write(body.save())
             return
 
@@ -1460,7 +1517,8 @@ class HTTP2Sender(BaseSender):
 
         elif isinstance(body, dict):
             event_type = body.get('type', '')
-            logger.debug('HTTP2Sender event: %r', event_type)
+            if _DEBUG:
+                logger.debug('HTTP2Sender event: %r', event_type)
 
             # RFC 9113 §8.1 — frames after END_STREAM are a protocol error.
             # Drop the event with a warning rather than writing a frame that
@@ -1558,7 +1616,7 @@ class WebSocketSender(BaseSender):
         await self._write(encode_frame(code.to_bytes(2, 'big'),
                                        opcode=WSOpcode.CLOSE))
 
-    async def __call__(self, body: '_WSSenderEvent | NativeWSMessage',
+    async def __call__(self, body: _WSSenderEvent | NativeWSMessage,
                        _status: HTTPStatus | None = None,
                        _headers: HeaderList = []):
         # Dict arm first.  A dict is the one shape here that nothing cheaper
@@ -1650,11 +1708,13 @@ class SenderFactory:
     def http2(stream_writer, factory, stream_id: int,
               push_callback=None,
               conn_window: 'ConnectionWindow | None' = None,
-              initial_window: int | None = None) -> HTTP2Sender:
+              initial_window: int | None = None,
+              flow_control_timeout: float | None = None) -> HTTP2Sender:
         return HTTP2Sender(SenderFactory._ensure_writer(stream_writer),
                            factory, stream_id, push_callback,
                            conn_window=conn_window,
-                           initial_window=initial_window)
+                           initial_window=initial_window,
+                           flow_control_timeout=flow_control_timeout)
 
     @staticmethod
     def websocket(stream_writer, *, compressor=None) -> WebSocketSender:

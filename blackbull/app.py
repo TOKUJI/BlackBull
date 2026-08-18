@@ -36,7 +36,13 @@ from .native import NativeResponse
 from .response import wrap_native_send
 from .asgi import ASGIReceiveCallable, ASGISendCallable
 from .config import AppConfig
+from .logger import debug_gate  # noqa: E402
 logger = logging.getLogger(__name__)
+#: Read once at import: a disabled ``logger.debug`` on a per-request path
+#: costs 24 executed instructions to emit nothing.  Same bargain as
+#: ``@log`` — see :func:`blackbull.logger.debug_gate`.
+_DEBUG = debug_gate(logger)
+
 
 
 def _wrap_send_native(raw_send: ASGISendCallable):
@@ -541,7 +547,8 @@ class BlackBull:
         while True:
             event = await receive()
             if event['type'] == 'lifespan.startup':
-                self._logger.debug('lifespan startup')
+                if _DEBUG:
+                    self._logger.debug('lifespan startup')
                 mw_errors = [
                     f"Global middleware {mw!r} has no 'call_next' parameter"
                     for mw in self._global_middlewares
@@ -573,7 +580,8 @@ class BlackBull:
                     return
                 await send({'type': 'lifespan.startup.complete'})
             elif event['type'] == 'lifespan.shutdown':
-                self._logger.debug('lifespan shutdown')
+                if _DEBUG:
+                    self._logger.debug('lifespan shutdown')
                 try:
                     await self._dispatcher.emit(Event('app_shutdown'))
                     await self._dispatcher.aclose()
@@ -613,7 +621,8 @@ class BlackBull:
         registered handlers pays only a dict lookup, not an ``Event`` +
         detail-dict construction.
         """
-        self._logger.debug((conn, receive, send))
+        if _DEBUG:
+            self._logger.debug((conn, receive, send))
 
         # WebSocket is native too: ``conn`` is a Connection here as
         # well. Route it by its ``path`` to the registered WS handler, which
@@ -696,13 +705,15 @@ class BlackBull:
             method = conn.method
 
         path = conn.path
-        self._logger.debug((path, scheme))
+        if _DEBUG:
+            self._logger.debug((path, scheme))
 
         try:
             function = self._router[(path, method, scheme)]
         except MethodNotApplicable as e:
-            self._logger.debug("%s: path=%r method=%r allowed=%r",
-                         HTTPStatus.METHOD_NOT_ALLOWED.phrase, path, method, e.allowed_methods)
+            if _DEBUG:
+                self._logger.debug("%s: path=%r method=%r allowed=%r",
+                             HTTPStatus.METHOD_NOT_ALLOWED.phrase, path, method, e.allowed_methods)
             conn.state.update({
                 'error_status': HTTPStatus.METHOD_NOT_ALLOWED,
                 'allowed_methods': e.allowed_methods,
@@ -712,7 +723,8 @@ class BlackBull:
                 await handler(conn, receive, send)
             return
         except PathNotRegistered:
-            self._logger.debug("%s: path=%r", HTTPStatus.NOT_FOUND.phrase, path)
+            if _DEBUG:
+                self._logger.debug("%s: path=%r", HTTPStatus.NOT_FOUND.phrase, path)
             conn.state['error_status'] = HTTPStatus.NOT_FOUND
             handler = self._error_router[HTTPStatus.NOT_FOUND]
             if handler is not None:
@@ -750,7 +762,8 @@ class BlackBull:
                     await handler(conn, receive, send)
                 return
 
-        self._logger.debug((self, function))
+        if _DEBUG:
+            self._logger.debug((self, function))
         exc_caught: Exception | None = None
         try:
             if self._dispatcher.has_listeners('before_handler'):
@@ -766,7 +779,8 @@ class BlackBull:
             # Peer vanished mid-body — there is no one to answer.  Record it
             # for the after_handler event but log quietly and send nothing.
             exc_caught = e
-            self._logger.debug('client disconnected before request body completed')
+            if _DEBUG:
+                self._logger.debug('client disconnected before request body completed')
         except HTTPException as e:
             # A status-carrying error (e.g. a malformed request body → 400).
             # 4xx are client faults: log quietly, no traceback.  5xx still

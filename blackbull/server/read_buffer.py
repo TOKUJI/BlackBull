@@ -364,6 +364,24 @@ class ReadBuffer:
         if self._w == 0:
             self.drained_boundary = True
 
+    def consume_boundary(self) -> None:
+        """Take the raised boundary, and start the next message's accounting.
+
+        The reader polls :attr:`drained_boundary` on every consuming read —
+        cheap, and true only rarely — and calls this when it is set.  Clearing
+        it here rather than at the call site is the whole point: the flag and
+        the peak are this object's state, so the transition that ends a
+        message's accounting is this object's to make.  A consumer that reset
+        them itself would be an edge-triggered signal with the reset on the
+        wrong side, and the edge would go to whichever consumer reached it
+        first.
+
+        Called only on a real boundary, so the cost is a rare call rather than
+        a per-read one — the same shape as the reader's own ``maybe_pause``.
+        """
+        self.drained_boundary = False
+        self.peak_avail = 0
+
     def release_to_floor(self) -> bool:
         """Hand a grown allocation back.  ``True`` when it was given up.
 

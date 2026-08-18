@@ -191,13 +191,22 @@ can't stop one stream from starving the rest.
 **§5.3 Prioritization** ✅ (as deprecation)
 RFC 9113 **§5.3.2** deprecated the priority *tree* (dependencies and weights)
 that **RFC 7540** had originally defined.
-BlackBull does not build the tree; it accepts PRIORITY frames and translates
-them, plus RFC 9218 `PRIORITY_UPDATE`, into a simple
-`{'urgency', 'incremental'}` hint (built by `_resolve_priority() in
-http2_actor.py` / `_build_h2_extensions() in http2_actor.py`) exposed at
-`conn.extensions['http.response.priority']`.  *Because* the tree was
-unimplementable interoperably — RFC 9113 itself removed it, and modern clients
-send RFC 9218 urgency signals instead.  (Background: §5.3.1.)
+BlackBull does not build the tree; it validates PRIORITY frames and discards
+the dependency signal, and takes its scheduling hint from RFC 9218
+`PRIORITY_UPDATE` instead — a simple `{'urgency', 'incremental'}` value (built
+by `_resolve_priority() in http2_actor.py` / `_build_h2_extensions() in
+http2_actor.py`) exposed at `conn.extensions['http.response.priority']`.
+*Because* the tree was unimplementable interoperably — RFC 9113 itself removed
+it, and modern clients send RFC 9218 urgency signals instead.
+(Background: §5.3.1.)
+
+"Does not build the tree" is now literally true of the state as well as the
+scheduling.  `PriorityResponder` used to record `weight` and re-parent
+children, and `_frame_loop` used to create a `Stream` node for PRIORITY on an
+idle stream.  Nothing read either field, and §6.3 permits PRIORITY in any
+stream state — so those writes were a way for a peer to add a tree node per
+frame for the life of the connection.  §5.3.1's self-dependency check is what
+survives.
 
 **§5.4 Error Handling** ✅ — *this is where the actor model earns its place.*
 A **connection error** (§5.4.1) goes through `HTTP2Actor._connection_error()`:
@@ -266,19 +275,35 @@ A `Priority` frame is dispatched to `PriorityResponder`, but its payload-length
 guard (it **MUST** be exactly 5 bytes → stream FRAME_SIZE_ERROR) is enforced in
 `HTTP2Actor._frame_loop()`, and the urgency signal is mapped by
 `_resolve_priority() in http2_actor.py`.  PRIORITY on a not-yet-seen stream
-creates an idle `Stream` node.  The signal is mapped to RFC 9218 urgency (see
-§5.3).  *Because* the frame is still valid wire
-syntax even though the tree semantics are deprecated — reject the malformed,
-accept-and-translate the well-formed.
+creates **no** stream state: the frame is validated (§5.3.1 self-dependency →
+stream PROTOCOL_ERROR) and the deprecated dependency signal is dropped.
+*Because* the frame is still valid wire syntax even though the tree semantics
+are deprecated — reject the malformed, accept and ignore the well-formed, and
+hold nothing a peer can grow.
+
+RFC 9218 `PRIORITY_UPDATE` is the one path that still pre-creates a node, so
+a hint arriving before HEADERS survives to meet it; §7 permits bounding how
+many are buffered, and `SETTINGS_MAX_CONCURRENT_STREAMS` is the bound — a hint
+for more streams than the peer may open at once is a hint it can never redeem.
+Over the bound the frame is dropped and `h2_priority_update_buffer` is logged
+to `blackbull.caps`.
 
 **§6.4 RST_STREAM — `RstStream(FrameBase)`** ✅
 The basic "any → CLOSED" transition is applied by `RstStreamResponder`; ahead of
 it, `HTTP2Actor._frame_loop()` carries the **CVE-2023-44487 (Rapid Reset)**
-mitigation: a rolling 1-second counter, >20 RST/s → GOAWAY ENHANCE_YOUR_CALM,
-raised *before* stream-state validation so abusive RSTs on idle/unknown streams
-still count.
+mitigation: a rolling window (`BB_FRAME_RATE_LIMIT` per `BB_FRAME_RATE_WINDOW`,
+default 20 per second) → GOAWAY ENHANCE_YOUR_CALM, raised *before* stream-state
+validation so abusive RSTs on idle/unknown streams still count.
 *Because* `SETTINGS_MAX_CONCURRENT_STREAMS` cannot catch the attack — a stream
 reset in the same round-trip never counts as "concurrent."
+
+Resets **this server emits** are counted on the same meter
+(`HTTP2Actor._count_emitted_rst()`, hooked into `send_frame`).  *Because* a
+stream reset costs the same slot churn whoever sent it, and a peer can provoke
+ours on demand by repeatedly tripping a real limit — an upload loop over
+`BB_MAX_BODY_SIZE`, say.  The consequence is deliberate: a client that keeps
+tripping a legitimate limit eventually loses its connection, and the cap-hit
+log names which limit it kept hitting so an operator can tell abuse from a bug.
 
 **§6.5 SETTINGS — `SettingFrame(FrameBase)`** ✅
 The server sends its own SETTINGS first from `HTTP2Actor.run()` (§3.4); a peer's
@@ -287,6 +312,12 @@ and answers with ACK (§6.5.3).
 `SETTINGS_ENABLE_CONNECT_PROTOCOL` (§6.5.2 / RFC 8441 §3) is advertised **only**
 when `BB_H2_ENABLE_WEBSOCKET=1`.  *Because* you must not invite Extended CONNECT
 unless you can service it.
+
+SETTINGS is rate-metered on the same mechanism as RST_STREAM
+(**CVE-2019-9515**): each frame obliges the server to one ACK write, so an
+unbounded stream of them is free to send and not free to answer.  Metered
+*before* the responder runs, so an over-budget frame is refused rather than
+merely counted.
 
 **§6.6 PUSH_PROMISE — `PushPromise(FrameBase)`** ✅
 A server-sent `PushPromise` is built by `HTTP2Actor._handle_push()`: allocate the
@@ -305,6 +336,21 @@ A `Ping` frame is handled by `PingResponder`: PING with ACK → no-op (it answer
 our own PING); PING without ACK → echo with ACK, unchanged opaque data.
 *Because* PING is the connection liveness primitive;
 the only correct response is the identical payload with the flag flipped.
+
+Metered like SETTINGS (**CVE-2019-9512**) — one ACK write per frame is exactly
+the shape a flood exploits.
+
+The server also **sends** PING, as the liveness probe behind
+`BB_H2_IDLE_TIMEOUT` (`HTTP2Actor._probe_peer()`).  After that long with no
+frame in either direction the server asks rather than reaps: an idle HTTP/2
+connection is normal — a browser holds one for a page's lifetime, a gRPC
+channel idles between calls — and is not distinguishable from a dead one
+without asking.  Any inbound frame counts as the answer, not just a PING ACK:
+matching by opaque data would be more precise and no more true, since a peer
+that sent anything at all is there.  Silence for a further
+`BB_H2_PING_TIMEOUT` closes with GOAWAY **NO_ERROR** — nothing was violated;
+we asked a question and got no reply, which is a fact about the network rather
+than a complaint about the peer.
 
 **§6.8 GOAWAY — `GoAway(FrameBase)`** ✅
 A `GoAway` frame is handled in two directions.  **Incoming**
@@ -508,13 +554,23 @@ already enforced at parse time; pushed-response cacheability follows from the
 
 | Threat | RFC | Mitigation | Code |
 |---|---|---|---|
-| Rapid Reset (CVE-2023-44487) | §6.4 | Rolling 20/s RST limit → GOAWAY ENHANCE_YOUR_CALM | `HTTP2Actor._frame_loop()` |
+| Rapid Reset (CVE-2023-44487) | §6.4 | `BB_FRAME_RATE_LIMIT` per `BB_FRAME_RATE_WINDOW` (20/s), inbound **and** server-emitted → GOAWAY ENHANCE_YOUR_CALM | `HTTP2Actor._frame_loop()`, `._count_emitted_rst()` |
+| PING flood (CVE-2019-9512) | §6.7 | Same meter, own budget — one ACK write per frame is the cost being exploited | `HTTP2Actor._meter()` |
+| SETTINGS flood (CVE-2019-9515) | §6.5 | Same meter, own budget; refused before the ACK responder runs | `HTTP2Actor._meter()` |
+| Empty-frame flood (CVE-2019-9518 shape) | §6.1, §6.10 | Zero-length `DATA`/`CONTINUATION` metered by **count** — they add no bytes, so `BB_HEADER_MAX_TOTAL` cannot see them | `HTTP2Actor._meter()` |
+| Data dribble (CVE-2019-9511 shape) | §6.9 | `BB_WRITE_TIMEOUT` bounds waiting for `WINDOW_UPDATE`; the stream ends `RST_STREAM(CANCEL)`, not INTERNAL_ERROR — we gave up on a stream the peer abandoned | `HTTP2Sender._write_data()`, `FlowControlStalled` |
+| Unfinished header block held open | §4.3, §6.10 | `BB_HEADER_TIMEOUT` on HEADERS→END_HEADERS → GOAWAY ENHANCE_YOUR_CALM.  A **connection** error, not a stream one: HPACK state is connection-wide and order-dependent, so a block whose bytes never arrived leaves the decoder unable to read any later block | `HTTP2Actor._end_for_stalled_header_block()` |
+| Silent connection held indefinitely | §6.7, §9 | `BB_H2_IDLE_TIMEOUT` probes with PING; `BB_H2_PING_TIMEOUT` unanswered → GOAWAY NO_ERROR | `HTTP2Actor._liveness_watchdog()` |
+| Declared body over the cap | §8.1 | `BB_MAX_BODY_SIZE` refused at HEADERS: full response, then `RST_STREAM(NO_ERROR)` per §8.1.  The connection survives — HTTP/2 frames every stream, so refused octets can never be re-read as the next request (unlike HTTP/1.1, where the refusal must close) | `HTTP2Actor._refuse_oversized_declared_body()` |
+| Undeclared or dribbling body | §6.9, §8.1 | `BB_MAX_BODY_SIZE` counted as DATA arrives; `BB_MIN_BODY_RATE` judged on a rolling grace window, exempt while our own flow control is what slowed the peer | `HTTP2Recipient._body_limits_refuse()` |
 | CONTINUATION flood / CVE-2024-27983 (§10.5.1) | §6.10 | `len(raw_block) > BB_HEADER_MAX_TOTAL` → RST before parse | `HTTP2Actor._on_continuation_frame()` |
 | `stream_id==0` for stream-only frames | §6.1–6.4, 6.6, 6.10 | `HTTP2Actor._STREAM_ONLY_FRAME_TYPES` → connection PROTOCOL_ERROR | `HTTP2Actor._frame_loop()` |
 | Oversized single header block (§10.5.1) | §4.3, §8.1.1 | `malformed` flag set during parse → RST | `parse_payload() in frame_types.py` / `parse_headers() in parser.py` |
 | Stream exhaustion | §5.1.2 | RST REFUSED_STREAM before scope is built | `HTTP2Actor._on_headers_frame()` |
 | WebSocket stream exhaustion | RFC 8441 | `HTTP2Actor._ws_stream_count` cap (`BB_H2_WS_MAX_STREAMS`) | `HTTP2Actor._handle_h2_websocket()` |
 | Concurrent-handler flood (1 worker) | operational | `BB_H2_ACTIVE_STREAMS_1W` semaphore via `_run_guarded() in http2_actor.py` | `HTTP2Actor._spawn_stream_task()` |
+| PRIORITY flood on idle streams | §6.3, §5.3 | No state is created or recorded: the deprecated dependency signal is validated and dropped, so a PRIORITY frame buys nothing that outlives it.  Previously each one created a `Stream` node that was never removed | `HTTP2Actor._frame_loop()`, `PriorityResponder` |
+| PRIORITY_UPDATE hint-buffer growth | RFC 9218 §7 | Pre-created hint nodes bounded by `SETTINGS_MAX_CONCURRENT_STREAMS`; over it the frame is dropped and `h2_priority_update_buffer` logged | `PriorityUpdateResponder` |
 
 *Because* DoS hardening is the part of the spec a from-scratch server most easily
 skips, and the part attackers most reliably probe.  Making it a single auditable
@@ -547,7 +603,6 @@ implementation surface): §1 (introduction), §2 (document organisation &
 conventions), §5.3.1 (background on deprecated RFC 7540 priority), §8.8
 (illustrative examples), §11 (IANA registries), Appendix A (prohibited
 cipher list), and Appendix B (changes from RFC 7540).  Against that
-denominator:  Against that
 denominator:
 
 | Of RFC 9113's server requirements & options | Share (approx.) | Examples |

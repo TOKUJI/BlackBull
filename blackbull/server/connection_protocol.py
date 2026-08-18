@@ -21,15 +21,33 @@ so the body recipient and the WebSocket/h2c successors work unchanged, and adds
 instead of a `readuntil` per line.
 
 **The two classes split decision from execution.**  The reader owns the receive
-competence — whether a high-water crossing should pause, when to wait, and
-when a hand a grown buffer back — because reading is the only activity that
-knows both what was asked for and what was consumed.  The protocol owns the
-socket: the transport callbacks, the rendezvous future, the two flow-control
-calls it makes when the reader asks, and the byte-level high-water comparison
-(a threshold, not a judgement — the reader decides what a crossing means).
-Before the split the stop-reading test sat in
-:meth:`ConnectionProtocol.buffer_updated` and reconstructed the reader's
+competence — whether a high-water crossing should pause, when to wait, when a
+grown buffer goes back, and what to throw away on a lingering close — because
+reading is the only activity that knows both what was asked for and what was
+consumed.  The protocol owns the socket: the transport callbacks, the
+rendezvous future, the two flow-control calls it makes when the reader asks,
+and the byte-level high-water comparison (a threshold, not a judgement — the
+reader decides what a crossing means).  Before the split the stop-reading test
+sat in :meth:`ConnectionProtocol.buffer_updated` and reconstructed the reader's
 state from outside — resident bytes plus a guess at whether anyone was parked.
+
+**Published fields are facts, never shared state.**  Crossing the boundary with
+a *call* is what the arrival path cannot afford — an EC2 /conn A/B measured one
+there at the same order as a whole regression — so the two sides publish the
+few facts the other consults (``BufferReader.read_offer``,
+``ConnectionProtocol.reading_paused``, ``ReadBuffer.drained_boundary``).  That
+trade is only safe under one rule, and the rule is what keeps "published" from
+decaying into "shared":
+
+    A published field has exactly one writer — its owner.  Reading it across
+    the boundary is free; changing it is a method call on the owner, gated on
+    a cheap read so it happens only when a change is actually due.
+
+``maybe_pause`` and :meth:`ReadBuffer.consume_boundary` are that gate: both are
+reached only on the rare edge, so the poll stays an attribute read and the
+transition stays with the object whose state it is.  Encapsulation is normally
+what *enforces* ownership; publishing gives that up, so the rule has to be
+written down and tested — see ``tests/unit/test_receive_decisions.py``.
 
 Because peeked bytes stay resident, protocol detection can decide without
 consuming: there is nothing to replay to the winning binding, which is what
@@ -76,16 +94,17 @@ class BufferReader(AbstractReader):
     consumption (``take``), so everything that follows from the pair is
     decided here and merely *executed* on the transport: whether a high-water
     crossing pauses the peer (:meth:`maybe_pause`), when to let it go again
-    (:meth:`_consumed`), and when a grown allocation goes back to the floor
-    (:meth:`_at_boundary`).  The protocol below owns the socket, not the
-    judgement about it.
+    (:meth:`_consumed`), how much the next recv should be able to deliver
+    (the offer published around a park), and when a grown allocation goes back
+    to the floor (:meth:`_at_boundary`).  The protocol below owns the socket,
+    not the judgement about it.
 
     Deliberately not on :class:`~.recipient.AbstractReader`: two of its three
     implementations have no transport to pause, so promoting this competence to
     the interface would force a no-op onto them.
     """
 
-    __slots__ = ('_buf', '_proto', '_release_count', '_waiting')
+    __slots__ = ('_buf', '_proto', '_release_count', '_waiting', 'read_offer')
 
     def __init__(self, buf: ReadBuffer, proto: ConnectionProtocol) -> None:
         self._buf = buf
@@ -96,6 +115,14 @@ class BufferReader(AbstractReader):
         #: the wake and the reader running read as "nobody is waiting" and
         #: armed a pause that the next park immediately released.
         self._waiting = False
+        #: How much this reader wants the arrival that wakes it to be able to
+        #: deliver, capped at the high-water mark; 0 unless it is parked.
+        #: Published for the arrival path to consult, because ``get_buffer``
+        #: runs on every arrival on every connection and a method call in that
+        #: position measured at the same order as a whole regression.  Held
+        #: *here*, on the object that decides it: the protocol reads it, never
+        #: writes it, which is what keeps "published" from meaning "shared".
+        self.read_offer = 0
         self._release_count = 0  # consecutive small messages since the last grow
 
     # -- the receive decisions ---------------------------------------------
@@ -134,7 +161,6 @@ class BufferReader(AbstractReader):
         if proto.reading_paused and buf.available <= _LOW_WATER:
             proto.resume_reading()
         if buf.drained_boundary:
-            buf.drained_boundary = False
             self._at_boundary()
 
     def _at_boundary(self) -> None:
@@ -145,6 +171,11 @@ class BufferReader(AbstractReader):
         allocation instead of growing and shrinking per message (the F6/B7
         churn); only after ``_RELEASE_HYSTERESIS`` fully-consumed *small*
         messages is the peak given back.
+
+        The decision is read off the buffer's accounting and the buffer is then
+        told to close the message out; this method never writes the buffer's
+        own fields.  Reached only on a real boundary, so the call costs nothing
+        on the reads that do not end one.
         """
         buf = self._buf
         if buf.grown:
@@ -155,7 +186,7 @@ class BufferReader(AbstractReader):
                 if (self._release_count >= _RELEASE_HYSTERESIS
                         and buf.release_to_floor()):
                     self._release_count = 0
-        buf.peak_avail = 0
+        buf.consume_boundary()
 
     async def wait_for_data(self) -> None:
         """Park until more arrives, declaring the wait first.
@@ -168,6 +199,14 @@ class BufferReader(AbstractReader):
         a ``chunked`` chunk whose size the peer chose.
         ``asyncio.StreamReader._wait_for_data`` resumes here for the same
         reason.
+
+        Parking is also the only moment a recv-size demand can be *consulted*,
+        so the two readers that have one publish it immediately around their
+        call to this (see :attr:`read_offer`).  It is not
+        published here, taking a *want* argument, because the readers that park
+        without a size — ``read_head`` on every request, ``readuntil``,
+        ``fill`` — would then pay a pair of stores to declare nothing, which
+        measured as the header path funding what the body path saves.
         """
         proto = self._proto
         if proto.reading_paused:
@@ -181,34 +220,42 @@ class BufferReader(AbstractReader):
     # -- AbstractReader ----------------------------------------------------
 
     async def read(self, n: int = -1) -> bytes:
-        self._proto.read_offer = _HIGH_WATER if n < 0 else min(n, _HIGH_WATER)
-        try:
-            if not self._buf.available:
-                if self._proto.at_eof:
-                    return b''
+        if not self._buf.available:
+            if self._proto.peer_closed:
+                return b''
+            # Declared around the park and nowhere else: a read the buffer can
+            # already satisfy never yields, so nothing could consult an offer
+            # it published, and on HTTP/2 that is the great majority of reads.
+            self.read_offer = (
+                _HIGH_WATER if n < 0 else min(n, _HIGH_WATER))
+            try:
                 await self.wait_for_data()
-                if not self._buf.available:
-                    return b''
-            take = self._buf.available if n < 0 else min(n, self._buf.available)
-            out = self._buf.take(take)
-            self._consumed()
-            return out
-        finally:
-            self._proto.read_offer = 0
+            finally:
+                self.read_offer = 0
+            if not self._buf.available:
+                return b''
+        take = self._buf.available if n < 0 else min(n, self._buf.available)
+        out = self._buf.take(take)
+        self._consumed()
+        return out
 
     async def readexactly(self, n: int) -> bytes:
-        self._proto.read_offer = min(n, _HIGH_WATER)
-        try:
-            while self._buf.available < n:
-                if self._proto.at_eof:
-                    partial = self._buf.take(self._buf.available)
-                    raise IncompleteReadError(partial)
+        # The demand is the whole read, not what is left of it: an arrival that
+        # can fill the request in one recv is the point, and re-deriving a
+        # smaller offer each time round would shrink the window exactly when
+        # the peer is delivering slowly.
+        while self._buf.available < n:
+            if self._proto.peer_closed:
+                partial = self._buf.take(self._buf.available)
+                raise IncompleteReadError(partial)
+            self.read_offer = min(n, _HIGH_WATER)
+            try:
                 await self.wait_for_data()
-            out = self._buf.take(n)
-            self._consumed()
-            return out
-        finally:
-            self._proto.read_offer = 0
+            finally:
+                self.read_offer = 0
+        out = self._buf.take(n)
+        self._consumed()
+        return out
 
     async def readuntil(self, sep: bytes = b'\n') -> bytes:
         while True:
@@ -217,9 +264,48 @@ class BufferReader(AbstractReader):
                 out = self._buf.take(idx + len(sep))
                 self._consumed()
                 return out
-            if self._proto.at_eof:
+            if self._proto.peer_closed:
                 raise IncompleteReadError(self._buf.take(self._buf.available))
             await self.wait_for_data()
+
+    async def discard(self, max_bytes: int, deadline: float) -> int:
+        """Read and throw away up to *max_bytes*, until EOF or *deadline*.
+
+        The lingering close needs the peer's remaining bytes gone so the kernel
+        does not answer our close with an RST — which would discard the
+        response we already wrote.  Throwing bytes away is still *reading*
+        them: it has a demand (*max_bytes*) and it consumes, which is exactly
+        the pair that makes a thing this reader's.  Doing it on the protocol
+        with a direct ``ReadBuffer.consume`` gave the connection a second
+        receive path that skipped every decision this one makes.
+
+        ``consume`` rather than ``take``: the bytes are not wanted, so there is
+        no reason to copy them out.  Both bounds are the caller's to set and
+        both matter — an unbounded read hands an attacker the very thing a
+        refused request was declining to read, and a read with no deadline lets
+        a slow peer hold a connection that has already been answered.
+
+        Returns the number of bytes discarded.  Errors are the caller's to
+        absorb: this runs on the teardown path, where the response is already
+        on the wire.
+        """
+        loop = asyncio.get_running_loop()
+        discarded = self._buf.available
+        self._buf.consume(discarded)
+        self._consumed()
+        while not self._proto.peer_closed and discarded < max_bytes:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                break
+            try:
+                await asyncio.wait_for(self.wait_for_data(), remaining)
+            except (TimeoutError, Exception):
+                break
+            n = self._buf.available
+            self._buf.consume(n)
+            discarded += n
+            self._consumed()
+        return discarded
 
     def has_buffered(self) -> bool:
         return self._buf.available > 0
@@ -233,7 +319,7 @@ class BufferReader(AbstractReader):
         return bytes(self._buf.view(want))
 
     def at_eof(self) -> bool:
-        return self._proto.at_eof and not self._buf.available
+        return self._proto.peer_closed and not self._buf.available
 
     async def fill(self, n: int) -> bool:
         """Wait until *n* bytes are resident, consuming nothing.
@@ -243,7 +329,7 @@ class BufferReader(AbstractReader):
         hand the winning binding this very reader with the stream still whole.
         """
         while self._buf.available < n:
-            if self._proto.at_eof:
+            if self._proto.peer_closed:
                 return False
             await self.wait_for_data()
         return True
@@ -270,7 +356,7 @@ class BufferReader(AbstractReader):
                 # false) and the scan's resumption state is untouched (it
                 # sets ``_scanned = _w``, which already equals ``_r``), so the
                 # idle-close and truncated-head contracts below are unchanged.
-                if self._proto.at_eof:
+                if self._proto.peer_closed:
                     return b''
                 await self.wait_for_data()
                 continue
@@ -285,7 +371,7 @@ class BufferReader(AbstractReader):
                 out = self._buf.take(end)
                 self._consumed()
                 return out
-            if self._proto.at_eof:
+            if self._proto.peer_closed:
                 partial = self._buf.take(self._buf.available)
                 if not partial:
                     return b''
@@ -307,19 +393,6 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
 
     def __init__(self) -> None:
         self._rb = ReadBuffer()
-        #: How much the reader wants the next recv to be able to deliver,
-        #: capped at the high-water mark; 0 when no read is pending.  Written
-        #: by :class:`BufferReader` around its parks and read here on the
-        #: arrival path, the mirror of ``reading_paused`` — each side
-        #: publishes the state the other consults, so neither has to call
-        #: into the other on a per-arrival basis.  The decision is still the
-        #: reader's: a parked read of *n* gets a recv window of up to
-        #: ``min(n, _HIGH_WATER)`` so one arrival feeds most of it (arrival
-        #: granularity follows the demand, not the idle floor — the 8 KiB
-        #: delivery-pinning that sank the first transport-paced attempt),
-        #: while an idle connection offers the floor span and keeps its
-        #: memory floor.
-        self.read_offer = 0
         self.reader = BufferReader(self._rb, self)
         self.transport: asyncio.Transport | None = None
         self._waiter: asyncio.Future[None] | None = None
@@ -334,13 +407,17 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
     # -- state -------------------------------------------------------------
 
     @property
-    def at_eof(self) -> bool:
-        return self._eof
+    def peer_closed(self) -> bool:
+        """The transport signalled EOF: the peer will send nothing more.
 
-    @property
-    def buffer(self) -> ReadBuffer:
-        """The connection's buffer, for a successor taking the stream over."""
-        return self._rb
+        A fact about the socket, which is why it lives here.  It is **not**
+        the same question as :meth:`BufferReader.at_eof` — bytes already
+        delivered are still there to be served after the peer has gone, so a
+        reader is at EOF only when this is true *and* its buffer is empty.
+        One name for both questions made every call site a guess about which
+        was meant.
+        """
+        return self._eof
 
     # -- transport callbacks ----------------------------------------------
 
@@ -349,13 +426,15 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
 
     def get_buffer(self, sizehint: int) -> memoryview:
         # The demand comes from the reader, not the hint: the reader owns
-        # "how much to offer the transport" (see :attr:`read_offer`), and the
-        # hint is unreliable (asyncio passes -1, uvloop a fixed 64 KiB).  Read
-        # as a published attribute rather than asked for through the reader:
-        # this runs on every arrival on every connection, and the EC2 /conn
-        # A/B put a method call here at the same order as the whole regression
-        # it showed (~0.7 %).
-        return self._rb.get_buffer(sizehint, want=self.read_offer)
+        # "how much to offer the transport" (see ``BufferReader.read_offer``),
+        # and the hint is unreliable (asyncio passes -1, uvloop a fixed
+        # 64 KiB).  Read as a published attribute rather than asked for through
+        # the reader: this runs on every arrival on every connection, and the
+        # EC2 /conn A/B put a *method call* here at the same order as the whole
+        # regression it showed (~0.7 %).  One attribute hop to reach the owner
+        # is not that call — measured at 1.66 ns — and it is what keeps the
+        # field on the object that decides it.
+        return self._rb.get_buffer(sizehint, want=self.reader.read_offer)
 
     def buffer_updated(self, nbytes: int) -> None:
         if nbytes == 0:
@@ -483,28 +562,14 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
             return
         try:
             # FIN tells the peer we are done writing, so it stops waiting for
-            # more response and closes its end.
+            # more response and closes its end.  That, and the close below, are
+            # this object's whole share of a lingering close: throwing the
+            # peer's remaining bytes away is *reading* them, which is the
+            # reader's, bounds and all.
             if self.transport.can_write_eof():
                 self.transport.write_eof()
             loop = asyncio.get_running_loop()
-            deadline = loop.time() + timeout
-            discarded = self._rb.available
-            self._rb.consume(discarded)
-            while not self._eof and discarded < max_bytes:
-                remaining = deadline - loop.time()
-                if remaining <= 0:
-                    break
-                try:
-                    # Through the reader: discarding is still reading, so the
-                    # wait has to release any pause the discarded bytes armed.
-                    await asyncio.wait_for(self.reader.wait_for_data(), remaining)
-                except TimeoutError:
-                    break
-                except Exception:
-                    break
-                n = self._rb.available
-                self._rb.consume(n)
-                discarded += n
+            await self.reader.discard(max_bytes, loop.time() + timeout)
         except Exception:
             # Teardown is best-effort: the response is already on the wire and
             # the close below is what actually matters.

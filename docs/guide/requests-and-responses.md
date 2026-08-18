@@ -105,6 +105,29 @@ returns one chunk with `more_body=True` until the final chunk
 arrives with `more_body=False`.  `read_body` is a convenience
 wrapper that buffers all chunks before returning.
 
+### The body has a ceiling, and it is not the handler's job
+
+Two limits apply before your handler sees a byte, on HTTP/1.1 and
+HTTP/2 alike:
+
+* **`BB_MAX_BODY_SIZE`** (30 MiB) — the total the request may deliver.
+  A declared `Content-Length` over the cap is answered **413 Content
+  Too Large** without reading the body at all, so the handler is never
+  entered; an undeclared or chunked body over it is refused mid-stream.
+* **`BB_MIN_BODY_RATE`** (240 B/s, after a 5 s grace) — the slowest a
+  peer may deliver.  Below it the request is abandoned, the same way
+  `BB_BODY_TIMEOUT` abandons a silent one.
+
+An upload endpoint that legitimately accepts more raises the cap
+(`BB_MAX_BODY_SIZE=104857600`); `0` disables it and hands the 413
+decision back to the application.  Both are documented in full under
+[environment variables](../reference/env-vars.md).
+
+A handler *can* still see a 413: when a chunked HTTP/1.1 body crosses
+the cap mid-stream, `receive()` raises `HTTPException(413)`, which the
+dispatcher answers like any other status-carrying error — so an
+`@app.on_error(413)` handler is honoured.
+
 ### Noticing that the client left
 
 `conn.disconnected` is `True` once the client dropped mid-request.  It is
