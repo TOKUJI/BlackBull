@@ -55,7 +55,11 @@ product is bounded out of the box — but only as tightly as that
 descriptor budget, which on a default Linux host is large.  Set it
 explicitly to the concurrency the deployment actually expects, and
 rely on `BB_H2_WS_MAX_STREAMS_PER_CONNECTION` (default `5`) for the
-per-connection half.  The
+per-connection half.  Holding a stream idle is also bounded in *time*
+now: an Extended CONNECT stream is a WebSocket, so it gets the same
+liveness probe as any other (`BB_WS_IDLE_TIMEOUT` →
+`BB_WS_PONG_TIMEOUT` → close 1001), and a peer that never answers is
+closed rather than held.  The
 recommended production shape — nginx terminating TLS/HTTP/2
 with BlackBull on HTTP/1.1 behind it — eliminates this surface
 entirely because nginx does not forward RFC 8441 Extended

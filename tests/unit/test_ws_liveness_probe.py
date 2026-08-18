@@ -372,3 +372,50 @@ class TestTheScannerDrivesIt:
         finally:
             task.cancel()
             r.disarm_watchdog()
+
+
+# ===========================================================================
+# Both transports, one construction point
+# ===========================================================================
+
+class TestBothTransportsGetIt:
+    """RFC 8441 WebSocket-over-HTTP/2 must not be the unbounded one.
+
+    The RFC 8441 surface is the one `KNOWN_LIMITATIONS.md` names as
+    reachable — an attacker opening Extended CONNECT streams and holding
+    them idle — so "the probe covers WebSocket" is only true if it covers
+    that path too.  It does, structurally: both protocol actors build a
+    ``WebSocketActor``, which is the single caller of the factory that
+    reads the setting.  This test is what keeps that structural claim
+    from quietly becoming false.
+    """
+
+    def test_websocket_actor_is_the_only_thing_that_builds_the_recipient(self):
+        import pathlib
+        import re
+
+        root = pathlib.Path(__file__).resolve().parents[2] / 'blackbull'
+        callers = {
+            path.relative_to(root).as_posix()
+            for path in root.rglob('*.py')
+            if re.search(r'RecipientFactory\.websocket\(', path.read_text())
+        }
+        assert callers == {'server/websocket_actor.py'}, (
+            f'the server factory has more callers than the WebSocket actor: '
+            f'{sorted(callers)} — each one is a place the probe can be '
+            f'forgotten')
+
+    def test_both_protocol_actors_build_that_actor(self):
+        import pathlib
+        import re
+
+        root = pathlib.Path(__file__).resolve().parents[2] / 'blackbull'
+        builders = {
+            path.relative_to(root).as_posix()
+            for path in root.rglob('*.py')
+            if re.search(r'^\s*ws_actor = WebSocketActor\(', path.read_text(),
+                         re.M)
+        }
+        assert builders == {'server/http1_actor.py', 'server/http2_actor.py'}, (
+            f'expected both protocol actors to route WebSocket through the '
+            f'same actor; found {sorted(builders)}')
