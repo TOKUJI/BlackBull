@@ -629,11 +629,13 @@ class Priority(FrameBase):
         self.dependent_stream = _t & 0x7fffffff
         # RFC 7540 §6.3: wire value is weight − 1; add 1 to get true weight (1–256).
         self.weight = int.from_bytes(payload.read(1), 'big', signed=False) + 1
-        # Lazy %-args defer formatting until emit; PRIORITY frames are rare, so
-        # the plain call (no isEnabledFor guard) is enough.  The bare
-        # `logger.info(_t)` debug-leftover above was removed.
-        logger.info('exclusion: %s, dependent_stream: %s, weight: %s',
-                    self.exclusion, self.dependent_stream, self.weight)
+        # DEBUG behind the module gate, not INFO.  The justification for the
+        # unguarded INFO call was that PRIORITY frames are rare — which is a
+        # statement about well-behaved peers.  §6.3 lets any peer send them at
+        # line rate, and a log record per frame is its own amplification.
+        if _DEBUG:
+            logger.debug('Priority exclusion=%s dependent_stream=%s weight=%s',
+                         self.exclusion, self.dependent_stream, self.weight)
 
     def save(self):
         base = super().save()

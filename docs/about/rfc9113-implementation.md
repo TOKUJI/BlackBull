@@ -191,13 +191,22 @@ can't stop one stream from starving the rest.
 **§5.3 Prioritization** ✅ (as deprecation)
 RFC 9113 **§5.3.2** deprecated the priority *tree* (dependencies and weights)
 that **RFC 7540** had originally defined.
-BlackBull does not build the tree; it accepts PRIORITY frames and translates
-them, plus RFC 9218 `PRIORITY_UPDATE`, into a simple
-`{'urgency', 'incremental'}` hint (built by `_resolve_priority() in
-http2_actor.py` / `_build_h2_extensions() in http2_actor.py`) exposed at
-`conn.extensions['http.response.priority']`.  *Because* the tree was
-unimplementable interoperably — RFC 9113 itself removed it, and modern clients
-send RFC 9218 urgency signals instead.  (Background: §5.3.1.)
+BlackBull does not build the tree; it validates PRIORITY frames and discards
+the dependency signal, and takes its scheduling hint from RFC 9218
+`PRIORITY_UPDATE` instead — a simple `{'urgency', 'incremental'}` value (built
+by `_resolve_priority() in http2_actor.py` / `_build_h2_extensions() in
+http2_actor.py`) exposed at `conn.extensions['http.response.priority']`.
+*Because* the tree was unimplementable interoperably — RFC 9113 itself removed
+it, and modern clients send RFC 9218 urgency signals instead.
+(Background: §5.3.1.)
+
+"Does not build the tree" is now literally true of the state as well as the
+scheduling.  `PriorityResponder` used to record `weight` and re-parent
+children, and `_frame_loop` used to create a `Stream` node for PRIORITY on an
+idle stream.  Nothing read either field, and §6.3 permits PRIORITY in any
+stream state — so those writes were a way for a peer to add one tree node per
+14-byte frame, for the life of the connection, on a frame type no rate meter
+covers.  §5.3.1's self-dependency check is what survives.
 
 **§5.4 Error Handling** ✅ — *this is where the actor model earns its place.*
 A **connection error** (§5.4.1) goes through `HTTP2Actor._connection_error()`:
@@ -266,10 +275,18 @@ A `Priority` frame is dispatched to `PriorityResponder`, but its payload-length
 guard (it **MUST** be exactly 5 bytes → stream FRAME_SIZE_ERROR) is enforced in
 `HTTP2Actor._frame_loop()`, and the urgency signal is mapped by
 `_resolve_priority() in http2_actor.py`.  PRIORITY on a not-yet-seen stream
-creates an idle `Stream` node.  The signal is mapped to RFC 9218 urgency (see
-§5.3).  *Because* the frame is still valid wire
-syntax even though the tree semantics are deprecated — reject the malformed,
-accept-and-translate the well-formed.
+creates **no** stream state: the frame is validated (§5.3.1 self-dependency →
+stream PROTOCOL_ERROR) and the deprecated dependency signal is dropped.
+*Because* the frame is still valid wire syntax even though the tree semantics
+are deprecated — reject the malformed, accept and ignore the well-formed, and
+hold nothing a peer can grow.
+
+RFC 9218 `PRIORITY_UPDATE` is the one path that still pre-creates a node, so
+a hint arriving before HEADERS survives to meet it; §7 permits bounding how
+many are buffered, and `SETTINGS_MAX_CONCURRENT_STREAMS` is the bound — a hint
+for more streams than the peer may open at once is a hint it can never redeem.
+Over the bound the frame is dropped and `h2_priority_update_buffer` is logged
+to `blackbull.caps`.
 
 **§6.4 RST_STREAM — `RstStream(FrameBase)`** ✅
 The basic "any → CLOSED" transition is applied by `RstStreamResponder`; ahead of
@@ -552,6 +569,8 @@ already enforced at parse time; pushed-response cacheability follows from the
 | Stream exhaustion | §5.1.2 | RST REFUSED_STREAM before scope is built | `HTTP2Actor._on_headers_frame()` |
 | WebSocket stream exhaustion | RFC 8441 | `HTTP2Actor._ws_stream_count` cap (`BB_H2_WS_MAX_STREAMS`) | `HTTP2Actor._handle_h2_websocket()` |
 | Concurrent-handler flood (1 worker) | operational | `BB_H2_ACTIVE_STREAMS_1W` semaphore via `_run_guarded() in http2_actor.py` | `HTTP2Actor._spawn_stream_task()` |
+| PRIORITY flood on idle streams | §6.3, §5.3 | No state is created or recorded: the deprecated dependency signal is validated and dropped, so 14 wire bytes buy nothing that outlives the frame.  Previously one `Stream` node per frame, never removed, on a frame type no meter covers | `HTTP2Actor._frame_loop()`, `PriorityResponder` |
+| PRIORITY_UPDATE hint-buffer growth | RFC 9218 §7 | Pre-created hint nodes bounded by `SETTINGS_MAX_CONCURRENT_STREAMS`; over it the frame is dropped and `h2_priority_update_buffer` logged | `PriorityUpdateResponder` |
 
 *Because* DoS hardening is the part of the spec a from-scratch server most easily
 skips, and the part attackers most reliably probe.  Making it a single auditable

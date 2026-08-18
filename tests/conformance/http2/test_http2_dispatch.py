@@ -897,18 +897,22 @@ class TestHTTP2Priority:
             f'PRIORITY frame must not trigger GOAWAY; got {goaway_calls}'
         )
 
-    async def test_stream_weight_stored_after_priority_frame(self):
+    async def test_priority_records_no_stream_state(self):
+        """§5.3 is deprecated and unimplemented here, so nothing is stored.
+
+        This asserted ``stream.weight == 32`` while nothing in the server
+        ever read ``weight``.  §6.3 permits PRIORITY on an idle stream, so
+        recording it gave a peer one tree node per 14-byte frame, unbounded
+        and unmetered.  Scheduling reads the RFC 9218 hint instead.
+        """
         priority = self._priority_frame(stream_id=3, weight=32)
 
         handler, _ = _make_h2_actor()
         handler.receive = AsyncMock(side_effect=[priority, None])
         await handler.run()
 
-        stream = handler.root_stream.find_child(3)
-        assert stream is not None, 'Stream 3 must exist after PRIORITY frame'
-        assert stream.weight == 32, (
-            f'Expected weight=32 after PRIORITY; got {stream.weight}'
-        )
+        assert handler.root_stream.find_child(3) is None, (
+            'PRIORITY on an idle stream created a node the server never reads')
 
 
 # ---------------------------------------------------------------------------

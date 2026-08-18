@@ -393,6 +393,26 @@ no red-team exercise, no volumetric-DoS protection.
 
 ### Fixed
 
+- **A PRIORITY flood no longer grows HTTP/2 server state.**  RFC 9113 §6.3
+  permits PRIORITY for a stream in any state, including idle, so a peer could
+  send it for arbitrary stream identifiers; each one created a priority-tree
+  node, and `Stream.remove_child` had no caller anywhere in the tree.  Measured
+  before the fix: 10,000 PRIORITY frames left 10,000 nodes, no GOAWAY, the
+  connection still open — 14 bytes on the wire for ~232 bytes held, and PRIORITY
+  is not one of the frame types the rate meters cover.  §5.3 deprecated that
+  prioritisation scheme and BlackBull does not implement it (`Stream.weight` and
+  `.parent` were written by the responder and read by nothing), so the fix is to
+  stop recording it rather than to cap it: the frame is validated and the signal
+  dropped.  The exclusive-dependency branch went with it, which had walked every
+  child of root to rewrite that same unread field — quadratic on top of
+  unbounded.  §5.3.1's self-dependency check is unchanged and h2spec is
+  unchanged at 146 tests, 145 passed, 1 skipped, 0 failed.  RFC 9218
+  `PRIORITY_UPDATE` still pre-creates a node so a hint arriving before HEADERS
+  survives to meet it, now bounded by `SETTINGS_MAX_CONCURRENT_STREAMS` as §7
+  permits, with `h2_priority_update_buffer` logged over the bound.  `Priority`
+  frame construction also logged one `INFO` record per frame on the grounds that
+  "PRIORITY frames are rare" — true only of well-behaved peers; it is now DEBUG
+  behind the module gate.
 - **MQTT Session Expiry Interval is now enforced.**  `_expiry` was recorded on
   CONNECT and read in exactly one place — a `<= 0` test at detach — so every
   session that declared a non-zero interval was retained for the life of the

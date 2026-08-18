@@ -55,6 +55,7 @@ pieces. Each row below names the knob for each column.
 | HTTP/2 connection | — | stream and window budgets | `BB_H2_IDLE_TIMEOUT` 300 s + `BB_H2_PING_TIMEOUT` 30 s |
 | HTTP/2 response write | `SETTINGS_MAX_FRAME_SIZE` | — | `BB_WRITE_TIMEOUT` 30 s |
 | Control frames (HTTP/2 + WebSocket) | — | `BB_FRAME_RATE_LIMIT` 20 per type | `BB_FRAME_RATE_WINDOW` 1 s |
+| HTTP/2 priority signals | 5-byte PRIORITY payload | no state recorded (PRIORITY); `SETTINGS_MAX_CONCURRENT_STREAMS` (PRIORITY_UPDATE hints) | — |
 | WebSocket frame | `BB_WS_MAX_FRAME_PAYLOAD` 64 MiB | — | — |
 | WebSocket message | per frame | `BB_WS_MAX_MESSAGE_SIZE` 16 MiB | — *(see qualification 3)* |
 | MQTT packet | `BB_MQTT_MAX_PACKET_SIZE` 1 MiB | same, before buffering | keep-alive × 1.5 |

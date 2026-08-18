@@ -13,7 +13,8 @@ from blackbull.connection import Connection
 from blackbull.headers import Headers
 from blackbull.protocol.frame import FrameFactory
 from blackbull.protocol.frame_types import (
-    FrameTypes, SettingFrameFlags, DataFrameFlags, DEFAULT_MAX_FRAME_SIZE,
+    ErrorCodes, FrameTypes, SettingFrameFlags, DataFrameFlags,
+    DEFAULT_MAX_FRAME_SIZE,
 )
 
 
@@ -378,44 +379,46 @@ async def test_window_update_stream_level_only_credits_stream_window():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_priority_responder_updates_existing_stream():
+async def test_priority_responder_records_nothing():
+    """§5.3 deprecated the dependency scheme; this server does not implement it.
+
+    These two tests used to assert ``weight`` was stored and a node created.
+    Both were internal state no code read, and §6.3 permits PRIORITY on an
+    idle stream — so the responder was a way for a peer to grow the tree one
+    node per frame.  What it owes now is silence.
+    """
     frame = MagicMock()
     frame.stream_id = 3
     frame.dependent_stream = 0
     frame.weight = 42
     frame.exclusion = False
 
-    existing = MagicMock()
     handler = MagicMock()
-    handler.root_stream.find_child.return_value = existing
+    handler.send_frame = AsyncMock()
 
-    responder = PriorityResponder(frame)
-    await responder.respond(handler)
+    await PriorityResponder(frame).respond(handler)
 
-    assert existing.weight == 42
+    handler.root_stream.add_child.assert_not_called()
+    handler.send_frame.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_priority_responder_creates_new_stream():
+async def test_priority_responder_still_rejects_self_dependency():
+    """RFC 9113 §5.3.1 — the one thing the responder must keep doing."""
     frame = MagicMock()
     frame.stream_id = 5
-    frame.dependent_stream = 1
+    frame.dependent_stream = 5
     frame.weight = 10
     frame.exclusion = False
 
-    new_stream = MagicMock()
     handler = MagicMock()
-    # First find_child returns None (stream doesn't exist yet)
-    # Second call (for dependent_stream) returns a parent stub
-    parent_stub = MagicMock()
-    parent_stub.add_child.return_value = new_stream
-    handler.root_stream.find_child.side_effect = [None, parent_stub]
+    handler.send_frame = AsyncMock()
 
-    responder = PriorityResponder(frame)
-    await responder.respond(handler)
+    await PriorityResponder(frame).respond(handler)
 
-    parent_stub.add_child.assert_called_once_with(5)
-    assert new_stream.weight == 10
+    handler.factory.rst_stream.assert_called_once_with(
+        5, ErrorCodes.PROTOCOL_ERROR)
+    handler.send_frame.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------
@@ -462,6 +465,9 @@ async def test_priority_update_new_stream_precreated():
     handler = MagicMock()
     # First call: None (stream doesn't exist), second call: the new stream
     handler.find_stream.side_effect = [None, new_stream]
+    # The buffer cap (RFC 9218 §7) reads both of these before pre-creating.
+    handler.root_stream.children = {}
+    handler.max_concurrent_streams = 100
 
     responder = PriorityUpdateResponder(frame)
     await responder.respond(handler)

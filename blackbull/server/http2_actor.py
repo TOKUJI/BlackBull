@@ -1178,7 +1178,16 @@ class HTTP2Actor(Actor):
                         self._last_peer_stream_id = frame.stream_id
                         stream = self.root_stream.add_child(frame.stream_id)
                     elif frame_type == FrameTypes.PRIORITY:
-                        stream = self.root_stream.add_child(frame.stream_id)
+                        # §6.3 lets a peer prioritise a stream it has not
+                        # opened, so this frame is legal on an idle stream and
+                        # must not be an error.  It also must not *create*
+                        # anything: §5.3 deprecated the dependency scheme and
+                        # this server does not implement it (``Stream.weight``
+                        # and ``.parent`` are written by the responder and read
+                        # by nothing), so a node here would be state the peer
+                        # can grow and no one can use.  ``stream`` stays None;
+                        # the responder below still validates the frame.
+                        pass
                     else:
                         await self._connection_error(
                             ErrorCodes.PROTOCOL_ERROR,

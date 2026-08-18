@@ -178,10 +178,14 @@ async def test_priority_unknown_dependency_does_not_crash():
     frame.dependent_stream = 99  # also unknown
     frame.exclusion = False
     frame.weight = 16
-    # Must not raise AttributeError (find_child(99) → None); the stream is
-    # parented under the root instead.
+    # The defect this guards is an AttributeError out of ``respond`` that
+    # unwound the frame loop and killed every stream on the connection
+    # without a GOAWAY.  It must still not raise — and, since §5.3 is
+    # deprecated and BlackBull records no dependency state, it must also
+    # not park a node in the tree for an idle stream the peer merely named
+    # (see tests/unit/test_h2_priority_state_bounds.py).
     await PriorityResponder(frame).respond(handler)
-    assert handler.root_stream.find_child(7) is not None
+    assert handler.root_stream.find_child(7) is None
 
 
 # ---------------------------------------------------------------------------
