@@ -89,6 +89,17 @@ Hello, world!
   Python framework with native **HTTP QUERY** (RFC 10008) support — the
   new safe, idempotent, cacheable method that carries a request body,
   with `Accept-Query` content negotiation.
+- **Bounded by default, on every protocol.** Every growable path has a
+  limit on how big one unit may be, how big the total may be, and how
+  long it may take — request bodies by size *and* delivery rate,
+  WebSocket messages after reassembly *and* after inflation, MQTT
+  packets and queues, HTTP/2 idle time and per-type control-frame
+  rates, and a connection cap derived from the process's own
+  descriptor budget.  Rapid Reset (CVE-2023-44487), the 2019 HTTP/2
+  flood family, slow-drip bodies and decompression amplification are
+  answered out of the box, with no configuration.
+  [`docs/about/security-model.md`](https://TOKUJI.github.io/BlackBull/about/security-model/)
+  states what each guarantee is — and the two places it stops.
 - **Typed throughout.** Your editor and `mypy` / `pyright` see
   every parameter; PEP 561 typed distribution.  The `receive`/`send`
   message channel is a discriminated union — all 19 ASGI event shapes
