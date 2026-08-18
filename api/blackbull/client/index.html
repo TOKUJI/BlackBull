@@ -6962,7 +6962,8 @@ to <code>Transfer-Encoding: chunked</code> for <code>AsyncIterable</code> bodies
 <p>Decodes both <code>Content-Length</code>-bound and <code>Transfer-Encoding: chunked</code>
 bodies.  Returns a <code>ClientResponse</code>; <code>stream()</code> returns an async
 iterator of body chunks instead, so large responses don't have to fit
-in memory.</p>
+in memory — true of both framings, which it was not until the
+<code>Content-Length</code> path stopped reading the body in one call.</p>
 
 
 
