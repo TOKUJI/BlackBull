@@ -65,9 +65,12 @@ Do not attempt to work around this rule with any tool.
 - **Every limit names its triad column.**  When you add or change a resource
   limit, state which of the three it occupies — *how big may one unit be*,
   *how big may the total be*, *how long may it take* — and name the owner of
-  the other two.  Every memory gap the attack-surface audit found was a unit
-  cap mistaken for a total cap: the frame was capped and the message was not,
-  the packet was capped and the session state was not.  Also check what state
+  the other two.  Almost every memory gap the attack-surface audit found was a
+  unit cap mistaken for a total cap: the frame was capped and the message was
+  not, the packet was capped and the session state was not.  The one exception
+  names the second question to ask: the HTTP/2 priority tree had no total
+  because nothing ever *read* what it stored, so nobody counted it as storage —
+  **a write with no reader is still a growable path**.  Also check what state
   the protocol *shares*, because that constrains the answer — an HTTP/2 header
   block cannot be abandoned per-stream, since HPACK state is connection-wide.
   → `.claude/planning/research/attack-surface-audit-2026-08.md` [private]

@@ -178,15 +178,21 @@ so the editable install's metadata catches up.
 
 ### Security
 
-An audit of every path a peer can make the server allocate on found nine gaps,
-all closed in this release. They are listed plainly rather than folded into the
-feature notes above: BlackBull has no known production adopters and none of
-these was reported from the field, but a security page that appears quietly
-after silent fixes is worth less than the fixes.
+An audit of the paths a peer can make the server allocate on found nine gaps.
+Re-reading that audit afterwards found two more, in rows it had already written
+down — so eleven are closed here, and the count is the point: **this is a pass
+over the surface, not a finished job.** They are listed plainly rather than
+folded into the feature notes above: BlackBull has no known production adopters
+and none of these was reported from the field, but a security page that appears
+quietly after silent fixes is worth less than the fixes.
 
 The organising defect was one shape repeated — **a cap on one unit standing in
 for a cap on the total**. The frame was bounded and the message was not; the
-packet was bounded and the session state was not.
+packet was bounded and the session state was not. Ten of the eleven are that
+shape. The eleventh is the one worth remembering, because it needed a different
+question: the HTTP/2 priority tree had no total because nothing ever *read*
+what it stored, so it was never counted as storage at all. **A write with no
+reader is still a growable path.**
 
 | What was unbounded | Reachable by | Now |
 |---|---|---|
@@ -199,6 +205,8 @@ packet was bounded and the session state was not.
 | HTTP/2 PING / SETTINGS / zero-length frame floods | one ACK write or one loop turn per frame, at no byte cost (CVE-2019-9512 / -9515 / -9518 shapes) | `BB_FRAME_RATE_LIMIT` per type |
 | WebSocket control-frame flood | one PONG write per PING | same meter |
 | Rapid Reset counter's blind spot | provoking *server-emitted* resets rather than sending them | emitted resets counted in the same window |
+| MQTT session state — subscriptions per session, sessions per broker, and an expiry that was recorded but never enforced | one CONNECT per Client Identifier at `session_expiry_interval = 0xFFFFFFFF`, which §3.1.2.11.2 defines as *never expires*; or one client subscribing to endless filters | `BB_MQTT_MAX_SUBSCRIPTIONS`, `BB_MQTT_MAX_SESSIONS`, and a one-shot expiry sweep |
+| HTTP/2 priority-tree growth | PRIORITY for arbitrary idle stream ids — legal under §6.3, unmetered, and measured at 10,000 frames → 10,000 nodes that nothing removed | the state was never read, so it is no longer recorded at all; PRIORITY_UPDATE hints bounded by `SETTINGS_MAX_CONCURRENT_STREAMS` |
 
 Also in this release: the request-body total cap and minimum delivery rate
 (`BB_MAX_BODY_SIZE`, `BB_MIN_BODY_RATE`), and a finite default connection cap
@@ -207,8 +215,18 @@ Also in this release: the request-body total cap and minimum delivery rate
 **What is still open, stated because the boundary matters as much as the
 fixes**: `BB_REQUEST_TIMEOUT` remains off by default, so a peer delivering at
 exactly the minimum rate up to the body cap legally holds a connection for
-≈36.4 hours; and the derived connection cap bounds descriptor exhaustion, not
-event-loop health. Both are documented in
+≈36.4 hours; the derived connection cap bounds descriptor exhaustion, not
+event-loop health; a WebSocket connection has no liveness probe of its own, so
+a peer that completes the handshake and goes silent holds it until the
+connection or the process ends; TLS handshake cost per connection has not been
+audited at all; and `BB_TCP_USER_TIMEOUT_MS` is `0`, so a peer that vanishes
+behind a NAT is not evicted until TCP keepalives notice.
+
+Two of those eleven gaps were found by re-reading the audit rather than the
+code, which is the strongest thing this release can say about its own method:
+it produced both the coverage and the misses. The security page now states that
+outright, and the list of covered paths should be read as what has been looked
+at, not as what exists. These are documented in
 [the security model](https://github.com/TOKUJI/BlackBull/blob/master/docs/about/security-model.md),
 which also states what this project does **not** claim — no third-party audit,
 no red-team exercise, no volumetric-DoS protection.

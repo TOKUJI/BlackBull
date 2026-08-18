@@ -12,8 +12,10 @@ stated; where it is off, that is stated too, along with what to set.
 
 **Every byte from a peer is untrusted until dispatch.** Request lines, headers,
 bodies, WebSocket frames, HTTP/2 frames and MQTT packets are all parsed by
-BlackBull's own code, and every one of those paths is bounded before it can
-allocate on a peer's behalf.
+BlackBull's own code. Each path listed on this page is bounded before it can
+allocate on a peer's behalf, and each bound has a test named under
+[Evidence](#evidence). What establishes the *list* is a code audit, and
+[Non-claims](#non-claims) says what that method can and cannot prove.
 
 Named non-goals — real limits, not oversights:
 
@@ -29,7 +31,7 @@ Named non-goals — real limits, not oversights:
 
 | Resource | How a peer reaches it | Bounded by |
 |---|---|---|
-| Memory | large or accumulating request bodies, WebSocket messages, MQTT packets and broker state | size and total caps on every growable path |
+| Memory | large or accumulating request bodies, WebSocket messages, MQTT packets and broker state | size and total caps on each path in the table below |
 | Event-loop time | floods of cheap control frames that each oblige a small piece of work | per-type frame-rate meters |
 | Connection slots | opening connections and holding them | `BB_MAX_CONNECTIONS`, plus idle and header deadlines |
 | Task slots | opening HTTP/2 streams | `BB_H2_MAX_CONCURRENT_STREAMS`, per-connection handler semaphore |
@@ -38,13 +40,23 @@ Named non-goals — real limits, not oversights:
 
 ## The invariant
 
-> **Every path a peer can grow has a bound on one unit, on the total, and on
-> how long it may take.**
+> **A path a peer can grow gets a bound on one unit, on the total, and on how
+> long it may take.**
 
-Those three questions are the design rule, and they are not interchangeable. A
-total cap with no time bound lets a peer hold a slot for as long as the cap
-allows; a time bound with no total cap lets it deliver forever in small, timely
-pieces. Each row below names the knob for each column.
+Read that as the **rule this project holds itself to**, not as a proven
+property of the whole surface. Applying it is what the table below records;
+finding every path it should apply to is a separate problem, and a harder one
+(see [Non-claims](#non-claims)).
+
+The three questions are not interchangeable. A total cap with no time bound
+lets a peer hold a slot for as long as the cap allows; a time bound with no
+total cap lets it deliver forever in small, timely pieces. Almost every gap
+this project has found in its own defences was one shape — a cap on one unit
+standing in for a cap on the total. The exception is instructive: the HTTP/2
+priority tree was bounded per unit and had no total because nobody had counted
+it as storage at all, since nothing ever read what it stored. **A write with no
+reader is still a growable path.** Each row below names the knob for each
+column.
 
 | Path | One unit | Total | Time |
 |---|---|---|---|
@@ -97,14 +109,15 @@ one more byte.
 
 Three rungs, and the difference between them is what an operator has to do:
 
-- **`bounded-by-default`** — every growable path is bounded with nothing
-  configured.
+- **`bounded-by-default`** — every path listed above is bounded with nothing
+  configured. It is a statement about this page's rows, not about paths nobody
+  has thought of yet.
 - **`bounded-when-configured`** — the bounds exist but one or more default open.
 - **`bounded-unit-only`** — individual units are bounded; totals are not.
 
 | Protocol | Posture | Notes |
 |---|---|---|
-| HTTP/1.1 | `bounded-by-default` | see the two qualifications below |
+| HTTP/1.1 | `bounded-by-default` | see qualifications 1 and 2 below |
 | HTTP/2 | `bounded-by-default` | includes control-frame rate metering and PING-based liveness |
 | gRPC | `bounded-by-default` | own message bounds, plus everything HTTP/2 provides |
 | WebSocket | `bounded-by-default` | message bounded post-reassembly and post-inflation; see qualification 3 |
@@ -203,12 +216,24 @@ less than one that draws its own boundary:
 - **No third-party security audit.** No external firm has reviewed this code.
 - **No red-team exercise.** The limits above were derived by auditing the code
   for growable paths, not by attacking a running deployment.
+- **The audit method has a measured miss rate, and it is not zero.** The
+  coverage above comes from reading the code for paths a peer can grow. In
+  August 2026 that audit closed nine gaps and declared the register complete —
+  and then, within two days, two more gaps were found by re-reading the *audit
+  document itself* rather than the code. Both were in rows it had already
+  written down: MQTT session state, recorded as bounded when none of its three
+  columns was, and the HTTP/2 priority tree, recorded as "unaudited" and framed
+  as the wrong question. Both are fixed and both are in the table above. The
+  point of stating it here is that the same method produced both the coverage
+  and the misses, so the coverage should be read as *what has been looked at*,
+  not as *what exists*.
 - **Not volumetric-DoS protection.** Bandwidth and SYN floods are answered
   upstream.
 - **A malicious application handler is out of scope.** BlackBull bounds what a
   *peer* can spend, not what your own code can.
 - **"No known gaps" is not "no gaps."** A bound that no one has found missing is
-  not the same as a bound proven complete.
+  not the same as a bound proven complete. This work is continuing, not
+  finished.
 
 Found something? Please open an issue at
 [github.com/TOKUJI/BlackBull](https://github.com/TOKUJI/BlackBull/issues).
