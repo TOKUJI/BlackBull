@@ -13,7 +13,7 @@ from .ws_codec import (
 )
 from .constants import WSCloseCode
 from .rate_window import RateWindow
-from ..asgi import ASGIEvent, ASGIReceiveEvent
+from ..asgi import ASGIEvent
 from ..connection import Connection, disconnected, mark_disconnected
 from ..request import ClientDisconnected
 from ..protocol.frame_types import FrameBase, Data, DEFAULT_INITIAL_WINDOW_SIZE
