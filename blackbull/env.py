@@ -271,6 +271,28 @@ BB_H2_PING_TIMEOUT
     concluding the peer is gone and closing with ``GOAWAY(NO_ERROR)``.
     Only meaningful when ``BB_H2_IDLE_TIMEOUT`` is non-zero.
     Default: ``30.0``.
+BB_WS_IDLE_TIMEOUT
+    Seconds of complete silence on a WebSocket connection before the
+    server probes the peer with a PING (RFC 6455 §5.5.2).  **Same
+    purpose, same triad column and same default as
+    ``BB_H2_IDLE_TIMEOUT``** — an idle WebSocket is *normal*, since a
+    subscription channel pushes nothing until something happens, so
+    reaping on idleness alone would break the legitimate case.  Probing
+    distinguishes *idle* from *gone*: a peer that answers is never
+    closed, and one that does not answer within ``BB_WS_PONG_TIMEOUT``
+    is closed with ``1001 (Going Away)``.  Any inbound frame counts as
+    an answer, not only a PONG — a peer that is talking to us is
+    demonstrably alive.  This is the *time* column for a WebSocket
+    connection; the *unit* is ``BB_WS_MAX_FRAME_PAYLOAD`` and the
+    *total* is ``BB_WS_MAX_MESSAGE_SIZE`` for the message and
+    ``BB_MAX_CONNECTIONS`` for the connection.  ``0`` disables the
+    probe, leaving a silent connection bounded only by
+    ``BB_MAX_CONNECTIONS``.  Default: ``300.0`` (5 minutes).
+BB_WS_PONG_TIMEOUT
+    Seconds to wait for any inbound frame after a liveness PING before
+    concluding the peer is gone and closing with ``1001``.  Only
+    meaningful when ``BB_WS_IDLE_TIMEOUT`` is non-zero.  Default:
+    ``30.0`` — as ``BB_H2_PING_TIMEOUT``, and for the same reason.
 BB_MQTT_MAX_PACKET_SIZE
     Maximum size (bytes) of a single inbound MQTT control packet,
     advertised to clients as the ``Maximum Packet Size`` property in
@@ -840,6 +862,14 @@ class Settings:
     #: with GOAWAY(NO_ERROR).  See BB_H2_PING_TIMEOUT above.
     h2_ping_timeout: float = 30.0
 
+    #: Seconds of silence on a WebSocket connection before probing the peer
+    #: with a PING.  See BB_WS_IDLE_TIMEOUT above.
+    ws_idle_timeout: float = 300.0
+
+    #: Seconds to wait for any inbound frame after a WebSocket liveness PING
+    #: before closing with 1001.  See BB_WS_PONG_TIMEOUT above.
+    ws_pong_timeout: float = 30.0
+
     #: Maximum size (bytes) of one inbound MQTT control packet, checked on
     #: the declared Remaining Length before the payload is buffered and
     #: advertised in CONNACK.  See BB_MQTT_MAX_PACKET_SIZE above.
@@ -1003,6 +1033,8 @@ def get_settings() -> Settings:
         frame_rate_window=_float_env_nonneg('BB_FRAME_RATE_WINDOW', 1.0),
         h2_idle_timeout=_float_env_nonneg('BB_H2_IDLE_TIMEOUT', 300.0),
         h2_ping_timeout=_float_env_nonneg('BB_H2_PING_TIMEOUT', 30.0),
+        ws_idle_timeout=_float_env_nonneg('BB_WS_IDLE_TIMEOUT', 300.0),
+        ws_pong_timeout=_float_env_nonneg('BB_WS_PONG_TIMEOUT', 30.0),
         mqtt_max_packet_size=_int_env_nonneg(
             'BB_MQTT_MAX_PACKET_SIZE', 1024 * 1024),
         mqtt_receive_maximum=_int_env_nonneg('BB_MQTT_RECEIVE_MAXIMUM', 64),

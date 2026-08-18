@@ -49,6 +49,34 @@ The runtime version is exposed as `blackbull.__version__` via
 `pyproject.toml`.  Re-run `pip install -e .` after a local version bump
 so the editable install's metadata catches up.
 
+## [Unreleased]
+
+### Added
+
+- **`BB_WS_IDLE_TIMEOUT`** (default `300.0`) and **`BB_WS_PONG_TIMEOUT`**
+  (default `30.0`) — a WebSocket connection now has a bound on how long a
+  silent peer may hold it.  HTTP/1.1 closes an idle keep-alive connection and
+  HTTP/2 probes a silent peer with a PING; WebSocket did neither, so a peer
+  that completed the handshake and then said nothing held its connection, its
+  actor task and its buffers for the life of the process.  After the idle
+  bound the server sends a PING (RFC 6455 §5.5.2); if nothing arrives within
+  the pong bound it closes with **1001 (Going Away)** — nothing was violated,
+  so the code says so.  **Any inbound frame counts as the answer**, not only a
+  PONG: a peer that is talking to us is demonstrably alive, and requiring the
+  specific reply would close a connection that is merely busy.  Both defaults
+  match `BB_H2_IDLE_TIMEOUT` / `BB_H2_PING_TIMEOUT` because the question is
+  the same one — an idle connection is legitimate on both protocols, so
+  neither can reap on idleness alone.  `0` disables the probe.
+
+  **Server-side only.**  The bundled clients under `blackbull.client` share
+  the same read implementation but do not probe: the bound exists to stop an
+  untrusted peer holding a *server* connection, which is not a question a
+  client has about a server it chose to connect to.
+
+  The receive path pays one integer increment for this, not a clock read —
+  the arrival counter is turned into a time once per idle connection per
+  scanner tick, in the callback that was already running.
+
 ## [0.77.0] — 2026-08-18
 
 ### Added

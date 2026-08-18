@@ -486,6 +486,37 @@ Choose read-ahead when a handler does slow work between reads and you
 need keepalive `ping`s answered during it.  A handler that loops
 tightly on `receive()` — the common shape — wants the default.
 
+### The server asks whether a silent peer is still there
+
+A WebSocket that says nothing is not the same as one that is gone, and
+nothing at the transport layer tells the two apart — a peer whose network
+vanished leaves a socket that looks exactly like a quiet subscription
+channel.  So the server asks: after `BB_WS_IDLE_TIMEOUT` (default 300 s) of
+complete silence it sends a `ping` (RFC 6455 §5.5.2), and if nothing arrives
+within `BB_WS_PONG_TIMEOUT` (default 30 s) it closes with **1001 (Going
+Away)**.
+
+Three things worth knowing:
+
+- **Any inbound frame counts as the answer**, not only a `pong`.  A peer that
+  is talking to you is demonstrably alive, and requiring the specific reply
+  would close a connection that is merely busy.
+- **Your handler never sees it.**  The probe and its answer are control
+  frames, handled the same way `ping`/`close` already are — the application
+  receives complete messages, nothing else.
+- **It is the server's, not the client's.**  The bundled clients under
+  `blackbull.client` share the same read code but do not probe: the bound
+  exists to stop an untrusted peer holding a server connection, which is not
+  a question a client has about a server it chose.
+
+`BB_WS_IDLE_TIMEOUT=0` disables it, which leaves a silent connection bounded
+only by `BB_MAX_CONNECTIONS`.  Deployments behind a proxy often never reach
+the default — ALB, Cloudflare and nginx `proxy_read_timeout` all reap idle
+WebSocket connections well inside five minutes — so this matters most when
+BlackBull terminates the connection itself.  Both numbers match HTTP/2's
+`BB_H2_IDLE_TIMEOUT` / `BB_H2_PING_TIMEOUT` because the question is the
+same one.
+
 !!! note "`websocket_message` and the deferred reader"
 
     The [`websocket_message`](events.md) event fires when the *server*
