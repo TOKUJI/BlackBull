@@ -50,10 +50,14 @@ LOCAL_KEY="$AWS_DIR/${KEY_NAME}.pem"   # private SSH key — chmod 600 by up.sh
 
 # --- Remote access --------------------------------------------------------
 SSH_USER="ubuntu"
+# Overridable so a run can keep its host keys somewhere other than the shared
+# default — two instances provisioned in sequence reuse an IP often enough that
+# a per-run file is sometimes what makes StrictHostKeyChecking usable.
+: "${KNOWN_HOSTS_FILE:=$AWS_DIR/.known_hosts}"
 SSH_OPTS=(
     -i "$LOCAL_KEY"
     -o StrictHostKeyChecking=accept-new
-    -o UserKnownHostsFile="$AWS_DIR/.known_hosts"
+    -o UserKnownHostsFile="$KNOWN_HOSTS_FILE"
     -o ConnectTimeout=10
     -o ServerAliveInterval=30
 )
