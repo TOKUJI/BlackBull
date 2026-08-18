@@ -199,6 +199,30 @@ no red-team exercise, no volumetric-DoS protection.
 
 ### Changed
 
+- **`blackbull.__all__` now states the public surface, and two names that
+  leaked into it are gone.**  The package ships `py.typed`, and for an
+  inline-typed package the typing spec treats `from .x import Y` in
+  `__init__.py` as a *private* import unless it is re-exported — so the 37
+  names this package intends you to import were not formally part of its typed
+  contract.  They are now.
+
+  Two of the names previously reachable were accidents of implementation, and
+  have been bound privately:
+
+  - `blackbull.logging` resolved to the **standard library** `logging` module —
+    an artifact of `import logging` at the top of `__init__.py`, and confusing
+    next to the real `blackbull.logger`.
+  - `blackbull.PackageNotFoundError` was `importlib.metadata`'s exception,
+    imported only to detect a source checkout.
+
+  Neither was documented and neither is used anywhere in the tree, so this
+  should be invisible; if you were importing either from `blackbull`, take them
+  from `logging` and `importlib.metadata` directly.  Submodules
+  (`blackbull.server`, `blackbull.middleware`, …) are deliberately *not* in
+  `__all__` and are unaffected — import them by path as before.  `Request`, the
+  deprecated `Connection` alias, is also excluded so `import *` no longer risks
+  a `DeprecationWarning` for code that never asked for it.
+
 - **Internal `DEBUG` logging is now decided at import, not per call.**  A
   `logger.debug(...)` that emits nothing is not free — the call happens, its
   arguments are built, and the level is checked — and the framework was making

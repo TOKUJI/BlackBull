@@ -3,7 +3,8 @@
 **Early Alpha** — API may break between MINOR versions; see
 ``KNOWN_LIMITATIONS.md`` before building production-shape work on top.
 
-Public API exports:
+Public API exports — ``__all__`` at the foot of this module is the complete
+and authoritative list; the notes below cover the ones worth a sentence:
 
 - `BlackBull`: the main application object; wraps routing, middleware, and lifespan hooks.
 - `AppConfig`: declarative, immutable holder for the startup settings ``run()`` accepts (port, TLS, workers, …).
@@ -33,19 +34,27 @@ when you want to embed BlackBull's own server; otherwise pass the
 ``BlackBull`` instance to any external ASGI server (uvicorn, hypercorn,
 granian, …) since ``BlackBull.__call__`` is ASGI 3.0 compliant.
 """
-import logging
-logging.getLogger('blackbull').addHandler(logging.NullHandler())
+# Bound privately, all of it.  A bare ``import logging`` here publishes
+# ``blackbull.logging`` — resolving to the *standard library* module, next
+# door to the real ``blackbull.logger`` — because anything imported into a
+# package's ``__init__`` becomes an attribute of it.  Same for the exception
+# below, which was reachable as ``blackbull.PackageNotFoundError``.  The
+# underscore is what actually removes the name; ``__all__`` only governs
+# ``import *``.  Guarded by tests/architecture/test_public_api_surface.py.
+import logging as _logging
+_logging.getLogger('blackbull').addHandler(_logging.NullHandler())
 
 # Single source of truth for the version is pyproject.toml; expose it at
 # runtime via importlib.metadata so the two never drift.  Falls back to a
 # sentinel only when blackbull is being imported from a source checkout
 # without `pip install -e .` (the test runners and `bench/app.py` both
 # install editably, so this path is exercised only in unusual setups).
-from importlib.metadata import PackageNotFoundError, version as _pkg_version
+from importlib.metadata import (PackageNotFoundError as _PackageNotFoundError,
+                                version as _pkg_version)
 
 try:
     __version__ = _pkg_version('blackbull')
-except PackageNotFoundError:
+except _PackageNotFoundError:
     __version__ = '0.0.0+unknown'
 
 from .app import BlackBull, serve
@@ -70,6 +79,38 @@ from .asgi import (
 from .middleware.cors import CORS
 from .middleware.utils import as_middleware
 from .middleware.proxy import TrustedProxy
+
+#: The public surface, and — because this package ships ``py.typed`` — the
+#: thing that makes these names re-exports rather than private imports for a
+#: strict type checker.  Submodules are deliberately absent: ``blackbull.server``
+#: and friends are imported by path, not pulled in by ``import *``, and the
+#: server stack in particular must stay unloaded until asked for.  ``Request``
+#: is absent because it is a deprecated alias resolved through ``__getattr__``;
+#: listing it would make ``import *`` warn at code that never asked for it.
+__all__ = [
+    # application + entry points
+    'BlackBull', 'serve', 'AppConfig',
+    # routing
+    'RouteInfo', 'HTTPException', 'UnprocessableQuery', 'QUERY',
+    # request side
+    'Connection', 'Headers', 'read_body', 'read_json', 'read_text',
+    'parse_cookies', 'cookies_from_headers', 'ClientDisconnected',
+    # response side
+    'Response', 'JSONResponse', 'RedirectResponse', 'StreamingResponse',
+    'EventSourceResponse', 'WebSocketResponse', 'cookie_header',
+    # websocket
+    'WebSocket', 'WebSocketDisconnect',
+    # dependency injection
+    'Depends',
+    # events
+    'Event', 'EventHandler',
+    # ASGI interop
+    'ResponseStart', 'ResponseBody', 'parse_response_event',
+    'ASGIReceiveEvent', 'ASGISendEvent',
+    'ASGIReceiveCallable', 'ASGISendCallable',
+    # bundled middleware
+    'CORS', 'as_middleware', 'TrustedProxy',
+]
 
 
 def __getattr__(name):
