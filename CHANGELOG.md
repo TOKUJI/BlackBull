@@ -49,6 +49,48 @@ The runtime version is exposed as `blackbull.__version__` via
 `pyproject.toml`.  Re-run `pip install -e .` after a local version bump
 so the editable install's metadata catches up.
 
+## [Unreleased]
+
+### Fixed
+
+Seven defects in the bundled clients (`blackbull.client`), each verified
+present before the fix.  The attack-surface map covers BlackBull as the
+*listening* party; these are the connecting direction, where the peer is the
+server and a misbehaving one turns into a client-side failure worse than the
+disconnect itself.
+
+- **HTTP/2 GOAWAY failed streams the server said it had processed.**
+  `last_stream_id` was read from the frame's own stream identifier, which
+  RFC 9113 §6.8 fixes at 0; the field is the first four payload bytes.  Every
+  pending stream therefore compared as unprocessed, so a *graceful* shutdown
+  failed responses the peer had just promised to complete — the opposite of
+  what GOAWAY communicates.
+- **DATA for an unknown HTTP/2 stream leaked the connection window.**  The
+  frame was dropped without returning flow-control credit.  The connection
+  window is shared by every stream (§6.9), so each such frame shrank it
+  permanently, and at zero every response body stalls in the peer's writer.
+  A stream that closes while its DATA is in flight is ordinary, not hostile.
+- **`HTTP2Client.request()` hung forever after the peer disconnected.**  Only
+  a GOAWAY marked the connection dead, so a peer that simply vanished left the
+  next request awaiting a future with no remaining resolver.  `HTTP1Client`
+  raises `ConnectionError` here; the two clients no longer disagree.
+- **A failed send leaked its pending future.**  The entry stayed in the
+  response map until GOAWAY or `__aexit__`, growing once per failure.
+- **A half-delivered HTTP/2 frame parked the connection.**  Waiting for a
+  frame to *begin* is still unbounded — server streaming and long-polling both
+  require it — but once nine header bytes declare a payload length, the
+  remainder is bounded (30 s) and a peer that stops mid-frame is treated as
+  gone.  The client-side twin of the server's `BB_HEADER_TIMEOUT`.
+- **An HTTP/1.1 response could declare two different lengths.**  Only the
+  first `Content-Length` was read.  Repeated and comma-combined values are now
+  collapsed and a conflict refused, matching the rule the server already
+  applies to requests — believing the wrong one makes the surplus octets the
+  next keep-alive response's status line.
+- **`stream()` did not stream a `Content-Length` body.**  One `readexactly`
+  returned the whole body as a single chunk, so the memory bound streaming
+  exists to provide was absent on exactly the path that asked for it.  It now
+  yields in slices, as the chunked path always did.
+
 ## [0.77.1] — 2026-08-18
 
 ### Added

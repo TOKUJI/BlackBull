@@ -390,7 +390,8 @@ class TestBothTransportsGetIt:
     from quietly becoming false.
     """
 
-    def test_websocket_actor_is_the_only_thing_that_builds_the_recipient(self):
+    @pytest.mark.asyncio(loop_scope='function')
+    async def test_websocket_actor_is_the_only_thing_that_builds_the_recipient(self):
         import pathlib
         import re
 
@@ -405,7 +406,7 @@ class TestBothTransportsGetIt:
             f'{sorted(callers)} — each one is a place the probe can be '
             f'forgotten')
 
-    def test_both_protocol_actors_build_that_actor(self):
+    async def test_both_protocol_actors_build_that_actor(self):
         import pathlib
         import re
 
