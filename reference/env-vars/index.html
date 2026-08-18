@@ -5671,6 +5671,16 @@ or drop to <code>INFO</code> to surface the rate-limit summary records.</p>
 <td>Maximum size of a message <strong>as your handler receives it</strong> — after fragment reassembly and after decompression.  This is the bound the frame cap cannot express: permessage-deflate ratios reach 1028.8:1 in this tree, so a frame far under the frame cap can still inflate to gigabytes, and fragmentation accumulates frames that are each individually legal.  Exceeding it closes with 1009 and logs a <code>ws_max_message_size</code> cap hit.  <code>0</code> disables.  The default is the largest message the Autobahn suite sends, so conformance passes unconfigured; <strong>lower it if your application does not serve huge messages</strong> — at the ratio above, 16 MiB of server memory costs a peer roughly 16 KiB of bandwidth.</td>
 </tr>
 <tr>
+<td><code>BB_WS_IDLE_TIMEOUT</code></td>
+<td><code>300.0</code></td>
+<td>Seconds of complete silence on a WebSocket connection before the server probes the peer with a PING (RFC 6455 §5.5.2).  <strong>Same purpose and same default as <code>BB_H2_IDLE_TIMEOUT</code></strong> — an idle WebSocket is <em>normal</em>, since a subscription channel pushes nothing until something happens, so reaping on idleness alone would break the legitimate case.  Probing distinguishes <em>idle</em> from <em>gone</em>: a peer that answers is never closed, one that does not answer within <code>BB_WS_PONG_TIMEOUT</code> is closed with <strong>1001 (Going Away)</strong>.  <strong>Any inbound frame counts as an answer</strong>, not only a PONG — a peer that is talking to us is demonstrably alive.  This is the <em>time</em> bound on a WebSocket connection; the <em>unit</em> is <code>BB_WS_MAX_FRAME_PAYLOAD</code> and the <em>total</em> is <code>BB_WS_MAX_MESSAGE_SIZE</code> for a message and <code>BB_MAX_CONNECTIONS</code> for the connection.  Server-side only — the bundled clients do not probe.  <code>0</code> disables.</td>
+</tr>
+<tr>
+<td><code>BB_WS_PONG_TIMEOUT</code></td>
+<td><code>30.0</code></td>
+<td>Seconds to wait for any inbound frame after a WebSocket liveness PING before concluding the peer is gone and closing with 1001.  Only meaningful when <code>BB_WS_IDLE_TIMEOUT</code> is non-zero.  As <code>BB_H2_PING_TIMEOUT</code>, and for the same reason.</td>
+</tr>
+<tr>
 <td><code>BB_H2_ENABLE_WEBSOCKET</code></td>
 <td><code>0</code></td>
 <td>Advertise <code>SETTINGS_ENABLE_CONNECT_PROTOCOL=1</code> (RFC 8441 §3) so peers may bootstrap WebSocket over HTTP/2 via Extended CONNECT.  Off by default — this path has fewer conformance tests than the HTTP/1.1 Upgrade path and few clients use it.  When enabling this on a BlackBull instance that terminates TLS/HTTP/2 directly (no nginx / L7 proxy in front), also set <code>BB_MAX_CONNECTIONS</code> to a finite value and review <code>BB_H2_WS_MAX_STREAMS_PER_CONNECTION</code>.  The recommended production shape (nginx terminating TLS/HTTP/2, BlackBull behind it on HTTP/1.1) eliminates the RFC 8441 attack surface entirely because nginx does not forward Extended CONNECT to the backend.</td>

@@ -889,6 +889,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Read-ahead and back-pressure">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-server-asks-whether-a-silent-peer-is-still-there" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The server asks whether a silent peer is still there
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -5431,6 +5448,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Read-ahead and back-pressure">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-server-asks-whether-a-silent-peer-is-still-there" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The server asks whether a silent peer is still there
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -5991,6 +6025,34 @@ queue fills, the read loop blocks rather than buffering without bound.</p>
 <p>Choose read-ahead when a handler does slow work between reads and you
 need keepalive <code>ping</code>s answered during it.  A handler that loops
 tightly on <code>receive()</code> — the common shape — wants the default.</p>
+<h3 id="the-server-asks-whether-a-silent-peer-is-still-there">The server asks whether a silent peer is still there<a class="headerlink" href="#the-server-asks-whether-a-silent-peer-is-still-there" title="Permanent link">&para;</a></h3>
+<p>A WebSocket that says nothing is not the same as one that is gone, and
+nothing at the transport layer tells the two apart — a peer whose network
+vanished leaves a socket that looks exactly like a quiet subscription
+channel.  So the server asks: after <code>BB_WS_IDLE_TIMEOUT</code> (default 300 s) of
+complete silence it sends a <code>ping</code> (RFC 6455 §5.5.2), and if nothing arrives
+within <code>BB_WS_PONG_TIMEOUT</code> (default 30 s) it closes with <strong>1001 (Going
+Away)</strong>.</p>
+<p>Three things worth knowing:</p>
+<ul>
+<li><strong>Any inbound frame counts as the answer</strong>, not only a <code>pong</code>.  A peer that
+  is talking to you is demonstrably alive, and requiring the specific reply
+  would close a connection that is merely busy.</li>
+<li><strong>Your handler never sees it.</strong>  The probe and its answer are control
+  frames, handled the same way <code>ping</code>/<code>close</code> already are — the application
+  receives complete messages, nothing else.</li>
+<li><strong>It is the server's, not the client's.</strong>  The bundled clients under
+  <code>blackbull.client</code> share the same read code but do not probe: the bound
+  exists to stop an untrusted peer holding a server connection, which is not
+  a question a client has about a server it chose.</li>
+</ul>
+<p><code>BB_WS_IDLE_TIMEOUT=0</code> disables it, which leaves a silent connection bounded
+only by <code>BB_MAX_CONNECTIONS</code>.  Deployments behind a proxy often never reach
+the default — ALB, Cloudflare and nginx <code>proxy_read_timeout</code> all reap idle
+WebSocket connections well inside five minutes — so this matters most when
+BlackBull terminates the connection itself.  Both numbers match HTTP/2's
+<code>BB_H2_IDLE_TIMEOUT</code> / <code>BB_H2_PING_TIMEOUT</code> because the question is the
+same one.</p>
 <div class="admonition note">
 <p class="admonition-title"><code>websocket_message</code> and the deferred reader</p>
 <p>The <a href="../events/"><code>websocket_message</code></a> event fires when the <em>server</em>

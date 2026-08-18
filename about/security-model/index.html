@@ -5310,7 +5310,7 @@ allocate on a peer's behalf, and each bound has a test named under
 <tr>
 <td>Connection slots</td>
 <td>opening connections and holding them</td>
-<td><code>BB_MAX_CONNECTIONS</code>, plus idle and header deadlines</td>
+<td><code>BB_MAX_CONNECTIONS</code>, plus idle and header deadlines and, on HTTP/2 and WebSocket, a liveness probe</td>
 </tr>
 <tr>
 <td>Task slots</td>
@@ -5418,6 +5418,12 @@ column.</p>
 <td>—</td>
 </tr>
 <tr>
+<td>WebSocket connection</td>
+<td>—</td>
+<td><code>BB_MAX_CONNECTIONS</code> (derived)</td>
+<td><code>BB_WS_IDLE_TIMEOUT</code> 300 s + <code>BB_WS_PONG_TIMEOUT</code> 30 s</td>
+</tr>
+<tr>
 <td>MQTT packet</td>
 <td><code>BB_MQTT_MAX_PACKET_SIZE</code> 1 MiB</td>
 <td>same, before buffering</td>
@@ -5503,7 +5509,7 @@ one more byte.</p>
 <tr>
 <td>WebSocket</td>
 <td><code>bounded-by-default</code></td>
-<td>message bounded post-reassembly and post-inflation</td>
+<td>message bounded post-reassembly and post-inflation; a silent peer is probed with a PING and closed if it does not answer</td>
 </tr>
 <tr>
 <td>MQTT</td>
@@ -5651,6 +5657,10 @@ are the difference between the label and the whole truth:</p>
 <tr>
 <td>HTTP/2 time bounds, including that a responsive peer is never closed</td>
 <td><code>tests/unit/test_h2_time_bounds.py</code></td>
+</tr>
+<tr>
+<td>WebSocket liveness probe, including that an answering peer is never closed</td>
+<td><code>tests/unit/test_ws_liveness_probe.py</code></td>
 </tr>
 <tr>
 <td>Frame-rate metering</td>
