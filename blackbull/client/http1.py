@@ -40,6 +40,11 @@ logger = logging.getLogger(__name__)
 RequestBody = Union[bytes, bytearray, memoryview, AsyncIterable[bytes]]
 
 # CRLF as used throughout RFC 7230.
+#: Slice size for streaming a ``Content-Length`` body.  Matches the
+#: server's own body-chunk default so both directions hand the same
+#: shape to a caller.
+_STREAM_CHUNK_SIZE: int = 64 * 1024
+
 _CRLF = b'\r\n'
 
 # Methods for which an empty body still warrants an
@@ -171,7 +176,8 @@ class HTTP1ResponseRecipient:
     Decodes both ``Content-Length``-bound and ``Transfer-Encoding: chunked``
     bodies.  Returns a ``ClientResponse``; ``stream()`` returns an async
     iterator of body chunks instead, so large responses don't have to fit
-    in memory.
+    in memory — true of both framings, which it was not until the
+    ``Content-Length`` path stopped reading the body in one call.
     """
 
     async def receive(self, reader: AbstractReader) -> ClientResponse:
@@ -210,16 +216,42 @@ class HTTP1ResponseRecipient:
             pairs.append((name.strip().lower(), value.strip()))
         return status, Headers(pairs)
 
+    @staticmethod
+    def _declared_length(headers: Headers) -> int | None:
+        """The response's ``Content-Length``, or ``None`` when it has none.
+
+        A response may repeat the field or comma-combine it, and RFC 9110
+        §8.6 permits that **only** when every value agrees.  Trusting the
+        first one is a desync: believe 5 where the peer meant 10 and the
+        surplus five octets become the next keep-alive response's status
+        line.  The server refuses exactly this on the request side
+        (``_validate_message_framing``); this is the same rule facing the
+        other way, including the leading-zero normalisation that makes
+        "005" and "5" agree.
+        """
+        raw = headers.getlist(b'content-length')
+        if not raw:
+            return None
+        values: set[bytes] = set()
+        for _, value in raw:
+            for v in value.split(b','):
+                v = v.strip()
+                if not v or not v.isdigit():
+                    raise ProtocolError(f'invalid Content-Length value {v!r}')
+                values.add(v.lstrip(b'0') or b'0')
+        if len(values) > 1:
+            raise ProtocolError(
+                f'conflicting Content-Length values in response: '
+                f'{sorted(values)!r}')
+        return int(values.pop())
+
     async def _read_body(self, reader: AbstractReader, headers: Headers) -> bytes:
         te = headers.get(b'transfer-encoding', b'').lower()
         if te == b'chunked':
             return b''.join([c async for c in self._read_chunked(reader)])
-        # Absence is emptiness here: ``Headers.get`` returns ``b''`` for a
-        # missing field, so a ``is not None`` test would call ``int(b'')`` on
-        # every response that legitimately omits the header — 101, 204, 304.
-        cl_raw = headers.get(b'content-length')
-        if cl_raw:
-            return await reader.readexactly(int(cl_raw))
+        declared = self._declared_length(headers)
+        if declared:
+            return await reader.readexactly(declared)
         # No Content-Length and no chunked: caller (e.g. HEAD, 204, 304) must
         # interpret as empty body.  We don't read-until-EOF here because that
         # would break keep-alive.
@@ -232,10 +264,18 @@ class HTTP1ResponseRecipient:
             async for chunk in self._read_chunked(reader):
                 yield chunk
             return
-        # Same absence-is-emptiness rule as ``_read_body``.
-        cl_raw = headers.get(b'content-length')
-        if cl_raw:
-            yield await reader.readexactly(int(cl_raw))
+        declared = self._declared_length(headers)
+        if not declared:
+            return
+        # In slices, not one ``readexactly(declared)``.  This method's whole
+        # promise is that a large response need not fit in memory, and a
+        # single exact read hands the caller the entire body as one chunk —
+        # the memory bound absent on exactly the path that asked for it.
+        remaining = declared
+        while remaining > 0:
+            chunk = await reader.readexactly(min(remaining, _STREAM_CHUNK_SIZE))
+            remaining -= len(chunk)
+            yield chunk
 
     async def _read_chunked(self, reader: AbstractReader) -> AsyncIterator[bytes]:
         while True:

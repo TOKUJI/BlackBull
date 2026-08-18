@@ -38,6 +38,11 @@ _FRAME_HEADER_BYTES = 9
 # ``WebSocketH2Session._credit_returned``: batching avoids a WINDOW_UPDATE
 # per DATA frame while still reopening the peer's send window long before
 # the 65535-byte initial window is exhausted (RFC 9113 §6.9).
+#: Seconds to wait for the remainder of a frame whose 9-byte header has
+#: already arrived.  Not a bound on waiting for the next frame — see
+#: ``HTTP2Client._receive_frame``.
+_FRAME_READ_TIMEOUT: float = 30.0
+
 _WINDOW_UPDATE_THRESHOLD = 32768
 
 
@@ -130,6 +135,15 @@ class HTTP2Client:
 
         # Set when the peer sends GOAWAY; subsequent request() calls raise.
         self._goaway_received: bool = False
+        # Set when the receive loop ends for any reason.  ``_goaway_received``
+        # only covers the polite departure; a peer that simply vanishes leaves
+        # no frame behind, and without this ``request()`` awaited a future
+        # nobody was left to resolve.  ``HTTP1Client`` raises here, so the two
+        # clients used to disagree about the same event.
+        self._connection_lost: bool = False
+        # Bounds the *rest* of a frame the peer has already begun — never
+        # the gap between frames.  See ``_receive_frame``.
+        self._frame_read_timeout: float = _FRAME_READ_TIMEOUT
         self._goaway_error_code: int = 0
 
     # ---- async context manager -------------------------------------------
@@ -217,6 +231,8 @@ class HTTP2Client:
         if self._goaway_received:
             raise ConnectionError(
                 f'connection closed by peer (GOAWAY error_code={self._goaway_error_code})')
+        if self._connection_lost:
+            raise ConnectionError('connection closed by peer')
         if self._writer is None:
             raise ConnectionError('client is not connected')
 
@@ -241,16 +257,25 @@ class HTTP2Client:
             h_frame.headers.append((_to_str(name).lower(), _to_str(value)))
 
         sender = self._make_sender(stream_id)
-        await sender(h_frame)
+        try:
+            await sender(h_frame)
 
-        if body:
+            if body:
             # Use the sender's flow-controlled DATA path rather than a single
             # raw DATA frame: it splits the body across SETTINGS_MAX_FRAME_SIZE
             # chunks and blocks on flow-control credit, so bodies larger than
             # one frame (e.g. >16 KiB gRPC messages) are sent correctly.
             # WINDOW_UPDATE frames are routed to this sender in
             # ``_on_window_update``, keeping its send window in sync.
-            await sender._write_data(body, end_stream=True)
+                await sender._write_data(body, end_stream=True)
+        except BaseException:
+            # The future is only resolvable by the receive loop, and the
+            # receive loop only knows about streams the peer answered.  A
+            # send that never reached the wire has no answer coming, so its
+            # entry would sit in ``_responses`` until GOAWAY or __aexit__ —
+            # a dict that grows once per failed send.
+            self._responses.pop(stream_id, None)
+            raise
 
         return await future
 
@@ -321,13 +346,44 @@ class HTTP2Client:
         await self._control_sender(frame)
 
     async def _receive_frame(self) -> FrameBase | None:
+        """Read one frame, or ``None`` when the peer is finished with us.
+
+        The wait for a frame to *begin* is deliberately unbounded: an
+        HTTP/2 client that stops listening after a quiet interval breaks
+        server streaming and long-polling, both of which are the peer
+        behaving correctly.
+
+        The wait for a frame to *finish* is bounded.  Once nine header
+        bytes have arrived the peer has committed to a payload length, so
+        a peer that sends the header and stops is not idle — it has
+        abandoned a frame mid-delivery.  Without a bound that parks every
+        pending future for the life of the process.  This is the
+        client-side twin of the server's ``BB_HEADER_TIMEOUT``, and it
+        ends the read the same way EOF does: ``None``, which the receive
+        loop already treats as the connection being over.
+        """
         assert self._reader is not None
         try:
             header = await self._reader.readexactly(_FRAME_HEADER_BYTES)
         except (asyncio.IncompleteReadError, EOFError):
             return None
         length = int.from_bytes(header[:3], 'big', signed=False)
-        payload = await self._reader.readexactly(length) if length else b''
+        if not length:
+            return self._factory.load(header)
+        timeout = self._frame_read_timeout
+        try:
+            if timeout and timeout > 0:
+                async with asyncio.timeout(timeout):
+                    payload = await self._reader.readexactly(length)
+            else:
+                payload = await self._reader.readexactly(length)
+        except (asyncio.IncompleteReadError, EOFError):
+            return None
+        except TimeoutError:
+            logger.warning(
+                'HTTP/2 peer began a %d-byte frame and stopped for %.1fs — '
+                'treating the connection as gone', length, timeout)
+            return None
         return self._factory.load(header + payload)
 
     async def _receive_loop(self) -> None:
@@ -362,6 +418,10 @@ class HTTP2Client:
         except Exception:
             logger.exception('receive loop crashed')
         finally:
+            # Record it before failing anyone: a request issued after this
+            # point must be refused rather than parked on a future with no
+            # remaining resolver.
+            self._connection_lost = True
             # Connection ended; fail any still-pending responses.
             for pending in self._responses.values():
                 if not pending.future.done():
@@ -394,6 +454,14 @@ class HTTP2Client:
         pending = self._responses.get(frame.stream_id)
         if pending is None:
             logger.debug('DATA for unknown stream %d — dropping', frame.stream_id)
+            # The *payload* is dropped; the credit is not.  RFC 9113 §6.9
+            # makes the connection window shared by every stream, so bytes
+            # that arrive for a stream we no longer track still consumed it.
+            # Returning early without crediting leaks that window by every
+            # such frame, and once it reaches zero every stream's body
+            # stalls in the peer's writer.  A stream that closed while its
+            # DATA was in flight is ordinary, not hostile.
+            await self._credit_connection(len(frame.payload))
             return
         payload = frame.payload
         pending.body_parts.append(payload)
@@ -421,11 +489,23 @@ class HTTP2Client:
         every stream.
         """
         pending.unacked += n
-        self._unacked_conn += n
         if not end_stream and pending.unacked >= _WINDOW_UPDATE_THRESHOLD:
             await self._send_raw_frame(
                 self._factory.window_update(stream_id, pending.unacked))
             pending.unacked = 0
+        await self._credit_connection(n)
+
+    async def _credit_connection(self, n: int) -> None:
+        """Return *n* bytes of connection-level credit.
+
+        Split out from :meth:`_credit_received` because it is owed for every
+        DATA octet that arrived, including octets for a stream this client
+        no longer tracks — that path has no per-stream state to accumulate
+        against but consumed the shared window all the same.
+        """
+        if n <= 0:
+            return
+        self._unacked_conn += n
         if self._unacked_conn >= _WINDOW_UPDATE_THRESHOLD:
             await self._send_raw_frame(
                 self._factory.window_update(0, self._unacked_conn))
@@ -469,8 +549,13 @@ class HTTP2Client:
 
     def _on_goaway(self, frame) -> None:
         self._goaway_received = True
-        # frame.stream_id on a GOAWAY frame carries last_stream_id (RFC 7540 §6.8)
-        last_stream_id = frame.stream_id
+        # RFC 9113 §6.8 — a GOAWAY's own stream identifier MUST be 0; the
+        # Last-Stream-ID is the first four *payload* bytes, which ``GoAway``
+        # parses into its own field.  Reading the header field instead made
+        # ``sid > last_stream_id`` true for every stream, so a graceful
+        # shutdown failed the responses the peer had just promised it *had*
+        # processed — the opposite of what GOAWAY communicates.
+        last_stream_id = frame.last_stream_id
         self._goaway_error_code = frame.error_code
         for sid, pending in list(self._responses.items()):
             if sid > last_stream_id and not pending.future.done():
