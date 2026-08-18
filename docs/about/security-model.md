@@ -33,7 +33,7 @@ Named non-goals — real limits, not oversights:
 |---|---|---|
 | Memory | large or accumulating request bodies, WebSocket messages, MQTT packets and broker state | size and total caps on each path in the table below |
 | Event-loop time | floods of cheap control frames that each oblige a small piece of work | per-type frame-rate meters |
-| Connection slots | opening connections and holding them | `BB_MAX_CONNECTIONS`, plus idle and header deadlines |
+| Connection slots | opening connections and holding them | `BB_MAX_CONNECTIONS`, plus idle and header deadlines and, on HTTP/2 and WebSocket, a liveness probe |
 | Task slots | opening HTTP/2 streams | `BB_H2_MAX_CONCURRENT_STREAMS`, per-connection handler semaphore |
 | Write path | requesting a response and refusing to read it | `BB_WRITE_TIMEOUT`, on the socket drain *and* on the HTTP/2 flow-control wait |
 | Broker state | subscribing without acknowledging; subscribing to endless filters; retaining messages; leaving sessions behind | `BB_MQTT_MAX_QUEUED_MESSAGES`, `BB_MQTT_MAX_SUBSCRIPTIONS`, `BB_MQTT_MAX_RETAINED`, `BB_MQTT_MAX_SESSIONS` |
@@ -70,6 +70,7 @@ column.
 | HTTP/2 priority signals | 5-byte PRIORITY payload | no state recorded (PRIORITY); `SETTINGS_MAX_CONCURRENT_STREAMS` (PRIORITY_UPDATE hints) | — |
 | WebSocket frame | `BB_WS_MAX_FRAME_PAYLOAD` 64 MiB | — | — |
 | WebSocket message | per frame | `BB_WS_MAX_MESSAGE_SIZE` 16 MiB | — |
+| WebSocket connection | — | `BB_MAX_CONNECTIONS` (derived) | `BB_WS_IDLE_TIMEOUT` 300 s + `BB_WS_PONG_TIMEOUT` 30 s |
 | MQTT packet | `BB_MQTT_MAX_PACKET_SIZE` 1 MiB | same, before buffering | keep-alive × 1.5 |
 | MQTT session state | `BB_MQTT_MAX_SUBSCRIPTIONS` 1000, `BB_MQTT_MAX_QUEUED_MESSAGES` 1000, 16-bit packet-identifier space | `BB_MQTT_MAX_SESSIONS` 10000 | Session Expiry Interval, swept *(see qualification 3)* |
 | MQTT retained store | — | `BB_MQTT_MAX_RETAINED` 10000 | — |
@@ -120,7 +121,7 @@ Three rungs, and the difference between them is what an operator has to do:
 | HTTP/1.1 | `bounded-by-default` | see qualifications 1 and 2 below |
 | HTTP/2 | `bounded-by-default` | includes control-frame rate metering and PING-based liveness |
 | gRPC | `bounded-by-default` | own message bounds, plus everything HTTP/2 provides |
-| WebSocket | `bounded-by-default` | message bounded post-reassembly and post-inflation |
+| WebSocket | `bounded-by-default` | message bounded post-reassembly and post-inflation; a silent peer is probed with a PING and closed if it does not answer |
 | MQTT | `bounded-by-default` | limits are also *advertised* in CONNACK, so conforming clients stay inside them; see qualification 3 |
 
 **Three qualifications, stated here rather than in a footnote**, because they
@@ -194,6 +195,7 @@ Every claim on this page is backed by a test or an external conformance suite.
 | MQTT packet, backlog and retained-store bounds | `tests/unit/test_mqtt_resource_bounds.py` |
 | MQTT session count, subscription count and expiry sweep | `tests/unit/test_mqtt_session_bounds.py` |
 | HTTP/2 time bounds, including that a responsive peer is never closed | `tests/unit/test_h2_time_bounds.py` |
+| WebSocket liveness probe, including that an answering peer is never closed | `tests/unit/test_ws_liveness_probe.py` |
 | Frame-rate metering | `tests/unit/test_rate_window.py`, `tests/unit/test_frame_rate_metering.py` |
 | Derived connection cap | `tests/unit/test_max_connections_default.py` |
 | Protocol conformance | h2spec (HTTP/2 + HPACK), Autobahn (WebSocket), http11probe — see [Conformance](conformance.md) |

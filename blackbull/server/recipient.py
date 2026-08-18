@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 from abc import ABC, abstractmethod
 from collections import deque
 from time import monotonic as _monotonic
@@ -1710,7 +1711,9 @@ class WebSocketRecipient(BaseRecipient):
                  max_frame_payload: int | None = None,
                  max_message_size: int | None = None,
                  on_message: Callable[[dict], Awaitable[None]] | None = None,
-                 read_ahead_needed: Callable[[], bool] | None = None):
+                 read_ahead_needed: Callable[[], bool] | None = None,
+                 ws_idle_timeout: float | None = None,
+                 ws_pong_timeout: float | None = None):
         super().__init__(reader)
         self._writer = writer
         self._connect_sent = False
@@ -1813,6 +1816,30 @@ class WebSocketRecipient(BaseRecipient):
         # a recipient never requires a running loop.
         self._watchdog: WsIdleWatchdog | None = None
         self._closed = False
+        # -- liveness (RFC 6455 §5.5.2) -----------------------------------
+        # The *time* column for a WebSocket connection.  An idle WebSocket is
+        # normal — a subscription channel pushes nothing until something
+        # happens — so idleness alone cannot end it; the peer is asked.  Same
+        # purpose, same axis and same defaults as HTTP/2's probe.
+        #
+        # **Off unless a caller asks for it**, rather than read from Settings
+        # here.  This class is the read side of *both* roles: the server
+        # binding and the two bundled clients construct it.  Defaulting it on
+        # would silently make a client probe the server it connected to —
+        # traffic nobody asked for, on the surface the attack-surface audit
+        # records as unaudited (§9).  ``RecipientFactory.websocket`` is the
+        # server's entry point and is where the Settings values are read, so
+        # the policy has exactly one owner.
+        self._ws_idle_timeout: float = ws_idle_timeout or 0.0
+        self._ws_pong_timeout: float = ws_pong_timeout or 30.0
+        # Inbound arrival is recorded as a **counter**, not a timestamp: the
+        # receive path is the hot path, and Sprint 104 was spent taking
+        # per-message clock reads out of it.  The tick callback — once per
+        # idle connection per scanner tick — turns the counter into a time.
+        self._inbound_seq: int = 0
+        self._seq_at_last_check: int = 0
+        self._last_inbound_at: float = 0.0
+        self._probe_sent_at: float | None = None
 
     @property
     def terminal_code(self) -> int | None:
@@ -1856,6 +1883,11 @@ class WebSocketRecipient(BaseRecipient):
         """
         _CONTROL_OPS = (WSOpcode.CLOSE, WSOpcode.PING, WSOpcode.PONG)
         h = await read_frame_header(self._reader)
+        # Liveness, at the cost of one integer add: the peer sent something,
+        # so it is alive.  Deliberately not a ``loop.time()`` — see the
+        # counter's comment in ``__init__``.
+        self._inbound_seq += 1
+        self._probe_sent_at = None
 
         # RFC 6455 §5.5 — control frames MUST have payload ≤125 and
         # MUST NOT be fragmented.  Reject without reading the body.
@@ -2293,7 +2325,15 @@ class WebSocketRecipient(BaseRecipient):
         task for any actual work.  A reader already owns the wire (eager /
         deferred started) and services control frames itself; only a pure
         inline connection needs the watchdog's help.
+
+        The liveness decision runs **first and unconditionally**, because it
+        asks a different question from the servicing below: servicing is
+        about a connection whose handler has gone quiet, liveness is about a
+        connection whose *peer* has.  A connection with a reader parked on the
+        wire is the normal shape of a silent peer, so the guards below would
+        exempt exactly the case the probe exists for.
         """
+        self._check_liveness()
         if self._read_finished or self._reading or self._closed:
             return
         if self._event_queue is not None:
@@ -2303,6 +2343,72 @@ class WebSocketRecipient(BaseRecipient):
         elif self._reader.has_buffered() and self.has_control_frames_buffered():
             asyncio.get_running_loop().create_task(
                 self.service_available_control_frames())
+
+    def _check_liveness(self) -> None:
+        """Ask a silent peer whether it is there; close it if it is not.
+
+        One clock read per idle connection per scanner tick, and none on the
+        receive path: ``_inbound_seq`` moving is what "activity" means, and
+        this is the only place it is turned into a time.
+        """
+        if self._ws_idle_timeout <= 0 or self._closed or self._read_finished:
+            return
+        loop = asyncio.get_running_loop()
+        now = loop.time()
+        if self._inbound_seq != self._seq_at_last_check:
+            # Frames arrived since the last tick — the peer is alive, and the
+            # read path has already cleared any outstanding probe.
+            self._seq_at_last_check = self._inbound_seq
+            self._last_inbound_at = now
+            return
+        if self._last_inbound_at == 0.0:
+            # First quiet tick of the connection's life: start the clock here
+            # rather than at construction, so a connection that was busy
+            # before the watchdog armed is not judged on time it never spent
+            # idle.
+            self._last_inbound_at = now
+            return
+        if self._probe_sent_at is not None:
+            if now - self._probe_sent_at >= self._ws_pong_timeout:
+                loop.create_task(self._end_for_unresponsive_peer())
+            return
+        if now - self._last_inbound_at >= self._ws_idle_timeout:
+            self._probe_sent_at = now
+            loop.create_task(self._probe_peer())
+
+    async def _probe_peer(self) -> None:
+        """RFC 6455 §5.5.2 — ask whether the peer is still responsive.
+
+        §5.5.3 obliges a PONG in reply, but any inbound frame clears the
+        probe: a peer that is talking to us is alive, and requiring the
+        specific answer would close a connection that is merely busy.
+        """
+        ping = encode_frame(b'', opcode=WSOpcode.PING,
+                            mask=not self._require_masked)
+        with contextlib.suppress(Exception):
+            await self._writer.write(ping)
+
+    async def _end_for_unresponsive_peer(self) -> None:
+        """The probe went unanswered: the peer is gone, not merely quiet.
+
+        ``1001 (Going Away)`` rather than a policy code, for the reason
+        HTTP/2 answers its own unanswered probe with ``NO_ERROR``: nothing
+        was violated.  We asked a question and got no reply, which is a fact
+        about the network, not a complaint about the peer.  The CLOSE is
+        best-effort — if the peer really is gone the write fails, and the
+        channel is ended either way.
+        """
+        if self._closed or self._read_finished:
+            return
+        logger.info('WebSocket peer did not answer the liveness PING in '
+                    '%.1fs — closing 1001', self._ws_pong_timeout)
+        close = encode_frame(
+            WSCloseCode.GOING_AWAY.to_bytes(2, 'big'),
+            opcode=WSOpcode.CLOSE, mask=not self._require_masked)
+        with contextlib.suppress(Exception):
+            await self._writer.write(close)
+        self.disarm_watchdog()
+        await self._close_channel(WSCloseCode.GOING_AWAY)
 
     def has_buffered(self) -> bool:
         """True when inbound bytes are already buffered (a read won't block).
@@ -2570,8 +2676,16 @@ class RecipientFactory:
             reader = AsyncioReader(reader)
         if not isinstance(writer, AbstractWriter):
             writer = AsyncioWriter(writer)
+        # The liveness probe is read here, not in the recipient: this factory
+        # is the *server's* entry point, and the probe answers a question only
+        # the server has — how long an untrusted peer may hold a connection.
+        # The bundled clients build a recipient directly and are unaffected.
+        from ..env import get_settings  # noqa: PLC0415
+        _cfg = get_settings()
         return WebSocketRecipient(reader, writer, dispatcher=dispatcher, conn=conn,
                                   ws_queue_depth=ws_queue_depth,
                                   decompressor=decompressor,
                                   on_message=on_message,
-                                  read_ahead_needed=read_ahead_needed)
+                                  read_ahead_needed=read_ahead_needed,
+                                  ws_idle_timeout=_cfg.ws_idle_timeout,
+                                  ws_pong_timeout=_cfg.ws_pong_timeout)
