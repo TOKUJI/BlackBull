@@ -1616,7 +1616,7 @@ class WebSocketSender(BaseSender):
         await self._write(encode_frame(code.to_bytes(2, 'big'),
                                        opcode=WSOpcode.CLOSE))
 
-    async def __call__(self, body: '_WSSenderEvent | NativeWSMessage',
+    async def __call__(self, body: _WSSenderEvent | NativeWSMessage,
                        _status: HTTPStatus | None = None,
                        _headers: HeaderList = []):
         # Dict arm first.  A dict is the one shape here that nothing cheaper

@@ -10,7 +10,6 @@ from http import HTTPStatus
 
 from blackbull.connection import Connection
 from blackbull.env import get_settings, Environment
-from blackbull.asgi import ASGIEvent
 from blackbull.native import NativeResponse
 
 

@@ -2,7 +2,6 @@
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from typing import Any
 
 from ..actor import Actor, Message
 from ..native import NativeWSMessage
