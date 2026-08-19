@@ -28,7 +28,7 @@ from blackbull.fault_injection.scenario_h1 import (
     ReadResponse,
     Scenario,
     ScenarioResult,
-    SendBytes,
+    SendRawBytes as SendBytes,
     Sleep,
 )
 

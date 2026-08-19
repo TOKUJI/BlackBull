@@ -35,7 +35,7 @@ from ..fault_injection.scenario_h2_client import (
     ReadResponse as _ScReadResponse,
     ScenarioH2Client,
     ScenarioH2ClientResult,
-    SendBytes as _ScSendBytes,
+    SendRawBytes as _ScSendBytes,
     SendFrame as _ScSendFrame,
     SendPreface as _ScSendPreface,
     Sleep as _ScSleep,
@@ -105,7 +105,9 @@ class HTTP2Client:
 
     def __init__(self, host: str, port: int, *,
                  ssl: _ssl.SSLContext | None = None,
-                 connect_timeout: float | None = DEFAULT_CONNECT_TIMEOUT) -> None:
+                 connect_timeout: float | None = DEFAULT_CONNECT_TIMEOUT,
+                 scenario_mode: bool = False) -> None:
+        self._scenario_mode = scenario_mode
         self._host = host
         self._port = port
         self._ssl = ssl
@@ -195,8 +197,15 @@ class HTTP2Client:
 
         Idempotent — calling more than once is a no-op so ``Client`` can adopt
         a connection and then enter the inner client's ``async with`` cleanly.
+
+        Under ``scenario_mode`` this is a no-op, which makes it the twin of
+        :meth:`blackbull.client.http1.HTTP1Client._start`: the scenario owns
+        the wire from byte zero.  That is not a convenience — a fault
+        scenario exists to assemble its own bytes, and it cannot express a
+        preface fault (delayed, split, absent, repeated) on a connection
+        that has already sent a correct one.
         """
-        if self._receive_task is not None:
+        if self._scenario_mode or self._receive_task is not None:
             return
         assert self._raw_writer is not None and self._writer is not None
 
@@ -324,6 +333,7 @@ class HTTP2Client:
         import time as _time  # noqa: PLC0415
 
         assert self._writer is not None, 'connect via __aenter__ first'
+        self._check_scenario_ownership(scenario)
         result = ScenarioH2ClientResult()
         t0 = _time.monotonic()
         try:
@@ -360,6 +370,34 @@ class HTTP2Client:
         finally:
             result.elapsed_s = _time.monotonic() - t0
         return result
+
+    def _check_scenario_ownership(self, scenario: ScenarioH2Client) -> None:
+        """Reject a scenario the connection cannot actually express.
+
+        Raised up front, before any byte reaches the wire, so a scenario
+        either runs whole or not at all.
+
+        Both checks catch the same class of defect: HTTP/2, unlike
+        HTTP/1.1, has a connect-time preamble, so a client that has already
+        handshaked is *not* a blank wire.  Sending a second preface down it
+        does not test a peer's preface handling — it corrupts the frame
+        stream ahead of every later step, and a lenient peer skipping the
+        junk makes the scenario look like it passed.
+        """
+        if self._scenario_mode:
+            return
+        if any(isinstance(s, _ScSendPreface) for s in scenario.steps):
+            raise RuntimeError(
+                'SendPreface on an already-prefaced connection: this client '
+                'sent the preface and SETTINGS when it connected, so the '
+                "scenario's preface would be the second one on the wire. "
+                'Construct the client with scenario_mode=True.')
+        if any(isinstance(s, _ScReadResponse) for s in scenario.steps) \
+                and self._receive_task is not None:
+            raise RuntimeError(
+                'ReadResponse races the receive loop: both would read the '
+                'same socket, so which one sees a frame is a coin toss. '
+                'Construct the client with scenario_mode=True.')
 
     async def _write_paced(self, data: bytes, byte_interval: float) -> None:
         """Write *data*, optionally one byte at a time.

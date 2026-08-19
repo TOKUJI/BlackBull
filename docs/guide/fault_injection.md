@@ -318,11 +318,24 @@ from blackbull.fault_injection.catalogue.h2_client import rapid_reset_burst
 
 @pytest.mark.asyncio
 async def test_my_server_meters_rapid_reset():
-    async with HTTP2Client('127.0.0.1', my_port) as client:
+    async with HTTP2Client('127.0.0.1', my_port,
+                           scenario_mode=True) as client:
         result = await client.execute_scenario(rapid_reset_burst())
     # The scenario never raises; everything lands on the result.
     assert result.exception is None
 ```
+
+`scenario_mode=True` is required, and is the one place the two client
+vocabularies genuinely differ.  HTTP/1.1 has nothing to send on connect,
+so an HTTP/1.1 scenario owns the wire from byte zero for free.  HTTP/2
+does not: the client normally sends the preface and a SETTINGS frame as
+soon as it connects, and a scenario running on top of that would put a
+*second* preface on the wire, corrupting the frame stream ahead of every
+later step.  `scenario_mode` suppresses the client's own preamble and its
+receive loop, handing the connection to the scenario intact.
+
+Without it, `execute_scenario` raises before writing a byte rather than
+sending something the peer will read as garbage.
 
 The vocabulary mirrors the HTTP/1.1 client side — `SendBytes`,
 `ReadResponse`, `Sleep`, `Abort`, and `ScenarioResult`'s field names — and

@@ -312,7 +312,8 @@ async def cell_d_broken_h2_client() -> None:
     async with NativeTestServer(app) as server:
         print(f'counterpart: BlackBull on 127.0.0.1:{server.port}')
         for name in _SELF_TERMINATING:
-            async with HTTP2Client('127.0.0.1', server.port) as client:
+            async with HTTP2Client('127.0.0.1', server.port,
+                                   scenario_mode=True) as client:
                 result = await asyncio.wait_for(
                     client.execute_scenario(CATALOGUE_H2C[name]()),
                     timeout=10.0)
