@@ -488,6 +488,22 @@ tests — handler tracebacks surface as the test failure.  Set it
 to `False` to assert on the 500 response the framework would
 emit to a real client.
 
+## gRPC
+
+gRPC servicers need their own seam, because every gRPC response reports its
+status in **trailing headers** and the in-process `TestClient` transport
+cannot observe them:
+
+```python
+from blackbull.testing.grpc import GrpcTestServer
+
+async with GrpcTestServer(app) as grpc:
+    reply = await grpc.unary('/demo.Greeter/SayHello', b'world')
+assert reply.status is GrpcStatus.OK
+```
+
+Full details in [the gRPC guide](grpc.md#testing-your-servicers).
+
 ## End-to-end with BlackBull's clients
 
 BlackBull bundles four async clients in `blackbull.client`, with

@@ -376,8 +376,7 @@ for the full tutorial.
 | [`examples/edge_inference.py`](examples/edge_inference.py) | Edge inference API server — SSE token streaming (browser demo included) + MQTT telemetry + `$share` work queue, dependency-free fake model |
 | [`examples/grpc_greeter.py`](examples/grpc_greeter.py) | Canonical gRPC Greeter speaking real protobuf — works with stock `grpcurl` / `grpcio` clients unmodified |
 | [`examples/typed_routes_ok.py`](examples/typed_routes_ok.py) | `{param:converter}` syntax, `url_path_for` |
-| [`examples/scenario_h1_fault_injection.py`](examples/scenario_h1_fault_injection.py) | HTTP/1.1 fault scenarios driven against stdlib `http.server` |
-| [`examples/scenario_h2_fault_injection.py`](examples/scenario_h2_fault_injection.py) | HTTP/2 fault scenarios served against httpx |
+| [`examples/fault_injection.py`](examples/fault_injection.py) | Every cell of the fault-injection grid — a broken client against a real server, a broken server against real clients (ours *and* httpx), and scenarios as JSON you can replay |
 | [`examples/PriorityExample/`](examples/PriorityExample/) | RFC 9218 priority hints via `conn.extensions['http.response.priority']` — echo and urgency-scaled work endpoints |
 | [`examples/connection_object.py`](examples/connection_object.py) | Opt-in `Connection` context object — headers, cookies, client, `body()`/`json()`/`text()` |
 | [`examples/websocket_object.py`](examples/websocket_object.py) | High-level `WebSocket` object — `async for` messages, `send_json`, path/query injection, handshake rejection, and the raw event form side by side |

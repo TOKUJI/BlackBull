@@ -12,16 +12,18 @@ because which cell you need depends on which side you are testing:
 | | Broken **client** → your server | Broken **server** → your client |
 |---|---|---|
 | **HTTP/1.1** | ✅ `HTTP1Client.execute_scenario` + `oracle_h1` | ✅ `H1FaultServer` + catalogue |
-| **HTTP/2** | ✗ not implemented | ✅ `H2FaultServer` + catalogue |
+| **HTTP/2** | ✅ `HTTP2Client.execute_scenario` + catalogue | ✅ `H2FaultServer` + catalogue |
 | **WebSocket** | ✗ not implemented | ✗ not implemented |
 | **gRPC** | — | ⚠ transport only, via `H2FaultServer` |
 | **MQTT** | — | — out of scope |
 
 * **Broken client → your server** drives a target server through
-  slowloris-style misbehaviour: trickled bytes, partial headers,
-  mid-request idle, abrupt RST.  The `oracle_h1` half compares two
-  servers' responses to the same scenario, so you can diff your server
-  against a reference such as nginx.
+  slowloris-style misbehaviour: on HTTP/1.1 trickled bytes, partial
+  headers, mid-request idle, abrupt RST; on HTTP/2 a preface that never
+  arrives, a Rapid Reset burst, a PING or SETTINGS flood, a header block
+  opened and abandoned, a frame header that lies about its length.  The
+  `oracle_h1` half compares two servers' responses to the same scenario, so
+  you can diff your server against a reference such as nginx.
 * **Broken server → your client** emits misbehaviour at a connected
   client: on HTTP/1.1 a trickled status line, a `Content-Length` that
   lies, a chunked body that stops mid-chunk; on HTTP/2 half-closed
@@ -260,6 +262,45 @@ one bug class it would be least able to find is the one in the code it
 shares.  The HTTP/2 half carries its own frame encoder for the same
 reason.
 
+## Quick start — HTTP/2 client-side
+
+Drive your own HTTP/2 **server** through misbehaviour a real client can
+produce:
+
+```python
+import pytest
+from blackbull.client import HTTP2Client
+from blackbull.fault_injection.catalogue.h2_client import rapid_reset_burst
+
+@pytest.mark.asyncio
+async def test_my_server_meters_rapid_reset():
+    async with HTTP2Client('127.0.0.1', my_port) as client:
+        result = await client.execute_scenario(rapid_reset_burst())
+    # The scenario never raises; everything lands on the result.
+    assert result.exception is None
+```
+
+The vocabulary mirrors the HTTP/1.1 client side — `SendBytes`,
+`ReadResponse`, `Sleep`, `Abort`, and `ScenarioResult`'s field names — and
+adds two steps HTTP/1.1 has no use for:
+
+| Step | Why HTTP/2 needs it |
+|---|---|
+| `SendPreface` | HTTP/1.1 has no connection preface.  A *step* rather than a flag, because a client scenario may want to delay it, split it, or never send it |
+| `SendFrame` | HTTP/2 is framed where HTTP/1.1 is a byte stream.  `declared_length` sets the header's length independently of the payload — the direct way to say "the peer lied about how much is coming" |
+
+Eleven named cases ship in `blackbull.fault_injection.catalogue.h2_client`,
+drawn from the HTTP/2 rows of the project's own attack-surface work so the
+names line up with the defences that answer them: `rapid_reset_burst`
+(CVE-2023-44487), `ping_flood` (CVE-2019-9512), `settings_flood`
+(CVE-2019-9515), `empty_continuation_flood` (the CVE-2024-27983 shape),
+`header_block_never_finished`, `data_frame_lies_about_length`,
+`unknown_frame_type`, `settings_ack_with_payload`, `preface_never_arrives`,
+`preface_trickled`, `abort_mid_header_block`.
+
+Three of them end with a long `Sleep` because *holding* the connection is
+the fault they stage; what ends those is your server's own deadline.
+
 ## Safety locks
 
 Two locks ensure the deliberate-misbehaviour code path is unreachable
@@ -276,17 +317,26 @@ client, not a server-side code path) and carries no equivalent lock.
 
 ## Examples
 
-Two end-to-end walkthroughs ship with the framework, one per
-direction:
+One walkthrough ships with the framework and covers the whole grid:
 
-* [`examples/scenario_h2_fault_injection.py`](https://github.com/TOKUJI/BlackBull/blob/master/examples/scenario_h2_fault_injection.py)
-  — runs every catalogue scenario against ``httpx`` (over the
-  self-signed TLS context) and prints both what the server emitted
-  and how httpx reacted (``LocalProtocolError`` /
-  ``RemoteProtocolError`` / ...).  Requires ``pip install 'httpx[http2]'``.
-* [`examples/scenario_h1_fault_injection.py`](https://github.com/TOKUJI/BlackBull/blob/master/examples/scenario_h1_fault_injection.py)
-  — runs a handful of misbehaving client scenarios (slowloris
-  trickle, partial-headers idle, abrupt RST) against a stdlib
-  ``http.server.BaseHTTPRequestHandler`` running in a background
-  thread, and prints the resulting ``ScenarioResult`` for each.
-  No third-party deps.
+[`examples/fault_injection.py`](https://github.com/TOKUJI/BlackBull/blob/master/examples/fault_injection.py)
+
+| Cell | What it runs |
+|---|---|
+| **A** | A broken *client* against a real server — slowloris trickle, partial-headers idle, abrupt RST — driven at a stdlib `http.server` in a background thread.  No third-party deps |
+| **B** | A broken *server* against real clients: all nine HTTP/1.1 catalogue cases, driven **twice**, once with BlackBull's `HTTP1Client` and once with `httpx`.  The two columns sit side by side because that is the point — if our client and our fault server ever agree on something wrong, an independent implementation is what notices |
+| **C** | A broken *server* against a real HTTP/2 client — every HTTP/2 catalogue case against `httpx` over the self-signed TLS context |
+| **D** | Prints what is **not** implemented, and why, so the gap is visible from the same output as the coverage |
+| **E** | The same scenarios as **JSON Lines** — serialised, round-tripped, and one loaded from hand-written JSON and executed |
+
+It was previously two files, one per protocol.  A file per cell would have
+meant four, and the next cell five.
+
+Cells B and C need `pip install 'blackbull[fault-injection]'`; without it
+they report themselves skipped rather than failing.
+
+Cell B's output is worth reading for the two rows that come back **200**:
+`trickled_status_line` is correct HTTP delivered slowly, and
+`content_length_understated` is the conformant answer to a response that
+understates its body — the hazard there is the *next* exchange, not this
+one.  A fault catalogue is not a list of things a client must reject.

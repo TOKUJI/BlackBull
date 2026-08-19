@@ -53,6 +53,38 @@ so the editable install's metadata catches up.
 
 ### Added
 
+- **`blackbull.testing.grpc.GrpcTestServer`** — an app-facing seam for
+  testing your own gRPC servicers.  All four RPC shapes shipped and
+  `grpc.md` had no testing section, so the path an application developer
+  found was `grpcio`.  The framework's own gRPC tests have always driven a
+  real h2c socket with `HTTP2Client`, for a reason worth stating in the docs
+  rather than rediscovering: every gRPC response reports its status in
+  **trailing headers**, success and error alike, so an ASGI transport
+  without `http.response.trailers` support never observes the call finish —
+  which is why `TestClient` cannot test gRPC at all.  `GrpcTestServer` wraps
+  the boilerplate those tests repeat and hands back a `GrpcReply` with the
+  trailers already read out.
+
+  **Not a client.**  BlackBull ships a gRPC server and no gRPC client, and
+  this does not change that: it is a test environment, and `.port` is public
+  so `grpcio` can drive the same server if you would rather assert against
+  the client your users will use.
+
+- **`HTTP2Client.execute_scenario`** — the fault-injection grid's last cell.
+  `HTTP1Client` had a scenario executor and `HTTP2Client` did not, so an
+  HTTP/2 client-side scenario could only be written as procedural code
+  against a raw socket.  The vocabulary mirrors the HTTP/1.1 client side
+  (`SendBytes`, `ReadResponse`, `Sleep`, `Abort`, and `ScenarioResult`'s
+  field names) and adds the two steps HTTP/1.1 has no use for: `SendPreface`,
+  because HTTP/1.1 has no connection preface and a client scenario may want
+  to delay, split or withhold it; and `SendFrame`, because HTTP/2 is framed —
+  its `declared_length` sets the header's length independently of the
+  payload, which is the direct way to say "the peer lied about how much is
+  coming".  Eleven named cases ship in
+  `blackbull.fault_injection.catalogue.h2_client`, drawn from the HTTP/2 rows
+  of the project's own attack-surface work so the names line up with the
+  defences that answer them.
+
 - **`H1FaultServer`** — a deliberately misbehaving HTTP/1.1 server, for
   testing your own HTTP/1.1 client.  The toolkit documented "two directions
   are supported" and that was true, but each protocol had only **one** and
@@ -104,6 +136,17 @@ so the editable install's metadata catches up.
   reachable the same way (`CATALOGUE_H1` / `CATALOGUE_H2`, with `CATALOGUE`
   unchanged).  `ScenarioH1Server.steps` is a tuple, as `ScenarioH2.steps`
   always was.
+
+- **The two fault-injection examples are one.**
+  `examples/scenario_h1_fault_injection.py` and
+  `examples/scenario_h2_fault_injection.py` are replaced by
+  `examples/fault_injection.py`, organised by grid cell: a broken client
+  against a real server (A), a broken server against real clients (B — all
+  nine HTTP/1.1 cases driven **twice**, once with BlackBull's client and once
+  with `httpx`), a broken HTTP/2 server against `httpx` (C), what is not
+  implemented and why (D), and the same scenarios as replayable JSON (E).
+  Both old files' content is carried over.  One file per cell would have meant
+  four, and the next cell five.
 
 - **The fault-injection documentation states its reach as a grid**, not a
   count.  Which cell you need depends on which side you are testing, and the
