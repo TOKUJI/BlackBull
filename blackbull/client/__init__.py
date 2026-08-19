@@ -11,7 +11,12 @@ from blackbull.fault_injection.scenario_h1 import (
     ReadResponse,
     Scenario,
     ScenarioResult,
-    SendBytes,
+    # Re-exported under the deprecated spelling *without* going through the
+    # module ``__getattr__`` that warns — this file's own comment promises
+    # exactly that, and importing the old name here made the package emit
+    # its own deprecation warning on every ``import blackbull.client``.
+    SendRawBytes as SendBytes,
+    SendRawBytes,
     Sleep,
     Step,
 )
@@ -38,6 +43,7 @@ __all__ = [
     'Scenario',
     'ScenarioResult',
     'SendBytes',
+    'SendRawBytes',
     'Sleep',
     'Step',
     'WebSocketClient',

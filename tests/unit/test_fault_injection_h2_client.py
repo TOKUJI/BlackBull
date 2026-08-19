@@ -64,7 +64,9 @@ class _SilentReader(AbstractReader):
 
 
 def _client(writer=None, reader=None) -> HTTP2Client:
-    c = HTTP2Client('localhost', 1)
+    # scenario_mode: a scenario owns the wire from byte zero, so the client
+    # sends no preface of its own for the scenario's to collide with.
+    c = HTTP2Client('localhost', 1, scenario_mode=True)
     c._writer = writer or _RecordingWriter()
     c._reader = reader or _SilentReader()
     return c
@@ -276,7 +278,8 @@ class TestAgainstARealServer:
             return 'ok'
 
         async with NativeTestServer(app) as server:
-            client = HTTP2Client('127.0.0.1', server.port)
+            client = HTTP2Client('127.0.0.1', server.port,
+                                 scenario_mode=True)
             async with client:
                 result = await asyncio.wait_for(
                     client.execute_scenario(CATALOGUE[case_name]()),
@@ -301,3 +304,88 @@ class TestAgainstARealServer:
         assert holding == {'preface_never_arrives',
                            'header_block_never_finished',
                            'data_frame_lies_about_length'}
+
+
+# ===========================================================================
+# A scenario owns the wire
+# ===========================================================================
+
+class TestScenarioOwnsTheWire:
+    """HTTP/2 has a connect-time preamble; HTTP/1.1 does not.
+
+    That single asymmetry is enough to make a whole grid cell measure
+    nothing.  A client that has handshaked is not a blank wire, so a
+    scenario's ``SendPreface`` lands *second* and corrupts the frame
+    stream ahead of every later step.  A lenient peer skips the junk and
+    the scenario reports success while the fault never arrived.
+
+    These pin both halves: exactly one preface goes out in scenario mode,
+    and the collision is refused rather than written.
+    """
+
+    async def test_scenario_mode_puts_exactly_one_preface_on_the_wire(self):
+        writer = _RecordingWriter()
+        c = HTTP2Client('localhost', 1, scenario_mode=True)
+        c._writer = writer
+        c._reader = _SilentReader()
+        await c._start()          # the no-op that makes the mode work
+
+        await c.execute_scenario(ScenarioH2Client(steps=(SendPreface(),)))
+
+        assert bytes(writer.data).count(b'PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n') == 1
+
+    async def test_a_preface_step_on_a_handshaked_client_is_refused(self):
+        c = HTTP2Client('localhost', 1)     # not scenario_mode
+        c._writer = _RecordingWriter()
+        c._reader = _SilentReader()
+
+        with pytest.raises(RuntimeError, match='already-prefaced'):
+            await c.execute_scenario(
+                ScenarioH2Client(steps=(SendPreface(),)))
+
+    async def test_the_refusal_happens_before_any_byte_is_written(self):
+        """Whole or nothing — a half-run scenario is worse than none."""
+        writer = _RecordingWriter()
+        c = HTTP2Client('localhost', 1)
+        c._writer = writer
+        c._reader = _SilentReader()
+
+        with pytest.raises(RuntimeError):
+            await c.execute_scenario(ScenarioH2Client(steps=(
+                SendFrame(FrameTypes.PING, flags=0, stream_id=0,
+                          data=b'\x00' * 8),
+                SendPreface(),
+            )))
+
+        assert bytes(writer.data) == b'', (
+            'the PING was written before the scenario was rejected')
+
+    async def test_read_response_is_refused_while_the_receive_loop_runs(self):
+        """Both would read the same socket; which one wins is a coin toss."""
+        c = HTTP2Client('localhost', 1)
+        c._writer = _RecordingWriter()
+        c._reader = _SilentReader()
+        c._receive_task = asyncio.create_task(asyncio.sleep(3600))
+        try:
+            with pytest.raises(RuntimeError, match='races the receive loop'):
+                await c.execute_scenario(
+                    ScenarioH2Client(steps=(ReadResponse(timeout=0.1),)))
+        finally:
+            c._receive_task.cancel()
+
+    async def test_the_h1_twin_needs_no_such_mode(self):
+        """The asymmetry is real and belongs to HTTP/2 alone.
+
+        ``HTTP1Client._start`` is a no-op, so an H1 scenario already owns
+        the wire.  If that ever stops being true, the H1 cell acquires the
+        same silent failure and this test is where it surfaces.
+        """
+        from blackbull.client.http1 import HTTP1Client
+
+        writer = _RecordingWriter()
+        c = HTTP1Client('localhost', 1)
+        c._writer = writer
+        c._reader = _SilentReader()
+        await c._start()
+
+        assert bytes(writer.data) == b''
