@@ -25,6 +25,22 @@ from ..server.sender import AbstractWriter, AsyncioWriter, HTTP2Sender
 from ..utils import HTTP2 as _HTTP2_PREFACE
 from ._connect import DEFAULT_CONNECT_TIMEOUT, open_connection as _open_connection
 from .exceptions import ConnectionError, ProtocolError, StreamReset
+# Module-level and at runtime, as ``http1.py`` imports its own scenario
+# types: the annotation on ``execute_scenario`` has to be resolvable from
+# this module, and a TYPE_CHECKING import is not (beartype looks in the
+# module namespace at call time, where the name would not exist).
+from ..fault_injection.scenario_h2_client import (
+    Abort as _ScAbort,
+    CLIENT_PREFACE as _SC_PREFACE,
+    ReadResponse as _ScReadResponse,
+    ScenarioH2Client,
+    ScenarioH2ClientResult,
+    SendBytes as _ScSendBytes,
+    SendFrame as _ScSendFrame,
+    SendPreface as _ScSendPreface,
+    Sleep as _ScSleep,
+    encode_frame as _sc_encode_frame,
+)
 from .response import ResponderFactory
 
 logger = logging.getLogger(__name__)
@@ -278,6 +294,86 @@ class HTTP2Client:
             raise
 
         return await future
+
+    async def execute_scenario(
+        self, scenario: ScenarioH2Client,
+    ) -> ScenarioH2ClientResult:
+        """Walk ``scenario.steps`` against the connected socket.
+
+        The HTTP/2 counterpart of
+        :meth:`blackbull.client.http1.HTTP1Client.execute_scenario`, and
+        deliberately the same shape: it **never raises**, folding every
+        outcome — a frame read, a timeout, a transport failure, a
+        hard-abort — into the returned result so callers categorise without
+        a try/except per scenario.
+
+        Step dispatch:
+          * ``SendPreface``  → the RFC 9113 §3.4 preface bytes
+          * ``SendFrame``    → one frame, assembled here rather than by the
+            production sender (which is what lets a scenario declare a
+            length its payload does not match)
+          * ``SendBytes``    → arbitrary bytes, optionally one at a time
+          * ``Sleep``        → :func:`asyncio.sleep`
+          * ``ReadResponse`` → one frame, or a recorded timeout
+          * ``Abort``        → ``transport.abort()``; walks no further steps
+
+        This lives on the client rather than in ``fault_injection`` because
+        its twin does: a scenario executor needs the connection, and the
+        client is what owns one.
+        """
+        import time as _time  # noqa: PLC0415
+
+        assert self._writer is not None, 'connect via __aenter__ first'
+        result = ScenarioH2ClientResult()
+        t0 = _time.monotonic()
+        try:
+            for step in scenario.steps:
+                if isinstance(step, _ScSendPreface):
+                    await self._writer.write(_SC_PREFACE)
+                elif isinstance(step, _ScSendFrame):
+                    await self._writer.write(_sc_encode_frame(step))
+                elif isinstance(step, _ScSendBytes):
+                    await self._write_paced(step.data, step.byte_interval)
+                elif isinstance(step, _ScSleep):
+                    await asyncio.sleep(step.duration)
+                elif isinstance(step, _ScReadResponse):
+                    try:
+                        result.response = await asyncio.wait_for(
+                            self._receive_frame(), timeout=step.timeout)
+                    except (asyncio.TimeoutError, TimeoutError) as exc:
+                        result.timed_out = True
+                        result.exception = repr(exc)
+                        return result
+                elif isinstance(step, _ScAbort):
+                    # Hard-close: RST rather than FIN.  Subsequent socket
+                    # I/O would raise, so short-circuit like the twin does.
+                    transport = getattr(self._writer, 'transport', None)
+                    if transport is not None:
+                        transport.abort()
+                    result.aborted = True
+                    return result
+                else:
+                    raise TypeError(f'unknown step type: {type(step).__name__}')
+                result.steps_completed += 1
+        except Exception as exc:  # noqa: BLE001
+            result.exception = repr(exc)
+        finally:
+            result.elapsed_s = _time.monotonic() - t0
+        return result
+
+    async def _write_paced(self, data: bytes, byte_interval: float) -> None:
+        """Write *data*, optionally one byte at a time.
+
+        A trickle is not a slow write of the whole buffer: each byte has to
+        reach the wire before the pause, or the peer sees one burst after
+        the total delay and the scenario tests nothing.
+        """
+        if byte_interval <= 0:
+            await self._writer.write(data)
+            return
+        for i in range(len(data)):
+            await self._writer.write(data[i:i + 1])
+            await asyncio.sleep(byte_interval)
 
     async def send_raw_frame(self, frame: FrameBase) -> None:
         """Escape hatch: write a raw frame to the wire (negative-path tests)."""

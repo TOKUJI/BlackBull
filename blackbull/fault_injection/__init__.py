@@ -68,6 +68,24 @@ from .scenario_h1_server import (
     scenario_from_json as scenario_h1_server_from_json,
     scenario_to_json as scenario_h1_server_to_json,
 )
+# Fourth vocabulary, fourth set of role-qualified aliases.  ``H2C`` reads as
+# "HTTP/2 client-side"; the unprefixed names stay with the HTTP/1.1 client
+# vocabulary that had them first, ``H1S`` is the HTTP/1.1 server side and
+# ``H2`` the HTTP/2 server side.
+from .scenario_h2_client import (
+    Abort as H2CAbort,
+    CLIENT_PREFACE as H2C_CLIENT_PREFACE,
+    ReadResponse as H2CReadResponse,
+    ScenarioH2Client,
+    ScenarioH2ClientResult,
+    SendBytes as H2CSendBytes,
+    SendFrame as H2CSendFrame,
+    SendPreface as H2CSendPreface,
+    Sleep as H2CSleep,
+    StepOpH2Client,
+    scenario_from_json as scenario_h2_client_from_json,
+    scenario_to_json as scenario_h2_client_to_json,
+)
 from .h2_server import (
     CLIENT_PREFACE,
     H2FaultServer,
@@ -102,6 +120,13 @@ __all__ = [
     "H1SSendRawBytes",
     "H1SSleep",
     "H2Abort",
+    "H2CAbort",
+    "H2CReadResponse",
+    "H2CSendBytes",
+    "H2CSendFrame",
+    "H2CSendPreface",
+    "H2CSleep",
+    "H2C_CLIENT_PREFACE",
     "H2FaultServer",
     "H2FaultServerError",
     "H2Sleep",
@@ -111,8 +136,11 @@ __all__ = [
     "Scenario",
     "ScenarioH1Server",
     "StepOpH1Server",
+    "StepOpH2Client",
     "ScenarioH1ServerResult",
     "ScenarioH2",
+    "ScenarioH2Client",
+    "ScenarioH2ClientResult",
     "ScenarioH2Result",
     "ScenarioResult",
     "SendBytes",
@@ -132,6 +160,8 @@ __all__ = [
     "run_scenario",
     "scenario_h1_server_from_json",
     "scenario_h1_server_to_json",
+    "scenario_h2_client_from_json",
+    "scenario_h2_client_to_json",
     "scenario_h2_from_json",
     "scenario_h2_to_json",
     "serialize_frame",

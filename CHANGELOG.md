@@ -53,6 +53,21 @@ so the editable install's metadata catches up.
 
 ### Added
 
+- **`HTTP2Client.execute_scenario`** — the fault-injection grid's last cell.
+  `HTTP1Client` had a scenario executor and `HTTP2Client` did not, so an
+  HTTP/2 client-side scenario could only be written as procedural code
+  against a raw socket.  The vocabulary mirrors the HTTP/1.1 client side
+  (`SendBytes`, `ReadResponse`, `Sleep`, `Abort`, and `ScenarioResult`'s
+  field names) and adds the two steps HTTP/1.1 has no use for: `SendPreface`,
+  because HTTP/1.1 has no connection preface and a client scenario may want
+  to delay, split or withhold it; and `SendFrame`, because HTTP/2 is framed —
+  its `declared_length` sets the header's length independently of the
+  payload, which is the direct way to say "the peer lied about how much is
+  coming".  Eleven named cases ship in
+  `blackbull.fault_injection.catalogue.h2_client`, drawn from the HTTP/2 rows
+  of the project's own attack-surface work so the names line up with the
+  defences that answer them.
+
 - **`H1FaultServer`** — a deliberately misbehaving HTTP/1.1 server, for
   testing your own HTTP/1.1 client.  The toolkit documented "two directions
   are supported" and that was true, but each protocol had only **one** and

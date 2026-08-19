@@ -7,7 +7,7 @@ are testing::
 
               broken CLIENT -> your server     broken SERVER -> your client
     HTTP/1.1  A. yes                           B. yes
-    HTTP/2    D. not implemented               C. yes
+    HTTP/2    D. yes                           C. yes
 
 This one file walks every implemented cell, then shows the same scenarios
 as data rather than code.  It replaces the two per-protocol examples that
@@ -256,15 +256,60 @@ async def cell_c_broken_h2_server() -> None:
 # ===========================================================================
 # D. HTTP/2 — broken client against a real server
 # ===========================================================================
+#
+# The counterpart is BlackBull's own HTTP/2 server, which is the honest
+# choice for this cell: the toolkit is aimed at other people's
+# implementations, and the one implementation always on hand in an example
+# is ours.  Point it at yours by changing the host and port.
+#
+# Three catalogue cases close with a long Sleep because *holding* the
+# connection is the fault they stage.  Those are left out here — what ends
+# them is the server's own deadline, which is a different question at a
+# different timescale.
 
-def cell_d_not_implemented() -> None:
+_SELF_TERMINATING = (
+    'rapid_reset_burst', 'ping_flood', 'settings_flood',
+    'unknown_frame_type', 'settings_ack_with_payload',
+    'abort_mid_header_block',
+)
+
+
+async def cell_d_broken_h2_client() -> None:
     _heading('D', 'HTTP/2 — a broken client against a real server')
-    print('not implemented.\n')
-    print('  HTTP1Client has execute_scenario; HTTP2Client does not, so an')
-    print('  HTTP/2 client-side scenario has to be written as procedural')
-    print('  code against a raw socket.')
-    print('\n  Also outside the toolkit, stated so you can plan around it:')
-    print('    gRPC      transport-layer misbehaviour only, via cell C —')
+    from blackbull import BlackBull
+    from blackbull.client.http2 import HTTP2Client
+    from blackbull.fault_injection.catalogue.h2_client import (
+        CATALOGUE as CATALOGUE_H2C,
+    )
+    from blackbull.testing import NativeTestServer
+
+    app = BlackBull()
+
+    @app.route(path='/')
+    async def _root(conn):
+        return 'ok'
+
+    print(f'{len(_SELF_TERMINATING)} of {len(CATALOGUE_H2C)} catalogue cases '
+          f'(the rest hold the connection open on purpose).')
+    async with NativeTestServer(app) as server:
+        print(f'counterpart: BlackBull on 127.0.0.1:{server.port}')
+        for name in _SELF_TERMINATING:
+            async with HTTP2Client('127.0.0.1', server.port) as client:
+                result = await asyncio.wait_for(
+                    client.execute_scenario(CATALOGUE_H2C[name]()),
+                    timeout=10.0)
+            print(f'\n  --- {name} ---')
+            print(f'    steps completed: {result.steps_completed}')
+            print(f'    timed out:       {result.timed_out}')
+            print(f'    aborted:         {result.aborted}')
+            if result.exception is not None:
+                print(f'    exception:       {result.exception}')
+            print(f'    elapsed:         {result.elapsed_s:.3f}s')
+
+
+def cell_d_what_is_still_outside() -> None:
+    print('\n  Outside the toolkit, stated so you can plan around it:')
+    print('    gRPC      transport-layer misbehaviour only, via cells C/D —')
     print('              it rides HTTP/2, but an invalid grpc-status or a')
     print('              malformed length-prefixed message cannot be')
     print('              expressed.')
@@ -316,7 +361,8 @@ async def main() -> None:
     await cell_a_broken_client()
     await cell_b_broken_server()
     await cell_c_broken_h2_server()
-    cell_d_not_implemented()
+    await cell_d_broken_h2_client()
+    cell_d_what_is_still_outside()
     await cell_e_scenarios_as_data()
     print()
 

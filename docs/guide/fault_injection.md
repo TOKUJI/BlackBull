@@ -12,16 +12,18 @@ because which cell you need depends on which side you are testing:
 | | Broken **client** → your server | Broken **server** → your client |
 |---|---|---|
 | **HTTP/1.1** | ✅ `HTTP1Client.execute_scenario` + `oracle_h1` | ✅ `H1FaultServer` + catalogue |
-| **HTTP/2** | ✗ not implemented | ✅ `H2FaultServer` + catalogue |
+| **HTTP/2** | ✅ `HTTP2Client.execute_scenario` + catalogue | ✅ `H2FaultServer` + catalogue |
 | **WebSocket** | ✗ not implemented | ✗ not implemented |
 | **gRPC** | — | ⚠ transport only, via `H2FaultServer` |
 | **MQTT** | — | — out of scope |
 
 * **Broken client → your server** drives a target server through
-  slowloris-style misbehaviour: trickled bytes, partial headers,
-  mid-request idle, abrupt RST.  The `oracle_h1` half compares two
-  servers' responses to the same scenario, so you can diff your server
-  against a reference such as nginx.
+  slowloris-style misbehaviour: on HTTP/1.1 trickled bytes, partial
+  headers, mid-request idle, abrupt RST; on HTTP/2 a preface that never
+  arrives, a Rapid Reset burst, a PING or SETTINGS flood, a header block
+  opened and abandoned, a frame header that lies about its length.  The
+  `oracle_h1` half compares two servers' responses to the same scenario, so
+  you can diff your server against a reference such as nginx.
 * **Broken server → your client** emits misbehaviour at a connected
   client: on HTTP/1.1 a trickled status line, a `Content-Length` that
   lies, a chunked body that stops mid-chunk; on HTTP/2 half-closed
@@ -259,6 +261,45 @@ production serialiser cannot emit a fault that serialiser has**, so the
 one bug class it would be least able to find is the one in the code it
 shares.  The HTTP/2 half carries its own frame encoder for the same
 reason.
+
+## Quick start — HTTP/2 client-side
+
+Drive your own HTTP/2 **server** through misbehaviour a real client can
+produce:
+
+```python
+import pytest
+from blackbull.client import HTTP2Client
+from blackbull.fault_injection.catalogue.h2_client import rapid_reset_burst
+
+@pytest.mark.asyncio
+async def test_my_server_meters_rapid_reset():
+    async with HTTP2Client('127.0.0.1', my_port) as client:
+        result = await client.execute_scenario(rapid_reset_burst())
+    # The scenario never raises; everything lands on the result.
+    assert result.exception is None
+```
+
+The vocabulary mirrors the HTTP/1.1 client side — `SendBytes`,
+`ReadResponse`, `Sleep`, `Abort`, and `ScenarioResult`'s field names — and
+adds two steps HTTP/1.1 has no use for:
+
+| Step | Why HTTP/2 needs it |
+|---|---|
+| `SendPreface` | HTTP/1.1 has no connection preface.  A *step* rather than a flag, because a client scenario may want to delay it, split it, or never send it |
+| `SendFrame` | HTTP/2 is framed where HTTP/1.1 is a byte stream.  `declared_length` sets the header's length independently of the payload — the direct way to say "the peer lied about how much is coming" |
+
+Eleven named cases ship in `blackbull.fault_injection.catalogue.h2_client`,
+drawn from the HTTP/2 rows of the project's own attack-surface work so the
+names line up with the defences that answer them: `rapid_reset_burst`
+(CVE-2023-44487), `ping_flood` (CVE-2019-9512), `settings_flood`
+(CVE-2019-9515), `empty_continuation_flood` (the CVE-2024-27983 shape),
+`header_block_never_finished`, `data_frame_lies_about_length`,
+`unknown_frame_type`, `settings_ack_with_payload`, `preface_never_arrives`,
+`preface_trickled`, `abort_mid_header_block`.
+
+Three of them end with a long `Sleep` because *holding* the connection is
+the fault they stage; what ends those is your server's own deadline.
 
 ## Safety locks
 
