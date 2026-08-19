@@ -5856,11 +5856,22 @@ produce:</p>
 
 <span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">asyncio</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_my_server_meters_rapid_reset</span><span class="p">():</span>
-    <span class="k">async</span> <span class="k">with</span> <span class="n">HTTP2Client</span><span class="p">(</span><span class="s1">'127.0.0.1'</span><span class="p">,</span> <span class="n">my_port</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
+    <span class="k">async</span> <span class="k">with</span> <span class="n">HTTP2Client</span><span class="p">(</span><span class="s1">'127.0.0.1'</span><span class="p">,</span> <span class="n">my_port</span><span class="p">,</span>
+                           <span class="n">scenario_mode</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
         <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">execute_scenario</span><span class="p">(</span><span class="n">rapid_reset_burst</span><span class="p">())</span>
     <span class="c1"># The scenario never raises; everything lands on the result.</span>
     <span class="k">assert</span> <span class="n">result</span><span class="o">.</span><span class="n">exception</span> <span class="ow">is</span> <span class="kc">None</span>
 </code></pre></div>
+<p><code>scenario_mode=True</code> is required, and is the one place the two client
+vocabularies genuinely differ.  HTTP/1.1 has nothing to send on connect,
+so an HTTP/1.1 scenario owns the wire from byte zero for free.  HTTP/2
+does not: the client normally sends the preface and a SETTINGS frame as
+soon as it connects, and a scenario running on top of that would put a
+<em>second</em> preface on the wire, corrupting the frame stream ahead of every
+later step.  <code>scenario_mode</code> suppresses the client's own preamble and its
+receive loop, handing the connection to the scenario intact.</p>
+<p>Without it, <code>execute_scenario</code> raises before writing a byte rather than
+sending something the peer will read as garbage.</p>
 <p>The vocabulary mirrors the HTTP/1.1 client side — <code>SendBytes</code>,
 <code>ReadResponse</code>, <code>Sleep</code>, <code>Abort</code>, and <code>ScenarioResult</code>'s field names — and
 adds two steps HTTP/1.1 has no use for:</p>
