@@ -152,14 +152,14 @@ class TestTheServerSideHalfCloses:
     """The same step, driven from the breaking *server* — cells B and C."""
 
     async def test_h1_fault_server_half_closes_after_a_partial_response(self):
-        """FIN mid-body: the client sees a truncated body, not a reset.
+        """FIN mid-body: the peer sees a truncated body, not a reset.
 
-        `CloseGracefully` closes both directions at once; this leaves the
-        read side open, which is how a real server that has finished
-        writing but not finished reading behaves.
+        Driven on a raw socket rather than through a client library.  What
+        is under test is that the server sends its headers and then FIN,
+        and a client library would answer that question only through its
+        own timeout and error-mapping policy — which differs by version
+        and turned a server assertion into a test of httpx.
         """
-        import httpx
-
         from blackbull.fault_injection.h1_server import H1FaultServer
         from blackbull.fault_injection.scenario_h1_server import (
             EndHeaders, HalfClose, ScenarioH1Server, SendHeader,
@@ -175,13 +175,137 @@ class TestTheServerSideHalfCloses:
         ))
 
         async with H1FaultServer(scenario) as srv:
-            async with httpx.AsyncClient(timeout=5.0) as c:
-                with pytest.raises(httpx.HTTPError):
-                    await c.get(f'http://127.0.0.1:{srv.port}/')
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection('127.0.0.1', srv.port), timeout=5.0)
+            try:
+                writer.write(b'GET / HTTP/1.1\r\nHost: x\r\n\r\n')
+                await writer.drain()
+                # read() returns b'' at EOF, so this both proves the
+                # headers arrived and that FIN followed them.
+                data = await asyncio.wait_for(reader.read(-1), timeout=10.0)
+            finally:
+                writer.close()
 
-        assert srv.last_result is not None, srv.last_result
+        assert data.startswith(b'HTTP/1.1 200 OK\r\n'), data[:60]
+        assert b'content-length: 100' in data.lower()
+        assert b'\r\n\r\n' in data, 'headers never ended'
+        assert data.split(b'\r\n\r\n', 1)[1] == b'', (
+            'the server sent body bytes it declared it would not')
+
+        assert srv.last_result is not None
         assert srv.last_result.exception is None, srv.last_result.exception
         assert srv.last_result.half_closed is True, (
             'the transport refused the half-close')
-        assert srv.last_result.terminated is True, (
-            'a half-close ends the scenario for the server side')
+
+
+class TestHalfCloseIsNeverTerminal:
+    """The role-axis rule, as a test.
+
+    The first cut of this step made `HalfClose` terminal on the two server
+    cells and non-terminal on the two client cells — the exact asymmetry
+    this sprint exists to remove, shipped by the sprint removing it.  It
+    also leaked: a terminal step returns from the connection handler
+    without closing anything, so the half-open socket survived until
+    teardown reaped it.
+
+    CI caught it as a timeout on one Python version.  This catches it as a
+    statement about all four.
+    """
+
+    async def test_a_step_after_half_close_still_runs_on_the_h1_server(self):
+        """Asserted as behaviour: the step after it executed.
+
+        `Abort` and `CloseGracefully` end a scenario; `HalfClose` must not,
+        because the connection is still readable — that *is* the difference
+        between this step and the other two.
+        """
+        from blackbull.fault_injection.h1_server import H1FaultServer
+        from blackbull.fault_injection.scenario_h1_server import (
+            EndHeaders, HalfClose, ScenarioH1Server, SendStatusLine, Sleep,
+            WaitForRequest,
+        )
+
+        async with H1FaultServer(ScenarioH1Server(steps=(
+                WaitForRequest(timeout=5.0),
+                SendStatusLine(code=204, reason='No Content'),
+                EndHeaders(),
+                HalfClose(),
+                Sleep(0.0),          # must run
+        ))) as srv:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection('127.0.0.1', srv.port), timeout=5.0)
+            try:
+                writer.write(b'GET / HTTP/1.1\r\nHost: x\r\n\r\n')
+                await writer.drain()
+                await asyncio.wait_for(reader.read(-1), timeout=10.0)
+            finally:
+                writer.close()
+            result = srv.last_result
+
+        assert result is not None
+        assert result.steps_completed[-1] == 'Sleep', (
+            f'the step after HalfClose never ran: {result.steps_completed}')
+        assert result.terminated is False
+
+    async def test_a_step_after_half_close_still_runs_on_the_h2_server(self):
+        """The HTTP/2 twin — the asymmetry was in both server halves."""
+        from blackbull.fault_injection.h2_server import H2FaultServer
+        from blackbull.fault_injection.scenario_h2 import (
+            HalfClose, ScenarioH2, Sleep,
+        )
+
+        async with H2FaultServer(ScenarioH2(steps=(
+                HalfClose(),
+                Sleep(0.0),          # must run
+        ))) as srv:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection('127.0.0.1', srv.port), timeout=5.0)
+            try:
+                writer.write(b'PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n')
+                await writer.drain()
+                await asyncio.wait_for(reader.read(-1), timeout=10.0)
+            finally:
+                writer.close()
+            result = srv.last_result
+
+        assert result is not None, 'the scenario never ran'
+        assert result.half_closed is True
+        assert result.terminated is False, (
+            'HalfClose ended the HTTP/2 scenario instead of continuing it')
+
+    async def test_the_server_releases_the_socket_when_the_scenario_ends(self):
+        """A half-closed scenario must still finish and close.
+
+        The leak the terminal-step bug caused: FIN went out, the handler
+        returned, and nothing closed the read side.
+        """
+        from blackbull.fault_injection.h1_server import H1FaultServer
+        from blackbull.fault_injection.scenario_h1_server import (
+            EndHeaders, HalfClose, ScenarioH1Server, SendStatusLine,
+            WaitForRequest,
+        )
+
+        scenario = ScenarioH1Server(steps=(
+            WaitForRequest(timeout=5.0),
+            SendStatusLine(code=204, reason='No Content'),
+            EndHeaders(),
+            HalfClose(),
+        ))
+
+        async with H1FaultServer(scenario) as srv:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection('127.0.0.1', srv.port), timeout=5.0)
+            try:
+                writer.write(b'GET / HTTP/1.1\r\nHost: x\r\n\r\n')
+                await writer.drain()
+                await asyncio.wait_for(reader.read(-1), timeout=10.0)
+            finally:
+                writer.close()
+
+            result = srv.last_result
+
+        assert result is not None
+        assert result.half_closed is True
+        assert result.terminated is False, (
+            'HalfClose ended the scenario instead of continuing it')
+        assert 'HalfClose' in result.steps_completed

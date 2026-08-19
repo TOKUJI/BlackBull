@@ -288,11 +288,14 @@ class H1FaultServer:
             return True
 
         if isinstance(step, HalfClose):
-            # FIN on the write side only.  Terminal for *this* server —
-            # it has nothing left to say — but the client still has an
-            # open read side, which is the difference being scripted.
+            # FIN on the write side only, and **not** terminal — the
+            # connection is still readable, which is the whole difference
+            # from CloseGracefully.  Making it terminal would return from
+            # the handler without closing anything, leaving a half-open
+            # socket for teardown to reap; it would also disagree with the
+            # client half, where a half-closed scenario is still reading.
             result.half_closed = half_close(writer)
-            return True
+            return False
 
         raise H1FaultServerError(f'unknown scenario step: {step!r}')
 

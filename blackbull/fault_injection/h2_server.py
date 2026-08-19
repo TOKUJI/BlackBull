@@ -497,8 +497,9 @@ class H2FaultServer:
             # FIN without a GOAWAY: the peer is told the stream of frames
             # has ended without being told why, which is a different case
             # from CloseGracefully and one clients handle differently.
+            # Not terminal, for the reasons in the HTTP/1.1 twin.
             result.half_closed = half_close(writer)
-            return True
+            return False
 
         raise TypeError(f'unknown step: {type(step).__name__}')
 
