@@ -1240,6 +1240,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#quick-start-http2-client-side" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick start — HTTP/2 client-side
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#safety-locks" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2545,6 +2556,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/catalogue/h2_client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    h2_client
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2708,6 +2747,34 @@
     
   
     scenario_h2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/scenario_h2_client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    scenario_h2_client
   
 
     
@@ -4850,6 +4917,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/testing/grpc/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    grpc
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/testing/native/" class="md-nav__link">
         
   
@@ -5329,6 +5424,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#quick-start-http2-client-side" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick start — HTTP/2 client-side
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#safety-locks" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5393,7 +5499,7 @@ because which cell you need depends on which side you are testing:</p>
 </tr>
 <tr>
 <td><strong>HTTP/2</strong></td>
-<td>✗ not implemented</td>
+<td>✅ <code>HTTP2Client.execute_scenario</code> + catalogue</td>
 <td>✅ <code>H2FaultServer</code> + catalogue</td>
 </tr>
 <tr>
@@ -5415,10 +5521,12 @@ because which cell you need depends on which side you are testing:</p>
 </table>
 <ul>
 <li><strong>Broken client → your server</strong> drives a target server through
-  slowloris-style misbehaviour: trickled bytes, partial headers,
-  mid-request idle, abrupt RST.  The <code>oracle_h1</code> half compares two
-  servers' responses to the same scenario, so you can diff your server
-  against a reference such as nginx.</li>
+  slowloris-style misbehaviour: on HTTP/1.1 trickled bytes, partial
+  headers, mid-request idle, abrupt RST; on HTTP/2 a preface that never
+  arrives, a Rapid Reset burst, a PING or SETTINGS flood, a header block
+  opened and abandoned, a frame header that lies about its length.  The
+  <code>oracle_h1</code> half compares two servers' responses to the same scenario, so
+  you can diff your server against a reference such as nginx.</li>
 <li><strong>Broken server → your client</strong> emits misbehaviour at a connected
   client: on HTTP/1.1 a trickled status line, a <code>Content-Length</code> that
   lies, a chunked body that stops mid-chunk; on HTTP/2 half-closed
@@ -5684,6 +5792,51 @@ production serialiser cannot emit a fault that serialiser has</strong>, so the
 one bug class it would be least able to find is the one in the code it
 shares.  The HTTP/2 half carries its own frame encoder for the same
 reason.</p>
+<h2 id="quick-start-http2-client-side">Quick start — HTTP/2 client-side<a class="headerlink" href="#quick-start-http2-client-side" title="Permanent link">&para;</a></h2>
+<p>Drive your own HTTP/2 <strong>server</strong> through misbehaviour a real client can
+produce:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.client</span><span class="w"> </span><span class="kn">import</span> <span class="n">HTTP2Client</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.fault_injection.catalogue.h2_client</span><span class="w"> </span><span class="kn">import</span> <span class="n">rapid_reset_burst</span>
+
+<span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">asyncio</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_my_server_meters_rapid_reset</span><span class="p">():</span>
+    <span class="k">async</span> <span class="k">with</span> <span class="n">HTTP2Client</span><span class="p">(</span><span class="s1">'127.0.0.1'</span><span class="p">,</span> <span class="n">my_port</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">execute_scenario</span><span class="p">(</span><span class="n">rapid_reset_burst</span><span class="p">())</span>
+    <span class="c1"># The scenario never raises; everything lands on the result.</span>
+    <span class="k">assert</span> <span class="n">result</span><span class="o">.</span><span class="n">exception</span> <span class="ow">is</span> <span class="kc">None</span>
+</code></pre></div>
+<p>The vocabulary mirrors the HTTP/1.1 client side — <code>SendBytes</code>,
+<code>ReadResponse</code>, <code>Sleep</code>, <code>Abort</code>, and <code>ScenarioResult</code>'s field names — and
+adds two steps HTTP/1.1 has no use for:</p>
+<table>
+<thead>
+<tr>
+<th>Step</th>
+<th>Why HTTP/2 needs it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SendPreface</code></td>
+<td>HTTP/1.1 has no connection preface.  A <em>step</em> rather than a flag, because a client scenario may want to delay it, split it, or never send it</td>
+</tr>
+<tr>
+<td><code>SendFrame</code></td>
+<td>HTTP/2 is framed where HTTP/1.1 is a byte stream.  <code>declared_length</code> sets the header's length independently of the payload — the direct way to say "the peer lied about how much is coming"</td>
+</tr>
+</tbody>
+</table>
+<p>Eleven named cases ship in <code>blackbull.fault_injection.catalogue.h2_client</code>,
+drawn from the HTTP/2 rows of the project's own attack-surface work so the
+names line up with the defences that answer them: <code>rapid_reset_burst</code>
+(CVE-2023-44487), <code>ping_flood</code> (CVE-2019-9512), <code>settings_flood</code>
+(CVE-2019-9515), <code>empty_continuation_flood</code> (the CVE-2024-27983 shape),
+<code>header_block_never_finished</code>, <code>data_frame_lies_about_length</code>,
+<code>unknown_frame_type</code>, <code>settings_ack_with_payload</code>, <code>preface_never_arrives</code>,
+<code>preface_trickled</code>, <code>abort_mid_header_block</code>.</p>
+<p>Three of them end with a long <code>Sleep</code> because <em>holding</em> the connection is
+the fault they stage; what ends those is your server's own deadline.</p>
 <h2 id="safety-locks">Safety locks<a class="headerlink" href="#safety-locks" title="Permanent link">&para;</a></h2>
 <p>Two locks ensure the deliberate-misbehaviour code path is unreachable
 from a production process:</p>
@@ -5697,21 +5850,47 @@ from a production process:</p>
 <p>The HTTP/1.1 client-side scenario is benign by construction (it is a
 client, not a server-side code path) and carries no equivalent lock.</p>
 <h2 id="examples">Examples<a class="headerlink" href="#examples" title="Permanent link">&para;</a></h2>
-<p>Two end-to-end walkthroughs ship with the framework, one per
-direction:</p>
-<ul>
-<li><a href="https://github.com/TOKUJI/BlackBull/blob/master/examples/scenario_h2_fault_injection.py"><code>examples/scenario_h2_fault_injection.py</code></a>
-  — runs every catalogue scenario against <code>httpx</code> (over the
-  self-signed TLS context) and prints both what the server emitted
-  and how httpx reacted (<code>LocalProtocolError</code> /
-  <code>RemoteProtocolError</code> / ...).  Requires <code>pip install 'httpx[http2]'</code>.</li>
-<li><a href="https://github.com/TOKUJI/BlackBull/blob/master/examples/scenario_h1_fault_injection.py"><code>examples/scenario_h1_fault_injection.py</code></a>
-  — runs a handful of misbehaving client scenarios (slowloris
-  trickle, partial-headers idle, abrupt RST) against a stdlib
-  <code>http.server.BaseHTTPRequestHandler</code> running in a background
-  thread, and prints the resulting <code>ScenarioResult</code> for each.
-  No third-party deps.</li>
-</ul>
+<p>One walkthrough ships with the framework and covers the whole grid:</p>
+<p><a href="https://github.com/TOKUJI/BlackBull/blob/master/examples/fault_injection.py"><code>examples/fault_injection.py</code></a></p>
+<table>
+<thead>
+<tr>
+<th>Cell</th>
+<th>What it runs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>A</strong></td>
+<td>A broken <em>client</em> against a real server — slowloris trickle, partial-headers idle, abrupt RST — driven at a stdlib <code>http.server</code> in a background thread.  No third-party deps</td>
+</tr>
+<tr>
+<td><strong>B</strong></td>
+<td>A broken <em>server</em> against real clients: all nine HTTP/1.1 catalogue cases, driven <strong>twice</strong>, once with BlackBull's <code>HTTP1Client</code> and once with <code>httpx</code>.  The two columns sit side by side because that is the point — if our client and our fault server ever agree on something wrong, an independent implementation is what notices</td>
+</tr>
+<tr>
+<td><strong>C</strong></td>
+<td>A broken <em>server</em> against a real HTTP/2 client — every HTTP/2 catalogue case against <code>httpx</code> over the self-signed TLS context</td>
+</tr>
+<tr>
+<td><strong>D</strong></td>
+<td>Prints what is <strong>not</strong> implemented, and why, so the gap is visible from the same output as the coverage</td>
+</tr>
+<tr>
+<td><strong>E</strong></td>
+<td>The same scenarios as <strong>JSON Lines</strong> — serialised, round-tripped, and one loaded from hand-written JSON and executed</td>
+</tr>
+</tbody>
+</table>
+<p>It was previously two files, one per protocol.  A file per cell would have
+meant four, and the next cell five.</p>
+<p>Cells B and C need <code>pip install 'blackbull[fault-injection]'</code>; without it
+they report themselves skipped rather than failing.</p>
+<p>Cell B's output is worth reading for the two rows that come back <strong>200</strong>:
+<code>trickled_status_line</code> is correct HTTP delivered slowly, and
+<code>content_length_understated</code> is the conformant answer to a response that
+understates its body — the hazard there is the <em>next</em> exchange, not this
+one.  A fault catalogue is not a list of things a client must reject.</p>
 
 
 

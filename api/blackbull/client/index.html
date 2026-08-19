@@ -2015,6 +2015,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.client.HTTP2Client.execute_scenario" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        execute_scenario
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.client.HTTP2Client.receive_raw_frame" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3044,6 +3055,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fault_injection/catalogue/h2_client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    h2_client
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -3207,6 +3246,34 @@
     
   
     scenario_h2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fault_injection/scenario_h2_client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    scenario_h2_client
   
 
     
@@ -5349,6 +5416,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../testing/grpc/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    grpc
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../testing/native/" class="md-nav__link">
         
   
@@ -5982,6 +6077,17 @@
   
     <nav class="md-nav" aria-label="HTTP2Client">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.client.HTTP2Client.execute_scenario" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        execute_scenario
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#blackbull.client.HTTP2Client.receive_raw_frame" class="md-nav__link">
@@ -7124,6 +7230,51 @@ odd, monotonically-increasing client-initiated stream ID
 
 
 
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.client.HTTP2Client.execute_scenario" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">execute_scenario</span><span class="p">(</span><span class="n">scenario</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.client.HTTP2Client.execute_scenario" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Walk <code>scenario.steps</code> against the connected socket.</p>
+<p>The HTTP/2 counterpart of
+:meth:<code>blackbull.client.http1.HTTP1Client.execute_scenario</code>, and
+deliberately the same shape: it <strong>never raises</strong>, folding every
+outcome — a frame read, a timeout, a transport failure, a
+hard-abort — into the returned result so callers categorise without
+a try/except per scenario.</p>
+
+
+<details class="step-dispatch" open>
+  <summary>Step dispatch</summary>
+  <ul>
+<li><code>SendPreface</code>  → the RFC 9113 §3.4 preface bytes</li>
+<li><code>SendFrame</code>    → one frame, assembled here rather than by the
+  production sender (which is what lets a scenario declare a
+  length its payload does not match)</li>
+<li><code>SendBytes</code>    → arbitrary bytes, optionally one at a time</li>
+<li><code>Sleep</code>        → :func:<code>asyncio.sleep</code></li>
+<li><code>ReadResponse</code> → one frame, or a recorded timeout</li>
+<li><code>Abort</code>        → <code>transport.abort()</code>; walks no further steps</li>
+</ul>
+</details>        <p>This lives on the client rather than in <code>fault_injection</code> because
+its twin does: a scenario executor needs the connection, and the
+client is what owns one.</p>
+
+
+    </div>
+
+</div>
 
 <div class="doc doc-object doc-function">
 

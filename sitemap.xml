@@ -217,11 +217,19 @@
          <lastmod>2026-08-19</lastmod>
     </url>
     <url>
+         <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/fault_injection/scenario_h2_client/</loc>
+         <lastmod>2026-08-19</lastmod>
+    </url>
+    <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/fault_injection/catalogue/h1/</loc>
          <lastmod>2026-08-19</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/fault_injection/catalogue/h2/</loc>
+         <lastmod>2026-08-19</lastmod>
+    </url>
+    <url>
+         <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/fault_injection/catalogue/h2_client/</loc>
          <lastmod>2026-08-19</lastmod>
     </url>
     <url>
@@ -426,6 +434,10 @@
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/server/ws_codec/</loc>
+         <lastmod>2026-08-19</lastmod>
+    </url>
+    <url>
+         <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/testing/grpc/</loc>
          <lastmod>2026-08-19</lastmod>
     </url>
     <url>

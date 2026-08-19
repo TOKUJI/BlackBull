@@ -910,6 +910,34 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#testing-your-servicers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing your servicers
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Testing your servicers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-not-the-in-process-test-client" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why not the in-process test client
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#scope-and-limits" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2523,6 +2551,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/catalogue/h2_client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    h2_client
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2686,6 +2742,34 @@
     
   
     scenario_h2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/scenario_h2_client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    scenario_h2_client
   
 
     
@@ -4828,6 +4912,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/testing/grpc/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    grpc
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/testing/native/" class="md-nav__link">
         
   
@@ -5285,6 +5397,34 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#testing-your-servicers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing your servicers
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Testing your servicers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-not-the-in-process-test-client" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why not the in-process test client
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#scope-and-limits" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5519,6 +5659,76 @@ load-balancer probes:</p>
 </code></pre></div>
 <p>The raw-bytes registry path is untouched — both styles coexist on one
 registry, and <code>blackbull.grpc</code> works fully without the package installed.</p>
+<h2 id="testing-your-servicers">Testing your servicers<a class="headerlink" href="#testing-your-servicers" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.grpc</span><span class="w"> </span><span class="kn">import</span> <span class="n">GrpcStatus</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.testing.grpc</span><span class="w"> </span><span class="kn">import</span> <span class="n">GrpcTestServer</span>
+
+<span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">asyncio</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_say_hello</span><span class="p">():</span>
+    <span class="k">async</span> <span class="k">with</span> <span class="n">GrpcTestServer</span><span class="p">(</span><span class="n">app</span><span class="p">)</span> <span class="k">as</span> <span class="n">grpc</span><span class="p">:</span>
+        <span class="n">reply</span> <span class="o">=</span> <span class="k">await</span> <span class="n">grpc</span><span class="o">.</span><span class="n">unary</span><span class="p">(</span><span class="s1">'/demo.Greeter/SayHello'</span><span class="p">,</span> <span class="sa">b</span><span class="s1">'world'</span><span class="p">)</span>
+
+    <span class="k">assert</span> <span class="n">reply</span><span class="o">.</span><span class="n">status</span> <span class="ow">is</span> <span class="n">GrpcStatus</span><span class="o">.</span><span class="n">OK</span>
+    <span class="k">assert</span> <span class="n">reply</span><span class="o">.</span><span class="n">message</span> <span class="o">==</span> <span class="sa">b</span><span class="s1">'hi world'</span>
+</code></pre></div>
+<p><code>GrpcTestServer</code> serves your app on an ephemeral h2c port and drives it over
+a real socket, so the whole dispatch path runs — the gRPC analogue of
+<a href="../testing/"><code>NativeTestServer</code></a>.  The length-prefixed framing is applied for
+you: pass the message bytes your servicer expects, not an encoded frame.</p>
+<p><code>GrpcReply</code> carries what a servicer test asserts on:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>status</code></td>
+<td>the <code>grpc-status</code> trailer, as a <code>GrpcStatus</code></td>
+</tr>
+<tr>
+<td><code>grpc_message</code></td>
+<td>the <code>grpc-message</code> trailer — the human-readable detail</td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td>the first response message, unframed</td>
+</tr>
+<tr>
+<td><code>messages</code></td>
+<td>every response message, for server-streaming calls</td>
+</tr>
+<tr>
+<td><code>response</code></td>
+<td>the raw <code>ClientResponse</code>, for anything the above does not surface</td>
+</tr>
+</tbody>
+</table>
+<p>An error asserts the same way, because a gRPC error <em>is</em> a response:</p>
+<div class="highlight"><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">failing</span><span class="p">(</span><span class="n">request</span><span class="p">,</span> <span class="n">context</span><span class="p">):</span>
+    <span class="k">raise</span> <span class="n">GrpcError</span><span class="p">(</span><span class="n">GrpcStatus</span><span class="o">.</span><span class="n">NOT_FOUND</span><span class="p">,</span> <span class="s1">'no such greeting'</span><span class="p">)</span>
+
+<span class="n">reply</span> <span class="o">=</span> <span class="k">await</span> <span class="n">grpc</span><span class="o">.</span><span class="n">unary</span><span class="p">(</span><span class="s1">'/demo.Greeter/SayHello'</span><span class="p">,</span> <span class="sa">b</span><span class="s1">'x'</span><span class="p">)</span>
+<span class="k">assert</span> <span class="n">reply</span><span class="o">.</span><span class="n">status</span> <span class="ow">is</span> <span class="n">GrpcStatus</span><span class="o">.</span><span class="n">NOT_FOUND</span>
+<span class="k">assert</span> <span class="n">reply</span><span class="o">.</span><span class="n">grpc_message</span> <span class="o">==</span> <span class="s1">'no such greeting'</span>
+</code></pre></div>
+<h3 id="why-not-the-in-process-test-client">Why not the in-process test client<a class="headerlink" href="#why-not-the-in-process-test-client" title="Permanent link">&para;</a></h3>
+<p>Every gRPC response reports its status in <strong>trailing headers</strong> — success and
+error alike.  An ASGI transport with no <code>http.response.trailers</code> support
+never observes response completion, so <a href="../testing/"><code>TestClient</code></a> (which
+rides <code>httpx.ASGITransport</code>) cannot see a gRPC call finish at all.  That is
+not a limitation of your servicer; it is the framing real gRPC clients
+require.</p>
+<p><code>GrpcTestServer</code> therefore drives a real socket with BlackBull's own
+<code>HTTP2Client</code>, which handles trailers natively.  This is the pattern the
+framework's own gRPC tests have always used; it was internal until now.</p>
+<p><strong>BlackBull ships no gRPC client, and this is not one.</strong>  It is a test
+environment: <code>GrpcTestServer.port</code> is public, so <code>grpcio</code> or any other client
+can drive the same server if you would rather assert against the one your
+users will actually use.</p>
 <h2 id="scope-and-limits">Scope and limits<a class="headerlink" href="#scope-and-limits" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>All four RPC shapes are served</strong>: unary, server-streaming,

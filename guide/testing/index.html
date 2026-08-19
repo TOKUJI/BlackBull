@@ -1262,6 +1262,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#grpc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        gRPC
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#end-to-end-with-blackbulls-clients" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2700,6 +2711,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/catalogue/h2_client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    h2_client
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2863,6 +2902,34 @@
     
   
     scenario_h2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/scenario_h2_client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    scenario_h2_client
   
 
     
@@ -5005,6 +5072,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/testing/grpc/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    grpc
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/testing/native/" class="md-nav__link">
         
   
@@ -5530,6 +5625,17 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#grpc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        gRPC
+      
+    </span>
+  </a>
   
 </li>
       
@@ -6107,6 +6213,17 @@ tolerated silently.</p>
 tests — handler tracebacks surface as the test failure.  Set it
 to <code>False</code> to assert on the 500 response the framework would
 emit to a real client.</p>
+<h2 id="grpc">gRPC<a class="headerlink" href="#grpc" title="Permanent link">&para;</a></h2>
+<p>gRPC servicers need their own seam, because every gRPC response reports its
+status in <strong>trailing headers</strong> and the in-process <code>TestClient</code> transport
+cannot observe them:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.testing.grpc</span><span class="w"> </span><span class="kn">import</span> <span class="n">GrpcTestServer</span>
+
+<span class="k">async</span> <span class="k">with</span> <span class="n">GrpcTestServer</span><span class="p">(</span><span class="n">app</span><span class="p">)</span> <span class="k">as</span> <span class="n">grpc</span><span class="p">:</span>
+    <span class="n">reply</span> <span class="o">=</span> <span class="k">await</span> <span class="n">grpc</span><span class="o">.</span><span class="n">unary</span><span class="p">(</span><span class="s1">'/demo.Greeter/SayHello'</span><span class="p">,</span> <span class="sa">b</span><span class="s1">'world'</span><span class="p">)</span>
+<span class="k">assert</span> <span class="n">reply</span><span class="o">.</span><span class="n">status</span> <span class="ow">is</span> <span class="n">GrpcStatus</span><span class="o">.</span><span class="n">OK</span>
+</code></pre></div>
+<p>Full details in <a href="../grpc/#testing-your-servicers">the gRPC guide</a>.</p>
 <h2 id="end-to-end-with-blackbulls-clients">End-to-end with BlackBull's clients<a class="headerlink" href="#end-to-end-with-blackbulls-clients" title="Permanent link">&para;</a></h2>
 <p>BlackBull bundles four async clients in <code>blackbull.client</code>, with
 testing and fault injection as their primary uses:</p>
