@@ -2681,10 +2681,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.fault_injection.scenario_h1.SendBytes" class="md-nav__link">
+  <a href="#blackbull.fault_injection.scenario_h1.SendRawBytes" class="md-nav__link">
     <span class="md-ellipsis">
       
-        SendBytes
+        SendRawBytes
       
     </span>
   </a>
@@ -2707,6 +2707,17 @@
     <span class="md-ellipsis">
       
         StepOp
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.scenario_h1.__getattr__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __getattr__
       
     </span>
   </a>
@@ -5459,10 +5470,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.fault_injection.scenario_h1.SendBytes" class="md-nav__link">
+  <a href="#blackbull.fault_injection.scenario_h1.SendRawBytes" class="md-nav__link">
     <span class="md-ellipsis">
       
-        SendBytes
+        SendRawBytes
       
     </span>
   </a>
@@ -5485,6 +5496,17 @@
     <span class="md-ellipsis">
       
         StepOp
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.scenario_h1.__getattr__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __getattr__
       
     </span>
   </a>
@@ -5924,15 +5946,15 @@ try/except boilerplate per scenario.</p>
 
 
 
-<h3 id="blackbull.fault_injection.scenario_h1.SendBytes" class="doc doc-heading">
-            <code>SendBytes</code>
+<h3 id="blackbull.fault_injection.scenario_h1.SendRawBytes" class="doc doc-heading">
+            <code>SendRawBytes</code>
 
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
   </span>
 
-<a href="#blackbull.fault_injection.scenario_h1.SendBytes" class="headerlink" title="Permanent link">&para;</a></h3>
+<a href="#blackbull.fault_injection.scenario_h1.SendRawBytes" class="headerlink" title="Permanent link">&para;</a></h3>
 
 
     <div class="doc doc-contents ">
@@ -6075,6 +6097,27 @@ drop straight into JSON without a custom encoder.</p>
 
 </div>
 
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.fault_injection.scenario_h1.__getattr__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="fm">__getattr__</span><span class="p">(</span><span class="n">name</span><span class="p">)</span></code>
+
+<a href="#blackbull.fault_injection.scenario_h1.__getattr__" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>PEP 562 — warn when the deprecated spelling is actually used.</p>
+<p>A module-level assignment would alias silently; going through
+<code>__getattr__</code> means a reader who never touches <code>SendRawBytes</code> never
+sees a warning, and one who does gets it at their own call site.</p>
+
+
+    </div>
+
+</div>
 
 
 

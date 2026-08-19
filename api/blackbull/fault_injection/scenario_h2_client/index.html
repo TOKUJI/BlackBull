@@ -2715,17 +2715,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.fault_injection.scenario_h2_client.SendBytes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        SendBytes
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.fault_injection.scenario_h2_client.SendFrame" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2737,10 +2726,32 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.scenario_h2_client.SendHeaders" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SendHeaders
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.fault_injection.scenario_h2_client.SendPreface" class="md-nav__link">
     <span class="md-ellipsis">
       
         SendPreface
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.scenario_h2_client.SendRawBytes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SendRawBytes
       
     </span>
   </a>
@@ -2770,10 +2781,32 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.scenario_h2_client.__getattr__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __getattr__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.fault_injection.scenario_h2_client.encode_frame" class="md-nav__link">
     <span class="md-ellipsis">
       
         encode_frame
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.scenario_h2_client.encode_headers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        encode_headers
       
     </span>
   </a>
@@ -5414,17 +5447,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.fault_injection.scenario_h2_client.SendBytes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        SendBytes
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.fault_injection.scenario_h2_client.SendFrame" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5436,10 +5458,32 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.scenario_h2_client.SendHeaders" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SendHeaders
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.fault_injection.scenario_h2_client.SendPreface" class="md-nav__link">
     <span class="md-ellipsis">
       
         SendPreface
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.scenario_h2_client.SendRawBytes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SendRawBytes
       
     </span>
   </a>
@@ -5469,10 +5513,32 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.scenario_h2_client.__getattr__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __getattr__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.fault_injection.scenario_h2_client.encode_frame" class="md-nav__link">
     <span class="md-ellipsis">
       
         encode_frame
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.scenario_h2_client.encode_headers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        encode_headers
       
     </span>
   </a>
@@ -5550,7 +5616,7 @@ deliberate misbehaviour — a preface that never arrives, a header block
 opened and abandoned, a Rapid Reset burst, a window never opened.</p>
 <p>Its twin is :mod:<code>blackbull.fault_injection.scenario_h1</code>, the client-side
 vocabulary one protocol over, and this module takes that twin's names
-wherever the two mean the same thing: :class:<code>SendBytes</code>,
+wherever the two mean the same thing: :class:<code>SendRawBytes</code>,
 :class:<code>ReadResponse</code>, :class:<code>Sleep</code>, :class:<code>Abort</code>, and the fields of
 :class:<code>ScenarioH2ClientResult</code>.  Sprint 107 learned why that matters the
 expensive way — a vocabulary written from the <em>protocol</em> rather than from
@@ -5794,59 +5860,6 @@ the other.</p>
 
 
 
-<h3 id="blackbull.fault_injection.scenario_h2_client.SendBytes" class="doc doc-heading">
-            <code>SendBytes</code>
-
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
-  </span>
-
-<a href="#blackbull.fault_injection.scenario_h2_client.SendBytes" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-
-
-        <p>Push arbitrary bytes at the server.</p>
-<p>The escape hatch, and the same name and fields the HTTP/1.1 client-side
-vocabulary uses.  <code>byte_interval &gt; 0</code> transmits one byte at a time
-with that delay.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
 <h3 id="blackbull.fault_injection.scenario_h2_client.SendFrame" class="doc doc-heading">
             <code>SendFrame</code>
 
@@ -5909,6 +5922,69 @@ staging.</p>
 
 
 
+<h3 id="blackbull.fault_injection.scenario_h2_client.SendHeaders" class="doc doc-heading">
+            <code>SendHeaders</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#blackbull.fault_injection.scenario_h2_client.SendHeaders" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Emit a HEADERS frame, with the header block built for you.</p>
+<p>Added by the 107+108 consistency sweep, which found that every
+header-field fault — a malformed HPACK block, a missing or duplicated
+pseudo-header, a connection-specific header HTTP/2 forbids — could only
+be written as hand-assembled hex.  Three of the sweep's rows moved from
+<em>raw-bytes-only</em> to <em>typed</em> with this step.</p>
+<p><code>pseudo</code> and <code>headers</code> are encoded with HPACK in the order given, so
+a scenario can put <code>:path</code> after a regular field (RFC 9113 §8.3
+forbids it) simply by saying so.  Nothing here validates: the whole
+point is to send what a conforming client would not.</p>
+<p><code>raw_block</code> replaces the encoded block outright, for faults HPACK
+itself cannot produce — a truncated block, an invalid table index, a
+Huffman string that does not decode.  When set, <code>pseudo</code> and
+<code>headers</code> are ignored.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
 <h3 id="blackbull.fault_injection.scenario_h2_client.SendPreface" class="doc doc-heading">
             <code>SendPreface</code>
 
@@ -5929,6 +6005,59 @@ staging.</p>
 on the server side: a <em>client</em> scenario's whole point may be to delay
 the preface, split it, or never send it, and a boolean cannot say
 "after 30 seconds".</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.fault_injection.scenario_h2_client.SendRawBytes" class="doc doc-heading">
+            <code>SendRawBytes</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#blackbull.fault_injection.scenario_h2_client.SendRawBytes" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Push arbitrary bytes at the server.</p>
+<p>The escape hatch, and the same name and fields the HTTP/1.1 client-side
+vocabulary uses.  <code>byte_interval &gt; 0</code> transmits one byte at a time
+with that delay.</p>
 
 
 
@@ -6061,6 +6190,27 @@ the preface, split it, or never send it, and a boolean cannot say
 <div class="doc doc-object doc-function">
 
 
+<h3 id="blackbull.fault_injection.scenario_h2_client.__getattr__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="fm">__getattr__</span><span class="p">(</span><span class="n">name</span><span class="p">)</span></code>
+
+<a href="#blackbull.fault_injection.scenario_h2_client.__getattr__" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>PEP 562 — warn when the deprecated spelling is actually used.</p>
+<p>A module-level assignment would alias silently; going through
+<code>__getattr__</code> means a reader who never touches <code>SendRawBytes</code> never
+sees a warning, and one who does gets it at their own call site.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h3 id="blackbull.fault_injection.scenario_h2_client.encode_frame" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">encode_frame</span><span class="p">(</span><span class="n">step</span><span class="p">)</span></code>
 
@@ -6074,6 +6224,29 @@ the preface, split it, or never send it, and a boolean cannot say
 fault servers follow.  It is also what makes <code>declared_length</code>
 possible: a header whose length disagrees with the payload is exactly
 the fault, and a serialiser that computed the length could not say it.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.fault_injection.scenario_h2_client.encode_headers" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">encode_headers</span><span class="p">(</span><span class="n">step</span><span class="p">)</span></code>
+
+<a href="#blackbull.fault_injection.scenario_h2_client.encode_headers" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Assemble one HEADERS frame from <em>step</em>.</p>
+<p>HPACK encoding goes through the <code>hpack</code> package the server also uses,
+because a <em>correct</em> block is the baseline every header fault is a
+deviation from — hand-rolling it would make even the well-formed case a
+guess.  <code>raw_block</code> is the escape hatch for blocks HPACK will not
+produce.</p>
 
 
     </div>

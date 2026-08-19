@@ -2687,6 +2687,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.scenario_h2.ExpectClientFrame" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ExpectClientFrame
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.fault_injection.scenario_h2.ScenarioH2" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5436,6 +5447,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.scenario_h2.ExpectClientFrame" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ExpectClientFrame
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.fault_injection.scenario_h2.ScenarioH2" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5768,6 +5790,63 @@ or the highest accepted stream ID otherwise.</p>
 
 
 
+<h3 id="blackbull.fault_injection.scenario_h2.ExpectClientFrame" class="doc doc-heading">
+            <code>ExpectClientFrame</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#blackbull.fault_injection.scenario_h2.ExpectClientFrame" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Read one inbound frame and record whether it matched.</p>
+<p>A guard, not a filter: nothing is skipped and the executor moves on
+either way.  It answers a different question from
+:class:<code>WaitForClientFrame</code> — <em>is the client under test behaving as
+this scenario assumes?</em> — and a scenario whose premise silently failed
+would otherwise look like a pass.</p>
+<p>The HTTP/1.1 half has the same pair for the same reason
+(<code>ExpectRequest</code>); the names differ only where the unit does.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
 <h3 id="blackbull.fault_injection.scenario_h2.ScenarioH2" class="doc doc-heading">
             <code>ScenarioH2</code>
 
@@ -5903,6 +5982,12 @@ protocols.</p>
 <p>Routed through :class:<code>~blackbull.protocol.frame.FrameFactory</code> so
 the on-wire serialisation matches the framework's normal output.
 Use :class:<code>SendRawBytes</code> for frames the factory cannot construct.</p>
+<p><code>declared_length</code> overrides the header's length field without
+changing the bytes actually written — "the peer lied about how much is
+coming", which a serialiser that computes the length cannot say.  The
+client-side vocabulary had this from the start; the consistency sweep
+at the 107+108 close found the server side could not express the same
+fault.  Leave it <code>None</code> (the default) and nothing changes.</p>
 
 
 

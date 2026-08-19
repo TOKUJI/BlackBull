@@ -2039,17 +2039,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.client.scenario.SendBytes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        SendBytes
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.client.scenario.Sleep" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5459,17 +5448,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.client.scenario.SendBytes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        SendBytes
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.client.scenario.Sleep" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5868,60 +5846,6 @@ Hypothesis <code>well_formed_scenario_strategy</code>.</p>
 <code>False</code>.  The executor never raises, so callers (differential
 test, fuzz harness) categorise on this object instead of writing
 try/except boilerplate per scenario.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.client.scenario.SendBytes" class="doc doc-heading">
-            <code>SendBytes</code>
-
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
-  </span>
-
-<a href="#blackbull.client.scenario.SendBytes" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-
-
-        <p>Push raw bytes onto the connection.</p>
-<p><code>byte_interval &gt; 0</code> transmits one byte at a time with that delay
-between bytes — the primitive slowloris-style stall that lets
-scenarios express trickled headers or trickled bodies without
-dropping to a raw asyncio socket.</p>
 
 
 
