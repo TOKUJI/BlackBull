@@ -200,9 +200,22 @@ async def _drive_with_httpx(srv: H1FaultServer) -> str:
         return f'{type(exc).__name__}: {str(exc) or "<no message>"}'
 
 
+#: One scenario written out by hand, so the example shows the vocabulary and
+#: not only the catalogue.  Cell A does the same for the client-side steps;
+#: without this, a reader learns that named cases exist but not how to write
+#: the case they actually need.
+_HANDWRITTEN = ScenarioH1Server(name='truncated_header_line', steps=(
+    WaitForRequest(),
+    # A header line that stops before its CRLF, then nothing more.
+    H1SSendRawBytes(b'HTTP/1.1 200 OK\r\nContent-Len'),
+    H1SCloseGracefully(),
+))
+
+
 async def cell_b_broken_server() -> None:
     _heading('B', 'HTTP/1.1 — a broken server against real clients')
-    print(f'{len(CATALOGUE_H1)} catalogue cases, each driven twice.')
+    print(f'{len(CATALOGUE_H1)} catalogue cases, each driven twice, '
+          f'then one written by hand.')
     for name, build in CATALOGUE_H1.items():
         async with H1FaultServer(build()) as srv:
             ours = await _drive_with_blackbull(srv)
@@ -212,6 +225,11 @@ async def cell_b_broken_server() -> None:
         print(f'\n  --- {name} ---{note}')
         print(f'    blackbull: {ours}')
         print(f'    httpx:     {theirs}')
+
+    async with H1FaultServer(_HANDWRITTEN) as srv:
+        ours = await _drive_with_blackbull(srv)
+    print(f'\n  --- {_HANDWRITTEN.name} (hand-written) ---')
+    print(f'    blackbull: {ours}')
 
 
 # ===========================================================================
@@ -343,12 +361,16 @@ async def cell_e_scenarios_as_data() -> None:
     print(f'\n  round-trips exactly: {restored == original}')
 
     # Hand-written, never a Python object until now.
+    # b'HTTP/1.1 20' — the status line stops mid-code.  Built with the
+    # payload named rather than split across two adjacent literals: inside a
+    # list, implicit concatenation and a missing comma look identical.
+    half_a_status_line = '485454502f312e31203230'
+    send_raw = (f'{{"op": "SEND_RAW", "data": "{half_a_status_line}", '
+                f'"byte_interval": 0.0}}')
     handwritten = scenario_h1_server_from_json('\n'.join([
         '{"op": "HEADER", "name": "half_a_status_line"}',
         '{"op": "WAIT_FOR_REQUEST", "timeout": 5.0}',
-        # b'HTTP/1.1 20' — the status line stops mid-code.
-        '{"op": "SEND_RAW", "data": "485454502f312e31203230", '
-        '"byte_interval": 0.0}',
+        send_raw,
         '{"op": "CLOSE_GRACEFULLY"}',
     ]))
     print(f'\n  loaded from hand-written JSON: {handwritten.name}')

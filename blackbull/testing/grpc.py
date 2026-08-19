@@ -29,6 +29,7 @@ can drive it too.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from dataclasses import dataclass
 
 from ..grpc import GrpcStatus, decode_messages, encode_message
@@ -84,10 +85,13 @@ class GrpcTestServer:
     async def __aexit__(self, exc_type, exc, tb) -> None:
         if self._task is not None:
             self._task.cancel()
-            try:
+            # We cancelled it, so ``CancelledError`` is the expected answer
+            # and not an error; anything else the serve loop raises on its
+            # way down is a teardown detail that must not replace whatever
+            # the test was actually asserting.  ``contextlib.suppress`` is
+            # the idiom the rest of the tree uses for exactly this.
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._task
-            except (asyncio.CancelledError, Exception):
-                pass
             self._task = None
         self._server = None
 

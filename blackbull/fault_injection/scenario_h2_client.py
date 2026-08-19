@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import enum
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 #: RFC 9113 §3.4 — the client connection preface.
 CLIENT_PREFACE = b'PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n'
