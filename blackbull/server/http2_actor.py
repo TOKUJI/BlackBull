@@ -7,7 +7,6 @@ import asyncio
 import contextlib
 import inspect
 import logging
-import time
 from collections.abc import Awaitable, Callable
 from http import HTTPStatus
 from typing import Protocol, runtime_checkable
