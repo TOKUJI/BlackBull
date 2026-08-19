@@ -252,6 +252,50 @@ surplus is a whole second response left in the buffer, which a keep-alive
 client reusing the connection will parse as the reply to a request it has
 not sent.
 
+### Waiting for a particular request
+
+Two steps, because there are two questions.
+
+**`WaitForRequest(match=...)` — which request do I want to break?**  Reads
+heads until one matches, skipping the rest.  On a pipelined connection
+(RFC 9112 §9.3.2) that is how a scenario answers the GET normally and breaks
+on the POST:
+
+```python
+ScenarioH1Server(steps=(
+    WaitForRequest(match={'method': 'POST'}),
+    H1SSendStatusLine(code=500), H1SEndHeaders(),
+))
+```
+
+**Skipping desyncs the connection, and the result says so.**  HTTP/1.1
+responses are positional, so a head the step passed over is a request the
+scenario can no longer answer — everything after it is off by one.  The count
+is on `ScenarioH1ServerResult.requests_skipped`.  (On HTTP/2 the same skip is
+harmless, because streams are independent; that is why the two halves cannot
+simply share an implementation.)
+
+**`ExpectRequest(match=...)` — is the client behaving as I assumed?**  Reads
+one head, skips nothing, and records the verdict:
+
+```python
+ScenarioH1Server(steps=(
+    ExpectRequest(match={'header': ('expect', '100-continue')}),
+    H1SSendStatusLine(code=100), H1SEndHeaders(),
+))
+```
+
+A scenario staging a fault against `Expect: 100-continue` is testing nothing
+at all if the client never sent that header — and without this the run looks
+like a pass.  Mismatches are **recorded, not raised**, on
+`ScenarioH1ServerResult.expectations`.
+
+The grammar is shared: `method`, `target`, `version`, `header` (a
+`(name, value)` pair, or `value=None` for presence alone) and
+`header_absent`.  **An unrecognised key never matches** — a typo in a
+scenario is almost always a bug, and silently matching on a key nobody reads
+would hide it.  The HTTP/2 side's `frame_matches` made the same choice.
+
 ### Every scenario is raw bytes, deliberately
 
 There is no typed `SendResponse` step, and both fault servers assemble

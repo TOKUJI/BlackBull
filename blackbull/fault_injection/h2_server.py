@@ -52,6 +52,7 @@ from blackbull.protocol.frame_types import (
 )
 
 from .scenario_h2 import (
+    ExpectClientFrame,
     Abort,
     CloseGracefully,
     ScenarioH2,
@@ -447,7 +448,26 @@ class H2FaultServer:
                     return False
                 if frame_matches(frame, step.match):
                     return False
-                # else: frame didn't match — drop it and keep waiting
+                # else: frame didn't match — drop it and keep waiting.
+                # Counted, because the HTTP/1.1 half counts the same thing
+                # and there it means the connection is desynced; the two
+                # report it under one name even though only one of them
+                # bleeds from it.
+                result.wait_skipped += 1
+
+        if isinstance(step, ExpectClientFrame):
+            # A guard, not a filter: one frame, nothing skipped, verdict
+            # recorded either way.
+            try:
+                frame = await asyncio.wait_for(queue.get(),
+                                               timeout=step.timeout)
+            except (asyncio.TimeoutError, TimeoutError):
+                result.wait_timed_out = True
+                result.expectations.append((dict(step.match), False))
+                return False
+            result.expectations.append(
+                (dict(step.match), frame_matches(frame, step.match)))
+            return False
 
         if isinstance(step, Sleep):
             await asyncio.sleep(step.duration)

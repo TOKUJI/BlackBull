@@ -41,6 +41,7 @@ from .scenario_h1_server import (
     CloseGracefully,
     EndChunkedBody,
     EndHeaders,
+    ExpectRequest,
     ScenarioH1Server,
     ScenarioH1ServerResult,
     SendChunk,
@@ -53,6 +54,7 @@ from .scenario_h1_server import (
     encode_chunked_terminator,
     encode_header,
     encode_status_line,
+    request_matches,
 )
 
 logger = logging.getLogger(__name__)
@@ -212,15 +214,35 @@ class H1FaultServer:
                         result: ScenarioH1ServerResult) -> bool:
         """Execute one step.  Returns True when it terminates the connection."""
         if isinstance(step, WaitForRequest):
-            try:
-                head = await asyncio.wait_for(
-                    reader.readuntil(_HEAD_END), timeout=step.timeout)
-                result.request_head = head
-                result.client_bytes_received += len(head)
-            except (asyncio.TimeoutError, asyncio.IncompleteReadError):
-                # Recorded, not raised: a client that never sends a request
-                # is itself a case worth scripting around.
-                result.wait_timed_out = True
+            # Filter over a pipeline: read heads until one matches, and
+            # count what was skipped.  A skipped head is a request the
+            # scenario can no longer answer, and HTTP/1.1 responses are
+            # positional — so this desyncs the connection, deliberately,
+            # and ``wait_skipped`` is how the scenario author sees it.
+            deadline = asyncio.get_running_loop().time() + step.timeout
+            while True:
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    result.wait_timed_out = True
+                    return False
+                head = await self._read_head(reader, remaining, result)
+                if head is None:
+                    return False
+                if request_matches(head, step.match):
+                    result.request_head = head
+                    return False
+                result.wait_skipped += 1
+
+        if isinstance(step, ExpectRequest):
+            # A guard, not a filter: one head, nothing skipped, and the
+            # verdict recorded either way.
+            head = await self._read_head(reader, step.timeout, result)
+            if head is None:
+                result.expectations.append((dict(step.match), False))
+                return False
+            result.request_head = head
+            result.expectations.append(
+                (dict(step.match), request_matches(head, step.match)))
             return False
 
         # The typed steps all reduce to bytes, and share one write path so
@@ -263,6 +285,24 @@ class H1FaultServer:
             return True
 
         raise H1FaultServerError(f'unknown scenario step: {step!r}')
+
+    @staticmethod
+    async def _read_head(reader: asyncio.StreamReader, timeout: float,
+                         result: ScenarioH1ServerResult) -> bytes | None:
+        """Read one request head, or ``None`` when none arrives.
+
+        A client that never sends a request is itself a case worth
+        scripting around, so the miss is recorded rather than raised —
+        the behaviour this step has always had.
+        """
+        try:
+            head = await asyncio.wait_for(
+                reader.readuntil(_HEAD_END), timeout=timeout)
+        except (asyncio.TimeoutError, asyncio.IncompleteReadError):
+            result.wait_timed_out = True
+            return None
+        result.client_bytes_received += len(head)
+        return head
 
     @staticmethod
     async def _write(writer: asyncio.StreamWriter, data: bytes,

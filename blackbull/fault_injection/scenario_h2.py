@@ -77,6 +77,7 @@ class StepOpH2(str, enum.Enum):
     SEND_FRAME = 'SEND_FRAME'
     SEND_RAW = 'SEND_RAW'
     WAIT = 'WAIT'
+    EXPECT = 'EXPECT'
     SLEEP = 'SLEEP'
     ABORT = 'ABORT'
     GOAWAY_CLOSE = 'GOAWAY_CLOSE'
@@ -134,6 +135,23 @@ class WaitForClientFrame:
 
 
 @dataclass(frozen=True)
+class ExpectClientFrame:
+    """Read one inbound frame and record whether it matched.
+
+    A guard, not a filter: nothing is skipped and the executor moves on
+    either way.  It answers a different question from
+    :class:`WaitForClientFrame` — *is the client under test behaving as
+    this scenario assumes?* — and a scenario whose premise silently failed
+    would otherwise look like a pass.
+
+    The HTTP/1.1 half has the same pair for the same reason
+    (``ExpectRequest``); the names differ only where the unit does.
+    """
+    match: dict = field(default_factory=dict)
+    timeout: float = 5.0
+
+
+@dataclass(frozen=True)
 class Sleep:
     """Idle for ``duration`` seconds without reading or writing."""
     duration: float
@@ -164,6 +182,7 @@ H2Step = Union[
     SendFrame,
     SendRawBytes,
     WaitForClientFrame,
+    ExpectClientFrame,
     Sleep,
     Abort,
     CloseGracefully,
@@ -219,6 +238,15 @@ class ScenarioH2Result:
     # If a step raised, this is the repr.  The executor never lets a
     # scenario bubble exceptions to the caller.
     exception: str | None = None
+
+    # Frames a WaitForClientFrame(match=...) step read and passed over.
+    # Harmless here — HTTP/2 streams are independent — where the same
+    # count on HTTP/1.1 means the connection is desynced.
+    wait_skipped: int = 0
+
+    # One (match, matched) pair per ExpectClientFrame step, in order:
+    # what the scenario assumed, and whether it held.
+    expectations: list = field(default_factory=list)
 
     # Whether a WaitForClientFrame step timed out before its match
     # arrived.  When True the step still counts as completed and the
@@ -342,6 +370,9 @@ def _step_to_dict(step: H2Step) -> dict:
             'data': base64.b64encode(step.data).decode('ascii'),
             'byte_interval': step.byte_interval,
         }
+    if isinstance(step, ExpectClientFrame):
+        return {'op': StepOpH2.EXPECT.value, 'match': dict(step.match),
+                'timeout': step.timeout}
     if isinstance(step, WaitForClientFrame):
         return {
             'op': StepOpH2.WAIT.value,
@@ -371,6 +402,9 @@ def _step_from_dict(d: dict) -> H2Step:
             data=base64.b64decode(d['data']),
             byte_interval=float(d.get('byte_interval', 0.0)),
         )
+    if op == StepOpH2.EXPECT.value:
+        return ExpectClientFrame(match=d.get('match') or {},
+                                 timeout=d.get('timeout', 5.0))
     if op == StepOpH2.WAIT.value:
         return WaitForClientFrame(
             match=dict(d.get('match', {})),
@@ -521,6 +555,7 @@ def scenario_from_json(src: str) -> ScenarioH2:
 __all__ = [
     'Abort',
     'CloseGracefully',
+    'ExpectClientFrame',
     'H2Step',
     'ScenarioH2',
     'ScenarioH2Result',

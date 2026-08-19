@@ -138,9 +138,33 @@ so the editable install's metadata catches up.
     not express the same fault.  Old usage is unchanged.
   - **Every scenario carries a `name`.**  Three of four already did.
 
-  What the sweep did *not* close is recorded rather than quietly dropped:
-  `WaitForRequest` still has no `match` grammar where `WaitForClientFrame`
-  does, and CONNECT tunnelling is unmodelled on the HTTP/2 client side.
+  The gap the sweep found in `WaitForRequest` is closed too — see the next
+  entry.  What remains open is CONNECT tunnelling on the HTTP/2 client side,
+  which is unmodelled.
+
+- **`match` on the request-waiting steps, as two steps rather than one.**
+  `WaitForRequest` had no `match` grammar where `WaitForClientFrame` does,
+  and porting it literally would have changed what the word means: on
+  HTTP/2 the executor skips non-matching frames and keeps waiting, which is
+  harmless because streams are independent.  HTTP/1.1 responses are
+  positional (RFC 9112 §9.3), so a skipped head is a request the scenario
+  can never answer — everything after it is off by one.
+
+  - **`WaitForRequest(match=...)`** filters a pipeline: read heads until one
+    matches, skipping the rest, so a scenario can answer the GET normally
+    and break on the POST.  Skips land on `wait_skipped`, because they
+    desync the connection and that must be read from the result rather than
+    deduced.
+  - **`ExpectRequest(match=...)`** is a guard: one head, nothing skipped,
+    and the verdict recorded on `expectations`.  A scenario staging a fault
+    against `Expect: 100-continue` is testing nothing if the client never
+    sent it, and without this the run looks like a pass.
+
+  Both halves gained the same pair — `ExpectClientFrame` on HTTP/2 — and
+  both results report `wait_skipped` and `expectations` under one name.  The
+  grammar (`method`, `target`, `version`, `header`, `header_absent`) **fails
+  closed on an unrecognised key**, as `frame_matches` already did: a typo in
+  a scenario is a bug, and silently matching on a key nobody reads hides it.
 
 - **Typed steps for the faults that previously needed hand-built bytes.**
   `SendHeaders` (HTTP/2) builds a header block with HPACK — so a

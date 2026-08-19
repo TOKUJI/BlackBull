@@ -59,6 +59,13 @@ from .h1_server import (
 # as ``scenario_h2``'s keep ``H2``.
 from .scenario_h1_server import (
     Abort as H1SAbort,
+    EndChunkedBody as H1SEndChunkedBody,
+    EndHeaders as H1SEndHeaders,
+    ExpectRequest,
+    SendChunk as H1SSendChunk,
+    SendHeader as H1SSendHeader,
+    SendStatusLine as H1SSendStatusLine,
+    request_matches,
     CloseGracefully as H1SCloseGracefully,
     ScenarioH1Server,
     ScenarioH1ServerResult,
@@ -96,6 +103,7 @@ from .h2_server import (
 )
 from .scenario_h2 import (
     Abort as H2Abort,
+    ExpectClientFrame,
     CloseGracefully,
     H2Step,
     ScenarioH2,
@@ -118,6 +126,14 @@ __all__ = [
     "CloseGracefully",
     "H1FaultServer",
     "H1SAbort",
+    "request_matches",
+    "H1SSendStatusLine",
+    "H1SSendHeader",
+    "H1SSendChunk",
+    "H1SEndHeaders",
+    "H1SEndChunkedBody",
+    "ExpectClientFrame",
+    "ExpectRequest",
     "H1SCloseGracefully",
     "H1SSendRawBytes",
     "H1SSleep",
