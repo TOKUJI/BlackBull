@@ -174,26 +174,28 @@ class H1FaultServer:
         try:
             for step in self.scenario.steps:
                 terminal = await self._run_step(step, reader, writer, result)
-                result.completed.append(type(step).__name__)
+                result.steps_completed.append(type(step).__name__)
                 if terminal:
+                    result.terminated = True
                     return
             # Scenario exhausted without a terminator: close cleanly, so a
             # client waiting on a body it will never get sees EOF rather
             # than hanging on a server that has simply run out of steps.
             await self._close(writer, graceful=True)
-        except (ConnectionResetError, BrokenPipeError):
+        except (ConnectionResetError, BrokenPipeError) as exc:
             logger.debug('H1FaultServer: client vanished mid-scenario')
+            result.exception = exc
         except asyncio.CancelledError:
             # Teardown cancelled us mid-scenario; record what happened and
             # let the cancellation continue.
-            result.elapsed = time.monotonic() - t0
+            result.elapsed_s = time.monotonic() - t0
             self.last_result = result
             self._connection_done.set()
             raise
         finally:
             if task is not None:
                 self._handlers.discard(task)
-            result.elapsed = time.monotonic() - t0
+            result.elapsed_s = time.monotonic() - t0
             self.last_result = result
             self._connection_done.set()
 
@@ -205,10 +207,11 @@ class H1FaultServer:
                 head = await asyncio.wait_for(
                     reader.readuntil(_HEAD_END), timeout=step.timeout)
                 result.request_head = head
+                result.client_bytes_received += len(head)
             except (asyncio.TimeoutError, asyncio.IncompleteReadError):
                 # Recorded, not raised: a client that never sends a request
                 # is itself a case worth scripting around.
-                result.request_timed_out = True
+                result.wait_timed_out = True
             return False
 
         if isinstance(step, SendRawBytes):
@@ -216,12 +219,12 @@ class H1FaultServer:
                 for i in range(len(step.data)):
                     writer.write(step.data[i:i + 1])
                     await writer.drain()
-                    result.bytes_sent += 1
+                    result.server_bytes_sent += 1
                     await asyncio.sleep(step.byte_interval)
             else:
                 writer.write(step.data)
                 await writer.drain()
-                result.bytes_sent += len(step.data)
+                result.server_bytes_sent += len(step.data)
             return False
 
         if isinstance(step, Sleep):

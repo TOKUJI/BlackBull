@@ -285,3 +285,57 @@ class TestExportsDoNotCollide:
             scenario = build()
             assert scenario_h1_server_from_json(
                 scenario_h1_server_to_json(scenario)) == scenario, name
+
+
+# ===========================================================================
+# The two halves report the same things by the same names
+# ===========================================================================
+
+class TestResultSymmetry:
+    """A harness reporting on one half must not need a second spelling.
+
+    The HTTP/1.1 server result originally invented `completed`,
+    `bytes_sent` and `elapsed` where HTTP/2 already had `steps_completed`,
+    `server_bytes_sent` and `elapsed_s`.  Nothing was wrong with either
+    set; having both was the defect.
+    """
+
+    async def test_the_protocol_neutral_fields_match(self):
+        import dataclasses as dc
+        from blackbull.fault_injection import (
+            ScenarioH1Server, ScenarioH1ServerResult, ScenarioH2,
+        )
+        from blackbull.fault_injection.scenario_h2 import ScenarioH2Result
+
+        h1 = {f.name for f in dc.fields(ScenarioH1ServerResult)}
+        h2 = {f.name for f in dc.fields(ScenarioH2Result)}
+        #: The one field that is genuinely HTTP/1.1-only: HTTP/2 has no
+        #: single "head" to capture, it has frames.
+        assert h1 - h2 == {'request_head'}
+        assert h2 - h1 == set(), (
+            f'HTTP/2 reports fields HTTP/1.1 does not: {sorted(h2 - h1)}')
+
+        #: `name` is protocol-neutral and both scenarios carry it.
+        assert 'name' in {f.name for f in dc.fields(ScenarioH1Server)}
+        assert 'name' in {f.name for f in dc.fields(ScenarioH2)}
+
+    async def test_a_run_populates_the_shared_fields(self):
+        from blackbull.fault_injection import H1SCloseGracefully, H1SSendRawBytes
+
+        scenario = ScenarioH1Server(steps=(
+            WaitForRequest(),
+            H1SSendRawBytes(b'HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi'),
+            H1SCloseGracefully(),
+        ), name='symmetry_probe')
+        async with H1FaultServer(scenario) as srv:
+            await _get(srv.host, srv.port)
+            await srv.wait_for_connection_done(timeout=5.0)
+            result = srv.last_result
+
+        assert result.steps_completed == [
+            'WaitForRequest', 'SendRawBytes', 'CloseGracefully']
+        assert result.server_bytes_sent > 0
+        assert result.client_bytes_received > 0
+        assert result.terminated is True
+        assert result.wait_timed_out is False
+        assert result.elapsed_s > 0

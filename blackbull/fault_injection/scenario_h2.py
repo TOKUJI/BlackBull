@@ -182,6 +182,11 @@ class ScenarioH2:
     steps: tuple[H2Step, ...]
     send_preface: bool = True
     initial_settings: tuple[tuple[int, int], ...] = ()
+    #: For test parametrisation and for the JSON header line, as
+    #: :class:`~blackbull.fault_injection.scenario_h1_server.ScenarioH1Server`
+    #: has.  A scenario that can be reported on by name is one a failing CI
+    #: run can point at.
+    name: str = ''
 
 
 @dataclass
@@ -462,6 +467,7 @@ def scenario_to_json(scenario: ScenarioH2) -> str:
     """
     lines = [json.dumps({
         'op': 'HEADER',
+        'name': scenario.name,
         'send_preface': scenario.send_preface,
         'initial_settings': [list(p) for p in scenario.initial_settings],
     })]
@@ -472,6 +478,7 @@ def scenario_to_json(scenario: ScenarioH2) -> str:
 
 def scenario_from_json(src: str) -> ScenarioH2:
     """Parse JSON Lines back to a :class:`ScenarioH2`."""
+    name = ''
     send_preface = True
     initial_settings: tuple[tuple[int, int], ...] = ()
     steps: list[H2Step] = []
@@ -481,6 +488,7 @@ def scenario_from_json(src: str) -> ScenarioH2:
             continue
         d = json.loads(line)
         if d.get('op') == 'HEADER':
+            name = d.get('name', '')
             send_preface = bool(d.get('send_preface', True))
             initial_settings = tuple(
                 tuple(pair) for pair in d.get('initial_settings', []))
@@ -490,6 +498,7 @@ def scenario_from_json(src: str) -> ScenarioH2:
         steps=tuple(steps),
         send_preface=send_preface,
         initial_settings=initial_settings,
+        name=name,
     )
 
 
