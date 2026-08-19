@@ -9,7 +9,7 @@ opened and abandoned, a Rapid Reset burst, a window never opened.
 
 Its twin is :mod:`blackbull.fault_injection.scenario_h1`, the client-side
 vocabulary one protocol over, and this module takes that twin's names
-wherever the two mean the same thing: :class:`SendBytes`,
+wherever the two mean the same thing: :class:`SendRawBytes`,
 :class:`ReadResponse`, :class:`Sleep`, :class:`Abort`, and the fields of
 :class:`ScenarioH2ClientResult`.  Sprint 107 learned why that matters the
 expensive way — a vocabulary written from the *protocol* rather than from
@@ -30,6 +30,8 @@ from __future__ import annotations
 
 import enum
 import json
+
+from blackbull.protocol.frame_types import FrameTypes
 from dataclasses import dataclass
 
 #: RFC 9113 §3.4 — the client connection preface.
@@ -94,7 +96,36 @@ class SendFrame:
 
 
 @dataclass(frozen=True)
-class SendBytes:
+class SendHeaders:
+    """Emit a HEADERS frame, with the header block built for you.
+
+    Added by the 107+108 consistency sweep, which found that every
+    header-field fault — a malformed HPACK block, a missing or duplicated
+    pseudo-header, a connection-specific header HTTP/2 forbids — could only
+    be written as hand-assembled hex.  Three of the sweep's rows moved from
+    *raw-bytes-only* to *typed* with this step.
+
+    ``pseudo`` and ``headers`` are encoded with HPACK in the order given, so
+    a scenario can put ``:path`` after a regular field (RFC 9113 §8.3
+    forbids it) simply by saying so.  Nothing here validates: the whole
+    point is to send what a conforming client would not.
+
+    ``raw_block`` replaces the encoded block outright, for faults HPACK
+    itself cannot produce — a truncated block, an invalid table index, a
+    Huffman string that does not decode.  When set, ``pseudo`` and
+    ``headers`` are ignored.
+    """
+    pseudo: tuple[tuple[str, str], ...] = ()
+    headers: tuple[tuple[str, str], ...] = ()
+    stream_id: int = 1
+    end_stream: bool = False
+    end_headers: bool = True
+    raw_block: bytes | None = None
+    declared_length: int | None = None
+
+
+@dataclass(frozen=True)
+class SendRawBytes:
     """Push arbitrary bytes at the server.
 
     The escape hatch, and the same name and fields the HTTP/1.1 client-side
@@ -125,7 +156,8 @@ class Abort:
     """
 
 
-Step = SendPreface | SendFrame | SendBytes | Sleep | ReadResponse | Abort
+Step = (SendPreface | SendFrame | SendHeaders | SendRawBytes | Sleep
+        | ReadResponse | Abort)
 
 
 @dataclass(frozen=True)
@@ -173,7 +205,7 @@ def _step_to_dict(step) -> dict:
                 'stream_id': step.stream_id,
                 'data': step.data.hex(),
                 'declared_length': step.declared_length}
-    if isinstance(step, SendBytes):
+    if isinstance(step, SendRawBytes):
         return {'op': StepOpH2Client.SEND, 'data': step.data.hex(),
                 'byte_interval': step.byte_interval}
     if isinstance(step, Sleep):
@@ -200,7 +232,7 @@ def _step_from_dict(d: dict):
                          data=bytes.fromhex(d.get('data', '')),
                          declared_length=d.get('declared_length'))
     if op == StepOpH2Client.SEND:
-        return SendBytes(data=bytes.fromhex(d['data']),
+        return SendRawBytes(data=bytes.fromhex(d['data']),
                          byte_interval=d.get('byte_interval', 0.0))
     if op == StepOpH2Client.SLEEP:
         return Sleep(duration=d['duration'])
@@ -235,6 +267,30 @@ def scenario_from_json(src: str) -> ScenarioH2Client:
     return ScenarioH2Client(steps=tuple(steps), name=name)
 
 
+def encode_headers(step: SendHeaders) -> bytes:
+    """Assemble one HEADERS frame from *step*.
+
+    HPACK encoding goes through the ``hpack`` package the server also uses,
+    because a *correct* block is the baseline every header fault is a
+    deviation from — hand-rolling it would make even the well-formed case a
+    guess.  ``raw_block`` is the escape hatch for blocks HPACK will not
+    produce.
+    """
+    if step.raw_block is not None:
+        block = step.raw_block
+    else:
+        from hpack import Encoder  # noqa: PLC0415
+        block = Encoder().encode(list(step.pseudo) + list(step.headers))
+    flags = 0
+    if step.end_stream:
+        flags |= 0x01
+    if step.end_headers:
+        flags |= 0x04
+    return encode_frame(SendFrame(
+        frame_type=FrameTypes.HEADERS, flags=flags, stream_id=step.stream_id,
+        data=block, declared_length=step.declared_length))
+
+
 def encode_frame(step: SendFrame) -> bytes:
     """Assemble one frame's wire bytes from *step*.
 
@@ -253,3 +309,36 @@ def encode_frame(step: SendFrame) -> bytes:
         + (int(step.stream_id) & 0x7fffffff).to_bytes(4, 'big')
         + step.data
     )
+
+# ---------------------------------------------------------------------------
+# Naming: ``SendRawBytes`` is the canonical spelling across all four
+# vocabularies
+# ---------------------------------------------------------------------------
+#
+# The two server-side vocabularies have always called this ``SendRawBytes``
+# and the two client-side ones ``SendRawBytes`` — the same step, the same two
+# fields, the name split by *role* rather than by anything a reader could
+# predict.  The consistency sweep at the 107+108 close found it, and with a
+# typed alternative now present on every half, "raw" is the word that earns
+# its place.
+#
+# ``SendRawBytes`` is the name to use.  ``SendRawBytes`` keeps working and is
+# **deprecated**: removal no earlier than 2027-08-19, and at an arbitrary
+# time after that, following the deprecation window ASGI uses.
+
+def __getattr__(name: str):
+    """PEP 562 — warn when the deprecated spelling is actually used.
+
+    A module-level assignment would alias silently; going through
+    ``__getattr__`` means a reader who never touches ``SendRawBytes`` never
+    sees a warning, and one who does gets it at their own call site.
+    """
+    if name == 'SendBytes':
+        import warnings  # noqa: PLC0415
+        warnings.warn(
+            f"{__name__}.SendBytes is deprecated; use SendRawBytes, the "
+            "name the other three scenario vocabularies use.  Removal no "
+            "earlier than 2027-08-19.",
+            DeprecationWarning, stacklevel=2)
+        return SendRawBytes
+    raise AttributeError(f'module {__name__!r} has no attribute {name!r}')

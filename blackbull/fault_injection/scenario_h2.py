@@ -77,6 +77,7 @@ class StepOpH2(str, enum.Enum):
     SEND_FRAME = 'SEND_FRAME'
     SEND_RAW = 'SEND_RAW'
     WAIT = 'WAIT'
+    EXPECT = 'EXPECT'
     SLEEP = 'SLEEP'
     ABORT = 'ABORT'
     GOAWAY_CLOSE = 'GOAWAY_CLOSE'
@@ -89,8 +90,16 @@ class SendFrame:
     Routed through :class:`~blackbull.protocol.frame.FrameFactory` so
     the on-wire serialisation matches the framework's normal output.
     Use :class:`SendRawBytes` for frames the factory cannot construct.
+
+    ``declared_length`` overrides the header's length field without
+    changing the bytes actually written — "the peer lied about how much is
+    coming", which a serialiser that computes the length cannot say.  The
+    client-side vocabulary had this from the start; the consistency sweep
+    at the 107+108 close found the server side could not express the same
+    fault.  Leave it ``None`` (the default) and nothing changes.
     """
     frame: Frame
+    declared_length: int | None = None
 
 
 @dataclass(frozen=True)
@@ -120,6 +129,23 @@ class WaitForClientFrame:
 
     On ``timeout`` expiry the executor records the miss on
     :class:`ScenarioH2Result` and proceeds to the next step.
+    """
+    match: dict = field(default_factory=dict)
+    timeout: float = 5.0
+
+
+@dataclass(frozen=True)
+class ExpectClientFrame:
+    """Read one inbound frame and record whether it matched.
+
+    A guard, not a filter: nothing is skipped and the executor moves on
+    either way.  It answers a different question from
+    :class:`WaitForClientFrame` — *is the client under test behaving as
+    this scenario assumes?* — and a scenario whose premise silently failed
+    would otherwise look like a pass.
+
+    The HTTP/1.1 half has the same pair for the same reason
+    (``ExpectRequest``); the names differ only where the unit does.
     """
     match: dict = field(default_factory=dict)
     timeout: float = 5.0
@@ -156,6 +182,7 @@ H2Step = Union[
     SendFrame,
     SendRawBytes,
     WaitForClientFrame,
+    ExpectClientFrame,
     Sleep,
     Abort,
     CloseGracefully,
@@ -211,6 +238,15 @@ class ScenarioH2Result:
     # If a step raised, this is the repr.  The executor never lets a
     # scenario bubble exceptions to the caller.
     exception: str | None = None
+
+    # Frames a WaitForClientFrame(match=...) step read and passed over.
+    # Harmless here — HTTP/2 streams are independent — where the same
+    # count on HTTP/1.1 means the connection is desynced.
+    wait_skipped: int = 0
+
+    # One (match, matched) pair per ExpectClientFrame step, in order:
+    # what the scenario assumed, and whether it held.
+    expectations: list = field(default_factory=list)
 
     # Whether a WaitForClientFrame step timed out before its match
     # arrived.  When True the step still counts as completed and the
@@ -326,6 +362,7 @@ def _step_to_dict(step: H2Step) -> dict:
         return {
             'op': StepOpH2.SEND_FRAME.value,
             'frame': _frame_to_dict(step.frame),
+            'declared_length': step.declared_length,
         }
     if isinstance(step, SendRawBytes):
         return {
@@ -333,6 +370,9 @@ def _step_to_dict(step: H2Step) -> dict:
             'data': base64.b64encode(step.data).decode('ascii'),
             'byte_interval': step.byte_interval,
         }
+    if isinstance(step, ExpectClientFrame):
+        return {'op': StepOpH2.EXPECT.value, 'match': dict(step.match),
+                'timeout': step.timeout}
     if isinstance(step, WaitForClientFrame):
         return {
             'op': StepOpH2.WAIT.value,
@@ -355,12 +395,16 @@ def _step_to_dict(step: H2Step) -> dict:
 def _step_from_dict(d: dict) -> H2Step:
     op = d.get('op')
     if op == StepOpH2.SEND_FRAME.value:
-        return SendFrame(frame=_frame_from_dict(d['frame']))
+        return SendFrame(frame=_frame_from_dict(d['frame']),
+                         declared_length=d.get('declared_length'))
     if op == StepOpH2.SEND_RAW.value:
         return SendRawBytes(
             data=base64.b64decode(d['data']),
             byte_interval=float(d.get('byte_interval', 0.0)),
         )
+    if op == StepOpH2.EXPECT.value:
+        return ExpectClientFrame(match=d.get('match') or {},
+                                 timeout=d.get('timeout', 5.0))
     if op == StepOpH2.WAIT.value:
         return WaitForClientFrame(
             match=dict(d.get('match', {})),
@@ -446,9 +490,15 @@ def _frame_from_dict(d: dict) -> Frame:
         f.error_code = int(d.get('error_code', 0))
         return f
     if name == 'Ping':
-        f = frame_types.Ping(length=0, type_=frame_types.FrameTypes.PING,
-                             flags=flags, stream_id=stream_id)
-        f.payload = base64.b64decode(d.get('payload', ''))
+        # ``data`` is required on ``Ping`` alone among the frame classes it
+        # is constructed with here, and omitting it raised ``TypeError`` —
+        # so an HTTP/2 scenario containing a PING could be serialised and
+        # never read back.  Found by the 107+108 consistency sweep; present
+        # since the serialiser was written.
+        payload = base64.b64decode(d.get('payload', ''))
+        f = frame_types.Ping(length=len(payload),
+                             type_=frame_types.FrameTypes.PING,
+                             flags=flags, stream_id=stream_id, data=payload)
         return f
     if name == 'Data':
         f = frame_types.Data(length=0, type_=frame_types.FrameTypes.DATA,
@@ -505,6 +555,7 @@ def scenario_from_json(src: str) -> ScenarioH2:
 __all__ = [
     'Abort',
     'CloseGracefully',
+    'ExpectClientFrame',
     'H2Step',
     'ScenarioH2',
     'ScenarioH2Result',

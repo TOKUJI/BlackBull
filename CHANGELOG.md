@@ -122,6 +122,64 @@ so the editable install's metadata catches up.
   counterpart had.  Only `request_head` is now asymmetric, because HTTP/2 has
   no single head to capture.
 
+- **The four fault-injection scenario vocabularies are consistent, and the
+  sweep that checked it is kept as a test.**  Sprints 107 and 108 ship
+  together so the question could be asked once, about a finished grid: is the
+  notation unified, and can each protocol's own faults be expressed?  Running
+  it found six things nothing inside the code was going to surface.
+
+  - **`SendRawBytes` is now the name on all four.**  The escape hatch was
+    `SendBytes` on the client halves and `SendRawBytes` on the server halves —
+    the same two fields, split by role rather than by anything a reader could
+    predict.  `SendBytes` keeps working and is **deprecated**: removal no
+    earlier than **2027-08-19**, and at an arbitrary time after that.
+  - **`SendFrame` can lie about its length on both HTTP/2 halves.**  The
+    client half had `declared_length` from the start; the server half could
+    not express the same fault.  Old usage is unchanged.
+  - **Every scenario carries a `name`.**  Three of four already did.
+
+  The gap the sweep found in `WaitForRequest` is closed too — see the next
+  entry.  What remains open is CONNECT tunnelling on the HTTP/2 client side,
+  which is unmodelled.
+
+- **`match` on the request-waiting steps, as two steps rather than one.**
+  `WaitForRequest` had no `match` grammar where `WaitForClientFrame` does,
+  and porting it literally would have changed what the word means: on
+  HTTP/2 the executor skips non-matching frames and keeps waiting, which is
+  harmless because streams are independent.  HTTP/1.1 responses are
+  positional (RFC 9112 §9.3), so a skipped head is a request the scenario
+  can never answer — everything after it is off by one.
+
+  - **`WaitForRequest(match=...)`** filters a pipeline: read heads until one
+    matches, skipping the rest, so a scenario can answer the GET normally
+    and break on the POST.  Skips land on `wait_skipped`, because they
+    desync the connection and that must be read from the result rather than
+    deduced.
+  - **`ExpectRequest(match=...)`** is a guard: one head, nothing skipped,
+    and the verdict recorded on `expectations`.  A scenario staging a fault
+    against `Expect: 100-continue` is testing nothing if the client never
+    sent it, and without this the run looks like a pass.
+
+  Both halves gained the same pair — `ExpectClientFrame` on HTTP/2 — and
+  both results report `wait_skipped` and `expectations` under one name.  The
+  grammar (`method`, `target`, `version`, `header`, `header_absent`) **fails
+  closed on an unrecognised key**, as `frame_matches` already did: a typo in
+  a scenario is a bug, and silently matching on a key nobody reads hides it.
+
+- **Typed steps for the faults that previously needed hand-built bytes.**
+  `SendHeaders` (HTTP/2) builds a header block with HPACK — so a
+  pseudo-header out of order, a connection-specific header, or a block HPACK
+  itself would not produce (`raw_block`) stop being hex literals.
+  `SendStatusLine`, `SendHeader` (with `fold=` for obs-fold), `SendChunk`
+  (with `declared_size=`, the HTTP/1.1 twin of `declared_length`),
+  `EndHeaders` and `EndChunkedBody` do the same for HTTP/1.1 framing.
+
+- **An HTTP/2 scenario containing a PING can be read back.**  `Ping` is the
+  one frame class whose constructor requires `data`, and the JSON
+  deserialiser did not pass it — so a scenario that serialised cleanly raised
+  `TypeError` on the way back.  Present since the serialiser was written;
+  found by the sweep rather than by use.
+
 - **The three fault-injection scenario vocabularies are exported
   role-qualified.**  HTTP/1.1 client-side, HTTP/1.1 server-side and HTTP/2
   server-side share step names because they describe the same shapes of

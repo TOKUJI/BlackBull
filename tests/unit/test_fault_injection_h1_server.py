@@ -310,7 +310,10 @@ class TestResultSymmetry:
         h1 = {f.name for f in dc.fields(ScenarioH1ServerResult)}
         h2 = {f.name for f in dc.fields(ScenarioH2Result)}
         #: The one field that is genuinely HTTP/1.1-only: HTTP/2 has no
-        #: single "head" to capture, it has frames.
+        #: single "head" to capture, it has frames.  Everything else must
+        #: exist on both — this test caught `wait_skipped` and
+        #: `expectations` being added to one half only, an hour after they
+        #: were written.
         assert h1 - h2 == {'request_head'}
         assert h2 - h1 == set(), (
             f'HTTP/2 reports fields HTTP/1.1 does not: {sorted(h2 - h1)}')

@@ -39,11 +39,22 @@ import time
 from .scenario_h1_server import (
     Abort,
     CloseGracefully,
+    EndChunkedBody,
+    EndHeaders,
+    ExpectRequest,
     ScenarioH1Server,
     ScenarioH1ServerResult,
+    SendChunk,
+    SendHeader,
     SendRawBytes,
+    SendStatusLine,
     Sleep,
     WaitForRequest,
+    encode_chunk,
+    encode_chunked_terminator,
+    encode_header,
+    encode_status_line,
+    request_matches,
 )
 
 logger = logging.getLogger(__name__)
@@ -203,28 +214,62 @@ class H1FaultServer:
                         result: ScenarioH1ServerResult) -> bool:
         """Execute one step.  Returns True when it terminates the connection."""
         if isinstance(step, WaitForRequest):
-            try:
-                head = await asyncio.wait_for(
-                    reader.readuntil(_HEAD_END), timeout=step.timeout)
-                result.request_head = head
-                result.client_bytes_received += len(head)
-            except (asyncio.TimeoutError, asyncio.IncompleteReadError):
-                # Recorded, not raised: a client that never sends a request
-                # is itself a case worth scripting around.
-                result.wait_timed_out = True
+            # Filter over a pipeline: read heads until one matches, and
+            # count what was skipped.  A skipped head is a request the
+            # scenario can no longer answer, and HTTP/1.1 responses are
+            # positional — so this desyncs the connection, deliberately,
+            # and ``wait_skipped`` is how the scenario author sees it.
+            deadline = asyncio.get_running_loop().time() + step.timeout
+            while True:
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    result.wait_timed_out = True
+                    return False
+                head = await self._read_head(reader, remaining, result)
+                if head is None:
+                    return False
+                if request_matches(head, step.match):
+                    result.request_head = head
+                    return False
+                result.wait_skipped += 1
+
+        if isinstance(step, ExpectRequest):
+            # A guard, not a filter: one head, nothing skipped, and the
+            # verdict recorded either way.
+            head = await self._read_head(reader, step.timeout, result)
+            if head is None:
+                result.expectations.append((dict(step.match), False))
+                return False
+            result.request_head = head
+            result.expectations.append(
+                (dict(step.match), request_matches(head, step.match)))
+            return False
+
+        # The typed steps all reduce to bytes, and share one write path so
+        # the pacing option and the byte accounting cannot drift apart.
+        if isinstance(step, SendStatusLine):
+            await self._write(writer, encode_status_line(step), 0.0, result)
+            return False
+
+        if isinstance(step, SendHeader):
+            await self._write(writer, encode_header(step), 0.0, result)
+            return False
+
+        if isinstance(step, EndHeaders):
+            await self._write(writer, b'\r\n', 0.0, result)
+            return False
+
+        if isinstance(step, SendChunk):
+            await self._write(writer, encode_chunk(step), 0.0, result)
+            return False
+
+        if isinstance(step, EndChunkedBody):
+            await self._write(writer, encode_chunked_terminator(step), 0.0,
+                              result)
             return False
 
         if isinstance(step, SendRawBytes):
-            if step.byte_interval > 0:
-                for i in range(len(step.data)):
-                    writer.write(step.data[i:i + 1])
-                    await writer.drain()
-                    result.server_bytes_sent += 1
-                    await asyncio.sleep(step.byte_interval)
-            else:
-                writer.write(step.data)
-                await writer.drain()
-                result.server_bytes_sent += len(step.data)
+            await self._write(writer, step.data, step.byte_interval, result)
             return False
 
         if isinstance(step, Sleep):
@@ -240,6 +285,46 @@ class H1FaultServer:
             return True
 
         raise H1FaultServerError(f'unknown scenario step: {step!r}')
+
+    @staticmethod
+    async def _read_head(reader: asyncio.StreamReader, timeout: float,
+                         result: ScenarioH1ServerResult) -> bytes | None:
+        """Read one request head, or ``None`` when none arrives.
+
+        A client that never sends a request is itself a case worth
+        scripting around, so the miss is recorded rather than raised —
+        the behaviour this step has always had.
+        """
+        try:
+            head = await asyncio.wait_for(
+                reader.readuntil(_HEAD_END), timeout=timeout)
+        except (asyncio.TimeoutError, asyncio.IncompleteReadError):
+            result.wait_timed_out = True
+            return None
+        result.client_bytes_received += len(head)
+        return head
+
+    @staticmethod
+    async def _write(writer: asyncio.StreamWriter, data: bytes,
+                     byte_interval: float,
+                     result: ScenarioH1ServerResult) -> None:
+        """The one write path every step goes through.
+
+        Pacing lives here rather than per-step because a trickle is not a
+        slow write of the whole buffer: each byte has to reach the wire
+        before the pause, or the peer sees one burst after the total delay
+        and the scenario tests nothing.
+        """
+        if byte_interval > 0:
+            for i in range(len(data)):
+                writer.write(data[i:i + 1])
+                await writer.drain()
+                result.server_bytes_sent += 1
+                await asyncio.sleep(byte_interval)
+        else:
+            writer.write(data)
+            await writer.drain()
+            result.server_bytes_sent += len(data)
 
     @staticmethod
     async def _close(writer: asyncio.StreamWriter, *, graceful: bool) -> None:

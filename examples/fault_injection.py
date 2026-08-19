@@ -42,7 +42,7 @@ from blackbull.fault_injection import (
     ReadResponse,
     Scenario,
     ScenarioH1Server,
-    SendBytes,
+    H1CSendRawBytes,
     Sleep,
     WaitForRequest,
     make_self_signed_h2_context,
@@ -106,27 +106,27 @@ _WELL_FORMED = (
 
 BROKEN_CLIENT_SCENARIOS: dict[str, Scenario] = {
     'well_formed_request': Scenario(steps=(
-        SendBytes(_WELL_FORMED),
+        H1CSendRawBytes(_WELL_FORMED),
         ReadResponse(timeout=2.0),
     )),
     # Slowloris: one byte every 50 ms.  stdlib waits; a hardened server
     # closes on a request-header read timeout.
     'slowloris_trickle': Scenario(steps=(
-        SendBytes(_WELL_FORMED, byte_interval=0.05),
+        H1CSendRawBytes(_WELL_FORMED, byte_interval=0.05),
         ReadResponse(timeout=5.0),
     )),
     # Request line + Host, no blank line, then silence.  stdlib blocks
     # reading more header lines until the kernel gives up (default: never),
     # so this records a client-side read timeout.
     'partial_headers_idle': Scenario(steps=(
-        SendBytes(b'GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n'),
+        H1CSendRawBytes(b'GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n'),
         Sleep(duration=1.5),
         ReadResponse(timeout=1.0),
     )),
     # Hard RST after the request line.  Abort short-circuits the scenario;
     # no read happens.
     'abort_after_request_line': Scenario(steps=(
-        SendBytes(b'GET / HTTP/1.1\r\n'),
+        H1CSendRawBytes(b'GET / HTTP/1.1\r\n'),
         Abort(),
     )),
 }
