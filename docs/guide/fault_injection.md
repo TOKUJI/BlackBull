@@ -2,25 +2,49 @@
 
 BlackBull ships a deliberate-misbehaviour toolkit under
 `blackbull.fault_injection` for testing other HTTP implementations
-against bad-server / bad-client behaviour.  Two directions are
-supported:
+against bad-server / bad-client behaviour.
 
-* **Client → server (HTTP/1.1)** — a programmable client that drives
-  a target server through slowloris-style misbehaviour: trickled
-  bytes, partial headers, mid-request idle, abrupt RST.  Driven
-  through `HTTP1Client.execute_scenario`; the
-  `blackbull.fault_injection.oracle_h1` half compares two servers'
-  responses to the same scenario.
-* **Server → client (HTTP/2)** — a programmable server (`H2FaultServer`)
-  that emits deliberate misbehaviour toward a connected client:
-  half-closed streams, exhausted flow-control windows, illegal
-  SETTINGS, weird frame sequences.  Backed by a named catalogue you
-  can `parametrize` over.
+## What it covers
 
-This module is an opt-in testing instrument.  It refuses to start
-when `BB_PRODUCTION` is set in the environment so the
-deliberate-misbehaviour code path cannot accidentally fire on a
-production deployment.
+Both roles, on both HTTP protocols — the grid, rather than a count,
+because which cell you need depends on which side you are testing:
+
+| | Broken **client** → your server | Broken **server** → your client |
+|---|---|---|
+| **HTTP/1.1** | ✅ `HTTP1Client.execute_scenario` + `oracle_h1` | ✅ `H1FaultServer` + catalogue |
+| **HTTP/2** | ✗ not implemented | ✅ `H2FaultServer` + catalogue |
+| **WebSocket** | ✗ not implemented | ✗ not implemented |
+| **gRPC** | — | ⚠ transport only, via `H2FaultServer` |
+| **MQTT** | — | — out of scope |
+
+* **Broken client → your server** drives a target server through
+  slowloris-style misbehaviour: trickled bytes, partial headers,
+  mid-request idle, abrupt RST.  The `oracle_h1` half compares two
+  servers' responses to the same scenario, so you can diff your server
+  against a reference such as nginx.
+* **Broken server → your client** emits misbehaviour at a connected
+  client: on HTTP/1.1 a trickled status line, a `Content-Length` that
+  lies, a chunked body that stops mid-chunk; on HTTP/2 half-closed
+  streams, exhausted flow-control windows, illegal SETTINGS, weird
+  frame sequences.  Both are backed by a named catalogue you can
+  `parametrize` over.
+
+**Where it stops, stated because you would otherwise plan around it:**
+
+* **gRPC** has no fault injection of its own.  gRPC rides HTTP/2, so
+  `H2FaultServer` already misbehaves *beneath* a gRPC client at the
+  transport layer — but gRPC-specific faults (an invalid `grpc-status`,
+  a malformed length-prefixed message, a trailers-only response) cannot
+  be expressed.
+* **MQTT** has none and is not planned to.  The broker is server-side by
+  design and fault injection for it is out of scope.
+* **WebSocket** has none in either direction.
+
+This module is an opt-in testing instrument.  It refuses to start in a
+production context (`BLACKBULL_ENV=production`, or `BB_PRODUCTION` as an
+explicit override) so the deliberate-misbehaviour code path cannot
+accidentally fire on a production deployment, and both fault servers
+refuse a non-loopback bind without `allow_remote=True`.
 
 ## Install
 
@@ -164,6 +188,77 @@ The matching differential oracle
 (`blackbull.fault_injection.run_scenario`) drives the same scenario
 against two servers and categorises whether they agree, disagree,
 or both rejected.
+
+## Quick start — HTTP/1.1 server-side
+
+Point your own HTTP/1.1 client at a server that is wrong on purpose:
+
+```python
+import pytest
+from blackbull.fault_injection import (
+    H1FaultServer, H1SCloseGracefully, H1SSendRawBytes,
+    ScenarioH1Server, WaitForRequest,
+)
+
+@pytest.mark.asyncio
+async def test_my_client_rejects_a_short_body():
+    scenario = ScenarioH1Server(steps=(
+        WaitForRequest(),
+        # Declares 100 bytes, sends 5, then closes.
+        H1SSendRawBytes(b'HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nshort'),
+        H1SCloseGracefully(),
+    ))
+    async with H1FaultServer(scenario) as srv:
+        with pytest.raises(Exception):
+            await my_client.get(f'http://{srv.host}:{srv.port}/')
+```
+
+!!! note "Why the `H1S` prefix"
+
+    Three scenario vocabularies live in this package — HTTP/1.1 client-side,
+    HTTP/1.1 server-side, HTTP/2 server-side — and they share step names
+    because they describe the same shapes of misbehaviour.  The package
+    exports them role-qualified so an import cannot silently hand one half's
+    step to the other half's executor: `H1S…` is HTTP/1.1 server-side, `H2…`
+    is HTTP/2, and the unprefixed `Abort` / `Sleep` are the HTTP/1.1 *client*
+    vocabulary that had the names first.
+
+    Importing from the submodule directly (`from
+    blackbull.fault_injection.scenario_h1_server import SendRawBytes`) gives
+    you the unprefixed names if you prefer them.
+
+The named cases live in `blackbull.fault_injection.catalogue.h1`:
+
+| Case | What the server does |
+|---|---|
+| `content_length_overstated` | declares 100 bytes, sends 5, closes |
+| `content_length_understated` | declares 2, sends a whole second response after it |
+| `conflicting_content_length` | two `Content-Length` headers that disagree |
+| `chunked_stops_mid_chunk` | announces a 5-byte chunk, sends 2, EOF |
+| `chunked_never_terminates` | well-formed chunks, no zero-length terminator |
+| `trickled_status_line` | a *correct* response, one byte at a time |
+| `headers_never_end` | header lines forever, never the blank line |
+| `closed_without_response` | accepts the request, resets the connection |
+| `silent_after_request` | holds the connection open, writes nothing |
+
+Two of those are not failures to be caught.  `trickled_status_line` is
+correct HTTP delivered slowly — a client that rejects it has a bug of its
+own.  `content_length_understated` should *succeed*: RFC 9112 says read
+exactly `Content-Length` octets, so returning the 2-byte body is the
+conformant answer.  The hazard is the next exchange, not this one — the
+surplus is a whole second response left in the buffer, which a keep-alive
+client reusing the connection will parse as the reply to a request it has
+not sent.
+
+### Every scenario is raw bytes, deliberately
+
+There is no typed `SendResponse` step, and both fault servers assemble
+their own output rather than calling BlackBull's production send path.
+That is load-bearing rather than stylistic: **a fault server built on the
+production serialiser cannot emit a fault that serialiser has**, so the
+one bug class it would be least able to find is the one in the code it
+shares.  The HTTP/2 half carries its own frame encoder for the same
+reason.
 
 ## Safety locks
 

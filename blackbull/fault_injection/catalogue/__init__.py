@@ -34,6 +34,14 @@ from .h2 import (
     settings_max_frame_size_below_minimum,
 )
 
+from .h1 import CATALOGUE as CATALOGUE_H1
+
+#: HTTP/2 cases.  ``CATALOGUE`` keeps its original name and contents so
+#: existing ``parametrize`` over it is untouched; ``CATALOGUE_H2`` is the
+#: symmetric alias, and ``CATALOGUE_H1`` the HTTP/1.1 set.  Two protocols,
+#: two dicts, reachable the same way — the H1 set was previously only
+#: importable from its own module, which is how a reader would have
+#: concluded there was one catalogue.
 CATALOGUE = {
     'half_closed_stream_no_data': half_closed_stream_no_data,
     'exhausted_window_zero_initial': exhausted_window_zero_initial,
@@ -41,9 +49,12 @@ CATALOGUE = {
         settings_max_frame_size_below_minimum,
     'headers_continuation_dropped': headers_continuation_dropped,
 }
+CATALOGUE_H2 = CATALOGUE
 
 __all__ = [
     'CATALOGUE',
+    'CATALOGUE_H1',
+    'CATALOGUE_H2',
     'exhausted_window_zero_initial',
     'half_closed_stream_no_data',
     'headers_continuation_dropped',

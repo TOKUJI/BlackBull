@@ -49,6 +49,67 @@ The runtime version is exposed as `blackbull.__version__` via
 `pyproject.toml`.  Re-run `pip install -e .` after a local version bump
 so the editable install's metadata catches up.
 
+## [Unreleased]
+
+### Added
+
+- **`H1FaultServer`** — a deliberately misbehaving HTTP/1.1 server, for
+  testing your own HTTP/1.1 client.  The toolkit documented "two directions
+  are supported" and that was true, but each protocol had only **one** and
+  they were opposite ones: HTTP/1.1 had the broken *client*, HTTP/2 the broken
+  *server*.  A reader who took it as "both directions on both protocols" was
+  wrong and nothing corrected them.  Scenarios are typed steps —
+  `WaitForRequest`, `SendRawBytes` (with an optional per-byte interval),
+  `Sleep`, `Abort`, `CloseConnection` — and nine named cases ship in
+  `blackbull.fault_injection.catalogue.h1`: a `Content-Length` that overstates
+  or understates the body, two that disagree, a chunked body that stops
+  mid-chunk or never terminates, a status line trickled a byte at a time,
+  headers that never end, a connection reset without a response, and a server
+  that simply never answers.
+
+  It carries the same two safety locks as `H2FaultServer` — it refuses to run
+  in a production context, and refuses a non-loopback bind without
+  `allow_remote=True`.
+
+  **It assembles its own bytes.**  There is no typed `SendResponse` step and
+  nothing imports the production send path, because a fault server built on
+  the production serialiser cannot emit a fault that serialiser has — the one
+  bug class it would be least able to find is the one in the code it shares.
+  The HTTP/2 half already worked this way; the rule is now tested rather than
+  implied.
+
+### Changed
+
+- **The three fault-injection scenario vocabularies are exported
+  role-qualified.**  HTTP/1.1 client-side, HTTP/1.1 server-side and HTTP/2
+  server-side share step names because they describe the same shapes of
+  misbehaviour, and a bare `SendRawBytes` from the package resolved to
+  HTTP/2's — so handing one to an `H1FaultServer` raised *unknown scenario
+  step*.  The package now exports `H1S…` for the HTTP/1.1 server half and
+  keeps `H2…` for HTTP/2; the submodules still offer the unprefixed names.
+  Four further asymmetries went with it: the close step is `CloseGracefully`
+  on both halves (it was `CloseConnection` on one), `ScenarioH1Server` gains
+  the JSON round-trip `ScenarioH2` already had, `H2FaultServer` exposes the
+  public `host` / `port` that `H1FaultServer` does, and both catalogues are
+  reachable the same way (`CATALOGUE_H1` / `CATALOGUE_H2`, with `CATALOGUE`
+  unchanged).  `ScenarioH1Server.steps` is a tuple, as `ScenarioH2.steps`
+  always was.
+
+- **The fault-injection documentation states its reach as a grid**, not a
+  count.  Which cell you need depends on which side you are testing, and the
+  page now says where the toolkit stops: gRPC has no fault injection of its
+  own (it gets transport-layer misbehaviour because it rides HTTP/2, but
+  gRPC-specific faults cannot be expressed), MQTT has none and is not planned
+  to, WebSocket has none in either direction.
+
+  Three claims elsewhere were corrected to match.  `translation-hub.md` — a
+  page about MQTT ⇄ gRPC ⇄ REST — said every protocol conversation is
+  observable with the same event API *and fault-injection tooling*; the first
+  half is true on every protocol and the second is not.  `why-blackbull.md`
+  offered "differential oracles against a reference implementation" inside an
+  HTTP/2 paragraph while the oracle is HTTP/1.1-only.  `README.md` described
+  the catalogue as HTTP/2's alone.
+
 ## [0.77.2] — 2026-08-19
 
 ### Fixed

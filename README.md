@@ -347,10 +347,14 @@ async def test_my_client_handles_half_closed_streams():
             await my_h2_client.get(srv.url, timeout=1.0)
 ```
 
-The catalogue ships four spec-grade categories (half-closed streams,
-exhausted flow-control windows, illegal SETTINGS, weird frame
-sequences); the symmetric HTTP/1.1 client side drives a real server
-through trickled headers, partial requests, and abrupt RST.  See
+The catalogue ships four spec-grade categories for HTTP/2 (half-closed
+streams, exhausted flow-control windows, illegal SETTINGS, weird frame
+sequences) and nine for HTTP/1.1 (a `Content-Length` that lies, a chunked
+body that stops mid-chunk, a status line trickled a byte at a time, …);
+the HTTP/1.1 client side drives a real server through trickled headers,
+partial requests, and abrupt RST.  HTTP/1.1 and HTTP/2 are the covered
+protocols — MQTT is out of scope and gRPC gets transport-layer
+misbehaviour only, since it rides HTTP/2.  See
 [`docs/guide/fault_injection.md`](https://github.com/TOKUJI/BlackBull/blob/master/docs/guide/fault_injection.md)
 for the full tutorial.
 
