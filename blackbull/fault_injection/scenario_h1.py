@@ -36,7 +36,7 @@ Two serialisations are supported:
 import base64
 import enum
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Union
 
 
@@ -48,6 +48,8 @@ class StepOp(str, enum.Enum):
     READ = 'READ'
     ABORT = 'ABORT'
     HALF_CLOSE = 'HALF_CLOSE'
+    WAIT_FOR_RESPONSE = 'WAIT_FOR_RESPONSE'
+    EXPECT_RESPONSE = 'EXPECT_RESPONSE'
 
 
 @dataclass(frozen=True)
@@ -99,6 +101,41 @@ class Abort:
 # as a Union (not StrEnum) because the dispatcher matches by isinstance,
 # and frozen dataclasses are hashable / comparable / safe to share.
 @dataclass(frozen=True)
+class WaitForResponse:
+    """Read responses until one satisfies ``match``, or the timeout wins.
+
+    A **filter**: non-matching responses are read, counted in
+    ``wait_skipped``, and passed over.  The role-axis twin of
+    :class:`~blackbull.fault_injection.scenario_h1_server.WaitForRequest`,
+    and it exists for the same reason — a scenario that has to know
+    exactly how many messages precede the interesting one is a scenario
+    written against a particular peer.
+
+    On HTTP/1.1 a non-zero ``wait_skipped`` is worth reading: responses
+    arrive in request order, so skipping one means the scenario is a
+    response further along than it thinks.
+    """
+    match: dict = field(default_factory=dict)
+    timeout: float = 5.0
+
+
+@dataclass(frozen=True)
+class ExpectResponse:
+    """Read one response and record whether it matched.
+
+    A **guard**, not a filter: nothing is skipped and the executor moves
+    on either way.  It answers *is the peer behaving as this scenario
+    assumes?* — and a scenario whose premise silently failed would
+    otherwise look like a pass.
+
+    Twin of
+    :class:`~blackbull.fault_injection.scenario_h1_server.ExpectRequest`.
+    """
+    match: dict = field(default_factory=dict)
+    timeout: float = 5.0
+
+
+@dataclass(frozen=True)
 class HalfClose:
     """Shut down the sending direction only (FIN), keep reading.
 
@@ -113,7 +150,8 @@ class HalfClose:
     """
 
 
-Step = Union[SendRawBytes, Sleep, ReadResponse, Abort, HalfClose]
+Step = Union[SendRawBytes, Sleep, ReadResponse, Abort, HalfClose,
+             WaitForResponse, ExpectResponse]
 
 
 @dataclass(frozen=True)
@@ -310,6 +348,25 @@ class ScenarioResult:
     #: "asked and it did not happen" — a silently skipped half-close
     #: otherwise reads as a pass.
     half_closed: bool = False
+    #: Everything a read step received, in order.  ``response`` stays the
+    #: most recent one for back-compat; this is what a scenario needs when
+    #: the peer sends more than one thing — a pipelined pair on HTTP/1.1, or
+    #: the handshake frames an HTTP/2 verdict arrives behind.  Before it
+    #: existed, the second read overwrote the first and the loss was silent.
+    received: list = field(default_factory=list)
+    #: Bytes read from the peer.  Named for who the peer is, mirroring
+    #: ``client_bytes_received`` on the broken-server results.
+    server_bytes_received: int = 0
+    #: One ``(match, matched)`` pair per guard step, in order: what the
+    #: scenario assumed, and whether it held.  Same shape and same name as
+    #: the broken-server half.
+    expectations: list = field(default_factory=list)
+    #: Messages a ``WaitFor…(match=...)`` step read and passed over.
+    wait_skipped: int = 0
+    #: Whether a ``WaitFor…`` step timed out before its match arrived.  The
+    #: step still counts as completed and the next step runs; this is what
+    #: distinguishes a per-step miss from a transport error in ``exception``.
+    wait_timed_out: bool = False
 
 
 # ----------------------------------------------------------------------
@@ -333,7 +390,26 @@ def _step_to_dict(step: Step) -> dict:
         return {'op': StepOp.ABORT.value}
     if isinstance(step, HalfClose):
         return {'op': StepOp.HALF_CLOSE.value}
+    if isinstance(step, WaitForResponse):
+        return {'op': StepOp.WAIT_FOR_RESPONSE.value,
+                'timeout': step.timeout, 'match': dict(step.match)}
+    if isinstance(step, ExpectResponse):
+        return {'op': StepOp.EXPECT_RESPONSE.value,
+                'timeout': step.timeout, 'match': dict(step.match)}
     raise TypeError(f'unknown step type: {type(step).__name__}')
+
+
+def _normalise_match(match: dict | None) -> dict:
+    """JSON has no tuples, so ``header``'s pair comes back as a list.
+
+    Normalised on the way in rather than compared loosely on the way out:
+    a scenario that round-trips must equal the one it came from, and
+    ``('x', 'y') != ['x', 'y']``.  The HTTP/1.1 server half does the same.
+    """
+    match = dict(match or {})
+    if 'header' in match and isinstance(match['header'], list):
+        match['header'] = tuple(match['header'])
+    return match
 
 
 def _step_from_dict(d: dict) -> Step:
@@ -351,12 +427,67 @@ def _step_from_dict(d: dict) -> Step:
         return Abort()
     if op == StepOp.HALF_CLOSE.value:
         return HalfClose()
+    if op == StepOp.WAIT_FOR_RESPONSE.value:
+        return WaitForResponse(timeout=float(d.get('timeout', 5.0)),
+                               match=_normalise_match(d.get('match')))
+    if op == StepOp.EXPECT_RESPONSE.value:
+        return ExpectResponse(timeout=float(d.get('timeout', 5.0)),
+                              match=_normalise_match(d.get('match')))
     raise ValueError(f'unknown step op: {op!r}')
+
+
+def response_matches(response, match: dict) -> bool:
+    """Return True iff *response* satisfies every key in *match*.
+
+    Recognised keys: ``status``, ``reason``, ``version``, ``header``,
+    ``header_absent``, ``body_contains``.  **Unknown keys fail closed** —
+    an unrecognised key is almost certainly a typo in a scenario, and
+    silently matching on a key nobody reads would hide it.
+    ``request_matches`` and ``frame_matches`` made the same choice for the
+    same reason.
+
+    ``header`` takes ``(name, value)``; pass ``value=None`` to match on
+    presence alone.  ``header_absent`` takes a name.
+    """
+    recognised = {'status', 'reason', 'version', 'header', 'header_absent',
+                  'body_contains'}
+    if set(match) - recognised:
+        return False
+    if not match:
+        return True
+
+    for key in ('status', 'reason', 'version'):
+        if key in match and getattr(response, key, None) != match[key]:
+            return False
+
+    def _name(n):
+        return n.lower() if isinstance(n, str) else bytes(n).lower()
+
+    headers = list(getattr(response, 'headers', ()) or ())
+    names = {_name(n) for n, _ in headers}
+    if 'header' in match:
+        name, value = match['header']
+        name = _name(name)
+        if value is None:
+            if name not in names:
+                return False
+        elif not any(_name(n) == name and v == value for n, v in headers):
+            return False
+    if 'header_absent' in match and _name(match['header_absent']) in names:
+        return False
+    if 'body_contains' in match:
+        body = getattr(response, 'body', b'') or b''
+        if match['body_contains'] not in body:
+            return False
+    return True
 
 
 __all__ = [
     'Abort',
+    'ExpectResponse',
     'HalfClose',
+    'WaitForResponse',
+    'response_matches',
     'ReadResponse',
     'Scenario',
     'ScenarioResult',

@@ -30,6 +30,7 @@ from .exceptions import ConnectionError, ProtocolError, StreamReset
 # this module, and a TYPE_CHECKING import is not (beartype looks in the
 # module namespace at call time, where the name would not exist).
 from ..fault_injection._transport import half_close as _sc_half_close
+from ..fault_injection.scenario_h2 import frame_matches as _sc_frame_matches
 from ..fault_injection.scenario_h2_client import (
     Abort as _ScAbort,
     CLIENT_PREFACE as _SC_PREFACE,
@@ -38,7 +39,9 @@ from ..fault_injection.scenario_h2_client import (
     ScenarioH2ClientResult,
     SendRawBytes as _ScSendBytes,
     SendFrame as _ScSendFrame,
+    ExpectServerFrame as _ScExpectServerFrame,
     HalfClose as _ScHalfClose,
+    WaitForServerFrame as _ScWaitForServerFrame,
     SendPreface as _ScSendPreface,
     Sleep as _ScSleep,
     encode_frame as _sc_encode_frame,
@@ -87,6 +90,18 @@ class _PendingResponse:
     body_parts: list[bytes] = field(default_factory=list)
     # Stream-level received-but-unacked DATA bytes (see _credit_received).
     unacked: int = 0
+
+
+def _record_frame(result, frame) -> None:
+    """Log one frame: newest in ``response``, all of them in ``received``.
+
+    ``response`` keeps its old meaning so existing scenarios are
+    untouched.  The twin of ``http1._record_response`` — the two roles
+    report the same things under the same names.
+    """
+    result.response = frame
+    result.received.append(frame)
+    result.server_bytes_received += 9 + int(getattr(frame, 'length', 0) or 0)
 
 
 class HTTP2Client:
@@ -350,12 +365,54 @@ class HTTP2Client:
                     await asyncio.sleep(step.duration)
                 elif isinstance(step, _ScReadResponse):
                     try:
-                        result.response = await asyncio.wait_for(
-                            self._receive_frame(), timeout=step.timeout)
+                        _record_frame(result, await asyncio.wait_for(
+                            self._receive_frame(), timeout=step.timeout))
                     except (asyncio.TimeoutError, TimeoutError) as exc:
                         result.timed_out = True
                         result.exception = repr(exc)
                         return result
+                elif isinstance(step, _ScWaitForServerFrame):
+                    # The step that lets a scenario observe a *verdict*.
+                    # One read cannot: the first frame a correct server
+                    # sends is its handshake SETTINGS, so a GOAWAY is
+                    # always further down a stream whose depth varies by
+                    # peer.  Skipping is safe here in a way it is not on
+                    # HTTP/1.1 — HTTP/2 streams are independent.
+                    deadline = _time.monotonic() + step.timeout
+                    while True:
+                        remaining = deadline - _time.monotonic()
+                        if remaining <= 0:
+                            result.wait_timed_out = True
+                            break
+                        try:
+                            frame = await asyncio.wait_for(
+                                self._receive_frame(), timeout=remaining)
+                        except (asyncio.TimeoutError, TimeoutError):
+                            result.wait_timed_out = True
+                            break
+                        if frame is None:
+                            result.wait_timed_out = True
+                            break
+                        _record_frame(result, frame)
+                        if _sc_frame_matches(frame, step.match):
+                            break
+                        result.wait_skipped += 1
+                elif isinstance(step, _ScExpectServerFrame):
+                    try:
+                        frame = await asyncio.wait_for(
+                            self._receive_frame(), timeout=step.timeout)
+                    except (asyncio.TimeoutError, TimeoutError):
+                        result.wait_timed_out = True
+                        result.expectations.append((dict(step.match), False))
+                    else:
+                        if frame is None:
+                            result.expectations.append(
+                                (dict(step.match), False))
+                        else:
+                            _record_frame(result, frame)
+                            result.expectations.append(
+                                (dict(step.match),
+                                 _sc_frame_matches(frame, step.match)))
                 elif isinstance(step, _ScHalfClose):
                     result.half_closed = _sc_half_close(self._raw_writer)
                 elif isinstance(step, _ScAbort):

@@ -339,11 +339,17 @@ def frame_matches(frame: Frame, match: dict) -> bool:
     """Return True iff *frame* satisfies every key in *match*.
 
     Recognised keys: ``type``, ``stream_id``, ``flags_set``,
-    ``flags_unset``.  Unknown keys fail closed — an unrecognised
-    match key is almost certainly a typo in a catalogue entry, and
-    silently matching on a missing key would hide the bug.
+    ``flags_unset``, ``error_code``.  Unknown keys fail closed — an
+    unrecognised match key is almost certainly a typo in a catalogue
+    entry, and silently matching on a missing key would hide the bug.
+
+    ``error_code`` is what turns "a GOAWAY arrived" into "the peer
+    rejected this for *that* reason", and a frame carrying no error code
+    never matches it.  Both HTTP/2 roles share this function, so the key
+    is available to the broken server and the broken client alike.
     """
-    recognised = {'type', 'stream_id', 'flags_set', 'flags_unset'}
+    recognised = {'type', 'stream_id', 'flags_set', 'flags_unset',
+                  'error_code'}
     extra = set(match) - recognised
     if extra:
         return False
@@ -352,6 +358,11 @@ def frame_matches(frame: Frame, match: dict) -> bool:
         expected = match['type']
         if type(frame).__name__.upper() != expected.upper() \
                 and _frame_type_name(frame) != expected.upper():
+            return False
+
+    if 'error_code' in match:
+        actual = getattr(frame, 'error_code', None)
+        if actual is None or int(actual) != int(match['error_code']):
             return False
 
     if 'stream_id' in match and match['stream_id'] is not None:
