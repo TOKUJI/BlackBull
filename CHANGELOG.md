@@ -80,6 +80,16 @@ so the editable install's metadata catches up.
 
 ### Changed
 
+- **The two fault-injection result objects report the same things by the same
+  names.**  `ScenarioH1ServerResult` had invented `completed`, `bytes_sent`
+  and `elapsed` where `ScenarioH2Result` already had `steps_completed`,
+  `server_bytes_sent` and `elapsed_s`; nothing was wrong with either set, and
+  having both was the defect.  The HTTP/1.1 result also gains `exception`,
+  `terminated` and `client_bytes_received`, all protocol-neutral and all
+  already on the HTTP/2 side, and `ScenarioH2` gains the `name` its HTTP/1.1
+  counterpart had.  Only `request_head` is now asymmetric, because HTTP/2 has
+  no single head to capture.
+
 - **The three fault-injection scenario vocabularies are exported
   role-qualified.**  HTTP/1.1 client-side, HTTP/1.1 server-side and HTTP/2
   server-side share step names because they describe the same shapes of

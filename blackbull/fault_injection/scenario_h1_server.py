@@ -108,17 +108,29 @@ class ScenarioH1Server:
 
 @dataclass
 class ScenarioH1ServerResult:
-    """What the executor observed while running a scenario."""
+    """What the executor observed while running a scenario.
+
+    Field names match :class:`~blackbull.fault_injection.scenario_h2.ScenarioH2Result`
+    wherever the two mean the same thing, so a harness that reports on one
+    half does not need a second spelling for the other.
+    """
     #: Steps that completed, in order.
-    completed: list = field(default_factory=list)
+    steps_completed: list = field(default_factory=list)
+    #: Bytes the fault server wrote at the client.
+    server_bytes_sent: int = 0
+    #: Bytes the client sent us — the request head, mostly.
+    client_bytes_received: int = 0
+    #: Set when a step raised.
+    exception: BaseException | None = None
     #: True when a ``WaitForRequest`` step expired without a request head.
-    request_timed_out: bool = False
-    #: The client's request head, once one arrived.
-    request_head: bytes = b''
-    #: Total bytes written at the client.
-    bytes_sent: int = 0
+    wait_timed_out: bool = False
+    #: True when a terminal step (``Abort`` / ``CloseGracefully``) ran.
+    terminated: bool = False
     #: Seconds from first connection to the last step.
-    elapsed: float = 0.0
+    elapsed_s: float = 0.0
+    #: The client's request head, once one arrived.  HTTP/1.1-specific:
+    #: HTTP/2 has no single "head" to capture, it has frames.
+    request_head: bytes = b''
 
 
 # ---------------------------------------------------------------------------
