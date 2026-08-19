@@ -276,17 +276,26 @@ client, not a server-side code path) and carries no equivalent lock.
 
 ## Examples
 
-Two end-to-end walkthroughs ship with the framework, one per
-direction:
+One walkthrough ships with the framework and covers the whole grid:
 
-* [`examples/scenario_h2_fault_injection.py`](https://github.com/TOKUJI/BlackBull/blob/master/examples/scenario_h2_fault_injection.py)
-  — runs every catalogue scenario against ``httpx`` (over the
-  self-signed TLS context) and prints both what the server emitted
-  and how httpx reacted (``LocalProtocolError`` /
-  ``RemoteProtocolError`` / ...).  Requires ``pip install 'httpx[http2]'``.
-* [`examples/scenario_h1_fault_injection.py`](https://github.com/TOKUJI/BlackBull/blob/master/examples/scenario_h1_fault_injection.py)
-  — runs a handful of misbehaving client scenarios (slowloris
-  trickle, partial-headers idle, abrupt RST) against a stdlib
-  ``http.server.BaseHTTPRequestHandler`` running in a background
-  thread, and prints the resulting ``ScenarioResult`` for each.
-  No third-party deps.
+[`examples/fault_injection.py`](https://github.com/TOKUJI/BlackBull/blob/master/examples/fault_injection.py)
+
+| Cell | What it runs |
+|---|---|
+| **A** | A broken *client* against a real server — slowloris trickle, partial-headers idle, abrupt RST — driven at a stdlib `http.server` in a background thread.  No third-party deps |
+| **B** | A broken *server* against real clients: all nine HTTP/1.1 catalogue cases, driven **twice**, once with BlackBull's `HTTP1Client` and once with `httpx`.  The two columns sit side by side because that is the point — if our client and our fault server ever agree on something wrong, an independent implementation is what notices |
+| **C** | A broken *server* against a real HTTP/2 client — every HTTP/2 catalogue case against `httpx` over the self-signed TLS context |
+| **D** | Prints what is **not** implemented, and why, so the gap is visible from the same output as the coverage |
+| **E** | The same scenarios as **JSON Lines** — serialised, round-tripped, and one loaded from hand-written JSON and executed |
+
+It was previously two files, one per protocol.  A file per cell would have
+meant four, and the next cell five.
+
+Cells B and C need `pip install 'blackbull[fault-injection]'`; without it
+they report themselves skipped rather than failing.
+
+Cell B's output is worth reading for the two rows that come back **200**:
+`trickled_status_line` is correct HTTP delivered slowly, and
+`content_length_understated` is the conformant answer to a response that
+understates its body — the hazard there is the *next* exchange, not this
+one.  A fault catalogue is not a list of things a client must reject.

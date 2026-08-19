@@ -105,6 +105,17 @@ so the editable install's metadata catches up.
   unchanged).  `ScenarioH1Server.steps` is a tuple, as `ScenarioH2.steps`
   always was.
 
+- **The two fault-injection examples are one.**
+  `examples/scenario_h1_fault_injection.py` and
+  `examples/scenario_h2_fault_injection.py` are replaced by
+  `examples/fault_injection.py`, organised by grid cell: a broken client
+  against a real server (A), a broken server against real clients (B — all
+  nine HTTP/1.1 cases driven **twice**, once with BlackBull's client and once
+  with `httpx`), a broken HTTP/2 server against `httpx` (C), what is not
+  implemented and why (D), and the same scenarios as replayable JSON (E).
+  Both old files' content is carried over.  One file per cell would have meant
+  four, and the next cell five.
+
 - **The fault-injection documentation states its reach as a grid**, not a
   count.  Which cell you need depends on which side you are testing, and the
   page now says where the toolkit stops: gRPC has no fault injection of its

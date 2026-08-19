@@ -339,3 +339,58 @@ class TestResultSymmetry:
         assert result.terminated is True
         assert result.wait_timed_out is False
         assert result.elapsed_s > 0
+
+
+# =========================================================================
+# The shipped example
+# ===========================================================================
+
+class TestTheExampleStillRuns:
+    """`examples/fault_injection.py` is the toolkit's front door.
+
+    An example that stopped working is worse than no example: it is the
+    first thing a reader runs, and it fails in *their* terminal rather than
+    in CI.  This sprint has already broken one — the guide's quick-start
+    imported a step from the wrong half — so the example gets a test rather
+    than a promise.
+    """
+
+    async def test_the_example_imports_resolve(self):
+        """Every name the example imports must exist, with the right half."""
+        import ast
+        import pathlib
+
+        src = (pathlib.Path(__file__).resolve().parents[2]
+               / 'examples' / 'fault_injection.py')
+        tree = ast.parse(src.read_text())
+        imported = [
+            (node.module, alias.name)
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module
+            and node.module.startswith('blackbull')
+            for alias in node.names
+        ]
+        assert imported, 'the example imports nothing from blackbull'
+        import importlib
+        for module, name in imported:
+            mod = importlib.import_module(module)
+            assert hasattr(mod, name), f'{module} has no {name}'
+
+    async def test_cell_b_and_e_run(self):
+        """The two cells this sprint added, executed for real.
+
+        Cells A and C are left to the example itself: A starts a threaded
+        stdlib server and C needs TLS, and neither is what this sprint
+        changed.
+        """
+        import importlib.util
+        import pathlib
+
+        path = (pathlib.Path(__file__).resolve().parents[2]
+                / 'examples' / 'fault_injection.py')
+        spec = importlib.util.spec_from_file_location('_fi_example', path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        await asyncio.wait_for(module.cell_b_broken_server(), timeout=60.0)
+        await asyncio.wait_for(module.cell_e_scenarios_as_data(), timeout=20.0)
