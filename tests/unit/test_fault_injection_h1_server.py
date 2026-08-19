@@ -31,7 +31,7 @@ from blackbull.server.recipient import IncompleteReadError
 from blackbull.fault_injection.catalogue.h1 import CATALOGUE
 from blackbull.fault_injection.h1_server import H1FaultServer, H1FaultServerError
 from blackbull.fault_injection.scenario_h1_server import (
-    Abort, CloseConnection, ScenarioH1Server, SendRawBytes, Sleep, WaitForRequest,
+    Abort, CloseGracefully, ScenarioH1Server, SendRawBytes, Sleep, WaitForRequest,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -64,11 +64,11 @@ async def _get(url_host: str, port: int, *, timeout: float = 2.0):
 class TestDeliberateMisbehaviour:
     async def test_a_status_line_delivered_in_pieces(self):
         """A trickled status line: every byte legal, the pause is the fault."""
-        scenario = ScenarioH1Server(steps=[
+        scenario = ScenarioH1Server(steps=(
             WaitForRequest(),
             SendRawBytes(b'HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi',
                          byte_interval=0.001),
-        ])
+        ))
         async with H1FaultServer(scenario) as srv:
             resp = await _get(srv.host, srv.port)
         assert resp.status == 200
@@ -76,35 +76,35 @@ class TestDeliberateMisbehaviour:
 
     async def test_a_content_length_that_overstates_the_body(self):
         """The client must not return a short body as if it were complete."""
-        scenario = ScenarioH1Server(steps=[
+        scenario = ScenarioH1Server(steps=(
             WaitForRequest(),
             SendRawBytes(b'HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nshort'),
-            CloseConnection(),
-        ])
+            CloseGracefully(),
+        ))
         async with H1FaultServer(scenario) as srv:
             with pytest.raises(_REFUSED):
                 await _get(srv.host, srv.port)
 
     async def test_a_chunked_body_that_stops_mid_chunk(self):
-        scenario = ScenarioH1Server(steps=[
+        scenario = ScenarioH1Server(steps=(
             WaitForRequest(),
             SendRawBytes(b'HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n'
                          b'\r\n5\r\nab'),
-            CloseConnection(),
-        ])
+            CloseGracefully(),
+        ))
         async with H1FaultServer(scenario) as srv:
             with pytest.raises(_REFUSED):
                 await _get(srv.host, srv.port)
 
     async def test_a_connection_closed_without_any_response(self):
-        scenario = ScenarioH1Server(steps=[WaitForRequest(), Abort()])
+        scenario = ScenarioH1Server(steps=(WaitForRequest(), Abort()))
         async with H1FaultServer(scenario) as srv:
             with pytest.raises(_REFUSED):
                 await _get(srv.host, srv.port)
 
     async def test_a_server_that_never_answers(self):
         """The client's own deadline is what must end this, not the server."""
-        scenario = ScenarioH1Server(steps=[WaitForRequest(), Sleep(5.0)])
+        scenario = ScenarioH1Server(steps=(WaitForRequest(), Sleep(5.0)))
         async with H1FaultServer(scenario) as srv:
             with pytest.raises(asyncio.TimeoutError):
                 await _get(srv.host, srv.port, timeout=0.3)
@@ -142,19 +142,19 @@ class TestTheBreakerIsIndependent:
 
 class TestSafetyLocks:
     async def test_it_refuses_a_non_loopback_bind(self):
-        scenario = ScenarioH1Server(steps=[])
+        scenario = ScenarioH1Server(steps=())
         with pytest.raises(H1FaultServerError):
             H1FaultServer(scenario, host='0.0.0.0')
 
     async def test_allow_remote_is_the_explicit_opt_in(self):
-        scenario = ScenarioH1Server(steps=[])
+        scenario = ScenarioH1Server(steps=())
         srv = H1FaultServer(scenario, host='0.0.0.0', allow_remote=True)
         assert srv.host == '0.0.0.0'
 
     async def test_it_refuses_to_run_in_production(self, monkeypatch):
         monkeypatch.setenv('BB_PRODUCTION', '1')
         with pytest.raises(H1FaultServerError):
-            H1FaultServer(ScenarioH1Server(steps=[]))
+            H1FaultServer(ScenarioH1Server(steps=()))
 
 
 # ===========================================================================
@@ -218,3 +218,70 @@ class TestCatalogue:
                 with pytest.raises(Exception) as exc:
                     await client.get(url)
                 assert not isinstance(exc.value, AssertionError)
+
+
+# ===========================================================================
+# The package export surface
+# ===========================================================================
+
+class TestExportsDoNotCollide:
+    """Three vocabularies share step names; the package must keep them apart.
+
+    This is not hypothetical.  The documented quick-start originally imported
+    a bare ``SendRawBytes`` from the package, which resolved to **HTTP/2's** —
+    so the example in the docs raised ``unknown scenario step`` when run.  The
+    unit tests missed it because they import from the submodule, which is not
+    what the docs tell a reader to do.
+    """
+
+    async def test_the_documented_import_builds_a_runnable_scenario(self):
+        """Import exactly the way the guide does, and run it."""
+        from blackbull.fault_injection import (
+            H1FaultServer as Srv, H1SCloseGracefully, H1SSendRawBytes,
+            ScenarioH1Server as Scn, WaitForRequest as Wait,
+        )
+
+        scenario = Scn(steps=(
+            Wait(),
+            H1SSendRawBytes(b'HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi'),
+            H1SCloseGracefully(),
+        ))
+        async with Srv(scenario) as srv:
+            resp = await _get(srv.host, srv.port)
+        assert resp.status == 200 and resp.body == b'hi'
+
+    async def test_each_vocabulary_is_reachable_and_distinct(self):
+        import blackbull.fault_injection as fi
+        from blackbull.fault_injection import scenario_h1, scenario_h1_server, scenario_h2
+
+        assert fi.H1SSendRawBytes is scenario_h1_server.SendRawBytes
+        assert fi.SendRawBytes is scenario_h2.SendRawBytes
+        assert fi.Abort is scenario_h1.Abort
+        assert fi.H1SAbort is scenario_h1_server.Abort
+        assert fi.H2Abort is scenario_h2.Abort
+
+    async def test_both_servers_expose_host_and_port(self):
+        """A caller driving either with a raw socket needs the pair."""
+        from blackbull.fault_injection import (
+            H2FaultServer, ScenarioH1Server, ScenarioH2,
+        )
+        h1 = H1FaultServer(ScenarioH1Server(steps=()))
+        h2 = H2FaultServer(ScenarioH2(steps=()))
+        for srv in (h1, h2):
+            assert isinstance(srv.host, str)
+            assert isinstance(srv.port, int)
+
+    async def test_both_catalogues_are_reachable_the_same_way(self):
+        from blackbull.fault_injection.catalogue import CATALOGUE_H1, CATALOGUE_H2
+        assert len(CATALOGUE_H1) == 9
+        assert len(CATALOGUE_H2) == 4
+
+    async def test_a_scenario_survives_a_json_round_trip(self):
+        """H2 scenarios serialise; H1 server scenarios now do too."""
+        from blackbull.fault_injection import (
+            scenario_h1_server_from_json, scenario_h1_server_to_json,
+        )
+        for name, build in CATALOGUE.items():
+            scenario = build()
+            assert scenario_h1_server_from_json(
+                scenario_h1_server_to_json(scenario)) == scenario, name

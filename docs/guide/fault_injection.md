@@ -196,21 +196,36 @@ Point your own HTTP/1.1 client at a server that is wrong on purpose:
 ```python
 import pytest
 from blackbull.fault_injection import (
-    CloseConnection, H1FaultServer, ScenarioH1Server, SendRawBytes, WaitForRequest,
+    H1FaultServer, H1SCloseGracefully, H1SSendRawBytes,
+    ScenarioH1Server, WaitForRequest,
 )
 
 @pytest.mark.asyncio
 async def test_my_client_rejects_a_short_body():
-    scenario = ScenarioH1Server(steps=[
+    scenario = ScenarioH1Server(steps=(
         WaitForRequest(),
         # Declares 100 bytes, sends 5, then closes.
-        SendRawBytes(b'HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nshort'),
-        CloseConnection(),
-    ])
+        H1SSendRawBytes(b'HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nshort'),
+        H1SCloseGracefully(),
+    ))
     async with H1FaultServer(scenario) as srv:
         with pytest.raises(Exception):
             await my_client.get(f'http://{srv.host}:{srv.port}/')
 ```
+
+!!! note "Why the `H1S` prefix"
+
+    Three scenario vocabularies live in this package — HTTP/1.1 client-side,
+    HTTP/1.1 server-side, HTTP/2 server-side — and they share step names
+    because they describe the same shapes of misbehaviour.  The package
+    exports them role-qualified so an import cannot silently hand one half's
+    step to the other half's executor: `H1S…` is HTTP/1.1 server-side, `H2…`
+    is HTTP/2, and the unprefixed `Abort` / `Sleep` are the HTTP/1.1 *client*
+    vocabulary that had the names first.
+
+    Importing from the submodule directly (`from
+    blackbull.fault_injection.scenario_h1_server import SendRawBytes`) gives
+    you the unprefixed names if you prefer them.
 
 The named cases live in `blackbull.fault_injection.catalogue.h1`:
 

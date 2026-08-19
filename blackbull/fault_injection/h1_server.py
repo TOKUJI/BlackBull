@@ -7,7 +7,7 @@ assert that the client survives what a real server can do wrong::
     scenario = ScenarioH1Server(steps=[
         WaitForRequest(),
         SendRawBytes(b'HTTP/1.1 200 OK\\r\\nContent-Length: 100\\r\\n\\r\\nshort'),
-        CloseConnection(),
+        CloseGracefully(),
     ])
     async with H1FaultServer(scenario) as srv:
         with pytest.raises(...):
@@ -38,7 +38,7 @@ import time
 
 from .scenario_h1_server import (
     Abort,
-    CloseConnection,
+    CloseGracefully,
     ScenarioH1Server,
     ScenarioH1ServerResult,
     SendRawBytes,
@@ -232,7 +232,7 @@ class H1FaultServer:
             await self._close(writer, graceful=False)
             return True
 
-        if isinstance(step, CloseConnection):
+        if isinstance(step, CloseGracefully):
             await self._close(writer, graceful=True)
             return True
 

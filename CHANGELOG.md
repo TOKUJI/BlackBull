@@ -80,6 +80,21 @@ so the editable install's metadata catches up.
 
 ### Changed
 
+- **The three fault-injection scenario vocabularies are exported
+  role-qualified.**  HTTP/1.1 client-side, HTTP/1.1 server-side and HTTP/2
+  server-side share step names because they describe the same shapes of
+  misbehaviour, and a bare `SendRawBytes` from the package resolved to
+  HTTP/2's — so handing one to an `H1FaultServer` raised *unknown scenario
+  step*.  The package now exports `H1S…` for the HTTP/1.1 server half and
+  keeps `H2…` for HTTP/2; the submodules still offer the unprefixed names.
+  Four further asymmetries went with it: the close step is `CloseGracefully`
+  on both halves (it was `CloseConnection` on one), `ScenarioH1Server` gains
+  the JSON round-trip `ScenarioH2` already had, `H2FaultServer` exposes the
+  public `host` / `port` that `H1FaultServer` does, and both catalogues are
+  reachable the same way (`CATALOGUE_H1` / `CATALOGUE_H2`, with `CATALOGUE`
+  unchanged).  `ScenarioH1Server.steps` is a tuple, as `ScenarioH2.steps`
+  always was.
+
 - **The fault-injection documentation states its reach as a grid**, not a
   count.  Which cell you need depends on which side you are testing, and the
   page now says where the toolkit stops: gRPC has no fault injection of its

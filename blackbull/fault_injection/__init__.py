@@ -50,11 +50,23 @@ from .h1_server import (
     H1FaultServer,
     H1FaultServerError,
 )
+# Role-qualified, because three scenario vocabularies share step names and a
+# bare ``SendRawBytes`` silently resolved to HTTP/2's — handing an
+# ``H1FaultServer`` a step it rejects as unknown.  The ``H1S`` prefix reads as
+# "HTTP/1.1 server-side", the half these belong to; ``scenario_h1``'s
+# unprefixed ``Abort``/``Sleep`` are the *client* side and keep their names,
+# as ``scenario_h2``'s keep ``H2``.
 from .scenario_h1_server import (
-    CloseConnection,
+    Abort as H1SAbort,
+    CloseGracefully as H1SCloseGracefully,
     ScenarioH1Server,
     ScenarioH1ServerResult,
+    SendRawBytes as H1SSendRawBytes,
+    Sleep as H1SSleep,
+    StepOpH1Server,
     WaitForRequest,
+    scenario_from_json as scenario_h1_server_from_json,
+    scenario_to_json as scenario_h1_server_to_json,
 )
 from .h2_server import (
     CLIENT_PREFACE,
@@ -84,9 +96,11 @@ __all__ = [
     "CLIENT_PREFACE",
     "Category",
     "CloseGracefully",
-    "CloseConnection",
     "H1FaultServer",
-    "H1FaultServerError",
+    "H1SAbort",
+    "H1SCloseGracefully",
+    "H1SSendRawBytes",
+    "H1SSleep",
     "H2Abort",
     "H2FaultServer",
     "H2FaultServerError",
@@ -96,6 +110,7 @@ __all__ = [
     "ReadResponse",
     "Scenario",
     "ScenarioH1Server",
+    "StepOpH1Server",
     "ScenarioH1ServerResult",
     "ScenarioH2",
     "ScenarioH2Result",
@@ -115,6 +130,8 @@ __all__ = [
     "make_self_signed_h2_context",
     "normalize_response",
     "run_scenario",
+    "scenario_h1_server_from_json",
+    "scenario_h1_server_to_json",
     "scenario_h2_from_json",
     "scenario_h2_to_json",
     "serialize_frame",

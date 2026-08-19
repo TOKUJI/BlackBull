@@ -24,6 +24,7 @@ frame encoder rather than calling ``FrameBase.save()``).
 from __future__ import annotations
 
 import enum
+import json
 from dataclasses import dataclass, field
 
 
@@ -33,7 +34,7 @@ class StepOpH1Server(str, enum.Enum):
     SEND_RAW = 'SEND_RAW'
     SLEEP = 'SLEEP'
     ABORT = 'ABORT'
-    CLOSE = 'CLOSE'
+    CLOSE_GRACEFULLY = 'CLOSE_GRACEFULLY'
 
 
 @dataclass(frozen=True)
@@ -81,7 +82,7 @@ class Abort:
 
 
 @dataclass(frozen=True)
-class CloseConnection:
+class CloseGracefully:
     """Close cleanly (FIN) after whatever has been written.
 
     Terminal.  The difference from :class:`Abort` is what the client sees
@@ -90,13 +91,18 @@ class CloseConnection:
     """
 
 
-Step = WaitForRequest | SendRawBytes | Sleep | Abort | CloseConnection
+Step = WaitForRequest | SendRawBytes | Sleep | Abort | CloseGracefully
 
 
 @dataclass(frozen=True)
 class ScenarioH1Server:
-    """An ordered list of steps, plus a name for test parametrisation."""
-    steps: list = field(default_factory=list)
+    """An ordered sequence of steps, plus a name for test parametrisation.
+
+    ``steps`` is a **tuple**, matching :class:`ScenarioH2` — a frozen
+    dataclass holding a mutable list is a frozen container of mutable
+    contents, and the HTTP/2 half settled the question first.
+    """
+    steps: tuple[Step, ...] = ()
     name: str = ''
 
 
@@ -113,3 +119,73 @@ class ScenarioH1ServerResult:
     bytes_sent: int = 0
     #: Seconds from first connection to the last step.
     elapsed: float = 0.0
+
+
+# ---------------------------------------------------------------------------
+# JSON Lines serialisation — the same shape ``scenario_h2`` uses
+# ---------------------------------------------------------------------------
+
+
+def _step_to_dict(step) -> dict:
+    if isinstance(step, WaitForRequest):
+        return {'op': StepOpH1Server.WAIT_FOR_REQUEST, 'timeout': step.timeout}
+    if isinstance(step, SendRawBytes):
+        return {'op': StepOpH1Server.SEND_RAW,
+                'data': step.data.hex(),
+                'byte_interval': step.byte_interval}
+    if isinstance(step, Sleep):
+        return {'op': StepOpH1Server.SLEEP, 'duration': step.duration}
+    if isinstance(step, Abort):
+        return {'op': StepOpH1Server.ABORT}
+    if isinstance(step, CloseGracefully):
+        return {'op': StepOpH1Server.CLOSE_GRACEFULLY}
+    raise ValueError(f'cannot serialise step: {step!r}')
+
+
+def _step_from_dict(d: dict):
+    op = d['op']
+    if op == StepOpH1Server.WAIT_FOR_REQUEST:
+        return WaitForRequest(timeout=d.get('timeout', 5.0))
+    if op == StepOpH1Server.SEND_RAW:
+        return SendRawBytes(data=bytes.fromhex(d['data']),
+                            byte_interval=d.get('byte_interval', 0.0))
+    if op == StepOpH1Server.SLEEP:
+        return Sleep(duration=d['duration'])
+    if op == StepOpH1Server.ABORT:
+        return Abort()
+    if op == StepOpH1Server.CLOSE_GRACEFULLY:
+        return CloseGracefully()
+    raise ValueError(f'unknown step op: {op!r}')
+
+
+def scenario_to_json(scenario: ScenarioH1Server) -> str:
+    """Serialise *scenario* to JSON Lines (one step per line).
+
+    The name sits on the first line under the op ``HEADER``, so the file is
+    one line-oriented stream with no out-of-band metadata — the convention
+    :func:`blackbull.fault_injection.scenario_h2.scenario_to_json` set.
+
+    Payloads are hex rather than base64 or an escaped string: a fault
+    scenario's bytes are frequently *not* valid UTF-8 and are meant to be
+    read by a human comparing them against a packet capture.
+    """
+    lines = [json.dumps({'op': 'HEADER', 'name': scenario.name})]
+    for step in scenario.steps:
+        lines.append(json.dumps(_step_to_dict(step)))
+    return '\n'.join(lines)
+
+
+def scenario_from_json(src: str) -> ScenarioH1Server:
+    """Parse JSON Lines back to a :class:`ScenarioH1Server`."""
+    name = ''
+    steps: list = []
+    for line in src.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        d = json.loads(line)
+        if d.get('op') == 'HEADER':
+            name = d.get('name', '')
+            continue
+        steps.append(_step_from_dict(d))
+    return ScenarioH1Server(steps=tuple(steps), name=name)

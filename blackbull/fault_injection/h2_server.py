@@ -246,8 +246,11 @@ class H2FaultServer:
                 "intended for local-loop tests only."
             )
         self.scenario = scenario
-        self._host = host
-        self._port = port
+        # Public, and matching ``H1FaultServer``: a caller driving the server
+        # with a raw socket needs the pair, and reaching for ``_host`` to get
+        # it is the kind of private access that makes an API look accidental.
+        self.host = host
+        self.port = port
         self._ssl_context = ssl_context
         self._server: asyncio.base_events.Server | None = None
         self._factory = FrameFactory()
@@ -266,13 +269,12 @@ class H2FaultServer:
 
     async def start(self) -> None:
         self._server = await asyncio.start_server(
-            self._handle_connection, self._host, self._port,
+            self._handle_connection, self.host, self.port,
             ssl=self._ssl_context,
         )
-        sock = self._server.sockets[0]
-        port = sock.getsockname()[1]
+        self.port = self._server.sockets[0].getsockname()[1]
         scheme = 'https' if self._ssl_context is not None else 'http'
-        self.url = f'{scheme}://{self._host}:{port}/'
+        self.url = f'{scheme}://{self.host}:{self.port}/'
         logger.debug('H2FaultServer bound at %s', self.url)
 
     async def stop(self) -> None:
