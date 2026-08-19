@@ -47,6 +47,7 @@ class StepOp(str, enum.Enum):
     SLEEP = 'SLEEP'
     READ = 'READ'
     ABORT = 'ABORT'
+    HALF_CLOSE = 'HALF_CLOSE'
 
 
 @dataclass(frozen=True)
@@ -97,7 +98,22 @@ class Abort:
 # Step is the discriminated union the executor switches on.  Listed
 # as a Union (not StrEnum) because the dispatcher matches by isinstance,
 # and frozen dataclasses are hashable / comparable / safe to share.
-Step = Union[SendRawBytes, Sleep, ReadResponse, Abort]
+@dataclass(frozen=True)
+class HalfClose:
+    """Shut down the sending direction only (FIN), keep reading.
+
+    Neither :class:`Abort` nor a full close says this.  ``Abort`` sends RST,
+    which discards whatever is buffered and leaves nothing to read; a full
+    close ends both directions at once.  A half-close is the ordinary end of
+    a non-keep-alive exchange — "I have finished sending, I am still waiting
+    for your answer" — and it is a distinct code path on the peer.
+
+    **Not terminal**: later steps still run, because continuing to read is
+    the whole point.
+    """
+
+
+Step = Union[SendRawBytes, Sleep, ReadResponse, Abort, HalfClose]
 
 
 @dataclass(frozen=True)
@@ -288,6 +304,12 @@ class ScenarioResult:
     steps_completed: int = 0
 
     elapsed_s: float = 0.0
+    #: True when a ``HalfClose`` step actually shut down the write side.
+    #: False both when no such step ran and when the transport refused it
+    #: (TLS has no half-close), so a test can tell "did not ask" from
+    #: "asked and it did not happen" — a silently skipped half-close
+    #: otherwise reads as a pass.
+    half_closed: bool = False
 
 
 # ----------------------------------------------------------------------
@@ -309,6 +331,8 @@ def _step_to_dict(step: Step) -> dict:
         return {'op': StepOp.READ.value, 'timeout': step.timeout}
     if isinstance(step, Abort):
         return {'op': StepOp.ABORT.value}
+    if isinstance(step, HalfClose):
+        return {'op': StepOp.HALF_CLOSE.value}
     raise TypeError(f'unknown step type: {type(step).__name__}')
 
 
@@ -325,11 +349,14 @@ def _step_from_dict(d: dict) -> Step:
         return ReadResponse(timeout=float(d.get('timeout', 5.0)))
     if op == StepOp.ABORT.value:
         return Abort()
+    if op == StepOp.HALF_CLOSE.value:
+        return HalfClose()
     raise ValueError(f'unknown step op: {op!r}')
 
 
 __all__ = [
     'Abort',
+    'HalfClose',
     'ReadResponse',
     'Scenario',
     'ScenarioResult',

@@ -29,6 +29,7 @@ from .exceptions import ConnectionError, ProtocolError, StreamReset
 # types: the annotation on ``execute_scenario`` has to be resolvable from
 # this module, and a TYPE_CHECKING import is not (beartype looks in the
 # module namespace at call time, where the name would not exist).
+from ..fault_injection._transport import half_close as _sc_half_close
 from ..fault_injection.scenario_h2_client import (
     Abort as _ScAbort,
     CLIENT_PREFACE as _SC_PREFACE,
@@ -37,6 +38,7 @@ from ..fault_injection.scenario_h2_client import (
     ScenarioH2ClientResult,
     SendRawBytes as _ScSendBytes,
     SendFrame as _ScSendFrame,
+    HalfClose as _ScHalfClose,
     SendPreface as _ScSendPreface,
     Sleep as _ScSleep,
     encode_frame as _sc_encode_frame,
@@ -354,6 +356,8 @@ class HTTP2Client:
                         result.timed_out = True
                         result.exception = repr(exc)
                         return result
+                elif isinstance(step, _ScHalfClose):
+                    result.half_closed = _sc_half_close(self._raw_writer)
                 elif isinstance(step, _ScAbort):
                     # Hard-close: RST rather than FIN.  Subsequent socket
                     # I/O would raise, so short-circuit like the twin does.

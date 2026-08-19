@@ -46,6 +46,7 @@ class StepOpH2Client(str, enum.Enum):
     SLEEP = 'SLEEP'
     READ = 'READ'
     ABORT = 'ABORT'
+    HALF_CLOSE = 'HALF_CLOSE'
 
 
 @dataclass(frozen=True)
@@ -156,8 +157,23 @@ class Abort:
     """
 
 
+@dataclass(frozen=True)
+class HalfClose:
+    """Shut down the sending direction only (FIN), keep reading.
+
+    Neither :class:`Abort` nor a full close says this.  ``Abort`` sends RST,
+    which discards whatever is buffered and leaves nothing to read; a full
+    close ends both directions at once.  A half-close is the ordinary end of
+    a non-keep-alive exchange — "I have finished sending, I am still waiting
+    for your answer" — and it is a distinct code path on the peer.
+
+    **Not terminal**: later steps still run, because continuing to read is
+    the whole point.
+    """
+
+
 Step = (SendPreface | SendFrame | SendHeaders | SendRawBytes | Sleep
-        | ReadResponse | Abort)
+        | ReadResponse | Abort | HalfClose)
 
 
 @dataclass(frozen=True)
@@ -188,6 +204,12 @@ class ScenarioH2ClientResult:
     steps_completed: int = 0
     #: Seconds from the first step to the last.
     elapsed_s: float = 0.0
+    #: True when a ``HalfClose`` step actually shut down the write side.
+    #: False both when no such step ran and when the transport refused it
+    #: (TLS has no half-close), so a test can tell "did not ask" from
+    #: "asked and it did not happen" — a silently skipped half-close
+    #: otherwise reads as a pass.
+    half_closed: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -214,6 +236,8 @@ def _step_to_dict(step) -> dict:
         return {'op': StepOpH2Client.READ, 'timeout': step.timeout}
     if isinstance(step, Abort):
         return {'op': StepOpH2Client.ABORT}
+    if isinstance(step, HalfClose):
+        return {'op': StepOpH2Client.HALF_CLOSE}
     raise ValueError(f'cannot serialise step: {step!r}')
 
 
@@ -240,6 +264,8 @@ def _step_from_dict(d: dict):
         return ReadResponse(timeout=d.get('timeout', 5.0))
     if op == StepOpH2Client.ABORT:
         return Abort()
+    if op == StepOpH2Client.HALF_CLOSE:
+        return HalfClose()
     raise ValueError(f'unknown step op: {op!r}')
 
 

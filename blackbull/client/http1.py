@@ -23,8 +23,10 @@ from ..server.sender import AbstractWriter, AsyncioWriter
 from ._connect import DEFAULT_CONNECT_TIMEOUT, open_connection as _open_connection
 from .exceptions import ConnectionError, ProtocolError
 from .http2 import ClientResponse  # shared dataclass
+from blackbull.fault_injection._transport import half_close as _sc_half_close
 from blackbull.fault_injection.scenario_h1 import (
     Abort,
+    HalfClose,
     ReadResponse,
     Scenario,
     ScenarioResult,
@@ -568,6 +570,11 @@ class HTTP1Client:
                         result.timed_out = True
                         result.exception = repr(exc)
                         return result
+                elif isinstance(step, HalfClose):
+                    # FIN, not RST, and deliberately not terminal: a
+                    # half-closed client is still reading, which is the
+                    # only reason to script one.
+                    result.half_closed = _sc_half_close(self._raw_writer)
                 elif isinstance(step, Abort):
                     # Hard-close: send RST rather than FIN.  abort() is
                     # synchronous on asyncio's transport layer.  After

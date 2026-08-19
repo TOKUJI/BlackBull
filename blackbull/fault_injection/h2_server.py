@@ -51,7 +51,9 @@ from blackbull.protocol.frame_types import (
     SettingFrameFlags,
 )
 
+from ._transport import half_close
 from .scenario_h2 import (
+    HalfClose,
     ExpectClientFrame,
     Abort,
     CloseGracefully,
@@ -489,6 +491,13 @@ class H2FaultServer:
             writer.write(goaway)
             await writer.drain()
             result.server_bytes_sent += len(goaway)
+            return True
+
+        if isinstance(step, HalfClose):
+            # FIN without a GOAWAY: the peer is told the stream of frames
+            # has ended without being told why, which is a different case
+            # from CloseGracefully and one clients handle differently.
+            result.half_closed = half_close(writer)
             return True
 
         raise TypeError(f'unknown step: {type(step).__name__}')

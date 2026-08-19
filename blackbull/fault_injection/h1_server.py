@@ -36,12 +36,14 @@ import os
 import ssl
 import time
 
+from ._transport import half_close
 from .scenario_h1_server import (
     Abort,
     CloseGracefully,
     EndChunkedBody,
     EndHeaders,
     ExpectRequest,
+    HalfClose,
     ScenarioH1Server,
     ScenarioH1ServerResult,
     SendChunk,
@@ -61,6 +63,7 @@ logger = logging.getLogger(__name__)
 
 #: End of an HTTP/1.1 message head (RFC 9112 §2.1).
 _HEAD_END = b'\r\n\r\n'
+
 
 
 class H1FaultServerError(RuntimeError):
@@ -282,6 +285,13 @@ class H1FaultServer:
 
         if isinstance(step, CloseGracefully):
             await self._close(writer, graceful=True)
+            return True
+
+        if isinstance(step, HalfClose):
+            # FIN on the write side only.  Terminal for *this* server —
+            # it has nothing left to say — but the client still has an
+            # open read side, which is the difference being scripted.
+            result.half_closed = half_close(writer)
             return True
 
         raise H1FaultServerError(f'unknown scenario step: {step!r}')

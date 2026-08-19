@@ -37,6 +37,7 @@ from .oracle_h1 import (
 )
 from .scenario_h1 import (
     Abort,
+    HalfClose,
     ReadResponse,
     Scenario,
     ScenarioResult,
@@ -67,6 +68,7 @@ from .scenario_h1_server import (
     SendStatusLine as H1SSendStatusLine,
     request_matches,
     CloseGracefully as H1SCloseGracefully,
+    HalfClose as H1SHalfClose,
     ScenarioH1Server,
     ScenarioH1ServerResult,
     SendRawBytes as H1SSendRawBytes,
@@ -83,6 +85,7 @@ from .scenario_h1_server import (
 from .scenario_h2_client import (
     Abort as H2CAbort,
     CLIENT_PREFACE as H2C_CLIENT_PREFACE,
+    HalfClose as H2CHalfClose,
     ReadResponse as H2CReadResponse,
     ScenarioH2Client,
     ScenarioH2ClientResult,
@@ -118,7 +121,33 @@ from .scenario_h2 import (
     scenario_to_json as scenario_h2_to_json,
 )
 
+# The role-qualified spellings for the HTTP/2 *server* vocabulary.  The
+# other three cells are ``H1C`` / ``H1S`` / ``H2C``; this one shipped as a
+# bare ``H2`` prefix, which reads as "HTTP/2" rather than "HTTP/2 server"
+# and leaves the scheme with a hole exactly where a reader would look for
+# the fourth cell.  Both spellings are exported — the older one is not
+# deprecated, it is just less legible next to its three siblings.
+from .scenario_h2 import (
+    Abort as H2SAbort,
+    CloseGracefully as H2SCloseGracefully,
+    ExpectClientFrame as H2SExpectClientFrame,
+    HalfClose as H2SHalfClose,
+    SendFrame as H2SSendFrame,
+    SendRawBytes as H2SSendRawBytes,
+    Sleep as H2SSleep,
+    WaitForClientFrame as H2SWaitForClientFrame,
+)
+
 __all__ = [
+    "HalfClose",
+    "H2SAbort",
+    "H2SCloseGracefully",
+    "H2SExpectClientFrame",
+    "H2SHalfClose",
+    "H2SSendFrame",
+    "H2SSendRawBytes",
+    "H2SSleep",
+    "H2SWaitForClientFrame",
     "ACCEPTED_CATEGORIES",
     "Abort",
     "CLIENT_PREFACE",
@@ -135,6 +164,7 @@ __all__ = [
     "ExpectClientFrame",
     "ExpectRequest",
     "H1SCloseGracefully",
+    "H1SHalfClose",
     "H1SSendRawBytes",
     "H1SSleep",
     "H2Abort",
@@ -142,6 +172,7 @@ __all__ = [
     "H2CReadResponse",
     "H1CSendRawBytes",
     "H2CSendBytes",
+    "H2CHalfClose",
     "H2CSendRawBytes",
     "H2CSendFrame",
     "H2CSendPreface",

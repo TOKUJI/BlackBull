@@ -81,6 +81,7 @@ class StepOpH2(str, enum.Enum):
     SLEEP = 'SLEEP'
     ABORT = 'ABORT'
     GOAWAY_CLOSE = 'GOAWAY_CLOSE'
+    HALF_CLOSE = 'HALF_CLOSE'
 
 
 @dataclass(frozen=True)
@@ -177,6 +178,21 @@ class CloseGracefully:
     last_stream_id: int = 0
 
 
+@dataclass(frozen=True)
+class HalfClose:
+    """Shut down the sending direction only (FIN), keep reading.
+
+    Neither :class:`Abort` nor a full close says this.  ``Abort`` sends RST,
+    which discards whatever is buffered and leaves nothing to read; a full
+    close ends both directions at once.  A half-close is the ordinary end of
+    a non-keep-alive exchange — "I have finished sending, I am still waiting
+    for your answer" — and it is a distinct code path on the peer.
+
+    **Not terminal**: later steps still run, because continuing to read is
+    the whole point.
+    """
+
+
 # Discriminated union the H2 executor matches on.
 H2Step = Union[
     SendFrame,
@@ -186,7 +202,14 @@ H2Step = Union[
     Sleep,
     Abort,
     CloseGracefully,
+    HalfClose,
 ]
+
+#: The name the other three vocabularies use.  ``H2Step`` stays for the
+#: callers that already import it; new code should read ``Step``, so a
+#: reader comparing the four files is not told they differ where they do
+#: not.
+Step = H2Step
 
 
 @dataclass(frozen=True)
@@ -259,6 +282,12 @@ class ScenarioH2Result:
     terminated: bool = False
 
     elapsed_s: float = 0.0
+    #: True when a ``HalfClose`` step actually shut down the write side.
+    #: False both when no such step ran and when the transport refused it
+    #: (TLS has no half-close), so a test can tell "did not ask" from
+    #: "asked and it did not happen" — a silently skipped half-close
+    #: otherwise reads as a pass.
+    half_closed: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -383,6 +412,8 @@ def _step_to_dict(step: H2Step) -> dict:
         return {'op': StepOpH2.SLEEP.value, 'duration': step.duration}
     if isinstance(step, Abort):
         return {'op': StepOpH2.ABORT.value}
+    if isinstance(step, HalfClose):
+        return {'op': StepOpH2.HALF_CLOSE.value}
     if isinstance(step, CloseGracefully):
         return {
             'op': StepOpH2.GOAWAY_CLOSE.value,
@@ -414,6 +445,8 @@ def _step_from_dict(d: dict) -> H2Step:
         return Sleep(duration=float(d['duration']))
     if op == StepOpH2.ABORT.value:
         return Abort()
+    if op == StepOpH2.HALF_CLOSE.value:
+        return HalfClose()
     if op == StepOpH2.GOAWAY_CLOSE.value:
         return CloseGracefully(
             error_code=int(d.get('error_code', 0)),
@@ -555,6 +588,8 @@ def scenario_from_json(src: str) -> ScenarioH2:
 __all__ = [
     'Abort',
     'CloseGracefully',
+    'HalfClose',
+    'Step',
     'ExpectClientFrame',
     'H2Step',
     'ScenarioH2',
