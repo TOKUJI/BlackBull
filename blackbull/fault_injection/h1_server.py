@@ -39,11 +39,20 @@ import time
 from .scenario_h1_server import (
     Abort,
     CloseGracefully,
+    EndChunkedBody,
+    EndHeaders,
     ScenarioH1Server,
     ScenarioH1ServerResult,
+    SendChunk,
+    SendHeader,
     SendRawBytes,
+    SendStatusLine,
     Sleep,
     WaitForRequest,
+    encode_chunk,
+    encode_chunked_terminator,
+    encode_header,
+    encode_status_line,
 )
 
 logger = logging.getLogger(__name__)
@@ -214,17 +223,31 @@ class H1FaultServer:
                 result.wait_timed_out = True
             return False
 
+        # The typed steps all reduce to bytes, and share one write path so
+        # the pacing option and the byte accounting cannot drift apart.
+        if isinstance(step, SendStatusLine):
+            await self._write(writer, encode_status_line(step), 0.0, result)
+            return False
+
+        if isinstance(step, SendHeader):
+            await self._write(writer, encode_header(step), 0.0, result)
+            return False
+
+        if isinstance(step, EndHeaders):
+            await self._write(writer, b'\r\n', 0.0, result)
+            return False
+
+        if isinstance(step, SendChunk):
+            await self._write(writer, encode_chunk(step), 0.0, result)
+            return False
+
+        if isinstance(step, EndChunkedBody):
+            await self._write(writer, encode_chunked_terminator(step), 0.0,
+                              result)
+            return False
+
         if isinstance(step, SendRawBytes):
-            if step.byte_interval > 0:
-                for i in range(len(step.data)):
-                    writer.write(step.data[i:i + 1])
-                    await writer.drain()
-                    result.server_bytes_sent += 1
-                    await asyncio.sleep(step.byte_interval)
-            else:
-                writer.write(step.data)
-                await writer.drain()
-                result.server_bytes_sent += len(step.data)
+            await self._write(writer, step.data, step.byte_interval, result)
             return False
 
         if isinstance(step, Sleep):
@@ -240,6 +263,28 @@ class H1FaultServer:
             return True
 
         raise H1FaultServerError(f'unknown scenario step: {step!r}')
+
+    @staticmethod
+    async def _write(writer: asyncio.StreamWriter, data: bytes,
+                     byte_interval: float,
+                     result: ScenarioH1ServerResult) -> None:
+        """The one write path every step goes through.
+
+        Pacing lives here rather than per-step because a trickle is not a
+        slow write of the whole buffer: each byte has to reach the wire
+        before the pause, or the peer sees one burst after the total delay
+        and the scenario tests nothing.
+        """
+        if byte_interval > 0:
+            for i in range(len(data)):
+                writer.write(data[i:i + 1])
+                await writer.drain()
+                result.server_bytes_sent += 1
+                await asyncio.sleep(byte_interval)
+        else:
+            writer.write(data)
+            await writer.drain()
+            result.server_bytes_sent += len(data)
 
     @staticmethod
     async def _close(writer: asyncio.StreamWriter, *, graceful: bool) -> None:

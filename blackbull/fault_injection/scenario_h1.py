@@ -50,7 +50,7 @@ class StepOp(str, enum.Enum):
 
 
 @dataclass(frozen=True)
-class SendBytes:
+class SendRawBytes:
     """Push raw bytes onto the connection.
 
     ``byte_interval > 0`` transmits one byte at a time with that delay
@@ -97,13 +97,17 @@ class Abort:
 # Step is the discriminated union the executor switches on.  Listed
 # as a Union (not StrEnum) because the dispatcher matches by isinstance,
 # and frozen dataclasses are hashable / comparable / safe to share.
-Step = Union[SendBytes, Sleep, ReadResponse, Abort]
+Step = Union[SendRawBytes, Sleep, ReadResponse, Abort]
 
 
 @dataclass(frozen=True)
 class Scenario:
     """A sequence of steps the executor walks against one connection."""
     steps: tuple[Step, ...]
+    #: For test parametrisation and reporting, as the other three scenario
+    #: types carry.  Added by the 107+108 consistency sweep: a scenario a
+    #: failing CI run can point at by name is worth two lines.
+    name: str = ''
 
     # ------------------------------------------------------------------
     # Convenience builders
@@ -118,7 +122,7 @@ class Scenario:
         Used by the legacy ``diff_*.txt`` corpus loader and by the
         Hypothesis ``well_formed_scenario_strategy``.
         """
-        return cls(steps=(SendBytes(data=raw_request),
+        return cls(steps=(SendRawBytes(data=raw_request),
                           ReadResponse(timeout=response_timeout)))
 
     # ------------------------------------------------------------------
@@ -217,7 +221,7 @@ class Scenario:
                     i += 1
                 else:
                     bi = 0.0
-                steps.append(SendBytes(data=data, byte_interval=bi))
+                steps.append(SendRawBytes(data=data, byte_interval=bi))
             elif opcode == 1:  # SLEEP
                 if i >= n:
                     steps.append(Sleep(duration=_SLEEP_TABLE[0]))
@@ -293,7 +297,7 @@ class ScenarioResult:
 
 
 def _step_to_dict(step: Step) -> dict:
-    if isinstance(step, SendBytes):
+    if isinstance(step, SendRawBytes):
         return {
             'op': StepOp.SEND.value,
             'data': base64.b64encode(step.data).decode('ascii'),
@@ -311,7 +315,7 @@ def _step_to_dict(step: Step) -> dict:
 def _step_from_dict(d: dict) -> Step:
     op = d.get('op')
     if op == StepOp.SEND.value:
-        return SendBytes(
+        return SendRawBytes(
             data=base64.b64decode(d['data']),
             byte_interval=float(d.get('byte_interval', 0.0)),
         )
@@ -334,3 +338,36 @@ __all__ = [
     'Step',
     'StepOp',
 ]
+
+# ---------------------------------------------------------------------------
+# Naming: ``SendRawBytes`` is the canonical spelling across all four
+# vocabularies
+# ---------------------------------------------------------------------------
+#
+# The two server-side vocabularies have always called this ``SendRawBytes``
+# and the two client-side ones ``SendRawBytes`` — the same step, the same two
+# fields, the name split by *role* rather than by anything a reader could
+# predict.  The consistency sweep at the 107+108 close found it, and with a
+# typed alternative now present on every half, "raw" is the word that earns
+# its place.
+#
+# ``SendRawBytes`` is the name to use.  ``SendRawBytes`` keeps working and is
+# **deprecated**: removal no earlier than 2027-08-19, and at an arbitrary
+# time after that, following the deprecation window ASGI uses.
+
+def __getattr__(name: str):
+    """PEP 562 — warn when the deprecated spelling is actually used.
+
+    A module-level assignment would alias silently; going through
+    ``__getattr__`` means a reader who never touches ``SendRawBytes`` never
+    sees a warning, and one who does gets it at their own call site.
+    """
+    if name == 'SendBytes':
+        import warnings  # noqa: PLC0415
+        warnings.warn(
+            f"{__name__}.SendBytes is deprecated; use SendRawBytes, the "
+            "name the other three scenario vocabularies use.  Removal no "
+            "earlier than 2027-08-19.",
+            DeprecationWarning, stacklevel=2)
+        return SendRawBytes
+    raise AttributeError(f'module {__name__!r} has no attribute {name!r}')

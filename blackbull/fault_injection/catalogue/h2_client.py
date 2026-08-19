@@ -12,7 +12,7 @@ from __future__ import annotations
 from blackbull.protocol.frame_types import ErrorCodes, FrameTypes, SettingFrameFlags
 
 from ..scenario_h2_client import (
-    Abort, ReadResponse, ScenarioH2Client, SendBytes, SendFrame, SendPreface, Sleep,
+    Abort, ReadResponse, ScenarioH2Client, SendRawBytes, SendFrame, SendPreface, Sleep,
 )
 
 #: A minimal, valid SETTINGS frame — the handshake a well-behaved client
@@ -33,7 +33,7 @@ def preface_never_arrives() -> ScenarioH2Client:
 def preface_trickled() -> ScenarioH2Client:
     """The preface, one byte every 100 ms — legal bytes, hostile pacing."""
     return ScenarioH2Client(name='preface_trickled', steps=(
-        SendBytes(b'PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n', byte_interval=0.1),
+        SendRawBytes(b'PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n', byte_interval=0.1),
         _EMPTY_SETTINGS,
         ReadResponse(timeout=2.0),
     ))

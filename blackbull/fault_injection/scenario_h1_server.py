@@ -32,6 +32,11 @@ class StepOpH1Server(str, enum.Enum):
     """Tag used by the JSON serialiser."""
     WAIT_FOR_REQUEST = 'WAIT_FOR_REQUEST'
     SEND_RAW = 'SEND_RAW'
+    SEND_STATUS_LINE = 'SEND_STATUS_LINE'
+    SEND_HEADER = 'SEND_HEADER'
+    END_HEADERS = 'END_HEADERS'
+    SEND_CHUNK = 'SEND_CHUNK'
+    END_CHUNKED_BODY = 'END_CHUNKED_BODY'
     SLEEP = 'SLEEP'
     ABORT = 'ABORT'
     CLOSE_GRACEFULLY = 'CLOSE_GRACEFULLY'
@@ -64,6 +69,69 @@ class SendRawBytes:
 
 
 @dataclass(frozen=True)
+class SendStatusLine:
+    """Emit a status line, field by field.
+
+    Added by the 107+108 consistency sweep.  Nothing validates: a status
+    line with no reason phrase, an impossible version, or a three-digit
+    code that is not a status are all faults worth staging, and a typed
+    step that refused them would be useless here.  What it buys over raw
+    bytes is that the *shape* is legible — a reader sees which field the
+    scenario is bending.
+    """
+    code: int = 200
+    reason: str = 'OK'
+    version: str = 'HTTP/1.1'
+    #: Omit the reason phrase entirely (RFC 9112 §4 permits an empty one,
+    #: which is not the same as omitting the space before it).
+    omit_reason: bool = False
+
+
+@dataclass(frozen=True)
+class SendHeader:
+    """Emit one header line.
+
+    ``fold`` writes it as an obs-fold continuation (RFC 9112 §5.2, which
+    deprecates the form and requires a recipient to reject or normalise
+    it) — expressible before only as a hand-built byte string.
+    """
+    name: str
+    value: str
+    fold: bool = False
+
+
+@dataclass(frozen=True)
+class EndHeaders:
+    """The blank line that ends the head.  Omit it to stage a head that
+    never finishes."""
+
+
+@dataclass(frozen=True)
+class SendChunk:
+    """One chunk of a chunked body (RFC 9112 §7.1).
+
+    ``declared_size`` sets the chunk-size line independently of the data —
+    the HTTP/1.1 twin of ``SendFrame.declared_length``, and the single most
+    common framing fault there is.  ``extension`` appends a chunk
+    extension; ``terminator`` can be replaced to stage a bad CRLF.
+    """
+    data: bytes = b''
+    declared_size: int | None = None
+    extension: str = ''
+    terminator: bytes = b'\r\n'
+
+
+@dataclass(frozen=True)
+class EndChunkedBody:
+    """The zero-length chunk that terminates a chunked body.
+
+    ``trailers`` are emitted before the final CRLF; omit this step to stage
+    a body that never terminates.
+    """
+    trailers: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True)
 class Sleep:
     """Idle for ``duration`` seconds, holding the connection open.
 
@@ -91,7 +159,9 @@ class CloseGracefully:
     """
 
 
-Step = WaitForRequest | SendRawBytes | Sleep | Abort | CloseGracefully
+Step = (WaitForRequest | SendStatusLine | SendHeader | EndHeaders
+        | SendChunk | EndChunkedBody | SendRawBytes | Sleep | Abort
+        | CloseGracefully)
 
 
 @dataclass(frozen=True)
@@ -201,3 +271,47 @@ def scenario_from_json(src: str) -> ScenarioH1Server:
             continue
         steps.append(_step_from_dict(d))
     return ScenarioH1Server(steps=tuple(steps), name=name)
+
+
+# ---------------------------------------------------------------------------
+# Byte assembly for the typed steps
+# ---------------------------------------------------------------------------
+#
+# Here rather than in the production sender, for the reason the module
+# docstring gives: a breaker that shares the production serialiser cannot
+# emit a fault that serialiser has.
+
+
+def encode_status_line(step: SendStatusLine) -> bytes:
+    """``HTTP/1.1 200 OK\\r\\n``, or whatever the step says instead."""
+    head = f'{step.version} {step.code}'
+    if not step.omit_reason:
+        head += f' {step.reason}'
+    return head.encode('latin-1') + b'\r\n'
+
+
+def encode_header(step: SendHeader) -> bytes:
+    """One header line, or an obs-fold continuation of the previous one."""
+    if step.fold:
+        return b' ' + step.value.encode('latin-1') + b'\r\n'
+    return (step.name.encode('latin-1') + b': '
+            + step.value.encode('latin-1') + b'\r\n')
+
+
+def encode_chunk(step: SendChunk) -> bytes:
+    """One chunk, with the size line free to disagree with the data."""
+    size = step.declared_size
+    if size is None:
+        size = len(step.data)
+    line = format(size, 'x')
+    if step.extension:
+        line += f';{step.extension}'
+    return line.encode('latin-1') + b'\r\n' + step.data + step.terminator
+
+
+def encode_chunked_terminator(step: EndChunkedBody) -> bytes:
+    """The zero chunk, plus any trailer fields."""
+    out = b'0\r\n'
+    for name, value in step.trailers:
+        out += name.encode('latin-1') + b': ' + value.encode('latin-1') + b'\r\n'
+    return out + b'\r\n'

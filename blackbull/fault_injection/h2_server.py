@@ -411,6 +411,10 @@ class H2FaultServer:
         CloseGracefully terminators)."""
         if isinstance(step, SendFrame):
             data = serialize_frame(step.frame)
+            if step.declared_length is not None:
+                # Rewrite the 24-bit length in place, leaving the payload
+                # alone: the fault *is* the disagreement between the two.
+                data = (step.declared_length.to_bytes(3, 'big') + data[3:])
             writer.write(data)
             await writer.drain()
             result.server_bytes_sent += len(data)

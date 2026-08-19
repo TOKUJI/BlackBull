@@ -221,7 +221,10 @@ class TestScenarioFromBytes:
         )
         scenario = Scenario.from_bytes(raw)
         kinds = [type(s).__name__ for s in scenario.steps]
-        assert kinds == ['SendBytes', 'Sleep', 'ReadResponse']
+        # ``SendBytes`` is now the deprecated spelling of ``SendRawBytes`` —
+        # the class was renamed at the 107+108 consistency sweep so all
+        # four scenario vocabularies use one name.
+        assert kinds == ['SendRawBytes', 'Sleep', 'ReadResponse']
 
 
 # ---------------------------------------------------------------------------

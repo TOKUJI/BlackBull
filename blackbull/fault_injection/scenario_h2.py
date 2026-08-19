@@ -89,8 +89,16 @@ class SendFrame:
     Routed through :class:`~blackbull.protocol.frame.FrameFactory` so
     the on-wire serialisation matches the framework's normal output.
     Use :class:`SendRawBytes` for frames the factory cannot construct.
+
+    ``declared_length`` overrides the header's length field without
+    changing the bytes actually written — "the peer lied about how much is
+    coming", which a serialiser that computes the length cannot say.  The
+    client-side vocabulary had this from the start; the consistency sweep
+    at the 107+108 close found the server side could not express the same
+    fault.  Leave it ``None`` (the default) and nothing changes.
     """
     frame: Frame
+    declared_length: int | None = None
 
 
 @dataclass(frozen=True)
@@ -326,6 +334,7 @@ def _step_to_dict(step: H2Step) -> dict:
         return {
             'op': StepOpH2.SEND_FRAME.value,
             'frame': _frame_to_dict(step.frame),
+            'declared_length': step.declared_length,
         }
     if isinstance(step, SendRawBytes):
         return {
@@ -355,7 +364,8 @@ def _step_to_dict(step: H2Step) -> dict:
 def _step_from_dict(d: dict) -> H2Step:
     op = d.get('op')
     if op == StepOpH2.SEND_FRAME.value:
-        return SendFrame(frame=_frame_from_dict(d['frame']))
+        return SendFrame(frame=_frame_from_dict(d['frame']),
+                         declared_length=d.get('declared_length'))
     if op == StepOpH2.SEND_RAW.value:
         return SendRawBytes(
             data=base64.b64decode(d['data']),
@@ -446,9 +456,15 @@ def _frame_from_dict(d: dict) -> Frame:
         f.error_code = int(d.get('error_code', 0))
         return f
     if name == 'Ping':
-        f = frame_types.Ping(length=0, type_=frame_types.FrameTypes.PING,
-                             flags=flags, stream_id=stream_id)
-        f.payload = base64.b64decode(d.get('payload', ''))
+        # ``data`` is required on ``Ping`` alone among the frame classes it
+        # is constructed with here, and omitting it raised ``TypeError`` —
+        # so an HTTP/2 scenario containing a PING could be serialised and
+        # never read back.  Found by the 107+108 consistency sweep; present
+        # since the serialiser was written.
+        payload = base64.b64decode(d.get('payload', ''))
+        f = frame_types.Ping(length=len(payload),
+                             type_=frame_types.FrameTypes.PING,
+                             flags=flags, stream_id=stream_id, data=payload)
         return f
     if name == 'Data':
         f = frame_types.Data(length=0, type_=frame_types.FrameTypes.DATA,
