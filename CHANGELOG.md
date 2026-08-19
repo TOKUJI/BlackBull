@@ -221,6 +221,26 @@ so the editable install's metadata catches up.
   HTTP/2 paragraph while the oracle is HTTP/1.1-only.  `README.md` described
   the catalogue as HTTP/2's alone.
 
+### Fixed
+
+- **An HTTP/2 client scenario now owns the wire**, via a required
+  `HTTP2Client(..., scenario_mode=True)`.  `HTTP2Client` sends the connection
+  preface and a SETTINGS frame as soon as it connects, so a scenario's
+  `SendPreface` was the *second* preface on the wire and every byte after it
+  was unparseable to a strict peer — the fault never reached the code meant
+  to judge it.  `scenario_mode` makes `_start` the no-op its HTTP/1.1 twin
+  already is (HTTP/1.1 has nothing to send on connect, so that half was never
+  affected), and also removes a latent race in which `ReadResponse` and the
+  receive loop both read the same socket.
+
+  `execute_scenario` validates ownership before writing a byte, so the
+  collision now raises instead of going out as garbage.
+
+  Found by pointing the cell at something that is not BlackBull: a reference
+  server built on `h2`, cross-checked against nginx.  `settings_ack_with_payload`
+  had been reporting success against both; delivered intact it draws
+  `GOAWAY(FRAME_SIZE_ERROR)` from each.
+
 ## [0.77.2] — 2026-08-19
 
 ### Fixed
