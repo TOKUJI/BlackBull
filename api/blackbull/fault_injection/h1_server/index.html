@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/server/connection_protocol/">
+        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/fault_injection/h1_server/">
       
       
-        <link rel="prev" href="../connection_actor/">
+        <link rel="prev" href="../catalogue/h2/">
       
       
-        <link rel="next" href="../constants/">
+        <link rel="next" href="../h2_server/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>connection_protocol - BlackBull</title>
+        <title>h1_server - BlackBull</title>
       
     
     
@@ -72,7 +72,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#blackbullserverconnection_protocol" class="md-skip">
+        <a href="#blackbullfault_injectionh1_server" class="md-skip">
           Skip to content
         </a>
       
@@ -108,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              connection_protocol
+              h1_server
             
           </span>
         </div>
@@ -2184,18 +2184,20 @@
                 
   
   
+    
   
   
+  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_14" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_14" checked>
         
           
           <label class="md-nav__link" for="__nav_5_2_1_14" id="__nav_5_2_1_14_label" tabindex="0">
@@ -2216,7 +2218,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_14_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_14_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_5_2_1_14">
             <span class="md-nav__icon md-icon"></span>
             
@@ -2234,7 +2236,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/" class="md-nav__link">
+      <a href="../" class="md-nav__link">
         
   
   
@@ -2309,7 +2311,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/catalogue/" class="md-nav__link">
+      <a href="../catalogue/" class="md-nav__link">
         
   
   
@@ -2337,7 +2339,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/catalogue/h1/" class="md-nav__link">
+      <a href="../catalogue/h1/" class="md-nav__link">
         
   
   
@@ -2365,7 +2367,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/catalogue/h2/" class="md-nav__link">
+      <a href="../catalogue/h2/" class="md-nav__link">
         
   
   
@@ -2398,10 +2400,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../fault_injection/h1_server/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    h1_server
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -2417,6 +2446,93 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.h1_server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        h1_server
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="h1_server">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.h1_server.H1FaultServer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        H1FaultServer
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="H1FaultServer">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.h1_server.H1FaultServer.stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        stop
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.h1_server.H1FaultServer.wait_for_connection_done" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        wait_for_connection_done
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.h1_server.H1FaultServerError" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        H1FaultServerError
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -2429,7 +2545,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/h2_server/" class="md-nav__link">
+      <a href="../h2_server/" class="md-nav__link">
         
   
   
@@ -2457,7 +2573,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/oracle_h1/" class="md-nav__link">
+      <a href="../oracle_h1/" class="md-nav__link">
         
   
   
@@ -2485,7 +2601,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/scenario_h1/" class="md-nav__link">
+      <a href="../scenario_h1/" class="md-nav__link">
         
   
   
@@ -2513,7 +2629,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/scenario_h1_server/" class="md-nav__link">
+      <a href="../scenario_h1_server/" class="md-nav__link">
         
   
   
@@ -2541,7 +2657,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/scenario_h2/" class="md-nav__link">
+      <a href="../scenario_h2/" class="md-nav__link">
         
   
   
@@ -3802,20 +3918,18 @@
                 
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_26" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_26" >
         
           
           <label class="md-nav__link" for="__nav_5_2_1_26" id="__nav_5_2_1_26_label" tabindex="0">
@@ -3836,7 +3950,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_26_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_26_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5_2_1_26">
             <span class="md-nav__icon md-icon"></span>
             
@@ -3854,7 +3968,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../" class="md-nav__link">
+      <a href="../../server/" class="md-nav__link">
         
   
   
@@ -3882,7 +3996,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../access_log/" class="md-nav__link">
+      <a href="../../server/access_log/" class="md-nav__link">
         
   
   
@@ -3910,7 +4024,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../affinity/" class="md-nav__link">
+      <a href="../../server/affinity/" class="md-nav__link">
         
   
   
@@ -3938,7 +4052,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../cap_log/" class="md-nav__link">
+      <a href="../../server/cap_log/" class="md-nav__link">
         
   
   
@@ -3966,7 +4080,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../conn_id/" class="md-nav__link">
+      <a href="../../server/conn_id/" class="md-nav__link">
         
   
   
@@ -3994,7 +4108,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../connection_actor/" class="md-nav__link">
+      <a href="../../server/connection_actor/" class="md-nav__link">
         
   
   
@@ -4019,37 +4133,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    connection_protocol
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../server/connection_protocol/" class="md-nav__link">
         
   
   
@@ -4065,209 +4152,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        connection_protocol
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="connection_protocol">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol.BufferReader" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        BufferReader
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="BufferReader">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol.BufferReader.discard" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        discard
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol.BufferReader.fill" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        fill
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol.BufferReader.maybe_pause" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        maybe_pause
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol.BufferReader.read_head" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        read_head
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol.BufferReader.wait_for_data" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        wait_for_data
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol.ConnectionProtocol" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ConnectionProtocol
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="ConnectionProtocol">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol.ConnectionProtocol.peer_closed" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        peer_closed
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol.ConnectionProtocol.drain" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        drain
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol.ConnectionProtocol.linger_close" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        linger_close
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol.ConnectionProtocol.pause_reading" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        pause_reading
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol.ConnectionProtocol.resume_reading" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        resume_reading
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol.ConnectionProtocol.wait_for_arrival" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        wait_for_arrival
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol.ConnectionProtocol.writelines" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        writelines
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -4280,7 +4164,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../constants/" class="md-nav__link">
+      <a href="../../server/constants/" class="md-nav__link">
         
   
   
@@ -4308,7 +4192,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../deadline/" class="md-nav__link">
+      <a href="../../server/deadline/" class="md-nav__link">
         
   
   
@@ -4336,7 +4220,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../http1_actor/" class="md-nav__link">
+      <a href="../../server/http1_actor/" class="md-nav__link">
         
   
   
@@ -4364,7 +4248,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../http2_actor/" class="md-nav__link">
+      <a href="../../server/http2_actor/" class="md-nav__link">
         
   
   
@@ -4392,7 +4276,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../http2_ws/" class="md-nav__link">
+      <a href="../../server/http2_ws/" class="md-nav__link">
         
   
   
@@ -4420,7 +4304,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../multiworker/" class="md-nav__link">
+      <a href="../../server/multiworker/" class="md-nav__link">
         
   
   
@@ -4448,7 +4332,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../parser/" class="md-nav__link">
+      <a href="../../server/parser/" class="md-nav__link">
         
   
   
@@ -4476,7 +4360,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../permessage_deflate/" class="md-nav__link">
+      <a href="../../server/permessage_deflate/" class="md-nav__link">
         
   
   
@@ -4504,7 +4388,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../protocol_registry/" class="md-nav__link">
+      <a href="../../server/protocol_registry/" class="md-nav__link">
         
   
   
@@ -4532,7 +4416,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../rate_window/" class="md-nav__link">
+      <a href="../../server/rate_window/" class="md-nav__link">
         
   
   
@@ -4560,7 +4444,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../read_buffer/" class="md-nav__link">
+      <a href="../../server/read_buffer/" class="md-nav__link">
         
   
   
@@ -4588,7 +4472,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../recipient/" class="md-nav__link">
+      <a href="../../server/recipient/" class="md-nav__link">
         
   
   
@@ -4616,7 +4500,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../reload/" class="md-nav__link">
+      <a href="../../server/reload/" class="md-nav__link">
         
   
   
@@ -4644,7 +4528,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../response/" class="md-nav__link">
+      <a href="../../server/response/" class="md-nav__link">
         
   
   
@@ -4672,7 +4556,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../sender/" class="md-nav__link">
+      <a href="../../server/sender/" class="md-nav__link">
         
   
   
@@ -4700,7 +4584,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/" class="md-nav__link">
+      <a href="../../server/server/" class="md-nav__link">
         
   
   
@@ -4728,7 +4612,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../warmup/" class="md-nav__link">
+      <a href="../../server/warmup/" class="md-nav__link">
         
   
   
@@ -4756,7 +4640,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../websocket_actor/" class="md-nav__link">
+      <a href="../../server/websocket_actor/" class="md-nav__link">
         
   
   
@@ -4784,7 +4668,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../worker/" class="md-nav__link">
+      <a href="../../server/worker/" class="md-nav__link">
         
   
   
@@ -4812,7 +4696,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../ws_codec/" class="md-nav__link">
+      <a href="../../server/ws_codec/" class="md-nav__link">
         
   
   
@@ -5308,34 +5192,34 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol" class="md-nav__link">
+  <a href="#blackbull.fault_injection.h1_server" class="md-nav__link">
     <span class="md-ellipsis">
       
-        connection_protocol
+        h1_server
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="connection_protocol">
+    <nav class="md-nav" aria-label="h1_server">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol.BufferReader" class="md-nav__link">
+  <a href="#blackbull.fault_injection.h1_server.H1FaultServer" class="md-nav__link">
     <span class="md-ellipsis">
       
-        BufferReader
+        H1FaultServer
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="BufferReader">
+    <nav class="md-nav" aria-label="H1FaultServer">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol.BufferReader.discard" class="md-nav__link">
+  <a href="#blackbull.fault_injection.h1_server.H1FaultServer.stop" class="md-nav__link">
     <span class="md-ellipsis">
       
-        discard
+        stop
       
     </span>
   </a>
@@ -5343,43 +5227,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol.BufferReader.fill" class="md-nav__link">
+  <a href="#blackbull.fault_injection.h1_server.H1FaultServer.wait_for_connection_done" class="md-nav__link">
     <span class="md-ellipsis">
       
-        fill
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol.BufferReader.maybe_pause" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        maybe_pause
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol.BufferReader.read_head" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        read_head
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol.BufferReader.wait_for_data" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        wait_for_data
+        wait_for_connection_done
       
     </span>
   </a>
@@ -5392,96 +5243,13 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol.ConnectionProtocol" class="md-nav__link">
+  <a href="#blackbull.fault_injection.h1_server.H1FaultServerError" class="md-nav__link">
     <span class="md-ellipsis">
       
-        ConnectionProtocol
+        H1FaultServerError
       
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="ConnectionProtocol">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol.ConnectionProtocol.peer_closed" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        peer_closed
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol.ConnectionProtocol.drain" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        drain
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol.ConnectionProtocol.linger_close" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        linger_close
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol.ConnectionProtocol.pause_reading" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        pause_reading
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol.ConnectionProtocol.resume_reading" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        resume_reading
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol.ConnectionProtocol.wait_for_arrival" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        wait_for_arrival
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol.ConnectionProtocol.writelines" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        writelines
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
         
@@ -5510,67 +5278,47 @@
   
 
 
-<h1 id="blackbullserverconnection_protocol"><code>blackbull.server.connection_protocol</code><a class="headerlink" href="#blackbullserverconnection_protocol" title="Permanent link">&para;</a></h1>
+<h1 id="blackbullfault_injectionh1_server"><code>blackbull.fault_injection.h1_server</code><a class="headerlink" href="#blackbullfault_injectionh1_server" title="Permanent link">&para;</a></h1>
 
 
 <div class="doc doc-object doc-module">
 
 
 
-<h2 id="blackbull.server.connection_protocol" class="doc doc-heading">
-            <code>blackbull.server.connection_protocol</code>
+<h2 id="blackbull.fault_injection.h1_server" class="doc doc-heading">
+            <code>blackbull.fault_injection.h1_server</code>
 
 
-<a href="#blackbull.server.connection_protocol" class="headerlink" title="Permanent link">&para;</a></h2>
+<a href="#blackbull.fault_injection.h1_server" class="headerlink" title="Permanent link">&para;</a></h2>
 
     <div class="doc doc-contents first">
 
-        <p>Connection transport front end: <code>asyncio.BufferedProtocol</code> over one buffer.</p>
-<p>One of these per accepted connection, created before the protocol is known —
-the shared listener detects HTTP/1.1, h2c, and MQTT off the same resident
-bytes, so the buffer belongs to the <em>connection</em>, not to any one protocol.</p>
-<p>This is what replaces <code>asyncio.StreamReader</code> on the inbound path.  The
-kernel writes straight into the connection's :class:<code>~.read_buffer.ReadBuffer</code>
-through :meth:<code>ConnectionProtocol.get_buffer</code>, and the actor's coroutine parks on a
-future that :meth:<code>ConnectionProtocol.buffer_updated</code> resolves.</p>
-<p><strong>The actor invariant is intact.</strong>  One coroutine still owns the connection's
-state and processes one request at a time; it is woken by the protocol instead
-of parking inside <code>readuntil</code>.  That distinction is the whole design: sanic
-reaches half our read/parse cost with a parked coroutine too, so the cost was
-never the coroutine — it was reading through a second buffer.</p>
-<p>:class:<code>BufferReader</code> presents the :class:<code>~.recipient.AbstractReader</code> surface
-so the body recipient and the WebSocket/h2c successors work unchanged, and adds
-:meth:<code>BufferReader.read_head</code> — the one-scan header read the H/1.1 actor uses
-instead of a <code>readuntil</code> per line.</p>
-<p><strong>The two classes split decision from execution.</strong>  The reader owns the receive
-competence — whether a high-water crossing should pause, when to wait, when a
-grown buffer goes back, and what to throw away on a lingering close — because
-reading is the only activity that knows both what was asked for and what was
-consumed.  The protocol owns the socket: the transport callbacks, the
-rendezvous future, the two flow-control calls it makes when the reader asks,
-and the byte-level high-water comparison (a threshold, not a judgement — the
-reader decides what a crossing means).  Before the split the stop-reading test
-sat in :meth:<code>ConnectionProtocol.buffer_updated</code> and reconstructed the reader's
-state from outside — resident bytes plus a guess at whether anyone was parked.</p>
-<p><strong>Published fields are facts, never shared state.</strong>  Crossing the boundary with
-a <em>call</em> is what the arrival path cannot afford — an EC2 /conn A/B measured one
-there at the same order as a whole regression — so the two sides publish the
-few facts the other consults (<code>BufferReader.read_offer</code>,
-<code>ConnectionProtocol.reading_paused</code>, <code>ReadBuffer.drained_boundary</code>).  That
-trade is only safe under one rule, and the rule is what keeps "published" from
-decaying into "shared":</p>
-<pre><code>A published field has exactly one writer — its owner.  Reading it across
-the boundary is free; changing it is a method call on the owner, gated on
-a cheap read so it happens only when a change is actually due.
+        <p>A deliberately misbehaving HTTP/1.1 server.</p>
+<p>The HTTP/1.1 half of the fault-injection grid's <em>server</em> direction — the
+cell the toolkit did not have.  Point your own HTTP/1.1 client at it and
+assert that the client survives what a real server can do wrong::</p>
+<pre><code>scenario = ScenarioH1Server(steps=[
+    WaitForRequest(),
+    SendRawBytes(b'HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nshort'),
+    CloseGracefully(),
+])
+async with H1FaultServer(scenario) as srv:
+    with pytest.raises(...):
+        await my_client.get(f'http://{srv.host}:{srv.port}/')
 </code></pre>
-<p><code>maybe_pause</code> and :meth:<code>ReadBuffer.consume_boundary</code> are that gate: both are
-reached only on the rare edge, so the poll stays an attribute read and the
-transition stays with the object whose state it is.  Encapsulation is normally
-what <em>enforces</em> ownership; publishing gives that up, so the rule has to be
-written down and tested — see <code>tests/unit/test_receive_decisions.py</code>.</p>
-<p>Because peeked bytes stay resident, protocol detection can decide without
-consuming: there is nothing to replay to the winning binding, which is what
-retires <code>PrefixReader</code> on this path.</p>
+<p><strong>It assembles every byte itself.</strong>  Nothing here imports
+<code>blackbull.server.sender</code> or <code>blackbull.server.response</code>, and that is
+load-bearing rather than incidental: a fault server built on the
+production send path cannot emit a fault the production send path has, so
+the one bug class it is least able to find is the one in the code it
+shares.  The HTTP/2 half made the same choice — it carries its own frame
+encoder rather than calling <code>FrameBase.save()</code>.  There is a test for it
+(<code>tests/unit/test_fault_injection_h1_server.py::TestTheBreakerIsIndependent</code>)
+because the property is invisible until the day it matters.</p>
+<p>Two safety locks, the same pair :class:<code>H2FaultServer</code> carries and both
+in scope for security reports per <code>SECURITY.md</code>: it refuses to start in
+a production context, and it refuses a non-loopback bind without an
+explicit <code>allow_remote=True</code>.</p>
 
 
 
@@ -5595,37 +5343,18 @@ retires <code>PrefixReader</code> on this path.</p>
 
 
 
-<h3 id="blackbull.server.connection_protocol.BufferReader" class="doc doc-heading">
-            <code>BufferReader</code>
+<h3 id="blackbull.fault_injection.h1_server.H1FaultServer" class="doc doc-heading">
+            <code>H1FaultServer</code>
 
 
-<a href="#blackbull.server.connection_protocol.BufferReader" class="headerlink" title="Permanent link">&para;</a></h3>
+<a href="#blackbull.fault_injection.h1_server.H1FaultServer" class="headerlink" title="Permanent link">&para;</a></h3>
 
 
     <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><a class="autorefs autorefs-internal" title="AbstractReader (blackbull.server.recipient.AbstractReader)" href="../recipient/#blackbull.server.recipient.AbstractReader">AbstractReader</a></code></p>
 
 
 
-        <p><code>AbstractReader</code> over a :class:<code>ReadBuffer</code> fed by :class:<code>ConnectionProtocol</code>.</p>
-<p>Every method serves from resident bytes first and only parks when it needs
-more.  A pipelined or keep-alive peer's next head is usually already
-resident, so those reads complete without a loop turn — which is the claim
-the layered predecessor made and could not deliver, because it sat on a
-reader that was buffering underneath it.</p>
-<p><strong>This is where the receive decisions live.</strong>  Reading is the only activity
-that knows both the demand (<code>read(n)</code>, :meth:<code>read_head</code>) and the
-consumption (<code>take</code>), so everything that follows from the pair is
-decided here and merely <em>executed</em> on the transport: whether a high-water
-crossing pauses the peer (:meth:<code>maybe_pause</code>), when to let it go again
-(:meth:<code>_consumed</code>), how much the next recv should be able to deliver
-(the offer published around a park), and when a grown allocation goes back
-to the floor (:meth:<code>_at_boundary</code>).  The protocol below owns the socket,
-not the judgement about it.</p>
-<p>Deliberately not on :class:<code>~.recipient.AbstractReader</code>: two of its three
-implementations have no transport to pause, so promoting this competence to
-the interface would force a no-op onto them.</p>
+        <p>Serves one :class:<code>ScenarioH1Server</code> to each connecting client.</p>
 
 
 
@@ -5651,34 +5380,23 @@ the interface would force a no-op onto them.</p>
 <div class="doc doc-object doc-function">
 
 
-<h4 id="blackbull.server.connection_protocol.BufferReader.discard" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">discard</span><span class="p">(</span><span class="n">max_bytes</span><span class="p">,</span> <span class="n">deadline</span><span class="p">)</span></code>
+<h4 id="blackbull.fault_injection.h1_server.H1FaultServer.stop" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">stop</span><span class="p">()</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
   </span>
 
-<a href="#blackbull.server.connection_protocol.BufferReader.discard" class="headerlink" title="Permanent link">&para;</a></h4>
+<a href="#blackbull.fault_injection.h1_server.H1FaultServer.stop" class="headerlink" title="Permanent link">&para;</a></h4>
 
 
     <div class="doc doc-contents ">
 
-        <p>Read and throw away up to <em>max_bytes</em>, until EOF or <em>deadline</em>.</p>
-<p>The lingering close needs the peer's remaining bytes gone so the kernel
-does not answer our close with an RST — which would discard the
-response we already wrote.  Throwing bytes away is still <em>reading</em>
-them: it has a demand (<em>max_bytes</em>) and it consumes, which is exactly
-the pair that makes a thing this reader's.  Doing it on the protocol
-with a direct <code>ReadBuffer.consume</code> gave the connection a second
-receive path that skipped every decision this one makes.</p>
-<p><code>consume</code> rather than <code>take</code>: the bytes are not wanted, so there is
-no reason to copy them out.  Both bounds are the caller's to set and
-both matter — an unbounded read hands an attacker the very thing a
-refused request was declining to read, and a read with no deadline lets
-a slow peer hold a connection that has already been answered.</p>
-<p>Returns the number of bytes discarded.  Errors are the caller's to
-absorb: this runs on the teardown path, where the response is already
-on the wire.</p>
+        <p>Stop accepting and cancel anything still mid-scenario.</p>
+<p>The cancellation is the part that matters: a scenario whose last
+step is a long <code>Sleep</code> is the <em>normal</em> shape here — that is how
+"the server never answers" is expressed — so a teardown that waited
+for handlers would wait out the sleep on every such case.</p>
 
 
     </div>
@@ -5688,114 +5406,19 @@ on the wire.</p>
 <div class="doc doc-object doc-function">
 
 
-<h4 id="blackbull.server.connection_protocol.BufferReader.fill" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">fill</span><span class="p">(</span><span class="n">n</span><span class="p">)</span></code>
+<h4 id="blackbull.fault_injection.h1_server.H1FaultServer.wait_for_connection_done" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">wait_for_connection_done</span><span class="p">(</span><span class="n">timeout</span><span class="o">=</span><span class="mf">5.0</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
   </span>
 
-<a href="#blackbull.server.connection_protocol.BufferReader.fill" class="headerlink" title="Permanent link">&para;</a></h4>
+<a href="#blackbull.fault_injection.h1_server.H1FaultServer.wait_for_connection_done" class="headerlink" title="Permanent link">&para;</a></h4>
 
 
     <div class="doc doc-contents ">
 
-        <p>Wait until <em>n</em> bytes are resident, consuming nothing.</p>
-<p>Free here: resident bytes are already the buffer's normal state, so
-peeking is just not calling <code>take</code>.  It is the reason detection can
-hand the winning binding this very reader with the stream still whole.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.server.connection_protocol.BufferReader.maybe_pause" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">maybe_pause</span><span class="p">()</span></code>
-
-<a href="#blackbull.server.connection_protocol.BufferReader.maybe_pause" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>A delivery crossed the high-water mark: decide whether to pause.</p>
-<p>Called by the protocol only when the resident count crossed the mark —
-the byte threshold is compared at the transport, which already holds
-the count and accounts it, so this reader call is the rare crossing
-rather than a per-arrival one.</p>
-<p>Not while this reader is waiting: it is starved, not behind, so the
-condition backpressure exists to prevent is not the one in play.
-Pausing anyway would cost a <code>pause_reading</code>/<code>resume_reading</code> pair —
-two <code>epoll_ctl</code> calls — on every arrival for the whole of a large
-read, since the next park releases it again.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.server.connection_protocol.BufferReader.read_head" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">read_head</span><span class="p">(</span><span class="n">limit</span><span class="p">)</span></code>
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-async"><code>async</code></small>
-  </span>
-
-<a href="#blackbull.server.connection_protocol.BufferReader.read_head" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>The message head, terminator included — found in one scan.</p>
-<p>The override the whole rewrite exists for: the terminator is looked for
-once, across everything resident, and the head leaves the buffer in a
-single copy.  Resumable, so bytes already scanned are not scanned again
-when the head arrives split across reads.</p>
-<p>Contract as documented on :meth:<code>AbstractReader.read_head</code> — an idle
-close returns <code>b''</code> and a truncated one raises with the partial.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.server.connection_protocol.BufferReader.wait_for_data" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">wait_for_data</span><span class="p">()</span></code>
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-async"><code>async</code></small>
-  </span>
-
-<a href="#blackbull.server.connection_protocol.BufferReader.wait_for_data" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Park until more arrives, declaring the wait first.</p>
-<p>Parking releases the high-water pause.  Backpressure exists to stop a
-fast peer outrunning a handler that is <em>behind</em>; a reader about to
-block is the opposite case — it is starved, and the bytes it waits for
-are precisely the ones the pause is refusing to read.  Without this,
-any single read larger than the mark deadlocks: a WebSocket frame, or
-a <code>chunked</code> chunk whose size the peer chose.
-<code>asyncio.StreamReader._wait_for_data</code> resumes here for the same
-reason.</p>
-<p>Parking is also the only moment a recv-size demand can be <em>consulted</em>,
-so the two readers that have one publish it immediately around their
-call to this (see :attr:<code>read_offer</code>).  It is not
-published here, taking a <em>want</em> argument, because the readers that park
-without a size — <code>read_head</code> on every request, <code>readuntil</code>,
-<code>fill</code> — would then pay a pair of stores to declare nothing, which
-measured as the header path funding what the body path saves.</p>
+        <p>Block until a client has connected and the scenario finished.</p>
 
 
     </div>
@@ -5814,27 +5437,20 @@ measured as the header path funding what the body path saves.</p>
 
 
 
-<h3 id="blackbull.server.connection_protocol.ConnectionProtocol" class="doc doc-heading">
-            <code>ConnectionProtocol</code>
+<h3 id="blackbull.fault_injection.h1_server.H1FaultServerError" class="doc doc-heading">
+            <code>H1FaultServerError</code>
 
 
-<a href="#blackbull.server.connection_protocol.ConnectionProtocol" class="headerlink" title="Permanent link">&para;</a></h3>
+<a href="#blackbull.fault_injection.h1_server.H1FaultServerError" class="headerlink" title="Permanent link">&para;</a></h3>
 
 
     <div class="doc doc-contents ">
             <p class="doc doc-class-bases">
-              Bases: <code><span title="asyncio.BufferedProtocol">BufferedProtocol</span></code></p>
+              Bases: <code><span title="RuntimeError">RuntimeError</span></code></p>
 
 
 
-        <p>Buffered-protocol front end for one H/1.1 connection.</p>
-<p>The transport half of the receive path: it owns the socket callbacks, the
-callback↔coroutine rendezvous, and the two flow-control calls — but none of
-the judgement about when to make them.  Those belong to
-:class:<code>BufferReader</code>, which is the only object that knows what has been
-asked for; this class executes what it is told.  Its one comparison — the
-byte-level high-water threshold — is a transport fact, not a judgement:
-whether a crossing pauses the peer is the Reader's call.</p>
+        <p>Raised when the fault server refuses to run.</p>
 
 
 
@@ -5843,200 +5459,6 @@ whether a crossing pauses the peer is the Reader's call.</p>
 
 
 
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-<div class="doc doc-object doc-attribute">
-
-
-
-<h4 id="blackbull.server.connection_protocol.ConnectionProtocol.peer_closed" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">peer_closed</span></code>
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-property"><code>property</code></small>
-  </span>
-
-<a href="#blackbull.server.connection_protocol.ConnectionProtocol.peer_closed" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>The transport signalled EOF: the peer will send nothing more.</p>
-<p>A fact about the socket, which is why it lives here.  It is <strong>not</strong>
-the same question as :meth:<code>BufferReader.at_eof</code> — bytes already
-delivered are still there to be served after the peer has gone, so a
-reader is at EOF only when this is true <em>and</em> its buffer is empty.
-One name for both questions made every call site a guess about which
-was meant.</p>
-
-    </div>
-
-</div>
-
-
-
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.server.connection_protocol.ConnectionProtocol.drain" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">drain</span><span class="p">()</span></code>
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-async"><code>async</code></small>
-  </span>
-
-<a href="#blackbull.server.connection_protocol.ConnectionProtocol.drain" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Block only while the transport is over its high-water mark.</p>
-<p>Returns without awaiting in the common case, which matters: an
-unconditional await here is one loop turn per response send, the very
-cost the inbound rewrite is removing on the read side.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.server.connection_protocol.ConnectionProtocol.linger_close" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">linger_close</span><span class="p">(</span><span class="n">max_bytes</span><span class="o">=</span><span class="mi">65536</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="mf">0.25</span><span class="p">)</span></code>
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-async"><code>async</code></small>
-  </span>
-
-<a href="#blackbull.server.connection_protocol.ConnectionProtocol.linger_close" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Close after briefly discarding whatever the peer is still sending.</p>
-<p>Closing a socket with unread bytes in its receive queue makes the
-kernel send RST, and an RST discards data we already wrote — so a peer
-that is still mid-send when we answer never sees the response.  That
-is not hypothetical: it is how a 431 for an over-budget header block
-goes missing, because rejecting at the budget means, by design, not
-reading the rest.</p>
-<p>nginx calls this <code>lingering_close</code>.  Both bounds matter: reading
-without a byte cap hands an attacker the unbounded read the budget
-exists to refuse, and reading without a deadline lets a slow peer hold
-the connection open after it has been answered.</p>
-<p>Skipped unless we are closing with bytes we chose not to consume.  A
-completed request leaves the buffer empty, so the normal close stays a
-bare close — lingering on every connection would put a timeout on the
-teardown path that <code>AsyncioWriter.close</code> deliberately keeps free of
-even one extra loop turn, for the burst-keepalive workload.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.server.connection_protocol.ConnectionProtocol.pause_reading" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">pause_reading</span><span class="p">()</span></code>
-
-<a href="#blackbull.server.connection_protocol.ConnectionProtocol.pause_reading" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Stop the transport, because the reader asked.  Idempotent.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.server.connection_protocol.ConnectionProtocol.resume_reading" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">resume_reading</span><span class="p">()</span></code>
-
-<a href="#blackbull.server.connection_protocol.ConnectionProtocol.resume_reading" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Let the transport read again, because the reader asked.  Idempotent.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.server.connection_protocol.ConnectionProtocol.wait_for_arrival" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">wait_for_arrival</span><span class="p">()</span></code>
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-async"><code>async</code></small>
-  </span>
-
-<a href="#blackbull.server.connection_protocol.ConnectionProtocol.wait_for_arrival" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Park until the next arrival, EOF, or connection loss.</p>
-<p>The rendezvous itself — a callback↔coroutine handoff, which is why it
-stays here while the decision to wait, and the backpressure release
-that goes with it, live on :meth:<code>BufferReader.wait_for_data</code>.</p>
-<p>One waiter only: a connection is driven by a single actor coroutine, so
-a second concurrent reader is a bug rather than a case to support.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.server.connection_protocol.ConnectionProtocol.writelines" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">writelines</span><span class="p">(</span><span class="n">parts</span><span class="p">)</span></code>
-
-<a href="#blackbull.server.connection_protocol.ConnectionProtocol.writelines" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Vectored write — the other half of the send-path size gate.</p>
-<p><code>BaseSender._write_many</code> joins below 32 KiB and comes here above it,
-so a protocol that offers only :meth:<code>write</code> serves small responses and
-fails large ones.  Delegated to the transport rather than joined here:
-the selector transport reaches <code>sendmsg(iovec, …)</code> and uvloop does a
-real vectored write, which is the entire reason the gate has an upper
-branch.</p>
-
-
-    </div>
-
-</div>
-
-
-
-  </div>
 
     </div>
 

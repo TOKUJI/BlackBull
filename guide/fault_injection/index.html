@@ -1146,6 +1146,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#what-it-covers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it covers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#install" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1197,6 +1208,34 @@
       
     </span>
   </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#quick-start-http11-server-side" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick start — HTTP/1.1 server-side
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Quick start — HTTP/1.1 server-side">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#every-scenario-is-raw-bytes-deliberately" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Every scenario is raw bytes, deliberately
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -2457,6 +2496,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/catalogue/h1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    h1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/fault_injection/catalogue/h2/" class="md-nav__link">
         
   
@@ -2481,6 +2548,34 @@
           </ul>
         </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/h1_server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    h1_server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -2557,6 +2652,34 @@
     
   
     scenario_h1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/scenario_h1_server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    scenario_h1_server
   
 
     
@@ -5112,6 +5235,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#what-it-covers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it covers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#install" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5167,6 +5301,34 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#quick-start-http11-server-side" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick start — HTTP/1.1 server-side
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Quick start — HTTP/1.1 server-side">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#every-scenario-is-raw-bytes-deliberately" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Every scenario is raw bytes, deliberately
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#safety-locks" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5211,25 +5373,75 @@
 <h1 id="fault-injection">Fault injection<a class="headerlink" href="#fault-injection" title="Permanent link">&para;</a></h1>
 <p>BlackBull ships a deliberate-misbehaviour toolkit under
 <code>blackbull.fault_injection</code> for testing other HTTP implementations
-against bad-server / bad-client behaviour.  Two directions are
-supported:</p>
+against bad-server / bad-client behaviour.</p>
+<h2 id="what-it-covers">What it covers<a class="headerlink" href="#what-it-covers" title="Permanent link">&para;</a></h2>
+<p>Both roles, on both HTTP protocols — the grid, rather than a count,
+because which cell you need depends on which side you are testing:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Broken <strong>client</strong> → your server</th>
+<th>Broken <strong>server</strong> → your client</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>HTTP/1.1</strong></td>
+<td>✅ <code>HTTP1Client.execute_scenario</code> + <code>oracle_h1</code></td>
+<td>✅ <code>H1FaultServer</code> + catalogue</td>
+</tr>
+<tr>
+<td><strong>HTTP/2</strong></td>
+<td>✗ not implemented</td>
+<td>✅ <code>H2FaultServer</code> + catalogue</td>
+</tr>
+<tr>
+<td><strong>WebSocket</strong></td>
+<td>✗ not implemented</td>
+<td>✗ not implemented</td>
+</tr>
+<tr>
+<td><strong>gRPC</strong></td>
+<td>—</td>
+<td>⚠ transport only, via <code>H2FaultServer</code></td>
+</tr>
+<tr>
+<td><strong>MQTT</strong></td>
+<td>—</td>
+<td>— out of scope</td>
+</tr>
+</tbody>
+</table>
 <ul>
-<li><strong>Client → server (HTTP/1.1)</strong> — a programmable client that drives
-  a target server through slowloris-style misbehaviour: trickled
-  bytes, partial headers, mid-request idle, abrupt RST.  Driven
-  through <code>HTTP1Client.execute_scenario</code>; the
-  <code>blackbull.fault_injection.oracle_h1</code> half compares two servers'
-  responses to the same scenario.</li>
-<li><strong>Server → client (HTTP/2)</strong> — a programmable server (<code>H2FaultServer</code>)
-  that emits deliberate misbehaviour toward a connected client:
-  half-closed streams, exhausted flow-control windows, illegal
-  SETTINGS, weird frame sequences.  Backed by a named catalogue you
-  can <code>parametrize</code> over.</li>
+<li><strong>Broken client → your server</strong> drives a target server through
+  slowloris-style misbehaviour: trickled bytes, partial headers,
+  mid-request idle, abrupt RST.  The <code>oracle_h1</code> half compares two
+  servers' responses to the same scenario, so you can diff your server
+  against a reference such as nginx.</li>
+<li><strong>Broken server → your client</strong> emits misbehaviour at a connected
+  client: on HTTP/1.1 a trickled status line, a <code>Content-Length</code> that
+  lies, a chunked body that stops mid-chunk; on HTTP/2 half-closed
+  streams, exhausted flow-control windows, illegal SETTINGS, weird
+  frame sequences.  Both are backed by a named catalogue you can
+  <code>parametrize</code> over.</li>
 </ul>
-<p>This module is an opt-in testing instrument.  It refuses to start
-when <code>BB_PRODUCTION</code> is set in the environment so the
-deliberate-misbehaviour code path cannot accidentally fire on a
-production deployment.</p>
+<p><strong>Where it stops, stated because you would otherwise plan around it:</strong></p>
+<ul>
+<li><strong>gRPC</strong> has no fault injection of its own.  gRPC rides HTTP/2, so
+  <code>H2FaultServer</code> already misbehaves <em>beneath</em> a gRPC client at the
+  transport layer — but gRPC-specific faults (an invalid <code>grpc-status</code>,
+  a malformed length-prefixed message, a trailers-only response) cannot
+  be expressed.</li>
+<li><strong>MQTT</strong> has none and is not planned to.  The broker is server-side by
+  design and fault injection for it is out of scope.</li>
+<li><strong>WebSocket</strong> has none in either direction.</li>
+</ul>
+<p>This module is an opt-in testing instrument.  It refuses to start in a
+production context (<code>BLACKBULL_ENV=production</code>, or <code>BB_PRODUCTION</code> as an
+explicit override) so the deliberate-misbehaviour code path cannot
+accidentally fire on a production deployment, and both fault servers
+refuse a non-loopback bind without <code>allow_remote=True</code>.</p>
 <h2 id="install">Install<a class="headerlink" href="#install" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span><span class="s1">'blackbull[fault-injection]'</span>
 </code></pre></div>
@@ -5376,6 +5588,102 @@ short-circuit.</p>
 (<code>blackbull.fault_injection.run_scenario</code>) drives the same scenario
 against two servers and categorises whether they agree, disagree,
 or both rejected.</p>
+<h2 id="quick-start-http11-server-side">Quick start — HTTP/1.1 server-side<a class="headerlink" href="#quick-start-http11-server-side" title="Permanent link">&para;</a></h2>
+<p>Point your own HTTP/1.1 client at a server that is wrong on purpose:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.fault_injection</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">H1FaultServer</span><span class="p">,</span> <span class="n">H1SCloseGracefully</span><span class="p">,</span> <span class="n">H1SSendRawBytes</span><span class="p">,</span>
+    <span class="n">ScenarioH1Server</span><span class="p">,</span> <span class="n">WaitForRequest</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">asyncio</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_my_client_rejects_a_short_body</span><span class="p">():</span>
+    <span class="n">scenario</span> <span class="o">=</span> <span class="n">ScenarioH1Server</span><span class="p">(</span><span class="n">steps</span><span class="o">=</span><span class="p">(</span>
+        <span class="n">WaitForRequest</span><span class="p">(),</span>
+        <span class="c1"># Declares 100 bytes, sends 5, then closes.</span>
+        <span class="n">H1SSendRawBytes</span><span class="p">(</span><span class="sa">b</span><span class="s1">'HTTP/1.1 200 OK</span><span class="se">\r\n</span><span class="s1">Content-Length: 100</span><span class="se">\r\n\r\n</span><span class="s1">short'</span><span class="p">),</span>
+        <span class="n">H1SCloseGracefully</span><span class="p">(),</span>
+    <span class="p">))</span>
+    <span class="k">async</span> <span class="k">with</span> <span class="n">H1FaultServer</span><span class="p">(</span><span class="n">scenario</span><span class="p">)</span> <span class="k">as</span> <span class="n">srv</span><span class="p">:</span>
+        <span class="k">with</span> <span class="n">pytest</span><span class="o">.</span><span class="n">raises</span><span class="p">(</span><span class="ne">Exception</span><span class="p">):</span>
+            <span class="k">await</span> <span class="n">my_client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="sa">f</span><span class="s1">'http://</span><span class="si">{</span><span class="n">srv</span><span class="o">.</span><span class="n">host</span><span class="si">}</span><span class="s1">:</span><span class="si">{</span><span class="n">srv</span><span class="o">.</span><span class="n">port</span><span class="si">}</span><span class="s1">/'</span><span class="p">)</span>
+</code></pre></div>
+<div class="admonition note">
+<p class="admonition-title">Why the <code>H1S</code> prefix</p>
+<p>Three scenario vocabularies live in this package — HTTP/1.1 client-side,
+HTTP/1.1 server-side, HTTP/2 server-side — and they share step names
+because they describe the same shapes of misbehaviour.  The package
+exports them role-qualified so an import cannot silently hand one half's
+step to the other half's executor: <code>H1S…</code> is HTTP/1.1 server-side, <code>H2…</code>
+is HTTP/2, and the unprefixed <code>Abort</code> / <code>Sleep</code> are the HTTP/1.1 <em>client</em>
+vocabulary that had the names first.</p>
+<p>Importing from the submodule directly (<code>from
+blackbull.fault_injection.scenario_h1_server import SendRawBytes</code>) gives
+you the unprefixed names if you prefer them.</p>
+</div>
+<p>The named cases live in <code>blackbull.fault_injection.catalogue.h1</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Case</th>
+<th>What the server does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>content_length_overstated</code></td>
+<td>declares 100 bytes, sends 5, closes</td>
+</tr>
+<tr>
+<td><code>content_length_understated</code></td>
+<td>declares 2, sends a whole second response after it</td>
+</tr>
+<tr>
+<td><code>conflicting_content_length</code></td>
+<td>two <code>Content-Length</code> headers that disagree</td>
+</tr>
+<tr>
+<td><code>chunked_stops_mid_chunk</code></td>
+<td>announces a 5-byte chunk, sends 2, EOF</td>
+</tr>
+<tr>
+<td><code>chunked_never_terminates</code></td>
+<td>well-formed chunks, no zero-length terminator</td>
+</tr>
+<tr>
+<td><code>trickled_status_line</code></td>
+<td>a <em>correct</em> response, one byte at a time</td>
+</tr>
+<tr>
+<td><code>headers_never_end</code></td>
+<td>header lines forever, never the blank line</td>
+</tr>
+<tr>
+<td><code>closed_without_response</code></td>
+<td>accepts the request, resets the connection</td>
+</tr>
+<tr>
+<td><code>silent_after_request</code></td>
+<td>holds the connection open, writes nothing</td>
+</tr>
+</tbody>
+</table>
+<p>Two of those are not failures to be caught.  <code>trickled_status_line</code> is
+correct HTTP delivered slowly — a client that rejects it has a bug of its
+own.  <code>content_length_understated</code> should <em>succeed</em>: RFC 9112 says read
+exactly <code>Content-Length</code> octets, so returning the 2-byte body is the
+conformant answer.  The hazard is the next exchange, not this one — the
+surplus is a whole second response left in the buffer, which a keep-alive
+client reusing the connection will parse as the reply to a request it has
+not sent.</p>
+<h3 id="every-scenario-is-raw-bytes-deliberately">Every scenario is raw bytes, deliberately<a class="headerlink" href="#every-scenario-is-raw-bytes-deliberately" title="Permanent link">&para;</a></h3>
+<p>There is no typed <code>SendResponse</code> step, and both fault servers assemble
+their own output rather than calling BlackBull's production send path.
+That is load-bearing rather than stylistic: <strong>a fault server built on the
+production serialiser cannot emit a fault that serialiser has</strong>, so the
+one bug class it would be least able to find is the one in the code it
+shares.  The HTTP/2 half carries its own frame encoder for the same
+reason.</p>
 <h2 id="safety-locks">Safety locks<a class="headerlink" href="#safety-locks" title="Permanent link">&para;</a></h2>
 <p>Two locks ensure the deliberate-misbehaviour code path is unreachable
 from a production process:</p>

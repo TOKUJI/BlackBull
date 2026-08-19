@@ -2331,6 +2331,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/catalogue/h1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    h1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/fault_injection/catalogue/h2/" class="md-nav__link">
         
   
@@ -2355,6 +2383,34 @@
           </ul>
         </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/h1_server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    h1_server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -2431,6 +2487,34 @@
     
   
     scenario_h1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/scenario_h1_server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    scenario_h1_server
   
 
     
@@ -5267,11 +5351,17 @@ routes, the MQTT broker, and the gRPC handlers — one concurrency story across
 every protocol. See <a href="../internals/">Internals</a> for the actor topology and the
 per-connection <code>TaskGroup</code> supervision.</p>
 <h2 id="fault-injection-the-differentiator">Fault injection — the differentiator<a class="headerlink" href="#fault-injection-the-differentiator" title="Permanent link">&para;</a></h2>
-<p>Because BlackBull owns its HTTP/2 implementation, it can be instructed to
+<p>Because BlackBull owns its HTTP implementations, it can be instructed to
 <strong>misbehave on command</strong>: half-closed streams, exhausted flow-control
-windows, illegal SETTINGS frames, trailers where none belong — crafted from a
-Python script. A delegating stack cannot easily do this, because the
-misbehaviour would have to be programmed into a third-party protocol library.</p>
+windows, illegal SETTINGS frames, trailers where none belong on HTTP/2; a
+status line delivered a byte at a time, a <code>Content-Length</code> that lies, a
+chunked body that stops mid-chunk on HTTP/1.1 — all crafted from a Python
+script. A delegating stack cannot easily do this, because the misbehaviour
+would have to be programmed into a third-party protocol library.</p>
+<p>The same ownership creates the obligation that goes with it: the fault
+servers assemble their own bytes rather than calling the production send
+path, because a breaker sharing the production serialiser cannot emit a fault
+that serialiser has.</p>
 <p>That makes BlackBull a portable conformance test bench: if you maintain an
 HTTP client, proxy, or middleware, you can drive it against adversarial
 protocol conditions in CI, and run a differential oracle that compares

@@ -2535,6 +2535,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/catalogue/h1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    h1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/fault_injection/catalogue/h2/" class="md-nav__link">
         
   
@@ -2559,6 +2587,34 @@
           </ul>
         </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/h1_server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    h1_server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -2635,6 +2691,34 @@
     
   
     scenario_h1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/scenario_h1_server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    scenario_h1_server
   
 
     
@@ -5389,10 +5473,13 @@ in your debugger. The protocol implementations are pure Python — no C
 extensions, no opaque libraries. That makes BlackBull a strong platform for
 learning HTTP/2 internals or prototyping protocol-level behaviour.</p>
 <h3 id="you-need-to-test-protocol-edge-cases">You need to test protocol edge cases<a class="headerlink" href="#you-need-to-test-protocol-edge-cases" title="Permanent link">&para;</a></h3>
-<p>BlackBull ships a programmable fault-injection framework: craft malformed
-HTTP/2 frames, simulate connection drops mid-stream, run differential oracles
-against a reference implementation. If your product depends on HTTP/2
-correctness under adverse conditions, this toolchain is unusual and useful.</p>
+<p>BlackBull ships a programmable fault-injection framework, in both roles and
+on both HTTP protocols: craft malformed HTTP/2 frames at your client,
+misbehave as an HTTP/1.1 server against it, drive a target server through
+slowloris-style misbehaviour, and simulate connection drops mid-stream. The
+differential oracle — same scenario against two servers, responses compared —
+is HTTP/1.1. If your product depends on HTTP correctness under adverse
+conditions, this toolchain is unusual and useful.</p>
 <h3 id="you-deploy-to-arm-risc-v-or-constrained-environments">You deploy to ARM, RISC-V, or constrained environments<a class="headerlink" href="#you-deploy-to-arm-risc-v-or-constrained-environments" title="Permanent link">&para;</a></h3>
 <p>Zero C extensions means zero cross-compilation pain. BlackBull runs anywhere
 CPython runs — no build step, no native dependencies to source for your

@@ -2424,6 +2424,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/catalogue/h1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    h1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/fault_injection/catalogue/h2/" class="md-nav__link">
         
   
@@ -2448,6 +2476,34 @@
           </ul>
         </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/h1_server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    h1_server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -2524,6 +2580,34 @@
     
   
     scenario_h1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/scenario_h1_server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    scenario_h1_server
   
 
     
@@ -5225,8 +5309,10 @@ Envoy's gRPC-JSON transcoder, and the web server.  Each hop adds a
 serialization boundary, a network hop, a config file, and a failure mode.
 Here the entire hub is one <code>python</code> invocation whose "config" is the
 example file itself — and every protocol conversation is observable with
-the same <a href="../events/">event API</a> and <a href="../fault_injection/">fault-injection</a>
-tooling the rest of BlackBull uses.</p>
+the same <a href="../events/">event API</a> the rest of BlackBull uses.</p>
+<p>(The <a href="../fault_injection/">fault-injection</a> toolkit does <strong>not</strong> stretch
+this far: it covers HTTP/1.1 and HTTP/2.  gRPC gets transport-layer
+misbehaviour because it rides HTTP/2, and MQTT is out of scope.)</p>
 
 
 
