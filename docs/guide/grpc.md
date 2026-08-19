@@ -216,6 +216,66 @@ abort_with_details(context, GrpcStatus.INVALID_ARGUMENT,
 The raw-bytes registry path is untouched — both styles coexist on one
 registry, and `blackbull.grpc` works fully without the package installed.
 
+## Testing your servicers
+
+```python
+import pytest
+from blackbull.grpc import GrpcStatus
+from blackbull.testing.grpc import GrpcTestServer
+
+@pytest.mark.asyncio
+async def test_say_hello():
+    async with GrpcTestServer(app) as grpc:
+        reply = await grpc.unary('/demo.Greeter/SayHello', b'world')
+
+    assert reply.status is GrpcStatus.OK
+    assert reply.message == b'hi world'
+```
+
+`GrpcTestServer` serves your app on an ephemeral h2c port and drives it over
+a real socket, so the whole dispatch path runs — the gRPC analogue of
+[`NativeTestServer`](testing.md).  The length-prefixed framing is applied for
+you: pass the message bytes your servicer expects, not an encoded frame.
+
+`GrpcReply` carries what a servicer test asserts on:
+
+| Field | |
+|---|---|
+| `status` | the `grpc-status` trailer, as a `GrpcStatus` |
+| `grpc_message` | the `grpc-message` trailer — the human-readable detail |
+| `message` | the first response message, unframed |
+| `messages` | every response message, for server-streaming calls |
+| `response` | the raw `ClientResponse`, for anything the above does not surface |
+
+An error asserts the same way, because a gRPC error *is* a response:
+
+```python
+async def failing(request, context):
+    raise GrpcError(GrpcStatus.NOT_FOUND, 'no such greeting')
+
+reply = await grpc.unary('/demo.Greeter/SayHello', b'x')
+assert reply.status is GrpcStatus.NOT_FOUND
+assert reply.grpc_message == 'no such greeting'
+```
+
+### Why not the in-process test client
+
+Every gRPC response reports its status in **trailing headers** — success and
+error alike.  An ASGI transport with no `http.response.trailers` support
+never observes response completion, so [`TestClient`](testing.md) (which
+rides `httpx.ASGITransport`) cannot see a gRPC call finish at all.  That is
+not a limitation of your servicer; it is the framing real gRPC clients
+require.
+
+`GrpcTestServer` therefore drives a real socket with BlackBull's own
+`HTTP2Client`, which handles trailers natively.  This is the pattern the
+framework's own gRPC tests have always used; it was internal until now.
+
+**BlackBull ships no gRPC client, and this is not one.**  It is a test
+environment: `GrpcTestServer.port` is public, so `grpcio` or any other client
+can drive the same server if you would rather assert against the one your
+users will actually use.
+
 ## Scope and limits
 
 - **All four RPC shapes are served**: unary, server-streaming,

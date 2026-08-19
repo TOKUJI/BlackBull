@@ -53,6 +53,23 @@ so the editable install's metadata catches up.
 
 ### Added
 
+- **`blackbull.testing.grpc.GrpcTestServer`** — an app-facing seam for
+  testing your own gRPC servicers.  All four RPC shapes shipped and
+  `grpc.md` had no testing section, so the path an application developer
+  found was `grpcio`.  The framework's own gRPC tests have always driven a
+  real h2c socket with `HTTP2Client`, for a reason worth stating in the docs
+  rather than rediscovering: every gRPC response reports its status in
+  **trailing headers**, success and error alike, so an ASGI transport
+  without `http.response.trailers` support never observes the call finish —
+  which is why `TestClient` cannot test gRPC at all.  `GrpcTestServer` wraps
+  the boilerplate those tests repeat and hands back a `GrpcReply` with the
+  trailers already read out.
+
+  **Not a client.**  BlackBull ships a gRPC server and no gRPC client, and
+  this does not change that: it is a test environment, and `.port` is public
+  so `grpcio` can drive the same server if you would rather assert against
+  the client your users will use.
+
 - **`HTTP2Client.execute_scenario`** — the fault-injection grid's last cell.
   `HTTP1Client` had a scenario executor and `HTTP2Client` did not, so an
   HTTP/2 client-side scenario could only be written as procedural code
