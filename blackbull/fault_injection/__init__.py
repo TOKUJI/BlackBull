@@ -37,8 +37,13 @@ from .oracle_h1 import (
 )
 from .scenario_h1 import (
     Abort,
+    ExpectResponse,
+    ExpectResponse as H1CExpectResponse,
     HalfClose,
     ReadResponse,
+    WaitForResponse,
+    WaitForResponse as H1CWaitForResponse,
+    response_matches,
     Scenario,
     ScenarioResult,
     SendRawBytes as SendBytes,   # deprecated spelling, still exported
@@ -85,7 +90,11 @@ from .scenario_h1_server import (
 from .scenario_h2_client import (
     Abort as H2CAbort,
     CLIENT_PREFACE as H2C_CLIENT_PREFACE,
+    ExpectServerFrame,
+    ExpectServerFrame as H2CExpectServerFrame,
     HalfClose as H2CHalfClose,
+    WaitForServerFrame,
+    WaitForServerFrame as H2CWaitForServerFrame,
     ReadResponse as H2CReadResponse,
     ScenarioH2Client,
     ScenarioH2ClientResult,
@@ -139,7 +148,16 @@ from .scenario_h2 import (
 )
 
 __all__ = [
+    "ExpectResponse",
+    "ExpectServerFrame",
+    "H1CExpectResponse",
+    "H1CWaitForResponse",
+    "H2CExpectServerFrame",
+    "H2CWaitForServerFrame",
     "HalfClose",
+    "WaitForResponse",
+    "WaitForServerFrame",
+    "response_matches",
     "H2SAbort",
     "H2SCloseGracefully",
     "H2SExpectClientFrame",

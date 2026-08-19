@@ -119,3 +119,35 @@ class TestTheVocabulariesStayInStep:
         mod = importlib.import_module(f'blackbull.fault_injection.{module_name}')
         missing = [s for s in steps if not hasattr(mod, s)]
         assert missing == [], f'{module_name} lacks {missing}'
+
+
+class TestTheDocsImportsResolve:
+    """Import exactly as `docs/guide/fault_injection.md` tells a reader to.
+
+    Sprint 108 shipped a documented quick-start whose `SendRawBytes`
+    resolved to the wrong cell's step, and the failure surfaced only when
+    someone ran the page.  A package export is part of the API; a name the
+    docs use and the package does not export is a broken page, so the
+    check belongs next to the code rather than in a reader's terminal.
+    """
+
+    def test_every_step_the_guide_names_is_importable(self):
+        import blackbull.fault_injection as fi
+
+        # Names appearing in a code block in the guide.
+        for name in ('H2CSendFrame', 'H2CSendPreface', 'ScenarioH2Client',
+                     'WaitForServerFrame', 'ExpectServerFrame',
+                     'WaitForResponse', 'ExpectResponse', 'HalfClose',
+                     'H1SSendRawBytes', 'H2CSendRawBytes', 'SendRawBytes'):
+            assert hasattr(fi, name), f'the guide names {name}; the package does not export it'
+
+    def test_the_role_qualified_aliases_point_at_the_right_cell(self):
+        from blackbull import fault_injection as fi
+        from blackbull.fault_injection import (
+            scenario_h1, scenario_h2_client,
+        )
+
+        assert fi.H1CWaitForResponse is scenario_h1.WaitForResponse
+        assert fi.H2CWaitForServerFrame is scenario_h2_client.WaitForServerFrame
+        assert fi.WaitForResponse is scenario_h1.WaitForResponse
+        assert fi.WaitForServerFrame is scenario_h2_client.WaitForServerFrame

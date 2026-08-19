@@ -53,6 +53,61 @@ so the editable install's metadata catches up.
 
 ### Added
 
+- **The fault-injection grid is symmetric on both axes.**  Sprint 108
+  filled the last cell and then drove all four at counterparts that are
+  not BlackBull — nginx, `httpx`, `curl`, `h2`.  Every cell ran.  The
+  *result* objects did not match: the broken-**server** cells could assert
+  what the peer did (`ExpectRequest` / `ExpectClientFrame` and an
+  `expectations` log), and the broken-**client** cells had a single
+  `response` slot.
+
+  So an HTTP/2 client scenario could send an illegal frame and could not
+  observe the `GOAWAY` it drew — `ReadResponse` reads one frame, the first
+  frame a correct server sends is its handshake SETTINGS, and the verdict
+  sits further down a stream whose depth varies by peer.  That cell could
+  answer *did the server survive?* and not *what did the server decide?*
+
+  The four cells now run one scheme.  `WaitFor…` filters, reading past
+  what does not match and counting the skips; `Expect…` guards, reading
+  exactly one message and recording `(match, matched)` either way:
+
+  | | HTTP/1.1 | HTTP/2 |
+  |---|---|---|
+  | breaking client waits | `WaitForResponse` | `WaitForServerFrame` |
+  | breaking client asserts | `ExpectResponse` | `ExpectServerFrame` |
+  | breaking server waits | `WaitForRequest` | `WaitForClientFrame` |
+  | breaking server asserts | `ExpectRequest` | `ExpectClientFrame` |
+
+  Both client results gained `received` (every read, in order — `response`
+  still means the most recent, so existing scenarios are untouched),
+  `server_bytes_received`, `expectations`, `wait_skipped` and
+  `wait_timed_out`, matching the server-side names exactly.
+  `frame_matches` gained `error_code`, which is what turns "a GOAWAY
+  arrived" into "the peer rejected this for *that* reason".
+
+- **`HalfClose`, in all four vocabularies** — shut down the sending
+  direction only and keep reading.  Every cell shipped `Abort` (RST) and,
+  on the server side, `CloseGracefully` (a full close); neither is a
+  half-close.  A peer that sends FIN and keeps reading has finished its
+  request and is waiting for the answer — the ordinary end of a
+  non-keep-alive exchange, and a distinct path on the receiving side,
+  because a reset discards buffered data and a FIN does not.  A test
+  reaching for `Abort` to stand in for it tests reset handling and reports
+  a pass.
+
+  `half_closed` on all four results records whether the transport actually
+  accepted it.  TLS has no half-close, so a scenario that assumed one
+  would otherwise pass while exercising the keep-alive path.
+
+- **A named catalogue for every cell.**  The HTTP/1.1 client cell had
+  none — it was reachable only through the atheris and Hypothesis
+  harnesses, which generate inputs rather than name them.  Fourteen cases
+  ship in `blackbull.fault_injection.catalogue.h1_client`, drawn from RFC
+  9112's framing rules and the request-smuggling literature.
+  `catalogue.CATALOGUES` keys all four cells by protocol **and** role
+  (`h1_client`, `h1_server`, `h2_client`, `h2_server`), so a suite can
+  sweep the toolkit without remembering four module paths.
+
 - **`blackbull.testing.grpc.GrpcTestServer`** — an app-facing seam for
   testing your own gRPC servicers.  All four RPC shapes shipped and
   `grpc.md` had no testing section, so the path an application developer
@@ -222,6 +277,11 @@ so the editable install's metadata catches up.
   the catalogue as HTTP/2's alone.
 
 ### Fixed
+
+- **The HTTP/1.1 client's JSON codec dropped the scenario name.**  It had
+  no `HEADER` line, the convention the other three vocabularies share, so
+  a named catalogue case came back anonymous from a round trip.  Files
+  written without one still parse.
 
 - **An HTTP/2 client scenario now owns the wire**, via a required
   `HTTP2Client(..., scenario_mode=True)`.  `HTTP2Client` sends the connection
