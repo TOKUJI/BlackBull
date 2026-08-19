@@ -67,6 +67,7 @@ def half_closed_stream_no_data() -> ScenarioH2:
         payload=_HEADERS_STATUS_200,
     )
     return ScenarioH2(
+        name='half_closed_stream_no_data',
         steps=(
             WaitForClientFrame(match={'type': 'HEADERS', 'stream_id': 1},
                                timeout=5.0),
@@ -91,6 +92,7 @@ def exhausted_window_zero_initial() -> ScenarioH2:
     flood the wire.
     """
     return ScenarioH2(
+        name='exhausted_window_zero_initial',
         steps=(
             WaitForClientFrame(match={'type': 'HEADERS', 'stream_id': 1},
                                timeout=5.0),
@@ -113,6 +115,7 @@ def settings_max_frame_size_below_minimum() -> ScenarioH2:
     splitting frames into 1-byte chunks).
     """
     return ScenarioH2(
+        name='settings_max_frame_size_below_minimum',
         steps=(
             # No further server work — the illegal SETTINGS in the
             # handshake is the entire payload.
@@ -146,6 +149,7 @@ def headers_continuation_dropped() -> ScenarioH2:
         payload=_HEADERS_STATUS_200,
     )
     return ScenarioH2(
+        name='headers_continuation_dropped',
         steps=(
             WaitForClientFrame(match={'type': 'HEADERS', 'stream_id': 1},
                                timeout=5.0),

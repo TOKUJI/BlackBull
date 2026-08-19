@@ -189,8 +189,14 @@ class Scenario:
         Bytes payloads are base64-encoded so the result round-trips
         through stdout / git / json.loads without escape ambiguity.
         Round-tripped by :meth:`from_json`.
+
+        The scenario's name rides the first line under the op ``HEADER``,
+        the convention the other three vocabularies use, so the file stays
+        one line-oriented stream with no out-of-band metadata.  Without it
+        a round trip silently dropped the name, and a catalogue case that
+        came back anonymous cannot say which case it is.
         """
-        lines = []
+        lines = [json.dumps({'op': 'HEADER', 'name': self.name})]
         for step in self.steps:
             lines.append(json.dumps(_step_to_dict(step)))
         return '\n'.join(lines)
@@ -201,14 +207,23 @@ class Scenario:
 
         Skips blank lines so files that end with a trailing newline
         (the conventional git-friendly shape) parse cleanly.
+
+        A ``HEADER`` line carries the name.  It is optional on the way in:
+        corpus files written before the header existed have no such line
+        and still parse, yielding an unnamed scenario.
         """
+        name = ''
         steps: list[Step] = []
         for line in src.splitlines():
             line = line.strip()
             if not line:
                 continue
-            steps.append(_step_from_dict(json.loads(line)))
-        return cls(steps=tuple(steps))
+            d = json.loads(line)
+            if d.get('op') == 'HEADER':
+                name = d.get('name', '')
+                continue
+            steps.append(_step_from_dict(d))
+        return cls(steps=tuple(steps), name=name)
 
     # ------------------------------------------------------------------
     # Bytes ↔ scenario — total decoder for atheris
@@ -482,12 +497,30 @@ def response_matches(response, match: dict) -> bool:
     return True
 
 
+def scenario_to_json(scenario: Scenario) -> str:
+    """Serialise *scenario* to JSON Lines (one step per line).
+
+    The same free function the other three vocabularies expose.  This cell
+    shipped first and grew ``Scenario.to_json`` as a method; the method
+    stays, because callers use it, but a reader comparing the four files
+    should not be told they differ where they do not.
+    """
+    return scenario.to_json()
+
+
+def scenario_from_json(src: str) -> Scenario:
+    """Parse what :func:`scenario_to_json` produced.  Twin of the other three."""
+    return Scenario.from_json(src)
+
+
 __all__ = [
     'Abort',
     'ExpectResponse',
     'HalfClose',
     'WaitForResponse',
     'response_matches',
+    'scenario_from_json',
+    'scenario_to_json',
     'ReadResponse',
     'Scenario',
     'ScenarioResult',
