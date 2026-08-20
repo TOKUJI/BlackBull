@@ -29,6 +29,7 @@ from __future__ import annotations
 
 from .h2 import (
     exhausted_window_zero_initial,
+    half_closed_after_headers as h2_half_closed_after_headers,
     half_closed_stream_no_data,
     headers_continuation_dropped,
     settings_max_frame_size_below_minimum,
@@ -53,6 +54,7 @@ CATALOGUE_H1_SERVER = CATALOGUE_H1
 #: importable from its own module, which is how a reader would have
 #: concluded there was one catalogue.
 CATALOGUE = {
+    'half_closed_after_headers': h2_half_closed_after_headers,
     'half_closed_stream_no_data': half_closed_stream_no_data,
     'exhausted_window_zero_initial': exhausted_window_zero_initial,
     'settings_max_frame_size_below_minimum':

@@ -11,7 +11,8 @@ going through the production send path — see
 from __future__ import annotations
 
 from ..scenario_h1_server import (
-    Abort, CloseGracefully, ScenarioH1Server, SendRawBytes, Sleep, WaitForRequest,
+    Abort, CloseGracefully, HalfClose, ScenarioH1Server, SendRawBytes, Sleep,
+    WaitForRequest,
 )
 
 _OK_HEAD = b'HTTP/1.1 200 OK\r\n'
@@ -115,8 +116,26 @@ def silent_after_request() -> ScenarioH1Server:
 
 
 #: Every case, for ``parametrize``.
+
+def half_closed_after_headers() -> ScenarioH1Server:
+    """Announces a body, sends FIN on the write side, keeps reading.
+
+    Distinct from ``closed_without_response`` (RST, nothing to read) and
+    from ``content_length_overstated`` (a full close after partial bytes):
+    here the connection stays *readable*, so a client that treats FIN as a
+    reset, or that waits for a close it will not get, behaves differently
+    from one that reads EOF and reports a truncated body.
+    """
+    return ScenarioH1Server(name='half_closed_after_headers', steps=(
+        WaitForRequest(),
+        SendRawBytes(_OK_HEAD + b'Content-Length: 100\r\n\r\n'),
+        HalfClose(),
+    ))
+
+
 CATALOGUE = {
     fn.__name__: fn for fn in (
+        half_closed_after_headers,
         content_length_overstated,
         content_length_understated,
         conflicting_content_length,

@@ -139,7 +139,7 @@ class TestTheBrokenServerCellsAreJudgedByOthers:
 
     @pytest.mark.parametrize('case_name', [
         'content_length_overstated', 'chunked_stops_mid_chunk',
-        'closed_without_response',
+        'closed_without_response', 'half_closed_after_headers',
     ])
     async def test_cell_b_httpx_and_blackbull_both_reject(self, case_name):
         """Where two independent clients agree, our client must agree too.
@@ -164,12 +164,15 @@ class TestTheBrokenServerCellsAreJudgedByOthers:
                 async with httpx.AsyncClient(timeout=5.0) as c:
                     await c.get(f'http://127.0.0.1:{srv.port}/')
 
-    async def test_cell_c_httpx_rejects_what_our_client_rejects(self):
+    @pytest.mark.parametrize('case_name', [
+        'headers_continuation_dropped', 'half_closed_after_headers',
+    ])
+    async def test_cell_c_httpx_rejects_what_our_client_rejects(self, case_name):
         from blackbull.client.http2 import HTTP2Client
         from blackbull.fault_injection.catalogue import CATALOGUE_H2_SERVER
         from blackbull.fault_injection.h2_server import H2FaultServer
 
-        build = CATALOGUE_H2_SERVER['headers_continuation_dropped']
+        build = CATALOGUE_H2_SERVER[case_name]
 
         async with H2FaultServer(build()) as srv:
             with pytest.raises(Exception):
@@ -192,14 +195,21 @@ class TestACImplementationAgrees:
     parser is the cheapest way to tell those apart.
     """
 
-    async def test_curl_also_refuses_a_truncated_body(self):
+    @pytest.mark.parametrize('case_name', [
+        'content_length_overstated',
+        # A half-close is the case most likely to be handled differently
+        # by a client that maps FIN onto "connection reset": curl's
+        # answer here is independent evidence that the FIN carries the
+        # meaning the scenario intends.
+        'half_closed_after_headers',
+    ])
+    async def test_curl_also_refuses_a_truncated_body(self, case_name):
         import subprocess
 
         from blackbull.fault_injection.catalogue import CATALOGUE_H1_SERVER
         from blackbull.fault_injection.h1_server import H1FaultServer
 
-        async with H1FaultServer(
-                CATALOGUE_H1_SERVER['content_length_overstated']()) as srv:
+        async with H1FaultServer(CATALOGUE_H1_SERVER[case_name]()) as srv:
             proc = await asyncio.create_subprocess_exec(
                 'curl', '-s', '--max-time', '5', '--http1.1',
                 f'http://127.0.0.1:{srv.port}/',
@@ -210,4 +220,52 @@ class TestACImplementationAgrees:
         # so a curl that reports the same fact under a different code does
         # not fail the suite for a reason unrelated to BlackBull.
         assert proc.returncode != 0, (
-            'curl accepted a body shorter than its declared Content-Length')
+            f'{case_name}: curl accepted a body shorter than its declared '
+            f'Content-Length')
+
+    async def test_curl_and_httpx_agree_a_half_close_is_not_a_reset(self):
+        """The distinction the step exists for, checked by two implementations.
+
+        `HalfClose` and `Abort` are only worth having as separate steps if
+        a peer can tell them apart.  Two independent clients reporting the
+        *same* difference is what makes that a property of the wire rather
+        than of one library's error mapping.
+        """
+        import subprocess
+
+        from blackbull.fault_injection.catalogue import CATALOGUE_H1_SERVER
+        from blackbull.fault_injection.h1_server import H1FaultServer
+
+        async def curl_stderr(build) -> str:
+            async with H1FaultServer(build()) as srv:
+                proc = await asyncio.create_subprocess_exec(
+                    'curl', '-sS', '--max-time', '5', '--http1.1',
+                    f'http://127.0.0.1:{srv.port}/',
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                _, err = await asyncio.wait_for(proc.communicate(), timeout=15)
+            return err.decode(errors='replace').lower()
+
+        async def httpx_error(build) -> str:
+            async with H1FaultServer(build()) as srv:
+                async with httpx.AsyncClient(timeout=5.0) as c:
+                    try:
+                        await c.get(f'http://127.0.0.1:{srv.port}/')
+                    except httpx.HTTPError as exc:
+                        return f'{type(exc).__name__}: {exc}'.lower()
+            return ''
+
+        half = CATALOGUE_H1_SERVER['half_closed_after_headers']
+        reset = CATALOGUE_H1_SERVER['closed_without_response']
+
+        # A half-close after headers: the client got a complete head and an
+        # incomplete body, so both should say so in those terms.
+        assert 'body' in await httpx_error(half), (
+            'httpx did not describe the half-close as a truncated body')
+        assert 'transfer closed' in await curl_stderr(half) \
+            or 'partial' in await curl_stderr(half), (
+            'curl did not describe the half-close as a truncated transfer')
+
+        # A reset before any response is a different report on both.
+        assert 'body' not in await httpx_error(reset), (
+            'httpx reported a pre-response reset the same way as a '
+            'half-close — the two steps are indistinguishable on the wire')

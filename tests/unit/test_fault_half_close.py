@@ -152,13 +152,22 @@ class TestTheServerSideHalfCloses:
     """The same step, driven from the breaking *server* — cells B and C."""
 
     async def test_h1_fault_server_half_closes_after_a_partial_response(self):
-        """FIN mid-body: the peer sees a truncated body, not a reset.
+        """FIN mid-body: the bytes on the wire, asserted directly.
 
-        Driven on a raw socket rather than through a client library.  What
-        is under test is that the server sends its headers and then FIN,
-        and a client library would answer that question only through its
-        own timeout and error-mapping policy — which differs by version
-        and turned a server assertion into a test of httpx.
+        A raw socket, because the claim here is about *our* output — the
+        headers went out and FIN followed them — and `reader.read(-1)`
+        returning at EOF proves both halves in one call.
+
+        This does **not** replace driving a real client at the same fault.
+        The broken-server cells are verified against implementations that
+        are not ours, and that rule applies to this step like any other:
+        `half_closed_after_headers` is in the HTTP/1.1 and HTTP/2 server
+        catalogues, and
+        `tests/conformance/fault_injection/test_four_cell_differential.py`
+        drives httpx and curl at it.  This test is the wire-level
+        complement, not a substitute — the earlier version of this file
+        had only the client-driven half, and only the raw-socket half
+        would have located the leak that made it hang.
         """
         from blackbull.fault_injection.h1_server import H1FaultServer
         from blackbull.fault_injection.scenario_h1_server import (
