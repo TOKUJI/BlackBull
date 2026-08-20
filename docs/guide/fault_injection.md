@@ -11,7 +11,7 @@ because which cell you need depends on which side you are testing:
 
 | | Broken **client** → your server | Broken **server** → your client |
 |---|---|---|
-| **HTTP/1.1** | ✅ `HTTP1Client.execute_scenario` + `oracle_h1` | ✅ `H1FaultServer` + catalogue |
+| **HTTP/1.1** | ✅ `HTTP1Client.execute_scenario` + catalogue + `oracle_h1` | ✅ `H1FaultServer` + catalogue |
 | **HTTP/2** | ✅ `HTTP2Client.execute_scenario` + catalogue | ✅ `H2FaultServer` + catalogue |
 | **WebSocket** | ✗ not implemented | ✗ not implemented |
 | **gRPC** | — | ⚠ transport only, via `H2FaultServer` |
@@ -30,6 +30,78 @@ because which cell you need depends on which side you are testing:
   streams, exhausted flow-control windows, illegal SETTINGS, weird
   frame sequences.  Both are backed by a named catalogue you can
   `parametrize` over.
+
+All four cells are reachable by name through
+`blackbull.fault_injection.catalogue.CATALOGUES`, keyed `h1_client`,
+`h1_server`, `h2_client`, `h2_server` — so a suite can sweep the whole
+toolkit without remembering four module paths.
+
+### One vocabulary, four cells
+
+Whichever cell you are in, the steps mean the same things:
+
+| | HTTP/1.1 | HTTP/2 |
+|---|---|---|
+| **Breaking client** waits for the peer | `WaitForResponse` | `WaitForServerFrame` |
+| **Breaking client** asserts about the peer | `ExpectResponse` | `ExpectServerFrame` |
+| **Breaking server** waits for the peer | `WaitForRequest` | `WaitForClientFrame` |
+| **Breaking server** asserts about the peer | `ExpectRequest` | `ExpectClientFrame` |
+
+`WaitFor…` is a **filter**: it reads past what does not match and counts
+the skips in `wait_skipped`.  `Expect…` is a **guard**: it reads exactly
+one message, skips nothing, and appends `(match, matched)` to
+`expectations` either way — so a scenario whose premise quietly failed
+does not report a pass.
+
+On HTTP/2 the distinction is load-bearing rather than stylistic.  The
+first frame any correct server sends is its handshake SETTINGS, so a
+verdict — `GOAWAY`, `RST_STREAM` — always arrives *behind* frames the
+scenario does not care about, at a depth that varies by peer.  A single
+read can only ever report that the handshake started:
+
+```python
+from blackbull.client import HTTP2Client
+from blackbull.fault_injection import (
+    H2CSendFrame, H2CSendPreface, ScenarioH2Client, WaitForServerFrame,
+)
+from blackbull.protocol.frame_types import FrameTypes
+
+async with HTTP2Client('127.0.0.1', my_port, scenario_mode=True) as client:
+    result = await client.execute_scenario(ScenarioH2Client(steps=(
+        H2CSendPreface(),
+        # SETTINGS with ACK set *and* a payload — RFC 9113 §6.5.
+        H2CSendFrame(FrameTypes.SETTINGS, flags=0x1, stream_id=0,
+                     data=b'\x00' * 6),
+        WaitForServerFrame(match={'type': 'GOAWAY', 'error_code': 6},
+                           timeout=5.0),
+    )))
+
+assert result.response is not None      # the GOAWAY itself
+assert result.wait_skipped == 1         # the handshake SETTINGS, passed over
+assert result.received                  # every frame read, in order
+```
+
+`result.received` holds everything a read step took off the wire, in
+order; `result.response` stays the most recent one.  Before both existed,
+a second read overwrote the first and the loss was silent.
+
+### Closing the connection: three ways, not two
+
+| Step | What the peer sees |
+|---|---|
+| `Abort` | RST — buffered data discarded, nothing left to read.  Terminal |
+| `CloseGracefully` | FIN in both directions (HTTP/2: a GOAWAY first).  Terminal |
+| `HalfClose` | FIN on the sending side only; the connection stays readable.  **Not terminal** |
+
+`HalfClose` is in all four vocabularies.  It is the ordinary end of a
+non-keep-alive exchange — "I have finished sending, I am still waiting for
+your answer" — and a distinct code path on the receiving side, because a
+reset discards buffered data and a FIN does not.  Reaching for `Abort` to
+stand in for it tests reset handling instead.
+
+`result.half_closed` records whether the transport actually accepted it.
+TLS has no half-close, so a scenario that assumed one would otherwise
+report a pass while exercising the keep-alive path.
 
 **Where it stops, stated because you would otherwise plan around it:**
 

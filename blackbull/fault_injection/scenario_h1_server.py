@@ -41,6 +41,7 @@ class StepOpH1Server(str, enum.Enum):
     SLEEP = 'SLEEP'
     ABORT = 'ABORT'
     CLOSE_GRACEFULLY = 'CLOSE_GRACEFULLY'
+    HALF_CLOSE = 'HALF_CLOSE'
 
 
 @dataclass(frozen=True)
@@ -203,9 +204,24 @@ class CloseGracefully:
     """
 
 
+@dataclass(frozen=True)
+class HalfClose:
+    """Shut down the sending direction only (FIN), keep reading.
+
+    Neither :class:`Abort` nor a full close says this.  ``Abort`` sends RST,
+    which discards whatever is buffered and leaves nothing to read; a full
+    close ends both directions at once.  A half-close is the ordinary end of
+    a non-keep-alive exchange — "I have finished sending, I am still waiting
+    for your answer" — and it is a distinct code path on the peer.
+
+    **Not terminal**: later steps still run, because continuing to read is
+    the whole point.
+    """
+
+
 Step = (WaitForRequest | ExpectRequest | SendStatusLine | SendHeader | EndHeaders
         | SendChunk | EndChunkedBody | SendRawBytes | Sleep | Abort
-        | CloseGracefully)
+        | CloseGracefully | HalfClose)
 
 
 @dataclass(frozen=True)
@@ -326,6 +342,12 @@ class ScenarioH1ServerResult:
     #: One ``(match, matched)`` pair per :class:`ExpectRequest` step, in
     #: order — what the scenario assumed, and whether it held.
     expectations: list = field(default_factory=list)
+    #: True when a ``HalfClose`` step actually shut down the write side.
+    #: False both when no such step ran and when the transport refused it
+    #: (TLS has no half-close), so a test can tell "did not ask" from
+    #: "asked and it did not happen" — a silently skipped half-close
+    #: otherwise reads as a pass.
+    half_closed: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -350,6 +372,8 @@ def _step_to_dict(step) -> dict:
         return {'op': StepOpH1Server.ABORT}
     if isinstance(step, CloseGracefully):
         return {'op': StepOpH1Server.CLOSE_GRACEFULLY}
+    if isinstance(step, HalfClose):
+        return {'op': StepOpH1Server.HALF_CLOSE}
     raise ValueError(f'cannot serialise step: {step!r}')
 
 
@@ -383,6 +407,8 @@ def _step_from_dict(d: dict):
         return Abort()
     if op == StepOpH1Server.CLOSE_GRACEFULLY:
         return CloseGracefully()
+    if op == StepOpH1Server.HALF_CLOSE:
+        return HalfClose()
     raise ValueError(f'unknown step op: {op!r}')
 
 

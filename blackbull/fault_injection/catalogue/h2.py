@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from blackbull.fault_injection.scenario_h2 import (
     CloseGracefully,
+    HalfClose,
     ScenarioH2,
     SendRawBytes,
     Sleep,
@@ -67,6 +68,7 @@ def half_closed_stream_no_data() -> ScenarioH2:
         payload=_HEADERS_STATUS_200,
     )
     return ScenarioH2(
+        name='half_closed_stream_no_data',
         steps=(
             WaitForClientFrame(match={'type': 'HEADERS', 'stream_id': 1},
                                timeout=5.0),
@@ -91,6 +93,7 @@ def exhausted_window_zero_initial() -> ScenarioH2:
     flood the wire.
     """
     return ScenarioH2(
+        name='exhausted_window_zero_initial',
         steps=(
             WaitForClientFrame(match={'type': 'HEADERS', 'stream_id': 1},
                                timeout=5.0),
@@ -113,6 +116,7 @@ def settings_max_frame_size_below_minimum() -> ScenarioH2:
     splitting frames into 1-byte chunks).
     """
     return ScenarioH2(
+        name='settings_max_frame_size_below_minimum',
         steps=(
             # No further server work — the illegal SETTINGS in the
             # handshake is the entire payload.
@@ -146,6 +150,7 @@ def headers_continuation_dropped() -> ScenarioH2:
         payload=_HEADERS_STATUS_200,
     )
     return ScenarioH2(
+        name='headers_continuation_dropped',
         steps=(
             WaitForClientFrame(match={'type': 'HEADERS', 'stream_id': 1},
                                timeout=5.0),
@@ -153,6 +158,41 @@ def headers_continuation_dropped() -> ScenarioH2:
             # No CONTINUATION ever follows.
             Sleep(duration=3.0),
             CloseGracefully(error_code=0, last_stream_id=1),
+        ),
+        send_preface=True,
+    )
+
+
+def half_closed_after_headers() -> ScenarioH2:
+    """Server sends a complete HEADERS, then FIN without a GOAWAY.
+
+    RFC 9113 §5.1 — a stream the server has not ended, on a connection the
+    server stops writing to without saying why.  Distinct from
+    ``CloseGracefully``, which sends GOAWAY first and tells the client
+    which streams were processed: here the client learns only that no more
+    frames are coming, and must decide for itself that an unterminated
+    stream cannot complete.
+
+    A client that waits for a GOAWAY it will never receive, or that treats
+    the FIN as a reset, differs observably from one that reads EOF and
+    fails the outstanding request.
+    """
+    type_headers = 0x01
+    flags_end_headers = 0x04  # END_HEADERS, but not END_STREAM
+    headers = _encode_frame(
+        length=len(_HEADERS_STATUS_200),
+        type_byte=type_headers,
+        flags=flags_end_headers,
+        stream_id=1,
+        payload=_HEADERS_STATUS_200,
+    )
+    return ScenarioH2(
+        name='half_closed_after_headers',
+        steps=(
+            WaitForClientFrame(match={'type': 'HEADERS', 'stream_id': 1},
+                               timeout=5.0),
+            SendRawBytes(headers),
+            HalfClose(),
         ),
         send_preface=True,
     )

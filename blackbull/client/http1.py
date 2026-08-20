@@ -23,9 +23,14 @@ from ..server.sender import AbstractWriter, AsyncioWriter
 from ._connect import DEFAULT_CONNECT_TIMEOUT, open_connection as _open_connection
 from .exceptions import ConnectionError, ProtocolError
 from .http2 import ClientResponse  # shared dataclass
+from blackbull.fault_injection._transport import half_close as _sc_half_close
 from blackbull.fault_injection.scenario_h1 import (
     Abort,
+    ExpectResponse,
+    HalfClose,
     ReadResponse,
+    WaitForResponse,
+    response_matches,
     Scenario,
     ScenarioResult,
     SendRawBytes as SendBytes,
@@ -292,6 +297,19 @@ class HTTP1ResponseRecipient:
             chunk = await reader.readexactly(size)
             await reader.readuntil(_CRLF)  # consume CRLF after chunk data
             yield chunk
+
+
+def _record_response(result, response) -> None:
+    """Log one response: newest in ``response``, all of them in ``received``.
+
+    ``response`` keeps its old meaning (the most recent read) so existing
+    scenarios are untouched; ``received`` is what a scenario needs when the
+    peer sends more than one thing.
+    """
+    result.response = response
+    result.received.append(response)
+    body = getattr(response, 'body', b'') or b''
+    result.server_bytes_received += len(body)
 
 
 class HTTP1Client:
@@ -563,11 +581,52 @@ class HTTP1Client:
                     await asyncio.sleep(step.duration)
                 elif isinstance(step, ReadResponse):
                     try:
-                        result.response = await self.read_response(timeout=step.timeout)
+                        _record_response(
+                            result,
+                            await self.read_response(timeout=step.timeout))
                     except asyncio.TimeoutError as exc:
                         result.timed_out = True
                         result.exception = repr(exc)
                         return result
+                elif isinstance(step, WaitForResponse):
+                    # A filter: read past what does not match, counting it.
+                    # On HTTP/1.1 a non-zero count is worth reading — replies
+                    # come back in request order, so a skip means the
+                    # scenario is further along the pipeline than it thinks.
+                    deadline = _time.monotonic() + step.timeout
+                    while True:
+                        remaining = deadline - _time.monotonic()
+                        if remaining <= 0:
+                            result.wait_timed_out = True
+                            break
+                        try:
+                            got = await self.read_response(timeout=remaining)
+                        except asyncio.TimeoutError:
+                            result.wait_timed_out = True
+                            break
+                        _record_response(result, got)
+                        if response_matches(got, step.match):
+                            break
+                        result.wait_skipped += 1
+                elif isinstance(step, ExpectResponse):
+                    # A guard: one response, nothing skipped, and the
+                    # verdict recorded either way — a scenario whose
+                    # premise silently failed would look like a pass.
+                    try:
+                        got = await self.read_response(timeout=step.timeout)
+                    except asyncio.TimeoutError:
+                        result.wait_timed_out = True
+                        result.expectations.append((dict(step.match), False))
+                    else:
+                        _record_response(result, got)
+                        result.expectations.append(
+                            (dict(step.match),
+                             response_matches(got, step.match)))
+                elif isinstance(step, HalfClose):
+                    # FIN, not RST, and deliberately not terminal: a
+                    # half-closed client is still reading, which is the
+                    # only reason to script one.
+                    result.half_closed = _sc_half_close(self._raw_writer)
                 elif isinstance(step, Abort):
                     # Hard-close: send RST rather than FIN.  abort() is
                     # synchronous on asyncio's transport layer.  After

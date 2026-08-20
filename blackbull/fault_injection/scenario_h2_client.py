@@ -32,7 +32,7 @@ import enum
 import json
 
 from blackbull.protocol.frame_types import FrameTypes
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 #: RFC 9113 §3.4 — the client connection preface.
 CLIENT_PREFACE = b'PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n'
@@ -46,6 +46,9 @@ class StepOpH2Client(str, enum.Enum):
     SLEEP = 'SLEEP'
     READ = 'READ'
     ABORT = 'ABORT'
+    HALF_CLOSE = 'HALF_CLOSE'
+    WAIT_FOR_SERVER_FRAME = 'WAIT_FOR_SERVER_FRAME'
+    EXPECT_SERVER_FRAME = 'EXPECT_SERVER_FRAME'
 
 
 @dataclass(frozen=True)
@@ -156,8 +159,55 @@ class Abort:
     """
 
 
+@dataclass(frozen=True)
+class WaitForServerFrame:
+    """Read frames until one satisfies ``match``, or the timeout wins.
+
+    A **filter**: non-matching frames are read, counted in
+    ``wait_skipped``, and passed over.  Twin of
+    :class:`~blackbull.fault_injection.scenario_h2.WaitForClientFrame`.
+
+    This is what makes an HTTP/2 client scenario able to observe a
+    *verdict*.  A single ``ReadResponse`` cannot: the first frame any
+    correct server sends is its handshake SETTINGS, so a GOAWAY or
+    RST_STREAM is always further down the stream, at a depth that varies
+    by peer.  A scenario that had to guess that depth was a scenario
+    written against one server.
+    """
+    match: dict = field(default_factory=dict)
+    timeout: float = 5.0
+
+
+@dataclass(frozen=True)
+class ExpectServerFrame:
+    """Read one frame and record whether it matched.
+
+    A **guard**, not a filter: nothing is skipped and the executor moves
+    on either way.  Twin of
+    :class:`~blackbull.fault_injection.scenario_h2.ExpectClientFrame`.
+    """
+    match: dict = field(default_factory=dict)
+    timeout: float = 5.0
+
+
+@dataclass(frozen=True)
+class HalfClose:
+    """Shut down the sending direction only (FIN), keep reading.
+
+    Neither :class:`Abort` nor a full close says this.  ``Abort`` sends RST,
+    which discards whatever is buffered and leaves nothing to read; a full
+    close ends both directions at once.  A half-close is the ordinary end of
+    a non-keep-alive exchange — "I have finished sending, I am still waiting
+    for your answer" — and it is a distinct code path on the peer.
+
+    **Not terminal**: later steps still run, because continuing to read is
+    the whole point.
+    """
+
+
 Step = (SendPreface | SendFrame | SendHeaders | SendRawBytes | Sleep
-        | ReadResponse | Abort)
+        | ReadResponse | Abort | HalfClose | WaitForServerFrame
+        | ExpectServerFrame)
 
 
 @dataclass(frozen=True)
@@ -188,6 +238,31 @@ class ScenarioH2ClientResult:
     steps_completed: int = 0
     #: Seconds from the first step to the last.
     elapsed_s: float = 0.0
+    #: True when a ``HalfClose`` step actually shut down the write side.
+    #: False both when no such step ran and when the transport refused it
+    #: (TLS has no half-close), so a test can tell "did not ask" from
+    #: "asked and it did not happen" — a silently skipped half-close
+    #: otherwise reads as a pass.
+    half_closed: bool = False
+    #: Everything a read step received, in order.  ``response`` stays the
+    #: most recent one for back-compat; this is what a scenario needs when
+    #: the peer sends more than one thing — a pipelined pair on HTTP/1.1, or
+    #: the handshake frames an HTTP/2 verdict arrives behind.  Before it
+    #: existed, the second read overwrote the first and the loss was silent.
+    received: list = field(default_factory=list)
+    #: Bytes read from the peer.  Named for who the peer is, mirroring
+    #: ``client_bytes_received`` on the broken-server results.
+    server_bytes_received: int = 0
+    #: One ``(match, matched)`` pair per guard step, in order: what the
+    #: scenario assumed, and whether it held.  Same shape and same name as
+    #: the broken-server half.
+    expectations: list = field(default_factory=list)
+    #: Messages a ``WaitFor…(match=...)`` step read and passed over.
+    wait_skipped: int = 0
+    #: Whether a ``WaitFor…`` step timed out before its match arrived.  The
+    #: step still counts as completed and the next step runs; this is what
+    #: distinguishes a per-step miss from a transport error in ``exception``.
+    wait_timed_out: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -214,6 +289,14 @@ def _step_to_dict(step) -> dict:
         return {'op': StepOpH2Client.READ, 'timeout': step.timeout}
     if isinstance(step, Abort):
         return {'op': StepOpH2Client.ABORT}
+    if isinstance(step, HalfClose):
+        return {'op': StepOpH2Client.HALF_CLOSE}
+    if isinstance(step, WaitForServerFrame):
+        return {'op': StepOpH2Client.WAIT_FOR_SERVER_FRAME,
+                'timeout': step.timeout, 'match': dict(step.match)}
+    if isinstance(step, ExpectServerFrame):
+        return {'op': StepOpH2Client.EXPECT_SERVER_FRAME,
+                'timeout': step.timeout, 'match': dict(step.match)}
     raise ValueError(f'cannot serialise step: {step!r}')
 
 
@@ -240,6 +323,14 @@ def _step_from_dict(d: dict):
         return ReadResponse(timeout=d.get('timeout', 5.0))
     if op == StepOpH2Client.ABORT:
         return Abort()
+    if op == StepOpH2Client.HALF_CLOSE:
+        return HalfClose()
+    if op == StepOpH2Client.WAIT_FOR_SERVER_FRAME:
+        return WaitForServerFrame(timeout=d.get('timeout', 5.0),
+                                  match=dict(d.get('match') or {}))
+    if op == StepOpH2Client.EXPECT_SERVER_FRAME:
+        return ExpectServerFrame(timeout=d.get('timeout', 5.0),
+                                 match=dict(d.get('match') or {}))
     raise ValueError(f'unknown step op: {op!r}')
 
 

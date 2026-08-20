@@ -36,7 +36,7 @@ Two serialisations are supported:
 import base64
 import enum
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Union
 
 
@@ -47,6 +47,9 @@ class StepOp(str, enum.Enum):
     SLEEP = 'SLEEP'
     READ = 'READ'
     ABORT = 'ABORT'
+    HALF_CLOSE = 'HALF_CLOSE'
+    WAIT_FOR_RESPONSE = 'WAIT_FOR_RESPONSE'
+    EXPECT_RESPONSE = 'EXPECT_RESPONSE'
 
 
 @dataclass(frozen=True)
@@ -97,7 +100,58 @@ class Abort:
 # Step is the discriminated union the executor switches on.  Listed
 # as a Union (not StrEnum) because the dispatcher matches by isinstance,
 # and frozen dataclasses are hashable / comparable / safe to share.
-Step = Union[SendRawBytes, Sleep, ReadResponse, Abort]
+@dataclass(frozen=True)
+class WaitForResponse:
+    """Read responses until one satisfies ``match``, or the timeout wins.
+
+    A **filter**: non-matching responses are read, counted in
+    ``wait_skipped``, and passed over.  The role-axis twin of
+    :class:`~blackbull.fault_injection.scenario_h1_server.WaitForRequest`,
+    and it exists for the same reason — a scenario that has to know
+    exactly how many messages precede the interesting one is a scenario
+    written against a particular peer.
+
+    On HTTP/1.1 a non-zero ``wait_skipped`` is worth reading: responses
+    arrive in request order, so skipping one means the scenario is a
+    response further along than it thinks.
+    """
+    match: dict = field(default_factory=dict)
+    timeout: float = 5.0
+
+
+@dataclass(frozen=True)
+class ExpectResponse:
+    """Read one response and record whether it matched.
+
+    A **guard**, not a filter: nothing is skipped and the executor moves
+    on either way.  It answers *is the peer behaving as this scenario
+    assumes?* — and a scenario whose premise silently failed would
+    otherwise look like a pass.
+
+    Twin of
+    :class:`~blackbull.fault_injection.scenario_h1_server.ExpectRequest`.
+    """
+    match: dict = field(default_factory=dict)
+    timeout: float = 5.0
+
+
+@dataclass(frozen=True)
+class HalfClose:
+    """Shut down the sending direction only (FIN), keep reading.
+
+    Neither :class:`Abort` nor a full close says this.  ``Abort`` sends RST,
+    which discards whatever is buffered and leaves nothing to read; a full
+    close ends both directions at once.  A half-close is the ordinary end of
+    a non-keep-alive exchange — "I have finished sending, I am still waiting
+    for your answer" — and it is a distinct code path on the peer.
+
+    **Not terminal**: later steps still run, because continuing to read is
+    the whole point.
+    """
+
+
+Step = Union[SendRawBytes, Sleep, ReadResponse, Abort, HalfClose,
+             WaitForResponse, ExpectResponse]
 
 
 @dataclass(frozen=True)
@@ -135,8 +189,14 @@ class Scenario:
         Bytes payloads are base64-encoded so the result round-trips
         through stdout / git / json.loads without escape ambiguity.
         Round-tripped by :meth:`from_json`.
+
+        The scenario's name rides the first line under the op ``HEADER``,
+        the convention the other three vocabularies use, so the file stays
+        one line-oriented stream with no out-of-band metadata.  Without it
+        a round trip silently dropped the name, and a catalogue case that
+        came back anonymous cannot say which case it is.
         """
-        lines = []
+        lines = [json.dumps({'op': 'HEADER', 'name': self.name})]
         for step in self.steps:
             lines.append(json.dumps(_step_to_dict(step)))
         return '\n'.join(lines)
@@ -147,14 +207,23 @@ class Scenario:
 
         Skips blank lines so files that end with a trailing newline
         (the conventional git-friendly shape) parse cleanly.
+
+        A ``HEADER`` line carries the name.  It is optional on the way in:
+        corpus files written before the header existed have no such line
+        and still parse, yielding an unnamed scenario.
         """
+        name = ''
         steps: list[Step] = []
         for line in src.splitlines():
             line = line.strip()
             if not line:
                 continue
-            steps.append(_step_from_dict(json.loads(line)))
-        return cls(steps=tuple(steps))
+            d = json.loads(line)
+            if d.get('op') == 'HEADER':
+                name = d.get('name', '')
+                continue
+            steps.append(_step_from_dict(d))
+        return cls(steps=tuple(steps), name=name)
 
     # ------------------------------------------------------------------
     # Bytes ↔ scenario — total decoder for atheris
@@ -288,6 +357,31 @@ class ScenarioResult:
     steps_completed: int = 0
 
     elapsed_s: float = 0.0
+    #: True when a ``HalfClose`` step actually shut down the write side.
+    #: False both when no such step ran and when the transport refused it
+    #: (TLS has no half-close), so a test can tell "did not ask" from
+    #: "asked and it did not happen" — a silently skipped half-close
+    #: otherwise reads as a pass.
+    half_closed: bool = False
+    #: Everything a read step received, in order.  ``response`` stays the
+    #: most recent one for back-compat; this is what a scenario needs when
+    #: the peer sends more than one thing — a pipelined pair on HTTP/1.1, or
+    #: the handshake frames an HTTP/2 verdict arrives behind.  Before it
+    #: existed, the second read overwrote the first and the loss was silent.
+    received: list = field(default_factory=list)
+    #: Bytes read from the peer.  Named for who the peer is, mirroring
+    #: ``client_bytes_received`` on the broken-server results.
+    server_bytes_received: int = 0
+    #: One ``(match, matched)`` pair per guard step, in order: what the
+    #: scenario assumed, and whether it held.  Same shape and same name as
+    #: the broken-server half.
+    expectations: list = field(default_factory=list)
+    #: Messages a ``WaitFor…(match=...)`` step read and passed over.
+    wait_skipped: int = 0
+    #: Whether a ``WaitFor…`` step timed out before its match arrived.  The
+    #: step still counts as completed and the next step runs; this is what
+    #: distinguishes a per-step miss from a transport error in ``exception``.
+    wait_timed_out: bool = False
 
 
 # ----------------------------------------------------------------------
@@ -309,7 +403,28 @@ def _step_to_dict(step: Step) -> dict:
         return {'op': StepOp.READ.value, 'timeout': step.timeout}
     if isinstance(step, Abort):
         return {'op': StepOp.ABORT.value}
+    if isinstance(step, HalfClose):
+        return {'op': StepOp.HALF_CLOSE.value}
+    if isinstance(step, WaitForResponse):
+        return {'op': StepOp.WAIT_FOR_RESPONSE.value,
+                'timeout': step.timeout, 'match': dict(step.match)}
+    if isinstance(step, ExpectResponse):
+        return {'op': StepOp.EXPECT_RESPONSE.value,
+                'timeout': step.timeout, 'match': dict(step.match)}
     raise TypeError(f'unknown step type: {type(step).__name__}')
+
+
+def _normalise_match(match: dict | None) -> dict:
+    """JSON has no tuples, so ``header``'s pair comes back as a list.
+
+    Normalised on the way in rather than compared loosely on the way out:
+    a scenario that round-trips must equal the one it came from, and
+    ``('x', 'y') != ['x', 'y']``.  The HTTP/1.1 server half does the same.
+    """
+    match = dict(match or {})
+    if 'header' in match and isinstance(match['header'], list):
+        match['header'] = tuple(match['header'])
+    return match
 
 
 def _step_from_dict(d: dict) -> Step:
@@ -325,11 +440,87 @@ def _step_from_dict(d: dict) -> Step:
         return ReadResponse(timeout=float(d.get('timeout', 5.0)))
     if op == StepOp.ABORT.value:
         return Abort()
+    if op == StepOp.HALF_CLOSE.value:
+        return HalfClose()
+    if op == StepOp.WAIT_FOR_RESPONSE.value:
+        return WaitForResponse(timeout=float(d.get('timeout', 5.0)),
+                               match=_normalise_match(d.get('match')))
+    if op == StepOp.EXPECT_RESPONSE.value:
+        return ExpectResponse(timeout=float(d.get('timeout', 5.0)),
+                              match=_normalise_match(d.get('match')))
     raise ValueError(f'unknown step op: {op!r}')
+
+
+def response_matches(response, match: dict) -> bool:
+    """Return True iff *response* satisfies every key in *match*.
+
+    Recognised keys: ``status``, ``reason``, ``version``, ``header``,
+    ``header_absent``, ``body_contains``.  **Unknown keys fail closed** —
+    an unrecognised key is almost certainly a typo in a scenario, and
+    silently matching on a key nobody reads would hide it.
+    ``request_matches`` and ``frame_matches`` made the same choice for the
+    same reason.
+
+    ``header`` takes ``(name, value)``; pass ``value=None`` to match on
+    presence alone.  ``header_absent`` takes a name.
+    """
+    recognised = {'status', 'reason', 'version', 'header', 'header_absent',
+                  'body_contains'}
+    if set(match) - recognised:
+        return False
+    if not match:
+        return True
+
+    for key in ('status', 'reason', 'version'):
+        if key in match and getattr(response, key, None) != match[key]:
+            return False
+
+    def _name(n):
+        return n.lower() if isinstance(n, str) else bytes(n).lower()
+
+    headers = list(getattr(response, 'headers', ()) or ())
+    names = {_name(n) for n, _ in headers}
+    if 'header' in match:
+        name, value = match['header']
+        name = _name(name)
+        if value is None:
+            if name not in names:
+                return False
+        elif not any(_name(n) == name and v == value for n, v in headers):
+            return False
+    if 'header_absent' in match and _name(match['header_absent']) in names:
+        return False
+    if 'body_contains' in match:
+        body = getattr(response, 'body', b'') or b''
+        if match['body_contains'] not in body:
+            return False
+    return True
+
+
+def scenario_to_json(scenario: Scenario) -> str:
+    """Serialise *scenario* to JSON Lines (one step per line).
+
+    The same free function the other three vocabularies expose.  This cell
+    shipped first and grew ``Scenario.to_json`` as a method; the method
+    stays, because callers use it, but a reader comparing the four files
+    should not be told they differ where they do not.
+    """
+    return scenario.to_json()
+
+
+def scenario_from_json(src: str) -> Scenario:
+    """Parse what :func:`scenario_to_json` produced.  Twin of the other three."""
+    return Scenario.from_json(src)
 
 
 __all__ = [
     'Abort',
+    'ExpectResponse',
+    'HalfClose',
+    'WaitForResponse',
+    'response_matches',
+    'scenario_from_json',
+    'scenario_to_json',
     'ReadResponse',
     'Scenario',
     'ScenarioResult',

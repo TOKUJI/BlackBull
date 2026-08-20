@@ -36,12 +36,14 @@ import os
 import ssl
 import time
 
+from ._transport import half_close
 from .scenario_h1_server import (
     Abort,
     CloseGracefully,
     EndChunkedBody,
     EndHeaders,
     ExpectRequest,
+    HalfClose,
     ScenarioH1Server,
     ScenarioH1ServerResult,
     SendChunk,
@@ -61,6 +63,7 @@ logger = logging.getLogger(__name__)
 
 #: End of an HTTP/1.1 message head (RFC 9112 §2.1).
 _HEAD_END = b'\r\n\r\n'
+
 
 
 class H1FaultServerError(RuntimeError):
@@ -283,6 +286,16 @@ class H1FaultServer:
         if isinstance(step, CloseGracefully):
             await self._close(writer, graceful=True)
             return True
+
+        if isinstance(step, HalfClose):
+            # FIN on the write side only, and **not** terminal — the
+            # connection is still readable, which is the whole difference
+            # from CloseGracefully.  Making it terminal would return from
+            # the handler without closing anything, leaving a half-open
+            # socket for teardown to reap; it would also disagree with the
+            # client half, where a half-closed scenario is still reading.
+            result.half_closed = half_close(writer)
+            return False
 
         raise H1FaultServerError(f'unknown scenario step: {step!r}')
 

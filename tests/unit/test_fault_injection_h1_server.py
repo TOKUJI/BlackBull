@@ -272,9 +272,21 @@ class TestExportsDoNotCollide:
             assert isinstance(srv.port, int)
 
     async def test_both_catalogues_are_reachable_the_same_way(self):
-        from blackbull.fault_injection.catalogue import CATALOGUE_H1, CATALOGUE_H2
-        assert len(CATALOGUE_H1) == 9
-        assert len(CATALOGUE_H2) == 4
+        """Reachability and shape — deliberately not a case count.
+
+        This asserted `len(...) == 9` and `== 4`, which made adding a case
+        to a catalogue fail a test about *imports*.  A count pins nothing
+        worth pinning here: the property is that each cell is reachable
+        from one place and yields callables keyed by name.
+        """
+        from blackbull.fault_injection.catalogue import (
+            CATALOGUE_H1, CATALOGUE_H2,
+        )
+
+        for catalogue in (CATALOGUE_H1, CATALOGUE_H2):
+            assert catalogue, 'a catalogue with no cases is not reachable'
+            assert all(callable(build) for build in catalogue.values())
+            assert all(isinstance(name, str) for name in catalogue)
 
     async def test_a_scenario_survives_a_json_round_trip(self):
         """H2 scenarios serialise; H1 server scenarios now do too."""
