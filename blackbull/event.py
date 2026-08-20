@@ -146,6 +146,38 @@ class EventDispatcher:
         except Exception:
             logger.exception("Observer failed for event %r", event.name)
 
+    async def drain(self, timeout: float = 5.0) -> bool:
+        """Wait until no detached observer task is outstanding.
+
+        Returns ``True`` on quiescence, ``False`` if *timeout* ran out
+        first.  **Nothing is cancelled either way** — that is the whole
+        difference from :meth:`aclose`, which is a shutdown operation and
+        kills what overruns.  A test helper that cancelled the work it was
+        asked to observe would make the side-effect it exists to reveal
+        unobservable.
+
+        Drains to *quiescence*, not to a snapshot.  An observer may itself
+        emit, so the pending set can refill while it is being awaited;
+        waiting on one ``list(self._pending_tasks)`` returns while that
+        second generation is still running.  The loop re-reads the set
+        after every wait for exactly that reason.
+
+        Intended for tests.  ``@app.intercept`` and
+        ``@app.on(..., blocking=True)`` are awaited inline and need no
+        seam; ``@app.on(name)`` is detached by design, which is what makes
+        a side-effect assertion after a request a race.
+        """
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        while True:
+            pending = [t for t in self._pending_tasks if not t.done()]
+            if not pending:
+                return True
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                return False
+            await asyncio.wait(pending, timeout=remaining)
+
     async def aclose(self) -> None:
         """Drain pending observer tasks during shutdown.
 

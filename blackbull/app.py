@@ -514,6 +514,20 @@ class BlackBull:
             return handler
         return decorator
 
+    async def drain_events(self, timeout: float = 5.0) -> bool:
+        """Wait for detached (`@app.on`) observers to finish.  Returns success.
+
+        Two of the three hook kinds need no seam: ``@app.intercept`` and
+        ``@app.on(..., blocking=True)`` are awaited before a request
+        returns, so their effects are already visible.  The third is
+        detached on purpose, so asserting its side-effect straight after a
+        request is a race — this is how a test waits instead of sleeping.
+
+        ``False`` means *timeout* expired with work still outstanding.
+        Nothing is cancelled; call again with a longer budget.
+        """
+        return await self._dispatcher.drain(timeout)
+
     def intercept(self, event_name: str) -> Callable[[EventHandler], EventHandler]:
         """Decorate a handler to intercept ``event_name`` synchronously.
 
