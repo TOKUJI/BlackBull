@@ -1633,6 +1633,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.BlackBull.drain_events" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        drain_events
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.BlackBull.enable_grpc" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6373,6 +6384,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.BlackBull.drain_events" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        drain_events
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.BlackBull.enable_grpc" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -7640,6 +7662,35 @@ async def on_temp(msg: Message):
     ...
 </code></pre>
 <p>Returns <em>ext</em> so it can be captured and configured further.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.BlackBull.drain_events" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">drain_events</span><span class="p">(</span><span class="n">timeout</span><span class="o">=</span><span class="mf">5.0</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.BlackBull.drain_events" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Wait for detached (<code>@app.on</code>) observers to finish.  Returns success.</p>
+<p>Two of the three hook kinds need no seam: <code>@app.intercept</code> and
+<code>@app.on(..., blocking=True)</code> are awaited before a request
+returns, so their effects are already visible.  The third is
+detached on purpose, so asserting its side-effect straight after a
+request is a race — this is how a test waits instead of sleeping.</p>
+<p><code>False</code> means <em>timeout</em> expired with work still outstanding.
+Nothing is cancelled; call again with a longer budget.</p>
 
 
     </div>

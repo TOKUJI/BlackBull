@@ -2209,6 +2209,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.event.EventDispatcher.drain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        drain
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.event.EventDispatcher.emit" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5381,6 +5392,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.event.EventDispatcher.drain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        drain
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.event.EventDispatcher.emit" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5663,6 +5685,43 @@ logged at WARNING and cancelled.</p>
 construction) for all in-flight observer tasks to complete.  Any
 tasks still running after the timeout are logged at WARNING and
 cancelled.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.event.EventDispatcher.drain" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">drain</span><span class="p">(</span><span class="n">timeout</span><span class="o">=</span><span class="mf">5.0</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.event.EventDispatcher.drain" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Wait until no detached observer task is outstanding.</p>
+<p>Returns <code>True</code> on quiescence, <code>False</code> if <em>timeout</em> ran out
+first.  <strong>Nothing is cancelled either way</strong> — that is the whole
+difference from :meth:<code>aclose</code>, which is a shutdown operation and
+kills what overruns.  A test helper that cancelled the work it was
+asked to observe would make the side-effect it exists to reveal
+unobservable.</p>
+<p>Drains to <em>quiescence</em>, not to a snapshot.  An observer may itself
+emit, so the pending set can refill while it is being awaited;
+waiting on one <code>list(self._pending_tasks)</code> returns while that
+second generation is still running.  The loop re-reads the set
+after every wait for exactly that reason.</p>
+<p>Intended for tests.  <code>@app.intercept</code> and
+<code>@app.on(..., blocking=True)</code> are awaited inline and need no
+seam; <code>@app.on(name)</code> is detached by design, which is what makes
+a side-effect assertion after a request a race.</p>
 
 
     </div>

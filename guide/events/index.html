@@ -1000,6 +1000,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#testing-your-hooks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing your hooks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#the-event-object" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5469,6 +5480,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#testing-your-hooks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing your hooks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#the-event-object" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5748,6 +5770,34 @@ a detached observer, which may outlive the scope), but a failure in
 one cleanup handler neither aborts the others nor breaks the emitter.
 Blocking observers run after any interceptors and before any detached
 observers for the same event.</p>
+<h2 id="testing-your-hooks">Testing your hooks<a class="headerlink" href="#testing-your-hooks" title="Permanent link">&para;</a></h2>
+<p>Two of the three kinds need no tool.  <code>@app.intercept</code> and
+<code>@app.on(..., blocking=True)</code> are awaited before the request returns, so by
+the time a test has a response their effects are already visible — assert
+the side-effect directly, and assert a short-circuit by the handler not
+having run.</p>
+<p><code>@app.on(name)</code> is detached on purpose, so asserting its side-effect right
+after a request is a <strong>race</strong>: the observer task may not have run yet.
+<code>await app.drain_events()</code> waits for every outstanding detached observer
+instead:</p>
+<div class="highlight"><pre><span></span><code><span class="n">seen</span> <span class="o">=</span> <span class="p">[]</span>
+
+<span class="nd">@app</span><span class="o">.</span><span class="n">on</span><span class="p">(</span><span class="s1">'request_completed'</span><span class="p">)</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">record</span><span class="p">(</span><span class="n">event</span><span class="p">):</span>
+    <span class="n">seen</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">'path'</span><span class="p">])</span>
+
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_the_observer_ran</span><span class="p">():</span>
+    <span class="k">await</span> <span class="n">native</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="s1">'/'</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="k">await</span> <span class="n">app</span><span class="o">.</span><span class="n">drain_events</span><span class="p">(</span><span class="n">timeout</span><span class="o">=</span><span class="mf">5.0</span><span class="p">)</span>     <span class="c1"># not a sleep</span>
+    <span class="k">assert</span> <span class="n">seen</span> <span class="o">==</span> <span class="p">[</span><span class="s1">'/'</span><span class="p">]</span>
+</code></pre></div>
+<p>It returns <code>False</code> if the timeout expired with work still outstanding, and
+<strong>cancels nothing</strong> — call it again with a longer budget.  Cancelling would
+destroy the very side-effect the test is trying to observe.</p>
+<p>It drains to <em>quiescence</em>, not to a snapshot: an observer may emit, and
+whatever that spawns is waited for too.</p>
+<p>Use it in tests.  In production the dispatcher drains detached observers at
+shutdown on its own.</p>
 <h2 id="the-event-object">The <code>Event</code> object<a class="headerlink" href="#the-event-object" title="Permanent link">&para;</a></h2>
 <p>Both decorators register handlers with the signature
 <code>async def handler(event: Event)</code>.  <code>Event</code> is a frozen dataclass:</p>
