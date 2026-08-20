@@ -49,6 +49,47 @@ The runtime version is exposed as `blackbull.__version__` via
 `pyproject.toml`.  Re-run `pip install -e .` after a local version bump
 so the editable install's metadata catches up.
 
+## [Unreleased]
+
+### Added
+
+- **`app.drain_events(timeout=)`** — wait for fire-and-forget `@app.on`
+  observers instead of sleeping.  Two of the three hook kinds were already
+  assertable (`@app.intercept` and `@app.on(..., blocking=True)` are awaited
+  before a request returns); the third is detached on purpose, so asserting
+  its side-effect straight after a request raced it.
+
+  Returns `False` if the timeout expired with work outstanding, and
+  **cancels nothing** — a helper that cancelled the work it was asked to
+  observe would destroy the effect the test exists to see.  It drains to
+  quiescence rather than to a snapshot: an observer may itself emit, and
+  what that spawns is waited for too.
+
+### Changed
+
+- **HTTP/2 pseudo-header and frame-type lookups no longer go through the
+  enum metaclass.**  `EnumClass(value)` is not a constructor — members are
+  singletons, and the call is a value lookup routed through
+  `EnumType.__call__` → `Enum.__new__`, two Python frames to perform one
+  dict lookup.  Module-level maps do the same lookup directly.
+
+  Two structural improvements came with it, and they matter more than the
+  instructions: `_KNOWN_PSEUDO` held the same six names as `PseudoHeaders`
+  in a second representation, so membership was checked twice with a `str`
+  allocated to feed the second check — retired.  And an unknown frame type
+  is a *specified normal outcome* (RFC 9113 §5.5 requires ignoring it), not
+  an exception; `.get()` returning `None` says so.
+
+  **Measured +2.65 % ± 0.15 throughput on the HTTP/2 lane** — 73.89 →
+  71.89 µs/req, so 2.00 µs/req saved, 2.71 % of BlackBull's own per-request
+  cost.  EC2 `m7a.2xlarge`, 12 ABBA rounds, 24 runs per arm; the paired null
+  (A/A) floor was 0.28 %, which the effect clears by 9.5×.
+
+  An HTTP/1.1 control lane ran in the same session and moved −0.30 % ± 0.20,
+  consistent with zero — the change is HTTP/2-only, and a control that had
+  moved with it would have meant the session measured something other than
+  the diff.
+
 ## [0.78.0] — 2026-08-20
 
 ### Added

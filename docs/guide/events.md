@@ -100,6 +100,42 @@ one cleanup handler neither aborts the others nor breaks the emitter.
 Blocking observers run after any interceptors and before any detached
 observers for the same event.
 
+## Testing your hooks
+
+Two of the three kinds need no tool.  `@app.intercept` and
+`@app.on(..., blocking=True)` are awaited before the request returns, so by
+the time a test has a response their effects are already visible — assert
+the side-effect directly, and assert a short-circuit by the handler not
+having run.
+
+`@app.on(name)` is detached on purpose, so asserting its side-effect right
+after a request is a **race**: the observer task may not have run yet.
+`await app.drain_events()` waits for every outstanding detached observer
+instead:
+
+```python
+seen = []
+
+@app.on('request_completed')
+async def record(event):
+    seen.append(event.detail['path'])
+
+async def test_the_observer_ran():
+    await native.get(app, '/')
+    assert await app.drain_events(timeout=5.0)     # not a sleep
+    assert seen == ['/']
+```
+
+It returns `False` if the timeout expired with work still outstanding, and
+**cancels nothing** — call it again with a longer budget.  Cancelling would
+destroy the very side-effect the test is trying to observe.
+
+It drains to *quiescence*, not to a snapshot: an observer may emit, and
+whatever that spawns is waited for too.
+
+Use it in tests.  In production the dispatcher drains detached observers at
+shutdown on its own.
+
 ## The `Event` object
 
 Both decorators register handlers with the signature
