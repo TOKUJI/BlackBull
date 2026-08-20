@@ -156,8 +156,7 @@ explained in [the MQTT guide](docs/guide/mqtt.md).
 ## Deliberately narrow surfaces
 
 These are implemented and supported, but fenced tighter than the
-equivalent surface in a larger framework.  Each fence is lifted on
-demonstrated demand, not speculatively.
+equivalent surface in a larger framework.
 
 ### Static-file serving: know the per-request cost
 
@@ -235,8 +234,7 @@ binding, no interception (the event API covers cross-cutting concerns).
 Query params resolve scalars only (`str`/`int`/`float`/`bool`,
 optionally `| None`); repeated-key aggregation (`?tag=a&tag=b` →
 `list[str]`) and query-model objects are not supported — parse
-`conn.query_string` yourself for those.  Fences are lifted on
-demonstrated demand, not speculatively.
+`conn.query_string` yourself for those.
 
 ### WebSocket injection: annotated query params only, one lifetime
 
@@ -260,9 +258,7 @@ serves N concurrent sockets.  Application-scope the pool
 (`@app.on_startup`) and borrow per use; see the dependency-lifetime
 section of `docs/guide/websockets.md`.  Per-message scope is not
 merely unimplemented but structurally unavailable: it needs a
-per-frame dispatch seam, and the handler owns its receive loop.  A
-declared-scope API is unlocked on demonstrated demand, not
-speculatively.
+per-frame dispatch seam, and the handler owns its receive loop.
 
 ### WebSocket inline mode: PONG latency is bounded, not instant
 
