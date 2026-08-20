@@ -327,8 +327,8 @@ publishes an AsyncAPI 3.0 document for your `@mqtt.on_message` taps at
 ## Fault injection
 
 BlackBull's single most distinctive feature: a programmable
-deliberate-misbehaviour toolkit you can point at your own HTTP/2
-client (or proxy, or middleware) directly from a pytest suite.
+deliberate-misbehaviour toolkit you can point at your own client **or**
+your own server — over HTTP/1.1 or HTTP/2 — directly from a pytest suite.
 
 ```python
 import pytest
@@ -347,14 +347,27 @@ async def test_my_client_handles_half_closed_streams():
             await my_h2_client.get(srv.url, timeout=1.0)
 ```
 
-The catalogue ships four spec-grade categories for HTTP/2 (half-closed
-streams, exhausted flow-control windows, illegal SETTINGS, weird frame
-sequences) and nine for HTTP/1.1 (a `Content-Length` that lies, a chunked
-body that stops mid-chunk, a status line trickled a byte at a time, …);
-the HTTP/1.1 client side drives a real server through trickled headers,
-partial requests, and abrupt RST.  HTTP/1.1 and HTTP/2 are the covered
-protocols — MQTT is out of scope and gRPC gets transport-layer
-misbehaviour only, since it rides HTTP/2.  See
+Both roles, on both protocols, with **40 named cases** across the four
+cells:
+
+| | Broken **client** → your server | Broken **server** → your client |
+|---|---|---|
+| **HTTP/1.1** | 14 cases — two `Content-Length`s that disagree, obs-fold, bare LF, a head trickled a byte at a time | 10 cases — a `Content-Length` that lies, a chunked body that stops mid-chunk, a half-close mid-body |
+| **HTTP/2** | 11 cases — Rapid Reset, PING/SETTINGS floods, a frame header that lies about its length | 5 cases — half-closed streams, exhausted windows, illegal SETTINGS, a dropped CONTINUATION |
+
+One vocabulary covers all four: `WaitFor…` reads past what does not match
+and counts the skips, `Expect…` reads exactly one message and records
+whether the scenario's premise held.  That matters most on HTTP/2, where
+the first frame any correct server sends is its handshake SETTINGS — so a
+verdict like `GOAWAY` always arrives behind frames you did not ask about.
+
+Every cell is exercised against an implementation that is **not**
+BlackBull — CPython's `http.server`, `h2`, `httpx`, `curl`, and nginx —
+because a fault toolkit whose only counterpart is its own project can
+pass while testing nothing.
+
+HTTP/1.1 and HTTP/2 are the covered protocols — MQTT is out of scope and
+gRPC gets transport-layer misbehaviour only, since it rides HTTP/2.  See
 [`docs/guide/fault_injection.md`](https://github.com/TOKUJI/BlackBull/blob/master/docs/guide/fault_injection.md)
 for the full tutorial.
 
