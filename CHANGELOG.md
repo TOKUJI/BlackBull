@@ -80,11 +80,15 @@ so the editable install's metadata catches up.
   is a *specified normal outcome* (RFC 9113 §5.5 requires ignoring it), not
   an exception; `.get()` returning `None` says so.
 
-  Measured at **−145 executed instructions per request** (1.63 % of the
-  HTTP/2 lane).  **No throughput claim is made**: instruction counts
-  under-predict real cost, and the plausible 1.95–2.44 % effect is above the
-  recorded EC2 null floor but far below what a local A/B can resolve.  This
-  ships on the two structural improvements, not on speed.
+  **Measured +2.65 % ± 0.15 throughput on the HTTP/2 lane** — 73.89 →
+  71.89 µs/req, so 2.00 µs/req saved, 2.71 % of BlackBull's own per-request
+  cost.  EC2 `m7a.2xlarge`, 12 ABBA rounds, 24 runs per arm; the paired null
+  (A/A) floor was 0.28 %, which the effect clears by 9.5×.
+
+  An HTTP/1.1 control lane ran in the same session and moved −0.30 % ± 0.20,
+  consistent with zero — the change is HTTP/2-only, and a control that had
+  moved with it would have meant the session measured something other than
+  the diff.
 
 ## [0.78.0] — 2026-08-20
 
