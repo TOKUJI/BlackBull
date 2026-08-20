@@ -49,7 +49,7 @@ The runtime version is exposed as `blackbull.__version__` via
 `pyproject.toml`.  Re-run `pip install -e .` after a local version bump
 so the editable install's metadata catches up.
 
-## [Unreleased]
+## [0.78.0] — 2026-08-20
 
 ### Added
 

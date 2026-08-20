@@ -62,9 +62,10 @@ Hello, world!
   handler that uses none of it compiles to the same bare wrapper:
   zero per-request cost for features you didn't ask for.
 - **Break things on purpose.** The same protocol code that serves
-  real traffic can drive a programmable misbehaving client or
-  server.  Test your own HTTP/2 client against half-closed streams,
-  exhausted windows, and illegal SETTINGS — in CI.
+  real traffic can drive a programmable misbehaving client *or*
+  server, on HTTP/1.1 and HTTP/2 — 40 named cases across the four
+  combinations, in CI.  Point it at your own client, your own
+  server, or a proxy between them.
 - **Test the path your requests actually take.** `blackbull.testing.native`
   calls your app the way the server does — a typed `Connection`, no ASGI
   scope round-trip — and `NativeTestServer` runs the whole stack on a
