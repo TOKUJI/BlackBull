@@ -16,7 +16,7 @@
         <link rel="prev" href="../">
       
       
-        <link rel="next" href="../h2/">
+        <link rel="next" href="../h1_client/">
       
       
         
@@ -2479,6 +2479,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.catalogue.h1.half_closed_after_headers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        half_closed_after_headers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.fault_injection.catalogue.h1.headers_never_end" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2520,6 +2531,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../h1_client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    h1_client
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -5405,6 +5444,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.catalogue.h1.half_closed_after_headers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        half_closed_after_headers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.fault_injection.catalogue.h1.headers_never_end" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5610,6 +5660,29 @@ going through the production send path — see
         <p>Declares 2 bytes and sends 40.</p>
 <p>The surplus is what a keep-alive client would parse as the <em>next</em>
 response's status line — the response-side twin of request smuggling.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.fault_injection.catalogue.h1.half_closed_after_headers" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">half_closed_after_headers</span><span class="p">()</span></code>
+
+<a href="#blackbull.fault_injection.catalogue.h1.half_closed_after_headers" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Announces a body, sends FIN on the write side, keeps reading.</p>
+<p>Distinct from <code>closed_without_response</code> (RST, nothing to read) and
+from <code>content_length_overstated</code> (a full close after partial bytes):
+here the connection stays <em>readable</em>, so a client that treats FIN as a
+reset, or that waits for a close it will not get, behaves differently
+from one that reads EOF and reports a truncated body.</p>
 
 
     </div>

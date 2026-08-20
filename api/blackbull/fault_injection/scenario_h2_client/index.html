@@ -2367,6 +2367,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../catalogue/h1_client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    h1_client
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../catalogue/h2/" class="md-nav__link">
         
   
@@ -2682,6 +2710,28 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.scenario_h2_client.ExpectServerFrame" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ExpectServerFrame
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.scenario_h2_client.HalfClose" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HalfClose
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.fault_injection.scenario_h2_client.ReadResponse" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2774,6 +2824,17 @@
     <span class="md-ellipsis">
       
         StepOpH2Client
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.scenario_h2_client.WaitForServerFrame" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WaitForServerFrame
       
     </span>
   </a>
@@ -5414,6 +5475,28 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.scenario_h2_client.ExpectServerFrame" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ExpectServerFrame
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.scenario_h2_client.HalfClose" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HalfClose
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.fault_injection.scenario_h2_client.ReadResponse" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5506,6 +5589,17 @@
     <span class="md-ellipsis">
       
         StepOpH2Client
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.scenario_h2_client.WaitForServerFrame" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WaitForServerFrame
       
     </span>
   </a>
@@ -5672,6 +5766,116 @@ cannot emit a fault that serialiser has.</p>
 
         <p>Hard-close the connection (<code>transport.abort</code> → RST on Linux).</p>
 <p>Terminal: later steps short-circuit, exactly as on the HTTP/1.1 side.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.fault_injection.scenario_h2_client.ExpectServerFrame" class="doc doc-heading">
+            <code>ExpectServerFrame</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#blackbull.fault_injection.scenario_h2_client.ExpectServerFrame" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Read one frame and record whether it matched.</p>
+<p>A <strong>guard</strong>, not a filter: nothing is skipped and the executor moves
+on either way.  Twin of
+:class:<code>~blackbull.fault_injection.scenario_h2.ExpectClientFrame</code>.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.fault_injection.scenario_h2_client.HalfClose" class="doc doc-heading">
+            <code>HalfClose</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#blackbull.fault_injection.scenario_h2_client.HalfClose" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Shut down the sending direction only (FIN), keep reading.</p>
+<p>Neither :class:<code>Abort</code> nor a full close says this.  <code>Abort</code> sends RST,
+which discards whatever is buffered and leaves nothing to read; a full
+close ends both directions at once.  A half-close is the ordinary end of
+a non-keep-alive exchange — "I have finished sending, I am still waiting
+for your answer" — and it is a distinct code path on the peer.</p>
+<p><strong>Not terminal</strong>: later steps still run, because continuing to read is
+the whole point.</p>
 
 
 
@@ -6156,6 +6360,65 @@ with that delay.</p>
 
 
         <p>Tag used by the JSON serialiser.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.fault_injection.scenario_h2_client.WaitForServerFrame" class="doc doc-heading">
+            <code>WaitForServerFrame</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#blackbull.fault_injection.scenario_h2_client.WaitForServerFrame" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Read frames until one satisfies <code>match</code>, or the timeout wins.</p>
+<p>A <strong>filter</strong>: non-matching frames are read, counted in
+<code>wait_skipped</code>, and passed over.  Twin of
+:class:<code>~blackbull.fault_injection.scenario_h2.WaitForClientFrame</code>.</p>
+<p>This is what makes an HTTP/2 client scenario able to observe a
+<em>verdict</em>.  A single <code>ReadResponse</code> cannot: the first frame any
+correct server sends is its handshake SETTINGS, so a GOAWAY or
+RST_STREAM is always further down the stream, at a depth that varies
+by peer.  A scenario that had to guess that depth was a scenario
+written against one server.</p>
 
 
 

@@ -1154,6 +1154,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="What it covers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#one-vocabulary-four-cells" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One vocabulary, four cells
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#closing-the-connection-three-ways-not-two" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Closing the connection: three ways, not two
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2526,6 +2554,34 @@
     
   
     h1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/catalogue/h1_client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    h1_client
   
 
     
@@ -5349,6 +5405,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="What it covers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#one-vocabulary-four-cells" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One vocabulary, four cells
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#closing-the-connection-three-ways-not-two" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Closing the connection: three ways, not two
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -5516,7 +5600,7 @@ because which cell you need depends on which side you are testing:</p>
 <tbody>
 <tr>
 <td><strong>HTTP/1.1</strong></td>
-<td>✅ <code>HTTP1Client.execute_scenario</code> + <code>oracle_h1</code></td>
+<td>✅ <code>HTTP1Client.execute_scenario</code> + catalogue + <code>oracle_h1</code></td>
 <td>✅ <code>H1FaultServer</code> + catalogue</td>
 </tr>
 <tr>
@@ -5556,6 +5640,107 @@ because which cell you need depends on which side you are testing:</p>
   frame sequences.  Both are backed by a named catalogue you can
   <code>parametrize</code> over.</li>
 </ul>
+<p>All four cells are reachable by name through
+<code>blackbull.fault_injection.catalogue.CATALOGUES</code>, keyed <code>h1_client</code>,
+<code>h1_server</code>, <code>h2_client</code>, <code>h2_server</code> — so a suite can sweep the whole
+toolkit without remembering four module paths.</p>
+<h3 id="one-vocabulary-four-cells">One vocabulary, four cells<a class="headerlink" href="#one-vocabulary-four-cells" title="Permanent link">&para;</a></h3>
+<p>Whichever cell you are in, the steps mean the same things:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>HTTP/1.1</th>
+<th>HTTP/2</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Breaking client</strong> waits for the peer</td>
+<td><code>WaitForResponse</code></td>
+<td><code>WaitForServerFrame</code></td>
+</tr>
+<tr>
+<td><strong>Breaking client</strong> asserts about the peer</td>
+<td><code>ExpectResponse</code></td>
+<td><code>ExpectServerFrame</code></td>
+</tr>
+<tr>
+<td><strong>Breaking server</strong> waits for the peer</td>
+<td><code>WaitForRequest</code></td>
+<td><code>WaitForClientFrame</code></td>
+</tr>
+<tr>
+<td><strong>Breaking server</strong> asserts about the peer</td>
+<td><code>ExpectRequest</code></td>
+<td><code>ExpectClientFrame</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>WaitFor…</code> is a <strong>filter</strong>: it reads past what does not match and counts
+the skips in <code>wait_skipped</code>.  <code>Expect…</code> is a <strong>guard</strong>: it reads exactly
+one message, skips nothing, and appends <code>(match, matched)</code> to
+<code>expectations</code> either way — so a scenario whose premise quietly failed
+does not report a pass.</p>
+<p>On HTTP/2 the distinction is load-bearing rather than stylistic.  The
+first frame any correct server sends is its handshake SETTINGS, so a
+verdict — <code>GOAWAY</code>, <code>RST_STREAM</code> — always arrives <em>behind</em> frames the
+scenario does not care about, at a depth that varies by peer.  A single
+read can only ever report that the handshake started:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.client</span><span class="w"> </span><span class="kn">import</span> <span class="n">HTTP2Client</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.fault_injection</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">H2CSendFrame</span><span class="p">,</span> <span class="n">H2CSendPreface</span><span class="p">,</span> <span class="n">ScenarioH2Client</span><span class="p">,</span> <span class="n">WaitForServerFrame</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.protocol.frame_types</span><span class="w"> </span><span class="kn">import</span> <span class="n">FrameTypes</span>
+
+<span class="k">async</span> <span class="k">with</span> <span class="n">HTTP2Client</span><span class="p">(</span><span class="s1">'127.0.0.1'</span><span class="p">,</span> <span class="n">my_port</span><span class="p">,</span> <span class="n">scenario_mode</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">execute_scenario</span><span class="p">(</span><span class="n">ScenarioH2Client</span><span class="p">(</span><span class="n">steps</span><span class="o">=</span><span class="p">(</span>
+        <span class="n">H2CSendPreface</span><span class="p">(),</span>
+        <span class="c1"># SETTINGS with ACK set *and* a payload — RFC 9113 §6.5.</span>
+        <span class="n">H2CSendFrame</span><span class="p">(</span><span class="n">FrameTypes</span><span class="o">.</span><span class="n">SETTINGS</span><span class="p">,</span> <span class="n">flags</span><span class="o">=</span><span class="mh">0x1</span><span class="p">,</span> <span class="n">stream_id</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+                     <span class="n">data</span><span class="o">=</span><span class="sa">b</span><span class="s1">'</span><span class="se">\x00</span><span class="s1">'</span> <span class="o">*</span> <span class="mi">6</span><span class="p">),</span>
+        <span class="n">WaitForServerFrame</span><span class="p">(</span><span class="n">match</span><span class="o">=</span><span class="p">{</span><span class="s1">'type'</span><span class="p">:</span> <span class="s1">'GOAWAY'</span><span class="p">,</span> <span class="s1">'error_code'</span><span class="p">:</span> <span class="mi">6</span><span class="p">},</span>
+                           <span class="n">timeout</span><span class="o">=</span><span class="mf">5.0</span><span class="p">),</span>
+    <span class="p">)))</span>
+
+<span class="k">assert</span> <span class="n">result</span><span class="o">.</span><span class="n">response</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>      <span class="c1"># the GOAWAY itself</span>
+<span class="k">assert</span> <span class="n">result</span><span class="o">.</span><span class="n">wait_skipped</span> <span class="o">==</span> <span class="mi">1</span>         <span class="c1"># the handshake SETTINGS, passed over</span>
+<span class="k">assert</span> <span class="n">result</span><span class="o">.</span><span class="n">received</span>                  <span class="c1"># every frame read, in order</span>
+</code></pre></div>
+<p><code>result.received</code> holds everything a read step took off the wire, in
+order; <code>result.response</code> stays the most recent one.  Before both existed,
+a second read overwrote the first and the loss was silent.</p>
+<h3 id="closing-the-connection-three-ways-not-two">Closing the connection: three ways, not two<a class="headerlink" href="#closing-the-connection-three-ways-not-two" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Step</th>
+<th>What the peer sees</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Abort</code></td>
+<td>RST — buffered data discarded, nothing left to read.  Terminal</td>
+</tr>
+<tr>
+<td><code>CloseGracefully</code></td>
+<td>FIN in both directions (HTTP/2: a GOAWAY first).  Terminal</td>
+</tr>
+<tr>
+<td><code>HalfClose</code></td>
+<td>FIN on the sending side only; the connection stays readable.  <strong>Not terminal</strong></td>
+</tr>
+</tbody>
+</table>
+<p><code>HalfClose</code> is in all four vocabularies.  It is the ordinary end of a
+non-keep-alive exchange — "I have finished sending, I am still waiting for
+your answer" — and a distinct code path on the receiving side, because a
+reset discards buffered data and a FIN does not.  Reaching for <code>Abort</code> to
+stand in for it tests reset handling instead.</p>
+<p><code>result.half_closed</code> records whether the transport actually accepted it.
+TLS has no half-close, so a scenario that assumed one would otherwise
+report a pass while exercising the keep-alive path.</p>
 <p><strong>Where it stops, stated because you would otherwise plan around it:</strong></p>
 <ul>
 <li><strong>gRPC</strong> has no fault injection of its own.  gRPC rides HTTP/2, so

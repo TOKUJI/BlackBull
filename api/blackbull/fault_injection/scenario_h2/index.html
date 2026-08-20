@@ -2367,6 +2367,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../catalogue/h1_client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    h1_client
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../catalogue/h2/" class="md-nav__link">
         
   
@@ -2691,6 +2719,17 @@
     <span class="md-ellipsis">
       
         ExpectClientFrame
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.scenario_h2.HalfClose" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HalfClose
       
     </span>
   </a>
@@ -5458,6 +5497,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.scenario_h2.HalfClose" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HalfClose
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.fault_injection.scenario_h2.ScenarioH2" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5813,6 +5863,63 @@ this scenario assumes?</em> — and a scenario whose premise silently failed
 would otherwise look like a pass.</p>
 <p>The HTTP/1.1 half has the same pair for the same reason
 (<code>ExpectRequest</code>); the names differ only where the unit does.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.fault_injection.scenario_h2.HalfClose" class="doc doc-heading">
+            <code>HalfClose</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#blackbull.fault_injection.scenario_h2.HalfClose" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Shut down the sending direction only (FIN), keep reading.</p>
+<p>Neither :class:<code>Abort</code> nor a full close says this.  <code>Abort</code> sends RST,
+which discards whatever is buffered and leaves nothing to read; a full
+close ends both directions at once.  A half-close is the ordinary end of
+a non-keep-alive exchange — "I have finished sending, I am still waiting
+for your answer" — and it is a distinct code path on the peer.</p>
+<p><strong>Not terminal</strong>: later steps still run, because continuing to read is
+the whole point.</p>
 
 
 
@@ -6242,9 +6349,13 @@ not advance this step.</p>
 
         <p>Return True iff <em>frame</em> satisfies every key in <em>match</em>.</p>
 <p>Recognised keys: <code>type</code>, <code>stream_id</code>, <code>flags_set</code>,
-<code>flags_unset</code>.  Unknown keys fail closed — an unrecognised
-match key is almost certainly a typo in a catalogue entry, and
-silently matching on a missing key would hide the bug.</p>
+<code>flags_unset</code>, <code>error_code</code>.  Unknown keys fail closed — an
+unrecognised match key is almost certainly a typo in a catalogue
+entry, and silently matching on a missing key would hide the bug.</p>
+<p><code>error_code</code> is what turns "a GOAWAY arrived" into "the peer
+rejected this for <em>that</em> reason", and a frame carrying no error code
+never matches it.  Both HTTP/2 roles share this function, so the key
+is available to the broken server and the broken client alike.</p>
 
 
     </div>

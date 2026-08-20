@@ -2558,6 +2558,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../fault_injection/catalogue/h1_client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    h1_client
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../fault_injection/catalogue/h2/" class="md-nav__link">
         
   
@@ -5783,6 +5811,9 @@ per-iteration fuzz throughput.</p>
         <p>Parse JSON Lines back to a :class:<code>Scenario</code>.</p>
 <p>Skips blank lines so files that end with a trailing newline
 (the conventional git-friendly shape) parse cleanly.</p>
+<p>A <code>HEADER</code> line carries the name.  It is optional on the way in:
+corpus files written before the header existed have no such line
+and still parse, yielding an unnamed scenario.</p>
 
 
     </div>
@@ -5804,6 +5835,11 @@ per-iteration fuzz throughput.</p>
 <p>Bytes payloads are base64-encoded so the result round-trips
 through stdout / git / json.loads without escape ambiguity.
 Round-tripped by :meth:<code>from_json</code>.</p>
+<p>The scenario's name rides the first line under the op <code>HEADER</code>,
+the convention the other three vocabularies use, so the file stays
+one line-oriented stream with no out-of-band metadata.  Without it
+a round trip silently dropped the name, and a catalogue case that
+came back anonymous cannot say which case it is.</p>
 
 
     </div>

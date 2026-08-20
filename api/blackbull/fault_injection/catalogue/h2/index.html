@@ -13,7 +13,7 @@
         <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/fault_injection/catalogue/h2/">
       
       
-        <link rel="prev" href="../h1/">
+        <link rel="prev" href="../h1_client/">
       
       
         <link rel="next" href="../h2_client/">
@@ -2366,6 +2366,34 @@
                 
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../h1_client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    h1_client
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
     
   
   
@@ -2445,6 +2473,17 @@
     <span class="md-ellipsis">
       
         exhausted_window_zero_initial
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.catalogue.h2.half_closed_after_headers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        half_closed_after_headers
       
     </span>
   </a>
@@ -5295,6 +5334,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.catalogue.h2.half_closed_after_headers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        half_closed_after_headers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.fault_injection.catalogue.h2.half_closed_stream_no_data" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5413,6 +5463,33 @@ send any DATA bytes until the server grants WINDOW_UPDATE.  This
 scenario never grants WINDOW_UPDATE, so a client trying to send
 a request body must respect the zero window rather than spin or
 flood the wire.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.fault_injection.catalogue.h2.half_closed_after_headers" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">half_closed_after_headers</span><span class="p">()</span></code>
+
+<a href="#blackbull.fault_injection.catalogue.h2.half_closed_after_headers" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Server sends a complete HEADERS, then FIN without a GOAWAY.</p>
+<p>RFC 9113 §5.1 — a stream the server has not ended, on a connection the
+server stops writing to without saying why.  Distinct from
+<code>CloseGracefully</code>, which sends GOAWAY first and tells the client
+which streams were processed: here the client learns only that no more
+frames are coming, and must decide for itself that an unterminated
+stream cannot complete.</p>
+<p>A client that waits for a GOAWAY it will never receive, or that treats
+the FIN as a reset, differs observably from one that reads EOF and
+fails the outstanding request.</p>
 
 
     </div>
