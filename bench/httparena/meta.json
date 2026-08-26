@@ -21,6 +21,7 @@
     "api-4",
     "api-16",
     "baseline",
+    "millionaire",
     "pipelined",
     "limited-conn",
     "json",
