@@ -259,18 +259,33 @@ class Cache:
                 held.append(event)
                 return
 
-            body_chunks.append(event._body)
+            if streaming:
+                # Already past the switch: every later chunk goes straight
+                # out.  Nothing is held and nothing is accumulated, or the
+                # stream would be buffered in full to cache a response the
+                # docstring says is not cached.
+                await send(event)
+                return
+
             if event.more_body:
-                # Streaming starts here.  Flush what we have and switch to
-                # pass-through: a streamed body's size is unknown and hashing
-                # it post-hoc would defeat the streaming.
+                # Streaming starts here.  Flush what is held, **clear it**,
+                # and switch to pass-through: a streamed body's size is
+                # unknown and hashing it post-hoc would defeat the streaming.
+                #
+                # Clearing is the whole correctness of this arm.  Leaving the
+                # buffer populated sent the header and the first chunk a
+                # second time when the terminal chunk flushed it again —
+                # two ``http.response.start`` events on HTTP/1.1, a duplicated
+                # body on HTTP/2.
                 streaming = True
                 held.append(event)
-                if not flushed:
-                    for buf in held:
-                        await send(buf)
-                    flushed = True
+                for buf in held:
+                    await send(buf)
+                held.clear()
+                flushed = True
                 return
+
+            body_chunks.append(event._body)
             # Final body chunk arrived; decide cacheability + ETag now.
             held.append(event)
             body = b''.join(body_chunks)

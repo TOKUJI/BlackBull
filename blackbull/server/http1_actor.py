@@ -470,20 +470,26 @@ def _parse_host_header(value: bytes, default_port: int) -> tuple[str, int]:
 
     A missing or non-numeric port falls back to *default_port*.
     """
+    # ``_validate_host`` rejects non-ASCII before this runs on the request
+    # path.  ``errors='replace'`` keeps the function total for every other
+    # caller rather than leaving a bare ``decode`` to repeat the defect.
+    def _dec(b: bytes) -> str:
+        return b.decode('utf-8', errors='replace')
+
     if value.startswith(b'['):
         end = value.find(b']')
         if end != -1:
             host = value[1:end]
             rest = value[end + 1:]
             if rest.startswith(b':') and rest[1:].isdigit():
-                return host.decode('utf-8'), int(rest[1:])
-            return host.decode('utf-8'), default_port
+                return _dec(host), int(rest[1:])
+            return _dec(host), default_port
         # Unterminated bracket — treat the whole value as the host.
-        return value.decode('utf-8'), default_port
+        return _dec(value), default_port
     host, sep, port_s = value.rpartition(b':')
     if sep and port_s.isdigit():
-        return host.decode('utf-8'), int(port_s)
-    return value.decode('utf-8'), default_port
+        return _dec(host), int(port_s)
+    return _dec(value), default_port
 
 
 def _validate_host(headers: 'Headers') -> None:
@@ -515,6 +521,21 @@ def _validate_host(headers: 'Headers') -> None:
         raise BadRequestError(
             f'invalid Host authority {value!r}: contains '
             f'delimiter / whitespace forbidden by RFC 3986 §3.2')
+    # RFC 3986 §3.2 authorities are ASCII; an internationalised name reaches
+    # the wire as punycode, which is too.  Neither check above excludes a
+    # high byte — the delimiter set is `/ ? #` plus whitespace, and the CTL
+    # check covers \x00-\x08\x0a-\x1f\x7f — so one used to reach
+    # ``_parse_host_header``'s bare ``decode('utf-8')`` and raise
+    # UnicodeDecodeError past every handler in ``run()``, closing the
+    # connection with no response at all.  Answering 400 is what nginx does,
+    # and *some* answer is the point: a caller cannot tell a silent drop
+    # from a crash.
+    try:
+        value.decode('ascii')
+    except UnicodeDecodeError:
+        raise BadRequestError(
+            f'invalid Host authority {value!r}: non-ASCII byte in a '
+            f'URI authority (RFC 3986 §3.2)') from None
 
 
 # ---------------------------------------------------------------------------
