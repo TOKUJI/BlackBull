@@ -146,9 +146,21 @@ RESERVED_FLAGS_0010 = 0x02
 
 
 def decode_publish_flags(flags_byte: int) -> PublishFlags:
-    """§3.3.1 — DUP (bit 3), QoS (bits 2-1), RETAIN (bit 0)."""
+    """§3.3.1 — DUP (bit 3), QoS (bits 2-1), RETAIN (bit 0).
+
+    QoS is two bits, so the field can hold 3, and §3.3.1-4 says a PUBLISH
+    with both QoS bits set is a **Malformed Packet**.  Masking alone
+    returned it as a value: nothing downstream acknowledged qos 3 (only 1
+    and 2 have an ack path), so such a packet was routed and retained with
+    no acknowledgement at all -- delivered, and invisible.
+    """
+    qos = (flags_byte >> PUBLISH_QOS_SHIFT) & PUBLISH_QOS_MASK
+    if qos > 2:
+        raise MQTTDecodeError(
+            f'PUBLISH with QoS {qos}: both QoS bits set is a Malformed '
+            f'Packet (MQTT 5 §3.3.1-4)')
     return PublishFlags(
-        qos=(flags_byte >> PUBLISH_QOS_SHIFT) & PUBLISH_QOS_MASK,
+        qos=qos,
         dup=bool(flags_byte & PublishFlagBits.DUP),
         retain=bool(flags_byte & PublishFlagBits.RETAIN),
     )

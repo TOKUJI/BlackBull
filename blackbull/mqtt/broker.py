@@ -631,6 +631,15 @@ class BrokerActor(Actor):
             reason_codes=[ReasonCode.SUCCESS] * len(unsubscribe.topics))))
 
     async def _on_publish(self, conn, publish) -> None:
+        # §3.3.1-4 — both QoS bits set is a Malformed Packet.  The codec
+        # refuses it, so this only fires for a PUBLISH built in-process, but
+        # the broker is the thing that would route it and the rule belongs
+        # where the routing decision is.  §4.13: DISCONNECT then close.
+        if publish.qos > 2:
+            await conn.send(Send(packet=MQTTDisconnect(
+                reason_code=ReasonCode.MALFORMED_PACKET)))
+            await conn.send(Close(reason_code=ReasonCode.MALFORMED_PACKET))
+            return
         # §3.3.2.1 — a Topic Name is literal: non-empty, no wildcards, no null.
         # An invalid one is rejected (0x90) and neither routed nor retained.
         if not validate_topic_name(publish.topic):
