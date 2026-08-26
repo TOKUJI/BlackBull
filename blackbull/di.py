@@ -20,15 +20,6 @@ compiles to exactly the wrapper it compiled to before this module existed
 (no per-request stack, no empty dependency loop).  Contrast FastAPI, which
 enters two ``AsyncExitStack``s and runs ``solve_dependencies()`` on every
 request even with an empty dependency list.
-
-v1 scope fences (add on real demand, not speculatively):
-
-* providers take **no parameters** — a provider that itself declares
-  ``Depends`` (nesting) is a registration-time ``TypeError``;
-* simplified handlers only — middleware and full ``(scope, receive, send)``
-  handlers are unchanged;
-* no interface binding and no interception: duck typing and the event API
-  (``@app.intercept``) already cover those.
 """
 import ast
 import inspect
