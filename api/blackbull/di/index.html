@@ -5345,15 +5345,6 @@ compiles to exactly the wrapper it compiled to before this module existed
 (no per-request stack, no empty dependency loop).  Contrast FastAPI, which
 enters two <code>AsyncExitStack</code>s and runs <code>solve_dependencies()</code> on every
 request even with an empty dependency list.</p>
-<p>v1 scope fences (add on real demand, not speculatively):</p>
-<ul>
-<li>providers take <strong>no parameters</strong> — a provider that itself declares
-  <code>Depends</code> (nesting) is a registration-time <code>TypeError</code>;</li>
-<li>simplified handlers only — middleware and full <code>(scope, receive, send)</code>
-  handlers are unchanged;</li>
-<li>no interface binding and no interception: duck typing and the event API
-  (<code>@app.intercept</code>) already cover those.</li>
-</ul>
 
 
 
