@@ -45,20 +45,13 @@ def _to_asgi_send(inner_send):
 
     The inverse of :func:`_normalize_send`, and the reason the pair is safe:
     an ASGI-written middleware inspects ``event['type']``, so what reaches it
-    from below must be dicts.  The dict form is created here and consumed
-    again at the same middleware's exit — it never travels further in either
-    direction.
+    from below must be dicts — on the WebSocket path as much as the HTTP one.
+    The dict form is created here and consumed again at the same middleware's
+    exit — it never travels further in either direction.
     """
-    from ..native import NativeResponse  # noqa: PLC0415
+    from ..native import asgi_send_boundary  # noqa: PLC0415
 
-    async def _send(event):
-        if isinstance(event, NativeResponse):
-            for ev in event.to_asgi():
-                await inner_send(ev)
-        else:
-            await inner_send(event)
-
-    return _send
+    return asgi_send_boundary(inner_send)
 
 
 def _adapt(conn, send, wants_scope: bool):

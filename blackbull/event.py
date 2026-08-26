@@ -185,15 +185,28 @@ class EventDispatcher:
         construction) for all in-flight observer tasks to complete.  Any
         tasks still running after the timeout are logged at WARNING and
         cancelled.
+
+        Drains to *quiescence* via :meth:`drain`, not to a snapshot of the
+        pending set.  An observer may itself ``emit``, and the task for that
+        second observer is created while the wait is already in progress —
+        so awaiting one ``list(self._pending_tasks)`` returns, and reports a
+        clean drain, with the second generation still running.  Nothing is
+        logged in that case either, because the overrun warning below only
+        covers tasks that were in the set being awaited.
+
+        The cost is that a pathological observer chain can now hold shutdown
+        for the full budget where it used to return early.  That is the
+        correct direction — the early return was the defect — and
+        ``shutdown_timeout`` remains the ceiling, so an observer chain that
+        never quiesces is a bounded latency cost at shutdown.
         """
         if not self._pending_tasks:
             return
 
-        pending = list(self._pending_tasks)
-        _done, still_pending = await asyncio.wait(
-            pending, timeout=self._shutdown_timeout,
-        )
+        if await self.drain(self._shutdown_timeout):
+            return
 
+        still_pending = [t for t in self._pending_tasks if not t.done()]
         if still_pending:
             for task in still_pending:
                 coro = task.get_coro()

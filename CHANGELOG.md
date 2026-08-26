@@ -65,7 +65,69 @@ so the editable install's metadata catches up.
   quiescence rather than to a snapshot: an observer may itself emit, and
   what that spawns is waited for too.
 
+### Fixed
+
+- **A cached streaming response was sent twice.**  The cache middleware holds
+  the header arm until the body completes so it can attach an ETag; a
+  streaming response has no completion to wait for, so it switches to
+  pass-through — and the switch flushed what it held without clearing it.  The
+  terminal chunk flushed the same buffer again: two `http.response.start`
+  events on HTTP/1.1, a duplicated body on HTTP/2.  Three chunks of
+  `aa`/`bb`/`cc` arrived as `aaaabbcc`.  Middle chunks were withheld as well,
+  and the stream was accumulated for caching, which the docstring says does
+  not happen.
+
+- **A non-ASCII `Host` header closed the connection with no reply.**  Neither
+  check in front of `_parse_host_header` excluded a high byte, so decoding
+  raised where nothing was ready to answer.  It is now a `400`, and the
+  header parser decodes with `errors='replace'` so the value cannot take the
+  connection down on the way to being rejected.
+
+- **A self-referencing dataclass never terminated OpenAPI schema
+  generation.**  `_type_to_schema` recursed into `_dataclass_to_schema` and
+  back with no record of what was already being walked.  One self-reference
+  produced a 53,753-byte, 1000-deep schema — stopping only because a
+  `RecursionError` inside `get_type_hints` was swallowed by a bare `except
+  Exception`.  Two self-references branch `2^depth` and had no such accident.
+  A `frozenset` of types under expansion is now threaded through every
+  recursive call.  Node: 53,753 → 164 bytes; tree: hung → 225 bytes.
+
+- **Object-form WebSockets broke under an external ASGI host.**  The
+  native→ASGI boundary expanded `NativeResponse` but passed `NativeWSMessage`
+  straight through, so what `WebSocket.accept()` / `.send()` emitted reached
+  uvicorn as an object where it subscripts `event['type']`.  Both edges (the
+  external host and a `scope`-declared middleware) now share one expansion, so
+  a native message cannot be handled at one and forgotten at the other.
+
+- **The bare-`yield` provider warning fired on providers that were correct.**
+  The check counted every statement *later in the file* rather than every
+  statement *reachable* after the yield, so a provider that degrades
+  gracefully — `yield None` then `return`, with the real acquisition and its
+  `finally` further down — was reported as leaking.  It is judged per
+  execution path now; a genuine cleanup-after-bare-`yield` is still caught.
+
+- **Shutdown abandoned observers that observers spawned.**  The dispatcher's
+  shutdown drain waited on one snapshot of the pending set, so an observer
+  that itself emits — close the session, then emit an audit record, the shape
+  `docs/guide/events.md` documents — had its second generation left running
+  while the drain reported success.  Silently: the overrun `WARNING` only
+  covers tasks that were in the snapshot.  It drains to quiescence now, as
+  `drain_events()` already did.  `observer_shutdown_timeout` remains the
+  ceiling.
+
 ### Changed
+
+- **MQTT QoS 3 is rejected instead of delivered.**  QoS is a two-bit field,
+  so it can hold 3, and the codec returned whatever the mask produced.  MQTT 5
+  §3.3.1-4 makes both bits set a Malformed Packet.  Nothing downstream caught
+  it: the broker acknowledges QoS 1 and 2 only, so a QoS-3 PUBLISH was routed
+  to subscribers and retained **with no acknowledgement at all** — delivered,
+  and invisible to the publisher.  It is now rejected in the codec and again
+  in the broker, with DISCONNECT `0x81` (Malformed Packet) then close, per
+  §4.13.
+
+  **This is a behaviour change.**  A client that sent QoS 3 and had it
+  delivered will now be disconnected.
 
 - **HTTP/2 pseudo-header and frame-type lookups no longer go through the
   enum metaclass.**  `EnumClass(value)` is not a constructor — members are

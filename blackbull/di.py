@@ -42,7 +42,9 @@ def _cleanup_after_bare_yield(provider) -> bool:
     because a socket ends by exception far more often than a request does.
 
     The shape reported is narrow on purpose: a ``yield`` that is not inside a
-    ``try`` at all, with at least one statement after it.  A yield inside any
+    ``try`` at all, with at least one statement reachable after it — reachable,
+    not merely later in the file, so an early-exit ``yield``/``return`` branch
+    is not charged for the wrapped yield further down.  A yield inside any
     ``try`` is left alone — ``finally`` covers every path, and ``except`` /
     ``else`` mean the author is deliberately telling success from failure (the
     commit-or-rollback provider).  A yield with nothing after it has no
@@ -65,13 +67,46 @@ def _cleanup_after_bare_yield(provider) -> bool:
                for stmt in t.body for y in ast.walk(stmt)
                if isinstance(y, (ast.Yield, ast.YieldFrom))}
 
+    parent = {id(c): n for n in ast.walk(fn) for c in ast.iter_child_nodes(n)}
+    block = {id(st): (lst, i, n)
+             for n in ast.walk(fn)
+             for _, lst in ast.iter_fields(n) if isinstance(lst, list)
+             for i, st in enumerate(lst) if isinstance(st, ast.stmt)}
+
     for y in (n for n in ast.walk(fn) if isinstance(n, (ast.Yield, ast.YieldFrom))):
         if id(y) in guarded:
             continue
-        end = getattr(y, 'end_lineno', y.lineno)
-        if any(isinstance(s, ast.stmt) and s.lineno > end for s in ast.walk(fn)):
+        if _reaches_a_statement_after(y, fn, parent, block):
             return True
     return False
+
+
+def _reaches_a_statement_after(y, fn, parent, block) -> bool:
+    """True when a statement can run after *y* resumes.
+
+    Asked per enclosing block rather than per line: a degraded-mode provider
+    exits early (``yield None`` then ``return``) and the resource-holding
+    yield sits further down, wrapped.  Counting every later *line* in the
+    function reports that shape as a leak, when the statements counted are on
+    a path the yield never reaches.
+    """
+    node = y
+    while id(node) in parent and not isinstance(node, ast.stmt):
+        node = parent[id(node)]
+
+    while True:
+        entry = block.get(id(node))
+        if entry is None:
+            return False
+        siblings, index, owner = entry
+        rest = siblings[index + 1:]
+        if rest:
+            # ``return``/``raise`` right after the yield ends the path without
+            # running anything; anything else is the cleanup being warned about.
+            return not isinstance(rest[0], (ast.Return, ast.Raise))
+        if owner is fn or not isinstance(owner, ast.stmt):
+            return False
+        node = owner
 
 
 class Depends:

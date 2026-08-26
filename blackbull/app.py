@@ -64,23 +64,16 @@ def _to_asgi_boundary(send: ASGISendCallable):
     """Wrap an external ASGI host's ``send`` with native→ASGI conversion.
 
     The app is native internally in **both** modes (decision 7): the router
-    converts handler sends to ``NativeResponse`` on the H1 path.  At the
-    external-host edge (scope-dict entry / ``asgi=True``), this wrapper
-    converts ``NativeResponse`` emissions back to ASGI dicts via
-    :meth:`~blackbull.native.NativeResponse.to_asgi` so uvicorn / httpx /
-    TestClient receive standard ``http.response.*`` events.  Everything else
-    (lifespan, websocket, and already-ASGI events) passes straight through.
+    converts handler sends to ``NativeResponse`` on the H1 path, and the
+    object-form :class:`~blackbull.websocket.WebSocket` emits
+    ``NativeWSMessage``.  At the external-host edge (scope-dict entry /
+    ``asgi=True``) both are expanded back to ASGI dicts, so uvicorn / httpx /
+    TestClient receive standard ``http.response.*`` / ``websocket.*`` events.
+    Lifespan and already-ASGI events pass straight through.
     """
-    from .native import NativeResponse  # noqa: PLC0415
+    from .native import asgi_send_boundary  # noqa: PLC0415
 
-    async def _send(event):
-        if isinstance(event, NativeResponse):
-            for ev in event.to_asgi():
-                await send(ev)
-        else:
-            await send(event)
-
-    return _send
+    return asgi_send_boundary(send)
 
 
 def _inject_response_headers(raw_send, extra_headers):

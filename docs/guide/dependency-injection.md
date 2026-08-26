@@ -115,6 +115,24 @@ left alone, and so is a provider with nothing after the `yield` (there is no
 cleanup to lose) or one whose `yield` sits inside an `async with` (the
 context manager already handles every path).
 
+It is narrow along the *path*, too.  A provider that degrades gracefully
+yields a placeholder and returns, keeping the real acquisition — and its
+`finally` — further down; the early branch holds no resource, so it is not
+reported:
+
+```python
+async def get_conn():
+    pool = await get_pool()
+    if pool is None:
+        yield None               # DB-less mode: nothing to release
+        return
+    conn = await pool.acquire()
+    try:
+        yield conn
+    finally:
+        await pool.release(conn)
+```
+
 This is ordinary [`@asynccontextmanager`](https://docs.python.org/3/library/contextlib.html#contextlib.asynccontextmanager)
 behaviour, and it is not a wart to be fixed: the exception has to reach the
 generator so a provider can tell success from failure.
