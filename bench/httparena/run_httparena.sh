@@ -93,8 +93,43 @@ else
     _SUDO_ENV=""
 fi
 
+# Per-framework profile list: the requested profiles intersected with what
+# THIS framework's meta.json actually subscribes to, order preserved.
+#
+# Why this exists.  The loop used to walk the full requested list for every
+# framework, so a framework that subscribes to six profiles still spent
+# fourteen cell-slots being told "skip: does not subscribe".  That is
+# harmless until something goes wrong mid-run, and then it is not: a
+# 5-way run lost three of robyn's six *subscribed* profiles because five
+# non-subscribed ones sat ahead of them and the docker daemon died while
+# walking that dead stretch.  Filtering means a framework's real work is
+# never queued behind cells that were always going to be skipped.
+_subscribed_profiles() {
+    local fw="$1" meta="$HARENA_DIR/frameworks/$fw/meta.json"
+    [ -f "$meta" ] || { printf '%s\n' "${PROFILES[@]}"; return; }
+    python3 - "$meta" "${PROFILES[@]}" <<'PYEOF'
+import json, sys
+meta, requested = sys.argv[1], sys.argv[2:]
+subscribed = set(json.load(open(meta)).get("tests", []))
+for p in requested:                      # requested order is preserved
+    if p in subscribed:
+        print(p)
+PYEOF
+}
+
 for fw in "${FRAMEWORKS[@]}"; do
-    for prof in "${PROFILES[@]}"; do
+    mapfile -t _FW_PROFILES < <(_subscribed_profiles "$fw")
+    # Fail OPEN.  If the filter produced nothing it is far more likely that
+    # the meta.json or python3 was missing than that a framework genuinely
+    # subscribes to none of the requested profiles — and silently running
+    # zero cells for a framework is exactly the failure this change exists
+    # to prevent.  Fall back to the old behaviour and say so.
+    if [ "${#_FW_PROFILES[@]}" -eq 0 ]; then
+        echo "  - $fw: profile filter returned nothing (missing meta.json or python3?) — falling back to the full requested list"
+        _FW_PROFILES=("${PROFILES[@]}")
+    fi
+    echo "  - $fw: ${#_FW_PROFILES[@]} of ${#PROFILES[@]} requested profiles subscribed: ${_FW_PROFILES[*]}"
+    for prof in "${_FW_PROFILES[@]}"; do
         echo "  - $fw / $prof"
         cd "$HARENA_DIR"
         if sudo ${_SUDO_ENV} ./scripts/benchmark.sh "$fw" "$prof" --save 2>&1 | tee "$RESULTS_DIR/benchmark-${fw}-${prof}.log"; then

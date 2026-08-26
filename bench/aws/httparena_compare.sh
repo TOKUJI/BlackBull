@@ -95,6 +95,19 @@ FRAMEWORKS="${FRAMEWORKS:-blackbull fastapi}"
 # Supported frameworks: blackbull, blackbull-uvloop, blackbull-asgiscope, fastapi, sanic, aiohttp
 KEEP_INSTANCE="${KEEP_INSTANCE:-0}"
 SKIP_VALIDATE="${SKIP_VALIDATE:-0}"
+# STAGE_PEERS=0 leaves upstream HttpArena's own `sanic` / `aiohttp` entries in
+# place instead of overwriting them with this repo's.  Default 1 preserves the
+# existing behaviour.
+#
+# Why this knob exists.  The staged entries are *our* applications written
+# against someone else's framework — `bench/httparena/sanic/app.py` says so in
+# its first line ("BlackBull-equivalent") — and their meta.json declares more
+# profiles than upstream does (sanic: 14 vs 6).  That is fine for "compare the
+# same endpoints", and it is **not** evidence about Sanic or aiohttp as
+# projects.  A peer-positioning run wants STAGE_PEERS=0; an endpoint-parity run
+# wants the default.  Whichever is used has to be stated in the writeup, which
+# is why this is a named knob and not a code edit.
+STAGE_PEERS="${STAGE_PEERS:-1}"
 # BB_UVLOOP: baked into the `blackbull` image ENV. Default 0 (pure-Python event
 # loop) so the identity measurement is the default.
 #
@@ -264,6 +277,11 @@ echo "    instance: $SERVER_PUBLIC_IP"
 # (set by up.sh) ensures the poweroff results in termination, not just stop.
 # 180 minutes covers the worst-case BB+FastAPI run (~90 min) with a 2× margin.
 SAFETY_SHUTDOWN_MINUTES="${SAFETY_SHUTDOWN_MINUTES:-180}"
+if [ "$STAGE_PEERS" = "1" ]; then
+    echo ">>> STAGE_PEERS=1 — sanic/aiohttp will run THIS REPO's implementations"
+else
+    echo ">>> STAGE_PEERS=0 — sanic/aiohttp will run UPSTREAM's implementations"
+fi
 echo ">>> setting EC2 safety shutdown timer: ${SAFETY_SHUTDOWN_MINUTES} min ..."
 ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
     "sudo shutdown -h +${SAFETY_SHUTDOWN_MINUTES} </dev/null >/dev/null 2>&1" || true
@@ -553,8 +571,8 @@ done
 # requirements.txt, Dockerfile, and build.sh.
 # Only stages if "sanic" is in $FRAMEWORKS.
 # ---------------------------------------------------------------------------
-if [[ " $FRAMEWORKS " == *" sanic "* ]]; then
-    echo ">>> staging sanic framework dir on the instance ..."
+if [[ " $FRAMEWORKS " == *" sanic "* && "$STAGE_PEERS" = "1" ]]; then
+    echo ">>> staging sanic framework dir on the instance (STAGE_PEERS=1 — this repo's implementation, not upstream's) ..."
     ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" 'mkdir -p HttpArena/frameworks/sanic'
 
     _SANIC_RSYNC_FILES=(
@@ -586,8 +604,8 @@ fi
 # requirements.txt, Dockerfile, and build.sh.
 # Only stages if "aiohttp" is in $FRAMEWORKS.
 # ---------------------------------------------------------------------------
-if [[ " $FRAMEWORKS " == *" aiohttp "* ]]; then
-    echo ">>> staging aiohttp framework dir on the instance ..."
+if [[ " $FRAMEWORKS " == *" aiohttp "* && "$STAGE_PEERS" = "1" ]]; then
+    echo ">>> staging aiohttp framework dir on the instance (STAGE_PEERS=1 — this repo's implementation, not upstream's) ..."
     ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" 'mkdir -p HttpArena/frameworks/aiohttp'
 
     _AIOHTTP_RSYNC_FILES=(
@@ -770,6 +788,27 @@ _watchdog() {
         else
             strikes=$((strikes + 1))
             echo "  [watchdog $(date +%H:%M:%S)] ⚠ remote unresponsive (strike ${strikes}) — ${probe:-probe ssh timed out}"
+            # A hung daemon is not a perturbation risk: nothing can be
+            # measured while docker cannot answer, so restarting it is
+            # recovery rather than interference.  HttpArena restarts the
+            # daemon itself between profiles (68 times in a 5-way run); one
+            # restart failing is what cost a previous run 23 cells, because
+            # this watchdog named the problem and did nothing about it.
+            if [[ "$probe" == *docker=HUNG* ]] && [ "${WATCHDOG_RECOVER:-1}" = "1" ]; then
+                echo "  [watchdog] docker is hung — attempting restart (this run will be marked as recovered)"
+                timeout 60 ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
+                    'sudo systemctl restart docker 2>/dev/null || sudo service docker restart 2>/dev/null' \
+                    >/dev/null 2>&1
+                for _i in $(seq 1 20); do
+                    if timeout 10 ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
+                        'timeout 5 sudo docker ps >/dev/null 2>&1'; then
+                        echo "  [watchdog] ✓ docker answered again after restart — DOCKER_RECOVERED"
+                        strikes=0
+                        break
+                    fi
+                    sleep 3
+                done
+            fi
             if [ "$strikes" -ge "${WATCHDOG_MAX_STRIKES:-4}" ]; then
                 echo "  [watchdog] ✗ docker/instance wedged for ${strikes} consecutive probes — abort manually (Ctrl-C) and re-provision; do not trust this run."
                 strikes=0
