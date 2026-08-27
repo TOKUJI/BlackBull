@@ -238,10 +238,27 @@ class PseudoHeaders(StrEnum):
 # ":status" is response-only, ":method"/":scheme"/":path" are request-only)
 # is enforced one layer up by ``parse_headers`` on the server side and by
 # the HTTP/2 client on the client side.
-_KNOWN_PSEUDO: frozenset[bytes] = frozenset((
-    b':method', b':scheme', b':path', b':authority', b':protocol',
-    b':status',
-))
+#: Wire name -> member, built once at import.
+#:
+#: This replaces a frozenset of the same six names *plus* a
+#: ``PseudoHeaders(k_str)`` coercion.  Membership was checked against one
+#: representation and the value looked up in the other, so the list existed
+#: twice and a ``str`` was allocated purely to feed the second check.
+#:
+#: ``PseudoHeaders(value)`` is not a constructor — members are singletons
+#: created when the class body ran, and the call is a lookup routed through
+#: the metaclass (``EnumType.__call__`` -> ``Enum.__new__`` ->
+#: ``_value2member_map_``): two Python frames to do one dict lookup.  A
+#: plain module-level dict is that lookup without the frames, and it returns
+#: the same singletons.
+#:
+#: Keyed by ``bytes`` because the wire is bytes.  A module-level dict rather
+#: than a helper function or a classmethod on purpose: a helper is a call,
+#: and the call is what this removes — wrapping it gives back roughly a
+#: third of the saving to buy an API with one caller.
+_PSEUDO_BY_BYTES: dict[bytes, PseudoHeaders] = {
+    m.value.encode('ascii'): m for m in PseudoHeaders
+}
 
 # RFC 9113 §8.2.2 — connection-specific header fields MUST NOT appear in
 # HTTP/2.  Receiving any of these is a stream error of type PROTOCOL_ERROR.
@@ -383,11 +400,13 @@ class Headers(FrameBase):
                 # defined fields (rejects unknown ":foo").  The
                 # request-vs-response check (e.g. ":status" not on requests)
                 # is enforced one layer up.
-                if kb not in _KNOWN_PSEUDO:
+                # One bytes-keyed lookup does the membership check and the
+                # value lookup that were previously two steps over two
+                # representations of the same six names.
+                pseudo_key = _PSEUDO_BY_BYTES.get(kb)
+                if pseudo_key is None:
                     self._mark_malformed(f'unknown pseudo-header: {kb!r}')
                     return
-                k_str = kb.decode('ascii')
-                pseudo_key = PseudoHeaders(k_str)
                 # RFC 9113 §8.3.1 — each defined request pseudo-header field
                 # MUST NOT appear more than once.
                 if pseudo_key in self.pseudo_headers:
@@ -395,7 +414,7 @@ class Headers(FrameBase):
                     return
                 self.pseudo_headers[pseudo_key] = vb.decode('utf-8')
                 if debug:
-                    logger.debug('%r: %r', k_str, self.pseudo_headers[pseudo_key])
+                    logger.debug('%r: %r', kb, self.pseudo_headers[pseudo_key])
                 continue
 
             seen_regular = True

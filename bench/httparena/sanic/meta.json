@@ -1,0 +1,29 @@
+{
+  "display_name": "sanic",
+  "language": "Python",
+  "type": "emerging",
+  "mode": "standard",
+  "engine": "sanic",
+  "description": "Sanic — async Python web framework with built-in server. HTTP/1.1 + WebSocket only (no HTTP/2, no gRPC).",
+  "repo": "https://github.com/sanic-org/sanic",
+  "enabled": true,
+  "tests": [
+    "baseline",
+    "pipelined",
+    "limited-conn",
+    "json",
+    "json-comp",
+    "json-tls",
+    "upload",
+    "static",
+    "echo-ws",
+    "echo-ws-pipeline",
+    "crud",
+    "async-db",
+    "api-4",
+    "api-16"
+  ],
+  "maintainers": [
+    "TOKUJI"
+  ]
+}

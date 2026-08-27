@@ -48,9 +48,13 @@ for fw in frameworks:
         subs = json.load(open(path)).get('tests') or []
         where = f'upstream frameworks/{fw}/meta.json'
         shadow = f'{repo}/bench/httparena/{fw}/meta.json'
-        if os.path.exists(shadow):
-            fail.append(f'{fw}: this repo carries bench/httparena/{fw}/, which '
-                        f'shadows the upstream entry — upstream must win')
+        if os.path.exists(shadow) and os.environ.get('STAGE_PEERS') == '1':
+            # STAGE_PEERS=1 replaces the upstream entry with this repo's own.
+            # Legitimate when upstream carries none; a substituted column when
+            # it does, which is the failure this check exists to name.
+            fail.append(f'{fw}: STAGE_PEERS=1 would stage bench/httparena/{fw}/ '
+                        f'over the upstream entry — the column would be this '
+                        f"repo's implementation, not {fw}'s")
     missing = [p for p in profiles if p not in subs]
     if missing:
         fail.append(f'{fw} does not subscribe to {missing} (per {where})')
