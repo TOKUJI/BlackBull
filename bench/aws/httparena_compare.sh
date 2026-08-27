@@ -673,7 +673,7 @@ scp "${SSH_OPTS[@]}" \
 
 # Execute it with tuning values as arguments.
 ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
-    "bash ~/install_docker_shim.sh '${WEB_WORKERS}' '${WEB_NOFILE}' '${WRK_CPUS}' '${WRK_NOFILE}' '${BB_ACCESS_LOG}' '${BB_PHASE_TRACE}' '${BB_LOG_BATCH_SIZE:-}' '${BB_LOG_BATCH_TIMEOUT_MS:-}'"
+    "bash ~/install_docker_shim.sh '${WEB_WORKERS}' '${WEB_NOFILE}' '${WRK_CPUS}' '${WRK_NOFILE}' '${BB_ACCESS_LOG}' '${BB_PHASE_TRACE}' '${BB_LOG_BATCH_SIZE:-}' '${BB_LOG_BATCH_TIMEOUT_MS:-}' '${PYTHONTRACEMALLOC:-}'"
 echo "    shim installed."
 
 # ---------------------------------------------------------------------------
