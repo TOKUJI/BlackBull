@@ -1,5 +1,10 @@
 """One process, several HTTP ports — the shape a multi-listener deployment needs.
 
+The seam under test is internal (``BlackBull._add_http_port``) and deliberately
+absent from the guide: it removes a process multiplier now, and is expected to
+be replaced by whatever comes out of reconsidering how multi-protocol,
+single-process should be expressed.
+
 BlackBull already serves HTTP/1.1, HTTP/2 and WebSocket from one listener, and
 already binds extra ports with a per-port TLS choice for non-ASGI protocols.
 What it could not do was put an *HTTP* listener on one of those extra ports, so
@@ -85,7 +90,7 @@ async def _stop(task):
 
 async def test_a_second_cleartext_http_port_serves_the_same_app():
     app = _app()
-    app.add_http_port(18311)
+    app._add_http_port(18311)
     server = Server(app)
     server.open_socket(18310)
     task = await _serve(server, 18310, 18311)
@@ -104,8 +109,8 @@ async def test_cleartext_and_tls_http_ports_coexist_in_one_process():
     bindings.
     """
     app = _app()
-    app.add_http_port(18321)                 # cleartext, alongside a TLS main
-    app.add_http_port(18322, tls=True)       # TLS, same certificate
+    app._add_http_port(18321)                 # cleartext, alongside a TLS main
+    app._add_http_port(18322, tls=True)       # TLS, same certificate
     server = Server(app, certfile=CERT, keyfile=KEY)
     server.open_socket(18320)
     task = await _serve(server, 18320, 18321, 18322)
