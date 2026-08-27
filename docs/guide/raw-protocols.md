@@ -113,10 +113,34 @@ if ctx.aggregator is not None:
 
 `connection_accepted` and `connection_closed` fire automatically.
 
+## Extra HTTP ports
+
+A binding registered *without* a handler is an HTTP listener rather than a raw
+one: the connection goes through the same detection the main port uses, so it
+answers HTTP/1.1, HTTP/2 and WebSocket alike.  `add_http_port` is the readable
+way to say that, and `tls` chooses the port's posture, so one process can expose
+cleartext and TLS at the same time:
+
+```python
+app.add_http_port(8080)                 # cleartext
+app.add_http_port(8443, tls=True)       # TLS, the server's certificate
+```
+
+Unlike a stateful raw protocol, these run on **every** worker — they are the
+same stateless listener the main port is.  Without them a deployment that must
+expose several ports had to run one process per port, each carrying the full
+worker count.
+
+This surface is **interim**.  How multi-protocol, single-process is best
+expressed is being reconsidered without the constraints of the mechanism it
+currently borrows; expect it to be superseded.
+
 ## Limitations
 
-- **Cleartext only.** TLS termination for raw protocols is not yet wired up.
-- **Single owner, but HTTP still scales.** A port-bound protocol is served by
+- **TLS is the server's, not the binding's.** A binding with `tls=True` is
+  served through the certificate the server was configured with; a port cannot
+  carry a certificate of its own.
+- **Single owner, but HTTP still scales.** A port-bound *raw* protocol is served by
   **worker 0** only (a stateful broker must have one owner), while HTTP runs on
   every worker. So `app.run(port=8000, workers=4)` with a `raw_handler` scales
   HTTP across all four workers and runs the protocol on worker 0; if worker 0

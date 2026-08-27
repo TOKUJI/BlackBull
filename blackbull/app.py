@@ -1243,7 +1243,7 @@ class BlackBull:
     def register_protocol_handler(
         self,
         name: str,
-        handler: Callable[..., Awaitable[None]],
+        handler: Callable[..., Awaitable[None]] | None,
         *,
         detector: object | None = None,
         port: int | None = None,
@@ -1258,7 +1258,9 @@ class BlackBull:
 
         Args:
             name: Protocol name (e.g. ``'echo'``, ``'mqtt'``); must be unique.
-            handler: Async ``(reader, writer, ctx)`` coroutine.
+            handler: Async ``(reader, writer, ctx)`` coroutine, or ``None``
+                to serve the port as HTTP (see :meth:`add_http_port`, which is
+                the readable way to say that).
             detector: Reserved for first-byte sniffing on shared ports;
                 unused today.
             port: Dedicated listening port for this protocol.
@@ -1271,6 +1273,29 @@ class BlackBull:
             self._protocol_registry = ProtocolRegistry()
         self._protocol_registry.register(name, handler,
                                          detector=detector, port=port, tls=tls)
+
+    def add_http_port(self, port: int, *, tls: bool = False) -> None:
+        """Serve HTTP on an additional port from this same process.
+
+        The extra listener is the main one in every respect that matters: the
+        same app, the same workers, the same per-connection detection, so it
+        answers HTTP/1.1, HTTP/2 and WebSocket alike.  Only its TLS posture is
+        its own — *tls* chooses it per port, which is what lets one process
+        expose cleartext and TLS at the same time::
+
+            app.add_http_port(8080)                # cleartext
+            app.add_http_port(8443, tls=True)      # TLS, server's certificate
+
+        ``tls=True`` requires the server to be configured with a certificate;
+        startup fails fast otherwise.
+
+        **Interim surface.**  It exists because a deployment that must expose
+        several ports had no way to say so and had to run one process per port,
+        each carrying the full worker count.  How multi-protocol, single-process
+        is best expressed is being reconsidered without this mechanism's
+        constraints; expect this to be superseded.
+        """
+        self.register_protocol_handler(f'http:{port}', None, port=port, tls=tls)
 
     def raw_handler(self, name: str, *, port: int | None = None,
                     detector: object | None = None, tls: bool = False):

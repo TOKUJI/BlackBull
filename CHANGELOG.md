@@ -51,6 +51,31 @@ so the editable install's metadata catches up.
 
 ## [0.78.1] — 2026-08-27
 
+### Added
+
+- **`app.add_http_port(port, tls=)`** — serve HTTP on additional ports from the
+  same process.  The extra listener is the main one in every respect that
+  matters: same app, same workers, same per-connection detection, so it answers
+  HTTP/1.1, HTTP/2 and WebSocket alike.  Only its TLS posture is its own, which
+  is what lets one process expose cleartext and TLS at once.
+
+  A deployment that had to expose several ports previously had no way to say
+  so and ran one process per port — each carrying the **full worker count**.
+  Measured on HttpArena's `async-db` profile at 16 server cores: four listener
+  processes × N workers lost 20 % throughput between N=16 and N=64 where a
+  single-process peer was flat (49,647 → 39,871 req/s against 66,628 →
+  66,256), and held 2.5 GiB against that peer's 254 MiB.
+
+  The actor model already handled this — every connection, main listener or
+  port-bound, goes through the same `ConnectionActor`, and per-port TLS already
+  existed for non-ASGI bindings.  What was missing was a way to say "this extra
+  port is HTTP".  Unlike a stateful raw protocol, which must have a single
+  owner, these listeners run on every worker.
+
+  **Interim surface**: how multi-protocol, single-process is best expressed is
+  being reconsidered without this mechanism's constraints.  Expect it to be
+  superseded.
+
 ### Fixed
 
 - **A dead connection was rediscovered once per HTTP/2 stream.**  The sender

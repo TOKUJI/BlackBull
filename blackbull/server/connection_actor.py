@@ -66,8 +66,10 @@ class ConnectionActor(Actor):
         # h1/h2 split isn't known, so the shared listener reports ``'http'``;
         # a port-bound binding already knows its name.  ``_dispatch`` refines
         # this to the actually-served binding once detection picks one.
-        self._served_protocol = (bound_binding.name
-                                 if bound_binding is not None else 'http')
+        self._served_protocol = (
+            bound_binding.name
+            if bound_binding is not None and not bound_binding.serves_http
+            else 'http')
 
     async def run(self) -> None:
         # Per-connection cap-hit rate-limit state — bound on the
@@ -201,7 +203,7 @@ class ConnectionActor(Actor):
         # Port-bound non-ASGI protocol: the listening socket already
         # identifies the protocol, so skip detection and the deadline machinery
         # entirely — the handler owns the connection lifetime and the raw reader.
-        if self._bound_binding is not None:
+        if self._bound_binding is not None and not self._bound_binding.serves_http:
             await self._bound_binding.serve(self._make_conn(self._reader, dl))
             return
 
