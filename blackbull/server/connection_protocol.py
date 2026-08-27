@@ -398,6 +398,8 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
         self._waiter: asyncio.Future[None] | None = None
         self._eof = False
         self._exc: BaseException | None = None
+        # Cleartext until connection_made says otherwise.
+        self._half_close_is_honoured = True
         #: The transport is not reading.  Public because the reader consults it
         #: on the consuming path, where a property call is not free; kept a
         #: plain flag maintained by the two methods that change it.
@@ -423,6 +425,12 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
 
     def connection_made(self, transport) -> None:
         self.transport = transport
+        # Whether a half-close can leave the write half open, resolved once.
+        # TLS cannot: asyncio's SSL protocol tears the connection down on EOF
+        # regardless of what the app protocol returns, and says so.  See
+        # :meth:`eof_received`.
+        self._half_close_is_honoured = (
+            transport.get_extra_info('ssl_object') is None)
 
     def get_buffer(self, sizehint: int) -> memoryview:
         # The demand comes from the reader, not the hint: the reader owns
@@ -453,12 +461,17 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
     def eof_received(self) -> bool:
         self._eof = True
         self._wake()
-        # True keeps the transport open for writing.  Returning False would
-        # have asyncio close it the moment the peer half-closes — and a client
-        # that sends its request then calls ``shutdown(SHUT_WR)`` is doing
-        # exactly that, legitimately, while still waiting for the response.
+        # True keeps the transport open for writing, which is what a cleartext
+        # client that sends its request then calls ``shutdown(SHUT_WR)`` needs:
+        # it is half-closed, legitimately, and still waiting for the response.
         # The write half is ours to close, once the response has shipped.
-        return True
+        #
+        # Over TLS that is not on offer.  asyncio's SSL protocol closes on EOF
+        # whatever the app protocol returns, and logs "returning true from
+        # eof_received() has no effect when using ssl" for each one — 3,425 of
+        # them in a sixteen-profile run.  Claiming a half-close we will not get
+        # is the thing to stop doing; the log line is only how we found out.
+        return self._half_close_is_honoured
 
     def connection_lost(self, exc: BaseException | None) -> None:
         self._eof = True

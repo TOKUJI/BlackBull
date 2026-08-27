@@ -86,6 +86,23 @@ so the editable install's metadata catches up.
   raised into the handler, so a truncated body is never mistaken for a
   complete one.
 
+- **A TLS half-close claimed something asyncio would ignore.**
+  `eof_received()` returned `True` unconditionally, which keeps the write half
+  open after a peer half-closes — what a cleartext client doing
+  `shutdown(SHUT_WR)` while awaiting its response needs.  TLS cannot offer it:
+  asyncio's SSL protocol closes on EOF whatever the app protocol returns, and
+  logs a warning for each ignored claim — **3,425** in a sixteen-profile run.
+  The protocol now answers what the transport can honour.  Cleartext behaviour
+  is unchanged.
+
+- **A stream that lost the spawn race left an orphaned coroutine.**  A HEADERS
+  frame arriving in the same turn the peer went away found the connection's
+  TaskGroup already winding down; `StreamActor.run()` had been built before
+  `create_task` could refuse it, so Python reported "coroutine
+  'StreamActor.run' was never awaited" whenever the GC reached it — naming a
+  stream unrelated to wherever the line landed.  The coroutine is closed on
+  that path now.
+
   No public API changes.
 
 ## [0.78.0] — 2026-08-20
