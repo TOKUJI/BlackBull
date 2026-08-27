@@ -60,6 +60,31 @@ The runtime version is exposed as `blackbull.__version__` via
 `pyproject.toml`.  Re-run `pip install -e .` after a local version bump
 so the editable install's metadata catches up.
 
+## [Unreleased]
+
+### Changed
+
+- **A worker now drains on `SIGTERM` instead of dying where it stands.**  A
+  request in flight when the signal arrived was dropped — the client saw the
+  connection close with no response — because the worker restored `SIG_DFL`.
+  That was not carelessness: the inherited handler did not stop the asyncio
+  loop, so terminating the process was the only thing that worked, and the
+  master's `shutdown_timeout` was a wait rather than a drain.
+
+  The worker installs a loop signal handler instead.  It closes the listeners,
+  stops accepting, and lets the connections it already accepted finish, for up
+  to **8 seconds** — inside the master's 10-second budget, so the wait ends in
+  the worker's own cancel rather than in a `SIGKILL`.  Nothing in flight is
+  cancelled while the budget lasts, because a cancelled handler is a client
+  holding a half-written response.
+
+  `--reload` uses the same path, so a code change now recycles workers by
+  draining them rather than by killing them.
+
+  No documented behaviour changed — `docs/` never promised in-flight
+  completion, and now states the contract in
+  `docs/deployment/workers.md#shutdown`.
+
 ## [0.79.0] — 2026-08-28
 
 ### Added

@@ -20,6 +20,12 @@ from .recipient import _WS_READ_INLINE
 logger = logging.getLogger(__name__)
 
 
+#: Seconds a worker spends letting accepted connections finish after SIGTERM.
+#: Must stay inside ``MultiWorkerServer``'s ``shutdown_timeout`` (10 s) so the
+#: wait ends in our own cancel rather than the master's SIGKILL.
+_DRAIN_TIMEOUT = 8.0
+
+
 def run_worker(app, raw_sockets, ssl_context, worker_id: int,
                max_connections: int,
                stream_queue_depth: int = 64,
@@ -49,13 +55,18 @@ def run_worker(app, raw_sockets, ssl_context, worker_id: int,
     # Workers should not respond to Ctrl+C directly — the master handles the
     # signal and sends SIGTERM to every worker for a coordinated shutdown.
     signal.signal(signal.SIGINT, signal.SIG_IGN)
-    # ``fork`` inherits any SIGTERM handler the master installed (eg the
-    # one that flips ``_stopped`` to break the supervision loop).  That
-    # handler is a no-op inside the worker — it does not stop the
-    # asyncio loop — and prevents the default-terminate behaviour from
-    # firing.  Restore the default disposition so master.terminate()
-    # actually exits the worker promptly; without this the master has
-    # to SIGKILL every recycle, which makes auto-reload glacial.
+    # ``fork`` inherits the SIGTERM handler the master installed — the one
+    # that flips ``_stopped`` to break the supervision loop, which inside a
+    # worker is a no-op that also suppresses the default terminate.  The old
+    # answer was ``SIG_DFL``: the worker died where it stood, because there
+    # was no handler that stopped the *loop* and dying was the only thing that
+    # worked.  A request in flight was dropped, and the master's
+    # ``shutdown_timeout`` was a wait rather than a drain.
+    #
+    # The loop-stopping handler is installed inside ``_serve`` below, where
+    # there is a running loop to attach it to.  Until then, SIG_DFL remains
+    # the right disposition: a signal arriving before the loop exists has
+    # nothing to stop.
     signal.signal(signal.SIGTERM, signal.SIG_DFL)
 
     from ..env import apply_event_loop_policy, get_settings as _get_settings  # noqa: PLC0415
@@ -106,9 +117,27 @@ def run_worker(app, raw_sockets, ssl_context, worker_id: int,
         # would run every offloaded compression and file read on the one core
         # the loop is already saturating.  Hand the pool the mask the operator
         # gave us instead — offloading exists to get off this core.
+        loop = asyncio.get_running_loop()
         if offload_mask is not None:
-            asyncio.get_running_loop().set_default_executor(
-                make_offload_executor(offload_mask))
+            loop.set_default_executor(make_offload_executor(offload_mask))
+
+        # SIGTERM now stops the loop instead of the process.  ``stop()`` closes
+        # the listeners and waits for the connections already being served;
+        # ``add_signal_handler`` is used rather than ``signal.signal`` so the
+        # callback runs on the loop, where awaiting is possible.
+        #
+        # The drain budget sits inside the master's ``shutdown_timeout`` (10 s)
+        # so the wait ends in our cancel rather than its SIGKILL.
+        def _graceful(*_):
+            loop.create_task(server.stop(drain_timeout=_DRAIN_TIMEOUT))
+
+        try:
+            loop.add_signal_handler(signal.SIGTERM, _graceful)
+        except (NotImplementedError, RuntimeError):
+            # No loop signal support (Windows, or a non-main thread).  The
+            # SIG_DFL disposition set above still applies.
+            logger.debug('Worker %d: loop signal handler unavailable', worker_id)
+
         await server.run()
 
     logger.info('Worker %d starting (PID %d)', worker_id, os.getpid())

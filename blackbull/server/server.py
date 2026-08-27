@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 
 from http import HTTPStatus
 import logging
@@ -224,6 +225,15 @@ class Server:
         self.protocol_ports: dict[str, int] = {}
         # list of (raw_sockets, binding) bound for non-ASGI protocols.
         self._protocol_sockets: list = []
+        # Live connection tasks.  Held so a shutdown has something to wait on:
+        # each task owned its own lifetime and nothing aggregated them, so
+        # "let the in-flight finish" had no referent.  Discarded by the same
+        # done-callback that already reports failures.
+        self._connection_tasks: set = set()
+        # Set when a graceful stop begins: listeners are closed and no new
+        # connection is accepted, but the ones already being served are not
+        # touched.
+        self._stopping = False
         # Cache the dispatcher + aggregator pair once — both are
         # process-wide singletons.  Looking them up per accept is wasted
         # work on the hot connection-burst path.
@@ -345,6 +355,7 @@ class Server:
                 # so a failure surfaces as a log line rather than asyncio's
                 # "Task exception was never retrieved" at GC time.
                 self._serve_task = task
+                server._connection_tasks.add(task)
                 task.add_done_callback(self._serve_done)
 
             async def _serve(self):
@@ -363,6 +374,7 @@ class Server:
 
             @staticmethod
             def _serve_done(task):
+                server._connection_tasks.discard(task)
                 if task.cancelled():
                     return
                 exc = task.exception()
@@ -716,6 +728,7 @@ class Server:
                               self._raw_tls_context() if raw_tls else None
                               ) as raw_tls_servers:
             servers = servers + raw_servers + raw_tls_servers
+            self._running_servers = servers
             async with LifespanManager(self.app):
                 logger.info(f'Server(s) created: {servers}')
                 try:
@@ -733,6 +746,47 @@ class Server:
                     logger.error('Server error: %s', eg)
 
         logger.info('Server has been stopped.')
+
+    async def stop(self, drain_timeout: float = 8.0) -> None:
+        """Stop accepting, then let the connections already being served finish.
+
+        What the loop owes work still on it when the process is asked to stop:
+        a request that was accepted gets to produce its response, and a
+        connection that was not yet accepted never becomes one.  Nothing is
+        cancelled while the budget lasts — a cancelled handler is a client
+        holding a half-written response, which is worse than the wait.
+
+        *drain_timeout* must sit **inside** the supervisor's own budget
+        (``MultiWorkerServer``'s ``shutdown_timeout``, 10 s), so that the wait
+        ends here rather than in a SIGKILL.  Whatever has not finished by then
+        is cancelled, because a shutdown that must complete still completes.
+        """
+        if self._stopping:
+            return
+        self._stopping = True
+
+        # Close the listeners first, so the drain below is over a set that can
+        # only shrink.  ``close()`` is synchronous and stops accept(); the
+        # sockets are released when the SocketManager unwinds.
+        for srv in getattr(self, '_running_servers', ()):
+            srv.close()
+
+        pending = [t for t in self._connection_tasks if not t.done()]
+        if pending:
+            logger.info('Draining %d connection(s), up to %.1fs',
+                        len(pending), drain_timeout)
+            _done, still = await asyncio.wait(pending, timeout=drain_timeout)
+            if still:
+                logger.warning(
+                    '%d connection(s) did not finish within %.1fs — cancelling',
+                    len(still), drain_timeout)
+                for task in still:
+                    task.cancel()
+                await asyncio.gather(*still, return_exceptions=True)
+
+        for srv in getattr(self, '_running_servers', ()):
+            with contextlib.suppress(Exception):
+                await srv.wait_closed()
 
     def wait_for_port(self, timeout: float = 10.0, poll_interval: float = 0.1):
         if self.port is None:
