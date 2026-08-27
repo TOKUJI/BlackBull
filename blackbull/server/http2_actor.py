@@ -142,14 +142,22 @@ def _build_h2_extensions(
 
 
 
-async def _run_guarded(coro, sem):
-    # BB_H2_ACTIVE_STREAMS_1W semaphore: caps concurrently-running handlers on a
-    # single-worker deployment.  Without it, one high-mux connection can saturate
-    # the event loop with handler coroutines and starve connections handled by the
-    # same worker.  Each acquire yields to the event loop, so stream tasks that
-    # cannot enter still receive frames; they just don't start the ASGI app call.
+async def _run_guarded(make_coro, sem):
+    # BB_H2_ACTIVE_STREAMS / _1W semaphore: caps concurrently-running handlers.
+    # Without it, one high-mux connection can saturate the event loop with
+    # handler coroutines and starve connections handled by the same worker.
+    # Each acquire yields to the event loop, so stream tasks that cannot enter
+    # still receive frames; they just don't start the ASGI app call.
+    #
+    # *make_coro* is a factory, not a coroutine, and that is the whole point:
+    # a task cancelled while parked on ``__aenter__`` never reaches the body,
+    # so a coroutine passed in ready-made would be destroyed un-awaited.  With
+    # a cap of 20 and a connection that dies while more streams are queued,
+    # that is one "coroutine 'StreamActor.run' was never awaited" per queued
+    # stream — measured at 19 out of 20 in a direct reproduction.  Built here,
+    # it is only built once the semaphore has let us through.
     async with sem:
-        await coro
+        await make_coro()
 
 
 # ---------------------------------------------------------------------------
@@ -1293,25 +1301,35 @@ class HTTP2Actor(Actor):
         # via ``RequestActor``), and its failure handling is the one a peer
         # can act on — a raising stream is reset with INTERNAL_ERROR rather
         # than left to stop without explanation.
-        coro = StreamActor(
-            stream_id=stream_id,
-            conn=conn,
-            receive=recipient,
-            send=send,
-            app=self.app,
-            aggregator=self._aggregator,
-            http2_actor=self,
-            log_record=log_record,
-            force_asgi=self._force_asgi,
-        ).run()
+        # A *factory*, not a coroutine.  A coroutine built here is owned by
+        # whatever runs it, and between here and running there are two places
+        # that may never get there: the semaphore in ``_run_guarded``, where a
+        # cancelled task never reaches the body, and ``create_task`` itself.
+        # Either one destroys a ready-made coroutine un-awaited, which Python
+        # reports whenever the GC reaches it — naming a stream unrelated to
+        # wherever the line lands.  Built on the far side of both, there is
+        # nothing to strand.
+        def _make_stream_coro():
+            return StreamActor(
+                stream_id=stream_id,
+                conn=conn,
+                receive=recipient,
+                send=send,
+                app=self.app,
+                aggregator=self._aggregator,
+                http2_actor=self,
+                log_record=log_record,
+                force_asgi=self._force_asgi,
+            ).run()
 
         timeout = self._request_timeout
         if timeout > 0:
             _sp = conn.path
 
-            async def _timed(c=coro, sid=stream_id, t=timeout, sp=_sp):
+            async def _timed(make=_make_stream_coro, sid=stream_id, t=timeout,
+                             sp=_sp):
                 try:
-                    await asyncio.wait_for(c, timeout=t)
+                    await asyncio.wait_for(make(), timeout=t)
                 except asyncio.TimeoutError:
                     logger.warning(
                         'Stream %d timed out after %.1fs — RST_STREAM CANCEL', sid, t)
@@ -1319,26 +1337,21 @@ class HTTP2Actor(Actor):
                                 requested=t, limit=t,
                                 scope_path=sp, protocol='http2')
                     await self.send_frame(self.factory.rst_stream(sid, ErrorCodes.CANCEL))
-            final_coro = _timed()
+            make_final = _timed
         else:
-            final_coro = coro
+            make_final = _make_stream_coro
 
         try:
             if self._stream_semaphore is not None:
                 task = tg.create_task(
-                    _run_guarded(final_coro, self._stream_semaphore))
+                    _run_guarded(make_final, self._stream_semaphore))
             else:
-                task = tg.create_task(final_coro)
+                task = tg.create_task(make_final())
         except RuntimeError:
             # The connection's TaskGroup is already winding down — a HEADERS
-            # frame arrived in the same turn the peer went away.  The coroutine
-            # was built before we could know that, so close it here: an
-            # unawaited coroutine is reported whenever the GC reaches it,
-            # naming a stream that has nothing to do with wherever the line
-            # lands.  There is no peer left to RST_STREAM.
-            if final_coro is not coro:
-                final_coro.close()
-            coro.close()
+            # frame arrived in the same turn the peer went away.  Nothing was
+            # built, so nothing is stranded; there is no peer left to
+            # RST_STREAM either.
             if _DEBUG:
                 logger.debug('stream %d not started: connection closing',
                              stream_id)
