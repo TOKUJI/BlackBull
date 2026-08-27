@@ -73,16 +73,12 @@ class MultiWorkerServer:
         self._app = app
         self._ssl_context = ssl_context
         self._num_workers = workers
-        # Port-bound listeners, bound once by the master and split by what the
-        # binding is.  A stateful non-ASGI protocol (an MQTT broker) must have a
-        # single owner, so it goes to worker 0 alone.  A binding that serves
-        # HTTP has no such constraint — it is the same stateless listener the
-        # main port is — so it goes to *every* worker, or the extra port would
-        # be answered by one process while the rest sat idle.  The master keeps
-        # both sets open for the workers' lifetime so a respawn re-inherits.
-        _bound = list(protocol_sockets or [])
-        self._http_sockets = [(s, b) for s, b in _bound if b.serves_http]
-        self._protocol_sockets = [(s, b) for s, b in _bound if not b.serves_http]
+        # Stateful non-ASGI protocol listeners (eg MQTT), bound once by the
+        # master.  HTTP scales across every worker, but a stateful broker must
+        # have a single owner, so these go to worker 0 only — see
+        # ``_spawn_worker``.  The master keeps them open for the worker's
+        # lifetime so a respawned worker 0 re-inherits them.
+        self._protocol_sockets = list(protocol_sockets or [])
         self._max_connections = max_connections
         self._stream_queue_depth = stream_queue_depth
         self._ws_queue_depth = ws_queue_depth
@@ -183,17 +179,11 @@ class MultiWorkerServer:
     # ------------------------------------------------------------------
 
     def _spawn_worker(self, worker_id: int):
-        # Only worker 0 owns the stateful protocol listeners (MQTT, …).  Extra
-        # HTTP ports go to every worker, which is the whole point of having
-        # them: one process serving all of a deployment's ports across all of
-        # its workers, rather than one process per port each carrying the full
-        # worker count.  Worker 0 inherits the master's still-open protocol fds
-        # via fork, so a respawn after a crash re-adopts them and the broker
-        # resumes on the same port.
-        protocol_sockets = list(self._http_sockets)
-        if worker_id == 0:
-            protocol_sockets += self._protocol_sockets
-        protocol_sockets = protocol_sockets or None
+        # Only worker 0 owns the stateful protocol listeners (MQTT, …); the
+        # rest serve HTTP only.  Worker 0 inherits the master's still-open
+        # protocol fds via fork, so a respawn after a crash re-adopts them
+        # and the broker resumes on the same port.
+        protocol_sockets = self._protocol_sockets if worker_id == 0 else None
         p = self._mp_ctx.Process(
             target=run_worker,
             args=(self._app, self._worker_sockets[worker_id], self._ssl_context,

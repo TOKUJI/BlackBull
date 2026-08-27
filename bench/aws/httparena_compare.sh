@@ -395,6 +395,23 @@ scp "${SSH_OPTS[@]}" "$REPO_ROOT/bench/httparena/patch_cpuset.sh" \
 ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" 'bash ~/patch_cpuset.sh'
 
 # ---------------------------------------------------------------------------
+# DATABASE_MAX_CONN — how many Postgres connections the whole cluster may hold.
+# Upstream hardcodes 256 in scripts/lib/framework.sh; each entry then divides it
+# by its worker count to size its own pool.  On a small instance that division
+# gives a pool far larger than the reference run's, which changes the regime
+# under test: at 256/16 every worker has 15 slots and nothing waits, while the
+# published numbers were taken at 3.  Set DATABASE_MAX_CONN to put the pool back
+# where the comparison needs it — the divisor stays each entry's own.
+# ---------------------------------------------------------------------------
+if [ -n "${DATABASE_MAX_CONN:-}" ]; then
+    echo ">>> setting DATABASE_MAX_CONN=${DATABASE_MAX_CONN} on the instance ..."
+    ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
+        "sed -i 's/DATABASE_MAX_CONN=256/DATABASE_MAX_CONN=${DATABASE_MAX_CONN}/g' \
+             HttpArena/scripts/lib/framework.sh
+         grep -n 'DATABASE_MAX_CONN=' HttpArena/scripts/lib/framework.sh | head -3"
+fi
+
+# ---------------------------------------------------------------------------
 # Step 4 — vendor bench/httparena/ as one framework dir per BlackBull variant.
 # Rewrite the Dockerfile to install from PyPI (or the local wheel).  Flip
 # meta.json enabled=true so HttpArena's harness picks it up.

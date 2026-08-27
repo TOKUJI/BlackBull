@@ -115,10 +115,10 @@ if ctx.aggregator is not None:
 
 ## Limitations
 
-- **TLS is the server's, not the binding's.** A binding with `tls=True` is
-  served through the certificate the server was configured with; a port cannot
-  carry a certificate of its own.
-- **Single owner, but HTTP still scales.** A port-bound *raw* protocol is served by
+- **TLS is the server's, not the binding's.** A binding registered with
+  `tls=True` is served through the certificate the server was configured
+  with; a port cannot carry a certificate of its own.
+- **Single owner, but HTTP still scales.** A port-bound protocol is served by
   **worker 0** only (a stateful broker must have one owner), while HTTP runs on
   every worker. So `app.run(port=8000, workers=4)` with a `raw_handler` scales
   HTTP across all four workers and runs the protocol on worker 0; if worker 0

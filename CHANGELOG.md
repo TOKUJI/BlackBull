@@ -53,32 +53,6 @@ so the editable install's metadata catches up.
 
 ### Fixed
 
-- **A deployment needing several ports ran one process per port, each with the
-  full worker count.**  A `Server` binds one HTTP listener and holds one
-  server-wide TLS context, so cleartext and TLS at once could not be expressed
-  and had to be separate processes.  HttpArena's entry needs four; at
-  `WEB_WORKERS=64` that is 256 worker processes where a single-process peer
-  runs 64.
-
-  Measured on `async-db`, 16 server cores, one instance, three reps per point:
-  BlackBull went 49,647 → 45,529 → 39,871 req/s across 16/32/64 workers while
-  the peer held 66,628 → 66,173 → 66,256, and memory went 1.0 → 1.6 → 2.5 GiB
-  against a flat 249 → 254 MiB.  Three of the four listener groups never serve
-  a request on that profile and still cost scheduler time and memory in
-  proportion to the worker count.
-
-  A port-bound binding registered without a handler is now served as HTTP,
-  through the same detection the main listener uses, and — unlike a stateful
-  raw protocol, which must keep its single owner — runs on **every** worker.
-  Per-port TLS already existed; the actor model already routed every
-  connection, main or port-bound, through the same `ConnectionActor`.
-
-  **No public API.**  The seam is internal (`BlackBull._add_http_port`) and is
-  deliberately not documented as a feature: how multi-protocol, single-process
-  should be expressed is being reconsidered without the constraints of the
-  mechanism borrowed here, and whatever lands will replace it.
-
-
 - **A dead connection was rediscovered once per HTTP/2 stream.**  The sender
   records "the peer is gone" in per-sender state, but it is a property of the
   *connection*: HTTP/2 builds one sender per stream over one shared writer, so

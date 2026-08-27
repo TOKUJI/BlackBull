@@ -140,11 +140,6 @@ class ProtocolBinding:
     """
 
     name: str = ''
-
-    #: True when a connection on this binding's port should go through the
-    #: server's own HTTP detection instead of a handler of its own.  Only
-    #: :class:`RawBinding` can answer yes, and only when it carries no handler.
-    serves_http: bool = False
     alpn_token: str | None = None
     port: int | None = None
     #: Bytes of the connection prefix this binding needs to make a ``claims``
@@ -272,19 +267,12 @@ class Http1Binding(ProtocolBinding):
 
 
 class RawBinding(ProtocolBinding):
-    """A user-registered protocol, bound to its own listening port.
-
-    ``handler=None`` means *serve this port as HTTP*: the connection goes
-    through the same detection the main listener uses, so it gets HTTP/1.1,
-    HTTP/2 and WebSocket like any other.  Nothing else about the binding
-    changes — in particular :attr:`tls` still chooses the port's TLS posture,
-    which is what lets one process expose cleartext and TLS at once.
-    """
+    """A user-registered non-ASGI protocol, bound to its own listening port."""
 
     def __init__(
         self,
         name: str,
-        handler: RawProtocolHandler | None,
+        handler: RawProtocolHandler,
         *,
         detector: ProtocolDetector | None = None,
         port: int | None = None,
@@ -297,11 +285,6 @@ class RawBinding(ProtocolBinding):
         # Serve this binding's port through the server's TLS
         # machinery (mqtts:// and friends).  Cleartext remains the default.
         self.tls = tls
-
-    @property
-    def serves_http(self) -> bool:
-        """A binding registered without a handler is an HTTP listener."""
-        return self.handler is None
 
     @property
     def detect_prefix_len(self) -> int:
@@ -359,7 +342,7 @@ class ProtocolRegistry:
     def register(
         self,
         name: str,
-        handler: RawProtocolHandler | None,
+        handler: RawProtocolHandler,
         *,
         detector: ProtocolDetector | None = None,
         port: int | None = None,

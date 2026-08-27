@@ -266,21 +266,12 @@ def http_and_raw_app():
     return app
 
 
-class _Binding:
-    def __init__(self, name, serves_http=False):
-        self.name = name
-        self.serves_http = serves_http
-
-
 def test_spawn_worker_routes_protocol_sockets_to_worker0_only(plain_app, bound_sockets):
     """The stateful protocol listeners must be handed to worker 0 only; every
     other worker is HTTP-only (gets ``None``).  Regression guard for the
-    single-owner invariant — a broker on >1 worker would scatter state.
-
-    An HTTP binding is not stateful and is covered by
-    ``test_extra_http_ports.py``: it goes to every worker instead."""
+    single-owner invariant — a broker on >1 worker would scatter state."""
     sockets, _ = bound_sockets
-    sentinel = [('fake-socks', _Binding('mqtt'))]
+    sentinel = [('fake-socks', 'fake-binding')]
     mws = MultiWorkerServer(plain_app, sockets, None, workers=3,
                             protocol_sockets=sentinel)
 

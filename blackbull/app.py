@@ -1243,7 +1243,7 @@ class BlackBull:
     def register_protocol_handler(
         self,
         name: str,
-        handler: Callable[..., Awaitable[None]] | None,
+        handler: Callable[..., Awaitable[None]],
         *,
         detector: object | None = None,
         port: int | None = None,
@@ -1258,9 +1258,7 @@ class BlackBull:
 
         Args:
             name: Protocol name (e.g. ``'echo'``, ``'mqtt'``); must be unique.
-            handler: Async ``(reader, writer, ctx)`` coroutine.  ``None`` is
-                an internal shape meaning "serve this port as HTTP"; it is not
-                part of the documented surface.
+            handler: Async ``(reader, writer, ctx)`` coroutine.
             detector: Reserved for first-byte sniffing on shared ports;
                 unused today.
             port: Dedicated listening port for this protocol.
@@ -1273,26 +1271,6 @@ class BlackBull:
             self._protocol_registry = ProtocolRegistry()
         self._protocol_registry.register(name, handler,
                                          detector=detector, port=port, tls=tls)
-
-    def _add_http_port(self, port: int, *, tls: bool = False) -> None:
-        """Serve HTTP on an additional port from this same process.
-
-        **Not public, and not documented as a feature.**  It exists so that a
-        deployment needing several ports stops running one process per port,
-        each carrying the full worker count; it is deliberately underscored
-        because how multi-protocol, single-process should be expressed is being
-        reconsidered without the constraints of the mechanism borrowed here.
-        Whatever lands will replace this, and nothing outside the project
-        should be depending on the name.
-
-        The extra listener is the main one in every respect that matters: the
-        same app, the same workers, the same per-connection detection, so it
-        answers HTTP/1.1, HTTP/2 and WebSocket alike.  Only its TLS posture is
-        its own — *tls* chooses it per port, which is what lets one process
-        expose cleartext and TLS at the same time.  ``tls=True`` requires the
-        server to hold a certificate; startup fails fast otherwise.
-        """
-        self.register_protocol_handler(f'http:{port}', None, port=port, tls=tls)
 
     def raw_handler(self, name: str, *, port: int | None = None,
                     detector: object | None = None, tls: bool = False):
