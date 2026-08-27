@@ -219,6 +219,18 @@ class AbstractWriter(ABC):
     interface, so switching the async runtime requires only a new subclass here.
     """
 
+    def peer_is_gone(self) -> bool:
+        """True when the transport has already recorded the loss.
+
+        Asked *before* a write, because the exception the guard below catches
+        can arrive arbitrarily later: ``connection_lost`` is delivered through
+        ``call_soon``, so between the transport recording the loss and the
+        protocol learning of it there is a window in which ``write()`` drops
+        silently and ``drain()`` returns without raising.  Every write in that
+        window is one asyncio counts and warns about.
+        """
+        return False
+
     #: Set once the peer is known to be gone.  A class attribute so every
     #: writer has it without touching each ``__init__``; an instance assigns
     #: over it on first discovery.
@@ -297,6 +309,14 @@ class AsyncioWriter(AbstractWriter):
                 f"got {type(stream_writer)}"
             )
         self._sw = stream_writer
+        # Resolved once: the bound ``is_closing`` of whatever transport this
+        # writer sits on.  ``ConnectionProtocol`` (what the server passes) and
+        # ``asyncio.StreamWriter`` (what tests and embedders pass) both expose
+        # ``.transport``.  A ``MagicMock`` fabricates the attribute too, which
+        # is why the result is compared against ``True`` by identity rather
+        # than truthiness — a mock must not be able to close every write.
+        _transport = getattr(stream_writer, 'transport', None)
+        self._is_closing = getattr(_transport, 'is_closing', None)
         self._write_timeout = write_timeout
         self._deadline = (WriteDeadline(write_timeout)
                           if write_timeout > 0 else None)
@@ -373,6 +393,17 @@ class AsyncioWriter(AbstractWriter):
         """
         self._sw.writelines(parts)
         await self._drain_with_timeout()
+
+    def peer_is_gone(self) -> bool:
+        check = self._is_closing
+        if check is None:
+            # No transport yet (or a stand-in without one): fall back to the
+            # exception path, which is what this class did before.
+            return False
+        try:
+            return check() is True
+        except Exception:  # noqa: BLE001 - a diagnostic must never break a write
+            return False
 
     async def close(self) -> None:
         # ``self._sw.close()`` is synchronous: it initiates the TCP
@@ -536,6 +567,11 @@ class BaseSender(ABC):
         and warns on each past the fifth.
         """
         if self._closed or self._writer.peer_gone:
+            return
+        if self._writer.peer_is_gone():
+            self._closed = self._writer.peer_gone = True
+            if _DEBUG:
+                logger.debug('sender: transport already closing; write skipped')
             return
         try:
             await write_fn(arg)

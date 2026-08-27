@@ -140,22 +140,27 @@ async def get_db_conn():
 
     Yields ``None`` in DB-less mode (no database configured/reachable, or an
     acquire failure) so the query helpers below keep the profiles' graceful
-    degradation.  The checked-out connection returns to the pool *after* the
-    response has been sent.
+    degradation.
+
+    One yield, inside one try/finally.  The earlier shape exited early with a
+    bare ``yield None`` before the guarded yield further down, which BlackBull's
+    DI reported as cleanup-after-a-bare-yield — 480 warning blocks in a
+    sixteen-profile run.  That report was a false positive (fixed in the
+    framework), but this reads better anyway and the bench pins a released
+    version.
     """
     pool = await get_pool()
-    if pool is None:
-        yield None
-        return
-    try:
-        conn = await pool.acquire()
-    except Exception:  # noqa: BLE001 - acquire failure → DB-less mode
-        yield None
-        return
+    conn = None
+    if pool is not None:
+        try:
+            conn = await pool.acquire()
+        except Exception:  # noqa: BLE001 - acquire failure -> DB-less mode
+            conn = None
     try:
         yield conn
     finally:
-        await pool.release(conn)
+        if conn is not None:
+            await pool.release(conn)
 
 
 def _row_to_item(row) -> dict:

@@ -68,7 +68,25 @@ so the editable install's metadata catches up.
   writes out of 100 streams on both the TLS and cleartext paths.
 
   The discovery is now published on the writer, which every sender on the
-  connection shares.  No public API changes.
+  connection shares, and — the half that matters most — it is read from the
+  transport rather than waited for as an exception.  `connection_lost` is
+  delivered through `call_soon`, so between the transport recording the loss
+  and the protocol learning of it there is a window in which `write()` drops
+  silently and `drain()` returns without raising.  A guard that waits for an
+  exception never fires there.  Measured in that window: **96 of 100 writes**
+  produced a warning before, none after.
+
+- **A client that reset mid-upload printed a full traceback.**  The read path
+  surfaces the OS `ConnectionResetError` when the reset lands while a handler
+  is inside `conn.stream()`.  It reached the generic handler and was logged at
+  ERROR with a stack — 307 times in one sixteen-profile run — for something
+  that is a client's ordinary prerogative.  It is now treated as the client
+  disconnect it is, alongside `ClientDisconnected`: recorded for
+  `after_handler`, logged at DEBUG, nothing sent.  The exception is still
+  raised into the handler, so a truncated body is never mistaken for a
+  complete one.
+
+  No public API changes.
 
 ## [0.78.0] — 2026-08-20
 

@@ -151,3 +151,138 @@ async def test_a_live_connection_still_writes():
         await server.wait_closed()
 
     assert payload == b'hello world'
+
+
+async def _production_shaped_writer():
+    """An ``AsyncioWriter`` over the object the server actually passes it.
+
+    ``server.py`` builds ``AsyncioWriter(self, ...)`` where *self* is the
+    ``ConnectionProtocol`` — not an ``asyncio.StreamWriter``.  The two differ in
+    exactly the way this guard depends on: ``StreamWriter.drain()`` consults the
+    reader's exception and raises once the peer is gone, while
+    ``ConnectionProtocol.drain()`` raises only if ``connection_lost`` recorded
+    one and otherwise returns immediately, and its ``write()`` hands the bytes
+    to a transport that drops them silently.
+
+    A test that uses a StreamWriter therefore passes on a guard that does
+    nothing in production.  This one uses what production uses.
+    """
+    from blackbull.server.connection_protocol import ConnectionProtocol
+
+    loop = asyncio.get_running_loop()
+    accepted: asyncio.Future = loop.create_future()
+
+    def factory():
+        proto = ConnectionProtocol()
+        original = proto.connection_made
+
+        def connection_made(transport):
+            original(transport)
+            if not accepted.done():
+                accepted.set_result(proto)
+
+        proto.connection_made = connection_made
+        return proto
+
+    server = await loop.create_server(factory, '127.0.0.1', 0)
+    port = server.sockets[0].getsockname()[1]
+
+    sock = socket.create_connection(('127.0.0.1', port))
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER,
+                    b'\x01\x00\x00\x00\x00\x00\x00\x00')
+    proto = await accepted
+    sock.close()
+
+    for _ in range(50):
+        await asyncio.sleep(0.01)
+        if proto.transport is not None and proto.transport.is_closing():
+            break
+
+    return server, proto
+
+
+async def test_the_guard_works_on_the_writer_the_server_actually_uses():
+    """The production shape: no exception is ever raised, so a guard that waits
+    for one never fires."""
+    server, proto = await _production_shaped_writer()
+    handler = _CapturingHandler()
+    asyncio_logger = logging.getLogger('asyncio')
+    asyncio_logger.addHandler(handler)
+    previous = asyncio_logger.level
+    asyncio_logger.setLevel(logging.WARNING)
+    try:
+        writer = AsyncioWriter(proto)
+        for _ in range(STREAMS):
+            await _Sender(writer)._write(b'y' * 512)
+            await asyncio.sleep(0)
+    finally:
+        asyncio_logger.removeHandler(handler)
+        asyncio_logger.setLevel(previous)
+        server.close()
+        await server.wait_closed()
+
+    assert not handler.messages, (
+        f'{len(handler.messages)} of {STREAMS} writes reached a transport '
+        f'already gone; first: {handler.messages[0]!r}')
+
+
+async def test_writes_between_transport_loss_and_connection_lost_are_stopped():
+    """The window the exception-based guard cannot see.
+
+    ``connection_lost`` is delivered through ``call_soon``, so the transport
+    records the loss one or more loop turns before the protocol learns of it.
+    In between, ``write()`` drops silently and ``drain()`` returns without
+    raising — a guard that waits for an exception never fires, and every write
+    in the window is one asyncio counts and warns about.  This is where the
+    bulk of the volume came from: an EC2 run of all sixteen profiles on
+    v0.78.1's first attempt still produced 610,210 "socket.send() raised
+    exception." lines and 489,977 "SSL connection is closed", and one container
+    log was truncated at 8 MB.
+    """
+    from blackbull.server.connection_protocol import ConnectionProtocol
+
+    loop = asyncio.get_running_loop()
+    accepted: asyncio.Future = loop.create_future()
+
+    def factory():
+        proto = ConnectionProtocol()
+        original = proto.connection_made
+
+        def connection_made(transport):
+            original(transport)
+            if not accepted.done():
+                accepted.set_result(proto)
+
+        proto.connection_made = connection_made
+        return proto
+
+    server = await loop.create_server(factory, '127.0.0.1', 0)
+    port = server.sockets[0].getsockname()[1]
+    sock = socket.create_connection(('127.0.0.1', port))
+    proto = await accepted
+
+    handler = _CapturingHandler()
+    asyncio_logger = logging.getLogger('asyncio')
+    asyncio_logger.addHandler(handler)
+    previous = asyncio_logger.level
+    asyncio_logger.setLevel(logging.WARNING)
+    try:
+        writer = AsyncioWriter(proto)
+        # Lose the transport without letting connection_lost be delivered.
+        proto.transport._force_close(ConnectionResetError(104, 'reset'))
+        assert proto.transport.is_closing() is True
+        assert proto._exc is None, 'the window closed before the test could use it'
+
+        for _ in range(STREAMS):
+            await _Sender(writer)._write(b'y' * 512)
+    finally:
+        asyncio_logger.removeHandler(handler)
+        asyncio_logger.setLevel(previous)
+        sock.close()
+        server.close()
+        await server.wait_closed()
+
+    assert not handler.messages, (
+        f'{len(handler.messages)} of {STREAMS} writes landed in the window '
+        f'between transport loss and connection_lost; '
+        f'first: {handler.messages[0]!r}')

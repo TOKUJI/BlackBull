@@ -775,9 +775,16 @@ class BlackBull:
                     'handler':   function.__name__,
                 }))
             await function(conn, receive, send)
-        except ClientDisconnected as e:
+        except (ClientDisconnected, ConnectionResetError) as e:
             # Peer vanished mid-body — there is no one to answer.  Record it
             # for the after_handler event but log quietly and send nothing.
+            #
+            # ``ConnectionResetError`` is the same event arriving unwrapped:
+            # the read path surfaces the OS error when the reset lands while a
+            # handler is mid-``stream()``.  It reached the generic handler
+            # below and printed a full traceback per occurrence — 307 of them
+            # in one sixteen-profile run, for something that is a client's
+            # ordinary prerogative rather than a server fault.
             exc_caught = e
             if _DEBUG:
                 self._logger.debug('client disconnected before request body completed')
