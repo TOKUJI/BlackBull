@@ -156,7 +156,7 @@ _PRIMITIVE_SCHEMAS: dict[type, dict] = {
 }
 
 
-def _type_to_schema(tp: Any) -> dict:
+def _type_to_schema(tp: Any, _seen: frozenset | None = None) -> dict:
     """Convert a Python annotation to an OpenAPI 3.1 / JSON-schema dict.
 
     Unknown types fall through to an empty ``{}`` — OpenAPI 3.1 treats this
@@ -177,12 +177,12 @@ def _type_to_schema(tp: Any) -> dict:
         non_none = [a for a in args if a is not type(None)]
         has_none = len(non_none) != len(args)
         if len(non_none) == 1:
-            schema = _type_to_schema(non_none[0])
+            schema = _type_to_schema(non_none[0], _seen)
             if has_none:
                 # Cleanest OpenAPI 3.1 expression of "T or null".
                 return {'anyOf': [schema, {'type': 'null'}]}
             return schema
-        sub = [_type_to_schema(a) for a in non_none]
+        sub = [_type_to_schema(a, _seen) for a in non_none]
         if has_none:
             sub.append({'type': 'null'})
         return {'anyOf': sub}
@@ -190,7 +190,7 @@ def _type_to_schema(tp: Any) -> dict:
     # list[X], tuple[X, ...]
     if origin is list or origin is tuple:
         item = args[0] if args else None
-        items_schema = _type_to_schema(item) if item is not None else {}
+        items_schema = _type_to_schema(item, _seen) if item is not None else {}
         return {'type': 'array', 'items': items_schema}
 
     # dict[K, V] — JSON keys are always strings; we describe the value type.
@@ -198,16 +198,24 @@ def _type_to_schema(tp: Any) -> dict:
         v = args[1] if len(args) == 2 else None
         return {
             'type': 'object',
-            'additionalProperties': _type_to_schema(v) if v is not None else True,
+            'additionalProperties': _type_to_schema(v, _seen) if v is not None else True,
         }
 
     if dataclasses.is_dataclass(tp):
-        return _dataclass_to_schema(tp)
+        seen = _seen or frozenset()
+        if tp in seen:
+            # Already being walked further up this branch, so descending
+            # again cannot terminate.  ``{}`` is OpenAPI's "any schema",
+            # which is the honest answer for a type whose full expansion is
+            # infinite; a ``$ref`` would be better but needs a components
+            # section this generator does not emit.
+            return {}
+        return _dataclass_to_schema(tp, seen | {tp})
 
     return {}
 
 
-def _dataclass_to_schema(cls: Any) -> dict:
+def _dataclass_to_schema(cls: Any, _seen: frozenset | None = None) -> dict:
     """Synthesize an OpenAPI schema object for *cls*, a Python dataclass."""
     # Resolve forward references and string-form annotations once, here, so
     # field.type may be either a real class or a `from __future__ import
@@ -221,7 +229,7 @@ def _dataclass_to_schema(cls: Any) -> dict:
     required: list[str] = []
     for f in dataclasses.fields(cls):
         annotation = hints.get(f.name, f.type)
-        field_schema = _type_to_schema(annotation)
+        field_schema = _type_to_schema(annotation, _seen)
         if f.default is not dataclasses.MISSING:
             default = f.default
         elif f.default_factory is not dataclasses.MISSING:  # type: ignore[misc]

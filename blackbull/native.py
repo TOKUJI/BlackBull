@@ -348,3 +348,28 @@ class NativeResponse:
             events.append({'type': 'http.response.trailers',
                            'headers': list(self.trailers)})
         return events
+
+
+def asgi_send_boundary(inner_send):
+    """Wrap *inner_send* so native send-channel objects arrive as ASGI dicts.
+
+    Both native message types own a ``to_asgi()``, and both cross the same two
+    edges: the external-host boundary (uvicorn / ``asgi=True``) and the
+    scope-declared middleware's own send wrapper.  Consumers there subscript
+    ``event['type']``, so a native object reaching them raises in *their* code,
+    not ours.
+
+    This is deliberately the single place that decides which types convert: the
+    HTTP message was expanded at both edges and the WebSocket one at neither,
+    because each edge carried its own ``isinstance`` list.  A new native message
+    now cannot be handled at one edge and forgotten at the other.  Anything
+    already ASGI-shaped passes straight through.
+    """
+    async def _send(event):
+        if isinstance(event, (NativeResponse, NativeWSMessage)):
+            for ev in event.to_asgi():
+                await inner_send(ev)
+        else:
+            await inner_send(event)
+
+    return _send

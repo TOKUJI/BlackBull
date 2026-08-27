@@ -37,17 +37,26 @@ _PKG = _REPO_ROOT / 'blackbull'
 # ``NativeResponse.to_asgi()`` — the native → ASGI expansion.  Every entry is a
 # boundary: there is no residual caller left.
 _TO_ASGI_ALLOWED: dict[str, str] = {
-    'blackbull/app.py::_to_asgi_boundary._send':
-        'boundary — the external host edge: BlackBull(asgi=True) under uvicorn',
-    'blackbull/middleware/utils.py::_to_asgi_send._send':
-        'boundary — a @as_middleware middleware that declared `scope`; the '
-        'dicts exist across that one frame and are native again on both sides',
+    'blackbull/native.py::asgi_send_boundary._send':
+        'boundary — the shared send-side expansion both ASGI edges call; the '
+        'edges themselves are enumerated in _BOUNDARY_WRAPPER_ALLOWED below',
     'blackbull/testing/native.py::request.send':
         'boundary — Tier-1 builds the documented NativeResponse.events surface '
         '(docs/guide/testing.md); reusing to_asgi() keeps one expansion',
     'blackbull/testing/__init__.py::WebSocketTestSession._recv_event':
         'boundary — Tier-2 drives the app through the ASGI WebSocket contract; '
         'the one place server events enter the client',
+}
+
+# Who may wrap a ``send`` with the native → ASGI expansion.  The expansion
+# itself moved into one helper, so without this the edges would stop being
+# enumerated: any module could acquire a boundary by calling it.
+_BOUNDARY_WRAPPER_ALLOWED: dict[str, str] = {
+    'blackbull/app.py::_to_asgi_boundary':
+        'boundary — the external host edge: BlackBull(asgi=True) under uvicorn',
+    'blackbull/middleware/utils.py::_to_asgi_send':
+        'boundary — a @as_middleware middleware that declared `scope`; the '
+        'dicts exist across that one frame and are native again on both sides',
 }
 
 # Response-event dict literals (``{'type': 'http.response.*', ...}``) built by
@@ -163,6 +172,7 @@ class _Scanner(ast.NodeVisitor):
         self.request_dicts: list[str] = []
         self.ws_dicts: list[str] = []
         self.dict_lane_imports: list[str] = []
+        self.boundary_wrappers: list[str] = []
 
     # -- qualname tracking --------------------------------------------------
 
@@ -186,6 +196,8 @@ class _Scanner(ast.NodeVisitor):
                 self.to_asgi.append(self._site)
             elif func.attr == 'to_asgi_scope':
                 self.to_asgi_scope.append(self._site)
+        elif isinstance(func, ast.Name) and func.id == 'asgi_send_boundary':
+            self.boundary_wrappers.append(self._site)
         self.generic_visit(node)
 
     def visit_Dict(self, node: ast.Dict) -> None:
@@ -254,6 +266,17 @@ def test_to_asgi_only_at_enumerated_boundaries(scanned):
     """``NativeResponse.to_asgi()`` runs only where BlackBull meets ASGI."""
     found = {s for sc in scanned for s in sc.to_asgi}
     problem = _report(found, _TO_ASGI_ALLOWED, 'native → ASGI expansion')
+    assert not problem, problem
+
+
+def test_the_asgi_send_boundary_is_wrapped_only_at_enumerated_edges(scanned):
+    """Only a real ASGI edge may convert its ``send``.
+
+    The expansion lives in one helper now; this is what keeps the *edges*
+    enumerated, which is the property the two former call sites carried.
+    """
+    found = {s for sc in scanned for s in sc.boundary_wrappers}
+    problem = _report(found, _BOUNDARY_WRAPPER_ALLOWED, 'ASGI send-boundary wrap')
     assert not problem, problem
 
 

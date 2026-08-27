@@ -420,6 +420,13 @@ for still-running observer tasks to finish.  Tasks still running
 after the timeout are cancelled and a `WARNING` is logged on the
 `blackbull` logger naming the unfinished coroutine.
 
+Like `drain_events()`, the shutdown drain waits for *quiescence*
+rather than for one snapshot of the pending set: an observer that
+itself emits — close the session, then emit an audit record — has
+whatever it spawned waited for too.  The timeout is still the
+ceiling, so a chain that never settles costs at most
+`observer_shutdown_timeout`; it cannot hold shutdown open.
+
 Observers therefore have a *conditional* fire-and-forget
 guarantee: during normal request processing they do not block the
 emitter, but during shutdown they are expected to finish promptly.

@@ -361,6 +361,43 @@ class TestBareYieldDiagnostic:
 
         assert not self._warned(get_db)
 
+    def test_early_return_before_the_guarded_yield_is_not_flagged(self):
+        """A degraded-mode provider: the bare yield is an early exit.
+
+        ``return`` right after it means nothing follows *on that path*; the
+        yield that actually holds a resource is further down and wrapped.  The
+        statements the check must not count are the ones it can never reach.
+        """
+        async def get_db_conn():
+            pool = self._maybe_pool()
+            if pool is None:
+                yield None                    # DB-less mode: nothing acquired
+                return
+            conn = await pool.acquire()
+            try:
+                yield conn
+            finally:
+                await pool.release(conn)
+
+        assert not self._warned(get_db_conn)
+
+    def test_early_return_still_flags_cleanup_on_the_same_path(self):
+        """The narrowing must not blind the check: an early-exit branch
+        elsewhere does not excuse cleanup that really does follow a bare
+        yield."""
+        async def get_db():
+            if self._maybe_pool() is None:
+                yield None
+                return
+            yield 'db'
+            print('release')                  # skipped when the handler raises
+
+        assert self._warned(get_db)
+
+    @staticmethod
+    def _maybe_pool():
+        return None
+
     def test_async_with_around_the_yield_is_not_flagged(self):
         """The context manager already cleans up on every path."""
         class _Pool:
