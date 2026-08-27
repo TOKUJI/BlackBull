@@ -6158,6 +6158,12 @@ BlackBull waits up to <code>observer_shutdown_timeout</code> seconds (default
 for still-running observer tasks to finish.  Tasks still running
 after the timeout are cancelled and a <code>WARNING</code> is logged on the
 <code>blackbull</code> logger naming the unfinished coroutine.</p>
+<p>Like <code>drain_events()</code>, the shutdown drain waits for <em>quiescence</em>
+rather than for one snapshot of the pending set: an observer that
+itself emits — close the session, then emit an audit record — has
+whatever it spawned waited for too.  The timeout is still the
+ceiling, so a chain that never settles costs at most
+<code>observer_shutdown_timeout</code>; it cannot hold shutdown open.</p>
 <p>Observers therefore have a <em>conditional</em> fire-and-forget
 guarantee: during normal request processing they do not block the
 emitter, but during shutdown they are expected to finish promptly.

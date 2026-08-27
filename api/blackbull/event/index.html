@@ -5685,6 +5685,18 @@ logged at WARNING and cancelled.</p>
 construction) for all in-flight observer tasks to complete.  Any
 tasks still running after the timeout are logged at WARNING and
 cancelled.</p>
+<p>Drains to <em>quiescence</em> via :meth:<code>drain</code>, not to a snapshot of the
+pending set.  An observer may itself <code>emit</code>, and the task for that
+second observer is created while the wait is already in progress —
+so awaiting one <code>list(self._pending_tasks)</code> returns, and reports a
+clean drain, with the second generation still running.  Nothing is
+logged in that case either, because the overrun warning below only
+covers tasks that were in the set being awaited.</p>
+<p>The cost is that a pathological observer chain can now hold shutdown
+for the full budget where it used to return early.  That is the
+correct direction — the early return was the defect — and
+<code>shutdown_timeout</code> remains the ceiling, so an observer chain that
+never quiesces is a bounded latency cost at shutdown.</p>
 
 
     </div>

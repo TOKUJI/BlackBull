@@ -6525,6 +6525,11 @@ Raises :class:<code>IncompletePacket</code> if the buffer is short, or
     <div class="doc doc-contents ">
 
         <p>§3.3.1 — DUP (bit 3), QoS (bits 2-1), RETAIN (bit 0).</p>
+<p>QoS is two bits, so the field can hold 3, and §3.3.1-4 says a PUBLISH
+with both QoS bits set is a <strong>Malformed Packet</strong>.  Masking alone
+returned it as a value: nothing downstream acknowledged qos 3 (only 1
+and 2 have an ack path), so such a packet was routed and retained with
+no acknowledgement at all -- delivered, and invisible.</p>
 
 
     </div>

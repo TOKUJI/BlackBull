@@ -3647,6 +3647,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#blackbull.native.asgi_send_boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        asgi_send_boundary
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5419,6 +5430,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#blackbull.native.asgi_send_boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        asgi_send_boundary
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5714,6 +5736,34 @@ raw <code>(conn, receive, send)</code> compat surface — exactly like
 
 </div>
 
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.native.asgi_send_boundary" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">asgi_send_boundary</span><span class="p">(</span><span class="n">inner_send</span><span class="p">)</span></code>
+
+<a href="#blackbull.native.asgi_send_boundary" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Wrap <em>inner_send</em> so native send-channel objects arrive as ASGI dicts.</p>
+<p>Both native message types own a <code>to_asgi()</code>, and both cross the same two
+edges: the external-host boundary (uvicorn / <code>asgi=True</code>) and the
+scope-declared middleware's own send wrapper.  Consumers there subscript
+<code>event['type']</code>, so a native object reaching them raises in <em>their</em> code,
+not ours.</p>
+<p>This is deliberately the single place that decides which types convert: the
+HTTP message was expanded at both edges and the WebSocket one at neither,
+because each edge carried its own <code>isinstance</code> list.  A new native message
+now cannot be handled at one edge and forgotten at the other.  Anything
+already ASGI-shaped passes straight through.</p>
+
+
+    </div>
+
+</div>
 
 
 

@@ -5505,6 +5505,21 @@ provider.  The warning is deliberately narrow: a <code>yield</code> inside any <
 left alone, and so is a provider with nothing after the <code>yield</code> (there is no
 cleanup to lose) or one whose <code>yield</code> sits inside an <code>async with</code> (the
 context manager already handles every path).</p>
+<p>It is narrow along the <em>path</em>, too.  A provider that degrades gracefully
+yields a placeholder and returns, keeping the real acquisition — and its
+<code>finally</code> — further down; the early branch holds no resource, so it is not
+reported:</p>
+<div class="highlight"><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_conn</span><span class="p">():</span>
+    <span class="n">pool</span> <span class="o">=</span> <span class="k">await</span> <span class="n">get_pool</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">pool</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">yield</span> <span class="kc">None</span>               <span class="c1"># DB-less mode: nothing to release</span>
+        <span class="k">return</span>
+    <span class="n">conn</span> <span class="o">=</span> <span class="k">await</span> <span class="n">pool</span><span class="o">.</span><span class="n">acquire</span><span class="p">()</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">yield</span> <span class="n">conn</span>
+    <span class="k">finally</span><span class="p">:</span>
+        <span class="k">await</span> <span class="n">pool</span><span class="o">.</span><span class="n">release</span><span class="p">(</span><span class="n">conn</span><span class="p">)</span>
+</code></pre></div>
 <p>This is ordinary <a href="https://docs.python.org/3/library/contextlib.html#contextlib.asynccontextmanager"><code>@asynccontextmanager</code></a>
 behaviour, and it is not a wart to be fixed: the exception has to reach the
 generator so a provider can tell success from failure.</p>
