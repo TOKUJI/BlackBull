@@ -89,6 +89,61 @@ so the editable install's metadata catches up.
   consistent with zero — the change is HTTP/2-only, and a control that had
   moved with it would have meant the session measured something other than
   the diff.
+## [0.78.1] — 2026-08-27
+
+### Fixed
+
+- **A dead connection was rediscovered once per HTTP/2 stream.**  The sender
+  records "the peer is gone" in per-sender state, but it is a property of the
+  *connection*: HTTP/2 builds one sender per stream over one shared writer, so
+  every open stream learned it the only way a sender could — by writing into
+  the dead socket.  asyncio drops those writes silently and logs a warning for
+  each one past its threshold of five, so the cost showed up as log volume
+  rather than as an error.
+
+  Measured on HttpArena's published logs for this server: one 30-second
+  `baseline-h2` run produced **264,278** lines of "SSL connection is closed"
+  and **4,415** of "socket.send() raised exception.", while the HTTP/1.1
+  lanes — one sender per connection — produced none.  Reproduced at 96 wasted
+  writes out of 100 streams on both the TLS and cleartext paths.
+
+  The discovery is now published on the writer, which every sender on the
+  connection shares, and — the half that matters most — it is read from the
+  transport rather than waited for as an exception.  `connection_lost` is
+  delivered through `call_soon`, so between the transport recording the loss
+  and the protocol learning of it there is a window in which `write()` drops
+  silently and `drain()` returns without raising.  A guard that waits for an
+  exception never fires there.  Measured in that window: **96 of 100 writes**
+  produced a warning before, none after.
+
+- **A client that reset mid-upload printed a full traceback.**  The read path
+  surfaces the OS `ConnectionResetError` when the reset lands while a handler
+  is inside `conn.stream()`.  It reached the generic handler and was logged at
+  ERROR with a stack — 307 times in one sixteen-profile run — for something
+  that is a client's ordinary prerogative.  It is now treated as the client
+  disconnect it is, alongside `ClientDisconnected`: recorded for
+  `after_handler`, logged at DEBUG, nothing sent.  The exception is still
+  raised into the handler, so a truncated body is never mistaken for a
+  complete one.
+
+- **A TLS half-close claimed something asyncio would ignore.**
+  `eof_received()` returned `True` unconditionally, which keeps the write half
+  open after a peer half-closes — what a cleartext client doing
+  `shutdown(SHUT_WR)` while awaiting its response needs.  TLS cannot offer it:
+  asyncio's SSL protocol closes on EOF whatever the app protocol returns, and
+  logs a warning for each ignored claim — **3,425** in a sixteen-profile run.
+  The protocol now answers what the transport can honour.  Cleartext behaviour
+  is unchanged.
+
+- **A stream that lost the spawn race left an orphaned coroutine.**  A HEADERS
+  frame arriving in the same turn the peer went away found the connection's
+  TaskGroup already winding down; `StreamActor.run()` had been built before
+  `create_task` could refuse it, so Python reported "coroutine
+  'StreamActor.run' was never awaited" whenever the GC reached it — naming a
+  stream unrelated to wherever the line landed.  The coroutine is closed on
+  that path now.
+
+  No public API changes.
 
 ## [0.78.0] — 2026-08-20
 

@@ -1323,10 +1323,26 @@ class HTTP2Actor(Actor):
         else:
             final_coro = coro
 
-        if self._stream_semaphore is not None:
-            task = tg.create_task(_run_guarded(final_coro, self._stream_semaphore))
-        else:
-            task = tg.create_task(final_coro)
+        try:
+            if self._stream_semaphore is not None:
+                task = tg.create_task(
+                    _run_guarded(final_coro, self._stream_semaphore))
+            else:
+                task = tg.create_task(final_coro)
+        except RuntimeError:
+            # The connection's TaskGroup is already winding down — a HEADERS
+            # frame arrived in the same turn the peer went away.  The coroutine
+            # was built before we could know that, so close it here: an
+            # unawaited coroutine is reported whenever the GC reaches it,
+            # naming a stream that has nothing to do with wherever the line
+            # lands.  There is no peer left to RST_STREAM.
+            if final_coro is not coro:
+                final_coro.close()
+            coro.close()
+            if _DEBUG:
+                logger.debug('stream %d not started: connection closing',
+                             stream_id)
+            return
 
         self._stream_tasks[stream_id] = task
         task.add_done_callback(self._make_done_cb(stream_id))

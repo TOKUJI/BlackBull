@@ -19,6 +19,7 @@ _BB_ACCESS_LOG="${5:-}"
 _BB_PHASE_TRACE="${6:-}"
 _BB_LOG_BATCH_SIZE="${7:-}"
 _BB_LOG_BATCH_TIMEOUT_MS="${8:-}"
+_PYTHONTRACEMALLOC="${9:-}"
 
 # Locate the docker binary currently on PATH (not yet shimmed).
 DOCKER_ON_PATH="$(command -v docker)"
@@ -44,6 +45,9 @@ WEB_NOFILE="__WEB_NOFILE__"
 WRK_CPUS="__WRK_CPUS__"
 WRK_NOFILE="__WRK_NOFILE__"
 BB_ACCESS_LOG="__BB_ACCESS_LOG__"
+# Naming where a never-awaited coroutine was created needs the
+# allocation traceback; only set when hunting one.
+PYTHONTRACEMALLOC="__PYTHONTRACEMALLOC__"
 BB_PHASE_TRACE="__BB_PHASE_TRACE__"
 BB_LOG_BATCH_SIZE="__BB_LOG_BATCH_SIZE__"
 BB_LOG_BATCH_TIMEOUT_MS="__BB_LOG_BATCH_TIMEOUT_MS__"
@@ -105,6 +109,10 @@ else
         )
     fi
     [ -n "$BB_ACCESS_LOG" ] && extra+=(-e "BB_ACCESS_LOG=${BB_ACCESS_LOG}")
+    if [ -n "$PYTHONTRACEMALLOC" ]; then
+        extra+=(-e "PYTHONTRACEMALLOC=${PYTHONTRACEMALLOC}")
+        extra+=(-e "PYTHONWARNINGS=always")
+    fi
     # When access logging is ON, route it through BlackBull's PRODUCTION async
     # path: the deferred-format QueueHandler enqueues on the event loop and the
     # listener thread writes to BB_LOG_FILE (approach 2, on the mounted
@@ -127,6 +135,7 @@ sed -i \
     -e "s|__WRK_CPUS__|${_WRK_CPUS}|g" \
     -e "s|__WRK_NOFILE__|${_WRK_NOFILE}|g" \
     -e "s|__BB_ACCESS_LOG__|${_BB_ACCESS_LOG}|g" \
+    -e "s|__PYTHONTRACEMALLOC__|${_PYTHONTRACEMALLOC}|g" \
     -e "s|__BB_PHASE_TRACE__|${_BB_PHASE_TRACE}|g" \
     -e "s|__BB_LOG_BATCH_SIZE__|${_BB_LOG_BATCH_SIZE}|g" \
     -e "s|__BB_LOG_BATCH_TIMEOUT_MS__|${_BB_LOG_BATCH_TIMEOUT_MS}|g" \

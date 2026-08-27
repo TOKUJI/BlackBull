@@ -219,6 +219,29 @@ class AbstractWriter(ABC):
     interface, so switching the async runtime requires only a new subclass here.
     """
 
+    def peer_is_gone(self) -> bool:
+        """True when the transport has already recorded the loss.
+
+        Asked *before* a write, because the exception the guard below catches
+        can arrive arbitrarily later: ``connection_lost`` is delivered through
+        ``call_soon``, so between the transport recording the loss and the
+        protocol learning of it there is a window in which ``write()`` drops
+        silently and ``drain()`` returns without raising.  Every write in that
+        window is one asyncio counts and warns about.
+        """
+        return False
+
+    #: Set once the peer is known to be gone.  A class attribute so every
+    #: writer has it without touching each ``__init__``; an instance assigns
+    #: over it on first discovery.
+    #:
+    #: It lives here rather than on the sender because *the connection* is
+    #: what died.  HTTP/2 builds one sender per stream over one writer
+    #: (``HTTP2Actor.make_sender``), so a per-sender flag has every stream
+    #: rediscover the same dead socket by writing into it — asyncio drops
+    #: those writes and logs a warning for each one past its threshold of 5.
+    peer_gone: bool = False
+
     @abstractmethod
     async def write(self, data: bytes) -> None:
         """Write *data* to the transport and ensure it is flushed."""
@@ -286,6 +309,14 @@ class AsyncioWriter(AbstractWriter):
                 f"got {type(stream_writer)}"
             )
         self._sw = stream_writer
+        # Resolved once: the bound ``is_closing`` of whatever transport this
+        # writer sits on.  ``ConnectionProtocol`` (what the server passes) and
+        # ``asyncio.StreamWriter`` (what tests and embedders pass) both expose
+        # ``.transport``.  A ``MagicMock`` fabricates the attribute too, which
+        # is why the result is compared against ``True`` by identity rather
+        # than truthiness — a mock must not be able to close every write.
+        _transport = getattr(stream_writer, 'transport', None)
+        self._is_closing = getattr(_transport, 'is_closing', None)
         self._write_timeout = write_timeout
         self._deadline = (WriteDeadline(write_timeout)
                           if write_timeout > 0 else None)
@@ -362,6 +393,17 @@ class AsyncioWriter(AbstractWriter):
         """
         self._sw.writelines(parts)
         await self._drain_with_timeout()
+
+    def peer_is_gone(self) -> bool:
+        check = self._is_closing
+        if check is None:
+            # No transport yet (or a stand-in without one): fall back to the
+            # exception path, which is what this class did before.
+            return False
+        try:
+            return check() is True
+        except Exception:  # noqa: BLE001 - a diagnostic must never break a write
+            return False
 
     async def close(self) -> None:
         # ``self._sw.close()`` is synchronous: it initiates the TCP
@@ -517,19 +559,30 @@ class BaseSender(ABC):
         ``_closed`` is bound in ``__init__`` for every sender, so a direct
         attribute read is safe (and cheaper than the old ``getattr`` guard)
         on this per-write hot path.
+
+        The discovery is published to :attr:`AbstractWriter.peer_gone`, which
+        every sender on the connection shares.  A sender that has not written
+        yet must not have to learn it the same way: on HTTP/2 that is one
+        wasted write per open stream, and asyncio's transport counts them all
+        and warns on each past the fifth.
         """
-        if self._closed:
+        if self._closed or self._writer.peer_gone:
+            return
+        if self._writer.peer_is_gone():
+            self._closed = self._writer.peer_gone = True
+            if _DEBUG:
+                logger.debug('sender: transport already closing; write skipped')
             return
         try:
             await write_fn(arg)
         except (ConnectionResetError, BrokenPipeError) as exc:
-            self._closed = True
+            self._closed = self._writer.peer_gone = True
             if _DEBUG:
                 logger.debug('sender: peer closed write side (%s)', exc.__class__.__name__)
         except OSError as exc:
             # SSLEOFError / SSLZeroReturnError land here on TLS connections
             # whose peer dropped without a proper close-notify.
-            self._closed = True
+            self._closed = self._writer.peer_gone = True
             if _DEBUG:
                 logger.debug('sender: write failed on closed TLS transport (%s)', exc.__class__.__name__)
 
