@@ -5507,7 +5507,9 @@ parsed an application-level message, via the aggregator on <code>ctx</code>:</p>
 <p><code>connection_accepted</code> and <code>connection_closed</code> fire automatically.</p>
 <h2 id="limitations">Limitations<a class="headerlink" href="#limitations" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Cleartext only.</strong> TLS termination for raw protocols is not yet wired up.</li>
+<li><strong>TLS is the server's, not the binding's.</strong> A binding registered with
+  <code>tls=True</code> is served through the certificate the server was configured
+  with; a port cannot carry a certificate of its own.</li>
 <li><strong>Single owner, but HTTP still scales.</strong> A port-bound protocol is served by
   <strong>worker 0</strong> only (a stateful broker must have one owner), while HTTP runs on
   every worker. So <code>app.run(port=8000, workers=4)</code> with a <code>raw_handler</code> scales

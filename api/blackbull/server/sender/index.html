@@ -4621,6 +4621,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.sender.AbstractWriter.peer_is_gone" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        peer_is_gone
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.sender.AbstractWriter.sendfile" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5583,6 +5594,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.sender.AbstractWriter.peer_is_gone" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        peer_is_gone
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.sender.AbstractWriter.sendfile" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5974,6 +5996,30 @@ interface, so switching the async runtime requires only a new subclass here.</p>
     <div class="doc doc-contents ">
 
         <p>Close the underlying transport. Default: no-op.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.server.sender.AbstractWriter.peer_is_gone" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">peer_is_gone</span><span class="p">()</span></code>
+
+<a href="#blackbull.server.sender.AbstractWriter.peer_is_gone" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>True when the transport has already recorded the loss.</p>
+<p>Asked <em>before</em> a write, because the exception the guard below catches
+can arrive arbitrarily later: <code>connection_lost</code> is delivered through
+<code>call_soon</code>, so between the transport recording the loss and the
+protocol learning of it there is a window in which <code>write()</code> drops
+silently and <code>drain()</code> returns without raising.  Every write in that
+window is one asyncio counts and warns about.</p>
 
 
     </div>
