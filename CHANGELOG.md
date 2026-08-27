@@ -49,6 +49,27 @@ The runtime version is exposed as `blackbull.__version__` via
 `pyproject.toml`.  Re-run `pip install -e .` after a local version bump
 so the editable install's metadata catches up.
 
+## [0.78.1] — 2026-08-27
+
+### Fixed
+
+- **A dead connection was rediscovered once per HTTP/2 stream.**  The sender
+  records "the peer is gone" in per-sender state, but it is a property of the
+  *connection*: HTTP/2 builds one sender per stream over one shared writer, so
+  every open stream learned it the only way a sender could — by writing into
+  the dead socket.  asyncio drops those writes silently and logs a warning for
+  each one past its threshold of five, so the cost showed up as log volume
+  rather than as an error.
+
+  Measured on HttpArena's published logs for this server: one 30-second
+  `baseline-h2` run produced **264,278** lines of "SSL connection is closed"
+  and **4,415** of "socket.send() raised exception.", while the HTTP/1.1
+  lanes — one sender per connection — produced none.  Reproduced at 96 wasted
+  writes out of 100 streams on both the TLS and cleartext paths.
+
+  The discovery is now published on the writer, which every sender on the
+  connection shares.  No public API changes.
+
 ## [0.78.0] — 2026-08-20
 
 ### Added

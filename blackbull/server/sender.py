@@ -219,6 +219,17 @@ class AbstractWriter(ABC):
     interface, so switching the async runtime requires only a new subclass here.
     """
 
+    #: Set once the peer is known to be gone.  A class attribute so every
+    #: writer has it without touching each ``__init__``; an instance assigns
+    #: over it on first discovery.
+    #:
+    #: It lives here rather than on the sender because *the connection* is
+    #: what died.  HTTP/2 builds one sender per stream over one writer
+    #: (``HTTP2Actor.make_sender``), so a per-sender flag has every stream
+    #: rediscover the same dead socket by writing into it — asyncio drops
+    #: those writes and logs a warning for each one past its threshold of 5.
+    peer_gone: bool = False
+
     @abstractmethod
     async def write(self, data: bytes) -> None:
         """Write *data* to the transport and ensure it is flushed."""
@@ -517,19 +528,25 @@ class BaseSender(ABC):
         ``_closed`` is bound in ``__init__`` for every sender, so a direct
         attribute read is safe (and cheaper than the old ``getattr`` guard)
         on this per-write hot path.
+
+        The discovery is published to :attr:`AbstractWriter.peer_gone`, which
+        every sender on the connection shares.  A sender that has not written
+        yet must not have to learn it the same way: on HTTP/2 that is one
+        wasted write per open stream, and asyncio's transport counts them all
+        and warns on each past the fifth.
         """
-        if self._closed:
+        if self._closed or self._writer.peer_gone:
             return
         try:
             await write_fn(arg)
         except (ConnectionResetError, BrokenPipeError) as exc:
-            self._closed = True
+            self._closed = self._writer.peer_gone = True
             if _DEBUG:
                 logger.debug('sender: peer closed write side (%s)', exc.__class__.__name__)
         except OSError as exc:
             # SSLEOFError / SSLZeroReturnError land here on TLS connections
             # whose peer dropped without a proper close-notify.
-            self._closed = True
+            self._closed = self._writer.peer_gone = True
             if _DEBUG:
                 logger.debug('sender: write failed on closed TLS transport (%s)', exc.__class__.__name__)
 
