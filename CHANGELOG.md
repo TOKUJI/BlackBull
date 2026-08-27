@@ -16,6 +16,17 @@ BlackBull uses [ZeroVer](https://0ver.org/) prior to a 1.0 commitment:
   nothing.  The minor number therefore does **not** equal the sprint number —
   patch releases and combined-sprint releases have introduced an offset
   (Sprint 49 closed as `v0.43.0`; Sprint 97 closed as `v0.73.1`).
+- **Decide on the strongest justification present, not the first one found.**
+  A release usually satisfies more than one of the conditions above, and they
+  are not equally strong: a documented public-API addition qualifies formally,
+  while a behaviour change an application must react to is what the *effective
+  surface* test is actually asking about.  Name the strongest — the release
+  notes are what tells an adopter whether they have work to do, and leading
+  with a formal qualifier buries that.  (v0.79.0 was first explained as a MINOR
+  because it added `app.drain_events()`, a test seam an adopter can ignore
+  entirely.  The version was right; the reason given was the weaker of the two
+  it had.  What earned it was MQTT QoS 3 becoming a disconnect.)
+
 - **MINOR is judged by effective surface, not the diff.**  Removing a public
   API key that has been deprecated with a documented replacement long enough
   for adopters to have migrated is a **PATCH**: an adopter who followed the
