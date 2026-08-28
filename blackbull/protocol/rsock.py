@@ -296,10 +296,14 @@ def create_dual_stack_sockets(port, backlog: int = _DEFAULT_BACKLOG,
                                reuseport: bool = False,
                                sndbuf: int = 0, rcvbuf: int = 0,
                                keepalive: bool = True,
-                               user_timeout_ms: int = 0):
+                               user_timeout_ms: int = 0,
+                               host: str | None = None):
     """
     Create one IPv4 socket (``0.0.0.0``) **and** one IPv6 socket (``::``),
     both listening on *port*.
+
+    Naming a *host* asks for that interface instead, which is one socket in
+    one family — the point of naming it is to reach nothing else.
 
     Using two explicit sockets — each with ``IPV6_V6ONLY`` set on the IPv6
     one — is the most portable way to accept both IPv4 and IPv6 connections
@@ -314,6 +318,17 @@ def create_dual_stack_sockets(port, backlog: int = _DEFAULT_BACKLOG,
     (typically two, but may be one if the platform lacks IPv6 support).
     """
     sockets = []
+
+    if host is not None:
+        family = socket.AF_INET6 if ':' in host else socket.AF_INET
+        sock = _bind_socket(family, host, port,
+                            backlog=backlog, reuseport=reuseport,
+                            sndbuf=sndbuf, rcvbuf=rcvbuf, keepalive=keepalive,
+                            user_timeout_ms=user_timeout_ms)
+        if sock is None:
+            logger.error('Failed to bind %s port %s.', host, port)
+            return []
+        return [sock]
 
     ipv4_sock = _bind_socket(socket.AF_INET, '0.0.0.0', port,
                               backlog=backlog, reuseport=reuseport,

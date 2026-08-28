@@ -15,12 +15,30 @@ from ..protocol.rsock import (
     create_dual_stack_sockets, create_unix_socket,
     adopt_inherited_sockets, adopt_listening_fd,
 )
+from .listener import HTTP, InheritedFd, Listener, Tcp, Unix
 from .sender import AbstractWriter
 from .recipient import (AbstractReader,
                         _HTTP2_STREAM_QUEUE_DEPTH, _WS_READ_INLINE)
 from .cap_log import log_cap_hit
 from ..asgi import ASGIEvent
 logger = logging.getLogger(__name__)
+
+
+def _listener_from_args(port, unix_path, inherited_fd) -> Listener:
+    """The old way of saying it — one port, one path, or one fd — as a listener."""
+    if inherited_fd is not None:
+        return Listener(InheritedFd(inherited_fd))
+    if unix_path is not None:
+        return Listener(Unix(unix_path))
+    return Listener(Tcp(port))
+
+
+def _address_of(sock) -> Tcp | Unix:
+    """The address a already-bound socket is listening on."""
+    sockname = sock.getsockname()
+    if isinstance(sockname, str):
+        return Unix(sockname)
+    return Tcp(sockname[1])
 
 #: ``eager_start`` landed in 3.12; the supported floor is 3.11.  A task
 #: constructed with it runs its coroutine synchronously until the first
@@ -200,8 +218,15 @@ class Server:
                  stream_queue_depth: int = _HTTP2_STREAM_QUEUE_DEPTH,
                  ws_queue_depth: int = _WS_READ_INLINE,
                  protocol_registry=None,
+                 listeners=None,
                  **kwds):
         self.app = app
+        # The sockets this server was asked for.  ``None`` means the caller
+        # said it the old way — a single port through ``open_socket`` — which
+        # is turned into one listener there rather than kept as a second path.
+        self._listeners = list(listeners) if listeners else None
+        #: ``[(Listener, [socket, ...]), ...]`` — what is actually bound.
+        self.bound_listeners: list = []
         self._max_connections = max_connections
         # A derived default depends on the host, so the only way an operator
         # learns the value in force is by being told it — including where it
@@ -531,98 +556,40 @@ class Server:
 
     def open_socket(self, port=0, unix_path: str | None = None,
                     inherited_fd: int | None = None):
-        # When the master re-execs itself for an auto-reload, it hands
-        # off the bound listening sockets via fd inheritance + the
-        # BB_INHERIT_FDS env var.  Adopt them instead of binding so the
-        # listener stays continuous across the reload (no port-release
-        # race, no missed SYNs).
-        raw_sockets = adopt_inherited_sockets()
-        if raw_sockets:
-            self.raw_sockets = raw_sockets
-            sockname = raw_sockets[0].getsockname()
-            # AF_UNIX getsockname() returns the bound path string; TCP
-            # returns ``(host, port)``.  Store both so downstream callers
-            # (workers, integration tests) don't have to special-case.
-            if isinstance(sockname, str):
-                self.port = None
-                self.unix_path = sockname
-            else:
-                self.port = sockname[1]
-                self.unix_path = None
-            return
+        """Bind every listener this server was asked for.
 
+        A caller that named ``listeners=`` gets those.  A caller that said it
+        the old way — a port, a Unix path, or an inherited fd — gets one
+        listener built from those arguments, so there is one binding path and
+        not two.
+        """
         from ..env import get_settings as _get_settings  # noqa: PLC0415
         _cfg = _get_settings()
 
-        if inherited_fd is not None:
-            # Systemd-style socket activation.  Bind / listen already
-            # happened in the supervisor; just adopt the fd and capture
-            # its sockname for ``port`` / ``unix_path`` so downstream
-            # code paths (lifespan, workers) see the same shape as
-            # a normal bind.
-            sock = adopt_listening_fd(inherited_fd)
-            self.raw_sockets = [sock]
-            sockname = sock.getsockname()
-            if isinstance(sockname, str):
-                self.port = None
-                self.unix_path = sockname
-            else:
-                # AF_INET sockname is ``(host, port)``; AF_INET6 is
-                # ``(host, port, flowinfo, scopeid)`` — port is always [1].
-                self.port = sockname[1]
-                self.unix_path = None
-            return
+        if self._listeners is None:
+            # When the master re-execs itself for an auto-reload, it hands off
+            # the bound listening sockets via fd inheritance + the
+            # BB_INHERIT_FDS env var.  Adopt them instead of binding so the
+            # listener stays continuous across the reload (no port-release
+            # race, no missed SYNs).
+            inherited = adopt_inherited_sockets()
+            if inherited:
+                self.bound_listeners = [(Listener(_address_of(inherited[0])),
+                                         inherited)]
+                self._publish_socket_view()
+                return
+            self._listeners = [_listener_from_args(port, unix_path, inherited_fd)]
+            # Registry-bound raw protocols have always been bound only on the
+            # plain-TCP path; a Unix socket or an inherited fd left them
+            # unbound.  Preserved rather than fixed here — see the design's
+            # open questions — because making them appear is a new socket.
+            bind_protocol_sockets = (unix_path is None and inherited_fd is None)
+        else:
+            bind_protocol_sockets = True
 
-        if unix_path is not None:
-            # AF_UNIX path: no port check, no dual-stack pairing, no TCP
-            # sockopts.  ``create_unix_socket`` handles stale-file cleanup
-            # and chmod for the typical reverse-proxy-runs-in-same-group
-            # deployment.
-            sock = create_unix_socket(
-                unix_path,
-                backlog=_cfg.socket_backlog,
-                sndbuf=_cfg.socket_sndbuf,
-                rcvbuf=_cfg.socket_rcvbuf,
-            )
-            if sock is None:
-                raise RuntimeError(
-                    f'Failed to bind AF_UNIX socket on {unix_path!r}.'
-                )
-            self.raw_sockets = [sock]
-            self.port = None
-            self.unix_path = unix_path
-            return
-
-        raw_sockets = create_dual_stack_sockets(
-            port,
-            backlog=_cfg.socket_backlog,
-            sndbuf=_cfg.socket_sndbuf,
-            rcvbuf=_cfg.socket_rcvbuf,
-            user_timeout_ms=_cfg.tcp_user_timeout_ms,
-            keepalive=False,  # replaced by app-level keep_alive_timeout
-            # Honour BB_SOCKET_REUSEPORT on the HTTP listener so forked
-            # workers can co-bind the same port and the kernel load-balances
-            # accepts across them.  (Stateful protocol ports below are bound
-            # WITHOUT reuseport on purpose — they must have a single owner.)
-            reuseport=_cfg.socket_reuseport,
-        )
-
-        if not raw_sockets:
-            # No connect-probe pre-check (that shape was racy, IPv4-localhost
-            # only, and hid the OS error): binding is the check.  The specific
-            # OS failure (e.g. EADDRINUSE naming the address) was already
-            # logged by _bind_socket.
-            logger.error(f'Failed to bind port {port}. Try another port.')
-            raise RuntimeError(
-                f'Failed to bind port {port} (see log for the OS error, '
-                f'e.g. address already in use). Try another port.')
-
-        self.raw_sockets = raw_sockets
-
-        # Derive the actual port from the first successfully bound socket
-        # (matters when port=0 was requested, i.e. the OS picks a free port).
-        self.port = self.raw_sockets[0].getsockname()[1]
-        self.unix_path = None
+        self.bound_listeners = [(listener, self._bind_listener(listener, _cfg))
+                                for listener in self._listeners]
+        self._publish_socket_view()
 
         # Do NOT wrap sockets with ssl_context here.
         # asyncio.start_server() accepts raw TCP sockets via sockets= and
@@ -630,7 +597,73 @@ class Server:
         # Pre-wrapping with ssl_context.wrap_socket() causes a double-TLS
         # layer and breaks the handshake.
 
-        self._bind_protocol_sockets(_cfg)
+        if bind_protocol_sockets:
+            self._bind_protocol_sockets(_cfg)
+
+    def _bind_listener(self, listener, _cfg) -> list:
+        """Bind one listener and return its sockets."""
+        where = listener.where
+
+        if isinstance(where, InheritedFd):
+            # Systemd-style socket activation: bind / listen already happened
+            # in the supervisor, so adopt the fd rather than binding again.
+            return [adopt_listening_fd(where.fd)]
+
+        if isinstance(where, Unix):
+            # No port check, no dual-stack pairing, no TCP sockopts.
+            sock = create_unix_socket(
+                where.path,
+                backlog=_cfg.socket_backlog,
+                sndbuf=_cfg.socket_sndbuf,
+                rcvbuf=_cfg.socket_rcvbuf,
+            )
+            if sock is None:
+                raise RuntimeError(
+                    f'Failed to bind AF_UNIX socket on {where.path!r}.')
+            return [sock]
+
+        socks = create_dual_stack_sockets(
+            where.port,
+            backlog=_cfg.socket_backlog,
+            sndbuf=_cfg.socket_sndbuf,
+            rcvbuf=_cfg.socket_rcvbuf,
+            user_timeout_ms=_cfg.tcp_user_timeout_ms,
+            keepalive=False,  # replaced by app-level keep_alive_timeout
+            # Honour BB_SOCKET_REUSEPORT so forked workers can co-bind the
+            # same port and the kernel load-balances accepts across them.
+            # (Stateful protocol ports are bound WITHOUT reuseport on
+            # purpose — they must have a single owner.)
+            reuseport=_cfg.socket_reuseport,
+            host=where.host,
+        )
+        if not socks:
+            # No connect-probe pre-check (that shape was racy, IPv4-localhost
+            # only, and hid the OS error): binding is the check.  The specific
+            # OS failure (e.g. EADDRINUSE naming the address) was already
+            # logged by _bind_socket.
+            logger.error(f'Failed to bind port {where.port}. Try another port.')
+            raise RuntimeError(
+                f'Failed to bind port {where.port} (see log for the OS error, '
+                f'e.g. address already in use). Try another port.')
+        return socks
+
+    def _publish_socket_view(self) -> None:
+        """Expose the bound listeners the way the rest of the server reads them.
+
+        ``raw_sockets`` is every HTTP socket, which is what the multi-worker
+        master hands to each worker; ``port`` / ``unix_path`` describe the
+        first listener, which is what callers report and tests connect to.
+        """
+        self.raw_sockets = [sock for listener, socks in self.bound_listeners
+                            for sock in socks if listener.speaks == HTTP]
+        first = self.raw_sockets[0] if self.raw_sockets else None
+        sockname = first.getsockname() if first is not None else None
+        # AF_UNIX getsockname() returns the bound path string; TCP returns
+        # ``(host, port)`` — AF_INET6 adds flowinfo/scopeid, port is always [1].
+        if isinstance(sockname, str):
+            self.port, self.unix_path = None, sockname
+        elif sockname is not None:
+            self.port, self.unix_path = sockname[1], None
 
     def _bind_protocol_sockets(self, _cfg):
         """Bind a listening socket per port-bound non-ASGI protocol.
@@ -665,8 +698,14 @@ class Server:
             logger.info('Protocol %r listening on port %d', binding.name, bound_port)
 
     def close_socket(self):
-        for s in getattr(self, 'raw_sockets', []):
-            s.close()
+        # bound_listeners is the truth; raw_sockets is a view of the HTTP ones,
+        # so closing only that would leak whatever else was bound.
+        for _listener, socks in self.bound_listeners:
+            for s in socks:
+                s.close()
+        if not self.bound_listeners:
+            for s in getattr(self, 'raw_sockets', []):
+                s.close()
         for socks, _ in self._protocol_sockets:
             for s in socks:
                 s.close()
