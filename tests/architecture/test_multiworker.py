@@ -398,3 +398,150 @@ def test_serve_forces_single_worker_for_port_bindings_with_reload(http_and_raw_a
 
     assert MockMWS.called
     assert MockMWS.call_args.kwargs['workers'] == 1, 'reload + protocol must force workers=1'
+
+
+@pytest.fixture()
+def pid_reporting_app():
+    """HTTP and a port-bound raw protocol that both answer with their PID."""
+    app = BlackBull()
+
+    from http import HTTPMethod
+
+    @app.route(path='/pid', methods=[HTTPMethod.GET])
+    async def which():
+        return str(os.getpid()).encode()
+
+    @app.raw_handler('broker', port=0)
+    async def broker(reader, writer, ctx):
+        while await reader.read(1024):
+            await writer.write(str(os.getpid()).encode() + b'\n')
+
+    return app
+
+
+def test_a_stateful_protocol_is_accepted_by_exactly_one_process(pid_reporting_app):
+    """The invariant fork threatens: every worker inherits the broker's
+    listening fd, so "one owner" has to mean one *accepting* process, not one
+    process holding the descriptor.
+
+    Both halves matter.  Asserting only that the broker answers from a single
+    PID would also pass if the whole server had collapsed onto one worker, so
+    the same run must show HTTP spread across several.
+    """
+    master = ASGIServer(pid_reporting_app)
+    master.open_socket(0)
+    http_port = master.port
+    broker_port = master.protocol_ports['broker']
+
+    mws = MultiWorkerServer(pid_reporting_app, master.bound_listeners, None,
+                            workers=4)
+    mws._spawn_all()
+    time.sleep(2.0)
+
+    broker_pids, http_pids = set(), set()
+    try:
+        deadline = time.time() + 10
+        while time.time() < deadline and len(http_pids) < 4:
+            conn = http.client.HTTPConnection('127.0.0.1', http_port, timeout=5)
+            conn.request('GET', '/pid')
+            http_pids.add(conn.getresponse().read().decode())
+            conn.close()
+
+        for _ in range(60):
+            raw = socket.create_connection(('127.0.0.1', broker_port), timeout=5)
+            with raw:
+                raw.sendall(b'who\n')
+                broker_pids.add(raw.recv(64).strip().decode())
+    finally:
+        mws._shutdown_all()
+        master.close_socket()
+
+    assert len(broker_pids) == 1, (
+        f'a stateful protocol must be accepted by one process, saw {broker_pids}')
+    assert len(http_pids) > 1, (
+        f'HTTP must still spread across workers, saw {http_pids}')
+    assert broker_pids <= http_pids, 'the broker rides a worker, not a stray process'
+
+
+@pytest.fixture()
+def stateful_broker_app():
+    """A port-bound protocol whose answer depends on an earlier exchange.
+
+    The point of single ownership is not that one process accepts; it is that
+    the process answering the *second* exchange holds what the first one left
+    behind.  A per-process dict makes that visible: an answer from a process
+    that missed the write is empty, not merely different.
+    """
+    app = BlackBull()
+    state: dict[str, str] = {}
+
+    from http import HTTPMethod
+
+    @app.route(path='/pid', methods=[HTTPMethod.GET])
+    async def which():
+        return str(os.getpid()).encode()
+
+    @app.raw_handler('store', port=0)
+    async def store(reader, writer, ctx):
+        while data := await reader.read(1024):
+            command, _, value = data.strip().decode().partition(' ')
+            if command == 'SET':
+                state['value'] = value
+                await writer.write(b'ok\n')
+            else:
+                await writer.write(
+                    f"{state.get('value', '')}|{os.getpid()}\n".encode())
+
+    return app
+
+
+def _exchange(port, payload):
+    conn = socket.create_connection(('127.0.0.1', port), timeout=5)
+    with conn:
+        conn.sendall(payload)
+        return conn.recv(128).strip().decode()
+
+
+def test_a_later_exchange_reaches_the_state_the_earlier_one_left(stateful_broker_app):
+    """What single ownership is actually for.
+
+    Writes on one connection, reads on forty later ones.  If any other worker
+    could accept, a read would land on a process that never saw the write and
+    would answer with nothing — which is a wrong answer, not a missing one.
+    """
+    master = ASGIServer(stateful_broker_app)
+    master.open_socket(0)
+    http_port = master.port
+    store_port = master.protocol_ports['store']
+
+    mws = MultiWorkerServer(stateful_broker_app, master.bound_listeners, None,
+                            workers=4)
+    mws._spawn_all()
+    time.sleep(2.0)
+
+    try:
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            if _exchange(store_port, b'SET remembered\n') == 'ok':
+                break
+
+        answers = {_exchange(store_port, b'GET\n') for _ in range(40)}
+
+        http_pids = set()
+        deadline = time.time() + 10
+        while time.time() < deadline and len(http_pids) < 4:
+            conn = http.client.HTTPConnection('127.0.0.1', http_port, timeout=5)
+            conn.request('GET', '/pid')
+            http_pids.add(conn.getresponse().read().decode())
+            conn.close()
+    finally:
+        mws._shutdown_all()
+        master.close_socket()
+
+    values = {answer.split('|')[0] for answer in answers}
+    assert values == {'remembered'}, (
+        f'a later exchange must reach the earlier state, saw {values}')
+    assert len({answer.split('|')[1] for answer in answers}) == 1, \
+        'and it must be the same process every time'
+    assert len(http_pids) > 1, \
+        f'while HTTP still spreads across workers, saw {http_pids}'

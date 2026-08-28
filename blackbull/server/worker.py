@@ -24,7 +24,8 @@ logger = logging.getLogger(__name__)
 def run_worker(app, bound_listeners, ssl_context, worker_id: int,
                max_connections: int,
                stream_queue_depth: int = 64,
-               ws_queue_depth: int = _WS_READ_INLINE) -> None:
+               ws_queue_depth: int = _WS_READ_INLINE,
+               disowned=()) -> None:
     """Entry point executed in each worker process.
 
     Parameters
@@ -37,11 +38,26 @@ def run_worker(app, bound_listeners, ssl_context, worker_id: int,
         each listener's own ``workers`` field.
     ssl_context:
         TLS context to pass to asyncio.start_server, or None for plain HTTP.
+    disowned:
+        Listening sockets this worker inherited through fork but does not
+        serve — another worker's, or a single-owner listener it does not own.
+        Closed on entry, in this process only: the master and the owning
+        worker keep their own descriptors.
     worker_id:
         Zero-based index used only for logging.
     max_connections:
         Per-worker connection limit; passed to ASGIServer.
     """
+    # Let go of what this worker does not serve, before anything can use it.
+    # A stateful protocol's second exchange has to reach the process that
+    # holds the first one's state, and the only sound way to guarantee that
+    # is for no other process to be able to accept it at all.
+    for sock in disowned:
+        try:
+            sock.close()
+        except OSError:  # pragma: no cover - already closed
+            pass
+
     # Workers should not respond to Ctrl+C directly — the master handles the
     # signal and sends SIGTERM to every worker for a coordinated shutdown.
     signal.signal(signal.SIGINT, signal.SIG_IGN)

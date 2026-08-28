@@ -185,6 +185,13 @@ class MultiWorkerServer:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    def _all_listening_sockets(self) -> list:
+        """Every listening socket the master created, in any role."""
+        return [sock
+                for group in (*self._worker_listeners, self._single_owner)
+                for _listener, socks in group
+                for sock in socks]
+
     def _spawn_worker(self, worker_id: int):
         # A single-owner listener goes to worker 0 and no one else — worker 0
         # inherits the master's still-open fds via fork, so a respawn after a
@@ -192,11 +199,20 @@ class MultiWorkerServer:
         listeners = list(self._worker_listeners[worker_id])
         if worker_id == 0:
             listeners += self._single_owner
+        # fork copies the whole descriptor table, so this child also holds
+        # every other worker's sockets and — but for worker 0 — the broker's.
+        # Hand it the list to let go of: a process that does not have the
+        # descriptor cannot accept on it, which makes single ownership
+        # structural instead of a consequence of what nobody calls.
+        mine = {id(sock) for _listener, socks in listeners for sock in socks}
+        disowned = [sock for sock in self._all_listening_sockets()
+                    if id(sock) not in mine]
         p = self._mp_ctx.Process(
             target=run_worker,
             args=(self._app, listeners, self._ssl_context,
                   worker_id, self._max_connections,
-                  self._stream_queue_depth, self._ws_queue_depth),
+                  self._stream_queue_depth, self._ws_queue_depth,
+                  disowned),
             daemon=False,  # workers must be reaped explicitly on shutdown
             name=f'bb-worker-{worker_id}',
         )
