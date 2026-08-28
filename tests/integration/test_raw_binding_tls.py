@@ -116,17 +116,20 @@ def test_cleartext_binding_stays_cleartext_alongside_tls(live_tls_bridge):
 
 
 def test_tls_binding_without_certs_fails_fast():
-    """tls=True on a server with no TLS configured raises at serve time."""
+    """tls=True on a server with no TLS configured raises at bind time.
+
+    It used to raise at serve time, which under ``app.run(workers=N)`` is
+    after the master has forked: N processes start and each discovers the
+    same misconfiguration.  Binding is where the listener's certificate is
+    resolved, so it is where the missing one is reported.
+    """
     app = BlackBull()
 
     @app.raw_handler('needs-tls', port=0, tls=True)
     async def h(reader, writer, ctx):
-        pass  # never reached — the server must refuse to start
+        pass  # never reached — the server must refuse to bind
 
     server = Server(app)
-    server.open_socket(0)
-    try:
-        with pytest.raises(RuntimeError, match='needs-tls'):
-            asyncio.run(asyncio.wait_for(server.run(), timeout=5))
-    finally:
-        server.close()
+    with pytest.raises(RuntimeError, match='needs-tls'):
+        server.open_socket(0)
+    server.close()

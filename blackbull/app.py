@@ -1517,7 +1517,7 @@ def serve(app, *,
 
     MultiWorkerServer(
         app,
-        master_server.raw_sockets,
+        master_server.bound_listeners,
         master_server.ssl_context,
         workers=workers,
         max_connections=max_connections,
@@ -1525,9 +1525,6 @@ def serve(app, *,
         ws_queue_depth=ws_queue_depth,
         reload=reload,
         reload_paths=reload_paths,
-        # Bound by master_server.open_socket(); handed to worker 0 only so the
-        # broker has a single owner while HTTP scales across all workers.
-        protocol_sockets=master_server._protocol_sockets,
     ).run()
 
     master_server.close_socket()

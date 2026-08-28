@@ -193,8 +193,13 @@ def worker_harness(monkeypatch):
 
     class _StubServer:
         def __init__(self, *_args, **_kwargs):
+            self.bound_listeners = []
             self.raw_sockets = []
             self.port = 0
+            self.protocol_ports = {}
+
+        def _publish_socket_view(self):
+            pass
 
         async def run(self):
             observed['loop_thread'] = set(os.sched_getaffinity(0))

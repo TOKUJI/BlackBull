@@ -193,7 +193,8 @@ class TestPortBoundRawProtocolsBindOnEveryPath:
 
     @staticmethod
     def _broker_bound(server) -> bool:
-        return bool(server._protocol_sockets)
+        return any(listener.speaks == 'echo'
+                   for listener, _socks in server.bound_listeners)
 
     def test_bound_behind_a_unix_socket(self, tmp_path):
         server = Server(self._app_with_broker())

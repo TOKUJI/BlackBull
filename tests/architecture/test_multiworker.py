@@ -28,7 +28,14 @@ import pytest
 
 from blackbull import BlackBull
 from blackbull.server.server import ASGIServer
+from blackbull.server.listener import Listener, Tcp
 from blackbull.server.multiworker import MultiWorkerServer
+
+
+def as_listeners(socks, speaks='http', workers=None):
+    """Wrap already-bound sockets the way the master hands them over."""
+    return [(Listener(Tcp(s.getsockname()[1]), speaks=speaks, workers=workers),
+             [s]) for s in socks]
 
 
 # ---------------------------------------------------------------------------
@@ -68,7 +75,7 @@ def bound_sockets():
 def test_spawn_count(plain_app, bound_sockets):
     """MultiWorkerServer must spawn exactly *workers* processes."""
     sockets, _ = bound_sockets
-    mws = MultiWorkerServer(plain_app, sockets, None, workers=3)
+    mws = MultiWorkerServer(plain_app, as_listeners(sockets), None, workers=3)
 
     mws._spawn_all()
     try:
@@ -86,7 +93,7 @@ def test_spawn_count(plain_app, bound_sockets):
 def test_crashed_worker_is_respawned(plain_app, bound_sockets):
     """A worker that exits unexpectedly must be replaced within one monitor cycle."""
     sockets, _ = bound_sockets
-    mws = MultiWorkerServer(plain_app, sockets, None, workers=2)
+    mws = MultiWorkerServer(plain_app, as_listeners(sockets), None, workers=2)
 
     mws._spawn_all()
     try:
@@ -118,7 +125,7 @@ def test_workers_serve_http_requests(plain_app):
     sock.listen()
     port = sock.getsockname()[1]
 
-    mws = MultiWorkerServer(plain_app, [sock], None, workers=2)
+    mws = MultiWorkerServer(plain_app, as_listeners([sock]), None, workers=2)
     mws._spawn_all()
 
     # Give workers a moment to enter their event loops.
@@ -157,7 +164,7 @@ def test_run_single_worker_uses_asyncio_run(plain_app):
 def test_master_stops_on_sigterm(plain_app, bound_sockets):
     """Sending SIGTERM to the master (current process simulated) must stop run()."""
     sockets, _ = bound_sockets
-    mws = MultiWorkerServer(plain_app, sockets, None, workers=2,
+    mws = MultiWorkerServer(plain_app, as_listeners(sockets), None, workers=2,
                             shutdown_timeout=3.0)
 
     # Run the master in a thread so this test's event loop is unaffected.
@@ -204,7 +211,7 @@ def test_sigterm_during_startup_is_not_lost(plain_app, bound_sockets):
         pytest.skip('signal handlers only install on the main thread')
 
     sockets, _ = bound_sockets
-    mws = MultiWorkerServer(plain_app, sockets, None, workers=1,
+    mws = MultiWorkerServer(plain_app, as_listeners(sockets), None, workers=1,
                             shutdown_timeout=3.0)
 
     # Stubbed: this test is about the flag, not about real children.
@@ -268,12 +275,20 @@ def http_and_raw_app():
 
 def test_spawn_worker_routes_protocol_sockets_to_worker0_only(plain_app, bound_sockets):
     """The stateful protocol listeners must be handed to worker 0 only; every
-    other worker is HTTP-only (gets ``None``).  Regression guard for the
-    single-owner invariant — a broker on >1 worker would scatter state."""
+    other worker serves the shared ones only.  Regression guard for the
+    single-owner invariant — a broker on >1 worker would scatter state.
+
+    Asserts the invariant rather than an argument position: what must hold is
+    that exactly one worker is handed the broker, whatever the handover looks
+    like."""
     sockets, _ = bound_sockets
-    sentinel = [('fake-socks', 'fake-binding')]
-    mws = MultiWorkerServer(plain_app, sockets, None, workers=3,
-                            protocol_sockets=sentinel)
+    broker = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    broker.bind(('127.0.0.1', 0))
+    broker.listen()
+    mws = MultiWorkerServer(
+        plain_app,
+        as_listeners(sockets) + as_listeners([broker], speaks='mqtt'),
+        None, workers=3)
 
     captured = {}
 
@@ -286,29 +301,35 @@ def test_spawn_worker_routes_protocol_sockets_to_worker0_only(plain_app, bound_s
         def start(self):
             pass
 
-    with patch.object(mws._mp_ctx, 'Process', _FakeProc):
-        mws._spawn_worker(0)
-        mws._spawn_worker(1)
-        mws._spawn_worker(2)
+    try:
+        with patch.object(mws._mp_ctx, 'Process', _FakeProc):
+            for worker_id in range(3):
+                mws._spawn_worker(worker_id)
 
-    # args = (app, sockets, ssl, worker_id, max_conn, sqd, wqd, protocol_sockets)
-    assert captured['bb-worker-0'][7] == sentinel, 'worker 0 must own the broker sockets'
-    assert captured['bb-worker-1'][7] is None, 'worker 1 must be HTTP-only'
-    assert captured['bb-worker-2'][7] is None, 'worker 2 must be HTTP-only'
+        def speaks_of(name):
+            listeners = captured[name][1]      # args = (app, listeners, ...)
+            return sorted(listener.speaks for listener, _socks in listeners)
+
+        assert speaks_of('bb-worker-0') == ['http', 'mqtt'], 'worker 0 owns the broker'
+        assert speaks_of('bb-worker-1') == ['http'], 'worker 1 serves the shared one only'
+        assert speaks_of('bb-worker-2') == ['http'], 'worker 2 serves the shared one only'
+
+        owners = sum('mqtt' in speaks_of(f'bb-worker-{i}') for i in range(3))
+        assert owners == 1, 'a stateful protocol must have exactly one owner'
+    finally:
+        broker.close()
 
 
 def test_multiworker_http_scales_while_raw_stays_on_worker0(http_and_raw_app):
     """End-to-end success criterion: with workers=2 and a port-bound protocol,
     HTTP is served (by any worker) AND the raw protocol round-trips (worker 0)."""
     master = ASGIServer(http_and_raw_app)
-    master.open_socket(0)  # binds HTTP + the echo port; populates _protocol_sockets
+    master.open_socket(0)  # binds HTTP + the echo port, both as listeners
     http_port = master.port
     echo_port = master.protocol_ports['echo']
 
     mws = MultiWorkerServer(
-        http_and_raw_app, master.raw_sockets, None, workers=2,
-        protocol_sockets=master._protocol_sockets,
-    )
+        http_and_raw_app, master.bound_listeners, None, workers=2)
     mws._spawn_all()
     time.sleep(0.6)  # let workers enter their event loops
 
@@ -356,7 +377,9 @@ def test_serve_keeps_workers_for_port_bindings_without_reload(http_and_raw_app):
 
     assert MockMWS.called, 'multi-worker path must be taken (not forced to single-worker)'
     assert MockMWS.call_args.kwargs['workers'] == 4, 'workers must not be downgraded'
-    assert MockMWS.call_args.kwargs['protocol_sockets'], 'broker sockets must be handed off'
+    handed = MockMWS.call_args.args[1]
+    assert any(listener.speaks == 'echo' for listener, _socks in handed), \
+        'broker sockets must be handed off'
 
 
 def test_serve_forces_single_worker_for_port_bindings_with_reload(http_and_raw_app):

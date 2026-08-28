@@ -248,8 +248,6 @@ class Server:
                                    or _PR())
         # name -> bound port, populated by open_socket for port-bound protocols.
         self.protocol_ports: dict[str, int] = {}
-        # list of (raw_sockets, binding) bound for non-ASGI protocols.
-        self._protocol_sockets: list = []
         #: Live connection tasks — what a shutdown drain waits on.
         self._connection_tasks: set = set()
         self._stopping = False
@@ -695,7 +693,18 @@ class Server:
                 continue
             bound_port = socks[0].getsockname()[1]
             self.protocol_ports[binding.name] = bound_port
-            self._protocol_sockets.append((socks, binding))
+            # ``tls=True`` on a registry binding means the server's certificate;
+            # a binding has no way to name one of its own.  Refused here rather
+            # than at serve time so a misconfiguration fails before workers fork.
+            if binding.tls and self.ssl_context is None:
+                raise RuntimeError(
+                    f'Raw protocol binding {binding.name!r} requires TLS '
+                    f'(tls=True) but the server has no certificate configured '
+                    f'— pass certfile/keyfile or an ssl_context.')
+            self.bound_listeners.append((
+                Listener(Tcp(bound_port), speaks=binding.name,
+                         tls=self._raw_tls_context() if binding.tls else None),
+                socks))
             logger.info('Protocol %r listening on port %d', binding.name, bound_port)
 
     def close_socket(self):
@@ -706,9 +715,6 @@ class Server:
                 s.close()
         if not self.bound_listeners:
             for s in getattr(self, 'raw_sockets', []):
-                s.close()
-        for socks, _ in self._protocol_sockets:
-            for s in socks:
                 s.close()
 
     async def startup(self):
@@ -754,26 +760,13 @@ class Server:
         # none.  ``None`` is a group like any other; it is the cleartext one.
         groups: dict[object, list] = defaultdict(list)
         for listener, socks in self.bound_listeners:
-            factory = self.connection_protocol_factory()
-            for sock in socks:
-                groups[listener.tls].append((sock, factory))
-
-        raw_tls_bindings = [binding for _socks, binding in self._protocol_sockets
-                            if binding.tls]
-        if raw_tls_bindings and self.ssl_context is None:
-            names = ', '.join(binding.name for binding in raw_tls_bindings)
-            raise RuntimeError(
-                f'Raw protocol binding(s) [{names}] require TLS (tls=True) '
-                f'but the server has no certificate configured — pass '
-                f'certfile/keyfile or an ssl_context.')
-        # ``tls=True`` on a registry binding still means the server's
-        # certificate; it has no way to name one of its own.
-        raw_tls_context = self._raw_tls_context() if raw_tls_bindings else None
-        for socks, binding in self._protocol_sockets:
+            # ``speaks`` is a name; the binding it names is resolved here, so a
+            # listener stays independent of the order things were registered in.
+            binding = (None if listener.speaks == HTTP else
+                       self._protocol_registry.raw_bindings.get(listener.speaks))
             factory = self.connection_protocol_factory(binding)
             for sock in socks:
-                groups[raw_tls_context if binding.tls else None].append(
-                    (sock, factory))
+                groups[listener.tls].append((sock, factory))
 
         async with AsyncExitStack() as stack:
             servers = []

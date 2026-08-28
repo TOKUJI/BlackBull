@@ -23,6 +23,7 @@ from http import HTTPMethod
 import pytest
 
 from blackbull import BlackBull
+from blackbull.server.listener import Listener, Tcp
 from blackbull.server.multiworker import MultiWorkerServer
 
 
@@ -69,7 +70,7 @@ def test_a_request_in_flight_when_shutdown_starts_still_finishes(slow_app):
     is what an operator draining a node actually observes.
     """
     sock, port = _listener()
-    mws = MultiWorkerServer(slow_app, [sock], None, workers=2)
+    mws = MultiWorkerServer(slow_app, [(Listener(Tcp(port)), [sock])], None, workers=2)
     mws._spawn_all()
     time.sleep(0.8)
 
@@ -103,7 +104,7 @@ def test_a_replacement_worker_serves_requests(slow_app):
     can break without changing any count.
     """
     sock, port = _listener()
-    mws = MultiWorkerServer(slow_app, [sock], None, workers=1)
+    mws = MultiWorkerServer(slow_app, [(Listener(Tcp(port)), [sock])], None, workers=1)
     mws._spawn_all()
     time.sleep(0.8)
     try:
@@ -140,7 +141,7 @@ def test_the_listening_socket_survives_a_worker_generation(slow_app):
     early breaks both, and this is the cheaper of the two to run.
     """
     sock, port = _listener()
-    mws = MultiWorkerServer(slow_app, [sock], None, workers=1)
+    mws = MultiWorkerServer(slow_app, [(Listener(Tcp(port)), [sock])], None, workers=1)
     mws._spawn_all()
     time.sleep(0.8)
     try:

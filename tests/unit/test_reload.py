@@ -236,6 +236,7 @@ def test_watcher_stop_is_idempotent(tmp_path: Path):
 def test_reload_disables_reuseport(monkeypatch):
     """With reload=True the master must hold the listening sockets (no
     SO_REUSEPORT per-worker close+rebind), even with workers>1."""
+    from blackbull.server.listener import Listener, Tcp
     from blackbull.server.multiworker import MultiWorkerServer
     from blackbull import BlackBull
 
@@ -246,13 +247,15 @@ def test_reload_disables_reuseport(monkeypatch):
     sock.listen(8)
 
     app = BlackBull()
-    mws = MultiWorkerServer(app, [sock], None, workers=2, reload=True)
+    mws = MultiWorkerServer(
+        app, [(Listener(Tcp(sock.getsockname()[1])), [sock])], None,
+        workers=2, reload=True)
     try:
         # Master must still hold the listening socket so it can hand it
         # off across exec.  Worker socket sets must reference the same
         # master sockets (shared, not per-worker rebound).
         assert mws._listening_sockets == [sock]
-        assert mws._worker_sockets[0] == [sock]
-        assert mws._worker_sockets[1] == [sock]
+        for worker_listeners in mws._worker_listeners:
+            assert [s for _l, socks in worker_listeners for s in socks] == [sock]
     finally:
         sock.close()

@@ -15,36 +15,32 @@ import os
 import signal
 
 from .affinity import apply_worker_affinity, make_offload_executor
+from .listener import HTTP
 from .recipient import _WS_READ_INLINE
 
 logger = logging.getLogger(__name__)
 
 
-def run_worker(app, raw_sockets, ssl_context, worker_id: int,
+def run_worker(app, bound_listeners, ssl_context, worker_id: int,
                max_connections: int,
                stream_queue_depth: int = 64,
-               ws_queue_depth: int = _WS_READ_INLINE,
-               protocol_sockets=None) -> None:
+               ws_queue_depth: int = _WS_READ_INLINE) -> None:
     """Entry point executed in each worker process.
 
     Parameters
     ----------
     app:
         The ASGI application callable (a BlackBull instance or any ASGI app).
-    raw_sockets:
-        Pre-bound socket objects inherited from the master via fork.
+    bound_listeners:
+        ``[(Listener, [socket, ...]), ...]`` inherited from the master via
+        fork — every listener this worker owns, which the master decided from
+        each listener's own ``workers`` field.
     ssl_context:
         TLS context to pass to asyncio.start_server, or None for plain HTTP.
     worker_id:
         Zero-based index used only for logging.
     max_connections:
         Per-worker connection limit; passed to ASGIServer.
-    protocol_sockets:
-        Pre-bound listener sets for stateful non-ASGI protocols (eg the MQTT
-        broker), as ``[(socks, binding), …]``.  The master hands these to a
-        single worker only (HTTP scales across all workers, but a stateful
-        broker must have one owner), so this is non-empty for that worker and
-        ``None`` for the rest.
     """
     # Workers should not respond to Ctrl+C directly — the master handles the
     # signal and sends SIGTERM to every worker for a coordinated shutdown.
@@ -81,22 +77,19 @@ def run_worker(app, raw_sockets, ssl_context, worker_id: int,
     server = ASGIServer(app, ssl_context=ssl_context, max_connections=max_connections,
                         stream_queue_depth=stream_queue_depth,
                         ws_queue_depth=ws_queue_depth)
-    # Inject the inherited sockets so ASGIServer.run() skips its own bind step.
-    server.raw_sockets = raw_sockets
-    server.port = raw_sockets[0].getsockname()[1] if raw_sockets else 0
-
-    # Adopt the stateful-protocol listeners (MQTT, …) if this is the worker the
-    # master designated to own them.  ASGIServer.run() serves whatever is in
-    # ``_protocol_sockets`` alongside the HTTP listener; an empty list (the
-    # other workers) just means HTTP-only.
-    if protocol_sockets:
-        server._protocol_sockets = list(protocol_sockets)
-        server.protocol_ports = {
-            binding.name: socks[0].getsockname()[1]
-            for socks, binding in protocol_sockets if socks
-        }
-        logger.info('Worker %d owns %d stateful protocol listener(s)',
-                    worker_id, len(protocol_sockets))
+    # Inject the inherited listeners so ASGIServer.run() skips its own bind
+    # step.  Whether this worker owns a broker is already decided — it is in
+    # the list or it is not.
+    server.bound_listeners = list(bound_listeners)
+    server._publish_socket_view()
+    server.protocol_ports = {
+        listener.speaks: socks[0].getsockname()[1]
+        for listener, socks in bound_listeners
+        if listener.speaks != HTTP and socks
+    }
+    if server.protocol_ports:
+        logger.info('Worker %d owns %d single-owner listener(s)',
+                    worker_id, len(server.protocol_ports))
 
     async def _serve() -> None:
         # Threads inherit the loop thread's affinity mask, so a pinned worker
