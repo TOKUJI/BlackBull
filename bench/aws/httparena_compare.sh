@@ -880,7 +880,8 @@ cat > "$LOCAL_DEST/provenance.md" <<EOF
 - Sprint tag: $SPRINT_TAG
 - Instance:   $INSTANCE_TYPE in $REGION
 - Public IP:  $SERVER_PUBLIC_IP
-- BlackBull:  blackbull==$BLACKBULL_VERSION ($([ "$LOCAL_BB_WHEEL" = "1" ] && echo "local wheel: $LOCAL_WHEEL_NAME" || echo "from PyPI"); repo commit $(cd "$REPO_ROOT" && git rev-parse --short HEAD))
+- BlackBull:  blackbull==$BLACKBULL_VERSION ($([ "$LOCAL_BB_WHEEL" = "1" ] && echo "local wheel: $LOCAL_WHEEL_NAME" || echo "from PyPI"))
+- Harness ref: $(cd "$REPO_ROOT" && git rev-parse --short HEAD) — the commit app.py / launcher.py / meta.json were rsynced from, which is NOT necessarily where the wheel came from
 - Wheel sha256: $([ -n "${LOCAL_WHEEL:-}" ] && sha256sum "$LOCAL_WHEEL" | awk '{print $1}' || echo n/a)  (n/a = PyPI install)
 - Profiles:   $PROFILES
 - Frameworks: $FRAMEWORKS
