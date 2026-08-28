@@ -6,7 +6,7 @@ import logging
 import ssl
 import sys
 from collections import defaultdict, deque
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 import time
 
@@ -24,13 +24,13 @@ from ..asgi import ASGIEvent
 logger = logging.getLogger(__name__)
 
 
-def _listener_from_args(port, unix_path, inherited_fd) -> Listener:
+def _listener_from_args(port, unix_path, inherited_fd, tls=None) -> Listener:
     """The old way of saying it — one port, one path, or one fd — as a listener."""
     if inherited_fd is not None:
-        return Listener(InheritedFd(inherited_fd))
+        return Listener(InheritedFd(inherited_fd), tls=tls)
     if unix_path is not None:
-        return Listener(Unix(unix_path))
-    return Listener(Tcp(port))
+        return Listener(Unix(unix_path), tls=tls)
+    return Listener(Tcp(port), tls=tls)
 
 
 def _address_of(sock) -> Tcp | Unix:
@@ -581,8 +581,12 @@ class Server:
                 self.bound_listeners = [(Listener(_address_of(inherited[0])),
                                          inherited)]
             else:
+                # certfile / keyfile / ssl_context are sugar: they build the
+                # context this one listener terminates.  A caller that names
+                # listeners says it per listener instead.
                 self._listeners = [
-                    _listener_from_args(port, unix_path, inherited_fd)]
+                    _listener_from_args(port, unix_path, inherited_fd,
+                                        self.ssl_context)]
 
         if not self.bound_listeners:
             self.bound_listeners = [(listener, self._bind_listener(listener, _cfg))
@@ -724,8 +728,17 @@ class Server:
 
     async def run(self, port=80):
         """Run an asyncio socket server with the setting in this object."""
-        if not hasattr(self, 'raw_sockets') or not self.raw_sockets:
-            self.open_socket(port)
+        if not self.bound_listeners:
+            if getattr(self, 'raw_sockets', None):
+                # A forked worker is handed the sockets the master bound.
+                # The handoff carries a flat list and one context, so every
+                # one of them terminates the server's — until it carries
+                # listeners, which is what lets workers differ per port.
+                self.bound_listeners = [
+                    (Listener(_address_of(sock), tls=self.ssl_context), [sock])
+                    for sock in self.raw_sockets]
+            else:
+                self.open_socket(port)
 
         # SocketManager wraps each socket in asyncio.start_server and closes all
         # servers on exit.  The shared HTTP listener uses client_connected_cb;
@@ -736,28 +749,37 @@ class Server:
         # LifespanManager drives the ASGI lifespan protocol; nesting it inside
         # SocketManager guarantees: startup completes before serve_forever() is
         # called, and shutdown completes before sockets are closed.
-        pairs = [(s, self.connection_protocol_factory())
-                 for s in self.raw_sockets]
-        raw_clear = [(s, self.connection_protocol_factory(binding))
-                     for socks, binding in self._protocol_sockets
-                     if not binding.tls for s in socks]
-        raw_tls = [(s, self.connection_protocol_factory(binding))
-                   for socks, binding in self._protocol_sockets
-                   if binding.tls for s in socks]
-        if raw_tls and self.ssl_context is None:
-            names = ', '.join(binding.name
-                              for _socks, binding in self._protocol_sockets
-                              if binding.tls)
+        # One group per distinct TLS context, because a listener terminates
+        # the certificate it names and its neighbour may name another — or
+        # none.  ``None`` is a group like any other; it is the cleartext one.
+        groups: dict[object, list] = defaultdict(list)
+        for listener, socks in self.bound_listeners:
+            factory = self.connection_protocol_factory()
+            for sock in socks:
+                groups[listener.tls].append((sock, factory))
+
+        raw_tls_bindings = [binding for _socks, binding in self._protocol_sockets
+                            if binding.tls]
+        if raw_tls_bindings and self.ssl_context is None:
+            names = ', '.join(binding.name for binding in raw_tls_bindings)
             raise RuntimeError(
                 f'Raw protocol binding(s) [{names}] require TLS (tls=True) '
                 f'but the server has no certificate configured — pass '
                 f'certfile/keyfile or an ssl_context.')
-        async with SocketManager(pairs, self.ssl_context) as servers, \
-                SocketManager(raw_clear, None) as raw_servers, \
-                SocketManager(raw_tls,
-                              self._raw_tls_context() if raw_tls else None
-                              ) as raw_tls_servers:
-            servers = servers + raw_servers + raw_tls_servers
+        # ``tls=True`` on a registry binding still means the server's
+        # certificate; it has no way to name one of its own.
+        raw_tls_context = self._raw_tls_context() if raw_tls_bindings else None
+        for socks, binding in self._protocol_sockets:
+            factory = self.connection_protocol_factory(binding)
+            for sock in socks:
+                groups[raw_tls_context if binding.tls else None].append(
+                    (sock, factory))
+
+        async with AsyncExitStack() as stack:
+            servers = []
+            for context, pairs in groups.items():
+                servers += await stack.enter_async_context(
+                    SocketManager(pairs, context))
             self._running_servers = servers
             async with LifespanManager(self.app):
                 logger.info(f'Server(s) created: {servers}')
