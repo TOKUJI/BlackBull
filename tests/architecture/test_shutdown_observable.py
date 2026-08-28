@@ -35,6 +35,12 @@ def slow_app():
     @app.route(path='/slow', methods=[HTTPMethod.GET])
     async def slow():
         import asyncio
+        import os
+        # Say the handler is running before it sleeps, so a test can send the
+        # signal *during* the request rather than guessing when that is.
+        started = os.environ.get('BB_TEST_STARTED_MARKER')
+        if started:
+            open(started, 'w').close()
         await asyncio.sleep(1.5)
         return b'finished'
 
@@ -43,6 +49,33 @@ def slow_app():
         return b'pong'
 
     return app
+
+
+def _await_ready(port: int, timeout: float = 20.0) -> None:
+    """Block until a worker answers, rather than guessing how long boot takes.
+
+    A fixed sleep is both slower and less reliable: on a loaded runner the
+    workers may not be accepting yet when it expires, and the request the test
+    means to catch mid-flight is instead refused by a listener that has already
+    closed.  That is what made this file fail on three of four CI Pythons.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            if _get(port, '/ping', timeout=2)[0] == 200:
+                return
+        except OSError:
+            time.sleep(0.05)
+    raise AssertionError(f'no worker answered /ping on {port} within {timeout}s')
+
+
+def _await_file(path, timeout: float = 20.0) -> None:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if path.exists():
+            return
+        time.sleep(0.02)
+    raise AssertionError(f'{path} never appeared within {timeout}s')
 
 
 def _listener() -> tuple[socket.socket, int]:
@@ -63,16 +96,19 @@ def _get(port: int, path: str, timeout: float = 10.0):
         conn.close()
 
 
-def test_a_request_in_flight_when_shutdown_starts_still_finishes(slow_app):
+def test_a_request_in_flight_when_shutdown_starts_still_finishes(
+        slow_app, tmp_path, monkeypatch):
     """Graceful means the request completes, not that the process waits.
 
     Asserted on the client's side — a body, not a process state — because that
     is what an operator draining a node actually observes.
     """
+    marker = tmp_path / 'handler-started'
+    monkeypatch.setenv('BB_TEST_STARTED_MARKER', str(marker))
     sock, port = _listener()
     mws = MultiWorkerServer(slow_app, [(Listener(Tcp(port)), [sock])], None, workers=2)
     mws._spawn_all()
-    time.sleep(0.8)
+    _await_ready(port)
 
     result: dict = {}
 
@@ -84,7 +120,7 @@ def test_a_request_in_flight_when_shutdown_starts_still_finishes(slow_app):
 
     caller = threading.Thread(target=call)
     caller.start()
-    time.sleep(0.5)                                   # handler is mid-sleep
+    _await_file(marker)                               # the handler is running
 
     try:
         mws._shutdown_all()                           # SIGTERM while in flight
@@ -106,7 +142,7 @@ def test_a_replacement_worker_serves_requests(slow_app):
     sock, port = _listener()
     mws = MultiWorkerServer(slow_app, [(Listener(Tcp(port)), [sock])], None, workers=1)
     mws._spawn_all()
-    time.sleep(0.8)
+    _await_ready(port)
     try:
         assert _get(port, '/ping') == (200, b'pong'), 'baseline'
 
@@ -143,7 +179,7 @@ def test_the_listening_socket_survives_a_worker_generation(slow_app):
     sock, port = _listener()
     mws = MultiWorkerServer(slow_app, [(Listener(Tcp(port)), [sock])], None, workers=1)
     mws._spawn_all()
-    time.sleep(0.8)
+    _await_ready(port)
     try:
         mws._processes[0].kill()
         mws._processes[0].join(timeout=5)
