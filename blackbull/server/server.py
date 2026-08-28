@@ -251,6 +251,9 @@ class Server:
         #: Live connection tasks — what a shutdown drain waits on.
         self._connection_tasks: set = set()
         self._stopping = False
+        #: The budget a drain in progress is working to.  ``run()`` reads it
+        #: to finish the job rather than returning into the loop teardown.
+        self._drain_timeout = None
         # Cache the dispatcher + aggregator pair once — both are
         # process-wide singletons.  Looking them up per accept is wasted
         # work on the hot connection-burst path.
@@ -790,6 +793,12 @@ class Server:
                 except* Exception as eg:
                     logger.error('Server error: %s', eg)
 
+                # The listeners closing is what ended the TaskGroup, and a
+                # request may still be unanswered.  Leaving now returns into
+                # asyncio.run(), which cancels it; finish the drain here.
+                if self._stopping:
+                    await self._drain(self._drain_timeout or 8.0)
+
         logger.info('Server has been stopped.')
 
     async def stop(self, drain_timeout: float = 8.0) -> None:
@@ -805,27 +814,41 @@ class Server:
         if self._stopping:
             return
         self._stopping = True
+        self._drain_timeout = drain_timeout
 
         # Close listeners first, so the drain is over a set that only shrinks.
         for srv in getattr(self, '_running_servers', ()):
             srv.close()
 
-        pending = [t for t in self._connection_tasks if not t.done()]
-        if pending:
-            logger.info('Draining %d connection(s), up to %.1fs',
-                        len(pending), drain_timeout)
-            _done, still = await asyncio.wait(pending, timeout=drain_timeout)
-            if still:
-                logger.warning(
-                    '%d connection(s) did not finish within %.1fs — cancelling',
-                    len(still), drain_timeout)
-                for task in still:
-                    task.cancel()
-                await asyncio.gather(*still, return_exceptions=True)
+        await self._drain(drain_timeout)
 
         for srv in getattr(self, '_running_servers', ()):
             with contextlib.suppress(Exception):
                 await srv.wait_closed()
+
+    async def _drain(self, drain_timeout: float) -> None:
+        """Let the connections already being served finish.  Idempotent.
+
+        Called by :meth:`stop` and again by :meth:`run` on its way out, because
+        closing the listeners is what ends ``serve_forever()`` and unwinds the
+        TaskGroup — so a drain started from a signal handler is racing its
+        caller's teardown, and returning into ``asyncio.run()`` would cancel
+        both the drain and the request it is protecting.  Whichever gets there
+        second finds nothing left to wait for.
+        """
+        pending = [t for t in self._connection_tasks if not t.done()]
+        if not pending:
+            return
+        logger.info('Draining %d connection(s), up to %.1fs',
+                    len(pending), drain_timeout)
+        _done, still = await asyncio.wait(pending, timeout=drain_timeout)
+        if still:
+            logger.warning(
+                '%d connection(s) did not finish within %.1fs — cancelling',
+                len(still), drain_timeout)
+            for task in still:
+                task.cancel()
+            await asyncio.gather(*still, return_exceptions=True)
 
     def wait_for_port(self, timeout: float = 10.0, poll_interval: float = 0.1):
         if self.port is None:

@@ -200,3 +200,63 @@ def test_the_listening_socket_survives_a_worker_generation(slow_app):
     finally:
         mws._shutdown_all()
         sock.close()
+
+
+@pytest.mark.asyncio
+async def test_run_does_not_return_while_a_drain_is_holding_a_request():
+    """``run()`` must not return while a request is still being answered.
+
+    **This does not reproduce the CI failure.**  It passes with the fix removed:
+    locally the drain always wins the race, whether ``stop()`` is awaited inline
+    or run as a task.  It is kept as a statement of the contract, not as the
+    regression guard — the guard is
+    ``test_a_request_in_flight_when_shutdown_starts_still_finishes`` under CI,
+    which is the only environment that has produced the losing order.
+
+    ``stop()`` closes the listeners, which is what ends ``serve_forever()`` and
+    unwinds the TaskGroup in ``run()``.  If ``run()`` returns there, it returns
+    into ``asyncio.run()``, which cancels every remaining task — the drain, and
+    the request the drain exists to protect.  The handler is then cut short and
+    the client sees a closed connection, which is precisely what a graceful
+    shutdown promises not to do.
+
+    Driven directly rather than through a fork and a signal, so the ordering is
+    the same but the timing is not a guess.
+    """
+    import asyncio
+
+    from blackbull.server.server import Server
+
+    started = asyncio.Event()
+    finished = False
+
+    app = BlackBull()
+
+    @app.route(path='/slow', methods=[HTTPMethod.GET])
+    async def slow():
+        nonlocal finished
+        started.set()
+        await asyncio.sleep(0.5)
+        finished = True
+        return b'finished'
+
+    server = Server(app)
+    server.open_socket(0)
+    port = server.port
+    runner = asyncio.create_task(server.run())
+    await asyncio.sleep(0.4)
+
+    caller = asyncio.create_task(asyncio.to_thread(_get, port, '/slow'))
+    await asyncio.wait_for(started.wait(), timeout=10)
+
+    # As a task, the way the worker's signal handler starts it -- awaiting it
+    # inline would let the drain finish before run() ever unwinds, which is
+    # the ordering the bug does not happen in.
+    stopper = asyncio.create_task(server.stop(drain_timeout=8.0))
+    await asyncio.wait_for(runner, timeout=10)
+
+    assert finished, ('run() returned while the handler was still running; in a '
+                      'worker that returns into asyncio.run(), which cancels it')
+    await asyncio.wait_for(stopper, timeout=10)
+    assert await asyncio.wait_for(caller, timeout=10) == (200, b'finished')
+    server.close_socket()
