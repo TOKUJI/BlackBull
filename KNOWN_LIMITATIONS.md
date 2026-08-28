@@ -115,8 +115,14 @@ listener — certificate from `certfile`/`keyfile` or `ssl_context`, with
 startup failing fast when `tls=True` has no certificate to use.  A
 TLS-terminating proxy in front of the raw socket is a fine alternative.
 
-A raw protocol also has a **single owner** — it is bound on worker 0 only,
-while HTTP scales across all workers.  See
+A raw protocol also has a **single owner** — one worker accepts on its port,
+while HTTP scales across all workers.  Registering it with a `detector` makes
+it reachable on the shared HTTP port as well, and that port is served by
+*every* worker: with `workers > 1` a protocol declared `stateful` (the
+default) stops claiming there and stays reachable on its own port, because a
+later exchange would otherwise be answered by a worker that never saw the
+earlier one.  A stateful protocol with **no** port of its own cannot be given
+an owner and is refused before the workers fork.  See
 [Workers](docs/deployment/workers.md) for the mechanics, including why
 `--reload` forces `workers=1` when a protocol port is bound.
 

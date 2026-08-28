@@ -85,6 +85,61 @@ so the editable install's metadata catches up.
   completion, and now states the contract in
   `docs/deployment/workers.md#shutdown`.
 
+### Added
+
+- **A deployment states the sockets it wants.**  `Server` bound one HTTP
+  listener — `self.port`, singular — and held one server-wide `ssl_context`
+  that applied to it.  A deployment needing cleartext and TLS at once could not
+  say so, and ran one process per port to get there.
+
+  ```python
+  from blackbull import BlackBull, Listener, Tcp
+
+  app.run(listeners=[
+      Listener(Tcp(8080)),                 # cleartext: h1 / h2c / WebSocket
+      Listener(Tcp(8443), tls=ctx),        # TLS: ALPN picks h2 or http/1.1
+      Listener(Tcp(1883), speaks='mqtt'),  # one owner, by default
+  ], workers=4)
+  ```
+
+  Every listener is served by every worker unless it says otherwise, and TLS
+  belongs to the listener that terminates it — so two ports can present
+  different certificates, and configuring one no longer silently converts a
+  port to HTTPS.  `app.run(port=8000)` is unchanged: it builds one listener
+  and nothing else moves.  See `docs/guide/listeners.md`.
+
+- **`raw_handler(..., stateful=True)`** — whether an exchange depends on what
+  an earlier one left behind, true by default.  A stateful protocol is served
+  by one worker, so with `workers > 1` it is reached on its own port only; the
+  shared port would answer from whichever worker accepted.  One with *no*
+  dedicated port cannot be given an owner at all and is now refused before the
+  workers fork, naming the three ways out.  Pass `stateful=False` for a
+  protocol that keeps nothing between exchanges.
+
+### Fixed
+
+- **A port-bound protocol is bound however the HTTP listener was said.**
+  `open_socket` had four paths that each returned as soon as they had set the
+  HTTP sockets, and the protocol-socket bind was appended to the last one.  A
+  Unix-socket deployment, a socket-activated one, and **every process after an
+  auto-reload** therefore had no broker — the reload handoff carries the HTTP
+  descriptors only.  No warning, no test.
+
+- **A worker lets go of the listeners it does not serve.**  `fork` copies the
+  descriptor table, so every worker held the broker's listening socket and
+  every other worker's — measured 4 of 4.  Single ownership was a property of
+  what nobody called, not of who could; a worker now closes what it was not
+  given, in its own process.
+
+- **A stream's coroutine is built past the two places it may never reach**,
+  removing the `coroutine 'StreamActor.run' was never awaited` warning (EC2
+  count 4 → 0 across sixteen profiles).
+
+- The `AttributeError: 'NoneType' object has no attribute 'close'` that
+  survived the v0.78.1 log work is **not BlackBull's** — a CPython defect in
+  `selector_events.py`, reproduced deterministically on 3.12, 3.13 and 3.14 and
+  reported upstream as [gh-156512](https://github.com/python/cpython/issues/156512).
+
 ## [0.79.0] — 2026-08-28
 
 ### Added
