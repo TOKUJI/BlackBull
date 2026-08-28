@@ -341,16 +341,61 @@ if build_registry is not None and hasattr(app, 'enable_grpc'):
 
 
 # ---------------------------------------------------------------------------
-# Entry point — invoked by launcher.py once per listener port.
+# Entry point — invoked by launcher.py once, for every listener port.
 # ---------------------------------------------------------------------------
 
 def _parse_args():
     p = argparse.ArgumentParser(description='BlackBull on HttpArena')
-    p.add_argument('--port', type=int, required=True)
+    # One process serves every listener HttpArena asks for.  --port is the
+    # single-listener shorthand and stays for anything that still drives this
+    # file one port at a time.
+    p.add_argument('--port', type=int)
+    p.add_argument('--listen', type=int, action='append', default=[],
+                   metavar='PORT', help='cleartext listener (repeatable)')
+    p.add_argument('--listen-tls', type=int, action='append', default=[],
+                   metavar='PORT', help='TLS listener (repeatable)')
+    # Early-bind: the launcher bound the socket before importing blackbull,
+    # so the port answers during warm-up.  Handed over as descriptors.
+    p.add_argument('--listen-fd', type=int, action='append', default=[],
+                   metavar='FD', help='inherited cleartext socket (repeatable)')
+    p.add_argument('--listen-tls-fd', type=int, action='append', default=[],
+                   metavar='FD', help='inherited TLS socket (repeatable)')
     p.add_argument('--cert')
     p.add_argument('--key')
     p.add_argument('--workers', type=int, default=None)
-    return p.parse_args()
+    args = p.parse_args()
+    if args.port is None and not (args.listen or args.listen_tls
+                                  or args.listen_fd or args.listen_tls_fd):
+        p.error('give --port, or one or more of --listen / --listen-tls / '
+                '--listen-fd / --listen-tls-fd')
+    return args
+
+
+def _build_listeners(args):
+    """The sockets this process should serve, or None for the --port form."""
+    from blackbull import InheritedFd, Listener, Tcp
+
+    if not (args.listen or args.listen_tls or args.listen_fd
+            or args.listen_tls_fd):
+        return None
+
+    tls = None
+    if args.cert and args.key:
+        import ssl
+        tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        tls.load_cert_chain(certfile=args.cert, keyfile=args.key)
+        # ALPN is what picks h2 vs http/1.1, which is the only difference
+        # between HttpArena's two TLS ports.
+        tls.set_alpn_protocols(['h2', 'http/1.1'])
+    elif args.listen_tls or args.listen_tls_fd:
+        raise SystemExit('TLS listeners were asked for without --cert/--key')
+
+    return (
+        [Listener(Tcp(port)) for port in args.listen]
+        + [Listener(Tcp(port), tls=tls) for port in args.listen_tls]
+        + [Listener(InheritedFd(fd)) for fd in args.listen_fd]
+        + [Listener(InheritedFd(fd), tls=tls) for fd in args.listen_tls_fd]
+    )
 
 
 if __name__ == '__main__':
@@ -374,7 +419,10 @@ if __name__ == '__main__':
     if os.environ.get('BB_ACCESS_LOG', '0') not in ('0', '', 'false', 'False'):
         import logging as _logging
         _logging.getLogger('blackbull.access').setLevel(_logging.INFO)
-    if args.cert and args.key:
+    listeners = _build_listeners(args)
+    if listeners is not None:
+        app.run(listeners=listeners, workers=args.workers)
+    elif args.cert and args.key:
         app.run(port=args.port, certfile=args.cert, keyfile=args.key,
                 workers=args.workers)
     else:
