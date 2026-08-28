@@ -128,7 +128,10 @@ def test_a_request_in_flight_when_shutdown_starts_still_finishes(
         caller.join(timeout=15)
         sock.close()
 
-    assert 'error' not in result, result.get('error')
+    finished = marker.with_suffix('.finished')
+    assert 'error' not in result, (
+        f"{result.get('error')} — handler {'completed' if finished.exists() else 'was cut short'}, "
+        f"which says whether the drain ran or the response was lost after it")
     assert result.get('value') == (200, b'finished'), result
 
 
