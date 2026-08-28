@@ -40,6 +40,38 @@ _SHUTDOWN_TIMEOUT = 10.0  # seconds to wait for graceful shutdown before SIGKILL
 _RELOAD_TICK = 0.1        # finer poll when reload mode is active
 
 
+def _settle_stateful_bindings(app, workers: int) -> None:
+    """Decide how a stateful raw protocol is reachable once workers multiply.
+
+    A shared listener is served by every worker, so a stateful protocol
+    sniffed off it is answered by whichever worker accepted — and one that
+    never saw the earlier exchange answers wrongly rather than not at all.
+    A dedicated port has one owner and stays sound, so a binding that has one
+    simply stops claiming the shared port.  A binding that has *only* the
+    shared port cannot be given an owner, and is refused here — before the
+    fork, so the failure is one message and not one per worker.
+    """
+    registry = getattr(app, '_protocol_registry', None)
+    if registry is None:
+        return
+    for binding in registry.raw_bindings.values():
+        if not (binding.stateful and binding.detector is not None):
+            continue
+        if binding.port is None:
+            raise RuntimeError(
+                f'Protocol {binding.name!r} keeps state and is reachable only '
+                f'on the shared port, which {workers} workers serve — a later '
+                f'exchange would be answered by a worker that never saw the '
+                f'earlier one.  Give it a dedicated port, run with workers=1, '
+                f'or register it with stateful=False if it keeps nothing '
+                f'between exchanges.')
+        binding.disable_shared_dispatch()
+        logger.info(
+            'Protocol %r keeps state: reachable on port %d only, not the '
+            'shared listener, because %d workers serve it.',
+            binding.name, binding.port, workers)
+
+
 class MultiWorkerServer:
     """Spawns and supervises N worker processes.
 
@@ -76,6 +108,8 @@ class MultiWorkerServer:
         # else.  A single-owner listener (a stateful broker) stays on the
         # master's socket so a respawned worker 0 re-inherits it.
         bound_listeners = list(bound_listeners)
+        if workers > 1:
+            _settle_stateful_bindings(app, workers)
         self._shared = [(l, socks) for l, socks in bound_listeners
                         if l.workers == 'all']
         self._single_owner = [(l, socks) for l, socks in bound_listeners

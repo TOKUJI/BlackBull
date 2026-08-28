@@ -1262,7 +1262,8 @@ class BlackBull:
         detector: object | None = None,
         port: int | None = None,
         tls: bool = False,
-    ) -> None:
+        stateful: bool = True,
+    ):
         """Register a handler for a non-ASGI (raw) protocol.
 
         The handler is an async callable ``(reader, writer, ctx) -> None`` that
@@ -1273,21 +1274,34 @@ class BlackBull:
         Args:
             name: Protocol name (e.g. ``'echo'``, ``'mqtt'``); must be unique.
             handler: Async ``(reader, writer, ctx)`` coroutine.
-            detector: Reserved for first-byte sniffing on shared ports;
-                unused today.
+            detector: First-byte sniffing on the shared HTTP port, so this
+                protocol can be reached there as well as on its own port.
             port: Dedicated listening port for this protocol.
             tls: Serve this port through the server's TLS machinery (e.g.
                 ``mqtts://``).  Requires the server to be configured with a
                 certificate; startup fails fast otherwise.
+            stateful: Whether an exchange depends on what an earlier one left
+                behind — true by default.  A stateful protocol is served by one
+                worker, so with ``workers > 1`` it is reached on its own port
+                only; the shared port would answer from whichever worker
+                accepted.  A stateful protocol with *no* dedicated port cannot
+                be given one owner at all and is refused before the workers
+                fork.  Pass ``False`` for a protocol that keeps nothing between
+                exchanges.
+
+        Returns:
+            The registered binding.
         """
         if self._protocol_registry is None:
             from .server.protocol_registry import ProtocolRegistry  # noqa: PLC0415
             self._protocol_registry = ProtocolRegistry()
-        self._protocol_registry.register(name, handler,
-                                         detector=detector, port=port, tls=tls)
+        return self._protocol_registry.register(
+            name, handler, detector=detector, port=port, tls=tls,
+            stateful=stateful)
 
     def raw_handler(self, name: str, *, port: int | None = None,
-                    detector: object | None = None, tls: bool = False):
+                    detector: object | None = None, tls: bool = False,
+                    stateful: bool = True):
         """Decorator form of :meth:`register_protocol_handler`.
 
         ::
@@ -1300,7 +1314,7 @@ class BlackBull:
         def decorator(handler):
             self.register_protocol_handler(name, handler,
                                            detector=detector, port=port,
-                                           tls=tls)
+                                           tls=tls, stateful=stateful)
             return handler
         return decorator
 

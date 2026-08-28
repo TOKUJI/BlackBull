@@ -277,6 +277,7 @@ class RawBinding(ProtocolBinding):
         detector: ProtocolDetector | None = None,
         port: int | None = None,
         tls: bool = False,
+        stateful: bool = True,
     ) -> None:
         self.name = name
         self.handler = handler
@@ -285,6 +286,14 @@ class RawBinding(ProtocolBinding):
         # Serve this binding's port through the server's TLS
         # machinery (mqtts:// and friends).  Cleartext remains the default.
         self.tls = tls
+        # Whether an exchange depends on what an earlier one left behind.
+        # True by default: a raw protocol that keeps nothing is the rarer
+        # case, and mistaking a stateful one for stateless scatters its state
+        # silently, while the opposite mistake is refused out loud.
+        self.stateful = stateful
+        # Cleared by the master when more than one worker would answer this
+        # binding's shared-port connections.  A dedicated port is unaffected.
+        self._shared_dispatch = True
 
     @property
     def detect_prefix_len(self) -> int:
@@ -298,8 +307,20 @@ class RawBinding(ProtocolBinding):
     def claims(self, prefix: bytes, alpn: str | None) -> bool:
         """A raw binding claims a shared-port connection when its detector
         recognises the first bytes.  Port-bound bindings (no detector) never
-        claim via detection — they own their own listening socket instead."""
+        claim via detection — they own their own listening socket instead.
+
+        A stateful binding stops claiming once the shared listener is served
+        by more than one worker: whichever worker accepted would answer, and
+        the ones that never saw the earlier exchange would answer wrongly.
+        Its dedicated port is unaffected — that is where it stays reachable.
+        """
+        if not self._shared_dispatch:
+            return False
         return self.detector is not None and self.detector.detect(prefix, alpn)
+
+    def disable_shared_dispatch(self) -> None:
+        """Stop claiming shared-port connections.  Called by the master."""
+        self._shared_dispatch = False
 
     async def serve(self, conn: ConnectionView) -> None:
         # The handler owns the connection for its whole lifetime (long-lived,
@@ -347,6 +368,7 @@ class ProtocolRegistry:
         detector: ProtocolDetector | None = None,
         port: int | None = None,
         tls: bool = False,
+        stateful: bool = True,
     ) -> RawBinding:
         """Register a non-ASGI protocol handler.  Raises on duplicate name.
 
@@ -359,7 +381,7 @@ class ProtocolRegistry:
         if name in self._ports or name in {b.name for b in self._cleartext}:
             raise ValueError(f'Protocol {name!r} already registered')
         binding = RawBinding(name, handler, detector=detector, port=port,
-                             tls=tls)
+                             tls=tls, stateful=stateful)
         self._ports[name] = binding
         self._detection_order = (tuple(self._ports.values())
                                  + tuple(self._cleartext))
