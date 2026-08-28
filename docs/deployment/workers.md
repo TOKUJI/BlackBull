@@ -189,10 +189,11 @@ The defaults match Apache's `LimitRequestLine` /
 
 ## Shutdown
 
-On `SIGTERM` the master signals every worker and waits up to ten seconds
-before `SIGKILL`. A worker that receives it **stops accepting and lets the
-requests it already accepted finish**, for up to eight seconds — inside the
-master's budget, so the wait ends in the worker rather than in a kill.
+On `SIGTERM` the master signals every worker and waits before `SIGKILL`. A
+worker that receives it **stops accepting and lets the requests it already
+accepted finish**, for `BB_WORKER_DRAIN_TIMEOUT` — which sits inside the
+master's wait, so the drain ends in the worker rather than in a kill.
+Raising it past the master's wait only moves the deadline.
 
 Nothing in flight is cancelled while that budget lasts. A cancelled handler
 means a client holding a half-written response, which is worse than the wait.
@@ -208,11 +209,11 @@ your deploy started.
 draining them rather than by killing them.
 
 ```
-SIGTERM ──▶ close listeners ──▶ drain accepted connections (≤8s)
+SIGTERM ──▶ close listeners ──▶ drain accepted connections
                                         │
-                              still running at 8s ──▶ cancel
+                        BB_WORKER_DRAIN_TIMEOUT reached ──▶ cancel
                                         │
-                              master still waiting at 10s ──▶ SIGKILL
+                          master's wait exhausted ──▶ SIGKILL
 ```
 
 ## Scaling ceiling — plan against physical cores

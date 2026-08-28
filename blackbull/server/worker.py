@@ -20,12 +20,6 @@ from .recipient import _WS_READ_INLINE
 logger = logging.getLogger(__name__)
 
 
-#: Seconds a worker spends letting accepted connections finish after SIGTERM.
-#: Must stay inside ``MultiWorkerServer``'s ``shutdown_timeout`` (10 s) so the
-#: wait ends in our own cancel rather than the master's SIGKILL.
-_DRAIN_TIMEOUT = 8.0
-
-
 def run_worker(app, raw_sockets, ssl_context, worker_id: int,
                max_connections: int,
                stream_queue_depth: int = 64,
@@ -121,15 +115,12 @@ def run_worker(app, raw_sockets, ssl_context, worker_id: int,
         if offload_mask is not None:
             loop.set_default_executor(make_offload_executor(offload_mask))
 
-        # SIGTERM now stops the loop instead of the process.  ``stop()`` closes
-        # the listeners and waits for the connections already being served;
+        # SIGTERM stops the loop instead of the process.  ``stop()`` closes the
+        # listeners and waits for the connections already being served;
         # ``add_signal_handler`` is used rather than ``signal.signal`` so the
         # callback runs on the loop, where awaiting is possible.
-        #
-        # The drain budget sits inside the master's ``shutdown_timeout`` (10 s)
-        # so the wait ends in our cancel rather than its SIGKILL.
         def _graceful(*_):
-            loop.create_task(server.stop(drain_timeout=_DRAIN_TIMEOUT))
+            loop.create_task(server.stop(drain_timeout=cfg.worker_drain_timeout))
 
         try:
             loop.add_signal_handler(signal.SIGTERM, _graceful)

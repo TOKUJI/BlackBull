@@ -11,8 +11,8 @@ the line lands.
 Measured before the fix, on a sixteen-profile EC2 run: ten of these, all on
 HTTP/2 lanes.  Three local reproduction attempts missed it (synthetic aborts,
 h2load torn down mid-flight, multiplexed streams) because none of them had
-tasks *queued on the semaphore* when the cancellation arrived — the cap is 20
-by default, so it takes more than 20 concurrent streams plus a teardown.
+tasks *queued on the semaphore* when the cancellation arrived: it takes more
+concurrent streams than `h2_active_streams` allows, plus a teardown.
 """
 from __future__ import annotations
 

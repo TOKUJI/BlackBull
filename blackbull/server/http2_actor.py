@@ -143,19 +143,18 @@ def _build_h2_extensions(
 
 
 async def _run_guarded(make_coro, sem):
-    # BB_H2_ACTIVE_STREAMS / _1W semaphore: caps concurrently-running handlers.
-    # Without it, one high-mux connection can saturate the event loop with
-    # handler coroutines and starve connections handled by the same worker.
-    # Each acquire yields to the event loop, so stream tasks that cannot enter
-    # still receive frames; they just don't start the ASGI app call.
+    # Caps concurrently-running stream handlers, so one high-mux connection
+    # cannot saturate the event loop and starve the connections sharing it.
+    # Each acquire yields, so a stream that cannot enter still receives frames;
+    # it just does not start the ASGI app call.  The cap and its reasoning are
+    # ``h2_active_streams`` / ``h2_active_streams_1w`` in ``env.py``.
     #
     # *make_coro* is a factory, not a coroutine, and that is the whole point:
     # a task cancelled while parked on ``__aenter__`` never reaches the body,
-    # so a coroutine passed in ready-made would be destroyed un-awaited.  With
-    # a cap of 20 and a connection that dies while more streams are queued,
-    # that is one "coroutine 'StreamActor.run' was never awaited" per queued
-    # stream — measured at 19 out of 20 in a direct reproduction.  Built here,
-    # it is only built once the semaphore has let us through.
+    # so a coroutine handed in ready-made is destroyed un-awaited — one
+    # "coroutine 'StreamActor.run' was never awaited" per queued stream when a
+    # connection dies with streams still waiting.  Built here, it exists only
+    # once the semaphore has let us through.
     async with sem:
         await make_coro()
 
@@ -360,10 +359,12 @@ class HTTP2Actor(Actor):
         # Per-connection semaphore: caps concurrently-running stream handlers to
         # prevent a high-mux connection from starving other connections on the
         # same worker.  None means no cap.
-        # Single-worker uses BB_H2_ACTIVE_STREAMS_1W (default 20) because one
-        # event loop can be overwhelmed by 2,500 tasks at -c50 -m50.
-        # Multi-worker uses BB_H2_ACTIVE_STREAMS (default 0 = no limit) because
-        # SO_REUSEPORT distributes connections across workers.
+        # Two settings because the two deployments saturate differently: one
+        # worker meets every connection's streams on one loop, while
+        # SO_REUSEPORT spreads them.  Both caps and the measurements behind
+        # them live on ``h2_active_streams_1w`` / ``h2_active_streams`` in
+        # ``env.py``; restating a value here is how this comment came to claim
+        # the multi-worker cap was disabled when it has never been.
         if _cfg.workers == 1:
             _stream_cap = _cfg.h2_active_streams_1w
         else:

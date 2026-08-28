@@ -756,10 +756,10 @@ class Server:
         cancelled while the budget lasts — a cancelled handler is a client
         holding a half-written response, which is worse than the wait.
 
-        *drain_timeout* must sit **inside** the supervisor's own budget
-        (``MultiWorkerServer``'s ``shutdown_timeout``, 10 s), so that the wait
-        ends here rather than in a SIGKILL.  Whatever has not finished by then
-        is cancelled, because a shutdown that must complete still completes.
+        *drain_timeout* must sit **inside** the supervisor's own wait
+        (``MultiWorkerServer.shutdown_timeout``), so the drain ends here rather
+        than in a SIGKILL.  Whatever has not finished by then is cancelled,
+        because a shutdown that must complete still completes.
         """
         if self._stopping:
             return
