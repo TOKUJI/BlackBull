@@ -131,6 +131,10 @@ testing = [
     "pytest",
     "pytest-asyncio",
     "pytest-timeout",
+    # Test processes, one per core.  The suite is ~4x faster with it, and the
+    # isolation is worth as much as the speed: a worker per process means a
+    # module's import-time state cannot leak from one test file to another.
+    "pytest-xdist",
     "pytest-cov",
     "beartype",
     "pytest-beartype",

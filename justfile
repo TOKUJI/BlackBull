@@ -7,11 +7,11 @@ install:
 
 # Run the full test suite
 test:
-    uv run pytest -q
+    uv run pytest -q -n auto
 
 # Type-check with beartype instrumentation
 typecheck:
-    uv run pytest --beartype-packages=blackbull --timeout=30 -q --tb=short
+    uv run pytest --beartype-packages=blackbull --timeout=30 -q --tb=short -n auto
 
 # Build and serve docs locally
 docs:
