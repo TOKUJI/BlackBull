@@ -203,7 +203,7 @@ def test_the_listening_socket_survives_a_worker_generation(slow_app):
 
 
 @pytest.mark.asyncio
-async def test_run_does_not_return_while_a_drain_is_holding_a_request():
+async def test_run_does_not_return_while_a_drain_is_holding_a_request(caplog):
     """``run()`` must not return while a request is still being answered.
 
     **This does not reproduce the CI failure.**  It passes with the fix removed:
@@ -224,8 +224,18 @@ async def test_run_does_not_return_while_a_drain_is_holding_a_request():
     the same but the timing is not a guess.
     """
     import asyncio
+    import logging
 
+    from blackbull.server import sender as _sender
     from blackbull.server.server import Server
+
+    # The send path skips a write when the transport is already closing, and
+    # the access log is emitted in a finally either way -- so a dropped
+    # response looks like a served one from the server's side.  Open the gate
+    # that reports the skip, so this test can tell them apart.
+    caplog.set_level(logging.DEBUG, logger='blackbull.server.sender')
+    monkeypatch_debug = getattr(_sender, '_DEBUG', None)
+    _sender._DEBUG = True
 
     started = asyncio.Event()
     finished = False
@@ -258,5 +268,24 @@ async def test_run_does_not_return_while_a_drain_is_holding_a_request():
     assert finished, ('run() returned while the handler was still running; in a '
                       'worker that returns into asyncio.run(), which cancels it')
     await asyncio.wait_for(stopper, timeout=10)
-    assert await asyncio.wait_for(caller, timeout=10) == (200, b'finished')
+
+    # The handler finishing and the client receiving are different claims, and
+    # CI has shown them coming apart: an access-logged 200 with the client
+    # seeing nothing.  Report which side of the socket lost it.
+    try:
+        answer = await asyncio.wait_for(caller, timeout=10)
+    except Exception as exc:                              # noqa: BLE001
+        skipped = [r.getMessage() for r in caplog.records
+                   if 'write skipped' in r.getMessage()]
+        raise AssertionError(
+            f'handler completed ({finished}) and the server logged a response, '
+            f'but the client got {type(exc).__name__}: {exc}. '
+            f'send-path skips: {skipped or "none"} — a skip means the guard '
+            f'saw the transport already closing; none means it was lost later'
+        ) from exc
+    finally:
+        if monkeypatch_debug is not None:
+            _sender._DEBUG = monkeypatch_debug
+    assert answer == (200, b'finished'), answer
     server.close_socket()
+
