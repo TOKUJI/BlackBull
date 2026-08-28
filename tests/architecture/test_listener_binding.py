@@ -167,3 +167,64 @@ class TestTheSinglePortPathIsUnchanged:
             assert server.raw_sockets == expected
         finally:
             server.close_socket()
+
+
+class TestPortBoundRawProtocolsBindOnEveryPath:
+    """A registered broker port is bound whichever way the HTTP listener
+    was said.
+
+    It used to be bound only when the HTTP listener came from a plain TCP
+    port: ``open_socket`` had four paths that each returned as soon as they
+    had set ``raw_sockets``, and the protocol-socket bind was appended to
+    the last one.  So a Unix-socket deployment, a socket-activated one, and
+    every process after an auto-reload silently had no broker — the reload
+    handoff carries the HTTP fds only.
+    """
+
+    @staticmethod
+    def _app_with_broker():
+        app = BlackBull()
+
+        @app.raw_handler('echo', port=0)
+        async def echo(reader, writer, ctx):  # pragma: no cover - never dialled
+            pass
+
+        return app
+
+    @staticmethod
+    def _broker_bound(server) -> bool:
+        return bool(server._protocol_sockets)
+
+    def test_bound_behind_a_unix_socket(self, tmp_path):
+        server = Server(self._app_with_broker())
+        server.open_socket(unix_path=str(tmp_path / 'bb.sock'))
+        try:
+            assert self._broker_bound(server)
+        finally:
+            server.close_socket()
+
+    def test_bound_behind_socket_activation(self):
+        listening = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listening.bind(('127.0.0.1', 0))
+        listening.listen(16)
+        server = Server(self._app_with_broker())
+        server.open_socket(inherited_fd=listening.detach())
+        try:
+            assert self._broker_bound(server)
+        finally:
+            server.close_socket()
+
+    def test_bound_after_an_auto_reload_handoff(self, monkeypatch):
+        """The re-exec hands over the HTTP fds; the broker rebinds here."""
+        handed = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        handed.bind(('127.0.0.1', 0))
+        handed.listen(16)
+        monkeypatch.setattr('blackbull.server.server.adopt_inherited_sockets',
+                            lambda: [handed])
+        server = Server(self._app_with_broker())
+        server.open_socket()
+        try:
+            assert server.raw_sockets == [handed]
+            assert self._broker_bound(server)
+        finally:
+            server.close_socket()

@@ -574,21 +574,19 @@ class Server:
             # race, no missed SYNs).
             inherited = adopt_inherited_sockets()
             if inherited:
+                # The handoff carries the HTTP fds only, so a broker port is
+                # rebound below rather than adopted.  Safe: sockets are
+                # CLOEXEC, and the caller terminates the workers holding
+                # copies before re-execing, so the port is free by now.
                 self.bound_listeners = [(Listener(_address_of(inherited[0])),
                                          inherited)]
-                self._publish_socket_view()
-                return
-            self._listeners = [_listener_from_args(port, unix_path, inherited_fd)]
-            # Registry-bound raw protocols have always been bound only on the
-            # plain-TCP path; a Unix socket or an inherited fd left them
-            # unbound.  Preserved rather than fixed here — see the design's
-            # open questions — because making them appear is a new socket.
-            bind_protocol_sockets = (unix_path is None and inherited_fd is None)
-        else:
-            bind_protocol_sockets = True
+            else:
+                self._listeners = [
+                    _listener_from_args(port, unix_path, inherited_fd)]
 
-        self.bound_listeners = [(listener, self._bind_listener(listener, _cfg))
-                                for listener in self._listeners]
+        if not self.bound_listeners:
+            self.bound_listeners = [(listener, self._bind_listener(listener, _cfg))
+                                    for listener in self._listeners]
         self._publish_socket_view()
 
         # Do NOT wrap sockets with ssl_context here.
@@ -597,8 +595,7 @@ class Server:
         # Pre-wrapping with ssl_context.wrap_socket() causes a double-TLS
         # layer and breaks the handshake.
 
-        if bind_protocol_sockets:
-            self._bind_protocol_sockets(_cfg)
+        self._bind_protocol_sockets(_cfg)
 
     def _bind_listener(self, listener, _cfg) -> list:
         """Bind one listener and return its sockets."""
