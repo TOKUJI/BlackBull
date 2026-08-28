@@ -51,6 +51,15 @@ echo "    sha256: $WHEEL_SHA"
 if [ ! -d "$HARENA_DIR/.git" ]; then
     echo ">>> cloning harness to $HARENA_DIR ..."
     git clone --depth 1 "$HARENA_REPO" "$HARENA_DIR"
+elif [ "${HARENA_REFRESH:-1}" = "1" ]; then
+    # EC2 clones fresh on every run; this one persisted and did not, so the
+    # two drifted until a profile the entry subscribes to existed on one side
+    # and not the other -- and upstream force-pushes, so a fetch is not enough.
+    # The local patches below are re-applied every run, so a hard reset costs
+    # nothing.  HARENA_REFRESH=0 pins the clone when that is what you want.
+    echo ">>> refreshing harness at $HARENA_DIR ..."
+    git -C "$HARENA_DIR" fetch --depth 1 origin main
+    git -C "$HARENA_DIR" reset --hard FETCH_HEAD
 else
     echo "harness present at $HARENA_DIR"
 fi
