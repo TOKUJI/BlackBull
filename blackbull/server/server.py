@@ -225,14 +225,8 @@ class Server:
         self.protocol_ports: dict[str, int] = {}
         # list of (raw_sockets, binding) bound for non-ASGI protocols.
         self._protocol_sockets: list = []
-        # Live connection tasks.  Held so a shutdown has something to wait on:
-        # each task owned its own lifetime and nothing aggregated them, so
-        # "let the in-flight finish" had no referent.  Discarded by the same
-        # done-callback that already reports failures.
+        #: Live connection tasks — what a shutdown drain waits on.
         self._connection_tasks: set = set()
-        # Set when a graceful stop begins: listeners are closed and no new
-        # connection is accepted, but the ones already being served are not
-        # touched.
         self._stopping = False
         # Cache the dispatcher + aggregator pair once — both are
         # process-wide singletons.  Looking them up per accept is wasted
@@ -750,24 +744,18 @@ class Server:
     async def stop(self, drain_timeout: float = 8.0) -> None:
         """Stop accepting, then let the connections already being served finish.
 
-        What the loop owes work still on it when the process is asked to stop:
-        a request that was accepted gets to produce its response, and a
-        connection that was not yet accepted never becomes one.  Nothing is
-        cancelled while the budget lasts — a cancelled handler is a client
-        holding a half-written response, which is worse than the wait.
-
-        *drain_timeout* must sit **inside** the supervisor's own wait
-        (``MultiWorkerServer.shutdown_timeout``), so the drain ends here rather
-        than in a SIGKILL.  Whatever has not finished by then is cancelled,
-        because a shutdown that must complete still completes.
+        Nothing in flight is cancelled while *drain_timeout* lasts: a cancelled
+        handler leaves a client holding a half-written response.  Whatever is
+        left at the deadline is cancelled — a shutdown that must complete still
+        completes.  Keep the budget inside
+        ``MultiWorkerServer.shutdown_timeout`` so the drain ends here and not
+        in a SIGKILL.
         """
         if self._stopping:
             return
         self._stopping = True
 
-        # Close the listeners first, so the drain below is over a set that can
-        # only shrink.  ``close()`` is synchronous and stops accept(); the
-        # sockets are released when the SocketManager unwinds.
+        # Close listeners first, so the drain is over a set that only shrinks.
         for srv in getattr(self, '_running_servers', ()):
             srv.close()
 

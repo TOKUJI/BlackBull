@@ -49,17 +49,9 @@ def run_worker(app, raw_sockets, ssl_context, worker_id: int,
     # Workers should not respond to Ctrl+C directly — the master handles the
     # signal and sends SIGTERM to every worker for a coordinated shutdown.
     signal.signal(signal.SIGINT, signal.SIG_IGN)
-    # ``fork`` inherits the SIGTERM handler the master installed — the one
-    # that flips ``_stopped`` to break the supervision loop, which inside a
-    # worker is a no-op that also suppresses the default terminate.  The old
-    # answer was ``SIG_DFL``: the worker died where it stood, because there
-    # was no handler that stopped the *loop* and dying was the only thing that
-    # worked.  A request in flight was dropped, and the master's
-    # ``shutdown_timeout`` was a wait rather than a drain.
-    #
-    # The loop-stopping handler is installed inside ``_serve`` below, where
-    # there is a running loop to attach it to.  Until then, SIG_DFL remains
-    # the right disposition: a signal arriving before the loop exists has
+    # The handler inherited from the master is a no-op here that also
+    # suppresses the default terminate.  SIG_DFL until ``_serve`` installs the
+    # loop-stopping one below: a signal arriving before the loop exists has
     # nothing to stop.
     signal.signal(signal.SIGTERM, signal.SIG_DFL)
 
@@ -115,18 +107,14 @@ def run_worker(app, raw_sockets, ssl_context, worker_id: int,
         if offload_mask is not None:
             loop.set_default_executor(make_offload_executor(offload_mask))
 
-        # SIGTERM stops the loop instead of the process.  ``stop()`` closes the
-        # listeners and waits for the connections already being served;
-        # ``add_signal_handler`` is used rather than ``signal.signal`` so the
-        # callback runs on the loop, where awaiting is possible.
-        def _graceful(*_):
+        def _drain_and_stop(*_):
             loop.create_task(server.stop(drain_timeout=cfg.worker_drain_timeout))
 
         try:
-            loop.add_signal_handler(signal.SIGTERM, _graceful)
+            # On the loop, not signal.signal, so the handler can await.
+            loop.add_signal_handler(signal.SIGTERM, _drain_and_stop)
         except (NotImplementedError, RuntimeError):
-            # No loop signal support (Windows, or a non-main thread).  The
-            # SIG_DFL disposition set above still applies.
+            # No loop signal support; SIG_DFL above still applies.
             logger.debug('Worker %d: loop signal handler unavailable', worker_id)
 
         await server.run()

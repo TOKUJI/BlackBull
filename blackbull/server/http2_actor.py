@@ -142,21 +142,15 @@ def _build_h2_extensions(
 
 
 
-async def _run_guarded(make_coro, sem):
-    # Caps concurrently-running stream handlers, so one high-mux connection
-    # cannot saturate the event loop and starve the connections sharing it.
-    # Each acquire yields, so a stream that cannot enter still receives frames;
-    # it just does not start the ASGI app call.  The cap and its reasoning are
-    # ``h2_active_streams`` / ``h2_active_streams_1w`` in ``env.py``.
-    #
-    # *make_coro* is a factory, not a coroutine, and that is the whole point:
-    # a task cancelled while parked on ``__aenter__`` never reaches the body,
-    # so a coroutine handed in ready-made is destroyed un-awaited — one
-    # "coroutine 'StreamActor.run' was never awaited" per queued stream when a
-    # connection dies with streams still waiting.  Built here, it exists only
-    # once the semaphore has let us through.
-    async with sem:
-        await make_coro()
+async def _run_when_stream_cap_admits(start_stream, cap):
+    """Run *start_stream()* once *cap* admits it.
+
+    A factory rather than a coroutine: a task cancelled while still waiting
+    never reaches the body, and a coroutine built before that is destroyed
+    un-awaited.
+    """
+    async with cap:
+        await start_stream()
 
 
 # ---------------------------------------------------------------------------
@@ -359,12 +353,8 @@ class HTTP2Actor(Actor):
         # Per-connection semaphore: caps concurrently-running stream handlers to
         # prevent a high-mux connection from starving other connections on the
         # same worker.  None means no cap.
-        # Two settings because the two deployments saturate differently: one
-        # worker meets every connection's streams on one loop, while
-        # SO_REUSEPORT spreads them.  Both caps and the measurements behind
-        # them live on ``h2_active_streams_1w`` / ``h2_active_streams`` in
-        # ``env.py``; restating a value here is how this comment came to claim
-        # the multi-worker cap was disabled when it has never been.
+        # Two settings: one worker meets every connection's streams on one
+        # loop, SO_REUSEPORT spreads them.
         if _cfg.workers == 1:
             _stream_cap = _cfg.h2_active_streams_1w
         else:
@@ -1302,15 +1292,7 @@ class HTTP2Actor(Actor):
         # via ``RequestActor``), and its failure handling is the one a peer
         # can act on — a raising stream is reset with INTERNAL_ERROR rather
         # than left to stop without explanation.
-        # A *factory*, not a coroutine.  A coroutine built here is owned by
-        # whatever runs it, and between here and running there are two places
-        # that may never get there: the semaphore in ``_run_guarded``, where a
-        # cancelled task never reaches the body, and ``create_task`` itself.
-        # Either one destroys a ready-made coroutine un-awaited, which Python
-        # reports whenever the GC reaches it — naming a stream unrelated to
-        # wherever the line lands.  Built on the far side of both, there is
-        # nothing to strand.
-        def _make_stream_coro():
+        def _start_stream():
             return StreamActor(
                 stream_id=stream_id,
                 conn=conn,
@@ -1327,7 +1309,7 @@ class HTTP2Actor(Actor):
         if timeout > 0:
             _sp = conn.path
 
-            async def _timed(make=_make_stream_coro, sid=stream_id, t=timeout,
+            async def _timed(make=_start_stream, sid=stream_id, t=timeout,
                              sp=_sp):
                 try:
                     await asyncio.wait_for(make(), timeout=t)
@@ -1340,19 +1322,17 @@ class HTTP2Actor(Actor):
                     await self.send_frame(self.factory.rst_stream(sid, ErrorCodes.CANCEL))
             make_final = _timed
         else:
-            make_final = _make_stream_coro
+            make_final = _start_stream
 
         try:
             if self._stream_semaphore is not None:
                 task = tg.create_task(
-                    _run_guarded(make_final, self._stream_semaphore))
+                    _run_when_stream_cap_admits(make_final, self._stream_semaphore))
             else:
                 task = tg.create_task(make_final())
         except RuntimeError:
-            # The connection's TaskGroup is already winding down — a HEADERS
-            # frame arrived in the same turn the peer went away.  Nothing was
-            # built, so nothing is stranded; there is no peer left to
-            # RST_STREAM either.
+            # HEADERS arrived in the turn the connection went away.  No peer
+            # left to RST_STREAM.
             if _DEBUG:
                 logger.debug('stream %d not started: connection closing',
                              stream_id)
