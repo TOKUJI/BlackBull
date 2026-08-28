@@ -37,6 +37,8 @@ from .response import wrap_native_send
 from .asgi import ASGIReceiveCallable, ASGISendCallable
 from .config import AppConfig
 from .logger import debug_gate  # noqa: E402
+from .server.protocol_registry import RawBinding
+
 logger = logging.getLogger(__name__)
 #: Read once at import: a disabled ``logger.debug`` on a per-request path
 #: costs 24 executed instructions to emit nothing.  Same bargain as
@@ -1263,7 +1265,7 @@ class BlackBull:
         port: int | None = None,
         tls: bool = False,
         stateful: bool = True,
-    ):
+    ) -> RawBinding:
         """Register a handler for a non-ASGI (raw) protocol.
 
         The handler is an async callable ``(reader, writer, ctx) -> None`` that
@@ -1359,6 +1361,7 @@ class BlackBull:
     def run(self, certfile=None, keyfile=None, port: int | None = None,
             unix_path: str | None = None,
             inherited_fd: int | None = None,
+            listeners: list | None = None,
             workers: int | None = None,
             max_connections: int | None = None,
             stream_queue_depth: int | None = None,
@@ -1418,6 +1421,13 @@ class BlackBull:
             self._config,
         )
         log_config_sources(resolved, sources)
+        if listeners:
+            # A listener list is a Python object, not something an env var or
+            # a config file resolves; and it states the socket itself, so the
+            # resolved port/path/fd would contradict it rather than default it.
+            for said_another_way in ('port', 'unix_path', 'inherited_fd'):
+                resolved.pop(said_another_way, None)
+            resolved['listeners'] = listeners
         serve(self, **resolved)
 
 
@@ -1425,6 +1435,7 @@ def serve(app, *,
           certfile=None, keyfile=None, port=0,
           unix_path: str | None = None,
           inherited_fd: int | None = None,
+          listeners: list | None = None,
           workers: int | None = None,
           max_connections: int | None = None,
           stream_queue_depth: int | None = None,
@@ -1446,9 +1457,19 @@ def serve(app, *,
     watched file changes (master then re-execs itself, see
     :mod:`blackbull.server.reload`).
 
+    *listeners* states the sockets directly — one
+    :class:`~blackbull.server.listener.Listener` each, saying where it is,
+    what speaks there and whether TLS terminates there.  It replaces *port*,
+    *unix_path* and *inherited_fd* rather than joining them, so passing both
+    is refused.
+
     All integer parameters default to their corresponding ``BB_*``
     environment variables (see :mod:`blackbull.env`).
     """
+    if listeners and (port or unix_path is not None or inherited_fd is not None):
+        raise TypeError(
+            'listeners= states the sockets by itself; pass port / unix_path / '
+            'inherited_fd or listeners, not both.')
     from .env import get_settings as _get_settings  # noqa: PLC0415
     import os as _os  # noqa: PLC0415
     _cfg = _get_settings()
@@ -1497,6 +1518,7 @@ def serve(app, *,
             port=port,
             unix_path=unix_path,
             inherited_fd=inherited_fd,
+            listeners=listeners,
             max_connections=max_connections,
             stream_queue_depth=stream_queue_depth,
             ws_queue_depth=ws_queue_depth,
@@ -1512,7 +1534,8 @@ def serve(app, *,
     master_server = ASGIServer(app, certfile=certfile, keyfile=keyfile,
                                max_connections=max_connections,
                                stream_queue_depth=stream_queue_depth,
-                               ws_queue_depth=ws_queue_depth)
+                               ws_queue_depth=ws_queue_depth,
+                               listeners=listeners)
 
     # Warm up ONCE in the master, before the listening socket exists and before
     # workers are forked, so every worker inherits the warmed heap via COW.
@@ -1553,6 +1576,7 @@ def _serve_single_worker(
     port,
     unix_path,
     inherited_fd,
+    listeners,
     max_connections,
     stream_queue_depth,
     ws_queue_depth,
@@ -1584,6 +1608,7 @@ def _serve_single_worker(
                 port=port,
                 unix_path=unix_path,
                 inherited_fd=inherited_fd,
+                listeners=listeners,
                 max_connections=max_connections,
                 stream_queue_depth=stream_queue_depth,
                 ws_queue_depth=ws_queue_depth,
@@ -1594,13 +1619,15 @@ def _serve_single_worker(
 
 
 async def _run_single(app, *, certfile, keyfile, port, unix_path, inherited_fd,
-                      max_connections, stream_queue_depth, ws_queue_depth):
+                      listeners, max_connections, stream_queue_depth,
+                      ws_queue_depth):
     """Single-worker server loop — invoked from :func:`serve`."""
     from .server import ASGIServer  # noqa: PLC0415
     server = ASGIServer(app, certfile=certfile, keyfile=keyfile,
                         max_connections=max_connections,
                         stream_queue_depth=stream_queue_depth,
-                        ws_queue_depth=ws_queue_depth)
+                        ws_queue_depth=ws_queue_depth,
+                        listeners=listeners)
 
     # Warm up before binding.  No fork here, so no COW benefit, but the one
     # process is still warm before it accepts its first connection.  Runs on

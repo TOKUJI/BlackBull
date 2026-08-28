@@ -400,6 +400,26 @@ def test_serve_forces_single_worker_for_port_bindings_with_reload(http_and_raw_a
     assert MockMWS.call_args.kwargs['workers'] == 1, 'reload + protocol must force workers=1'
 
 
+def _await_workers(port, expected, timeout=15.0):
+    """Wait until *expected* distinct workers have answered on *port*.
+
+    Polling beats sleeping twice over: it is done as soon as the workers are
+    up rather than at a guessed deadline, and it fails with the count it
+    reached instead of with a request that arrived too early.
+    """
+    seen = set()
+    deadline = time.time() + timeout
+    while time.time() < deadline and len(seen) < expected:
+        try:
+            conn = http.client.HTTPConnection('127.0.0.1', port, timeout=2)
+            conn.request('GET', '/pid')
+            seen.add(conn.getresponse().read().decode())
+            conn.close()
+        except OSError:
+            time.sleep(0.02)
+    return seen
+
+
 @pytest.fixture()
 def pid_reporting_app():
     """HTTP and a port-bound raw protocol that both answer with their PID."""
@@ -436,16 +456,10 @@ def test_a_stateful_protocol_is_accepted_by_exactly_one_process(pid_reporting_ap
     mws = MultiWorkerServer(pid_reporting_app, master.bound_listeners, None,
                             workers=4)
     mws._spawn_all()
-    time.sleep(2.0)
 
-    broker_pids, http_pids = set(), set()
+    broker_pids = set()
     try:
-        deadline = time.time() + 10
-        while time.time() < deadline and len(http_pids) < 4:
-            conn = http.client.HTTPConnection('127.0.0.1', http_port, timeout=5)
-            conn.request('GET', '/pid')
-            http_pids.add(conn.getresponse().read().decode())
-            conn.close()
+        http_pids = _await_workers(http_port, 4)
 
         for _ in range(60):
             raw = socket.create_connection(('127.0.0.1', broker_port), timeout=5)
@@ -517,23 +531,16 @@ def test_a_later_exchange_reaches_the_state_the_earlier_one_left(stateful_broker
     mws = MultiWorkerServer(stateful_broker_app, master.bound_listeners, None,
                             workers=4)
     mws._spawn_all()
-    time.sleep(2.0)
 
     try:
+        http_pids = _await_workers(http_port, 4)
+
         deadline = time.time() + 10
         while time.time() < deadline:
             if _exchange(store_port, b'SET remembered\n') == 'ok':
                 break
 
         answers = {_exchange(store_port, b'GET\n') for _ in range(40)}
-
-        http_pids = set()
-        deadline = time.time() + 10
-        while time.time() < deadline and len(http_pids) < 4:
-            conn = http.client.HTTPConnection('127.0.0.1', http_port, timeout=5)
-            conn.request('GET', '/pid')
-            http_pids.add(conn.getresponse().read().decode())
-            conn.close()
     finally:
         mws._shutdown_all()
         master.close_socket()

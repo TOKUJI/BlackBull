@@ -87,6 +87,8 @@ from .middleware.proxy import TrustedProxy
 #: server stack in particular must stay unloaded until asked for.  ``Request``
 #: is absent because it is a deprecated alias resolved through ``__getattr__``;
 #: listing it would make ``import *`` warn at code that never asked for it.
+from .server.listener import InheritedFd, Listener, Tcp, Unix
+
 __all__ = [
     # application + entry points
     'BlackBull', 'serve', 'AppConfig',
@@ -110,6 +112,8 @@ __all__ = [
     'ASGIReceiveCallable', 'ASGISendCallable',
     # bundled middleware
     'CORS', 'as_middleware', 'TrustedProxy',
+    # the sockets a deployment asks for
+    'Listener', 'Tcp', 'Unix', 'InheritedFd',
 ]
 
 
