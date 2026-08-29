@@ -254,6 +254,9 @@ class Server:
         #: The budget a drain in progress is working to.  ``run()`` reads it
         #: to finish the job rather than returning into the loop teardown.
         self._drain_timeout = None
+        #: Set by :meth:`stop` to release :meth:`run`.  ``run`` blocks on this
+        #: rather than on ``Server.serve_forever()`` — see there.
+        self._stopped_event = None
         # Cache the dispatcher + aggregator pair once — both are
         # process-wide singletons.  Looking them up per accept is wasted
         # work on the hot connection-burst path.
@@ -779,19 +782,28 @@ class Server:
             self._running_servers = servers
             async with LifespanManager(self.app):
                 logger.info(f'Server(s) created: {servers}')
+                # Block on our own event, not ``Server.serve_forever()``.
+                # The sockets are already accepting — ``create_server`` starts
+                # them — so ``serve_forever`` only ever blocked.  Recent 3.13
+                # and 3.14 patch releases made its cancellation path call
+                # ``Server.close_clients()``, which closes the *accepted*
+                # transports: a drain then finishes the handler, and the send
+                # path drops its response into a transport asyncio has already
+                # closed.  The client sees a closed connection, which is what
+                # the drain exists to prevent.  Measured: 3.14.6 has no such
+                # call and passes, 3.14.7 and 3.13.15 have it and fail.
+                self._stopped_event = asyncio.Event()
                 try:
-                    async with asyncio.TaskGroup() as tg:
-                        for srv in servers:
-                            tg.create_task(srv.serve_forever())
+                    await self._stopped_event.wait()
 
-                except* KeyboardInterrupt:
+                except KeyboardInterrupt:
                     logger.info('KeyboardInterrupt received — shutting down.')
 
-                except* asyncio.CancelledError:
+                except asyncio.CancelledError:
                     logger.info('Server task cancelled.')
 
-                except* Exception as eg:
-                    logger.error('Server error: %s', eg)
+                except Exception as exc:
+                    logger.error('Server error: %s', exc)
 
                 # The listeners closing is what ended the TaskGroup, and a
                 # request may still be unanswered.  Leaving now returns into
@@ -819,6 +831,8 @@ class Server:
         # Close listeners first, so the drain is over a set that only shrinks.
         for srv in getattr(self, '_running_servers', ()):
             srv.close()
+        if self._stopped_event is not None:
+            self._stopped_event.set()
 
         await self._drain(drain_timeout)
 
