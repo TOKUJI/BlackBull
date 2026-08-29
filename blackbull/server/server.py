@@ -7,6 +7,7 @@ import ssl
 import sys
 from collections import defaultdict, deque
 from contextlib import AsyncExitStack, asynccontextmanager
+from dataclasses import replace
 from pathlib import Path
 import time
 
@@ -270,13 +271,34 @@ class Server:
         if ssl_context and (certfile or keyfile):
             raise TypeError('SSLContext and certfile (or keyfile) must not be set at the same time')
 
-        self.ssl_context = ssl_context
+        self._ssl_context = ssl_context
         self.keyfile = keyfile
         self.certfile = certfile
         self.make_ssl_context()
         self.socket = None
         self.port = None
         self.unix_path: str | None = None
+
+    @property
+    def ssl_context(self):
+        """The context a listener built from ``certfile``/``keyfile`` uses.
+
+        Assigning it re-points every bound listener that was carrying the
+        previous one — which is what makes configuring mTLS after
+        ``open_socket()`` work, and what keeps ``bound_listeners`` honest about
+        what is actually being served.  A listener the caller stated carries
+        its own context and is left alone, because identity is the difference
+        between "the server's" and "its own".
+        """
+        return self._ssl_context
+
+    @ssl_context.setter
+    def ssl_context(self, value):
+        previous = getattr(self, '_ssl_context', None)
+        self._ssl_context = value
+        for index, (listener, socks) in enumerate(getattr(self, 'bound_listeners', ())):
+            if listener.tls is previous:
+                self.bound_listeners[index] = (replace(listener, tls=value), socks)
 
     @property
     def keyfile(self):
@@ -582,12 +604,15 @@ class Server:
                 # rebound below rather than adopted.  Safe: sockets are
                 # CLOEXEC, and the caller terminates the workers holding
                 # copies before re-execing, so the port is free by now.
-                self.bound_listeners = [(Listener(_address_of(inherited[0])),
-                                         inherited)]
+                self.bound_listeners = [
+                    (Listener(_address_of(inherited[0]), tls=self.ssl_context),
+                     inherited)]
             else:
-                # certfile / keyfile / ssl_context are sugar: they build the
-                # context this one listener terminates.  A caller that names
-                # listeners says it per listener instead.
+                # certfile / keyfile / ssl_context are sugar for this one
+                # listener, but they are resolved in run(), not here: a caller
+                # may replace ``server.ssl_context`` between open_socket() and
+                # run() -- mTLS is configured that way -- and a context frozen
+                # at bind time would silently serve the pre-mTLS one.
                 self._listeners = [
                     _listener_from_args(port, unix_path, inherited_fd,
                                         self.ssl_context)]

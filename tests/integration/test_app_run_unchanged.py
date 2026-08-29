@@ -53,13 +53,44 @@ class TestWhatOnePortProduces:
         finally:
             server.close_socket()
 
-    def test_a_certificate_makes_that_one_listener_tls(self, app):
+    def test_a_certificate_follows_the_server_not_the_bind(self, app):
+        """The certfile form's listener reads the server's context when it
+        serves, not when it binds.
+
+        Binding it in would freeze whatever ``make_ssl_context`` produced, and
+        a caller may replace ``server.ssl_context`` between ``open_socket()``
+        and ``run()`` — which is how mTLS is configured, and how this was
+        found: three mTLS tests began accepting clients with no certificate.
+        """
         server = Server(app, certfile=str(CERT), keyfile=str(KEY))
         server.open_socket(0)
         try:
             listener, _socks = server.bound_listeners[0]
-            assert listener.tls is server.ssl_context
             assert listener.workers == 'all'
+            assert listener.tls is server.ssl_context
+
+            replacement = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            replacement.load_cert_chain(certfile=str(CERT), keyfile=str(KEY))
+            server.ssl_context = replacement
+            served, _socks = server.bound_listeners[0]
+            assert served.tls is replacement, (
+                'the listener followed the server, and bound_listeners says so')
+        finally:
+            server.close_socket()
+
+    def test_a_stated_listener_keeps_its_own_certificate(self, app):
+        """The other half: a listener the caller states is never rewritten."""
+        from blackbull import Listener, Tcp
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(certfile=str(CERT), keyfile=str(KEY))
+        server = Server(app, listeners=[Listener(Tcp(0), tls=ctx)])
+        server.open_socket()
+        try:
+            listener, _socks = server.bound_listeners[0]
+            assert listener.tls is ctx
+            server.ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            still, _socks = server.bound_listeners[0]
+            assert still.tls is ctx, 'a stated context is not the server\'s to move'
         finally:
             server.close_socket()
 
