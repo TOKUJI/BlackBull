@@ -237,6 +237,25 @@ async def test_run_does_not_return_while_a_drain_is_holding_a_request(caplog):
     monkeypatch_debug = getattr(_sender, '_DEBUG', None)
     _sender._DEBUG = True
 
+    # Who closes the connection's transport is the question the last two runs
+    # could not answer.  Record the caller rather than reason about it.
+    import traceback
+    from asyncio import selector_events as _se
+    closes: list[str] = []
+    _orig_close = _se._SelectorTransport.close
+    _orig_abort = _se._SelectorTransport.abort
+
+    def _record(name, original):
+        def patched(self, *a, **kw):
+            if getattr(self, '_sock', None) is not None:
+                closes.append(f'{name} <- ' + ''.join(
+                    traceback.format_stack()[-7:-1]))
+            return original(self, *a, **kw)
+        return patched
+
+    _se._SelectorTransport.close = _record('close', _orig_close)
+    _se._SelectorTransport.abort = _record('abort', _orig_abort)
+
     started = asyncio.Event()
     finished = False
 
@@ -278,14 +297,16 @@ async def test_run_does_not_return_while_a_drain_is_holding_a_request(caplog):
         skipped = [r.getMessage() for r in caplog.records
                    if 'write skipped' in r.getMessage()]
         raise AssertionError(
-            f'handler completed ({finished}) and the server logged a response, '
-            f'but the client got {type(exc).__name__}: {exc}. '
-            f'send-path skips: {skipped or "none"} — a skip means the guard '
-            f'saw the transport already closing; none means it was lost later'
+            f'handler completed ({finished}); client got '
+            f'{type(exc).__name__}: {exc}. send-path skips: '
+            f'{skipped or "none"}. transport closes ({len(closes)}):\n'
+            + '\n'.join(closes)
         ) from exc
     finally:
         if monkeypatch_debug is not None:
             _sender._DEBUG = monkeypatch_debug
+        _se._SelectorTransport.close = _orig_close
+        _se._SelectorTransport.abort = _orig_abort
     assert answer == (200, b'finished'), answer
     server.close_socket()
 
