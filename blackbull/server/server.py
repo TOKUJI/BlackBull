@@ -784,8 +784,8 @@ class Server:
         # ``tls=True``, which serves them through the same TLS
         # machinery as the HTTPS listener.
         # LifespanManager drives the ASGI lifespan protocol; nesting it inside
-        # SocketManager guarantees: startup completes before serve_forever() is
-        # called, and shutdown completes before sockets are closed.
+        # SocketManager guarantees: startup completes before the server begins
+        # accepting, and shutdown completes before sockets are closed.
         # One group per distinct TLS context, because a listener terminates
         # the certificate it names and its neighbour may name another — or
         # none.  ``None`` is a group like any other; it is the cleartext one.

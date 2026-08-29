@@ -116,6 +116,38 @@ so the editable install's metadata catches up.
   workers fork, naming the three ways out.  Pass `stateful=False` for a
   protocol that keeps nothing between exchanges.
 
+### Internal
+
+- **Shutdown no longer goes through `Server.serve_forever()`.**  The sockets
+  are already accepting — `create_server` starts them — so `serve_forever()`
+  only ever blocked.  CPython 3.13.15 and 3.14.7 made its cancellation path
+  call `Server.close_clients()`, which closes the **accepted** transports
+  ([gh-123720], fixing a 3.12 regression where cancelling could hang on a
+  handler blocked reading from a client that never closed).  A graceful drain
+  then finished the handler and wrote its response into a transport asyncio
+  had already closed: the access log recorded a 200 the client never received.
+
+  The server blocks on its own event instead, and shuts down the way the
+  documentation describes — `close()` (which leaves accepted connections open
+  by contract), then the drain, then `wait_closed()`.  `close_clients()` and
+  `abort_clients()` are deliberately not called: closing the client is the
+  opposite of draining it.
+
+  This works on every supported version, but not for the same reason on each.
+  On 3.11 `wait_closed()` returns as soon as the server is closed, so the
+  drain is the only thing that waits for a request to finish.  From **3.12**
+  `wait_closed()` waits for active connections itself, and the drain's job
+  narrows to bounding that wait and cancelling what overruns it.
+
+  So the simplification arrives when **3.11** is dropped, not when 3.12 is:
+  with a 3.12 floor the sequence is `close()` → `wait_closed()`, and the drain
+  stays only for its timeout — an unbounded `wait_closed()` is not a shutdown
+  that completes.  Dropping 3.12 as well changes nothing here; the 3.13
+  additions (`close_clients()`, `abort_clients()`) are ones this path
+  deliberately does not call.
+
+[gh-123720]: https://github.com/python/cpython/issues/123720
+
 ### Fixed
 
 - **A port-bound protocol is bound however the HTTP listener was said.**
