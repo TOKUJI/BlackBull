@@ -11,7 +11,7 @@ deadlocks survive ``CancelledError``, ``@pytest.mark.timeout``, and
 teardown).  **However, the scenario logic lives in plain async
 functions in this file — no embedded script strings.**
 
-Full analysis: ``.claude/planning/archives/h2-flow-control-deadlock.md``
+Full analysis: ``BLA-167`` [private]
 """
 from __future__ import annotations
 

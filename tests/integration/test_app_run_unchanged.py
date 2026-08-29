@@ -6,7 +6,7 @@ a port, and sometimes a worker count — and it is what
 ``docs/getting-started/`` teaches.  These tests pin what that call produces, so
 the vocabulary underneath can keep moving without moving it.
 
-Gate 3 of `.claude/planning/designs/listener-vocabulary.md`.
+Gate 3 of `BLA-A-17` [private].
 """
 from __future__ import annotations
 

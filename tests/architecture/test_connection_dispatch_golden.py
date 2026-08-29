@@ -2,7 +2,7 @@
 
 Pins the **current** observable protocol-selection decisions of
 ``ConnectionActor._dispatch()`` so the refactor in
-``.claude/planning/proposals/decouple-connection-detection.md`` (peek-and-replay
+``BLA-133`` [private] (peek-and-replay
 detection + a unified ``serve(conn)``) can be verified to preserve them.
 
 These assert *which protocol claims each wire shape* and the lifecycle/timeout

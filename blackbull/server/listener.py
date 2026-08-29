@@ -9,7 +9,7 @@ The four ports a cleartext-plus-TLS deployment needs are four listeners that
 differ in address and TLS and in nothing else — HTTP/1.1 versus h2c is preface
 detection, and TLS h1 versus h2 is ALPN, both already handled downstream.
 
-Design: `.claude/planning/designs/listener-vocabulary.md`.
+Design: `BLA-A-17` [private].
 """
 from __future__ import annotations
 

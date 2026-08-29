@@ -1,7 +1,7 @@
 """Regression tests for an HTTP/1.1 correctness audit batch.
 
 Each test pins a specific bug from the 2026-07-07 comprehensive audit
-(``.claude/planning/recommendations/comprehensive-audit-2026-07-07.md``):
+(``BLA-120`` [private]):
 
 - 1.1  chunked request body corrupted by partial reads
 - 1.3  a raising ``@app.on_startup`` hook hangs the server forever

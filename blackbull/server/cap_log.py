@@ -45,7 +45,7 @@ torn down by RST (or any abnormal path that skips graceful
   ``flush_interval`` seconds if any cap still has suppressed
   hits.  Default 60.0 s; set to 0 to disable.
 
-Design recap in ``.claude/planning/candidates/cap-hit-logging.md``.
+Design recap in ``BLA-116`` [private].
 """
 import asyncio
 import contextvars

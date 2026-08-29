@@ -1,4 +1,4 @@
-"""Alloc hygiene (`.claude/planning/proposals/connection-alloc-hygiene.md`
+"""Alloc hygiene (`BLA-124` [private]
 Phase 2, 2026-07-24) — architecture guards for the H/2 lean ``Connection``
 builder.
 
@@ -243,7 +243,7 @@ def test_empty_method_pseudo_header_is_not_rejected_and_falls_back_to_head():
     (blackbull/server/parser.py) deliberately preserves a pre-refactor
     placeholder quirk for a spec-illegal empty ``:method`` value, rather than
     silently changing behaviour as a side effect of the Phase 1 restructure
-    (`.claude/planning/proposals/connection-alloc-hygiene.md`). Confirmed live
+    (`BLA-124` [private]). Confirmed live
     (not dead code): the frame-level parser does not reject an empty
     ``:method`` the way it rejects an empty ``:path`` (see the adjacent
     ``path_pseudo == ''`` check in ``parse_headers``), so this branch is

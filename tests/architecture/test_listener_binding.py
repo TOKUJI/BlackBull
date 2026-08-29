@@ -5,7 +5,7 @@ singular), so a deployment needing cleartext and TLS at once could not say so
 and ran one process per port.  These tests assert the sockets that exist after
 ``open_socket()``, which is what the process count is made of.
 
-Design: `.claude/planning/designs/listener-vocabulary.md`.
+Design: `BLA-A-17` [private].
 """
 from __future__ import annotations
 

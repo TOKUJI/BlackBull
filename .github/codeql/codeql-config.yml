@@ -11,7 +11,7 @@
 # Note: this also stops scanning the test-only self-signed-TLS setups that
 # tripped `py/request-without-cert-validation` in tests/integration — those are
 # intended for the local h2 fault-injection server, not real findings.  The
-# acceptance is recorded in .claude/planning/drafts/codeql-backlog-triage.md.
+# acceptance is recorded in BLA-118 [private].
 
 paths-ignore:
   - tests

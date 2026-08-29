@@ -6,7 +6,7 @@ That closed a cycle — ``conn._receive`` → wrapper → (captured) ``conn``, p
 ``conn`` → recipient → ``conn`` — so the whole per-request graph could only be
 reclaimed by the generational cyclic GC. Its periodic pauses were the v0.60.0
 tail-latency regression (see
-``.claude/planning/research/v0600-regression-investigation.md`` §6).
+``BLA-234`` [private] §6).
 
 The fix binds the *raw* recipient (which references no ``conn``) via
 ``bind_receive_channel`` and stops the router overwriting it with the wrapper.

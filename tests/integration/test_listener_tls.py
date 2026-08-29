@@ -5,7 +5,7 @@ its one HTTP listener, so configuring a certificate silently turned that port
 into HTTPS and "cleartext here, TLS there" was inexpressible — which is why a
 deployment needing both ran one process per port.
 
-Design: `.claude/planning/designs/listener-vocabulary.md`.
+Design: `BLA-A-17` [private].
 """
 from __future__ import annotations
 
