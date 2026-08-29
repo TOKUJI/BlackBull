@@ -16,42 +16,17 @@ router — but no built-in template engine, auth, or ORM.
 
 A personal learning project — wire correctness over API stability (ZeroVer).
 
----
-
-## Confidentiality (non-negotiable)
-
-NEVER read, list, glob, grep, or otherwise expose the following paths or their
-contents — not via file tools, not via `bash`/`cat`/`find`, not via any other
-tool:
-
-- `**/.env*` — environment / credential files
-- `**/*.pem`, `**/*.key`, `**/*.p12`, `**/*.pfx` — private keys
-- `**/.credentials*` — credential stores
-
-If a task requires one of these files, STOP and ask the user explicitly.
-Do not attempt to work around this rule with any tool.
+Workspace-wide rules — confidentiality, general operating principles, tool
+preferences — live in `~/work/AGENTS.md` and load before this file.  What
+follows is only what is specific to BlackBull; where the two overlap, this
+file is the more specific one and wins.
 
 ---
 
 ## Operating principles
 
-- **Clarify ambiguity before acting.**  When a request is underspecified,
-  do not self-interpret.  Ask the user for clarification with concrete,
-  narrow questions.  A wrong assumption is always more expensive than a
-  round-trip question.
-
-- **Plan, then execute.**  Once the task is clear, create a work plan as a
-  todo list.  Each item must be a single verifiable action — not a phase,
-  not a goal.  Share the plan with the user before starting work.
-
-- **Track progress; ask permission to deviate.**  Update the plan's status
-  as each item is completed.  If something cannot proceed as planned, stop
-  immediately, explain the blocker to the user, and get explicit approval
-  before changing the plan.
-
-- **Docs follow code.** When you change a feature, behaviour, or API,
-  update the corresponding page under `docs/` in the same commit.
-  `docs/guide/` covers user-facing features; `docs/about/` covers internals.
+The workspace-wide principles are in `~/work/AGENTS.md`.  Below are the ones
+that only make sense inside BlackBull.
 
 - **Findings update proposals; memory holds only tooling gotchas.**  When a
   measurement or investigation answers a question an open proposal is
@@ -75,56 +50,17 @@ Do not attempt to work around this rule with any tool.
   block cannot be abandoned per-stream, since HPACK state is connection-wide.
   → `.claude/planning/research/attack-surface-audit-2026-08.md` [private]
 
-- **Test first.** Add or update tests before implementing.  Assert
-  observable behaviour (events emitted / bytes on the wire), not
-  implementation internals.  → `.claude/patterns/testing.md`
-
 - **Type-check before committing.** `just typecheck` catches contract
   violations statically.  → `.claude/skills/type-check/SKILL.md` [private]
-
-- **Comments explain *why*, never *when*.** If a comment contains a sprint
-  number, a date, "still", "previously", "no longer", or "as of version X",
-  delete those parts — `git log` owns the timeline.  A comment's only job is
-  to capture non-obvious intent, design trade-offs, or invariants the next
-  reader would otherwise have to reverse-engineer from the code.
-
-- **Verified numbers only — estimates and calculations alike.** Never present
-  arithmetic, percentages, or summed tables that a tool has not computed.  For
-  any calculation use `bc` / `calc` / `python -c`; for any table with a Σ row,
-  generate it from a script that checks its own sums (Σ == total) and paste
-  the output verbatim — never hand-copy numbers into a response.  A number
-  you cannot reproduce from a script output is a number you do not have.
-
-- **Chain dependent long-running steps; never split them across turn
-  boundaries.**  A sequence whose later phases depend on earlier ones (e.g.
-  A→C→B sharing an EC2 instance) runs as ONE self-driving script with a
-  completion marker; only the terminal completion crosses a turn boundary.
-  Fail-safes for anything that outlasts a turn (self-terminating cloud
-  resources, marker files, explicit timeouts) and the turn-discipline
-  detail: → `.claude/patterns/chaining-long-running-steps.md`
-
-- **Questions end the turn.** A pending decision gate is a stop, not a
-  licence to continue.  If the answer to a gate question is not an explicit
-  user choice, end the turn with the question restated — do not treat a
-  "user unavailable / work autonomously" response as approval, and pause
-  background steps that depend on the decision.  Resume only on explicit
-  user input.  (Applies in Autopilot mode too; the agent must explicitly
-  stop and wait.)
-
-- **Verifiable, ephemeral work products.**  Do not embed complex logic inline
-  in prompt responses.  Instead: create a script file, run it, capture the
-  output, then delete the script.  The script file is the auditable record
-  of what was done.
-
-- **Use skill philosophies to prevent failures.**  When a task matches a
-  skill, use that skill.  When a task is similar but not an exact match,
-  apply the skill's philosophy to guide the work and prevent known failure
-  patterns.  If a skill lacks a clear philosophy — a concise statement of its
-  approach and guardrails at the top of the file — write one before using it.
 
 - **When stuck on handler code, consult docs and examples.**  Consult
   `docs/getting-started/` and `examples/` before guessing.  A signature
   mistake (full ASGI vs simplified form) wastes EC2 hours.
+
+### BlackBull addenda to the workspace rules
+
+- *Docs follow code* — the page to update lives under `docs/`: `docs/guide/`
+  covers user-facing features; `docs/about/` covers internals.
 
 ---
 
@@ -198,34 +134,24 @@ Rules that aren't architectural but will cause subtle bugs if you forget them.
 
 ## Tool preferences
 
-| Task | Tool | Why |
-|---|---|---|
-| Structural search / replace | `ast-grep` (`sg`) | Understands AST; no regex false positives |
-| Plain-text grep | `rg` (ripgrep) | Fast, `.gitignore`-aware |
-| File finding | `rg --files` or `rg -l` | One tool, less context switching |
-| Python package management | `uv` | Single binary replaces `pip` + `venv`; see `pyproject.toml` `[project.scripts]` |
-| Command runner | `just` | Project-specific commands in `justfile`.  `just typecheck`, `just docs`, etc. — no more memorising long `pytest`/`mkdocs` invocations |
-| CPU profiling | `py-spy` | `py-spy record -f speedscope -o profile.json -- python app.py` — speedscope JSON opens directly in VS Code / speedscope.app.  `py-spy top -- python app.py` (live).  Run as same user — if ptrace blocked, add `--nonblocking`.  → `.claude/patterns/benchmarking.md` §Profiling |
-| JSON filtering | `jq` | `jq '[.cases[] \| select(.state=="failed")]'` on h2spec/http11probe results |
-| Arithmetic / sums | `bc` (or `calc`, `python -c`) | No mental math — pipe the operands into `bc` and let it add; paste script/table output verbatim (see *Verified numbers only*) |
+The general table — search priority `ast-grep` → `rg` → `grep`, plus `uv`,
+`just`, `py-spy`, `jq`, `bc` — is in `~/work/AGENTS.md`.  BlackBull specifics:
 
-- **Search priority: `ast-grep` → `rg` → `grep`.**  Use `ast-grep` for
-  language structure (function defs, call sites, class hierarchies); `rg`
-  for plain text; `grep` only as a last resort.  Never regex-match language
-  syntax.
-- Prefer `rg` over `grep` / `find` for all text search.
-- Prefer `ast-grep -p 'pattern' -l python` over `rg` when matching code
-  structure (function defs, call sites, class hierarchies).
-- Use `ast-grep -U` for automated structural replacements — it won't
-  corrupt syntax like `sed` can.
+- **`just`** — the repo's `justfile` carries `just typecheck`, `just test`,
+  `just docs`.
+- **`jq`** — filter conformance output, e.g.
+  `jq '[.cases[] | select(.state=="failed")]'` on h2spec / http11probe results.
+- **`uv`** — entry points are declared in `pyproject.toml` `[project.scripts]`.
+- **`py-spy`** — the profiling workflow lives in
+  `.claude/patterns/benchmarking.md` §Profiling [private].
 
 ---
 
 ## Working docs map
 
-This file is the only doc auto-loaded every session. The docs below are **not**
-loaded automatically — open the relevant one when the trigger applies. Do not
-duplicate their content here; link, don't copy.
+This file and `~/work/AGENTS.md` are the only docs auto-loaded every session.
+The docs below are **not** loaded automatically — open the relevant one when
+the trigger applies. Do not duplicate their content here; link, don't copy.
 
 Entries under `.claude/` are **git-ignored** (stored in a private companion
 repo; see `.claude/CLAUDE_DEV.md` for setup).  Each entry lists a public
