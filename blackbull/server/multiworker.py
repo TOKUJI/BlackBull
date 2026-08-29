@@ -40,6 +40,38 @@ _SHUTDOWN_TIMEOUT = 10.0  # seconds to wait for graceful shutdown before SIGKILL
 _RELOAD_TICK = 0.1        # finer poll when reload mode is active
 
 
+def _settle_stateful_bindings(app, workers: int) -> None:
+    """Decide how a stateful raw protocol is reachable once workers multiply.
+
+    A shared listener is served by every worker, so a stateful protocol
+    sniffed off it is answered by whichever worker accepted — and one that
+    never saw the earlier exchange answers wrongly rather than not at all.
+    A dedicated port has one owner and stays sound, so a binding that has one
+    simply stops claiming the shared port.  A binding that has *only* the
+    shared port cannot be given an owner, and is refused here — before the
+    fork, so the failure is one message and not one per worker.
+    """
+    registry = getattr(app, '_protocol_registry', None)
+    if registry is None:
+        return
+    for binding in registry.raw_bindings.values():
+        if not (binding.stateful and binding.detector is not None):
+            continue
+        if binding.port is None:
+            raise RuntimeError(
+                f'Protocol {binding.name!r} keeps state and is reachable only '
+                f'on the shared port, which {workers} workers serve — a later '
+                f'exchange would be answered by a worker that never saw the '
+                f'earlier one.  Give it a dedicated port, run with workers=1, '
+                f'or register it with stateful=False if it keeps nothing '
+                f'between exchanges.')
+        binding.disable_shared_dispatch()
+        logger.info(
+            'Protocol %r keeps state: reachable on port %d only, not the '
+            'shared listener, because %d workers serve it.',
+            binding.name, binding.port, workers)
+
+
 class MultiWorkerServer:
     """Spawns and supervises N worker processes.
 
@@ -59,26 +91,29 @@ class MultiWorkerServer:
         Seconds to wait for graceful shutdown before sending SIGKILL.
     """
 
-    def __init__(self, app, raw_sockets, ssl_context, *,
+    def __init__(self, app, bound_listeners, ssl_context, *,
                  workers: int,
                  max_connections: int = 500,
                  stream_queue_depth: int = 64,
                  ws_queue_depth: int = _WS_READ_INLINE,
                  shutdown_timeout: float = _SHUTDOWN_TIMEOUT,
                  reload: bool = False,
-                 reload_paths=None,
-                 protocol_sockets=None):
+                 reload_paths=None):
         if workers < 1:
             raise ValueError(f'workers must be >= 1, got {workers}')
         self._app = app
         self._ssl_context = ssl_context
         self._num_workers = workers
-        # Stateful non-ASGI protocol listeners (eg MQTT), bound once by the
-        # master.  HTTP scales across every worker, but a stateful broker must
-        # have a single owner, so these go to worker 0 only — see
-        # ``_spawn_worker``.  The master keeps them open for the worker's
-        # lifetime so a respawned worker 0 re-inherits them.
-        self._protocol_sockets = list(protocol_sockets or [])
+        # Who owns what is the listener's own answer, read here and nowhere
+        # else.  A single-owner listener (a stateful broker) stays on the
+        # master's socket so a respawned worker 0 re-inherits it.
+        bound_listeners = list(bound_listeners)
+        if workers > 1:
+            _settle_stateful_bindings(app, workers)
+        self._shared = [(l, socks) for l, socks in bound_listeners
+                        if l.workers == 'all']
+        self._single_owner = [(l, socks) for l, socks in bound_listeners
+                              if l.workers == 'one']
         self._max_connections = max_connections
         self._stream_queue_depth = stream_queue_depth
         self._ws_queue_depth = ws_queue_depth
@@ -97,7 +132,7 @@ class MultiWorkerServer:
         # The original listening sockets the master adopts/binds.  These
         # are the ones we hand off across exec when reloading — distinct
         # from ``_worker_sockets`` which may be SO_REUSEPORT sets.
-        self._listening_sockets = list(raw_sockets)
+        self._listening_sockets = [s for _l, socks in self._shared for s in socks]
         # Use 'fork' so workers inherit socket FDs and the app object without
         # pickling.  'spawn' would require the app and sockets to be picklable
         # and would re-import all modules from scratch.
@@ -112,24 +147,30 @@ class MultiWorkerServer:
         from ..env import get_settings as _get_settings  # noqa: PLC0415
         cfg = _get_settings()
         if workers > 1 and REUSEPORT_SUPPORTED and cfg.socket_reuseport and not reload:
-            port = raw_sockets[0].getsockname()[1]
+            # Every shared listener is re-bound per worker, not just the first:
+            # a deployment that states four ports wants all four on all of them.
+            ports = [(listener, socks[0].getsockname()[1])
+                     for listener, socks in self._shared]
             # Close the master sockets BEFORE creating worker sockets.
             # Linux requires every socket co-binding on a port to have SO_REUSEPORT set;
             # the master's sockets were bound without it so they must be gone first.
-            for s in raw_sockets:
+            for s in self._listening_sockets:
                 s.close()
             self._listening_sockets = []  # master no longer holds listeners
-            self._worker_sockets = [
-                create_dual_stack_sockets(port, backlog=cfg.socket_backlog, reuseport=True)
+            self._worker_listeners = [
+                [(listener,
+                  create_dual_stack_sockets(port, backlog=cfg.socket_backlog,
+                                            reuseport=True))
+                 for listener, port in ports]
                 for _ in range(workers)
             ]
-            logger.info('SO_REUSEPORT: created %d per-worker socket set(s) on port %d',
-                        workers, port)
+            logger.info('SO_REUSEPORT: created %d per-worker socket set(s) for %d listener(s)',
+                        workers, len(ports))
         else:
             # Single-worker, SO_REUSEPORT unavailable, or reload mode:
             # all workers share the master's pre-bound sockets so the
             # master can hand them off across reload.
-            self._worker_sockets = [raw_sockets] * workers
+            self._worker_listeners = [self._shared] * workers
 
     # ------------------------------------------------------------------
     # Public API
@@ -178,18 +219,34 @@ class MultiWorkerServer:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    def _all_listening_sockets(self) -> list:
+        """Every listening socket the master created, in any role."""
+        return [sock
+                for group in (*self._worker_listeners, self._single_owner)
+                for _listener, socks in group
+                for sock in socks]
+
     def _spawn_worker(self, worker_id: int):
-        # Only worker 0 owns the stateful protocol listeners (MQTT, …); the
-        # rest serve HTTP only.  Worker 0 inherits the master's still-open
-        # protocol fds via fork, so a respawn after a crash re-adopts them
-        # and the broker resumes on the same port.
-        protocol_sockets = self._protocol_sockets if worker_id == 0 else None
+        # A single-owner listener goes to worker 0 and no one else — worker 0
+        # inherits the master's still-open fds via fork, so a respawn after a
+        # crash re-adopts them and the broker resumes on the same port.
+        listeners = list(self._worker_listeners[worker_id])
+        if worker_id == 0:
+            listeners += self._single_owner
+        # fork copies the whole descriptor table, so this child also holds
+        # every other worker's sockets and — but for worker 0 — the broker's.
+        # Hand it the list to let go of: a process that does not have the
+        # descriptor cannot accept on it, which makes single ownership
+        # structural instead of a consequence of what nobody calls.
+        mine = {id(sock) for _listener, socks in listeners for sock in socks}
+        disowned = [sock for sock in self._all_listening_sockets()
+                    if id(sock) not in mine]
         p = self._mp_ctx.Process(
             target=run_worker,
-            args=(self._app, self._worker_sockets[worker_id], self._ssl_context,
+            args=(self._app, listeners, self._ssl_context,
                   worker_id, self._max_connections,
                   self._stream_queue_depth, self._ws_queue_depth,
-                  protocol_sockets),
+                  disowned),
             daemon=False,  # workers must be reaped explicitly on shutdown
             name=f'bb-worker-{worker_id}',
         )

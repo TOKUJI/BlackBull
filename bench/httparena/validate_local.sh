@@ -35,10 +35,12 @@ HARENA_REPO="https://github.com/MDA2AV/HttpArena.git"
 ARG="${1:-HEAD}"
 if [[ "$ARG" == *.whl ]]; then
     WHEEL="$(cd "$(dirname "$ARG")" && pwd)/$(basename "$ARG")"
+    WHEEL_REF="(supplied: $(basename "$ARG"))"
     echo "using wheel: $WHEEL"
 else
     echo ">>> building wheel from ref $ARG ..."
     WHEEL="$(bash "$REPO_ROOT/bench/httparena/build_wheel.sh" "$ARG")"
+    WHEEL_REF="$(git -C "$REPO_ROOT" rev-parse --short "$ARG")"
 fi
 [ -f "$WHEEL" ] || { echo "ERROR: wheel not found: $WHEEL" >&2; exit 1; }
 WHEEL_NAME="$(basename "$WHEEL")"
@@ -49,6 +51,15 @@ echo "    sha256: $WHEEL_SHA"
 if [ ! -d "$HARENA_DIR/.git" ]; then
     echo ">>> cloning harness to $HARENA_DIR ..."
     git clone --depth 1 "$HARENA_REPO" "$HARENA_DIR"
+elif [ "${HARENA_REFRESH:-1}" = "1" ]; then
+    # EC2 clones fresh on every run; this one persisted and did not, so the
+    # two drifted until a profile the entry subscribes to existed on one side
+    # and not the other -- and upstream force-pushes, so a fetch is not enough.
+    # The local patches below are re-applied every run, so a hard reset costs
+    # nothing.  HARENA_REFRESH=0 pins the clone when that is what you want.
+    echo ">>> refreshing harness at $HARENA_DIR ..."
+    git -C "$HARENA_DIR" fetch --depth 1 origin main
+    git -C "$HARENA_DIR" reset --hard FETCH_HEAD
 else
     echo "harness present at $HARENA_DIR"
 fi
@@ -167,7 +178,12 @@ echo "$VERDICT" > "$RESULT_DIR/verdict.txt"
 {
     echo "wheel : $WHEEL"
     echo "sha256: $WHEEL_SHA"
-    echo "ref   : $(git -C "$REPO_ROOT" rev-parse --short HEAD)"
+    # Two refs, not one.  The wheel comes from the ref that was asked for;
+    # app.py and launcher.py are copied from the working tree.  Recording only
+    # HEAD says the wheel came from somewhere it did not, and hides the pairing
+    # that has to be right for an A/B arm to mean anything.
+    echo "wheel ref   : $WHEEL_REF"
+    echo "harness ref : $(git -C "$REPO_ROOT" rev-parse --short HEAD)"
     echo "rc    : $RC"
     echo "verdict: $VERDICT"
 } > "$RESULT_DIR/provenance.txt"

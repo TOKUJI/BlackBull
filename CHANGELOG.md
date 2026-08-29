@@ -60,6 +60,118 @@ The runtime version is exposed as `blackbull.__version__` via
 `pyproject.toml`.  Re-run `pip install -e .` after a local version bump
 so the editable install's metadata catches up.
 
+## [0.80.0] — 2026-08-29
+
+### Changed
+
+- **A worker now drains on `SIGTERM` instead of dying where it stands.**  A
+  request in flight when the signal arrived was dropped — the client saw the
+  connection close with no response — because the worker restored `SIG_DFL`.
+  That was not carelessness: the inherited handler did not stop the asyncio
+  loop, so terminating the process was the only thing that worked, and the
+  master's `shutdown_timeout` was a wait rather than a drain.
+
+  The worker installs a loop signal handler instead.  It closes the listeners,
+  stops accepting, and lets the connections it already accepted finish, for up
+  to **8 seconds** — inside the master's 10-second budget, so the wait ends in
+  the worker's own cancel rather than in a `SIGKILL`.  Nothing in flight is
+  cancelled while the budget lasts, because a cancelled handler is a client
+  holding a half-written response.
+
+  `--reload` uses the same path, so a code change now recycles workers by
+  draining them rather than by killing them.
+
+  No documented behaviour changed — `docs/` never promised in-flight
+  completion, and now states the contract in
+  `docs/deployment/workers.md#shutdown`.
+
+### Added
+
+- **A deployment states the sockets it wants.**  `Server` bound one HTTP
+  listener — `self.port`, singular — and held one server-wide `ssl_context`
+  that applied to it.  A deployment needing cleartext and TLS at once could not
+  say so, and ran one process per port to get there.
+
+  ```python
+  from blackbull import BlackBull, Listener, Tcp
+
+  app.run(listeners=[
+      Listener(Tcp(8080)),                 # cleartext: h1 / h2c / WebSocket
+      Listener(Tcp(8443), tls=ctx),        # TLS: ALPN picks h2 or http/1.1
+      Listener(Tcp(1883), speaks='mqtt'),  # one owner, by default
+  ], workers=4)
+  ```
+
+  Every listener is served by every worker unless it says otherwise, and TLS
+  belongs to the listener that terminates it — so two ports can present
+  different certificates, and configuring one no longer silently converts a
+  port to HTTPS.  `app.run(port=8000)` is unchanged: it builds one listener
+  and nothing else moves.  See `docs/guide/listeners.md`.
+
+- **`raw_handler(..., stateful=True)`** — whether an exchange depends on what
+  an earlier one left behind, true by default.  A stateful protocol is served
+  by one worker, so with `workers > 1` it is reached on its own port only; the
+  shared port would answer from whichever worker accepted.  One with *no*
+  dedicated port cannot be given an owner at all and is now refused before the
+  workers fork, naming the three ways out.  Pass `stateful=False` for a
+  protocol that keeps nothing between exchanges.
+
+### Internal
+
+- **Shutdown no longer goes through `Server.serve_forever()`.**  The sockets
+  are already accepting — `create_server` starts them — so `serve_forever()`
+  only ever blocked.  CPython 3.13.15 and 3.14.7 made its cancellation path
+  call `Server.close_clients()`, which closes the **accepted** transports
+  ([gh-123720], fixing a 3.12 regression where cancelling could hang on a
+  handler blocked reading from a client that never closed).  A graceful drain
+  then finished the handler and wrote its response into a transport asyncio
+  had already closed: the access log recorded a 200 the client never received.
+
+  The server blocks on its own event instead, and shuts down the way the
+  documentation describes — `close()` (which leaves accepted connections open
+  by contract), then the drain, then `wait_closed()`.  `close_clients()` and
+  `abort_clients()` are deliberately not called: closing the client is the
+  opposite of draining it.
+
+  This works on every supported version, but not for the same reason on each.
+  On 3.11 `wait_closed()` returns as soon as the server is closed, so the
+  drain is the only thing that waits for a request to finish.  From **3.12**
+  `wait_closed()` waits for active connections itself, and the drain's job
+  narrows to bounding that wait and cancelling what overruns it.
+
+  So the simplification arrives when **3.11** is dropped, not when 3.12 is:
+  with a 3.12 floor the sequence is `close()` → `wait_closed()`, and the drain
+  stays only for its timeout — an unbounded `wait_closed()` is not a shutdown
+  that completes.  Dropping 3.12 as well changes nothing here; the 3.13
+  additions (`close_clients()`, `abort_clients()`) are ones this path
+  deliberately does not call.
+
+[gh-123720]: https://github.com/python/cpython/issues/123720
+
+### Fixed
+
+- **A port-bound protocol is bound however the HTTP listener was said.**
+  `open_socket` had four paths that each returned as soon as they had set the
+  HTTP sockets, and the protocol-socket bind was appended to the last one.  A
+  Unix-socket deployment, a socket-activated one, and **every process after an
+  auto-reload** therefore had no broker — the reload handoff carries the HTTP
+  descriptors only.  No warning, no test.
+
+- **A worker lets go of the listeners it does not serve.**  `fork` copies the
+  descriptor table, so every worker held the broker's listening socket and
+  every other worker's — measured 4 of 4.  Single ownership was a property of
+  what nobody called, not of who could; a worker now closes what it was not
+  given, in its own process.
+
+- **A stream's coroutine is built past the two places it may never reach**,
+  removing the `coroutine 'StreamActor.run' was never awaited` warning (EC2
+  count 4 → 0 across sixteen profiles).
+
+- The `AttributeError: 'NoneType' object has no attribute 'close'` that
+  survived the v0.78.1 log work is **not BlackBull's** — a CPython defect in
+  `selector_events.py`, reproduced deterministically on 3.12, 3.13 and 3.14 and
+  reported upstream as [gh-156512](https://github.com/python/cpython/issues/156512).
+
 ## [0.79.0] — 2026-08-28
 
 ### Added

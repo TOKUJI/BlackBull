@@ -187,6 +187,35 @@ The defaults match Apache's `LimitRequestLine` /
 | `BB_MAX_CONNECTIONS` | `500` per worker | Connections beyond the cap are refused at accept time.  Combine with `BB_SOCKET_BACKLOG` for graceful overload.  `0` = unlimited. |
 | `BB_REQUEST_TIMEOUT` | `0` (off) | Per-HTTP/2-stream deadline in seconds.  Set in production (e.g. `30`) so an ASGI handler hung on an upstream call can't keep its stream slot indefinitely.  Stream is cancelled via `RST_STREAM CANCEL`. |
 
+## Shutdown
+
+On `SIGTERM` the master signals every worker and waits before `SIGKILL`. A
+worker that receives it **stops accepting and lets the requests it already
+accepted finish**, for `BB_WORKER_DRAIN_TIMEOUT` — which sits inside the
+master's wait, so the drain ends in the worker rather than in a kill.
+Raising it past the master's wait only moves the deadline.
+
+Nothing in flight is cancelled while that budget lasts. A cancelled handler
+means a client holding a half-written response, which is worse than the wait.
+Whatever has not finished by the deadline *is* cancelled: a shutdown that must
+complete still completes.
+
+This is what a rolling deploy or a `docker stop` depends on. Drain the node at
+the load balancer first if you want zero in-flight requests at all — the
+server's job here is to not truncate the ones already running, not to know that
+your deploy started.
+
+`--reload` uses the same path, so a code change now recycles workers by
+draining them rather than by killing them.
+
+```
+SIGTERM ──▶ close listeners ──▶ drain accepted connections
+                                        │
+                        BB_WORKER_DRAIN_TIMEOUT reached ──▶ cancel
+                                        │
+                          master's wait exhausted ──▶ SIGKILL
+```
+
 ## Scaling ceiling — plan against physical cores
 
 Worker throughput scales roughly to the **physical core count**, not the

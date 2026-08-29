@@ -113,19 +113,42 @@ if ctx.aggregator is not None:
 
 `connection_accepted` and `connection_closed` fire automatically.
 
+## State, and who answers an exchange
+
+A raw protocol is **stateful by default**: `stateful=True` says that an
+exchange can depend on what an earlier one left behind, which is true of a
+broker, a session-oriented line protocol, and most things worth writing a raw
+handler for. It decides who may answer:
+
+- **Its own port is served by one worker.** `app.run(port=8000, workers=4)`
+  with a `raw_handler` scales HTTP across all four workers and runs the raw
+  protocol on one; if that worker crashes it is respawned and re-adopts the
+  listener. The other workers close the descriptor at startup, so nothing else
+  can answer on it even by accident.
+- **The shared port is given up once workers multiply.** A binding with a
+  `detector` is also reachable on the HTTP port by first-byte sniffing — but
+  that port is served by *every* worker, so a later exchange would be answered
+  by a worker that never saw the earlier one. With `workers > 1` a stateful
+  binding stops claiming there and stays reachable on its own port. With one
+  worker there is nothing to scatter across, and both routes work.
+- **A stateful protocol with no port of its own is refused**, before the
+  workers fork, because there is no way to give it one owner. Give it a port,
+  run `workers=1`, or say `stateful=False` if it really keeps nothing.
+
+```python
+@app.raw_handler('metrics', detector=LineDetector(), stateful=False)
+async def metrics(reader, writer, ctx):
+    ...        # each exchange stands alone, so any worker may answer it
+```
+
 ## Limitations
 
-- **TLS is the server's, not the binding's.** A binding registered with
-  `tls=True` is served through the certificate the server was configured
-  with; a port cannot carry a certificate of its own.
-- **Single owner, but HTTP still scales.** A port-bound protocol is served by
-  **worker 0** only (a stateful broker must have one owner), while HTTP runs on
-  every worker. So `app.run(port=8000, workers=4)` with a `raw_handler` scales
-  HTTP across all four workers and runs the protocol on worker 0; if worker 0
-  crashes it is respawned and re-adopts the listener. The exception is
-  `--reload`, which still pins `workers=1` for port-bound protocols.
-- **Port-based routing only.** Sharing one port between HTTP and a raw protocol
-  (first-byte sniffing) is planned for a later release.
+- **TLS on a `raw_handler` port is the server's certificate.** `tls=True`
+  serves the binding's port through the certificate the server was configured
+  with; the binding cannot name one of its own. An HTTP
+  [listener](listeners.md) can.
+- **`--reload` pins `workers=1`** when a port-bound protocol is registered: the
+  exec handoff carries the HTTP sockets only.
 
 ## A note on the server class
 

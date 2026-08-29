@@ -18,7 +18,7 @@ exposed simultaneously — same BlackBull, same cert, different
 listeners.  ALPN negotiates HTTP/1.1 on :8081 connections and h2
 on :8443.
 
-Parallel ``subprocess.Popen`` per port, all terminated on SIGTERM /
+One ``subprocess.Popen`` stating every port, terminated on SIGTERM /
 SIGINT.  No port-readiness gating — BlackBull's bind happens in
 ``serve()`` as the first awaited step, so by the time the
 subprocess is alive the kernel TCP accept queue is open.
@@ -196,44 +196,71 @@ def _prebind(port):
     return fds
 
 
-def _spawn(port, extra):
-    argv = [PY, APP, '--port', str(port), *extra, '--workers', str(WRK_COUNT)]
+def _spawn(cleartext, tls_ports, have_tls):
+    """Start the one process that serves every listener.
+
+    Four ports used to mean four ``app.py`` processes, each with the full
+    worker count — 4xN where a peer ran N.  A BlackBull server states its
+    sockets, so they are four listeners in one process instead.
+    """
+    argv = [PY, APP, '--workers', str(WRK_COUNT)]
+    if have_tls:
+        argv += ['--cert', TLS_CERT, '--key', TLS_KEY]
+
     if not _EARLY_BIND:
+        for port in cleartext:
+            argv += ['--listen', str(port)]
+        for port in tls_ports:
+            argv += ['--listen-tls', str(port)]
+        sys.stderr.write(f'launcher: one process, listeners '
+                         f'cleartext={cleartext} tls={tls_ports}\n')
         return subprocess.Popen(argv)
-    fds = _prebind(port)
+
+    # Early-bind: the sockets are bound here, before blackbull is imported,
+    # so every port answers while the app is still warming up.  Each is
+    # handed over as a descriptor and becomes a listener of its own.
+    fds = []
+    for port in cleartext:
+        for fd in _prebind(port):
+            argv += ['--listen-fd', str(fd)]
+            fds.append(fd)
+    for port in tls_ports:
+        for fd in _prebind(port):
+            argv += ['--listen-tls-fd', str(fd)]
+            fds.append(fd)
     if not fds:
-        # Pre-bind failed entirely (port busy?) — fall back to letting the
-        # child bind, rather than spawning a child that can never listen.
-        sys.stderr.write(f'launcher: no pre-bound fds for port {port}; '
-                         f'child will bind normally\n')
-        return subprocess.Popen(argv)
-    env = os.environ.copy()
-    env['BB_INHERIT_FDS'] = ','.join(str(f) for f in fds)
-    sys.stderr.write(f'launcher: pre-bound port {port} fds={fds} '
-                     f'backlog={_BACKLOG} (early-bind)\n')
-    return subprocess.Popen(argv, env=env, pass_fds=tuple(fds))
+        sys.stderr.write('launcher: no pre-bound fds; falling back to '
+                         'binding in the child\n')
+        return _spawn_without_early_bind(cleartext, tls_ports, have_tls)
+    sys.stderr.write(f'launcher: pre-bound {len(fds)} socket(s) '
+                     f'backlog={_BACKLOG} (early-bind), one process\n')
+    return subprocess.Popen(argv, pass_fds=tuple(fds))
+
+
+def _spawn_without_early_bind(cleartext, tls_ports, have_tls):
+    global _EARLY_BIND
+    _EARLY_BIND = False
+    return _spawn(cleartext, tls_ports, have_tls)
 
 
 if _EARLY_BIND:
     sys.stderr.write(f'launcher: BB_EARLY_BIND=1  pre-binding listeners '
                      f'(backlog={_BACKLOG})\n')
 
-http_proc       = _spawn(HTTP_PORT, []) if 'http' in _enabled_ports else None
-h2c_proc        = _spawn(H2C_PORT, [])  if 'h2c'  in _enabled_ports else None
-https_h1_proc   = None
-https_h2_proc   = None
-if os.path.exists(TLS_CERT) and os.path.exists(TLS_KEY):
-    if 'https-h1' in _enabled_ports:
-        https_h1_proc = _spawn(HTTPS_H1_PORT, ['--cert', TLS_CERT, '--key', TLS_KEY])
-    if 'https-h2' in _enabled_ports:
-        https_h2_proc = _spawn(HTTPS_H2_PORT, ['--cert', TLS_CERT, '--key', TLS_KEY])
-else:
+_have_tls = os.path.exists(TLS_CERT) and os.path.exists(TLS_KEY)
+if not _have_tls:
     sys.stderr.write(
         f'launcher: TLS cert/key not present at {TLS_CERT} / {TLS_KEY}; '
         f'starting cleartext only\n')
 
+_cleartext = [port for name, port in (('http', HTTP_PORT), ('h2c', H2C_PORT))
+              if name in _enabled_ports]
+_tls_ports = ([port for name, port in (('https-h1', HTTPS_H1_PORT),
+                                       ('https-h2', HTTPS_H2_PORT))
+               if name in _enabled_ports] if _have_tls else [])
 
-_PROCS = (http_proc, h2c_proc, https_h1_proc, https_h2_proc)
+_PROCS = ((_spawn(_cleartext, _tls_ports, _have_tls),)
+          if (_cleartext or _tls_ports) else ())
 
 
 def _shutdown(*_):
@@ -250,10 +277,9 @@ def _shutdown(*_):
 signal.signal(signal.SIGTERM, _shutdown)
 signal.signal(signal.SIGINT,  _shutdown)
 
-try:
-    rc = http_proc.wait()
-finally:
-    for p in (h2c_proc, https_h1_proc, https_h2_proc):
-        if p is not None:
-            p.terminate()
-sys.exit(rc)
+if not _PROCS:
+    sys.stderr.write('launcher: no listeners enabled; nothing to run\n')
+    sys.exit(1)
+
+# One child now, so its exit code is the launcher's.
+sys.exit(_PROCS[0].wait())

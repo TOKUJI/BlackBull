@@ -15,47 +15,56 @@ import os
 import signal
 
 from .affinity import apply_worker_affinity, make_offload_executor
+from .listener import HTTP
 from .recipient import _WS_READ_INLINE
 
 logger = logging.getLogger(__name__)
 
 
-def run_worker(app, raw_sockets, ssl_context, worker_id: int,
+def run_worker(app, bound_listeners, ssl_context, worker_id: int,
                max_connections: int,
                stream_queue_depth: int = 64,
                ws_queue_depth: int = _WS_READ_INLINE,
-               protocol_sockets=None) -> None:
+               disowned=()) -> None:
     """Entry point executed in each worker process.
 
     Parameters
     ----------
     app:
         The ASGI application callable (a BlackBull instance or any ASGI app).
-    raw_sockets:
-        Pre-bound socket objects inherited from the master via fork.
+    bound_listeners:
+        ``[(Listener, [socket, ...]), ...]`` inherited from the master via
+        fork — every listener this worker owns, which the master decided from
+        each listener's own ``workers`` field.
     ssl_context:
         TLS context to pass to asyncio.start_server, or None for plain HTTP.
+    disowned:
+        Listening sockets this worker inherited through fork but does not
+        serve — another worker's, or a single-owner listener it does not own.
+        Closed on entry, in this process only: the master and the owning
+        worker keep their own descriptors.
     worker_id:
         Zero-based index used only for logging.
     max_connections:
         Per-worker connection limit; passed to ASGIServer.
-    protocol_sockets:
-        Pre-bound listener sets for stateful non-ASGI protocols (eg the MQTT
-        broker), as ``[(socks, binding), …]``.  The master hands these to a
-        single worker only (HTTP scales across all workers, but a stateful
-        broker must have one owner), so this is non-empty for that worker and
-        ``None`` for the rest.
     """
+    # Let go of what this worker does not serve, before anything can use it.
+    # A stateful protocol's second exchange has to reach the process that
+    # holds the first one's state, and the only sound way to guarantee that
+    # is for no other process to be able to accept it at all.
+    for sock in disowned:
+        try:
+            sock.close()
+        except OSError:  # pragma: no cover - already closed
+            pass
+
     # Workers should not respond to Ctrl+C directly — the master handles the
     # signal and sends SIGTERM to every worker for a coordinated shutdown.
     signal.signal(signal.SIGINT, signal.SIG_IGN)
-    # ``fork`` inherits any SIGTERM handler the master installed (eg the
-    # one that flips ``_stopped`` to break the supervision loop).  That
-    # handler is a no-op inside the worker — it does not stop the
-    # asyncio loop — and prevents the default-terminate behaviour from
-    # firing.  Restore the default disposition so master.terminate()
-    # actually exits the worker promptly; without this the master has
-    # to SIGKILL every recycle, which makes auto-reload glacial.
+    # The handler inherited from the master is a no-op here that also
+    # suppresses the default terminate.  SIG_DFL until ``_serve`` installs the
+    # loop-stopping one below: a signal arriving before the loop exists has
+    # nothing to stop.
     signal.signal(signal.SIGTERM, signal.SIG_DFL)
 
     from ..env import apply_event_loop_policy, get_settings as _get_settings  # noqa: PLC0415
@@ -84,31 +93,39 @@ def run_worker(app, raw_sockets, ssl_context, worker_id: int,
     server = ASGIServer(app, ssl_context=ssl_context, max_connections=max_connections,
                         stream_queue_depth=stream_queue_depth,
                         ws_queue_depth=ws_queue_depth)
-    # Inject the inherited sockets so ASGIServer.run() skips its own bind step.
-    server.raw_sockets = raw_sockets
-    server.port = raw_sockets[0].getsockname()[1] if raw_sockets else 0
-
-    # Adopt the stateful-protocol listeners (MQTT, …) if this is the worker the
-    # master designated to own them.  ASGIServer.run() serves whatever is in
-    # ``_protocol_sockets`` alongside the HTTP listener; an empty list (the
-    # other workers) just means HTTP-only.
-    if protocol_sockets:
-        server._protocol_sockets = list(protocol_sockets)
-        server.protocol_ports = {
-            binding.name: socks[0].getsockname()[1]
-            for socks, binding in protocol_sockets if socks
-        }
-        logger.info('Worker %d owns %d stateful protocol listener(s)',
-                    worker_id, len(protocol_sockets))
+    # Inject the inherited listeners so ASGIServer.run() skips its own bind
+    # step.  Whether this worker owns a broker is already decided — it is in
+    # the list or it is not.
+    server.bound_listeners = list(bound_listeners)
+    server._publish_socket_view()
+    server.protocol_ports = {
+        listener.speaks: socks[0].getsockname()[1]
+        for listener, socks in bound_listeners
+        if listener.speaks != HTTP and socks
+    }
+    if server.protocol_ports:
+        logger.info('Worker %d owns %d single-owner listener(s)',
+                    worker_id, len(server.protocol_ports))
 
     async def _serve() -> None:
         # Threads inherit the loop thread's affinity mask, so a pinned worker
         # would run every offloaded compression and file read on the one core
         # the loop is already saturating.  Hand the pool the mask the operator
         # gave us instead — offloading exists to get off this core.
+        loop = asyncio.get_running_loop()
         if offload_mask is not None:
-            asyncio.get_running_loop().set_default_executor(
-                make_offload_executor(offload_mask))
+            loop.set_default_executor(make_offload_executor(offload_mask))
+
+        def _drain_and_stop(*_):
+            loop.create_task(server.stop(drain_timeout=cfg.worker_drain_timeout))
+
+        try:
+            # On the loop, not signal.signal, so the handler can await.
+            loop.add_signal_handler(signal.SIGTERM, _drain_and_stop)
+        except (NotImplementedError, RuntimeError):
+            # No loop signal support; SIG_DFL above still applies.
+            logger.debug('Worker %d: loop signal handler unavailable', worker_id)
+
         await server.run()
 
     logger.info('Worker %d starting (PID %d)', worker_id, os.getpid())

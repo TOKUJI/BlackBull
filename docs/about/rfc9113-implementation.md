@@ -568,7 +568,7 @@ already enforced at parse time; pushed-response cacheability follows from the
 | Oversized single header block (§10.5.1) | §4.3, §8.1.1 | `malformed` flag set during parse → RST | `parse_payload() in frame_types.py` / `parse_headers() in parser.py` |
 | Stream exhaustion | §5.1.2 | RST REFUSED_STREAM before scope is built | `HTTP2Actor._on_headers_frame()` |
 | WebSocket stream exhaustion | RFC 8441 | `HTTP2Actor._ws_stream_count` cap (`BB_H2_WS_MAX_STREAMS`) | `HTTP2Actor._handle_h2_websocket()` |
-| Concurrent-handler flood (1 worker) | operational | `BB_H2_ACTIVE_STREAMS_1W` semaphore via `_run_guarded() in http2_actor.py` | `HTTP2Actor._spawn_stream_task()` |
+| Concurrent-handler flood (1 worker) | operational | `BB_H2_ACTIVE_STREAMS_1W` semaphore via `_run_when_stream_cap_admits() in http2_actor.py` | `HTTP2Actor._spawn_stream_task()` |
 | PRIORITY flood on idle streams | §6.3, §5.3 | No state is created or recorded: the deprecated dependency signal is validated and dropped, so a PRIORITY frame buys nothing that outlives it.  Previously each one created a `Stream` node that was never removed | `HTTP2Actor._frame_loop()`, `PriorityResponder` |
 | PRIORITY_UPDATE hint-buffer growth | RFC 9218 §7 | Pre-created hint nodes bounded by `SETTINGS_MAX_CONCURRENT_STREAMS`; over it the frame is dropped and `h2_priority_update_buffer` logged | `PriorityUpdateResponder` |
 

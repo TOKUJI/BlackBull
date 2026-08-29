@@ -17,6 +17,15 @@
 # No-op on a Docker whose bind mounts work (e.g. EC2) — the EC2 harness keeps
 # the upstream mounts.  Touches only the LOCAL harness clone.
 #
+# KNOWN LOCAL-ONLY FAILURES: the four "static / static-tls file|variant follows
+# the disk" checks.  They replace a file in $DATA_DIR/static on the host and
+# expect the server to serve the new bytes within 2s.  A named volume is
+# populated once by `docker cp`, so a host-side replacement never reaches the
+# container and the check fails here and only here.  It is not a caching bug:
+# StaticFiles defaults to cache=False and stats + re-reads on every request,
+# verified directly (1000 B file replaced with 2500 B, served at 2500 B after
+# 2s).  Expect these four to pass on EC2, where the bind mount is real.
+#
 # Usage: bash bench/httparena/patch_wsl2_docker.sh [HARENA_DIR]
 #   HARENA_DIR  harness root (default ~/HttpArena)
 #
@@ -99,10 +108,25 @@ sed -i "s|-v \"\$DATA_DIR/pgdb-seed.sql:/docker-entrypoint-initdb.d/seed.sql:ro\
 # error), and the httparena-data volume already serves /data/static.
 sed -i "s|-v \"\$DATA_DIR/dataset.json:/data/dataset.json:ro\"|-v ${VOL_DATA}:/data:ro|" \
     "$HARENA_DIR/scripts/validate.sh" "$HARENA_DIR/scripts/lib/framework.sh"
-sed -i 's|    docker_args+=(-v "\$DATA_DIR/static:/data/static:ro")|    : # static served from the data volume|' \
-    "$HARENA_DIR/scripts/validate.sh"
-sed -i 's|    docker_args+=(-v "\$DATA_DIR/static:/data/static:ro")|    : # static served from the data volume|' \
-    "$HARENA_DIR/scripts/lib/framework.sh"
+# The static mount appears in two shapes upstream and both must go, or the
+# surviving bind-mount shadows /data/static in the volume with an empty dir
+# and every static asset 404s:
+#   * a statement — replaced with `:`, NOT deleted, because bash rejects an
+#     empty then-block;
+#   * a bare line inside a docker_args=( … ) array — deleted, since `:` there
+#     would become a literal argument.
+for f in "$HARENA_DIR/scripts/validate.sh" "$HARENA_DIR/scripts/lib/framework.sh"; do
+    sed -i 's|docker_args+=(-v "\$DATA_DIR/static:/data/static:ro")|: # static served from the data volume|' "$f"
+    sed -i '/^[[:space:]]*-v "\$DATA_DIR\/static:\/data\/static:ro"[[:space:]]*$/d' "$f"
+done
+# A silent no-match here costs a whole run, so say so rather than carry on.
+for f in "$HARENA_DIR/scripts/validate.sh" "$HARENA_DIR/scripts/lib/framework.sh"; do
+    if grep -q -- '-v "\$DATA_DIR/static:/data/static:ro"' "$f"; then
+        echo "ERROR: the static bind-mount survived in $f — upstream changed its"
+        echo "       shape again; /data/static would be empty in the container." >&2
+        exit 1
+    fi
+done
 # certs: dir mount → volume.
 sed -i "s|-v \"\$CERTS_DIR:/certs:ro\"|-v ${VOL_CERTS}:/certs:ro|" \
     "$HARENA_DIR/scripts/validate.sh" "$HARENA_DIR/scripts/lib/framework.sh"

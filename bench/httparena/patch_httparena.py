@@ -41,29 +41,43 @@ PATCHES = [
     (
         'scripts/benchmark.sh',
         '--ulimit nofile=1048576:1048576',
-        '--ulimit nofile="${LOADGEN_NOFILE:-1048576}:${LOADGEN_NOFILE:-1048576}"',
+        # Unquoted on purpose: one of the two sites is inside a
+        # double-quoted assignment, where an inner quote would close the
+        # string.  The default has no whitespace, so it needs none.
+        '--ulimit nofile=${LOADGEN_NOFILE:-1048576}:${LOADGEN_NOFILE:-1048576}',
+        # Every load generator's docker command, not one of them: upstream now
+        # builds a second (zrk, for latency-1m) with the same literal, and the
+        # knob means "the loadgen's nofile is env-driven" wherever that is set.
+        'all',
     ),
 ]
 
 
 def apply(root: str) -> None:
-    for relpath, old, new in PATCHES:
+    for patch in PATCHES:
+        relpath, old, new = patch[:3]
+        mode = patch[3] if len(patch) > 3 else 'one'
         path = os.path.join(root, relpath)
         with open(path) as f:
             src = f.read()
         n = src.count(old)
-        if n != 1:
+        # 'one' asserts the exact count so upstream drift stops the run rather
+        # than being patched around; 'all' still needs at least one, and the
+        # count is printed so a change upstream is visible in the log.
+        if (mode == 'one' and n != 1) or (mode == 'all' and n < 1):
+            expected = 'exactly 1' if mode == 'one' else 'at least 1'
             sys.stderr.write(
-                f'FAIL: expected exactly 1 match of pattern in {relpath}, '
+                f'FAIL: expected {expected} match of pattern in {relpath}, '
                 f'found {n}\n'
             )
             sys.exit(1)
         with open(path, 'w') as f:
             f.write(src.replace(old, new))
-        print(f'  patched {relpath}')
+        print(f'  patched {relpath} ({n} site{"s" if n != 1 else ""})')
 
     print('  verification grep:')
-    for relpath, _, _ in PATCHES:
+    for patch in PATCHES:
+        relpath = patch[0]
         path = os.path.join(root, relpath)
         with open(path) as f:
             for i, line in enumerate(f, 1):

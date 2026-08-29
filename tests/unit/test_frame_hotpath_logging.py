@@ -14,7 +14,26 @@ from pathlib import Path
 
 import pytest
 
+from blackbull.protocol import frame_types
 from blackbull.protocol.frame import FrameFactory
+
+
+@pytest.fixture
+def debug_gate_open(monkeypatch):
+    """Open ``frame_types._DEBUG`` for the duration of a test.
+
+    The gate is settled at import — ``_DEBUG = debug_gate(logger)`` — which is
+    the point of it: a per-frame path pays one global read instead of a call
+    into ``Logger.debug``.  So whether it is open depends on the logging level
+    at the moment the module was first imported, and that moment moves with
+    what else the run collects: ``tests/integration/conftest.py`` imports
+    ``blackbull.server`` before any test module is imported, and the gate
+    settles closed.
+
+    ``caplog.set_level`` cannot reopen it, because there is no level left to
+    read.  A test that wants to observe the guarded line has to say so.
+    """
+    monkeypatch.setattr(frame_types, '_DEBUG', True)
 
 
 _HOT_FILES = [
@@ -62,7 +81,7 @@ def test_frame_create_emits_no_per_create_info(caplog):
         f'got {[r.getMessage() for r in frame_records]}')
 
 
-def test_frame_debug_still_emitted_when_enabled(caplog):
+def test_frame_debug_still_emitted_when_enabled(caplog, debug_gate_open):
     """The guards must not suppress DEBUG output when DEBUG *is* enabled —
     FrameBase.save() still logs the saved frame at DEBUG."""
     caplog.set_level(logging.DEBUG, logger='blackbull.protocol.frame_types')
@@ -74,7 +93,7 @@ def test_frame_debug_still_emitted_when_enabled(caplog):
     assert saved, 'FrameBase.save() must still emit its DEBUG trace when DEBUG is on'
 
 
-def test_frame_init_debug_uses_lazy_args(caplog):
+def test_frame_init_debug_uses_lazy_args(caplog, debug_gate_open):
     """FrameBase.__init__ logs its fields at DEBUG via lazy %-args (so the
     record renders correctly) when DEBUG is enabled."""
     caplog.set_level(logging.DEBUG, logger='blackbull.protocol.frame_types')

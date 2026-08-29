@@ -900,6 +900,14 @@ class Settings:
     #: See BB_WS_MAX_MESSAGE_SIZE above.  Default 16 MiB, ``0`` disables.
     ws_max_message_size: int = 16 * 1024 * 1024
 
+    #: Seconds a worker spends letting already-accepted connections finish
+    #: after SIGTERM, before cancelling what is left.  Sits inside the
+    #: supervisor's own wait so the drain ends here rather than in a SIGKILL;
+    #: raising it past that wait only moves the deadline, it does not extend
+    #: it.  ``0`` drops in-flight requests immediately, which is what the
+    #: server did before this existed.
+    worker_drain_timeout: float = 8.0
+
     #: Per-connection asyncio.Semaphore cap on running stream handlers when
     #: running with a single worker (0 = disabled).  Defaults to 20 so that
     #: high-mux connections (e.g. -m 50) do not saturate the single event loop
@@ -1045,6 +1053,7 @@ def get_settings() -> Settings:
             'BB_MQTT_MAX_SUBSCRIPTIONS', 1000),
         mqtt_max_sessions=_int_env_nonneg('BB_MQTT_MAX_SESSIONS', 10000),
         use_uvloop=_bool_env('BB_UVLOOP', False),
+        worker_drain_timeout=_float_env_nonneg('BB_WORKER_DRAIN_TIMEOUT', 8.0),
         h2_active_streams_1w=_int_env_nonneg('BB_H2_ACTIVE_STREAMS_1W', 20),
         h2_active_streams=_int_env_nonneg('BB_H2_ACTIVE_STREAMS', 20),
         compression_min_size=_int_env('BB_COMPRESSION_MIN_SIZE', 100),

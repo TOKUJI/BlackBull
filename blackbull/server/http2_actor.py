@@ -142,14 +142,15 @@ def _build_h2_extensions(
 
 
 
-async def _run_guarded(coro, sem):
-    # BB_H2_ACTIVE_STREAMS_1W semaphore: caps concurrently-running handlers on a
-    # single-worker deployment.  Without it, one high-mux connection can saturate
-    # the event loop with handler coroutines and starve connections handled by the
-    # same worker.  Each acquire yields to the event loop, so stream tasks that
-    # cannot enter still receive frames; they just don't start the ASGI app call.
-    async with sem:
-        await coro
+async def _run_when_stream_cap_admits(start_stream, cap):
+    """Run *start_stream()* once *cap* admits it.
+
+    A factory rather than a coroutine: a task cancelled while still waiting
+    never reaches the body, and a coroutine built before that is destroyed
+    un-awaited.
+    """
+    async with cap:
+        await start_stream()
 
 
 # ---------------------------------------------------------------------------
@@ -352,10 +353,8 @@ class HTTP2Actor(Actor):
         # Per-connection semaphore: caps concurrently-running stream handlers to
         # prevent a high-mux connection from starving other connections on the
         # same worker.  None means no cap.
-        # Single-worker uses BB_H2_ACTIVE_STREAMS_1W (default 20) because one
-        # event loop can be overwhelmed by 2,500 tasks at -c50 -m50.
-        # Multi-worker uses BB_H2_ACTIVE_STREAMS (default 0 = no limit) because
-        # SO_REUSEPORT distributes connections across workers.
+        # Two settings: one worker meets every connection's streams on one
+        # loop, SO_REUSEPORT spreads them.
         if _cfg.workers == 1:
             _stream_cap = _cfg.h2_active_streams_1w
         else:
@@ -1293,25 +1292,27 @@ class HTTP2Actor(Actor):
         # via ``RequestActor``), and its failure handling is the one a peer
         # can act on — a raising stream is reset with INTERNAL_ERROR rather
         # than left to stop without explanation.
-        coro = StreamActor(
-            stream_id=stream_id,
-            conn=conn,
-            receive=recipient,
-            send=send,
-            app=self.app,
-            aggregator=self._aggregator,
-            http2_actor=self,
-            log_record=log_record,
-            force_asgi=self._force_asgi,
-        ).run()
+        def _start_stream():
+            return StreamActor(
+                stream_id=stream_id,
+                conn=conn,
+                receive=recipient,
+                send=send,
+                app=self.app,
+                aggregator=self._aggregator,
+                http2_actor=self,
+                log_record=log_record,
+                force_asgi=self._force_asgi,
+            ).run()
 
         timeout = self._request_timeout
         if timeout > 0:
             _sp = conn.path
 
-            async def _timed(c=coro, sid=stream_id, t=timeout, sp=_sp):
+            async def _timed(make=_start_stream, sid=stream_id, t=timeout,
+                             sp=_sp):
                 try:
-                    await asyncio.wait_for(c, timeout=t)
+                    await asyncio.wait_for(make(), timeout=t)
                 except asyncio.TimeoutError:
                     logger.warning(
                         'Stream %d timed out after %.1fs — RST_STREAM CANCEL', sid, t)
@@ -1319,26 +1320,19 @@ class HTTP2Actor(Actor):
                                 requested=t, limit=t,
                                 scope_path=sp, protocol='http2')
                     await self.send_frame(self.factory.rst_stream(sid, ErrorCodes.CANCEL))
-            final_coro = _timed()
+            make_final = _timed
         else:
-            final_coro = coro
+            make_final = _start_stream
 
         try:
             if self._stream_semaphore is not None:
                 task = tg.create_task(
-                    _run_guarded(final_coro, self._stream_semaphore))
+                    _run_when_stream_cap_admits(make_final, self._stream_semaphore))
             else:
-                task = tg.create_task(final_coro)
+                task = tg.create_task(make_final())
         except RuntimeError:
-            # The connection's TaskGroup is already winding down — a HEADERS
-            # frame arrived in the same turn the peer went away.  The coroutine
-            # was built before we could know that, so close it here: an
-            # unawaited coroutine is reported whenever the GC reaches it,
-            # naming a stream that has nothing to do with wherever the line
-            # lands.  There is no peer left to RST_STREAM.
-            if final_coro is not coro:
-                final_coro.close()
-            coro.close()
+            # HEADERS arrived in the turn the connection went away.  No peer
+            # left to RST_STREAM.
             if _DEBUG:
                 logger.debug('stream %d not started: connection closing',
                              stream_id)

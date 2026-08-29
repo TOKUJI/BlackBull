@@ -1,11 +1,13 @@
 import asyncio
+import contextlib
 
 from http import HTTPStatus
 import logging
 import ssl
 import sys
 from collections import defaultdict, deque
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
+from dataclasses import replace
 from pathlib import Path
 import time
 
@@ -14,12 +16,30 @@ from ..protocol.rsock import (
     create_dual_stack_sockets, create_unix_socket,
     adopt_inherited_sockets, adopt_listening_fd,
 )
+from .listener import HTTP, InheritedFd, Listener, Tcp, Unix
 from .sender import AbstractWriter
 from .recipient import (AbstractReader,
                         _HTTP2_STREAM_QUEUE_DEPTH, _WS_READ_INLINE)
 from .cap_log import log_cap_hit
 from ..asgi import ASGIEvent
 logger = logging.getLogger(__name__)
+
+
+def _listener_from_args(port, unix_path, inherited_fd, tls=None) -> Listener:
+    """The old way of saying it — one port, one path, or one fd — as a listener."""
+    if inherited_fd is not None:
+        return Listener(InheritedFd(inherited_fd), tls=tls)
+    if unix_path is not None:
+        return Listener(Unix(unix_path), tls=tls)
+    return Listener(Tcp(port), tls=tls)
+
+
+def _address_of(sock) -> Tcp | Unix:
+    """The address a already-bound socket is listening on."""
+    sockname = sock.getsockname()
+    if isinstance(sockname, str):
+        return Unix(sockname)
+    return Tcp(sockname[1])
 
 #: ``eager_start`` landed in 3.12; the supported floor is 3.11.  A task
 #: constructed with it runs its coroutine synchronously until the first
@@ -199,8 +219,15 @@ class Server:
                  stream_queue_depth: int = _HTTP2_STREAM_QUEUE_DEPTH,
                  ws_queue_depth: int = _WS_READ_INLINE,
                  protocol_registry=None,
+                 listeners=None,
                  **kwds):
         self.app = app
+        # The sockets this server was asked for.  ``None`` means the caller
+        # said it the old way — a single port through ``open_socket`` — which
+        # is turned into one listener there rather than kept as a second path.
+        self._listeners = list(listeners) if listeners else None
+        #: ``[(Listener, [socket, ...]), ...]`` — what is actually bound.
+        self.bound_listeners: list = []
         self._max_connections = max_connections
         # A derived default depends on the host, so the only way an operator
         # learns the value in force is by being told it — including where it
@@ -222,8 +249,15 @@ class Server:
                                    or _PR())
         # name -> bound port, populated by open_socket for port-bound protocols.
         self.protocol_ports: dict[str, int] = {}
-        # list of (raw_sockets, binding) bound for non-ASGI protocols.
-        self._protocol_sockets: list = []
+        #: Live connection tasks — what a shutdown drain waits on.
+        self._connection_tasks: set = set()
+        self._stopping = False
+        #: The budget a drain in progress is working to.  ``run()`` reads it
+        #: to finish the job rather than returning into the loop teardown.
+        self._drain_timeout = None
+        #: Set by :meth:`stop` to release :meth:`run`.  ``run`` blocks on this
+        #: rather than on ``Server.serve_forever()`` — see there.
+        self._stopped_event = None
         # Cache the dispatcher + aggregator pair once — both are
         # process-wide singletons.  Looking them up per accept is wasted
         # work on the hot connection-burst path.
@@ -237,13 +271,34 @@ class Server:
         if ssl_context and (certfile or keyfile):
             raise TypeError('SSLContext and certfile (or keyfile) must not be set at the same time')
 
-        self.ssl_context = ssl_context
+        self._ssl_context = ssl_context
         self.keyfile = keyfile
         self.certfile = certfile
         self.make_ssl_context()
         self.socket = None
         self.port = None
         self.unix_path: str | None = None
+
+    @property
+    def ssl_context(self):
+        """The context a listener built from ``certfile``/``keyfile`` uses.
+
+        Assigning it re-points every bound listener that was carrying the
+        previous one — which is what makes configuring mTLS after
+        ``open_socket()`` work, and what keeps ``bound_listeners`` honest about
+        what is actually being served.  A listener the caller stated carries
+        its own context and is left alone, because identity is the difference
+        between "the server's" and "its own".
+        """
+        return self._ssl_context
+
+    @ssl_context.setter
+    def ssl_context(self, value):
+        previous = getattr(self, '_ssl_context', None)
+        self._ssl_context = value
+        for index, (listener, socks) in enumerate(getattr(self, 'bound_listeners', ())):
+            if listener.tls is previous:
+                self.bound_listeners[index] = (replace(listener, tls=value), socks)
 
     @property
     def keyfile(self):
@@ -345,6 +400,7 @@ class Server:
                 # so a failure surfaces as a log line rather than asyncio's
                 # "Task exception was never retrieved" at GC time.
                 self._serve_task = task
+                server._connection_tasks.add(task)
                 task.add_done_callback(self._serve_done)
 
             async def _serve(self):
@@ -363,6 +419,7 @@ class Server:
 
             @staticmethod
             def _serve_done(task):
+                server._connection_tasks.discard(task)
                 if task.cancelled():
                     return
                 exc = task.exception()
@@ -525,98 +582,45 @@ class Server:
 
     def open_socket(self, port=0, unix_path: str | None = None,
                     inherited_fd: int | None = None):
-        # When the master re-execs itself for an auto-reload, it hands
-        # off the bound listening sockets via fd inheritance + the
-        # BB_INHERIT_FDS env var.  Adopt them instead of binding so the
-        # listener stays continuous across the reload (no port-release
-        # race, no missed SYNs).
-        raw_sockets = adopt_inherited_sockets()
-        if raw_sockets:
-            self.raw_sockets = raw_sockets
-            sockname = raw_sockets[0].getsockname()
-            # AF_UNIX getsockname() returns the bound path string; TCP
-            # returns ``(host, port)``.  Store both so downstream callers
-            # (workers, integration tests) don't have to special-case.
-            if isinstance(sockname, str):
-                self.port = None
-                self.unix_path = sockname
-            else:
-                self.port = sockname[1]
-                self.unix_path = None
-            return
+        """Bind every listener this server was asked for.
 
+        A caller that named ``listeners=`` gets those.  A caller that said it
+        the old way — a port, a Unix path, or an inherited fd — gets one
+        listener built from those arguments, so there is one binding path and
+        not two.
+        """
         from ..env import get_settings as _get_settings  # noqa: PLC0415
         _cfg = _get_settings()
 
-        if inherited_fd is not None:
-            # Systemd-style socket activation.  Bind / listen already
-            # happened in the supervisor; just adopt the fd and capture
-            # its sockname for ``port`` / ``unix_path`` so downstream
-            # code paths (lifespan, workers) see the same shape as
-            # a normal bind.
-            sock = adopt_listening_fd(inherited_fd)
-            self.raw_sockets = [sock]
-            sockname = sock.getsockname()
-            if isinstance(sockname, str):
-                self.port = None
-                self.unix_path = sockname
+        if self._listeners is None:
+            # When the master re-execs itself for an auto-reload, it hands off
+            # the bound listening sockets via fd inheritance + the
+            # BB_INHERIT_FDS env var.  Adopt them instead of binding so the
+            # listener stays continuous across the reload (no port-release
+            # race, no missed SYNs).
+            inherited = adopt_inherited_sockets()
+            if inherited:
+                # The handoff carries the HTTP fds only, so a broker port is
+                # rebound below rather than adopted.  Safe: sockets are
+                # CLOEXEC, and the caller terminates the workers holding
+                # copies before re-execing, so the port is free by now.
+                self.bound_listeners = [
+                    (Listener(_address_of(inherited[0]), tls=self.ssl_context),
+                     inherited)]
             else:
-                # AF_INET sockname is ``(host, port)``; AF_INET6 is
-                # ``(host, port, flowinfo, scopeid)`` — port is always [1].
-                self.port = sockname[1]
-                self.unix_path = None
-            return
+                # certfile / keyfile / ssl_context are sugar for this one
+                # listener, but they are resolved in run(), not here: a caller
+                # may replace ``server.ssl_context`` between open_socket() and
+                # run() -- mTLS is configured that way -- and a context frozen
+                # at bind time would silently serve the pre-mTLS one.
+                self._listeners = [
+                    _listener_from_args(port, unix_path, inherited_fd,
+                                        self.ssl_context)]
 
-        if unix_path is not None:
-            # AF_UNIX path: no port check, no dual-stack pairing, no TCP
-            # sockopts.  ``create_unix_socket`` handles stale-file cleanup
-            # and chmod for the typical reverse-proxy-runs-in-same-group
-            # deployment.
-            sock = create_unix_socket(
-                unix_path,
-                backlog=_cfg.socket_backlog,
-                sndbuf=_cfg.socket_sndbuf,
-                rcvbuf=_cfg.socket_rcvbuf,
-            )
-            if sock is None:
-                raise RuntimeError(
-                    f'Failed to bind AF_UNIX socket on {unix_path!r}.'
-                )
-            self.raw_sockets = [sock]
-            self.port = None
-            self.unix_path = unix_path
-            return
-
-        raw_sockets = create_dual_stack_sockets(
-            port,
-            backlog=_cfg.socket_backlog,
-            sndbuf=_cfg.socket_sndbuf,
-            rcvbuf=_cfg.socket_rcvbuf,
-            user_timeout_ms=_cfg.tcp_user_timeout_ms,
-            keepalive=False,  # replaced by app-level keep_alive_timeout
-            # Honour BB_SOCKET_REUSEPORT on the HTTP listener so forked
-            # workers can co-bind the same port and the kernel load-balances
-            # accepts across them.  (Stateful protocol ports below are bound
-            # WITHOUT reuseport on purpose — they must have a single owner.)
-            reuseport=_cfg.socket_reuseport,
-        )
-
-        if not raw_sockets:
-            # No connect-probe pre-check (that shape was racy, IPv4-localhost
-            # only, and hid the OS error): binding is the check.  The specific
-            # OS failure (e.g. EADDRINUSE naming the address) was already
-            # logged by _bind_socket.
-            logger.error(f'Failed to bind port {port}. Try another port.')
-            raise RuntimeError(
-                f'Failed to bind port {port} (see log for the OS error, '
-                f'e.g. address already in use). Try another port.')
-
-        self.raw_sockets = raw_sockets
-
-        # Derive the actual port from the first successfully bound socket
-        # (matters when port=0 was requested, i.e. the OS picks a free port).
-        self.port = self.raw_sockets[0].getsockname()[1]
-        self.unix_path = None
+        if not self.bound_listeners:
+            self.bound_listeners = [(listener, self._bind_listener(listener, _cfg))
+                                    for listener in self._listeners]
+        self._publish_socket_view()
 
         # Do NOT wrap sockets with ssl_context here.
         # asyncio.start_server() accepts raw TCP sockets via sockets= and
@@ -625,6 +629,71 @@ class Server:
         # layer and breaks the handshake.
 
         self._bind_protocol_sockets(_cfg)
+
+    def _bind_listener(self, listener, _cfg) -> list:
+        """Bind one listener and return its sockets."""
+        where = listener.where
+
+        if isinstance(where, InheritedFd):
+            # Systemd-style socket activation: bind / listen already happened
+            # in the supervisor, so adopt the fd rather than binding again.
+            return [adopt_listening_fd(where.fd)]
+
+        if isinstance(where, Unix):
+            # No port check, no dual-stack pairing, no TCP sockopts.
+            sock = create_unix_socket(
+                where.path,
+                backlog=_cfg.socket_backlog,
+                sndbuf=_cfg.socket_sndbuf,
+                rcvbuf=_cfg.socket_rcvbuf,
+            )
+            if sock is None:
+                raise RuntimeError(
+                    f'Failed to bind AF_UNIX socket on {where.path!r}.')
+            return [sock]
+
+        socks = create_dual_stack_sockets(
+            where.port,
+            backlog=_cfg.socket_backlog,
+            sndbuf=_cfg.socket_sndbuf,
+            rcvbuf=_cfg.socket_rcvbuf,
+            user_timeout_ms=_cfg.tcp_user_timeout_ms,
+            keepalive=False,  # replaced by app-level keep_alive_timeout
+            # Honour BB_SOCKET_REUSEPORT so forked workers can co-bind the
+            # same port and the kernel load-balances accepts across them.
+            # (Stateful protocol ports are bound WITHOUT reuseport on
+            # purpose — they must have a single owner.)
+            reuseport=_cfg.socket_reuseport,
+            host=where.host,
+        )
+        if not socks:
+            # No connect-probe pre-check (that shape was racy, IPv4-localhost
+            # only, and hid the OS error): binding is the check.  The specific
+            # OS failure (e.g. EADDRINUSE naming the address) was already
+            # logged by _bind_socket.
+            logger.error(f'Failed to bind port {where.port}. Try another port.')
+            raise RuntimeError(
+                f'Failed to bind port {where.port} (see log for the OS error, '
+                f'e.g. address already in use). Try another port.')
+        return socks
+
+    def _publish_socket_view(self) -> None:
+        """Expose the bound listeners the way the rest of the server reads them.
+
+        ``raw_sockets`` is every HTTP socket, which is what the multi-worker
+        master hands to each worker; ``port`` / ``unix_path`` describe the
+        first listener, which is what callers report and tests connect to.
+        """
+        self.raw_sockets = [sock for listener, socks in self.bound_listeners
+                            for sock in socks if listener.speaks == HTTP]
+        first = self.raw_sockets[0] if self.raw_sockets else None
+        sockname = first.getsockname() if first is not None else None
+        # AF_UNIX getsockname() returns the bound path string; TCP returns
+        # ``(host, port)`` — AF_INET6 adds flowinfo/scopeid, port is always [1].
+        if isinstance(sockname, str):
+            self.port, self.unix_path = None, sockname
+        elif sockname is not None:
+            self.port, self.unix_path = sockname[1], None
 
     def _bind_protocol_sockets(self, _cfg):
         """Bind a listening socket per port-bound non-ASGI protocol.
@@ -655,14 +724,28 @@ class Server:
                 continue
             bound_port = socks[0].getsockname()[1]
             self.protocol_ports[binding.name] = bound_port
-            self._protocol_sockets.append((socks, binding))
+            # ``tls=True`` on a registry binding means the server's certificate;
+            # a binding has no way to name one of its own.  Refused here rather
+            # than at serve time so a misconfiguration fails before workers fork.
+            if binding.tls and self.ssl_context is None:
+                raise RuntimeError(
+                    f'Raw protocol binding {binding.name!r} requires TLS '
+                    f'(tls=True) but the server has no certificate configured '
+                    f'— pass certfile/keyfile or an ssl_context.')
+            self.bound_listeners.append((
+                Listener(Tcp(bound_port), speaks=binding.name,
+                         tls=self._raw_tls_context() if binding.tls else None),
+                socks))
             logger.info('Protocol %r listening on port %d', binding.name, bound_port)
 
     def close_socket(self):
-        for s in getattr(self, 'raw_sockets', []):
-            s.close()
-        for socks, _ in self._protocol_sockets:
+        # bound_listeners is the truth; raw_sockets is a view of the HTTP ones,
+        # so closing only that would leak whatever else was bound.
+        for _listener, socks in self.bound_listeners:
             for s in socks:
+                s.close()
+        if not self.bound_listeners:
+            for s in getattr(self, 'raw_sockets', []):
                 s.close()
 
     async def startup(self):
@@ -682,8 +765,17 @@ class Server:
 
     async def run(self, port=80):
         """Run an asyncio socket server with the setting in this object."""
-        if not hasattr(self, 'raw_sockets') or not self.raw_sockets:
-            self.open_socket(port)
+        if not self.bound_listeners:
+            if getattr(self, 'raw_sockets', None):
+                # A forked worker is handed the sockets the master bound.
+                # The handoff carries a flat list and one context, so every
+                # one of them terminates the server's — until it carries
+                # listeners, which is what lets workers differ per port.
+                self.bound_listeners = [
+                    (Listener(_address_of(sock), tls=self.ssl_context), [sock])
+                    for sock in self.raw_sockets]
+            else:
+                self.open_socket(port)
 
         # SocketManager wraps each socket in asyncio.start_server and closes all
         # servers on exit.  The shared HTTP listener uses client_connected_cb;
@@ -692,47 +784,110 @@ class Server:
         # ``tls=True``, which serves them through the same TLS
         # machinery as the HTTPS listener.
         # LifespanManager drives the ASGI lifespan protocol; nesting it inside
-        # SocketManager guarantees: startup completes before serve_forever() is
-        # called, and shutdown completes before sockets are closed.
-        pairs = [(s, self.connection_protocol_factory())
-                 for s in self.raw_sockets]
-        raw_clear = [(s, self.connection_protocol_factory(binding))
-                     for socks, binding in self._protocol_sockets
-                     if not binding.tls for s in socks]
-        raw_tls = [(s, self.connection_protocol_factory(binding))
-                   for socks, binding in self._protocol_sockets
-                   if binding.tls for s in socks]
-        if raw_tls and self.ssl_context is None:
-            names = ', '.join(binding.name
-                              for _socks, binding in self._protocol_sockets
-                              if binding.tls)
-            raise RuntimeError(
-                f'Raw protocol binding(s) [{names}] require TLS (tls=True) '
-                f'but the server has no certificate configured — pass '
-                f'certfile/keyfile or an ssl_context.')
-        async with SocketManager(pairs, self.ssl_context) as servers, \
-                SocketManager(raw_clear, None) as raw_servers, \
-                SocketManager(raw_tls,
-                              self._raw_tls_context() if raw_tls else None
-                              ) as raw_tls_servers:
-            servers = servers + raw_servers + raw_tls_servers
+        # SocketManager guarantees: startup completes before the server begins
+        # accepting, and shutdown completes before sockets are closed.
+        # One group per distinct TLS context, because a listener terminates
+        # the certificate it names and its neighbour may name another — or
+        # none.  ``None`` is a group like any other; it is the cleartext one.
+        groups: dict[object, list] = defaultdict(list)
+        for listener, socks in self.bound_listeners:
+            # ``speaks`` is a name; the binding it names is resolved here, so a
+            # listener stays independent of the order things were registered in.
+            binding = (None if listener.speaks == HTTP else
+                       self._protocol_registry.raw_bindings.get(listener.speaks))
+            factory = self.connection_protocol_factory(binding)
+            for sock in socks:
+                groups[listener.tls].append((sock, factory))
+
+        async with AsyncExitStack() as stack:
+            servers = []
+            for context, pairs in groups.items():
+                servers += await stack.enter_async_context(
+                    SocketManager(pairs, context))
+            self._running_servers = servers
             async with LifespanManager(self.app):
                 logger.info(f'Server(s) created: {servers}')
+                # Block on our own event, not ``Server.serve_forever()``.
+                # The sockets are already accepting — ``create_server`` starts
+                # them — so ``serve_forever`` only ever blocked.  Recent 3.13
+                # and 3.14 patch releases made its cancellation path call
+                # ``Server.close_clients()``, which closes the *accepted*
+                # transports: a drain then finishes the handler, and the send
+                # path drops its response into a transport asyncio has already
+                # closed.  The client sees a closed connection, which is what
+                # the drain exists to prevent.  Measured: 3.14.6 has no such
+                # call and passes, 3.14.7 and 3.13.15 have it and fail.
+                self._stopped_event = asyncio.Event()
                 try:
-                    async with asyncio.TaskGroup() as tg:
-                        for srv in servers:
-                            tg.create_task(srv.serve_forever())
+                    await self._stopped_event.wait()
 
-                except* KeyboardInterrupt:
+                except KeyboardInterrupt:
                     logger.info('KeyboardInterrupt received — shutting down.')
 
-                except* asyncio.CancelledError:
+                except asyncio.CancelledError:
                     logger.info('Server task cancelled.')
 
-                except* Exception as eg:
-                    logger.error('Server error: %s', eg)
+                except Exception as exc:
+                    logger.error('Server error: %s', exc)
+
+                # The listeners closing is what ended the TaskGroup, and a
+                # request may still be unanswered.  Leaving now returns into
+                # asyncio.run(), which cancels it; finish the drain here.
+                if self._stopping:
+                    await self._drain(self._drain_timeout or 8.0)
 
         logger.info('Server has been stopped.')
+
+    async def stop(self, drain_timeout: float = 8.0) -> None:
+        """Stop accepting, then let the connections already being served finish.
+
+        Nothing in flight is cancelled while *drain_timeout* lasts: a cancelled
+        handler leaves a client holding a half-written response.  Whatever is
+        left at the deadline is cancelled — a shutdown that must complete still
+        completes.  Keep the budget inside
+        ``MultiWorkerServer.shutdown_timeout`` so the drain ends here and not
+        in a SIGKILL.
+        """
+        if self._stopping:
+            return
+        self._stopping = True
+        self._drain_timeout = drain_timeout
+
+        # Close listeners first, so the drain is over a set that only shrinks.
+        for srv in getattr(self, '_running_servers', ()):
+            srv.close()
+        if self._stopped_event is not None:
+            self._stopped_event.set()
+
+        await self._drain(drain_timeout)
+
+        for srv in getattr(self, '_running_servers', ()):
+            with contextlib.suppress(Exception):
+                await srv.wait_closed()
+
+    async def _drain(self, drain_timeout: float) -> None:
+        """Let the connections already being served finish.  Idempotent.
+
+        Called by :meth:`stop` and again by :meth:`run` on its way out, because
+        closing the listeners is what ends ``serve_forever()`` and unwinds the
+        TaskGroup — so a drain started from a signal handler is racing its
+        caller's teardown, and returning into ``asyncio.run()`` would cancel
+        both the drain and the request it is protecting.  Whichever gets there
+        second finds nothing left to wait for.
+        """
+        pending = [t for t in self._connection_tasks if not t.done()]
+        if not pending:
+            return
+        logger.info('Draining %d connection(s), up to %.1fs',
+                    len(pending), drain_timeout)
+        _done, still = await asyncio.wait(pending, timeout=drain_timeout)
+        if still:
+            logger.warning(
+                '%d connection(s) did not finish within %.1fs — cancelling',
+                len(still), drain_timeout)
+            for task in still:
+                task.cancel()
+            await asyncio.gather(*still, return_exceptions=True)
 
     def wait_for_port(self, timeout: float = 10.0, poll_interval: float = 0.1):
         if self.port is None:

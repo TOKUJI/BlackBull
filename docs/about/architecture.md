@@ -22,11 +22,15 @@ layer do things a library won't let you (see *Fault injection* below).
 ## Multi-protocol, one process
 
 A single `python app.py` serves every protocol at once — HTTP routes,
-a WebSocket channel, a gRPC service, and an MQTT broker, on their own ports,
-in one runtime. Non-HTTP protocols attach through one seam,
-`app.add_extension(...)`, while the HTTP core stays protocol-agnostic. There
-is no reverse proxy to configure, no separate broker process, and no C
-extension in the path.
+a WebSocket channel, a gRPC service, and an MQTT broker, in one runtime.
+Non-HTTP protocols attach through one seam, `app.add_extension(...)`, while
+the HTTP core stays protocol-agnostic. There is no reverse proxy to configure,
+no separate broker process, and no C extension in the path.
+
+Ports are not part of the count. A deployment states the sockets it wants as
+[listeners](../guide/listeners.md) — cleartext and TLS side by side, two
+certificates, an admin port on loopback — and one process serves all of them,
+with every worker on every one.
 
 This is the bet behind the IoT-gateway and edge use cases: protocol density
 in a single deployable, on hardware where running four services is a burden.
