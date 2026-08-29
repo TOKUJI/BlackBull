@@ -720,6 +720,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../../guide/listeners/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Listeners
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../../guide/raw-protocols/" class="md-nav__link">
         
   
@@ -4022,6 +4050,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.Server.ssl_context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ssl_context
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.Server.client_connected_cb" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4037,6 +4076,17 @@
     <span class="md-ellipsis">
       
         connection_protocol_factory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.Server.open_socket" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        open_socket
       
     </span>
   </a>
@@ -4070,6 +4120,17 @@
     <span class="md-ellipsis">
       
         startup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.Server.stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        stop
       
     </span>
   </a>
@@ -4390,6 +4451,34 @@
     
   
     http2_ws
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="listener/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    listener
   
 
     
@@ -5350,6 +5439,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.Server.ssl_context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ssl_context
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.Server.client_connected_cb" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5365,6 +5465,17 @@
     <span class="md-ellipsis">
       
         connection_protocol_factory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.Server.open_socket" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        open_socket
       
     </span>
   </a>
@@ -5398,6 +5509,17 @@
     <span class="md-ellipsis">
       
         startup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.Server.stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        stop
       
     </span>
   </a>
@@ -5509,6 +5631,35 @@ When ssl_context or certfile is set, the HTTP listener runs as HTTPS.</p>
 
 
 
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.server.Server.ssl_context" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">ssl_context</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+      <small class="doc doc-label doc-label-writable"><code>writable</code></small>
+  </span>
+
+<a href="#blackbull.server.Server.ssl_context" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>The context a listener built from <code>certfile</code>/<code>keyfile</code> uses.</p>
+<p>Assigning it re-points every bound listener that was carrying the
+previous one — which is what makes configuring mTLS after
+<code>open_socket()</code> work, and what keeps <code>bound_listeners</code> honest about
+what is actually being served.  A listener the caller stated carries
+its own context and is left alone, because identity is the difference
+between "the server's" and "its own".</p>
+
+    </div>
+
+</div>
+
 
 
 
@@ -5553,6 +5704,28 @@ single buffer the kernel writes into, and the actor reads by cursor.</p>
 is synchronous.  <code>connection_made</code> fires after the TLS handshake on
 an SSL transport, so ALPN is already decided by the time the task runs
 — same ordering the callback form relied on.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.server.Server.open_socket" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">open_socket</span><span class="p">(</span><span class="n">port</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">unix_path</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">inherited_fd</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+<a href="#blackbull.server.Server.open_socket" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Bind every listener this server was asked for.</p>
+<p>A caller that named <code>listeners=</code> gets those.  A caller that said it
+the old way — a port, a Unix path, or an inherited fd — gets one
+listener built from those arguments, so there is one binding path and
+not two.</p>
 
 
     </div>
@@ -5623,6 +5796,34 @@ an SSL transport, so ALPN is already decided by the time the task runs
 waits for 'lifespan.startup.complete'.  Raises RuntimeError on
 'lifespan.startup.failed'.  Stores the context manager so that
 shutdown() can deliver 'lifespan.shutdown' to the same task.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.server.Server.stop" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">stop</span><span class="p">(</span><span class="n">drain_timeout</span><span class="o">=</span><span class="mf">8.0</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.server.Server.stop" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Stop accepting, then let the connections already being served finish.</p>
+<p>Nothing in flight is cancelled while <em>drain_timeout</em> lasts: a cancelled
+handler leaves a client holding a half-written response.  Whatever is
+left at the deadline is cancelled — a shutdown that must complete still
+completes.  Keep the budget inside
+<code>MultiWorkerServer.shutdown_timeout</code> so the drain ends here and not
+in a SIGKILL.</p>
 
 
     </div>

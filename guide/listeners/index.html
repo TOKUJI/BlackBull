@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/about/conformance/">
+        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/guide/listeners/">
       
       
-        <link rel="prev" href="../architecture/">
+        <link rel="prev" href="../structured-fields/">
       
       
-        <link rel="next" href="../security-model/">
+        <link rel="next" href="../raw-protocols/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Conformance - BlackBull</title>
+        <title>Listeners - BlackBull</title>
       
     
     
@@ -72,7 +72,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#conformance" class="md-skip">
+        <a href="#listeners-the-sockets-you-ask-for" class="md-skip">
           Skip to content
         </a>
       
@@ -108,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Conformance
+              Listeners
             
           </span>
         </div>
@@ -418,18 +418,20 @@
       
   
   
+    
   
   
+  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
         
           
           <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
@@ -450,7 +452,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             
@@ -468,7 +470,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/" class="md-nav__link">
+      <a href="../" class="md-nav__link">
         
   
   
@@ -496,7 +498,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/routing/" class="md-nav__link">
+      <a href="../routing/" class="md-nav__link">
         
   
   
@@ -524,7 +526,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/middleware/" class="md-nav__link">
+      <a href="../middleware/" class="md-nav__link">
         
   
   
@@ -552,7 +554,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/error-handling/" class="md-nav__link">
+      <a href="../error-handling/" class="md-nav__link">
         
   
   
@@ -580,7 +582,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/requests-and-responses/" class="md-nav__link">
+      <a href="../requests-and-responses/" class="md-nav__link">
         
   
   
@@ -608,7 +610,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/dependency-injection/" class="md-nav__link">
+      <a href="../dependency-injection/" class="md-nav__link">
         
   
   
@@ -636,7 +638,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/websockets/" class="md-nav__link">
+      <a href="../websockets/" class="md-nav__link">
         
   
   
@@ -664,7 +666,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/http2/" class="md-nav__link">
+      <a href="../http2/" class="md-nav__link">
         
   
   
@@ -692,7 +694,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/structured-fields/" class="md-nav__link">
+      <a href="../structured-fields/" class="md-nav__link">
         
   
   
@@ -717,10 +719,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../guide/listeners/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Listeners
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -736,6 +765,81 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-a-listener-says" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What a listener says
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tls-belongs-to-the-listener" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TLS belongs to the listener
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#who-serves-a-listener" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Who serves a listener
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#saying-it-the-short-way" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Saying it the short way
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reading-back-what-got-bound" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading back what got bound
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -748,7 +852,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/raw-protocols/" class="md-nav__link">
+      <a href="../raw-protocols/" class="md-nav__link">
         
   
   
@@ -776,7 +880,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/mqtt/" class="md-nav__link">
+      <a href="../mqtt/" class="md-nav__link">
         
   
   
@@ -804,7 +908,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/grpc/" class="md-nav__link">
+      <a href="../grpc/" class="md-nav__link">
         
   
   
@@ -832,7 +936,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/translation-hub/" class="md-nav__link">
+      <a href="../translation-hub/" class="md-nav__link">
         
   
   
@@ -860,7 +964,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/edge-inference/" class="md-nav__link">
+      <a href="../edge-inference/" class="md-nav__link">
         
   
   
@@ -888,7 +992,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/streaming/" class="md-nav__link">
+      <a href="../streaming/" class="md-nav__link">
         
   
   
@@ -916,7 +1020,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/events/" class="md-nav__link">
+      <a href="../events/" class="md-nav__link">
         
   
   
@@ -944,7 +1048,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/logging/" class="md-nav__link">
+      <a href="../logging/" class="md-nav__link">
         
   
   
@@ -972,7 +1076,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/static-files/" class="md-nav__link">
+      <a href="../static-files/" class="md-nav__link">
         
   
   
@@ -1000,7 +1104,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/configuration/" class="md-nav__link">
+      <a href="../configuration/" class="md-nav__link">
         
   
   
@@ -1028,7 +1132,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/extensions/" class="md-nav__link">
+      <a href="../extensions/" class="md-nav__link">
         
   
   
@@ -1056,7 +1160,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/openapi/" class="md-nav__link">
+      <a href="../openapi/" class="md-nav__link">
         
   
   
@@ -1084,7 +1188,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/testing/" class="md-nav__link">
+      <a href="../testing/" class="md-nav__link">
         
   
   
@@ -1112,7 +1216,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/fault_injection/" class="md-nav__link">
+      <a href="../fault_injection/" class="md-nav__link">
         
   
   
@@ -4965,20 +5069,18 @@
       
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
         
           
           <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
@@ -4999,7 +5101,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
@@ -5017,7 +5119,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../architecture/" class="md-nav__link">
+      <a href="../../about/architecture/" class="md-nav__link">
         
   
   
@@ -5042,37 +5144,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Conformance
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../about/conformance/" class="md-nav__link">
         
   
   
@@ -5088,187 +5163,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#coverage-summary" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Coverage summary
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#http11-in-tree-pytest" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        HTTP/1.1 (in-tree pytest)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#http2-h2spec" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        HTTP/2 — h2spec
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#websocket-autobahntestsuite" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        WebSocket — Autobahn|Testsuite
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#websocket-over-http2-rfc-8441" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        WebSocket over HTTP/2 (RFC 8441)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#filing-a-non-conformance" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Filing a non-conformance
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#fuzz-and-property-based-tests" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Fuzz and property-based tests
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Fuzz and property-based tests">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#atheris-coverage-guided-fuzz" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        atheris coverage-guided fuzz
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#differential-corpus-vs-nginx" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Differential corpus vs nginx
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Differential corpus vs nginx">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#docker-free-regression-replay" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Docker-free regression replay
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#verifying-your-fork-stays-rfc-correct" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Verifying your fork stays RFC-correct
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Verifying your fork stays RFC-correct">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#hypothesis-property-tests" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Hypothesis property tests
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#other-testing-surfaces" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Other testing surfaces
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -5281,7 +5175,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../security-model/" class="md-nav__link">
+      <a href="../../about/security-model/" class="md-nav__link">
         
   
   
@@ -5309,7 +5203,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../internals/" class="md-nav__link">
+      <a href="../../about/internals/" class="md-nav__link">
         
   
   
@@ -5337,7 +5231,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../mqtt-actor-design/" class="md-nav__link">
+      <a href="../../about/mqtt-actor-design/" class="md-nav__link">
         
   
   
@@ -5365,7 +5259,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../rfc9113-implementation/" class="md-nav__link">
+      <a href="../../about/rfc9113-implementation/" class="md-nav__link">
         
   
   
@@ -5393,7 +5287,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../grpc-assessment/" class="md-nav__link">
+      <a href="../../about/grpc-assessment/" class="md-nav__link">
         
   
   
@@ -5448,10 +5342,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#coverage-summary" class="md-nav__link">
+  <a href="#what-a-listener-says" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Coverage summary
+        What a listener says
       
     </span>
   </a>
@@ -5459,10 +5353,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#http11-in-tree-pytest" class="md-nav__link">
+  <a href="#tls-belongs-to-the-listener" class="md-nav__link">
     <span class="md-ellipsis">
       
-        HTTP/1.1 (in-tree pytest)
+        TLS belongs to the listener
       
     </span>
   </a>
@@ -5470,10 +5364,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#http2-h2spec" class="md-nav__link">
+  <a href="#who-serves-a-listener" class="md-nav__link">
     <span class="md-ellipsis">
       
-        HTTP/2 — h2spec
+        Who serves a listener
       
     </span>
   </a>
@@ -5481,10 +5375,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#websocket-autobahntestsuite" class="md-nav__link">
+  <a href="#saying-it-the-short-way" class="md-nav__link">
     <span class="md-ellipsis">
       
-        WebSocket — Autobahn|Testsuite
+        Saying it the short way
       
     </span>
   </a>
@@ -5492,116 +5386,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#websocket-over-http2-rfc-8441" class="md-nav__link">
+  <a href="#reading-back-what-got-bound" class="md-nav__link">
     <span class="md-ellipsis">
       
-        WebSocket over HTTP/2 (RFC 8441)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#filing-a-non-conformance" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Filing a non-conformance
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#fuzz-and-property-based-tests" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Fuzz and property-based tests
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Fuzz and property-based tests">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#atheris-coverage-guided-fuzz" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        atheris coverage-guided fuzz
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#differential-corpus-vs-nginx" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Differential corpus vs nginx
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Differential corpus vs nginx">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#docker-free-regression-replay" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Docker-free regression replay
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#verifying-your-fork-stays-rfc-correct" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Verifying your fork stays RFC-correct
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Verifying your fork stays RFC-correct">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#hypothesis-property-tests" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Hypothesis property tests
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#other-testing-surfaces" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Other testing surfaces
+        Reading back what got bound
       
     </span>
   </a>
@@ -5628,353 +5416,111 @@
   
 
 
-<h1 id="conformance">Conformance<a class="headerlink" href="#conformance" title="Permanent link">&para;</a></h1>
-<p>BlackBull is exercised against three published RFC conformance
-suites in addition to the in-tree pytest tests under
-<code>tests/conformance/</code>.</p>
-<h2 id="coverage-summary">Coverage summary<a class="headerlink" href="#coverage-summary" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Layer</th>
-<th>Suite</th>
-<th>Standard</th>
-<th>Where it runs</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>HTTP/1.1</td>
-<td>in-tree <code>tests/conformance/http1/</code></td>
-<td>RFC 9110, RFC 9112</td>
-<td><code>pytest</code> + CI</td>
-</tr>
-<tr>
-<td>HTTP/1.1 corpus replay</td>
-<td><code>tests/conformance/http1/test_h1_user_corpus_replay.py</code></td>
-<td>curated divergence set</td>
-<td><code>pytest</code> + CI (docker-free)</td>
-</tr>
-<tr>
-<td>HTTP/2 + HPACK</td>
-<td><a href="https://github.com/summerwind/h2spec">h2spec</a> (external)</td>
-<td>RFC 9113, RFC 7541</td>
-<td>CI + local harness under <code>bench/conformance/</code></td>
-</tr>
-<tr>
-<td>WebSocket</td>
-<td>[Autobahn</td>
-<td>Testsuite](https://github.com/crossbario/autobahn-testsuite) (external)</td>
-<td>RFC 6455, RFC 7692</td>
-</tr>
-<tr>
-<td>WebSocket over HTTP/2</td>
-<td>in-tree <code>tests/conformance/http2/test_rfc8441.py</code></td>
-<td>RFC 8441</td>
-<td><code>pytest</code> + CI</td>
-</tr>
-</tbody>
-</table>
-<p>A push to <code>master</code> (or any PR against it) triggers
-<a href="https://github.com/TOKUJI/BlackBull/blob/master/.github/workflows/conformance.yml"><code>.github/workflows/conformance.yml</code></a>,
-which runs the three external/external-shape suites on a fresh
-<code>ubuntu-latest</code> runner: h2spec, Autobahn|Testsuite, and the
-docker-free corpus replay.  The README's <em>RFC conformance</em> badge
-tracks that workflow's status; per-run artefacts (h2spec JUnit
-XML, Autobahn <code>index.json</code>, pytest output) are attached for 30
-days.  A weekly cron also runs the suite so upstream container /
-binary-release changes don't silently regress us between pushes.</p>
-<h2 id="http11-in-tree-pytest">HTTP/1.1 (in-tree pytest)<a class="headerlink" href="#http11-in-tree-pytest" title="Permanent link">&para;</a></h2>
-<p>Covers RFC 9110 (HTTP Semantics) and RFC 9112 (HTTP/1.1 message
-framing).  ~250 conformance test functions across the
-<code>tests/conformance/http1/</code> tree, organised by RFC section:</p>
-<table>
-<thead>
-<tr>
-<th>File</th>
-<th>Covers</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><a href="https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_rfc9112_body_length.py"><code>test_rfc9112_body_length.py</code></a></td>
-<td><code>Content-Length</code>, body framing, <code>HEAD</code> / <code>GET</code> body disagreement (RFC 9110 §9.3)</td>
-</tr>
-<tr>
-<td><a href="https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_rfc9112_chunked.py"><code>test_rfc9112_chunked.py</code></a></td>
-<td><code>Transfer-Encoding: chunked</code> framing, trailers</td>
-</tr>
-<tr>
-<td><a href="https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_rfc9112_connection.py"><code>test_rfc9112_connection.py</code></a></td>
-<td>Keep-alive, <code>Connection: close</code>, half-close</td>
-</tr>
-<tr>
-<td><a href="https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_rfc9112_pipelining.py"><code>test_rfc9112_pipelining.py</code></a></td>
-<td>HTTP/1.1 pipelining with and without bodies</td>
-</tr>
-<tr>
-<td><a href="https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_rfc9112_smuggling.py"><code>test_rfc9112_smuggling.py</code></a></td>
-<td>Request smuggling — CL.CL, CL.TE, TE.CL, TE.TE</td>
-</tr>
-<tr>
-<td><a href="https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_rfc9112_slowloris.py"><code>test_rfc9112_slowloris.py</code></a></td>
-<td>Slowloris partial-headers defence (<code>BB_HEADER_TIMEOUT</code>)</td>
-</tr>
-<tr>
-<td><a href="https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_rfc9110_body_cap.py"><code>test_rfc9110_body_cap.py</code></a></td>
-<td><code>BB_MAX_BODY_SIZE</code> → 413 on both framings, refused before the body is read, and the connection close that stops a refusal becoming a smuggling window</td>
-</tr>
-<tr>
-<td><a href="https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_http1_dispatch.py"><code>test_http1_dispatch.py</code></a></td>
-<td>ASGI dispatch — 1xx / 204 / 304 body suppression (RFC 9110 §15), auto-headers</td>
-</tr>
-</tbody>
-</table>
-<div class="highlight"><pre><span></span><code>pytest<span class="w"> </span>tests/conformance/http1/<span class="w"> </span>-q
-</code></pre></div>
-<p>Invalid HTTP raises <code>BadRequestError</code> at parse time in
-<a href="https://github.com/TOKUJI/BlackBull/blob/master/blackbull/server/parser.py"><code>blackbull/server/parser.py</code></a>
-— before the request reaches any application code.  The
-smuggling tests above cover the CVE classes that follow from
-<code>Content-Length</code> / <code>Transfer-Encoding</code> disagreement.</p>
-<h2 id="http2-h2spec">HTTP/2 — <code>h2spec</code><a class="headerlink" href="#http2-h2spec" title="Permanent link">&para;</a></h2>
-<p><code>h2spec</code> is the de-facto external conformance suite for HTTP/2
-and HPACK — ~146 numbered cases covering frame format, stream
-state, flow control, error codes, and header-block decoding.</p>
-<p>Install (one-time):</p>
-<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-L<span class="w"> </span>-sS<span class="w"> </span>https://github.com/summerwind/h2spec/releases/download/v2.6.0/h2spec_linux_amd64.tar.gz<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span><span class="p">|</span><span class="w"> </span>tar<span class="w"> </span>-xz<span class="w"> </span>-C<span class="w"> </span>~/.local/bin<span class="w"> </span>h2spec
-chmod<span class="w"> </span>+x<span class="w"> </span>~/.local/bin/h2spec
-</code></pre></div>
-<p>Run against a locally-running TLS server on <code>:8443</code>:</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># Start any BlackBull HTTPS server, then:</span>
-bash<span class="w"> </span>bench/conformance/h2spec_run.sh<span class="w">                 </span><span class="c1"># full suite (~2-5 min)</span>
-bash<span class="w"> </span>bench/conformance/h2spec_run.sh<span class="w"> </span>hpack<span class="w">           </span><span class="c1"># HPACK section only</span>
-bash<span class="w"> </span>bench/conformance/h2spec_run.sh<span class="w"> </span>http2/6.5<span class="w">       </span><span class="c1"># specific section</span>
-</code></pre></div>
-<p>Output is teed to
-<code>bench/conformance/results/h2spec_&lt;timestamp&gt;.{txt,xml}</code> (both
-gitignored).  The XML is JUnit-format and machine-readable; the
-TXT ends with a <code>N tests, P passed, S skipped, F failed</code> line
-you can grep for the headline number.</p>
-<p>In-tree pytest tests under <code>tests/conformance/http2/</code> cover
-BlackBull-specific behaviour h2spec does not exercise (RFC 8441
-Extended CONNECT, CONTINUATION boundary cases, server-response
-shapes, and the <code>BB_MAX_BODY_SIZE</code> / <code>BB_MIN_BODY_RATE</code> refusals in
-<code>test_rfc9113_body_cap.py</code>), and run in normal <code>pytest</code> runs.</p>
-<h2 id="websocket-autobahntestsuite">WebSocket — Autobahn|Testsuite<a class="headerlink" href="#websocket-autobahntestsuite" title="Permanent link">&para;</a></h2>
-<p>The de-facto external conformance suite for WebSocket — ~500
-numbered cases over framing, control frames, UTF-8 validation,
-close codes, fragmentation, and <code>permessage-deflate</code>.</p>
-<p>The harness drives the suite from a Docker image against a
-plaintext WebSocket echo server.  Docker is required.</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># Terminal 1 — start the echo server BlackBull provides for the test</span>
-python<span class="w"> </span>bench/conformance/autobahn_app.py<span class="w"> </span>--port<span class="w"> </span><span class="m">9001</span>
+<h1 id="listeners-the-sockets-you-ask-for">Listeners — the sockets you ask for<a class="headerlink" href="#listeners-the-sockets-you-ask-for" title="Permanent link">&para;</a></h1>
+<p><code>app.run(port=8000)</code> is one listener stated the short way. When a deployment
+needs more than one socket — cleartext and TLS at once, two certificates, an
+admin port bound to loopback — you state them directly instead:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">ssl</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">BlackBull</span><span class="p">,</span> <span class="n">Listener</span><span class="p">,</span> <span class="n">Tcp</span>
 
-<span class="c1"># Terminal 2 — run Autobahn against it</span>
-bash<span class="w"> </span>bench/conformance/autobahn_run.sh<span class="w">               </span><span class="c1"># full fuzzingclient run</span>
-<span class="nv">CASES</span><span class="o">=</span><span class="s1">'1.*'</span><span class="w"> </span>bash<span class="w"> </span>bench/conformance/autobahn_run.sh<span class="w">   </span><span class="c1"># subset (e.g. all of §1.x)</span>
+<span class="n">tls</span> <span class="o">=</span> <span class="n">ssl</span><span class="o">.</span><span class="n">SSLContext</span><span class="p">(</span><span class="n">ssl</span><span class="o">.</span><span class="n">PROTOCOL_TLS_SERVER</span><span class="p">)</span>
+<span class="n">tls</span><span class="o">.</span><span class="n">load_cert_chain</span><span class="p">(</span><span class="s1">'cert.pem'</span><span class="p">,</span> <span class="s1">'key.pem'</span><span class="p">)</span>
+
+<span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">()</span>
+
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/'</span><span class="p">)</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">index</span><span class="p">():</span>
+    <span class="k">return</span> <span class="s1">'served on all four'</span>
+
+<span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">listeners</span><span class="o">=</span><span class="p">[</span>
+    <span class="n">Listener</span><span class="p">(</span><span class="n">Tcp</span><span class="p">(</span><span class="mi">8080</span><span class="p">)),</span>                  <span class="c1"># cleartext: HTTP/1.1, h2c, WebSocket</span>
+    <span class="n">Listener</span><span class="p">(</span><span class="n">Tcp</span><span class="p">(</span><span class="mi">8082</span><span class="p">)),</span>                  <span class="c1"># another one, same stack</span>
+    <span class="n">Listener</span><span class="p">(</span><span class="n">Tcp</span><span class="p">(</span><span class="mi">8443</span><span class="p">),</span> <span class="n">tls</span><span class="o">=</span><span class="n">tls</span><span class="p">),</span>         <span class="c1"># TLS: ALPN picks h2 or http/1.1</span>
+    <span class="n">Listener</span><span class="p">(</span><span class="n">Tcp</span><span class="p">(</span><span class="mi">9443</span><span class="p">),</span> <span class="n">tls</span><span class="o">=</span><span class="n">tls</span><span class="p">),</span>         <span class="c1"># and another</span>
+<span class="p">],</span> <span class="n">workers</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span>
 </code></pre></div>
-<p>The §9 <em>Limits and performance</em> cases send messages up to 16 MiB
-(9.1.6 text / 9.2.6 binary; the fragmented 9.4.x cases top out at
-4 MiB), so both WebSocket size limits must be at least the case
-size.  The shipped defaults accept every §9 case with nothing
-configured — <code>BB_WS_MAX_FRAME_PAYLOAD</code> at 64 MiB and
-<code>BB_WS_MAX_MESSAGE_SIZE</code> at exactly the 16 MiB the suite needs.
-Lower either for stricter exposure on untrusted-peer deployments;
-that is a deviation from the configuration this suite was run
-under.</p>
-<p>Reports land in <code>bench/conformance/results/autobahn_&lt;timestamp&gt;/</code>
-with an HTML index — open <code>index.html</code> in a browser for the
-case-by-case breakdown.</p>
-<h2 id="websocket-over-http2-rfc-8441">WebSocket over HTTP/2 (RFC 8441)<a class="headerlink" href="#websocket-over-http2-rfc-8441" title="Permanent link">&para;</a></h2>
-<p>There is no external h2spec-style harness for RFC 8441 yet.
-The in-tree pytest tests under
-<code>tests/conformance/http2/test_rfc8441.py</code> are the current source
-of truth for this surface.  RFC 8441 is also opt-in via
-<code>BB_H2_ENABLE_WEBSOCKET=1</code> (see
-<a href="../../guide/websockets/#transport-http11-upgrade-vs-http2-extended-connect">WebSockets</a>).</p>
-<h2 id="filing-a-non-conformance">Filing a non-conformance<a class="headerlink" href="#filing-a-non-conformance" title="Permanent link">&para;</a></h2>
-<p>If a conformance run regresses (a case that previously passed
-starts failing), re-run the latest harness, attach the failing
-case's verbatim transcript to the report, and file an issue on
-the GitHub repo with:</p>
-<ul>
-<li>the RFC section citation (e.g. RFC 9113 §6.5.2);</li>
-<li>the case ID from h2spec or Autobahn (e.g. <code>http2/6.5/2</code>,
-  Autobahn <code>1.1.5</code>);</li>
-<li>the transcript and any wireshark / <code>tshark</code> capture if
-  available.</li>
-</ul>
-<h2 id="fuzz-and-property-based-tests">Fuzz and property-based tests<a class="headerlink" href="#fuzz-and-property-based-tests" title="Permanent link">&para;</a></h2>
-<p>In addition to the RFC suites, the codebase exercises the parser
-and protocol layers with two unstructured-input harnesses.</p>
-<h3 id="atheris-coverage-guided-fuzz">atheris coverage-guided fuzz<a class="headerlink" href="#atheris-coverage-guided-fuzz" title="Permanent link">&para;</a></h3>
-<p><a href="https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/fuzz/fuzz_http1.py"><code>tests/conformance/http1/fuzz/fuzz_http1.py</code></a>
-drives BlackBull's HTTP/1.1 parser with random byte sequences
-via <a href="https://github.com/google/atheris">atheris</a>.  The harness
-has run 100k+ iterations across corpus seeds without a process
-crash.  Targets:</p>
-<ul>
-<li><code>blackbull/server/parser.py</code> — request-line + header parsing</li>
-<li><code>blackbull/protocol/</code> — frame and HPACK decoding</li>
-</ul>
-<h3 id="differential-corpus-vs-nginx">Differential corpus vs nginx<a class="headerlink" href="#differential-corpus-vs-nginx" title="Permanent link">&para;</a></h3>
-<p><code>tests/conformance/http1/fuzz/user-corpus/</code> holds 7 captured
-input/response pairs where BlackBull and nginx differ on the
-same input, each categorised:</p>
+<p>All four run in <strong>one process</strong>, and every worker serves every one of them.
+Before listeners existed this deployment cost four processes, each with the
+full worker count.</p>
+<h2 id="what-a-listener-says">What a listener says<a class="headerlink" href="#what-a-listener-says" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="n">Listener</span><span class="p">(</span><span class="n">where</span><span class="p">,</span> <span class="n">speaks</span><span class="o">=</span><span class="s1">'http'</span><span class="p">,</span> <span class="n">tls</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">workers</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+</code></pre></div>
 <table>
 <thead>
 <tr>
-<th>Category</th>
-<th>Meaning</th>
-<th>Count</th>
+<th></th>
+<th></th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>STATUS_DIFFER</code></td>
-<td>RFC-defensible divergence (BlackBull is RFC-correct; nginx is permissive)</td>
-<td>2</td>
+<td><code>where</code></td>
+<td><code>Tcp(port, host=None)</code>, <code>Unix(path)</code>, or <code>InheritedFd(fd)</code></td>
 </tr>
 <tr>
-<td><code>BOTH_REJECTED</code></td>
-<td>Both servers reject the malformed input</td>
-<td>4</td>
+<td><code>speaks</code></td>
+<td><code>'http'</code>, or the name of a protocol registered with <a href="../raw-protocols/"><code>raw_handler</code></a></td>
 </tr>
 <tr>
-<td><code>OK</code></td>
-<td>Both servers respond identically</td>
-<td>1</td>
+<td><code>tls</code></td>
+<td>an <code>ssl.SSLContext</code>, or <code>None</code> for cleartext</td>
+</tr>
+<tr>
+<td><code>workers</code></td>
+<td><code>'all'</code> or <code>'one'</code> — left unset it follows <code>speaks</code></td>
 </tr>
 </tbody>
 </table>
-<p>Both <code>STATUS_DIFFER</code> entries are <strong>RFC-defensible</strong> — BlackBull is
-the stricter reader — and are kept in the corpus deliberately rather
-than treated as bugs:</p>
-<table>
-<thead>
-<tr>
-<th>Wire request</th>
-<th>nginx</th>
-<th>BlackBull</th>
-<th>Why we're right</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>GET&amp;nbsp;&amp;nbsp;http://localhost/x HTTP/1.0</code> (double-SP between method and target)</td>
-<td>200</td>
-<td>400</td>
-<td>RFC 9112 §3 — request-line tokens are separated by exactly one SP.  nginx is lenient; we reject.</td>
-</tr>
-<tr>
-<td><code>GET&amp;nbsp;&amp;nbsp;http://localhost/x HTTP/9.9</code> (double-SP <strong>and</strong> unknown version)</td>
-<td>505</td>
-<td>400</td>
-<td>Validation-order choice: the request-line SP grammar (RFC 9112 §3) is checked before the HTTP version, so the malformed line is 400 first.  nginx reports the version problem (505) instead.  A <em>well-formed</em> request with an unsupported version does get 505 from BlackBull (RFC 9110 §15.6.6).</td>
-</tr>
-</tbody>
-</table>
-<p>Both are also recorded in
-<a href="https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/fuzz/user-corpus/"><code>tests/conformance/http1/fuzz/user-corpus/diff_README.md</code></a>.
-We are not chasing nginx parity unless a real user need appears —
-being stricter than a permissive server is a conformance result, not
-a defect.</p>
-<h4 id="docker-free-regression-replay">Docker-free regression replay<a class="headerlink" href="#docker-free-regression-replay" title="Permanent link">&para;</a></h4>
-<p>The full differential test
-(<a href="https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_http1_differential.py"><code>test_http1_differential.py</code></a>)
-spins up nginx via <code>testcontainers</code> and skips at collection when
-Docker isn't reachable — which excludes most CI runners.  A
-companion test runs against just BlackBull:</p>
-<div class="highlight"><pre><span></span><code>pytest<span class="w"> </span>tests/conformance/http1/test_h1_user_corpus_replay.py<span class="w"> </span>-q
+<p><code>speaks='http'</code> selects the stack that detects HTTP/1.1, h2c and WebSocket
+upgrades; under TLS, ALPN picks between h2 and http/1.1. So the four ports
+above need no protocol configuration — they differ only in address and in
+whether TLS terminates there.</p>
+<p><code>Tcp(port)</code> binds every interface, IPv4 and IPv6. Naming a host binds that
+interface and nothing else, which is the point of naming it:</p>
+<div class="highlight"><pre><span></span><code><span class="n">Listener</span><span class="p">(</span><span class="n">Tcp</span><span class="p">(</span><span class="mi">9000</span><span class="p">,</span> <span class="n">host</span><span class="o">=</span><span class="s1">'127.0.0.1'</span><span class="p">))</span>     <span class="c1"># reachable from this machine only</span>
 </code></pre></div>
-<p>For each <code>diff_*.meta.json</code> sidecar, it sends the recorded
-<code>wire_request_latin1</code> to a live in-process BlackBull and asserts
-the response status code still matches the recorded
-<code>blackbull_status</code>.  Runs in well under a second; no Docker, no
-network egress.  A failure pinpoints which curated edge case
-moved without re-running the Hypothesis sweep against nginx.</p>
-<p>If you change the HTTP/1.1 parser or dispatch path and a corpus
-entry's status shifts, decide whether the shift is:</p>
+<h2 id="tls-belongs-to-the-listener">TLS belongs to the listener<a class="headerlink" href="#tls-belongs-to-the-listener" title="Permanent link">&para;</a></h2>
+<p>Each listener terminates the certificate it names, so two ports can present
+different ones — or one can be cleartext while its neighbour is not:</p>
+<div class="highlight"><pre><span></span><code><span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">listeners</span><span class="o">=</span><span class="p">[</span>
+    <span class="n">Listener</span><span class="p">(</span><span class="n">Tcp</span><span class="p">(</span><span class="mi">8080</span><span class="p">)),</span>                     <span class="c1"># no certificate here</span>
+    <span class="n">Listener</span><span class="p">(</span><span class="n">Tcp</span><span class="p">(</span><span class="mi">8443</span><span class="p">),</span> <span class="n">tls</span><span class="o">=</span><span class="n">public_cert</span><span class="p">),</span>
+    <span class="n">Listener</span><span class="p">(</span><span class="n">Tcp</span><span class="p">(</span><span class="mi">9443</span><span class="p">),</span> <span class="n">tls</span><span class="o">=</span><span class="n">internal_cert</span><span class="p">),</span>  <span class="c1"># a different one</span>
+<span class="p">])</span>
+</code></pre></div>
+<p><code>app.run(certfile=..., keyfile=...)</code> still means HTTPS: it builds the context
+that the one listener it constructs terminates.</p>
+<h2 id="who-serves-a-listener">Who serves a listener<a class="headerlink" href="#who-serves-a-listener" title="Permanent link">&para;</a></h2>
+<p><code>workers</code> says how many worker processes own a listener, and it is the only
+place that question is answered:</p>
 <ul>
-<li>a <strong>real regression</strong> — fix the change that moved the status; or</li>
-<li>an <strong>intentional behaviour change</strong> — delete the obsolete
-  <code>.meta.json</code> / <code>.jsonl</code> pair, regenerate by running the full
-  differential test under Docker, and commit the refreshed
-  recording.</li>
+<li><code>'all'</code> — every worker accepts on it. The default for <code>speaks='http'</code>, and
+  what lets HTTP scale.</li>
+<li><code>'one'</code> — exactly one worker accepts on it. The default for anything else,
+  because a protocol that keeps state between exchanges must answer them from
+  the same process.</li>
 </ul>
-<h2 id="verifying-your-fork-stays-rfc-correct">Verifying your fork stays RFC-correct<a class="headerlink" href="#verifying-your-fork-stays-rfc-correct" title="Permanent link">&para;</a></h2>
-<p>If you're carrying a patch on top of BlackBull and want assurance
-that your changes haven't broken protocol conformance, this is
-the recommended order:</p>
-<ol>
-<li>
-<p><strong>Run the in-tree pytest suite</strong>:
-   <div class="highlight"><pre><span></span><code>pytest<span class="w"> </span>tests/conformance/<span class="w"> </span>-q
+<p>Workers that do not own a listener close its descriptor at startup, so a
+protocol with one owner cannot be answered elsewhere even by accident.</p>
+<h2 id="saying-it-the-short-way">Saying it the short way<a class="headerlink" href="#saying-it-the-short-way" title="Permanent link">&para;</a></h2>
+<p><code>port=</code>, <code>unix_path=</code> and <code>inherited_fd=</code> still work and are unchanged — they
+build one listener for you:</p>
+<div class="highlight"><pre><span></span><code><span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">port</span><span class="o">=</span><span class="mi">8000</span><span class="p">)</span>                       <span class="c1"># Listener(Tcp(8000))</span>
+<span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">unix_path</span><span class="o">=</span><span class="s1">'/run/bb.sock'</span><span class="p">)</span>        <span class="c1"># Listener(Unix('/run/bb.sock'))</span>
+<span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">inherited_fd</span><span class="o">=</span><span class="mi">3</span><span class="p">)</span>                  <span class="c1"># Listener(InheritedFd(3))</span>
 </code></pre></div>
-   This covers HTTP/1.1 (RFC 9110, RFC 9112), HTTP/2 BlackBull-
-   specific cases, and RFC 8441 — fastest signal, no external
-   dependencies.</p>
-</li>
-<li>
-<p><strong>Run the docker-free corpus replay</strong>:
-   <div class="highlight"><pre><span></span><code>pytest<span class="w"> </span>tests/conformance/http1/test_h1_user_corpus_replay.py<span class="w"> </span>-q
+<p>They are a shorthand for the same thing, not a separate path, so <code>listeners=</code>
+replaces them rather than joining them — passing both is refused.</p>
+<h2 id="reading-back-what-got-bound">Reading back what got bound<a class="headerlink" href="#reading-back-what-got-bound" title="Permanent link">&para;</a></h2>
+<p><code>Tcp(0)</code> asks the OS for a free port, which is what tests want. The request is
+not rewritten; the answer is read back:</p>
+<div class="highlight"><pre><span></span><code><span class="n">server</span> <span class="o">=</span> <span class="n">Server</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">listeners</span><span class="o">=</span><span class="p">[</span><span class="n">Listener</span><span class="p">(</span><span class="n">Tcp</span><span class="p">(</span><span class="mi">0</span><span class="p">))])</span>
+<span class="n">server</span><span class="o">.</span><span class="n">open_socket</span><span class="p">()</span>
+<span class="k">for</span> <span class="n">listener</span><span class="p">,</span> <span class="n">socks</span> <span class="ow">in</span> <span class="n">server</span><span class="o">.</span><span class="n">bound_listeners</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">listener</span><span class="o">.</span><span class="n">speaks</span><span class="p">,</span> <span class="n">socks</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">getsockname</span><span class="p">())</span>
 </code></pre></div>
-   Confirms the curated divergence set still holds.  Single
-   second.</p>
-</li>
-<li>
-<p><strong>Run h2spec locally</strong> (RFC 9113 + RFC 7541):
-   <div class="highlight"><pre><span></span><code>openssl<span class="w"> </span>req<span class="w"> </span>-x509<span class="w"> </span>-newkey<span class="w"> </span>rsa:2048<span class="w"> </span>-keyout<span class="w"> </span>key.pem<span class="w"> </span>-out<span class="w"> </span>cert.pem<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>-days<span class="w"> </span><span class="m">365</span><span class="w"> </span>-nodes<span class="w"> </span>-subj<span class="w"> </span><span class="s1">'/CN=localhost'</span>
-python<span class="w"> </span>bench/conformance/h2spec_app.py<span class="w"> </span>--port<span class="w"> </span><span class="m">8443</span><span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>--cert<span class="w"> </span>cert.pem<span class="w"> </span>--key<span class="w"> </span>key.pem<span class="w"> </span><span class="p">&amp;</span>
-bash<span class="w"> </span>bench/conformance/h2spec_run.sh
-</code></pre></div>
-   ~2-5 minutes.  Output: <code>bench/conformance/results/h2spec_*.{txt,xml}</code>.</p>
-</li>
-<li>
-<p><strong>Run Autobahn|Testsuite locally</strong> (RFC 6455 + RFC 7692):
-   <div class="highlight"><pre><span></span><code>python<span class="w"> </span>bench/conformance/autobahn_app.py<span class="w"> </span>--port<span class="w"> </span><span class="m">9001</span><span class="w"> </span><span class="p">&amp;</span>
-bash<span class="w"> </span>bench/conformance/autobahn_run.sh
-</code></pre></div>
-   Requires Docker.  ~3-10 minutes.  Browse
-   <code>bench/conformance/results/autobahn_*/index.html</code> for the
-   case-by-case breakdown.</p>
-</li>
-<li>
-<p><strong>Push to a branch and let CI run</strong> the same three external
-   suites in parallel on <code>ubuntu-latest</code>.  The
-   <a href="https://github.com/TOKUJI/BlackBull/blob/master/.github/workflows/conformance.yml"><code>conformance.yml</code></a>
-   workflow runs on every push and PR to master; its badge in
-   the README turns red if any suite regresses.</p>
-</li>
-</ol>
-<p>A clean run of all five steps means your fork passes the same
-RFC-conformance bar that BlackBull itself ships with.  None of
-this proves the absence of bugs — these are published suites
-with finite coverage — but a regression in any of them is a
-hard signal you've changed protocol-level behaviour.</p>
-<h3 id="hypothesis-property-tests">Hypothesis property tests<a class="headerlink" href="#hypothesis-property-tests" title="Permanent link">&para;</a></h3>
-<p><a href="https://github.com/TOKUJI/BlackBull/tree/master/tests/properties"><code>tests/properties/</code></a>
-uses <a href="https://hypothesis.readthedocs.io/">hypothesis</a> to
-generate structured random inputs for header parsing
-(<a href="https://github.com/TOKUJI/BlackBull/blob/master/tests/properties/test_headers.py"><code>test_headers.py</code></a>)
-and HTTP/2 frame round-tripping
-(<a href="https://github.com/TOKUJI/BlackBull/blob/master/tests/properties/test_http2_frame.py"><code>test_http2_frame.py</code></a>),
-checking invariants (round-trip equality, header-name
-case-insensitivity) across many shapes.</p>
-<h2 id="other-testing-surfaces">Other testing surfaces<a class="headerlink" href="#other-testing-surfaces" title="Permanent link">&para;</a></h2>
-<ul>
-<li><a href="../../guide/testing/">Testing</a> — how to write tests for your
-  own application using BlackBull's clients or
-  <code>httpx.ASGITransport</code>.</li>
-<li>The differential fuzz corpus above records RFC-defensible
-  divergences from nginx; see
-  <a href="https://github.com/TOKUJI/BlackBull/blob/master/KNOWN_LIMITATIONS.md"><code>KNOWN_LIMITATIONS.md</code></a>
-  for the documented entries.</li>
-</ul>
+<p><code>server.port</code> and <code>server.unix_path</code> describe the first listener, as they
+always did.</p>
 
 
 

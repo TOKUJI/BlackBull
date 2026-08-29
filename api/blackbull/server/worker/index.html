@@ -720,6 +720,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../../../guide/listeners/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Listeners
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../../../guide/raw-protocols/" class="md-nav__link">
         
   
@@ -4274,6 +4302,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../listener/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    listener
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../multiworker/" class="md-nav__link">
         
   
@@ -5399,7 +5455,7 @@ ASGIServer with those sockets.</p>
 
 
 <h3 id="blackbull.server.worker.run_worker" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">run_worker</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">raw_sockets</span><span class="p">,</span> <span class="n">ssl_context</span><span class="p">,</span> <span class="n">worker_id</span><span class="p">,</span> <span class="n">max_connections</span><span class="p">,</span> <span class="n">stream_queue_depth</span><span class="o">=</span><span class="mi">64</span><span class="p">,</span> <span class="n">ws_queue_depth</span><span class="o">=</span><span class="n">_WS_READ_INLINE</span><span class="p">,</span> <span class="n">protocol_sockets</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">run_worker</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">bound_listeners</span><span class="p">,</span> <span class="n">ssl_context</span><span class="p">,</span> <span class="n">worker_id</span><span class="p">,</span> <span class="n">max_connections</span><span class="p">,</span> <span class="n">stream_queue_depth</span><span class="o">=</span><span class="mi">64</span><span class="p">,</span> <span class="n">ws_queue_depth</span><span class="o">=</span><span class="n">_WS_READ_INLINE</span><span class="p">,</span> <span class="n">disowned</span><span class="o">=</span><span class="p">())</span></code>
 
 <a href="#blackbull.server.worker.run_worker" class="headerlink" title="Permanent link">&para;</a></h3>
 
@@ -5410,20 +5466,21 @@ ASGIServer with those sockets.</p>
 <h5 id="blackbull.server.worker.run_worker--parameters">Parameters<a class="headerlink" href="#blackbull.server.worker.run_worker--parameters" title="Permanent link">&para;</a></h5>
 <p>app:
     The ASGI application callable (a BlackBull instance or any ASGI app).
-raw_sockets:
-    Pre-bound socket objects inherited from the master via fork.
+bound_listeners:
+    <code>[(Listener, [socket, ...]), ...]</code> inherited from the master via
+    fork — every listener this worker owns, which the master decided from
+    each listener's own <code>workers</code> field.
 ssl_context:
     TLS context to pass to asyncio.start_server, or None for plain HTTP.
+disowned:
+    Listening sockets this worker inherited through fork but does not
+    serve — another worker's, or a single-owner listener it does not own.
+    Closed on entry, in this process only: the master and the owning
+    worker keep their own descriptors.
 worker_id:
     Zero-based index used only for logging.
 max_connections:
-    Per-worker connection limit; passed to ASGIServer.
-protocol_sockets:
-    Pre-bound listener sets for stateful non-ASGI protocols (eg the MQTT
-    broker), as <code>[(socks, binding), …]</code>.  The master hands these to a
-    single worker only (HTTP scales across all workers, but a stateful
-    broker must have one owner), so this is non-empty for that worker and
-    <code>None</code> for the rest.</p>
+    Per-worker connection limit; passed to ASGIServer.</p>
 
 
     </div>

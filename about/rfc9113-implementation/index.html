@@ -720,6 +720,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../guide/listeners/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Listeners
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../guide/raw-protocols/" class="md-nav__link">
         
   
@@ -4266,6 +4294,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/server/listener/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    listener
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/server/multiworker/" class="md-nav__link">
         
   
@@ -6124,7 +6180,7 @@ already enforced at parse time; pushed-response cacheability follows from the
 <tr>
 <td>Concurrent-handler flood (1 worker)</td>
 <td>operational</td>
-<td><code>BB_H2_ACTIVE_STREAMS_1W</code> semaphore via <code>_run_guarded() in http2_actor.py</code></td>
+<td><code>BB_H2_ACTIVE_STREAMS_1W</code> semaphore via <code>_run_when_stream_cap_admits() in http2_actor.py</code></td>
 <td><code>HTTP2Actor._spawn_stream_task()</code></td>
 </tr>
 <tr>

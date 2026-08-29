@@ -13,7 +13,7 @@
         <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/guide/raw-protocols/">
       
       
-        <link rel="prev" href="../structured-fields/">
+        <link rel="prev" href="../listeners/">
       
       
         <link rel="next" href="../mqtt/">
@@ -719,6 +719,34 @@
                 
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../listeners/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Listeners
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
     
   
   
@@ -819,6 +847,17 @@
     <span class="md-ellipsis">
       
         Events
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#state-and-who-answers-an-exchange" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        State, and who answers an exchange
       
     </span>
   </a>
@@ -4381,6 +4420,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/server/listener/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    listener
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/server/multiworker/" class="md-nav__link">
         
   
@@ -5341,6 +5408,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#state-and-who-answers-an-exchange" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        State, and who answers an exchange
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#limitations" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5505,19 +5583,39 @@ parsed an application-level message, via the aggregator on <code>ctx</code>:</p>
     <span class="k">await</span> <span class="n">ctx</span><span class="o">.</span><span class="n">aggregator</span><span class="o">.</span><span class="n">on_message_received</span><span class="p">(</span><span class="s1">'echo'</span><span class="p">,</span> <span class="s1">'data'</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">data</span><span class="p">))</span>
 </code></pre></div>
 <p><code>connection_accepted</code> and <code>connection_closed</code> fire automatically.</p>
+<h2 id="state-and-who-answers-an-exchange">State, and who answers an exchange<a class="headerlink" href="#state-and-who-answers-an-exchange" title="Permanent link">&para;</a></h2>
+<p>A raw protocol is <strong>stateful by default</strong>: <code>stateful=True</code> says that an
+exchange can depend on what an earlier one left behind, which is true of a
+broker, a session-oriented line protocol, and most things worth writing a raw
+handler for. It decides who may answer:</p>
+<ul>
+<li><strong>Its own port is served by one worker.</strong> <code>app.run(port=8000, workers=4)</code>
+  with a <code>raw_handler</code> scales HTTP across all four workers and runs the raw
+  protocol on one; if that worker crashes it is respawned and re-adopts the
+  listener. The other workers close the descriptor at startup, so nothing else
+  can answer on it even by accident.</li>
+<li><strong>The shared port is given up once workers multiply.</strong> A binding with a
+  <code>detector</code> is also reachable on the HTTP port by first-byte sniffing — but
+  that port is served by <em>every</em> worker, so a later exchange would be answered
+  by a worker that never saw the earlier one. With <code>workers &gt; 1</code> a stateful
+  binding stops claiming there and stays reachable on its own port. With one
+  worker there is nothing to scatter across, and both routes work.</li>
+<li><strong>A stateful protocol with no port of its own is refused</strong>, before the
+  workers fork, because there is no way to give it one owner. Give it a port,
+  run <code>workers=1</code>, or say <code>stateful=False</code> if it really keeps nothing.</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">raw_handler</span><span class="p">(</span><span class="s1">'metrics'</span><span class="p">,</span> <span class="n">detector</span><span class="o">=</span><span class="n">LineDetector</span><span class="p">(),</span> <span class="n">stateful</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">metrics</span><span class="p">(</span><span class="n">reader</span><span class="p">,</span> <span class="n">writer</span><span class="p">,</span> <span class="n">ctx</span><span class="p">):</span>
+    <span class="o">...</span>        <span class="c1"># each exchange stands alone, so any worker may answer it</span>
+</code></pre></div>
 <h2 id="limitations">Limitations<a class="headerlink" href="#limitations" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>TLS is the server's, not the binding's.</strong> A binding registered with
-  <code>tls=True</code> is served through the certificate the server was configured
-  with; a port cannot carry a certificate of its own.</li>
-<li><strong>Single owner, but HTTP still scales.</strong> A port-bound protocol is served by
-  <strong>worker 0</strong> only (a stateful broker must have one owner), while HTTP runs on
-  every worker. So <code>app.run(port=8000, workers=4)</code> with a <code>raw_handler</code> scales
-  HTTP across all four workers and runs the protocol on worker 0; if worker 0
-  crashes it is respawned and re-adopts the listener. The exception is
-  <code>--reload</code>, which still pins <code>workers=1</code> for port-bound protocols.</li>
-<li><strong>Port-based routing only.</strong> Sharing one port between HTTP and a raw protocol
-  (first-byte sniffing) is planned for a later release.</li>
+<li><strong>TLS on a <code>raw_handler</code> port is the server's certificate.</strong> <code>tls=True</code>
+  serves the binding's port through the certificate the server was configured
+  with; the binding cannot name one of its own. An HTTP
+  <a href="../listeners/">listener</a> can.</li>
+<li><strong><code>--reload</code> pins <code>workers=1</code></strong> when a port-bound protocol is registered: the
+  exec handoff carries the HTTP sockets only.</li>
 </ul>
 <h2 id="a-note-on-the-server-class">A note on the server class<a class="headerlink" href="#a-note-on-the-server-class" title="Permanent link">&para;</a></h2>
 <p>The server class that drives all this is <code>blackbull.server.Server</code> (it serves

@@ -10,28 +10,28 @@
       
       
       
-        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/about/conformance/">
+        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/server/listener/">
       
       
-        <link rel="prev" href="../architecture/">
+        <link rel="prev" href="../http2_ws/">
       
       
-        <link rel="next" href="../security-model/">
+        <link rel="next" href="../multiworker/">
       
       
         
       
       
-      <link rel="icon" href="../../assets/images/favicon.png">
+      <link rel="icon" href="../../../../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
-        <title>Conformance - BlackBull</title>
+        <title>listener - BlackBull</title>
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../../../../assets/stylesheets/main.ec1eaa64.min.css">
       
       
 
@@ -50,11 +50,11 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+      <link rel="stylesheet" href="../../../../assets/_mkdocstrings.css">
     
-      <link rel="stylesheet" href="../../stylesheets/extra.css">
+      <link rel="stylesheet" href="../../../../stylesheets/extra.css">
     
-    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("../../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -72,7 +72,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#conformance" class="md-skip">
+        <a href="#blackbullserverlistener" class="md-skip">
           Skip to content
         </a>
       
@@ -88,7 +88,7 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="../.." title="BlackBull" class="md-header__button md-logo" aria-label="BlackBull" data-md-component="logo">
+    <a href="../../../.." title="BlackBull" class="md-header__button md-logo" aria-label="BlackBull" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -108,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Conformance
+              listener
             
           </span>
         </div>
@@ -198,7 +198,7 @@
 
 <nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="../.." title="BlackBull" class="md-nav__button md-logo" aria-label="BlackBull" data-md-component="logo">
+    <a href="../../../.." title="BlackBull" class="md-nav__button md-logo" aria-label="BlackBull" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -228,7 +228,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../.." class="md-nav__link">
+      <a href="../../../.." class="md-nav__link">
         
   
   
@@ -302,7 +302,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../getting-started/why-blackbull/" class="md-nav__link">
+      <a href="../../../../getting-started/why-blackbull/" class="md-nav__link">
         
   
   
@@ -330,7 +330,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../getting-started/installation/" class="md-nav__link">
+      <a href="../../../../getting-started/installation/" class="md-nav__link">
         
   
   
@@ -358,7 +358,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../getting-started/hello-world/" class="md-nav__link">
+      <a href="../../../../getting-started/hello-world/" class="md-nav__link">
         
   
   
@@ -386,7 +386,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../getting-started/first-app/" class="md-nav__link">
+      <a href="../../../../getting-started/first-app/" class="md-nav__link">
         
   
   
@@ -468,7 +468,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/" class="md-nav__link">
+      <a href="../../../../guide/" class="md-nav__link">
         
   
   
@@ -496,7 +496,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/routing/" class="md-nav__link">
+      <a href="../../../../guide/routing/" class="md-nav__link">
         
   
   
@@ -524,7 +524,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/middleware/" class="md-nav__link">
+      <a href="../../../../guide/middleware/" class="md-nav__link">
         
   
   
@@ -552,7 +552,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/error-handling/" class="md-nav__link">
+      <a href="../../../../guide/error-handling/" class="md-nav__link">
         
   
   
@@ -580,7 +580,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/requests-and-responses/" class="md-nav__link">
+      <a href="../../../../guide/requests-and-responses/" class="md-nav__link">
         
   
   
@@ -608,7 +608,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/dependency-injection/" class="md-nav__link">
+      <a href="../../../../guide/dependency-injection/" class="md-nav__link">
         
   
   
@@ -636,7 +636,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/websockets/" class="md-nav__link">
+      <a href="../../../../guide/websockets/" class="md-nav__link">
         
   
   
@@ -664,7 +664,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/http2/" class="md-nav__link">
+      <a href="../../../../guide/http2/" class="md-nav__link">
         
   
   
@@ -692,7 +692,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/structured-fields/" class="md-nav__link">
+      <a href="../../../../guide/structured-fields/" class="md-nav__link">
         
   
   
@@ -720,7 +720,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/listeners/" class="md-nav__link">
+      <a href="../../../../guide/listeners/" class="md-nav__link">
         
   
   
@@ -748,7 +748,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/raw-protocols/" class="md-nav__link">
+      <a href="../../../../guide/raw-protocols/" class="md-nav__link">
         
   
   
@@ -776,7 +776,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/mqtt/" class="md-nav__link">
+      <a href="../../../../guide/mqtt/" class="md-nav__link">
         
   
   
@@ -804,7 +804,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/grpc/" class="md-nav__link">
+      <a href="../../../../guide/grpc/" class="md-nav__link">
         
   
   
@@ -832,7 +832,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/translation-hub/" class="md-nav__link">
+      <a href="../../../../guide/translation-hub/" class="md-nav__link">
         
   
   
@@ -860,7 +860,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/edge-inference/" class="md-nav__link">
+      <a href="../../../../guide/edge-inference/" class="md-nav__link">
         
   
   
@@ -888,7 +888,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/streaming/" class="md-nav__link">
+      <a href="../../../../guide/streaming/" class="md-nav__link">
         
   
   
@@ -916,7 +916,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/events/" class="md-nav__link">
+      <a href="../../../../guide/events/" class="md-nav__link">
         
   
   
@@ -944,7 +944,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/logging/" class="md-nav__link">
+      <a href="../../../../guide/logging/" class="md-nav__link">
         
   
   
@@ -972,7 +972,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/static-files/" class="md-nav__link">
+      <a href="../../../../guide/static-files/" class="md-nav__link">
         
   
   
@@ -1000,7 +1000,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/configuration/" class="md-nav__link">
+      <a href="../../../../guide/configuration/" class="md-nav__link">
         
   
   
@@ -1028,7 +1028,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/extensions/" class="md-nav__link">
+      <a href="../../../../guide/extensions/" class="md-nav__link">
         
   
   
@@ -1056,7 +1056,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/openapi/" class="md-nav__link">
+      <a href="../../../../guide/openapi/" class="md-nav__link">
         
   
   
@@ -1084,7 +1084,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/testing/" class="md-nav__link">
+      <a href="../../../../guide/testing/" class="md-nav__link">
         
   
   
@@ -1112,7 +1112,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/fault_injection/" class="md-nav__link">
+      <a href="../../../../guide/fault_injection/" class="md-nav__link">
         
   
   
@@ -1194,7 +1194,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../deployment/running/" class="md-nav__link">
+      <a href="../../../../deployment/running/" class="md-nav__link">
         
   
   
@@ -1222,7 +1222,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../deployment/workers/" class="md-nav__link">
+      <a href="../../../../deployment/workers/" class="md-nav__link">
         
   
   
@@ -1250,7 +1250,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../deployment/tls/" class="md-nav__link">
+      <a href="../../../../deployment/tls/" class="md-nav__link">
         
   
   
@@ -1278,7 +1278,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../deployment/behind-reverse-proxy/" class="md-nav__link">
+      <a href="../../../../deployment/behind-reverse-proxy/" class="md-nav__link">
         
   
   
@@ -1306,7 +1306,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../deployment/unix-and-fd/" class="md-nav__link">
+      <a href="../../../../deployment/unix-and-fd/" class="md-nav__link">
         
   
   
@@ -1334,7 +1334,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../deployment/hot-reload/" class="md-nav__link">
+      <a href="../../../../deployment/hot-reload/" class="md-nav__link">
         
   
   
@@ -1366,18 +1366,20 @@
       
   
   
+    
   
   
+  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
         
           
           <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
@@ -1398,7 +1400,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1416,7 +1418,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../reference/env-vars/" class="md-nav__link">
+      <a href="../../../../reference/env-vars/" class="md-nav__link">
         
   
   
@@ -1441,18 +1443,20 @@
                 
   
   
+    
   
   
+  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2" checked>
         
           
           <label class="md-nav__link" for="__nav_5_2" id="__nav_5_2_label" tabindex="0">
@@ -1473,7 +1477,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_5_2">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1488,18 +1492,20 @@
                 
   
   
+    
   
   
+  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1" checked>
         
           
           <label class="md-nav__link" for="__nav_5_2_1" id="__nav_5_2_1_label" tabindex="0">
@@ -1520,7 +1526,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_2_1_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_2_1_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_5_2_1">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1538,7 +1544,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/" class="md-nav__link">
+      <a href="../../" class="md-nav__link">
         
   
   
@@ -1566,7 +1572,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/actor/" class="md-nav__link">
+      <a href="../../actor/" class="md-nav__link">
         
   
   
@@ -1594,7 +1600,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/app/" class="md-nav__link">
+      <a href="../../app/" class="md-nav__link">
         
   
   
@@ -1622,7 +1628,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/asgi/" class="md-nav__link">
+      <a href="../../asgi/" class="md-nav__link">
         
   
   
@@ -1650,7 +1656,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/cli/" class="md-nav__link">
+      <a href="../../cli/" class="md-nav__link">
         
   
   
@@ -1725,7 +1731,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/client/" class="md-nav__link">
+      <a href="../../client/" class="md-nav__link">
         
   
   
@@ -1753,7 +1759,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/client/client/" class="md-nav__link">
+      <a href="../../client/client/" class="md-nav__link">
         
   
   
@@ -1781,7 +1787,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/client/exceptions/" class="md-nav__link">
+      <a href="../../client/exceptions/" class="md-nav__link">
         
   
   
@@ -1809,7 +1815,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/client/http1/" class="md-nav__link">
+      <a href="../../client/http1/" class="md-nav__link">
         
   
   
@@ -1837,7 +1843,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/client/http2/" class="md-nav__link">
+      <a href="../../client/http2/" class="md-nav__link">
         
   
   
@@ -1865,7 +1871,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/client/response/" class="md-nav__link">
+      <a href="../../client/response/" class="md-nav__link">
         
   
   
@@ -1893,7 +1899,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/client/scenario/" class="md-nav__link">
+      <a href="../../client/scenario/" class="md-nav__link">
         
   
   
@@ -1921,7 +1927,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/client/scenario_oracle/" class="md-nav__link">
+      <a href="../../client/scenario_oracle/" class="md-nav__link">
         
   
   
@@ -1949,7 +1955,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/client/websocket/" class="md-nav__link">
+      <a href="../../client/websocket/" class="md-nav__link">
         
   
   
@@ -1977,7 +1983,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/client/websocket_h2/" class="md-nav__link">
+      <a href="../../client/websocket_h2/" class="md-nav__link">
         
   
   
@@ -2013,7 +2019,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/config/" class="md-nav__link">
+      <a href="../../config/" class="md-nav__link">
         
   
   
@@ -2041,7 +2047,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/connection/" class="md-nav__link">
+      <a href="../../connection/" class="md-nav__link">
         
   
   
@@ -2069,7 +2075,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/di/" class="md-nav__link">
+      <a href="../../di/" class="md-nav__link">
         
   
   
@@ -2097,7 +2103,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/env/" class="md-nav__link">
+      <a href="../../env/" class="md-nav__link">
         
   
   
@@ -2125,7 +2131,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/event/" class="md-nav__link">
+      <a href="../../event/" class="md-nav__link">
         
   
   
@@ -2153,7 +2159,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/event_aggregator/" class="md-nav__link">
+      <a href="../../event_aggregator/" class="md-nav__link">
         
   
   
@@ -2181,7 +2187,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/extension/" class="md-nav__link">
+      <a href="../../extension/" class="md-nav__link">
         
   
   
@@ -2256,7 +2262,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/fault_injection/" class="md-nav__link">
+      <a href="../../fault_injection/" class="md-nav__link">
         
   
   
@@ -2331,7 +2337,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/fault_injection/catalogue/" class="md-nav__link">
+      <a href="../../fault_injection/catalogue/" class="md-nav__link">
         
   
   
@@ -2359,7 +2365,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/fault_injection/catalogue/h1/" class="md-nav__link">
+      <a href="../../fault_injection/catalogue/h1/" class="md-nav__link">
         
   
   
@@ -2387,7 +2393,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/fault_injection/catalogue/h1_client/" class="md-nav__link">
+      <a href="../../fault_injection/catalogue/h1_client/" class="md-nav__link">
         
   
   
@@ -2415,7 +2421,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/fault_injection/catalogue/h2/" class="md-nav__link">
+      <a href="../../fault_injection/catalogue/h2/" class="md-nav__link">
         
   
   
@@ -2443,7 +2449,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/fault_injection/catalogue/h2_client/" class="md-nav__link">
+      <a href="../../fault_injection/catalogue/h2_client/" class="md-nav__link">
         
   
   
@@ -2479,7 +2485,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/fault_injection/h1_server/" class="md-nav__link">
+      <a href="../../fault_injection/h1_server/" class="md-nav__link">
         
   
   
@@ -2507,7 +2513,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/fault_injection/h2_server/" class="md-nav__link">
+      <a href="../../fault_injection/h2_server/" class="md-nav__link">
         
   
   
@@ -2535,7 +2541,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/fault_injection/oracle_h1/" class="md-nav__link">
+      <a href="../../fault_injection/oracle_h1/" class="md-nav__link">
         
   
   
@@ -2563,7 +2569,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/fault_injection/scenario_h1/" class="md-nav__link">
+      <a href="../../fault_injection/scenario_h1/" class="md-nav__link">
         
   
   
@@ -2591,7 +2597,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/fault_injection/scenario_h1_server/" class="md-nav__link">
+      <a href="../../fault_injection/scenario_h1_server/" class="md-nav__link">
         
   
   
@@ -2619,7 +2625,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/fault_injection/scenario_h2/" class="md-nav__link">
+      <a href="../../fault_injection/scenario_h2/" class="md-nav__link">
         
   
   
@@ -2647,7 +2653,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/fault_injection/scenario_h2_client/" class="md-nav__link">
+      <a href="../../fault_injection/scenario_h2_client/" class="md-nav__link">
         
   
   
@@ -2730,7 +2736,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/grpc/" class="md-nav__link">
+      <a href="../../grpc/" class="md-nav__link">
         
   
   
@@ -2758,7 +2764,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/grpc/asgi/" class="md-nav__link">
+      <a href="../../grpc/asgi/" class="md-nav__link">
         
   
   
@@ -2786,7 +2792,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/grpc/codec/" class="md-nav__link">
+      <a href="../../grpc/codec/" class="md-nav__link">
         
   
   
@@ -2814,7 +2820,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/grpc/compression/" class="md-nav__link">
+      <a href="../../grpc/compression/" class="md-nav__link">
         
   
   
@@ -2842,7 +2848,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/grpc/registry/" class="md-nav__link">
+      <a href="../../grpc/registry/" class="md-nav__link">
         
   
   
@@ -2870,7 +2876,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/grpc/status/" class="md-nav__link">
+      <a href="../../grpc/status/" class="md-nav__link">
         
   
   
@@ -2906,7 +2912,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/headers/" class="md-nav__link">
+      <a href="../../headers/" class="md-nav__link">
         
   
   
@@ -2934,7 +2940,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/logger/" class="md-nav__link">
+      <a href="../../logger/" class="md-nav__link">
         
   
   
@@ -3009,7 +3015,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/middleware/" class="md-nav__link">
+      <a href="../../middleware/" class="md-nav__link">
         
   
   
@@ -3037,7 +3043,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/middleware/base/" class="md-nav__link">
+      <a href="../../middleware/base/" class="md-nav__link">
         
   
   
@@ -3065,7 +3071,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/middleware/cache/" class="md-nav__link">
+      <a href="../../middleware/cache/" class="md-nav__link">
         
   
   
@@ -3093,7 +3099,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/middleware/compression/" class="md-nav__link">
+      <a href="../../middleware/compression/" class="md-nav__link">
         
   
   
@@ -3121,7 +3127,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/middleware/cors/" class="md-nav__link">
+      <a href="../../middleware/cors/" class="md-nav__link">
         
   
   
@@ -3149,7 +3155,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/middleware/proxy/" class="md-nav__link">
+      <a href="../../middleware/proxy/" class="md-nav__link">
         
   
   
@@ -3177,7 +3183,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/middleware/static/" class="md-nav__link">
+      <a href="../../middleware/static/" class="md-nav__link">
         
   
   
@@ -3205,7 +3211,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/middleware/utils/" class="md-nav__link">
+      <a href="../../middleware/utils/" class="md-nav__link">
         
   
   
@@ -3233,7 +3239,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/middleware/websocket/" class="md-nav__link">
+      <a href="../../middleware/websocket/" class="md-nav__link">
         
   
   
@@ -3316,7 +3322,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/mqtt/" class="md-nav__link">
+      <a href="../../mqtt/" class="md-nav__link">
         
   
   
@@ -3344,7 +3350,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/mqtt/asyncapi/" class="md-nav__link">
+      <a href="../../mqtt/asyncapi/" class="md-nav__link">
         
   
   
@@ -3372,7 +3378,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/mqtt/broker/" class="md-nav__link">
+      <a href="../../mqtt/broker/" class="md-nav__link">
         
   
   
@@ -3400,7 +3406,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/mqtt/connection/" class="md-nav__link">
+      <a href="../../mqtt/connection/" class="md-nav__link">
         
   
   
@@ -3428,7 +3434,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/mqtt/extension/" class="md-nav__link">
+      <a href="../../mqtt/extension/" class="md-nav__link">
         
   
   
@@ -3456,7 +3462,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/mqtt/messages/" class="md-nav__link">
+      <a href="../../mqtt/messages/" class="md-nav__link">
         
   
   
@@ -3484,7 +3490,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/mqtt/tap/" class="md-nav__link">
+      <a href="../../mqtt/tap/" class="md-nav__link">
         
   
   
@@ -3520,7 +3526,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/native/" class="md-nav__link">
+      <a href="../../native/" class="md-nav__link">
         
   
   
@@ -3548,7 +3554,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/openapi/" class="md-nav__link">
+      <a href="../../openapi/" class="md-nav__link">
         
   
   
@@ -3623,7 +3629,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/protocol/" class="md-nav__link">
+      <a href="../../protocol/" class="md-nav__link">
         
   
   
@@ -3651,7 +3657,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/protocol/frame/" class="md-nav__link">
+      <a href="../../protocol/frame/" class="md-nav__link">
         
   
   
@@ -3679,7 +3685,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/protocol/frame_types/" class="md-nav__link">
+      <a href="../../protocol/frame_types/" class="md-nav__link">
         
   
   
@@ -3707,7 +3713,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/protocol/hpack_fastpath/" class="md-nav__link">
+      <a href="../../protocol/hpack_fastpath/" class="md-nav__link">
         
   
   
@@ -3735,7 +3741,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/protocol/rsock/" class="md-nav__link">
+      <a href="../../protocol/rsock/" class="md-nav__link">
         
   
   
@@ -3763,7 +3769,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/protocol/stream/" class="md-nav__link">
+      <a href="../../protocol/stream/" class="md-nav__link">
         
   
   
@@ -3791,7 +3797,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/protocol/structured_fields/" class="md-nav__link">
+      <a href="../../protocol/structured_fields/" class="md-nav__link">
         
   
   
@@ -3827,7 +3833,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/request/" class="md-nav__link">
+      <a href="../../request/" class="md-nav__link">
         
   
   
@@ -3855,7 +3861,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/response/" class="md-nav__link">
+      <a href="../../response/" class="md-nav__link">
         
   
   
@@ -3883,7 +3889,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/router/" class="md-nav__link">
+      <a href="../../router/" class="md-nav__link">
         
   
   
@@ -3908,18 +3914,20 @@
                 
   
   
+    
   
   
+  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_26" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_26" checked>
         
           
           <label class="md-nav__link" for="__nav_5_2_1_26" id="__nav_5_2_1_26_label" tabindex="0">
@@ -3940,7 +3948,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_26_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_26_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_5_2_1_26">
             <span class="md-nav__icon md-icon"></span>
             
@@ -3958,7 +3966,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/server/" class="md-nav__link">
+      <a href="../" class="md-nav__link">
         
   
   
@@ -3986,7 +3994,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/server/access_log/" class="md-nav__link">
+      <a href="../access_log/" class="md-nav__link">
         
   
   
@@ -4014,7 +4022,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/server/affinity/" class="md-nav__link">
+      <a href="../affinity/" class="md-nav__link">
         
   
   
@@ -4042,7 +4050,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/server/cap_log/" class="md-nav__link">
+      <a href="../cap_log/" class="md-nav__link">
         
   
   
@@ -4070,7 +4078,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/server/conn_id/" class="md-nav__link">
+      <a href="../conn_id/" class="md-nav__link">
         
   
   
@@ -4098,7 +4106,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/server/connection_actor/" class="md-nav__link">
+      <a href="../connection_actor/" class="md-nav__link">
         
   
   
@@ -4126,7 +4134,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/server/connection_protocol/" class="md-nav__link">
+      <a href="../connection_protocol/" class="md-nav__link">
         
   
   
@@ -4154,7 +4162,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/server/constants/" class="md-nav__link">
+      <a href="../constants/" class="md-nav__link">
         
   
   
@@ -4182,7 +4190,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/server/deadline/" class="md-nav__link">
+      <a href="../deadline/" class="md-nav__link">
         
   
   
@@ -4210,7 +4218,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/server/http1_actor/" class="md-nav__link">
+      <a href="../http1_actor/" class="md-nav__link">
         
   
   
@@ -4238,7 +4246,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/server/http2_actor/" class="md-nav__link">
+      <a href="../http2_actor/" class="md-nav__link">
         
   
   
@@ -4266,7 +4274,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/server/http2_ws/" class="md-nav__link">
+      <a href="../http2_ws/" class="md-nav__link">
         
   
   
@@ -4291,10 +4299,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../api/blackbull/server/listener/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    listener
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -4310,6 +4345,98 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#blackbull.server.listener" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        listener
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="listener">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.listener.HTTP" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HTTP
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.listener.InheritedFd" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        InheritedFd
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.listener.Listener" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Listener
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.listener.Tcp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tcp
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.listener.Unix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Unix
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -4322,7 +4449,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/server/multiworker/" class="md-nav__link">
+      <a href="../multiworker/" class="md-nav__link">
         
   
   
@@ -4350,7 +4477,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/server/parser/" class="md-nav__link">
+      <a href="../parser/" class="md-nav__link">
         
   
   
@@ -4378,7 +4505,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/server/permessage_deflate/" class="md-nav__link">
+      <a href="../permessage_deflate/" class="md-nav__link">
         
   
   
@@ -4406,7 +4533,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/server/protocol_registry/" class="md-nav__link">
+      <a href="../protocol_registry/" class="md-nav__link">
         
   
   
@@ -4434,7 +4561,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/server/rate_window/" class="md-nav__link">
+      <a href="../rate_window/" class="md-nav__link">
         
   
   
@@ -4462,7 +4589,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/server/read_buffer/" class="md-nav__link">
+      <a href="../read_buffer/" class="md-nav__link">
         
   
   
@@ -4490,7 +4617,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/server/recipient/" class="md-nav__link">
+      <a href="../recipient/" class="md-nav__link">
         
   
   
@@ -4518,7 +4645,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/server/reload/" class="md-nav__link">
+      <a href="../reload/" class="md-nav__link">
         
   
   
@@ -4546,7 +4673,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/server/response/" class="md-nav__link">
+      <a href="../response/" class="md-nav__link">
         
   
   
@@ -4574,7 +4701,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/server/sender/" class="md-nav__link">
+      <a href="../sender/" class="md-nav__link">
         
   
   
@@ -4602,7 +4729,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/server/server/" class="md-nav__link">
+      <a href="../server/" class="md-nav__link">
         
   
   
@@ -4630,7 +4757,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/server/warmup/" class="md-nav__link">
+      <a href="../warmup/" class="md-nav__link">
         
   
   
@@ -4658,7 +4785,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/server/websocket_actor/" class="md-nav__link">
+      <a href="../websocket_actor/" class="md-nav__link">
         
   
   
@@ -4686,7 +4813,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/server/worker/" class="md-nav__link">
+      <a href="../worker/" class="md-nav__link">
         
   
   
@@ -4714,7 +4841,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/server/ws_codec/" class="md-nav__link">
+      <a href="../ws_codec/" class="md-nav__link">
         
   
   
@@ -4797,7 +4924,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/testing/" class="md-nav__link">
+      <a href="../../testing/" class="md-nav__link">
         
   
   
@@ -4825,7 +4952,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/testing/grpc/" class="md-nav__link">
+      <a href="../../testing/grpc/" class="md-nav__link">
         
   
   
@@ -4853,7 +4980,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/testing/native/" class="md-nav__link">
+      <a href="../../testing/native/" class="md-nav__link">
         
   
   
@@ -4889,7 +5016,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/utils/" class="md-nav__link">
+      <a href="../../utils/" class="md-nav__link">
         
   
   
@@ -4917,7 +5044,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/websocket/" class="md-nav__link">
+      <a href="../../websocket/" class="md-nav__link">
         
   
   
@@ -4965,20 +5092,18 @@
       
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
         
           
           <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
@@ -4999,7 +5124,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
@@ -5017,7 +5142,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../architecture/" class="md-nav__link">
+      <a href="../../../../about/architecture/" class="md-nav__link">
         
   
   
@@ -5042,37 +5167,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Conformance
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../../../about/conformance/" class="md-nav__link">
         
   
   
@@ -5088,187 +5186,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#coverage-summary" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Coverage summary
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#http11-in-tree-pytest" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        HTTP/1.1 (in-tree pytest)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#http2-h2spec" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        HTTP/2 — h2spec
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#websocket-autobahntestsuite" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        WebSocket — Autobahn|Testsuite
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#websocket-over-http2-rfc-8441" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        WebSocket over HTTP/2 (RFC 8441)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#filing-a-non-conformance" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Filing a non-conformance
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#fuzz-and-property-based-tests" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Fuzz and property-based tests
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Fuzz and property-based tests">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#atheris-coverage-guided-fuzz" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        atheris coverage-guided fuzz
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#differential-corpus-vs-nginx" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Differential corpus vs nginx
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Differential corpus vs nginx">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#docker-free-regression-replay" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Docker-free regression replay
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#verifying-your-fork-stays-rfc-correct" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Verifying your fork stays RFC-correct
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Verifying your fork stays RFC-correct">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#hypothesis-property-tests" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Hypothesis property tests
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#other-testing-surfaces" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Other testing surfaces
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -5281,7 +5198,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../security-model/" class="md-nav__link">
+      <a href="../../../../about/security-model/" class="md-nav__link">
         
   
   
@@ -5309,7 +5226,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../internals/" class="md-nav__link">
+      <a href="../../../../about/internals/" class="md-nav__link">
         
   
   
@@ -5337,7 +5254,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../mqtt-actor-design/" class="md-nav__link">
+      <a href="../../../../about/mqtt-actor-design/" class="md-nav__link">
         
   
   
@@ -5365,7 +5282,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../rfc9113-implementation/" class="md-nav__link">
+      <a href="../../../../about/rfc9113-implementation/" class="md-nav__link">
         
   
   
@@ -5393,7 +5310,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../grpc-assessment/" class="md-nav__link">
+      <a href="../../../../about/grpc-assessment/" class="md-nav__link">
         
   
   
@@ -5448,88 +5365,22 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#coverage-summary" class="md-nav__link">
+  <a href="#blackbull.server.listener" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Coverage summary
+        listener
       
     </span>
   </a>
   
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#http11-in-tree-pytest" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        HTTP/1.1 (in-tree pytest)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#http2-h2spec" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        HTTP/2 — h2spec
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#websocket-autobahntestsuite" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        WebSocket — Autobahn|Testsuite
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#websocket-over-http2-rfc-8441" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        WebSocket over HTTP/2 (RFC 8441)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#filing-a-non-conformance" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Filing a non-conformance
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#fuzz-and-property-based-tests" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Fuzz and property-based tests
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Fuzz and property-based tests">
+    <nav class="md-nav" aria-label="listener">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#atheris-coverage-guided-fuzz" class="md-nav__link">
+  <a href="#blackbull.server.listener.HTTP" class="md-nav__link">
     <span class="md-ellipsis">
       
-        atheris coverage-guided fuzz
+        HTTP
       
     </span>
   </a>
@@ -5537,22 +5388,43 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#differential-corpus-vs-nginx" class="md-nav__link">
+  <a href="#blackbull.server.listener.InheritedFd" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Differential corpus vs nginx
+        InheritedFd
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Differential corpus vs nginx">
-      <ul class="md-nav__list">
+</li>
         
           <li class="md-nav__item">
-  <a href="#docker-free-regression-replay" class="md-nav__link">
+  <a href="#blackbull.server.listener.Listener" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Docker-free regression replay
+        Listener
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.listener.Tcp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tcp
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.listener.Unix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Unix
       
     </span>
   </a>
@@ -5561,50 +5433,6 @@
         
       </ul>
     </nav>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#verifying-your-fork-stays-rfc-correct" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Verifying your fork stays RFC-correct
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Verifying your fork stays RFC-correct">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#hypothesis-property-tests" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Hypothesis property tests
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#other-testing-surfaces" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Other testing surfaces
-      
-    </span>
-  </a>
   
 </li>
       
@@ -5628,353 +5456,293 @@
   
 
 
-<h1 id="conformance">Conformance<a class="headerlink" href="#conformance" title="Permanent link">&para;</a></h1>
-<p>BlackBull is exercised against three published RFC conformance
-suites in addition to the in-tree pytest tests under
-<code>tests/conformance/</code>.</p>
-<h2 id="coverage-summary">Coverage summary<a class="headerlink" href="#coverage-summary" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Layer</th>
-<th>Suite</th>
-<th>Standard</th>
-<th>Where it runs</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>HTTP/1.1</td>
-<td>in-tree <code>tests/conformance/http1/</code></td>
-<td>RFC 9110, RFC 9112</td>
-<td><code>pytest</code> + CI</td>
-</tr>
-<tr>
-<td>HTTP/1.1 corpus replay</td>
-<td><code>tests/conformance/http1/test_h1_user_corpus_replay.py</code></td>
-<td>curated divergence set</td>
-<td><code>pytest</code> + CI (docker-free)</td>
-</tr>
-<tr>
-<td>HTTP/2 + HPACK</td>
-<td><a href="https://github.com/summerwind/h2spec">h2spec</a> (external)</td>
-<td>RFC 9113, RFC 7541</td>
-<td>CI + local harness under <code>bench/conformance/</code></td>
-</tr>
-<tr>
-<td>WebSocket</td>
-<td>[Autobahn</td>
-<td>Testsuite](https://github.com/crossbario/autobahn-testsuite) (external)</td>
-<td>RFC 6455, RFC 7692</td>
-</tr>
-<tr>
-<td>WebSocket over HTTP/2</td>
-<td>in-tree <code>tests/conformance/http2/test_rfc8441.py</code></td>
-<td>RFC 8441</td>
-<td><code>pytest</code> + CI</td>
-</tr>
-</tbody>
-</table>
-<p>A push to <code>master</code> (or any PR against it) triggers
-<a href="https://github.com/TOKUJI/BlackBull/blob/master/.github/workflows/conformance.yml"><code>.github/workflows/conformance.yml</code></a>,
-which runs the three external/external-shape suites on a fresh
-<code>ubuntu-latest</code> runner: h2spec, Autobahn|Testsuite, and the
-docker-free corpus replay.  The README's <em>RFC conformance</em> badge
-tracks that workflow's status; per-run artefacts (h2spec JUnit
-XML, Autobahn <code>index.json</code>, pytest output) are attached for 30
-days.  A weekly cron also runs the suite so upstream container /
-binary-release changes don't silently regress us between pushes.</p>
-<h2 id="http11-in-tree-pytest">HTTP/1.1 (in-tree pytest)<a class="headerlink" href="#http11-in-tree-pytest" title="Permanent link">&para;</a></h2>
-<p>Covers RFC 9110 (HTTP Semantics) and RFC 9112 (HTTP/1.1 message
-framing).  ~250 conformance test functions across the
-<code>tests/conformance/http1/</code> tree, organised by RFC section:</p>
-<table>
-<thead>
-<tr>
-<th>File</th>
-<th>Covers</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><a href="https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_rfc9112_body_length.py"><code>test_rfc9112_body_length.py</code></a></td>
-<td><code>Content-Length</code>, body framing, <code>HEAD</code> / <code>GET</code> body disagreement (RFC 9110 §9.3)</td>
-</tr>
-<tr>
-<td><a href="https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_rfc9112_chunked.py"><code>test_rfc9112_chunked.py</code></a></td>
-<td><code>Transfer-Encoding: chunked</code> framing, trailers</td>
-</tr>
-<tr>
-<td><a href="https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_rfc9112_connection.py"><code>test_rfc9112_connection.py</code></a></td>
-<td>Keep-alive, <code>Connection: close</code>, half-close</td>
-</tr>
-<tr>
-<td><a href="https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_rfc9112_pipelining.py"><code>test_rfc9112_pipelining.py</code></a></td>
-<td>HTTP/1.1 pipelining with and without bodies</td>
-</tr>
-<tr>
-<td><a href="https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_rfc9112_smuggling.py"><code>test_rfc9112_smuggling.py</code></a></td>
-<td>Request smuggling — CL.CL, CL.TE, TE.CL, TE.TE</td>
-</tr>
-<tr>
-<td><a href="https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_rfc9112_slowloris.py"><code>test_rfc9112_slowloris.py</code></a></td>
-<td>Slowloris partial-headers defence (<code>BB_HEADER_TIMEOUT</code>)</td>
-</tr>
-<tr>
-<td><a href="https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_rfc9110_body_cap.py"><code>test_rfc9110_body_cap.py</code></a></td>
-<td><code>BB_MAX_BODY_SIZE</code> → 413 on both framings, refused before the body is read, and the connection close that stops a refusal becoming a smuggling window</td>
-</tr>
-<tr>
-<td><a href="https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_http1_dispatch.py"><code>test_http1_dispatch.py</code></a></td>
-<td>ASGI dispatch — 1xx / 204 / 304 body suppression (RFC 9110 §15), auto-headers</td>
-</tr>
-</tbody>
-</table>
-<div class="highlight"><pre><span></span><code>pytest<span class="w"> </span>tests/conformance/http1/<span class="w"> </span>-q
-</code></pre></div>
-<p>Invalid HTTP raises <code>BadRequestError</code> at parse time in
-<a href="https://github.com/TOKUJI/BlackBull/blob/master/blackbull/server/parser.py"><code>blackbull/server/parser.py</code></a>
-— before the request reaches any application code.  The
-smuggling tests above cover the CVE classes that follow from
-<code>Content-Length</code> / <code>Transfer-Encoding</code> disagreement.</p>
-<h2 id="http2-h2spec">HTTP/2 — <code>h2spec</code><a class="headerlink" href="#http2-h2spec" title="Permanent link">&para;</a></h2>
-<p><code>h2spec</code> is the de-facto external conformance suite for HTTP/2
-and HPACK — ~146 numbered cases covering frame format, stream
-state, flow control, error codes, and header-block decoding.</p>
-<p>Install (one-time):</p>
-<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-L<span class="w"> </span>-sS<span class="w"> </span>https://github.com/summerwind/h2spec/releases/download/v2.6.0/h2spec_linux_amd64.tar.gz<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span><span class="p">|</span><span class="w"> </span>tar<span class="w"> </span>-xz<span class="w"> </span>-C<span class="w"> </span>~/.local/bin<span class="w"> </span>h2spec
-chmod<span class="w"> </span>+x<span class="w"> </span>~/.local/bin/h2spec
-</code></pre></div>
-<p>Run against a locally-running TLS server on <code>:8443</code>:</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># Start any BlackBull HTTPS server, then:</span>
-bash<span class="w"> </span>bench/conformance/h2spec_run.sh<span class="w">                 </span><span class="c1"># full suite (~2-5 min)</span>
-bash<span class="w"> </span>bench/conformance/h2spec_run.sh<span class="w"> </span>hpack<span class="w">           </span><span class="c1"># HPACK section only</span>
-bash<span class="w"> </span>bench/conformance/h2spec_run.sh<span class="w"> </span>http2/6.5<span class="w">       </span><span class="c1"># specific section</span>
-</code></pre></div>
-<p>Output is teed to
-<code>bench/conformance/results/h2spec_&lt;timestamp&gt;.{txt,xml}</code> (both
-gitignored).  The XML is JUnit-format and machine-readable; the
-TXT ends with a <code>N tests, P passed, S skipped, F failed</code> line
-you can grep for the headline number.</p>
-<p>In-tree pytest tests under <code>tests/conformance/http2/</code> cover
-BlackBull-specific behaviour h2spec does not exercise (RFC 8441
-Extended CONNECT, CONTINUATION boundary cases, server-response
-shapes, and the <code>BB_MAX_BODY_SIZE</code> / <code>BB_MIN_BODY_RATE</code> refusals in
-<code>test_rfc9113_body_cap.py</code>), and run in normal <code>pytest</code> runs.</p>
-<h2 id="websocket-autobahntestsuite">WebSocket — Autobahn|Testsuite<a class="headerlink" href="#websocket-autobahntestsuite" title="Permanent link">&para;</a></h2>
-<p>The de-facto external conformance suite for WebSocket — ~500
-numbered cases over framing, control frames, UTF-8 validation,
-close codes, fragmentation, and <code>permessage-deflate</code>.</p>
-<p>The harness drives the suite from a Docker image against a
-plaintext WebSocket echo server.  Docker is required.</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># Terminal 1 — start the echo server BlackBull provides for the test</span>
-python<span class="w"> </span>bench/conformance/autobahn_app.py<span class="w"> </span>--port<span class="w"> </span><span class="m">9001</span>
+<h1 id="blackbullserverlistener"><code>blackbull.server.listener</code><a class="headerlink" href="#blackbullserverlistener" title="Permanent link">&para;</a></h1>
 
-<span class="c1"># Terminal 2 — run Autobahn against it</span>
-bash<span class="w"> </span>bench/conformance/autobahn_run.sh<span class="w">               </span><span class="c1"># full fuzzingclient run</span>
-<span class="nv">CASES</span><span class="o">=</span><span class="s1">'1.*'</span><span class="w"> </span>bash<span class="w"> </span>bench/conformance/autobahn_run.sh<span class="w">   </span><span class="c1"># subset (e.g. all of §1.x)</span>
-</code></pre></div>
-<p>The §9 <em>Limits and performance</em> cases send messages up to 16 MiB
-(9.1.6 text / 9.2.6 binary; the fragmented 9.4.x cases top out at
-4 MiB), so both WebSocket size limits must be at least the case
-size.  The shipped defaults accept every §9 case with nothing
-configured — <code>BB_WS_MAX_FRAME_PAYLOAD</code> at 64 MiB and
-<code>BB_WS_MAX_MESSAGE_SIZE</code> at exactly the 16 MiB the suite needs.
-Lower either for stricter exposure on untrusted-peer deployments;
-that is a deviation from the configuration this suite was run
-under.</p>
-<p>Reports land in <code>bench/conformance/results/autobahn_&lt;timestamp&gt;/</code>
-with an HTML index — open <code>index.html</code> in a browser for the
-case-by-case breakdown.</p>
-<h2 id="websocket-over-http2-rfc-8441">WebSocket over HTTP/2 (RFC 8441)<a class="headerlink" href="#websocket-over-http2-rfc-8441" title="Permanent link">&para;</a></h2>
-<p>There is no external h2spec-style harness for RFC 8441 yet.
-The in-tree pytest tests under
-<code>tests/conformance/http2/test_rfc8441.py</code> are the current source
-of truth for this surface.  RFC 8441 is also opt-in via
-<code>BB_H2_ENABLE_WEBSOCKET=1</code> (see
-<a href="../../guide/websockets/#transport-http11-upgrade-vs-http2-extended-connect">WebSockets</a>).</p>
-<h2 id="filing-a-non-conformance">Filing a non-conformance<a class="headerlink" href="#filing-a-non-conformance" title="Permanent link">&para;</a></h2>
-<p>If a conformance run regresses (a case that previously passed
-starts failing), re-run the latest harness, attach the failing
-case's verbatim transcript to the report, and file an issue on
-the GitHub repo with:</p>
-<ul>
-<li>the RFC section citation (e.g. RFC 9113 §6.5.2);</li>
-<li>the case ID from h2spec or Autobahn (e.g. <code>http2/6.5/2</code>,
-  Autobahn <code>1.1.5</code>);</li>
-<li>the transcript and any wireshark / <code>tshark</code> capture if
-  available.</li>
-</ul>
-<h2 id="fuzz-and-property-based-tests">Fuzz and property-based tests<a class="headerlink" href="#fuzz-and-property-based-tests" title="Permanent link">&para;</a></h2>
-<p>In addition to the RFC suites, the codebase exercises the parser
-and protocol layers with two unstructured-input harnesses.</p>
-<h3 id="atheris-coverage-guided-fuzz">atheris coverage-guided fuzz<a class="headerlink" href="#atheris-coverage-guided-fuzz" title="Permanent link">&para;</a></h3>
-<p><a href="https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/fuzz/fuzz_http1.py"><code>tests/conformance/http1/fuzz/fuzz_http1.py</code></a>
-drives BlackBull's HTTP/1.1 parser with random byte sequences
-via <a href="https://github.com/google/atheris">atheris</a>.  The harness
-has run 100k+ iterations across corpus seeds without a process
-crash.  Targets:</p>
-<ul>
-<li><code>blackbull/server/parser.py</code> — request-line + header parsing</li>
-<li><code>blackbull/protocol/</code> — frame and HPACK decoding</li>
-</ul>
-<h3 id="differential-corpus-vs-nginx">Differential corpus vs nginx<a class="headerlink" href="#differential-corpus-vs-nginx" title="Permanent link">&para;</a></h3>
-<p><code>tests/conformance/http1/fuzz/user-corpus/</code> holds 7 captured
-input/response pairs where BlackBull and nginx differ on the
-same input, each categorised:</p>
-<table>
-<thead>
-<tr>
-<th>Category</th>
-<th>Meaning</th>
-<th>Count</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>STATUS_DIFFER</code></td>
-<td>RFC-defensible divergence (BlackBull is RFC-correct; nginx is permissive)</td>
-<td>2</td>
-</tr>
-<tr>
-<td><code>BOTH_REJECTED</code></td>
-<td>Both servers reject the malformed input</td>
-<td>4</td>
-</tr>
-<tr>
-<td><code>OK</code></td>
-<td>Both servers respond identically</td>
-<td>1</td>
-</tr>
-</tbody>
-</table>
-<p>Both <code>STATUS_DIFFER</code> entries are <strong>RFC-defensible</strong> — BlackBull is
-the stricter reader — and are kept in the corpus deliberately rather
-than treated as bugs:</p>
-<table>
-<thead>
-<tr>
-<th>Wire request</th>
-<th>nginx</th>
-<th>BlackBull</th>
-<th>Why we're right</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>GET&amp;nbsp;&amp;nbsp;http://localhost/x HTTP/1.0</code> (double-SP between method and target)</td>
-<td>200</td>
-<td>400</td>
-<td>RFC 9112 §3 — request-line tokens are separated by exactly one SP.  nginx is lenient; we reject.</td>
-</tr>
-<tr>
-<td><code>GET&amp;nbsp;&amp;nbsp;http://localhost/x HTTP/9.9</code> (double-SP <strong>and</strong> unknown version)</td>
-<td>505</td>
-<td>400</td>
-<td>Validation-order choice: the request-line SP grammar (RFC 9112 §3) is checked before the HTTP version, so the malformed line is 400 first.  nginx reports the version problem (505) instead.  A <em>well-formed</em> request with an unsupported version does get 505 from BlackBull (RFC 9110 §15.6.6).</td>
-</tr>
-</tbody>
-</table>
-<p>Both are also recorded in
-<a href="https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/fuzz/user-corpus/"><code>tests/conformance/http1/fuzz/user-corpus/diff_README.md</code></a>.
-We are not chasing nginx parity unless a real user need appears —
-being stricter than a permissive server is a conformance result, not
-a defect.</p>
-<h4 id="docker-free-regression-replay">Docker-free regression replay<a class="headerlink" href="#docker-free-regression-replay" title="Permanent link">&para;</a></h4>
-<p>The full differential test
-(<a href="https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_http1_differential.py"><code>test_http1_differential.py</code></a>)
-spins up nginx via <code>testcontainers</code> and skips at collection when
-Docker isn't reachable — which excludes most CI runners.  A
-companion test runs against just BlackBull:</p>
-<div class="highlight"><pre><span></span><code>pytest<span class="w"> </span>tests/conformance/http1/test_h1_user_corpus_replay.py<span class="w"> </span>-q
-</code></pre></div>
-<p>For each <code>diff_*.meta.json</code> sidecar, it sends the recorded
-<code>wire_request_latin1</code> to a live in-process BlackBull and asserts
-the response status code still matches the recorded
-<code>blackbull_status</code>.  Runs in well under a second; no Docker, no
-network egress.  A failure pinpoints which curated edge case
-moved without re-running the Hypothesis sweep against nginx.</p>
-<p>If you change the HTTP/1.1 parser or dispatch path and a corpus
-entry's status shifts, decide whether the shift is:</p>
-<ul>
-<li>a <strong>real regression</strong> — fix the change that moved the status; or</li>
-<li>an <strong>intentional behaviour change</strong> — delete the obsolete
-  <code>.meta.json</code> / <code>.jsonl</code> pair, regenerate by running the full
-  differential test under Docker, and commit the refreshed
-  recording.</li>
-</ul>
-<h2 id="verifying-your-fork-stays-rfc-correct">Verifying your fork stays RFC-correct<a class="headerlink" href="#verifying-your-fork-stays-rfc-correct" title="Permanent link">&para;</a></h2>
-<p>If you're carrying a patch on top of BlackBull and want assurance
-that your changes haven't broken protocol conformance, this is
-the recommended order:</p>
-<ol>
-<li>
-<p><strong>Run the in-tree pytest suite</strong>:
-   <div class="highlight"><pre><span></span><code>pytest<span class="w"> </span>tests/conformance/<span class="w"> </span>-q
-</code></pre></div>
-   This covers HTTP/1.1 (RFC 9110, RFC 9112), HTTP/2 BlackBull-
-   specific cases, and RFC 8441 — fastest signal, no external
-   dependencies.</p>
-</li>
-<li>
-<p><strong>Run the docker-free corpus replay</strong>:
-   <div class="highlight"><pre><span></span><code>pytest<span class="w"> </span>tests/conformance/http1/test_h1_user_corpus_replay.py<span class="w"> </span>-q
-</code></pre></div>
-   Confirms the curated divergence set still holds.  Single
-   second.</p>
-</li>
-<li>
-<p><strong>Run h2spec locally</strong> (RFC 9113 + RFC 7541):
-   <div class="highlight"><pre><span></span><code>openssl<span class="w"> </span>req<span class="w"> </span>-x509<span class="w"> </span>-newkey<span class="w"> </span>rsa:2048<span class="w"> </span>-keyout<span class="w"> </span>key.pem<span class="w"> </span>-out<span class="w"> </span>cert.pem<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>-days<span class="w"> </span><span class="m">365</span><span class="w"> </span>-nodes<span class="w"> </span>-subj<span class="w"> </span><span class="s1">'/CN=localhost'</span>
-python<span class="w"> </span>bench/conformance/h2spec_app.py<span class="w"> </span>--port<span class="w"> </span><span class="m">8443</span><span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>--cert<span class="w"> </span>cert.pem<span class="w"> </span>--key<span class="w"> </span>key.pem<span class="w"> </span><span class="p">&amp;</span>
-bash<span class="w"> </span>bench/conformance/h2spec_run.sh
-</code></pre></div>
-   ~2-5 minutes.  Output: <code>bench/conformance/results/h2spec_*.{txt,xml}</code>.</p>
-</li>
-<li>
-<p><strong>Run Autobahn|Testsuite locally</strong> (RFC 6455 + RFC 7692):
-   <div class="highlight"><pre><span></span><code>python<span class="w"> </span>bench/conformance/autobahn_app.py<span class="w"> </span>--port<span class="w"> </span><span class="m">9001</span><span class="w"> </span><span class="p">&amp;</span>
-bash<span class="w"> </span>bench/conformance/autobahn_run.sh
-</code></pre></div>
-   Requires Docker.  ~3-10 minutes.  Browse
-   <code>bench/conformance/results/autobahn_*/index.html</code> for the
-   case-by-case breakdown.</p>
-</li>
-<li>
-<p><strong>Push to a branch and let CI run</strong> the same three external
-   suites in parallel on <code>ubuntu-latest</code>.  The
-   <a href="https://github.com/TOKUJI/BlackBull/blob/master/.github/workflows/conformance.yml"><code>conformance.yml</code></a>
-   workflow runs on every push and PR to master; its badge in
-   the README turns red if any suite regresses.</p>
-</li>
-</ol>
-<p>A clean run of all five steps means your fork passes the same
-RFC-conformance bar that BlackBull itself ships with.  None of
-this proves the absence of bugs — these are published suites
-with finite coverage — but a regression in any of them is a
-hard signal you've changed protocol-level behaviour.</p>
-<h3 id="hypothesis-property-tests">Hypothesis property tests<a class="headerlink" href="#hypothesis-property-tests" title="Permanent link">&para;</a></h3>
-<p><a href="https://github.com/TOKUJI/BlackBull/tree/master/tests/properties"><code>tests/properties/</code></a>
-uses <a href="https://hypothesis.readthedocs.io/">hypothesis</a> to
-generate structured random inputs for header parsing
-(<a href="https://github.com/TOKUJI/BlackBull/blob/master/tests/properties/test_headers.py"><code>test_headers.py</code></a>)
-and HTTP/2 frame round-tripping
-(<a href="https://github.com/TOKUJI/BlackBull/blob/master/tests/properties/test_http2_frame.py"><code>test_http2_frame.py</code></a>),
-checking invariants (round-trip equality, header-name
-case-insensitivity) across many shapes.</p>
-<h2 id="other-testing-surfaces">Other testing surfaces<a class="headerlink" href="#other-testing-surfaces" title="Permanent link">&para;</a></h2>
-<ul>
-<li><a href="../../guide/testing/">Testing</a> — how to write tests for your
-  own application using BlackBull's clients or
-  <code>httpx.ASGITransport</code>.</li>
-<li>The differential fuzz corpus above records RFC-defensible
-  divergences from nginx; see
-  <a href="https://github.com/TOKUJI/BlackBull/blob/master/KNOWN_LIMITATIONS.md"><code>KNOWN_LIMITATIONS.md</code></a>
-  for the documented entries.</li>
-</ul>
+
+<div class="doc doc-object doc-module">
+
+
+
+<h2 id="blackbull.server.listener" class="doc doc-heading">
+            <code>blackbull.server.listener</code>
+
+
+<a href="#blackbull.server.listener" class="headerlink" title="Permanent link">&para;</a></h2>
+
+    <div class="doc doc-contents first">
+
+        <p>The sockets a deployment wants, said once each.</p>
+<p>A :class:<code>Listener</code> is one listening socket: where it is, what speaks there,
+whether TLS terminates there, and how many workers own it.  <code>Server</code> binds a
+list of them, so no port is privileged over another and HTTP is a value rather
+than the absence of a raw handler.</p>
+<p>The four ports a cleartext-plus-TLS deployment needs are four listeners that
+differ in address and TLS and in nothing else — HTTP/1.1 versus h2c is preface
+detection, and TLS h1 versus h2 is ALPN, both already handled downstream.</p>
+<p>Design: <code>.claude/planning/designs/listener-vocabulary.md</code>.</p>
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h3 id="blackbull.server.listener.HTTP" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">HTTP</span> <span class="o">=</span> <span class="s1">'http'</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-module-attribute"><code>module-attribute</code></small>
+  </span>
+
+<a href="#blackbull.server.listener.HTTP" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>What :attr:<code>Listener.speaks</code> names for the detecting HTTP stack.</p>
+
+    </div>
+
+</div>
+
+
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.server.listener.InheritedFd" class="doc doc-heading">
+            <code>InheritedFd</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#blackbull.server.listener.InheritedFd" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>A socket already bound and listening, handed over by a supervisor.</p>
+<p>Covers systemd-style activation and the re-exec handoff that keeps the
+listener continuous across an auto-reload.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.server.listener.Listener" class="doc doc-heading">
+            <code>Listener</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#blackbull.server.listener.Listener" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>One listening socket and what happens on it.</p>
+<p><em>speaks</em> is always a positive name: <code>'http'</code> selects the stack that
+detects HTTP/1.1, h2c and WebSocket upgrades, and a raw protocol names
+itself.</p>
+<p><em>tls</em> is the listener's own context, so a second certificate — or mTLS on
+one port and not another — is sayable.</p>
+<p><em>workers</em> is where ownership is decided, and the only place.  Left unset it
+follows <em>speaks</em>: the HTTP stack is stateless and runs on every worker,
+while a raw protocol holds state that scattering across workers would
+scatter with it.  Pass it explicitly to override.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.server.listener.Tcp" class="doc doc-heading">
+            <code>Tcp</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#blackbull.server.listener.Tcp" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>A TCP port, on <em>host</em> or on every interface when it is <code>None</code>.</p>
+<p><code>port=0</code> asks the OS for a free one; the bound port is read back after
+binding.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.server.listener.Unix" class="doc doc-heading">
+            <code>Unix</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#blackbull.server.listener.Unix" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>An AF_UNIX path.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
 
 
 
@@ -6024,10 +5792,10 @@ case-insensitivity) across many shapes.</p>
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": [], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../../..", "features": [], "search": "../../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../../../../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>

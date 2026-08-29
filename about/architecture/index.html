@@ -720,6 +720,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../guide/listeners/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Listeners
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../guide/raw-protocols/" class="md-nav__link">
         
   
@@ -4266,6 +4294,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/server/listener/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    listener
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/server/multiworker/" class="md-nav__link">
         
   
@@ -5444,11 +5500,14 @@ can offer — end-to-end debuggability, and the ability to make the protocol
 layer do things a library won't let you (see <em>Fault injection</em> below).</p>
 <h2 id="multi-protocol-one-process">Multi-protocol, one process<a class="headerlink" href="#multi-protocol-one-process" title="Permanent link">&para;</a></h2>
 <p>A single <code>python app.py</code> serves every protocol at once — HTTP routes,
-a WebSocket channel, a gRPC service, and an MQTT broker, on their own ports,
-in one runtime. Non-HTTP protocols attach through one seam,
-<code>app.add_extension(...)</code>, while the HTTP core stays protocol-agnostic. There
-is no reverse proxy to configure, no separate broker process, and no C
-extension in the path.</p>
+a WebSocket channel, a gRPC service, and an MQTT broker, in one runtime.
+Non-HTTP protocols attach through one seam, <code>app.add_extension(...)</code>, while
+the HTTP core stays protocol-agnostic. There is no reverse proxy to configure,
+no separate broker process, and no C extension in the path.</p>
+<p>Ports are not part of the count. A deployment states the sockets it wants as
+<a href="../../guide/listeners/">listeners</a> — cleartext and TLS side by side, two
+certificates, an admin port on loopback — and one process serves all of them,
+with every worker on every one.</p>
 <p>This is the bet behind the IoT-gateway and edge use cases: protocol density
 in a single deployable, on hardware where running four services is a burden.</p>
 <h2 id="actor-model">Actor model<a class="headerlink" href="#actor-model" title="Permanent link">&para;</a></h2>

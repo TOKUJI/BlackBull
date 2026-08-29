@@ -720,6 +720,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../guide/listeners/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Listeners
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../guide/raw-protocols/" class="md-nav__link">
         
   
@@ -4458,6 +4486,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/server/listener/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    listener
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/server/multiworker/" class="md-nav__link">
         
   
@@ -5823,6 +5879,11 @@ or drop to <code>INFO</code> to surface the rate-limit summary records.</p>
 <td><code>BB_H2_MAX_CONCURRENT_STREAMS</code></td>
 <td><code>100</code></td>
 <td><code>SETTINGS_MAX_CONCURRENT_STREAMS</code> (RFC 9113 §6.5.2 id <code>0x3</code>).  Streams beyond the cap receive <code>RST_STREAM REFUSED_STREAM</code> and are not dispatched.</td>
+</tr>
+<tr>
+<td><code>BB_WORKER_DRAIN_TIMEOUT</code></td>
+<td><code>8.0</code></td>
+<td>Seconds a worker spends letting already-accepted connections finish after <code>SIGTERM</code>, before cancelling what is left.  Nothing in flight is cancelled while it lasts — a cancelled handler is a client holding a half-written response.  It sits inside the supervisor's own wait, so the drain ends in the worker rather than in a <code>SIGKILL</code>; raising it past that wait only moves the deadline.  <code>0</code> drops in-flight requests immediately, which is what the server did before this existed.  See <a href="../../deployment/workers/#shutdown">Shutdown</a>.</td>
 </tr>
 <tr>
 <td><code>BB_H2_ACTIVE_STREAMS</code></td>

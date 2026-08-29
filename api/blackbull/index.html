@@ -720,6 +720,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../guide/listeners/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Listeners
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../guide/raw-protocols/" class="md-nav__link">
         
   
@@ -2200,10 +2228,32 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.InheritedFd" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        InheritedFd
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.JSONResponse" class="md-nav__link">
     <span class="md-ellipsis">
       
         JSONResponse
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.Listener" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Listener
       
     </span>
   </a>
@@ -2305,10 +2355,32 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.Tcp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tcp
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.TrustedProxy" class="md-nav__link">
     <span class="md-ellipsis">
       
         TrustedProxy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.Unix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Unix
       
     </span>
   </a>
@@ -5411,6 +5483,34 @@
   
   
     <li class="md-nav__item">
+      <a href="server/listener/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    listener
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="server/multiworker/" class="md-nav__link">
         
   
@@ -6951,10 +7051,32 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.InheritedFd" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        InheritedFd
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.JSONResponse" class="md-nav__link">
     <span class="md-ellipsis">
       
         JSONResponse
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.Listener" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Listener
       
     </span>
   </a>
@@ -7056,10 +7178,32 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.Tcp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tcp
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.TrustedProxy" class="md-nav__link">
     <span class="md-ellipsis">
       
         TrustedProxy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.Unix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Unix
       
     </span>
   </a>
@@ -8298,7 +8442,7 @@ async def warm(app):
 
 
 <h4 id="blackbull.BlackBull.raw_handler" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">raw_handler</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">port</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">detector</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">tls</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">raw_handler</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">port</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">detector</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">tls</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">stateful</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></code>
 
 <a href="#blackbull.BlackBull.raw_handler" class="headerlink" title="Permanent link">&para;</a></h4>
 
@@ -8359,7 +8503,7 @@ is shared with every adapted handler by reference.</p>
 
 
 <h4 id="blackbull.BlackBull.register_protocol_handler" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">register_protocol_handler</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">handler</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">detector</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">port</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">tls</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">register_protocol_handler</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">handler</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">detector</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">port</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">tls</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">stateful</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></code>
 
 <a href="#blackbull.BlackBull.register_protocol_handler" class="headerlink" title="Permanent link">&para;</a></h4>
 
@@ -8425,8 +8569,8 @@ skip HTTP detection and go straight to <em>handler</em>.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Reserved for first-byte sniffing on shared ports;
-unused today.</p>
+                <p>First-byte sniffing on the shared HTTP port, so this
+protocol can be reached there as well as on its own port.</p>
               </div>
             </td>
             <td>
@@ -8465,6 +8609,52 @@ certificate; startup fails fast otherwise.</p>
             </td>
             <td>
                   <code>False</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>stateful</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Whether an exchange depends on what an earlier one left
+behind — true by default.  A stateful protocol is served by one
+worker, so with <code>workers &gt; 1</code> it is reached on its own port
+only; the shared port would answer from whichever worker
+accepted.  A stateful protocol with <em>no</em> dedicated port cannot
+be given one owner at all and is refused before the workers
+fork.  Pass <code>False</code> for a protocol that keeps nothing between
+exchanges.</p>
+              </div>
+            </td>
+            <td>
+                  <code>True</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="RawBinding (blackbull.server.protocol_registry.RawBinding)" href="server/protocol_registry/#blackbull.server.protocol_registry.RawBinding">RawBinding</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The registered binding.</p>
+              </div>
             </td>
           </tr>
       </tbody>
@@ -8510,7 +8700,7 @@ methods on the same route still receive the <code>Accept-Query</code> header.</p
 
 
 <h4 id="blackbull.BlackBull.run" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">run</span><span class="p">(</span><span class="n">certfile</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">keyfile</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">port</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">unix_path</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">inherited_fd</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">workers</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">max_connections</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">stream_queue_depth</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">ws_queue_depth</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">reload</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">reload_paths</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">run</span><span class="p">(</span><span class="n">certfile</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">keyfile</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">port</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">unix_path</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">inherited_fd</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">listeners</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">workers</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">max_connections</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">stream_queue_depth</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">ws_queue_depth</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">reload</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">reload_paths</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 <a href="#blackbull.BlackBull.run" class="headerlink" title="Permanent link">&para;</a></h4>
 
@@ -9904,6 +10094,58 @@ parsing (per RFC 9651 §4.2 the whole field is then ignored).</p>
 
 
 
+<h3 id="blackbull.InheritedFd" class="doc doc-heading">
+            <code>InheritedFd</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#blackbull.InheritedFd" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>A socket already bound and listening, handed over by a supervisor.</p>
+<p>Covers systemd-style activation and the re-exec handoff that keeps the
+listener continuous across an auto-reload.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
 <h3 id="blackbull.JSONResponse" class="doc doc-heading">
             <code>JSONResponse</code>
 
@@ -9922,6 +10164,65 @@ parsing (per RFC 9651 §4.2 the whole field is then ignored).</p>
 <pre><code>await send(JSONResponse({'ok': True}))
 await send(JSONResponse({'error': 'Not found'}, status=HTTPStatus.NOT_FOUND))
 </code></pre>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.Listener" class="doc doc-heading">
+            <code>Listener</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#blackbull.Listener" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>One listening socket and what happens on it.</p>
+<p><em>speaks</em> is always a positive name: <code>'http'</code> selects the stack that
+detects HTTP/1.1, h2c and WebSocket upgrades, and a raw protocol names
+itself.</p>
+<p><em>tls</em> is the listener's own context, so a second certificate — or mTLS on
+one port and not another — is sayable.</p>
+<p><em>workers</em> is where ownership is decided, and the only place.  Left unset it
+follows <em>speaks</em>: the HTTP stack is stateless and runs on every worker,
+while a raw protocol holds state that scattering across workers would
+scatter with it.  Pass it explicitly to override.</p>
 
 
 
@@ -10365,6 +10666,58 @@ async def handler(conn, receive, send):
 
 
 
+<h3 id="blackbull.Tcp" class="doc doc-heading">
+            <code>Tcp</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#blackbull.Tcp" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>A TCP port, on <em>host</em> or on every interface when it is <code>None</code>.</p>
+<p><code>port=0</code> asks the OS for a free one; the bound port is read back after
+binding.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
 <h3 id="blackbull.TrustedProxy" class="doc doc-heading">
             <code>TrustedProxy</code>
 
@@ -10424,6 +10777,56 @@ single string or a list.  Defaults to loopback (<code>'127.0.0.1'</code>, <code>
 from blackbull import TrustedProxyMiddleware
 app.use(TrustedProxyMiddleware(['127.0.0.1', '::1']))
 </code></pre>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.Unix" class="doc doc-heading">
+            <code>Unix</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#blackbull.Unix" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>An AF_UNIX path.</p>
 
 
 
@@ -11307,7 +11710,7 @@ returned as if it were the complete text.</p>
 
 
 <h3 id="blackbull.serve" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">serve</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">certfile</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">keyfile</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">port</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">unix_path</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">inherited_fd</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">workers</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">max_connections</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">stream_queue_depth</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">ws_queue_depth</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">reload</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">reload_paths</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">serve</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">certfile</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">keyfile</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">port</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">unix_path</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">inherited_fd</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">listeners</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">workers</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">max_connections</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">stream_queue_depth</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">ws_queue_depth</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">reload</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">reload_paths</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 <a href="#blackbull.serve" class="headerlink" title="Permanent link">&para;</a></h3>
 
@@ -11326,6 +11729,11 @@ process via <code>asyncio.run</code>.  For <code>workers &gt; 1</code> <em>or</e
 blocks until SIGTERM / SIGINT — or in reload mode, until a
 watched file changes (master then re-execs itself, see
 :mod:<code>blackbull.server.reload</code>).</p>
+<p><em>listeners</em> states the sockets directly — one
+:class:<code>~blackbull.server.listener.Listener</code> each, saying where it is,
+what speaks there and whether TLS terminates there.  It replaces <em>port</em>,
+<em>unix_path</em> and <em>inherited_fd</em> rather than joining them, so passing both
+is refused.</p>
 <p>All integer parameters default to their corresponding <code>BB_*</code>
 environment variables (see :mod:<code>blackbull.env</code>).</p>
 

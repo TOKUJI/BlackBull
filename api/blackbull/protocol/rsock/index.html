@@ -720,6 +720,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../../../guide/listeners/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Listeners
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../../../guide/raw-protocols/" class="md-nav__link">
         
   
@@ -4393,6 +4421,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../server/listener/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    listener
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../server/multiworker/" class="md-nav__link">
         
   
@@ -5500,7 +5556,7 @@ multiworker path already handles set_inheritable as needed.</p>
 
 
 <h3 id="blackbull.protocol.rsock.create_dual_stack_sockets" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">create_dual_stack_sockets</span><span class="p">(</span><span class="n">port</span><span class="p">,</span> <span class="n">backlog</span><span class="o">=</span><span class="n">_DEFAULT_BACKLOG</span><span class="p">,</span> <span class="n">reuseport</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">sndbuf</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">rcvbuf</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">keepalive</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">user_timeout_ms</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">create_dual_stack_sockets</span><span class="p">(</span><span class="n">port</span><span class="p">,</span> <span class="n">backlog</span><span class="o">=</span><span class="n">_DEFAULT_BACKLOG</span><span class="p">,</span> <span class="n">reuseport</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">sndbuf</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">rcvbuf</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">keepalive</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">user_timeout_ms</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">host</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 <a href="#blackbull.protocol.rsock.create_dual_stack_sockets" class="headerlink" title="Permanent link">&para;</a></h3>
 
@@ -5509,6 +5565,8 @@ multiworker path already handles set_inheritable as needed.</p>
 
         <p>Create one IPv4 socket (<code>0.0.0.0</code>) <strong>and</strong> one IPv6 socket (<code>::</code>),
 both listening on <em>port</em>.</p>
+<p>Naming a <em>host</em> asks for that interface instead, which is one socket in
+one family — the point of naming it is to reach nothing else.</p>
 <p>Using two explicit sockets — each with <code>IPV6_V6ONLY</code> set on the IPv6
 one — is the most portable way to accept both IPv4 and IPv6 connections
 on all major platforms (Linux, macOS, Windows).</p>
