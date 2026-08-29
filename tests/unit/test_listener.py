@@ -6,7 +6,7 @@ many workers own it.  These tests pin the parts that decide behaviour
 elsewhere — the defaults, the single place ownership is derived, and the
 validation that stops a mistake at construction rather than at bind time.
 
-Design: `.claude/planning/designs/listener-vocabulary.md`.
+Design: `BLA-A-17` [private].
 """
 from __future__ import annotations
 

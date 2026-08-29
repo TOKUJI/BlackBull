@@ -5,7 +5,7 @@ If a future PR adds a new cap (``BB_*`` env var that rejects traffic)
 without wiring a ``log_cap_hit(...)`` call at the rejection site, this
 file is where the new test belongs.  Until it does, the inventory
 contract is not satisfied — see
-``.claude/planning/candidates/cap-hit-logging.md`` for the design.
+``BLA-116`` [private] for the design.
 
 Each test follows the same shape:
 

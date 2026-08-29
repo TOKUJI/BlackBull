@@ -30,12 +30,12 @@ that only make sense inside BlackBull.
 
 - **Findings update proposals; memory holds only tooling gotchas.**  When a
   measurement or investigation answers a question an open proposal is
-  pursuing, update that proposal — or create one — in the same turn (status
-  line + INDEX.md row included).  Never park a proposal-relevant answer in
-  `/memories/repo/`; repo memory is only for operational gotchas (tooling,
-  harness, environment quirks) that no proposal and no `docs/` page covers.
-  Before writing a new repo-memory file, grep `proposals/INDEX.md` for the
-  proposal that owns the question; if one exists, update it instead.
+  pursuing, update that proposal — or open one — in the same turn.  Never park
+  a proposal-relevant answer in `/memories/repo/`; repo memory is only for
+  operational gotchas (tooling, harness, environment quirks) that no proposal
+  and no `docs/` page covers.  Before writing a new repo-memory file, search
+  the tracker for the proposal that owns the question; if one exists, comment
+  there instead.
 
 - **Every limit names its triad column.**  When you add or change a resource
   limit, state which of the three it occupies — *how big may one unit be*,
@@ -48,7 +48,7 @@ that only make sense inside BlackBull.
   **a write with no reader is still a growable path**.  Also check what state
   the protocol *shares*, because that constrains the answer — an HTTP/2 header
   block cannot be abandoned per-stream, since HPACK state is connection-wide.
-  → `.claude/planning/research/attack-surface-audit-2026-08.md` [private]
+  → `BLA-A-1` [private]
 
 - **Type-check before committing.** `just typecheck` catches contract
   violations statically.  → `.claude/skills/type-check/SKILL.md` [private]
@@ -165,14 +165,14 @@ fallback where one exists.
 | Chaining dependent long-running steps (multi-phase measurement/build) | `.claude/patterns/chaining-long-running-steps.md` [private] |
 | Running peer server comparisons (FastAPI / Sanic / etc.) locally | `.claude/skills/peer-compare/SKILL.md` [private] |
 | High-precision A/B check (rule out regression / equivalence within ±Δ%) | `bench/peers/AB-HIGH-PRECISION.md` + `.claude/skills/ab-verify/SKILL.md` [skill private] — read the null phase before trusting a real verdict; pooled TOST on EC2 |
-| Tracing a regression across sprints | `.claude/sprint-logs/` [private] — per-sprint bottleneck-attribution logs.  `bench/CHARACTERIZATION.md` is the public summary; sprint-logs hold the raw diagnostic numbers |
+| Tracing a regression across sprints | YouTrack, `tag: sprint-log` [private] — per-sprint bottleneck-attribution logs.  `bench/CHARACTERIZATION.md` is the public summary; the tracker holds the raw diagnostic numbers |
 | Cutting a release / sprint close | `.claude/patterns/release.md` + `.claude/skills/sprint-close/SKILL.md` [both private] |
 | Reasoning about actors / events | `.claude/design/actor-model.md` + `.claude/design/event-catalogue.md` [both private] |
 | Checking a known gotcha before acting | `.claude/patterns/cautions.md` [private] |
-| Adding or changing a resource limit / reviewing defence coverage | `.claude/planning/research/attack-surface-audit-2026-08.md` [private] — the mechanism × surface matrix, the limit-triad grid, and the closed gap register with its evidence pointers |
+| Adding or changing a resource limit / reviewing defence coverage | `BLA-A-1` [private] — the mechanism × surface matrix, the limit-triad grid, and the closed gap register with its evidence pointers |
 | Answering a user's question about BlackBull's security posture | `docs/about/security-model.md` — quote the published claim rather than improvising one; it is a projection of the audit above, so the two must not drift |
-| Picking/triaging what to build next | `.claude/planning/proposals/INDEX.md` [private] |
-| Reading a point-in-time design | `.claude/planning/designs/` [private] |
+| Picking/triaging what to build next | YouTrack, `tag: active #Unresolved` ordered by `Priority` [private] — Critical first.  The hand-sorted index this replaced is closed: it fell four proposals behind before anyone noticed |
+| Reading a point-in-time design | YouTrack Knowledge Base [private] |
 
 **Skills** (invocable, harness-surfaced; they live in `.claude/skills/` [private] —
 `.github/skills` is an optional local symlink, see `.gitignore`):
@@ -201,11 +201,16 @@ Before acting on a request, read the corresponding skill file first.
 
 ### Doc lifecycle (so docs don't rot)
 
-Every doc under `.claude/planning/` carries a status line near the top:
-`**Status**: active | shipped vX.Y.0 | superseded-by <file> | archived <date>`.
-When a proposal/design ships or dies, move it to `.claude/planning/archives/`
-(that pruning is a step in the `sprint-close` skill). `.claude/` is git-ignored,
-so deletions are **not** recoverable — prune deliberately, archive when unsure.
-Findings land in the owning proposal in-session; INDEX regeneration and
-archival pruning stay sprint-close steps (see *Findings update proposals* above).
+Planning material lives in the tracker, not in files.  A document's state is the
+issue's own: `Type` says what it is, the tag says which stage it occupies
+(`active`, `candidate`, `archive`, `sprint-log`), and closing an issue is what
+moving a file to `archives/` used to mean.  Nothing is relocated and nothing is
+deleted, so a superseded proposal stays readable rather than disappearing from
+a git-ignored tree.
+
+An item that stops being touched no longer drifts unnoticed: a scheduled rule
+tags anything unresolved and `active` that has gone thirty days without an
+update.  That report is the reason the material moved — the file layout could
+record a status line but could not tell anyone the status had stopped being
+true.
 

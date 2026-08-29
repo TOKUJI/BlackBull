@@ -6,7 +6,7 @@ object may carry any combination of ``header`` (status line + headers),
 ``body`` (chunks), and ``trailers``, so a complete response is **one object
 and one ``send``**, while streaming is header-object then body-chunk objects.
 
-Design invariants (validated in ``scratch/send-model-c.py``):
+Design invariants (validated in ``bench/scratch/send-model-c.py``):
 
 - **Presence is ``is not None``, never truthiness** — an empty body is a real
   body (204-style).  Middleware must preserve ``None`` when transforming

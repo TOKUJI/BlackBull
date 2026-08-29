@@ -131,6 +131,22 @@ _NGINX_IMAGE = 'bb-fault-nginx:latest'
 
 
 def _wait_for_port(host: str, port: int, timeout: float = 30.0) -> None:
+    """Wait until nginx answers, not merely until something accepts.
+
+    ``docker run -P`` publishes the host port as soon as the container exists,
+    so docker-proxy completes the TCP handshake while nginx inside is still
+    starting.  A probe that stops at connect therefore returns early and the
+    first real connection is reset before nginx speaks.
+
+    That is how this surfaced: a scenario expecting GOAWAY got
+    ``ConnectionResetError`` with ``server_bytes_received=0``.  Zero bytes is
+    the tell — nginx sends its own SETTINGS the moment an h2c connection opens,
+    so a peer that says nothing was never listening, rather than one that
+    rejected the frame.
+
+    The same listener serves HTTP/1.1 and h2c, so one HTTP/1.1 exchange proves
+    a worker is accepting and answering.
+    """
     import socket
     import time
 
@@ -138,12 +154,15 @@ def _wait_for_port(host: str, port: int, timeout: float = 30.0) -> None:
     last = None
     while time.monotonic() < deadline:
         try:
-            with socket.create_connection((host, port), timeout=1.0):
-                return
+            with socket.create_connection((host, port), timeout=1.0) as sock:
+                sock.sendall(b'GET / HTTP/1.1\r\nHost: probe\r\n\r\n')
+                if sock.recv(9).startswith(b'HTTP/1.1'):
+                    return
+                last = RuntimeError('accepted, but answered nothing')
         except OSError as exc:
             last = exc
-            time.sleep(0.2)
-    raise RuntimeError(f'nginx never accepted on {host}:{port} ({last!r})')
+        time.sleep(0.2)
+    raise RuntimeError(f'nginx never answered on {host}:{port} ({last!r})')
 
 
 # ---------------------------------------------------------------------------

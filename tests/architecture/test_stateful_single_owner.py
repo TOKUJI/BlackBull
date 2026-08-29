@@ -15,7 +15,7 @@ there is more than one worker; a stateful binding that has *only* a shared
 listener cannot be made single-owner at all, so it is refused rather than left
 to answer wrongly.
 
-Design: `.claude/planning/designs/listener-vocabulary.md`.
+Design: `BLA-A-17` [private].
 """
 from __future__ import annotations
 

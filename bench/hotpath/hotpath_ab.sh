@@ -25,7 +25,7 @@
 #   folded.py <dir>/raw/X.folded   self/inclusive rollup of a py-spy profile
 #   parser_micro.py            `_parse` vs httptools on byte-identical requests
 #
-# Findings: ../../.claude/planning/research/blackbull-vs-fastapi-hotpath.md
+# Findings: BLA-A-2 [private]
 set -u
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)

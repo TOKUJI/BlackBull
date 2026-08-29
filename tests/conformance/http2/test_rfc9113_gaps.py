@@ -1,7 +1,7 @@
 """RFC 9113 compliance gap tests — covering HIGH and MEDIUM priority
 MUST/SHOULD requirements not yet validated by existing conformance tests.
 
-Gap reference: ``.claude/planning/proposals/rfc9113-compliance-audit.md``
+Gap reference: ``BLA-210`` [private]
 
 Tests are organized by RFC section.  Each test class documents the
 specific requirement, the expected behavior, and the current status.
