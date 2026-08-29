@@ -5543,7 +5543,7 @@ path.  One class replaces the ASGI start/body/trailers dicts: a response
 object may carry any combination of <code>header</code> (status line + headers),
 <code>body</code> (chunks), and <code>trailers</code>, so a complete response is <strong>one object
 and one <code>send</code></strong>, while streaming is header-object then body-chunk objects.</p>
-<p>Design invariants (validated in <code>scratch/send-model-c.py</code>):</p>
+<p>Design invariants (validated in <code>bench/scratch/send-model-c.py</code>):</p>
 <ul>
 <li><strong>Presence is <code>is not None</code>, never truthiness</strong> — an empty body is a real
   body (204-style).  Middleware must preserve <code>None</code> when transforming

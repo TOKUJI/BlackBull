@@ -5580,7 +5580,7 @@ BlackBull's HTTP/2 sender already emits trailers via the
 request DATA as incremental <code>http.request</code> events, so all four RPC kinds —
 unary, server-, client-, and bidirectional-streaming — map cleanly onto the
 existing (scope, receive, send) bridge; no new protocol Actor is needed
-(see <code>.claude/planning/designs/grpc-streaming-request-design.md</code>).</p>
+(see <code>BLA-161</code> [private]).</p>
 <p><code>serve_grpc</code> is dispatched from :meth:<code>BlackBull._dispatch</code> when the request
 content-type is <code>application/grpc</code> and a registry was installed via
 <code>app.enable_grpc(...)</code>.</p>

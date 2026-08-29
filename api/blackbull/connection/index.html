@@ -6209,7 +6209,7 @@ reference cycle: <code>conn._receive</code> → wrapper → (closure captures) <
 The refcount of a cyclic group never reaches zero when the request's local
 refs drop, so reclamation is deferred to the generational cyclic GC — whose
 periodic pauses were the v0.60.0 tail-latency regression (see
-<code>.claude/planning/research/v0600-regression-investigation.md</code> §6). The raw
+<code>BLA-234</code> [private] §6). The raw
 recipient does <strong>not</strong> reference <code>conn</code> (HTTP/1.1 keeps only the path
 string; HTTP/2 keeps none), so <code>conn</code> → recipient is an acyclic chain that
 refcounting frees the instant the request ends.</p>
