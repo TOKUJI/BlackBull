@@ -171,7 +171,7 @@ fallback where one exists.
 | Checking a known gotcha before acting | `.claude/patterns/cautions.md` [private] |
 | Adding or changing a resource limit / reviewing defence coverage | `BLA-A-1` [private] — the mechanism × surface matrix, the limit-triad grid, and the closed gap register with its evidence pointers |
 | Answering a user's question about BlackBull's security posture | `docs/about/security-model.md` — quote the published claim rather than improvising one; it is a projection of the audit above, so the two must not drift |
-| Picking/triaging what to build next | `BLA-4` [private] |
+| Picking/triaging what to build next | YouTrack, `tag: active #Unresolved` ordered by `Priority` [private] — Critical first.  The hand-sorted index this replaced is closed: it fell four proposals behind before anyone noticed |
 | Reading a point-in-time design | YouTrack Knowledge Base [private] |
 
 **Skills** (invocable, harness-surfaced; they live in `.claude/skills/` [private] —

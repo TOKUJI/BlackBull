@@ -114,9 +114,10 @@ venv.bak/
 # vscode
 .vscode/
 
-# Private development assets — stored in companion private repo.
-# Clone: git clone git@github.com:TOKUJI/blackbull-assets.git ../blackbull-assets
-# Symlink: ln -s ../blackbull-assets/.claude .claude
+# Private development assets — real files, never committed.
+# ../blackbull-assets holds the frozen history of the planning material that
+# moved to the tracker.  It is no longer symlinked in: these are working files
+# now, and the companion repo is an archive rather than their home.
 .claude
 # CLAUDE.md is a symlink to AGENTS.md — create locally: ln -s AGENTS.md CLAUDE.md
 CLAUDE.md
