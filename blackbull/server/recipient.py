@@ -202,10 +202,7 @@ def _validate_chunk_ext(ext: bytes) -> None:
 # MAL-CHUNK-EXT-64K (CVE-2023-39326 class) — hard bound on any
 # single chunk-framing line (chunk-size + chunk-ext, or one trailer field
 # line).  Mirrors the BB_HEADER_MAX_LINE default: extensions and trailers
-# are ignored on receipt, so nothing legitimate needs more.  Without the
-# bound, ``asyncio.StreamReader.readuntil`` hits its own buffer limit first
-# and raises ``LimitOverrunError`` — a ValueError the dispatcher's 400 seam
-# doesn't catch — surfacing as a 500.
+# are ignored on receipt, so nothing legitimate needs more.
 _CHUNK_LINE_MAX = 8192
 
 # RFC 9110 §6.5.1 — fields controlling message framing, routing, request
@@ -1028,11 +1025,7 @@ class HTTP1Recipient(BaseRecipient):
         Reads to bare LF, not CRLF: a bare-LF-terminated line then returns
         immediately and fails the caller's CRLF check with a 400 instead of
         blocking in ``readuntil`` until the peer gives up
-        (SMUG-CHUNK-LF-TERM / SMUG-CHUNK-LF-TRAILER were timeouts, not
-        rejections, before this).  Length violations — whether detected by
-        our own bound or pre-empted by ``asyncio.StreamReader``'s buffer
-        limit (``LimitOverrunError``) — surface as 400 with the stream
-        marked unframeable (MAL-CHUNK-EXT-64K).
+        (SMUG-CHUNK-LF-TERM / SMUG-CHUNK-LF-TRAILER).
         """
         try:
             line = await self._read_with_timeout(self._reader.readuntil(b'\n'))
