@@ -94,6 +94,12 @@ if WRK_COUNT is None:
     except (AttributeError, OSError):
         WRK_COUNT = multiprocessing.cpu_count()
 
+# Export the resolved count so child processes that size their own resources
+# (bench/httparena/db.py's per-worker asyncpg pool) divide by the same number
+# the launcher used, rather than re-deriving it and drifting when the cpuset
+# is narrower than the host (multiprocessing.cpu_count() ignores the cpuset).
+os.environ['WEB_WORKERS'] = str(WRK_COUNT)
+
 # Log effective settings so they appear in `docker logs` output.
 import resource as _resource
 _soft_nofile, _hard_nofile = _resource.getrlimit(_resource.RLIMIT_NOFILE)

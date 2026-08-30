@@ -61,8 +61,9 @@ def _worker_count() -> int:
     """How many worker processes will each open a pool.
 
     Mirror ``launcher.py``'s ``WRK_COUNT`` logic exactly: an explicit
-    ``WEB_WORKERS`` wins, otherwise fall back to the CPU count.  Each worker
-    process imports this module and builds its own pool, so this is the
+    ``WEB_WORKERS`` wins, otherwise fall back to the process's CPU affinity
+    (Linux ``sched_getaffinity``), then ``multiprocessing.cpu_count()``.  Each
+    worker process imports this module and builds its own pool, so this is the
     divisor that keeps the cluster under Postgres ``max_connections``.
     """
     env = os.environ.get('WEB_WORKERS', '').strip()
@@ -72,9 +73,12 @@ def _worker_count() -> int:
         except ValueError:
             pass
     try:
-        return max(1, multiprocessing.cpu_count())
-    except NotImplementedError:  # pragma: no cover
-        return 1
+        return max(1, min(len(os.sched_getaffinity(0)), 128))
+    except (AttributeError, OSError):
+        try:
+            return max(1, multiprocessing.cpu_count())
+        except NotImplementedError:  # pragma: no cover
+            return 1
 
 
 # Per-worker pool ceiling.  HttpArena's rule (its own CHANGELOG): each worker's
