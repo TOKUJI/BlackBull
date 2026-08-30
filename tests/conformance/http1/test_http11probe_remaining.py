@@ -3,12 +3,10 @@
 Each test replays the exact probe vector against a live BlackBull server:
 
 * ``RFC9112-7.1-MISSING-HOST``   — HTTP/1.1 without Host → 400.
-* ``RFC9112-2.3-INVALID-VERSION``— ``HTTP/9.9`` → 505 (was a happy 200).
+* ``RFC9112-2.3-INVALID-VERSION``— ``HTTP/9.9`` → 505.
 * ``COMP-NO-1XX-HTTP10``         — no ``100 Continue`` to an HTTP/1.0 client.
-* ``MAL-CHUNK-EXT-64K``          — 64 KiB chunk extension → 400 (was a
-  ``LimitOverrunError``-backed 500 through the real asyncio StreamReader).
-* ``SMUG-CHUNK-LF-TRAILER``      — bare-LF trailer terminator → 400 (was a
-  hang until the probe's client timeout).
+* ``MAL-CHUNK-EXT-64K``          — 64 KiB chunk extension → 400.
+* ``SMUG-CHUNK-LF-TRAILER``      — bare-LF trailer terminator → 400.
 * ``SMUG-CL-*`` / ``MAL-CL-TAB-BEFORE-VALUE`` — ambiguous Content-Length → 400.
 * ``NORM-UNDERSCORE-CL`` / ``-TE`` — framing-confusable underscore names → 400.
 """
@@ -65,8 +63,9 @@ class TestExpect100ContinueWire:
 
 class TestChunkFramingWire:
     def test_64k_chunk_extension_400_not_500(self, h1_app):
-        # MAL-CHUNK-EXT-64K — must traverse the real asyncio.StreamReader
-        # (LimitOverrunError path), which the unit fakes cannot reach.
+        # Must traverse the reader the transport actually installs: it
+        # carries no budget of its own, so the 400 comes from the length
+        # check on the returned line, which a unit fake does not exercise.
         req = (b'POST /echo HTTP/1.1\r\nHost: x\r\n'
                b'Transfer-Encoding: chunked\r\n\r\n'
                b'5;ext=' + b'a' * 65536 + b'\r\nhello\r\n0\r\n\r\n')

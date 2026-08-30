@@ -778,8 +778,7 @@ class Server:
                 self.open_socket(port)
 
         # SocketManager wraps each socket in asyncio.start_server and closes all
-        # servers on exit.  The shared HTTP listener uses client_connected_cb;
-        # each port-bound non-ASGI protocol uses its own raw callback.  Raw
+        # servers on exit.  Raw
         # sockets are cleartext unless the binding was registered with
         # ``tls=True``, which serves them through the same TLS
         # machinery as the HTTPS listener.

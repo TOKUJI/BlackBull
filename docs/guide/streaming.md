@@ -121,16 +121,8 @@ indefinitely.
 `HTTP2Sender._write_data()` enforces per-stream and per-connection
 flow control per RFC 9113 §6.9.  Before writing each DATA frame
 the sender waits on an `asyncio.Event` until either window has
-credit:
-
-```python
-while (self.connection_window_size <= 0 or
-       self.stream_window_size[self._stream_id] <= 0):
-    if self._window_open is None:
-        self._window_open = asyncio.Event()
-    self._window_open.clear()
-    await self._window_open.wait()
-```
+credit, and re-checks both after clearing the event so a
+WINDOW_UPDATE arriving mid-clear cannot be lost.
 
 The handler's next `yield` only fires after the previous chunk's
 `await send()` returns — and that return only happens after the

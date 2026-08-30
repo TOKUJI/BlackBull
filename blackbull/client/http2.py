@@ -18,7 +18,6 @@ from ..protocol.frame import FrameFactory
 from ..protocol.frame_types import (DEFAULT_INITIAL_WINDOW_SIZE,
                                     FrameBase, FrameTypes,
                                     HeaderFrameFlags, PseudoHeaders)
-from ..protocol.stream import Stream
 from ..headers import Headers
 from ..server.recipient import AbstractReader, AsyncioReader
 from ..server.sender import AbstractWriter, AsyncioWriter, HTTP2Sender
@@ -142,10 +141,6 @@ class HTTP2Client:
         # Client-initiated streams use odd IDs starting at 1 (RFC 7540 §5.1.1).
         self._next_stream_id = 1
 
-        # Track sent streams in a tree so child senders can read from it.
-        # The root is stream 0 (connection level).
-        self._root_stream = Stream(0, None, 1)
-
         # In-flight responses keyed by stream_id.
         self._responses: dict[int, _PendingResponse] = {}
 
@@ -158,9 +153,9 @@ class HTTP2Client:
         # Receive loop task; created in __aenter__, cancelled in __aexit__.
         self._receive_task: asyncio.Task | None = None
 
-        # Connection-level flow control state (mirrors HTTP2Sender's view).
-        self.connection_window_size: int = DEFAULT_INITIAL_WINDOW_SIZE
-        self.stream_window_size: dict[int, int] = {}
+        # The peer's announced SETTINGS_INITIAL_WINDOW_SIZE.  Seeded into
+        # each sender at construction; the windows themselves live there,
+        # because the sender is what waits on them.
         self.initial_window_size: int = DEFAULT_INITIAL_WINDOW_SIZE
 
         # Connection-level received-but-unacked DATA bytes (see
@@ -282,7 +277,6 @@ class HTTP2Client:
         loop = asyncio.get_running_loop()
         future: asyncio.Future[ClientResponse] = loop.create_future()
         self._responses[stream_id] = _PendingResponse(future=future)
-        self.stream_window_size[stream_id] = self.initial_window_size
 
         # Build the HEADERS frame.  END_STREAM is set immediately when the
         # caller has no body to send; otherwise it goes on the trailing DATA.
@@ -508,7 +502,6 @@ class HTTP2Client:
             raise ValueError(f'stream {stream_id} already registered as raw')
         q: asyncio.Queue = asyncio.Queue()
         self._raw_streams[stream_id] = q
-        self.stream_window_size[stream_id] = self.initial_window_size
         return q
 
     def unregister_raw_stream(self, stream_id: int) -> None:
@@ -587,10 +580,6 @@ class HTTP2Client:
                 frame = await self._receive_frame()
                 if frame is None:
                     break
-                # Track every stream the peer touches so children-of-root
-                # invariants in Stream stay consistent.
-                if frame.stream_id != 0 and self._root_stream.find_child(frame.stream_id) is None:
-                    self._root_stream.add_child(frame.stream_id)
                 # Raw-frame streams (WebSocket-over-H2, etc.) bypass the
                 # request/response dispatcher — the registrant drains
                 # the queue itself.  Connection-level frames
@@ -720,14 +709,10 @@ class HTTP2Client:
     def _on_window_update(self, frame) -> None:
         increment = frame.window_size
         if frame.stream_id == 0:
-            self.connection_window_size += increment
             for sender in self._senders.values():
                 sender.connection_window_size += increment
                 sender.wake_window()
         else:
-            self.stream_window_size[frame.stream_id] = (
-                self.stream_window_size.get(frame.stream_id, self.initial_window_size)
-                + increment)
             sender = self._senders.get(frame.stream_id)
             if sender is not None:
                 sender.window_update(increment)
