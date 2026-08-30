@@ -23,11 +23,16 @@ Multi-worker uses **pre-fork multiprocessing** — each worker is
 a separate OS process, not a thread.  The master process binds
 the socket, forks workers, and then sleeps until SIGTERM/SIGINT.
 
-On Linux / modern BSDs the workers also share the listening
-port via `SO_REUSEPORT` (`BB_SOCKET_REUSEPORT=1` by default), so
-the kernel hashes incoming connections across workers' accept
+On Linux / modern BSDs each worker can bind its own listening
+socket via `SO_REUSEPORT` (`BB_SOCKET_REUSEPORT=1`), so the
+kernel hashes incoming connections across workers' accept
 queues — no thundering-herd, per-connection CPU affinity for
-free.
+free.  It is **off by default**: with `BB_SOCKET_REUSEPORT=0`
+(the default) all workers share the master's single socket, and
+every incoming connection wakes every worker's loop, with N−1
+workers `accept()`-ing to EAGAIN — the thundering-herd accept
+race.  See "Workers vs cores under connection churn" below for
+when turning it on helps and when it does not.
 
 ### Shared-nothing model
 
@@ -88,6 +93,39 @@ Set `off` on a shared host, under an orchestrator that already
 does placement, or any time you would rather make this decision
 yourself.  Pinning is Linux-only (`sched_setaffinity`) and
 multi-worker-only; a single-worker server is never pinned.
+
+### Workers vs cores under connection churn
+
+The "one worker per core" advice assumes long-lived connections.
+When connections are short-lived — every request opens a new
+connection (`Connection: close`), or the workload rotates them
+every few requests — raising `BB_WORKERS` above the core count
+costs real throughput.  Measured on a 16-core cpuset, `/`
+endpoint, best-of-3 (BLA-5):
+
+| workload | W=16 | W=32 | W=64 | loss 16→64 |
+|---|---:|---:|---:|---:|
+| keep-alive | 292k | 284k | 279k req/s | ~4.5 % |
+| churn | 96k | 90k | 81k req/s | ~16 % |
+
+The churn loss is two stacked costs: the shared listener's
+**accept race** — every connection wakes every worker, which
+profiles show as `accept()` growing from ~3 % to ~11 % of worker
+time at 4× oversubscription — plus the general oversubscription
+amplification of per-connection work.
+
+Neither of the obvious knobs fixes it:
+
+- `BB_SOCKET_REUSEPORT=1` removes the accept race, but the
+  kernel's hash spreads a burst of new connections unevenly
+  across the per-worker queues and leaves cores idle — in the
+  same run it was still *slower* than the shared socket under
+  churn (87k vs 96k req/s at W=16).
+- `BB_CPU_PINNING=off` made no measurable difference (A/B at the
+  same worker counts).
+
+For churn-heavy deployments keep `BB_WORKERS` at or below the
+core count; extra workers buy contention, not throughput.
 
 ## `uvloop`
 
