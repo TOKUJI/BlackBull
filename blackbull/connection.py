@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Callable, NamedTuple
+from urllib.parse import parse_qsl
 
 from .headers import Headers
 from .request import (read_body, stream_body, cookies_from_headers,
@@ -84,6 +85,19 @@ def _identity(v: Any) -> Any:
     return v
 
 
+def _parse_qsl(data: bytes) -> list[tuple[str, str]]:
+    """Parse ``application/x-www-form-urlencoded`` / query-string *data* into
+    ``(key, value)`` pairs, keeping blank values and decoding UTF-8 with
+    ``errors='replace'`` (a malformed query never crashes a handler)."""
+    return parse_qsl(data.decode('utf-8', errors='replace'), keep_blank_values=True)
+
+
+def _is_urlencoded(headers: Headers) -> bool:
+    """True when the request ``Content-Type`` is urlencoded form data."""
+    ct = headers.get(b'content-type', b'').decode('latin-1').lower()
+    return 'application/x-www-form-urlencoded' in ct
+
+
 def _headers_to_scope(h: Headers) -> list:
     return list(h)                       # Headers iterates as (name, value) pairs
 
@@ -124,6 +138,9 @@ _CONNECTION_FIELDS: list[_FieldSpec] = [
     _FieldSpec('_body',          None, None, None),   # body cache
     _FieldSpec('_body_read',     None, None, None),   # body-drained flag
     _FieldSpec('_cookies',       None, None, None),   # parsed-cookies cache
+    _FieldSpec('_query',         None, None, None),   # parsed-query cache (last-value)
+    _FieldSpec('_query_list',    None, None, None),   # parsed-query cache (multivalue)
+    _FieldSpec('_form',          None, None, None),   # parsed-form cache
     _FieldSpec('_receive',       None, None, None),   # ASGI receive channel
     _FieldSpec('_disconnected',  None, None, None),   # client-disconnect flag (actor→app)
     _FieldSpec('_ws',            None, None, None),   # WebSocket handshake internals bag
@@ -253,6 +270,14 @@ class Connection:
     _body: bytes | None = field(default=None, compare=False, repr=False)
     _body_read: bool = field(default=False, compare=False, repr=False)
     _cookies: dict[str, str] | None = field(default=None, compare=False, repr=False)
+    # Lazily-parsed query caches, mirroring ``cookies``. ``_query_list`` holds
+    # the full ``parse_qsl`` result (every value); ``_query`` is the derived
+    # last-value-wins view. Split so ``conn.query_list`` returns the multivalue
+    # dict and ``conn.query`` never re-parses the raw ``query_string`` to fold it.
+    _query: dict[str, str] | None = field(default=None, compare=False, repr=False)
+    _query_list: dict[str, list[str]] | None = field(default=None, compare=False, repr=False)
+    # Lazily-parsed ``application/x-www-form-urlencoded`` body cache.
+    _form: dict[str, str] | None = field(default=None, compare=False, repr=False)
     # The **raw** ``receive`` channel (recipient), bound by the actor via
     # ``bind_receive_channel`` / by ``from_scope`` on the external path; only
     # ever a receive callable or ``None`` (before body access is wired). Must
@@ -504,4 +529,56 @@ class Connection:
         if self._cookies is None:
             self._cookies = cookies_from_headers(self.headers)
         return self._cookies
+
+    # ---- parsed query params (lazy, mirroring cookies) --------------------
+
+    @property
+    def query_list(self) -> dict[str, list[str]]:
+        """Query params keeping **every** value, parsed once and cached.
+
+        The full ``parse_qsl`` result: ``?tag=a&tag=b`` gives
+        ``{'tag': ['a', 'b']}``.  Unlike :attr:`query`, which folds repeats to
+        the last value, this is what list-valued keys need.  The backing dict
+        is created lazily on first access, so handlers that never read a query
+        param allocate nothing.
+        """
+        if self._query_list is None:
+            values: dict[str, list[str]] = {}
+            for k, v in _parse_qsl(self.query_string):
+                values.setdefault(k, []).append(v)
+            self._query_list = values
+        return self._query_list
+
+    @property
+    def query(self) -> dict[str, str]:
+        """Query params as ``dict[str, str]``, parsed once and cached.
+
+        Last value wins on repeated keys (``?tag=a&tag=b`` → ``{'tag': 'b'}``).
+        This is the honest exit for what the declared-parameter form cannot
+        express — keys not known at registration time, and repeated keys; it
+        does **not** coerce types (that is the declared form's job, which also
+        answers a malformed value with 400 rather than a silent fallback).
+        """
+        if self._query is None:
+            self._query = {k: vs[-1] for k, vs in self.query_list.items()}
+        return self._query
+
+    async def form(self) -> dict[str, str]:
+        """``application/x-www-form-urlencoded`` body, parsed once and cached.
+
+        Reads the body through :meth:`body`, so a later :meth:`json` /
+        :meth:`text` call reuses the cached bytes.  On a non-form
+        ``Content-Type`` (or no body) it returns ``{}`` rather than raising,
+        and does not touch the body.  Multipart uploads are out of scope — use
+        :meth:`stream` and parse them manually.
+        """
+        if self._form is None:
+            if _is_urlencoded(self.headers):
+                result: dict[str, str] = {}
+                for k, v in _parse_qsl(await self.body()):
+                    result[k] = v
+                self._form = result
+            else:
+                self._form = {}
+        return self._form
 

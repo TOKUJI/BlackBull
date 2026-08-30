@@ -12,6 +12,7 @@ a request client, and that the object the handler receives is the native
 ``Connection`` rather than a rebuilt one.
 """
 import asyncio
+import json
 from http import HTTPStatus
 
 import pytest
@@ -50,6 +51,15 @@ def app():
         body = (f'{conn.method}|{conn.path}|{conn.query_string.decode()}|'
                 f'{conn.http_version}|{conn.scheme}').encode()
         await send(body, HTTPStatus.OK)
+
+    @a.route(path='/query')
+    async def _query(conn, receive, send):
+        await send(json.dumps({'query': conn.query, 'list': conn.query_list}).encode(),
+                   HTTPStatus.OK)
+
+    @a.route(path='/form', methods=['POST'])
+    async def _form(conn, receive, send):
+        await send(json.dumps(await conn.form()).encode(), HTTPStatus.OK)
 
     @a.route(path='/hdr')
     async def _hdr(conn, receive, send):
@@ -142,6 +152,25 @@ async def test_query_string_is_split_from_the_path(app):
     method, path, query, version, scheme = resp.text().split('|')
     assert (method, path, query) == ('GET', '/inspect', 'a=1&b=2')
     assert (version, scheme) == ('1.1', 'http')
+
+
+@pytest.mark.asyncio
+async def test_query_accessors_parse_via_native_client(app):
+    """``conn.query`` / ``conn.query_list`` are reachable from a real handler —
+    the native Connection threaded end-to-end exposes them, not just a
+    hand-built one."""
+    resp = await native.get(app, '/query?tag=a&tag=b&done=true')
+    data = json.loads(resp.body)
+    assert data['query'] == {'tag': 'b', 'done': 'true'}
+    assert data['list'] == {'tag': ['a', 'b'], 'done': ['true']}
+
+
+@pytest.mark.asyncio
+async def test_form_accessor_parses_urlencoded_via_native_client(app):
+    resp = await native.post(
+        app, '/form', body=b'name=alice&tag=a&tag=b',
+        headers={b'content-type': b'application/x-www-form-urlencoded'})
+    assert json.loads(resp.body) == {'name': 'alice', 'tag': 'b'}
 
 
 @pytest.mark.asyncio
