@@ -5631,14 +5631,8 @@ indefinitely.</p>
 <p><code>HTTP2Sender._write_data()</code> enforces per-stream and per-connection
 flow control per RFC 9113 §6.9.  Before writing each DATA frame
 the sender waits on an <code>asyncio.Event</code> until either window has
-credit:</p>
-<div class="highlight"><pre><span></span><code><span class="k">while</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">connection_window_size</span> <span class="o">&lt;=</span> <span class="mi">0</span> <span class="ow">or</span>
-       <span class="bp">self</span><span class="o">.</span><span class="n">stream_window_size</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_stream_id</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">):</span>
-    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_window_open</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">_window_open</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">Event</span><span class="p">()</span>
-    <span class="bp">self</span><span class="o">.</span><span class="n">_window_open</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span>
-    <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_window_open</span><span class="o">.</span><span class="n">wait</span><span class="p">()</span>
-</code></pre></div>
+credit, and re-checks both after clearing the event so a
+WINDOW_UPDATE arriving mid-clear cannot be lost.</p>
 <p>The handler's next <code>yield</code> only fires after the previous chunk's
 <code>await send()</code> returns — and that return only happens after the
 peer has granted enough WINDOW_UPDATE credit to put the chunk on
