@@ -1964,6 +1964,28 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.Connection.query" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        query
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.Connection.query_list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        query_list
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.Connection.subprotocols" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1990,6 +2012,17 @@
     <span class="md-ellipsis">
       
         body
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.Connection.form" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        form
       
     </span>
   </a>
@@ -6787,6 +6820,28 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.Connection.query" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        query
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.Connection.query_list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        query_list
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.Connection.subprotocols" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6813,6 +6868,17 @@
     <span class="md-ellipsis">
       
         body
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.Connection.form" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        form
       
     </span>
   </a>
@@ -7611,7 +7677,7 @@ and authoritative list; the notes below cover the ones worth a sentence:</p>
 <li><code>QUERY</code>: the HTTP QUERY method (RFC 10008) as a plain string — <code>http.HTTPMethod</code> lacks the member until Python ≥3.16.</li>
 <li><code>UnprocessableQuery</code>: raise from a QUERY handler for <code>422</code> when the (accepted) request media type carries a semantically unprocessable query (RFC 10008).</li>
 <li><code>Headers</code>: case-insensitive, ordered, multi-valued HTTP header store.</li>
-<li><code>Connection</code>: the typed internal request representation; the handler context object exposing <code>method</code>/<code>path</code>/<code>headers</code>/<code>cookies</code>/<code>body()</code>/<code>json()</code>/<code>text()</code>. The ASGI <code>scope</code> is a derived view (<code>Connection.as_scope()</code>).</li>
+<li><code>Connection</code>: the typed internal request representation; the handler context object exposing <code>method</code>/<code>path</code>/<code>raw_path</code>/<code>query_string</code>/<code>headers</code>/<code>cookies</code>/<code>query</code>/<code>query_list</code>/<code>path_params</code>/<code>state</code> and <code>body()</code>/<code>json()</code>/<code>text()</code>/<code>form()</code>. The ASGI <code>scope</code> is a derived view (<code>Connection.as_scope()</code>).</li>
 <li><code>Request</code>: <strong>deprecated</strong> alias of <code>Connection</code>. Accessing <code>blackbull.Request</code> emits a <code>DeprecationWarning</code>; replace <code>request: Request</code> handler params with <code>conn: Connection</code> (identical API). Removal no earlier than 2027-08-01.</li>
 <li><code>WebSocket</code>: the high-level WebSocket handler object — <code>await ws.accept()</code>, <code>async for message in ws</code>, <code>ws.send_text()</code>/<code>send_bytes()</code>/<code>send_json()</code>, <code>await ws.close()</code>. Declare <code>async def handler(ws: WebSocket)</code> on a <code>Scheme.websocket</code> route to receive it; the raw <code>(conn, receive, send)</code> form keeps working unchanged.</li>
 <li><code>WebSocketDisconnect</code>: raised by <code>ws.receive()</code> when the peer closes; carries <code>code</code> and <code>reason</code>. <code>async for</code> ends the loop instead of raising.</li>
@@ -9232,6 +9298,60 @@ access so no-param routes allocate nothing.</p>
 
 
 
+<h4 id="blackbull.Connection.query" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">query</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#blackbull.Connection.query" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Query params as <code>dict[str, str]</code>, parsed once and cached.</p>
+<p>Last value wins on repeated keys (<code>?tag=a&amp;tag=b</code> → <code>{'tag': 'b'}</code>).
+This is the honest exit for what the declared-parameter form cannot
+express — keys not known at registration time, and repeated keys; it
+does <strong>not</strong> coerce types (that is the declared form's job, which also
+answers a malformed value with 400 rather than a silent fallback).</p>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.Connection.query_list" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">query_list</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#blackbull.Connection.query_list" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Query params keeping <strong>every</strong> value, parsed once and cached.</p>
+<p>The full <code>parse_qsl</code> result: <code>?tag=a&amp;tag=b</code> gives
+<code>{'tag': ['a', 'b']}</code>.  Unlike :attr:<code>query</code>, which folds repeats to
+the last value, this is what list-valued keys need.  The backing dict
+is created lazily on first access, so handlers that never read a query
+param allocate nothing.</p>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
 <h4 id="blackbull.Connection.subprotocols" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">subprotocols</span></code>
 
@@ -9298,6 +9418,33 @@ buffering middleware's writes reach the handler.</p>
 bytes. A mid-body disconnect raises :class:<code>ClientDisconnected</code>. Raises
 :class:<code>RuntimeError</code> if :meth:<code>stream</code> already consumed the body — the
 channel is a single drain, so there is nothing left to buffer.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.Connection.form" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">form</span><span class="p">()</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.Connection.form" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p><code>application/x-www-form-urlencoded</code> body, parsed once and cached.</p>
+<p>Reads the body through :meth:<code>body</code>, so a later :meth:<code>json</code> /
+:meth:<code>text</code> call reuses the cached bytes.  On a non-form
+<code>Content-Type</code> (or no body) it returns <code>{}</code> rather than raising,
+and does not touch the body.  Multipart uploads are out of scope — use
+:meth:<code>stream</code> and parse them manually.</p>
 
 
     </div>

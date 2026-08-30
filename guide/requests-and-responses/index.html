@@ -765,10 +765,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#raw-query-strings" class="md-nav__link">
+  <a href="#parsed-query-params-connquery-connquery_list" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Raw query strings
+        Parsed query params: conn.query / conn.query_list
       
     </span>
   </a>
@@ -5715,10 +5715,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#raw-query-strings" class="md-nav__link">
+  <a href="#parsed-query-params-connquery-connquery_list" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Raw query strings
+        Parsed query params: conn.query / conn.query_list
       
     </span>
   </a>
@@ -6220,50 +6220,46 @@ string, coerced to its annotation:</p>
 <p>Coercion and required-ness are resolved when the route is registered, not
 per request — handlers that declare no query params keep the exact adapted
 form they had before.</p>
-<h3 id="raw-query-strings">Raw query strings<a class="headerlink" href="#raw-query-strings" title="Permanent link">&para;</a></h3>
-<p>For repeated keys, unusual encodings, or full control,
-<code>conn.query_string</code> contains the raw query string as bytes.
-Parse it with the standard library:</p>
-<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">urllib.parse</span><span class="w"> </span><span class="kn">import</span> <span class="n">parse_qs</span><span class="p">,</span> <span class="n">parse_qsl</span>
-
-<span class="c1"># parse_qs: each key maps to a list of values (handles ?tag=a&amp;tag=b correctly)</span>
-<span class="n">params</span> <span class="o">=</span> <span class="n">parse_qs</span><span class="p">(</span><span class="n">conn</span><span class="o">.</span><span class="n">query_string</span><span class="o">.</span><span class="n">decode</span><span class="p">())</span>
-<span class="n">page</span>   <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">params</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'page'</span><span class="p">,</span> <span class="p">[</span><span class="s1">'1'</span><span class="p">])[</span><span class="mi">0</span><span class="p">])</span>
-<span class="n">tags</span>   <span class="o">=</span> <span class="n">params</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'tag'</span><span class="p">,</span> <span class="p">[])</span>             <span class="c1"># ['a', 'b'] for ?tag=a&amp;tag=b</span>
-
-<span class="c1"># parse_qsl: flat list of (key, value) pairs preserving order</span>
-<span class="n">pairs</span> <span class="o">=</span> <span class="n">parse_qsl</span><span class="p">(</span><span class="n">conn</span><span class="o">.</span><span class="n">query_string</span><span class="o">.</span><span class="n">decode</span><span class="p">())</span>
+<h3 id="parsed-query-params-connquery-connquery_list">Parsed query params: <code>conn.query</code> / <code>conn.query_list</code><a class="headerlink" href="#parsed-query-params-connquery-connquery_list" title="Permanent link">&para;</a></h3>
+<p>When the declared form cannot express the request — repeated keys, keys not
+known at registration time — <code>Connection</code> parses the query string for you,
+lazily and once:</p>
+<div class="highlight"><pre><span></span><code><span class="n">q</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">query</span>          <span class="c1"># dict[str, str]; last value wins on ?tag=a&amp;tag=b</span>
+<span class="n">ql</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">query_list</span>    <span class="c1"># dict[str, list[str]]; keeps every value</span>
 </code></pre></div>
-<p>For convenience, wrap this in a helper:</p>
-<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">qp</span><span class="p">(</span><span class="n">scope</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
-<span class="w">    </span><span class="sd">"""Return first value for each query parameter key."""</span>
-    <span class="k">return</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
-            <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">parse_qs</span><span class="p">(</span><span class="n">conn</span><span class="o">.</span><span class="n">query_string</span><span class="o">.</span><span class="n">decode</span><span class="p">())</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
-
-<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/tasks'</span><span class="p">)</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">list_tasks</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
-    <span class="n">p</span> <span class="o">=</span> <span class="n">qp</span><span class="p">(</span><span class="n">scope</span><span class="p">)</span>
-    <span class="n">done</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'done'</span><span class="p">,</span> <span class="s1">'false'</span><span class="p">)</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="o">==</span> <span class="s1">'true'</span>
-    <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">JSONResponse</span><span class="p">({</span><span class="s1">'done_filter'</span><span class="p">:</span> <span class="n">done</span><span class="p">}))</span>
-</code></pre></div>
+<ul>
+<li><strong><code>conn.query</code></strong> folds repeated keys to the <strong>last</strong> value:
+  <code>/search?q=bull&amp;tag=a&amp;tag=b</code> → <code>{'q': 'bull', 'tag': 'b'}</code>.  Values are
+  decoded, blank values are kept, and the result is cached on first access.</li>
+<li><strong><code>conn.query_list</code></strong> keeps <strong>every</strong> value:
+  <code>/search?tag=a&amp;tag=b</code> → <code>{'tag': ['a', 'b']}</code>.  It is the escape hatch for
+  list-valued keys.</li>
+<li>Both are lazy — a handler that never reads a query param allocates nothing —
+  and both are parsed <strong>once</strong> and cached, so re-reading them never re-parses
+  the raw <code>conn.query_string</code>.</li>
+</ul>
+<p>Neither coerces types.  That is the declared form's job (<code>q: int = 1</code>),
+which also answers a malformed value with <strong>400</strong> rather than a silent
+fallback — so the division is: <strong>declared parameters are for typed scalars;
+<code>conn.query</code> is the honest exit for what the declared form cannot express</strong>.
+If you want a typed scalar, declare it; don't plumb <code>conn.query</code> for one.</p>
+<p>For full control — unusual (non-UTF-8) encodings, or order-preserving pairs —
+<code>conn.query_string</code> (raw bytes) is still there; parse it with
+<code>urllib.parse.parse_qsl</code>.</p>
 <h2 id="form-data">Form data<a class="headerlink" href="#form-data" title="Permanent link">&para;</a></h2>
 <p>HTML forms with <code>enctype="application/x-www-form-urlencoded"</code> (the
-default) send key=value pairs in the body.  Read and parse with
-<code>read_body</code> + <code>parse_qs</code>:</p>
-<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">urllib.parse</span><span class="w"> </span><span class="kn">import</span> <span class="n">parse_qs</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">read_body</span>
-
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">form_body_mw</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">,</span> <span class="n">call_next</span><span class="p">):</span>
-<span class="w">    </span><span class="sd">"""Parse application/x-www-form-urlencoded body; inject conn.state['form']."""</span>
-    <span class="n">raw</span> <span class="o">=</span> <span class="k">await</span> <span class="n">read_body</span><span class="p">(</span><span class="n">receive</span><span class="p">)</span>
-    <span class="n">conn</span><span class="o">.</span><span class="n">state</span><span class="p">[</span><span class="s1">'form'</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">parse_qs</span><span class="p">(</span><span class="n">raw</span><span class="o">.</span><span class="n">decode</span><span class="p">())</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
-    <span class="k">await</span> <span class="n">call_next</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">)</span>
-
-<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">POST</span><span class="p">],</span> <span class="n">path</span><span class="o">=</span><span class="s1">'/submit'</span><span class="p">,</span> <span class="n">middlewares</span><span class="o">=</span><span class="p">[</span><span class="n">form_body_mw</span><span class="p">])</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">submit</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
-    <span class="n">name</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">state</span><span class="p">[</span><span class="s1">'form'</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'name'</span><span class="p">,</span> <span class="s1">''</span><span class="p">)</span>
-    <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">JSONResponse</span><span class="p">({</span><span class="s1">'received'</span><span class="p">:</span> <span class="n">name</span><span class="p">}))</span>
+default) send key=value pairs in the body.  <code>conn.form()</code> parses and caches
+them:</p>
+<div class="highlight"><pre><span></span><code><span class="n">form</span> <span class="o">=</span> <span class="k">await</span> <span class="n">conn</span><span class="o">.</span><span class="n">form</span><span class="p">()</span>   <span class="c1"># dict[str, str]; last value wins on repeats</span>
+<span class="n">name</span> <span class="o">=</span> <span class="n">form</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'name'</span><span class="p">,</span> <span class="s1">''</span><span class="p">)</span>
 </code></pre></div>
+<ul>
+<li>Reads the body through <code>conn.body()</code>, so a later <code>conn.json()</code> /
+  <code>conn.text()</code> call reuses the cached bytes.</li>
+<li>On a non-form <code>Content-Type</code> (or no body) it returns <code>{}</code> rather than
+  raising, and does not consume the body.</li>
+<li>Like <code>conn.query</code>, it is parsed <strong>once</strong> and cached.</li>
+</ul>
 <p>Multipart file uploads (<code>multipart/form-data</code>) are not yet
 supported by a built-in helper.  Use the <code>python-multipart</code>
 package to parse the body manually.</p>

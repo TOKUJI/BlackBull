@@ -2175,6 +2175,28 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.connection.Connection.query" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        query
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.connection.Connection.query_list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        query_list
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.connection.Connection.subprotocols" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2201,6 +2223,17 @@
     <span class="md-ellipsis">
       
         body
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.connection.Connection.form" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        form
       
     </span>
   </a>
@@ -5569,6 +5602,28 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.connection.Connection.query" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        query
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.connection.Connection.query_list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        query_list
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.connection.Connection.subprotocols" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5595,6 +5650,17 @@
     <span class="md-ellipsis">
       
         body
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.connection.Connection.form" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        form
       
     </span>
   </a>
@@ -5961,6 +6027,60 @@ access so no-param routes allocate nothing.</p>
 
 
 
+<h4 id="blackbull.connection.Connection.query" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">query</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#blackbull.connection.Connection.query" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Query params as <code>dict[str, str]</code>, parsed once and cached.</p>
+<p>Last value wins on repeated keys (<code>?tag=a&amp;tag=b</code> → <code>{'tag': 'b'}</code>).
+This is the honest exit for what the declared-parameter form cannot
+express — keys not known at registration time, and repeated keys; it
+does <strong>not</strong> coerce types (that is the declared form's job, which also
+answers a malformed value with 400 rather than a silent fallback).</p>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.connection.Connection.query_list" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">query_list</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#blackbull.connection.Connection.query_list" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Query params keeping <strong>every</strong> value, parsed once and cached.</p>
+<p>The full <code>parse_qsl</code> result: <code>?tag=a&amp;tag=b</code> gives
+<code>{'tag': ['a', 'b']}</code>.  Unlike :attr:<code>query</code>, which folds repeats to
+the last value, this is what list-valued keys need.  The backing dict
+is created lazily on first access, so handlers that never read a query
+param allocate nothing.</p>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
 <h4 id="blackbull.connection.Connection.subprotocols" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">subprotocols</span></code>
 
@@ -6027,6 +6147,33 @@ buffering middleware's writes reach the handler.</p>
 bytes. A mid-body disconnect raises :class:<code>ClientDisconnected</code>. Raises
 :class:<code>RuntimeError</code> if :meth:<code>stream</code> already consumed the body — the
 channel is a single drain, so there is nothing left to buffer.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.connection.Connection.form" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">form</span><span class="p">()</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.connection.Connection.form" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p><code>application/x-www-form-urlencoded</code> body, parsed once and cached.</p>
+<p>Reads the body through :meth:<code>body</code>, so a later :meth:<code>json</code> /
+:meth:<code>text</code> call reuses the cached bytes.  On a non-form
+<code>Content-Type</code> (or no body) it returns <code>{}</code> rather than raising,
+and does not touch the body.  Multipart uploads are out of scope — use
+:meth:<code>stream</code> and parse them manually.</p>
 
 
     </div>
