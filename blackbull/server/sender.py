@@ -1064,11 +1064,11 @@ class HTTP2Sender(BaseSender):
         self._factory = factory
         self._stream_id = stream_id
         self._push_callback = push_callback
-        # Shared connection-level send window.  The server passes one
-        # ``ConnectionWindow`` instance to every stream sender so they debit a
-        # single budget; when omitted (the experimental client, whose per-sender
-        # windowing is deferred) each sender gets a private one,
-        # preserving today's behaviour there.
+        # Shared connection-level send window.  Both server and client pass
+        # one ``ConnectionWindow`` instance to every stream sender so they
+        # debit a single budget.  A sender constructed without one gets a
+        # private window, which is correct only for a lone stream — see the
+        # class docstring for what N private copies cost.
         self._conn_window = conn_window if conn_window is not None else ConnectionWindow()
         # Per-stream send window.  Refactor 2.5 — a plain int (this was a
         # dict-of-one keyed on the sender's own stream id, which obscured that
