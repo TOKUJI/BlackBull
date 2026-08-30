@@ -313,6 +313,48 @@ class TestForm:
         assert await conn.json() == {'k': 1}   # body untouched by form()
 
     @pytest.mark.asyncio
+    async def test_form_content_type_with_charset_parameter(self):
+        conn = Connection(
+            method='POST', path='/submit', raw_path=b'/submit', query_string=b'',
+            http_version='1.1', scheme='http',
+            headers=Headers([(b'host', b'x'),
+                             (b'content-type',
+                              b'application/x-www-form-urlencoded; charset=UTF-8')]))
+        conn._receive = _stub_receive([
+            {'type': 'http.request', 'body': b'name=alice', 'more_body': False}])
+        assert await conn.form() == {'name': 'alice'}
+
+    @pytest.mark.asyncio
+    async def test_form_media_type_is_a_token_not_a_substring(self):
+        """A Content-Type that merely contains the urlencoded token is not a
+        form — the media type is compared as a token (BLA-286)."""
+        conn = Connection(
+            method='POST', path='/submit', raw_path=b'/submit', query_string=b'',
+            http_version='1.1', scheme='http',
+            headers=Headers([(b'host', b'x'),
+                             (b'content-type',
+                              b'application/x-www-form-urlencoded-fake')]))
+        conn._receive = _stub_receive([
+            {'type': 'http.request', 'body': b'name=alice', 'more_body': False}])
+        assert await conn.form() == {}   # not urlencoded → {} without touching body
+        assert await conn.text() == 'name=alice'
+
+    @pytest.mark.asyncio
+    async def test_form_parameter_value_does_not_make_a_form(self):
+        """A urlencoded token smuggled in a Content-Type *parameter value* is
+        not a form — only the media-type token itself counts (BLA-286)."""
+        conn = Connection(
+            method='POST', path='/submit', raw_path=b'/submit', query_string=b'',
+            http_version='1.1', scheme='http',
+            headers=Headers([(b'host', b'x'),
+                             (b'content-type',
+                              b'text/plain; note=application/x-www-form-urlencoded')]))
+        conn._receive = _stub_receive([
+            {'type': 'http.request', 'body': b'name=alice', 'more_body': False}])
+        assert await conn.form() == {}   # not urlencoded → {} without touching body
+        assert await conn.text() == 'name=alice'
+
+    @pytest.mark.asyncio
     async def test_form_last_value_wins(self):
         conn = Connection(
             method='POST', path='/submit', raw_path=b'/submit', query_string=b'',

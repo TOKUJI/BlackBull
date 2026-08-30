@@ -93,9 +93,14 @@ def _parse_qsl(data: bytes) -> list[tuple[str, str]]:
 
 
 def _is_urlencoded(headers: Headers) -> bool:
-    """True when the request ``Content-Type`` is urlencoded form data."""
+    """True when the request ``Content-Type`` is urlencoded form data.
+
+    The media type is parsed — split on ``;``, stripped, compared as a token —
+    rather than searched for as a substring of the whole header, so a
+    ``Content-Type`` that merely contains ``application/x-www-form-urlencoded``
+    (or smuggles it in a parameter) is not misread as a form."""
     ct = headers.get(b'content-type', b'').decode('latin-1').lower()
-    return 'application/x-www-form-urlencoded' in ct
+    return ct.split(';', 1)[0].strip() == 'application/x-www-form-urlencoded'
 
 
 def _headers_to_scope(h: Headers) -> list:
