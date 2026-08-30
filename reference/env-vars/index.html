@@ -5773,7 +5773,7 @@ first-hit-then-summary rate-limit model.</p>
 <tr>
 <td><code>BB_SOCKET_REUSEPORT</code></td>
 <td><code>0</code> (kernel default)</td>
-<td>When supported by the OS (Linux, modern BSDs), bind each worker to its own listening socket so the kernel hashes incoming connections across workers — eliminates the thundering-herd accept pattern.  No effect with one worker.  Enable on multi-worker deployments.</td>
+<td>When supported by the OS (Linux, modern BSDs), bind each worker to its own listening socket so the kernel hashes incoming connections across workers — eliminates the thundering-herd accept pattern.  No effect with one worker.  Enable on multi-worker deployments; a <strong>pessimization under connection churn</strong> (short-lived connections), where the hash spreads bursts unevenly — see <a href="../../deployment/workers/#workers-vs-cores-under-connection-churn">Workers</a>.</td>
 </tr>
 <tr>
 <td><code>BB_SOCKET_SNDBUF</code></td>
@@ -6090,7 +6090,7 @@ kernel/process memory and one custom socket option:</p>
 <td><code>BB_SOCKET_REUSEPORT</code></td>
 <td><code>0</code></td>
 <td><code>1</code></td>
-<td>When running &gt; 1 worker on Linux, lets the kernel hash incoming connections across workers instead of a single accept loop fanning them out.  Eliminates thundering-herd and improves CPU affinity.</td>
+<td>When running &gt; 1 worker on Linux, lets the kernel hash incoming connections across workers instead of a single accept loop fanning them out.  Eliminates thundering-herd and improves CPU affinity.  <strong>Caveat:</strong> under connection churn (short-lived connections) the hash spreads a burst unevenly and can cost more than the thundering-herd it removes — for churn-heavy workloads keep workers ≤ cores instead (see <a href="../../deployment/workers/#workers-vs-cores-under-connection-churn">Workers</a>).</td>
 </tr>
 <tr>
 <td><code>BB_SOCKET_SNDBUF</code></td>

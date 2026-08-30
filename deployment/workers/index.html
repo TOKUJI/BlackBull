@@ -1328,6 +1328,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#workers-vs-cores-under-connection-churn" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workers vs cores under connection churn
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5497,6 +5508,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#workers-vs-cores-under-connection-churn" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workers vs cores under connection churn
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5657,11 +5679,16 @@ app.run<span class="o">(</span><span class="nv">port</span><span class="o">=</sp
 <p>Multi-worker uses <strong>pre-fork multiprocessing</strong> — each worker is
 a separate OS process, not a thread.  The master process binds
 the socket, forks workers, and then sleeps until SIGTERM/SIGINT.</p>
-<p>On Linux / modern BSDs the workers also share the listening
-port via <code>SO_REUSEPORT</code> (<code>BB_SOCKET_REUSEPORT=1</code> by default), so
-the kernel hashes incoming connections across workers' accept
+<p>On Linux / modern BSDs each worker can bind its own listening
+socket via <code>SO_REUSEPORT</code> (<code>BB_SOCKET_REUSEPORT=1</code>), so the
+kernel hashes incoming connections across workers' accept
 queues — no thundering-herd, per-connection CPU affinity for
-free.</p>
+free.  It is <strong>off by default</strong>: with <code>BB_SOCKET_REUSEPORT=0</code>
+(the default) all workers share the master's single socket, and
+every incoming connection wakes every worker's loop, with N−1
+workers <code>accept()</code>-ing to EAGAIN — the thundering-herd accept
+race.  See "Workers vs cores under connection churn" below for
+when turning it on helps and when it does not.</p>
 <h3 id="shared-nothing-model">Shared-nothing model<a class="headerlink" href="#shared-nothing-model" title="Permanent link">&para;</a></h3>
 <p>Workers share <strong>nothing</strong> mutable — no shared dict, no shared
 cache, no shared lock.  Anything that needs cross-worker
@@ -5729,6 +5756,57 @@ controls it:</p>
 does placement, or any time you would rather make this decision
 yourself.  Pinning is Linux-only (<code>sched_setaffinity</code>) and
 multi-worker-only; a single-worker server is never pinned.</p>
+<h3 id="workers-vs-cores-under-connection-churn">Workers vs cores under connection churn<a class="headerlink" href="#workers-vs-cores-under-connection-churn" title="Permanent link">&para;</a></h3>
+<p>The "one worker per core" advice assumes long-lived connections.
+When connections are short-lived — every request opens a new
+connection (<code>Connection: close</code>), or the workload rotates them
+every few requests — raising <code>BB_WORKERS</code> above the core count
+costs real throughput.  Measured on a 16-core cpuset, <code>/</code>
+endpoint, best-of-3 (BLA-5):</p>
+<table>
+<thead>
+<tr>
+<th>workload</th>
+<th style="text-align: right;">W=16</th>
+<th style="text-align: right;">W=32</th>
+<th style="text-align: right;">W=64</th>
+<th style="text-align: right;">loss 16→64</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>keep-alive</td>
+<td style="text-align: right;">292k</td>
+<td style="text-align: right;">284k</td>
+<td style="text-align: right;">279k req/s</td>
+<td style="text-align: right;">~4.5 %</td>
+</tr>
+<tr>
+<td>churn</td>
+<td style="text-align: right;">96k</td>
+<td style="text-align: right;">90k</td>
+<td style="text-align: right;">81k req/s</td>
+<td style="text-align: right;">~16 %</td>
+</tr>
+</tbody>
+</table>
+<p>The churn loss is two stacked costs: the shared listener's
+<strong>accept race</strong> — every connection wakes every worker, which
+profiles show as <code>accept()</code> growing from ~3 % to ~11 % of worker
+time at 4× oversubscription — plus the general oversubscription
+amplification of per-connection work.</p>
+<p>Neither of the obvious knobs fixes it:</p>
+<ul>
+<li><code>BB_SOCKET_REUSEPORT=1</code> removes the accept race, but the
+  kernel's hash spreads a burst of new connections unevenly
+  across the per-worker queues and leaves cores idle — in the
+  same run it was still <em>slower</em> than the shared socket under
+  churn (87k vs 96k req/s at W=16).</li>
+<li><code>BB_CPU_PINNING=off</code> made no measurable difference (A/B at the
+  same worker counts).</li>
+</ul>
+<p>For churn-heavy deployments keep <code>BB_WORKERS</code> at or below the
+core count; extra workers buy contention, not throughput.</p>
 <h2 id="uvloop"><code>uvloop</code><a class="headerlink" href="#uvloop" title="Permanent link">&para;</a></h2>
 <p><code>uvloop</code> is a drop-in libuv-based replacement for the standard
 asyncio event loop.  BlackBull installs it as the loop policy
