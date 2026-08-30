@@ -213,6 +213,118 @@ class TestBody:
 
 
 # ---------------------------------------------------------------------------
+# Parsed query / form accessors (proposal BLA-242)
+# ---------------------------------------------------------------------------
+
+def _qs_connection(query_string: bytes = b'q=hello&page=2') -> Connection:
+    return Connection(
+        method='GET', path='/', raw_path=b'/', query_string=query_string,
+        http_version='1.1', scheme='http',
+        headers=Headers([(b'host', b'example.com')]))
+
+
+class TestQuery:
+    def test_query_last_value_wins(self):
+        conn = _qs_connection(b'tag=a&tag=b&done=true')
+        assert conn.query == {'tag': 'b', 'done': 'true'}
+
+    def test_query_list_keeps_every_value(self):
+        conn = _qs_connection(b'tag=a&tag=b')
+        assert conn.query_list == {'tag': ['a', 'b']}
+
+    def test_query_and_query_list_share_one_parse(self):
+        """query folds the multivalue cache rather than re-parsing the raw
+        string — the underlying query_string is parsed exactly once, and both
+        views stay consistent with the pre-mutation value."""
+        conn = _qs_connection(b'tag=a&tag=b')
+        assert conn.query == {'tag': 'b'}
+        assert conn.query_list == {'tag': ['a', 'b']}
+        conn.query_string = b'tag=zzz'
+        assert conn.query == {'tag': 'b'}
+        assert conn.query_list == {'tag': ['a', 'b']}
+
+    def test_query_empty_returns_empty_dict(self):
+        assert _qs_connection(b'').query == {}
+        assert _qs_connection(b'').query_list == {}
+
+    def test_query_decodes_percent_encoding(self):
+        conn = _qs_connection(b'q=hello%20world&name=%E3%81%93%E3%82%93')
+        assert conn.query == {'q': 'hello world', 'name': 'こん'}
+
+    def test_query_keeps_blank_value(self):
+        conn = _qs_connection(b'a=&b=1')
+        assert conn.query == {'a': '', 'b': '1'}
+
+    def test_query_parses_once_and_caches(self):
+        """Mutating the raw query_string after first access changes nothing —
+        the parse is cached (the gate's re-read assertion)."""
+        conn = _qs_connection(b'a=1')
+        assert conn.query == {'a': '1'}
+        conn.query_string = b'a=999'
+        assert conn.query == {'a': '1'}
+        assert conn.query is conn.query       # cached (same object)
+
+    def test_query_list_parses_once_and_caches(self):
+        conn = _qs_connection(b'a=1')
+        assert conn.query_list == {'a': ['1']}
+        conn.query_string = b'a=999'
+        assert conn.query_list == {'a': ['1']}
+        assert conn.query_list is conn.query_list
+
+
+class TestForm:
+    @pytest.mark.asyncio
+    async def test_form_parses_urlencoded_body(self):
+        conn = Connection(
+            method='POST', path='/submit', raw_path=b'/submit', query_string=b'',
+            http_version='1.1', scheme='http',
+            headers=Headers([(b'host', b'x'),
+                             (b'content-type', b'application/x-www-form-urlencoded')]))
+        conn._receive = _stub_receive([
+            {'type': 'http.request', 'body': b'name=alice&age=30', 'more_body': False}])
+        assert await conn.form() == {'name': 'alice', 'age': '30'}
+
+    @pytest.mark.asyncio
+    async def test_form_cached(self):
+        conn = Connection(
+            method='POST', path='/submit', raw_path=b'/submit', query_string=b'',
+            http_version='1.1', scheme='http',
+            headers=Headers([(b'host', b'x'),
+                             (b'content-type', b'application/x-www-form-urlencoded')]))
+        drained = {'n': 0}
+
+        async def receive():
+            drained['n'] += 1
+            return {'type': 'http.request', 'body': b'a=1', 'more_body': False}
+
+        conn._receive = receive
+        assert await conn.form() == {'a': '1'}
+        assert await conn.form() == {'a': '1'}
+        assert drained['n'] == 1   # body read once, form result cached
+
+    @pytest.mark.asyncio
+    async def test_form_non_form_returns_empty_without_consuming_body(self):
+        """On a non-form Content-Type, form() returns {} and does not drain the
+        body, so a later json()/text() still works."""
+        conn = _sample_connection()   # content-type: application/json
+        conn._receive = _stub_receive([
+            {'type': 'http.request', 'body': b'{"k": 1}', 'more_body': False}])
+        assert await conn.form() == {}
+        assert await conn.json() == {'k': 1}   # body untouched by form()
+
+    @pytest.mark.asyncio
+    async def test_form_last_value_wins(self):
+        conn = Connection(
+            method='POST', path='/submit', raw_path=b'/submit', query_string=b'',
+            http_version='1.1', scheme='http',
+            headers=Headers([(b'host', b'x'),
+                             (b'content-type', b'application/x-www-form-urlencoded')]))
+        conn._receive = _stub_receive([
+            {'type': 'http.request', 'body': b'tag=a&tag=b', 'more_body': False}])
+        assert await conn.form() == {'tag': 'b'}
+
+
+# ---------------------------------------------------------------------------
 # Equality excludes caches / receive
 # ---------------------------------------------------------------------------
 

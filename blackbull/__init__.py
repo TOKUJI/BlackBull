@@ -14,7 +14,7 @@ and authoritative list; the notes below cover the ones worth a sentence:
 - `QUERY`: the HTTP QUERY method (RFC 10008) as a plain string — ``http.HTTPMethod`` lacks the member until Python ≥3.16.
 - `UnprocessableQuery`: raise from a QUERY handler for ``422`` when the (accepted) request media type carries a semantically unprocessable query (RFC 10008).
 - `Headers`: case-insensitive, ordered, multi-valued HTTP header store.
-- `Connection`: the typed internal request representation; the handler context object exposing ``method``/``path``/``headers``/``cookies``/``body()``/``json()``/``text()``. The ASGI ``scope`` is a derived view (``Connection.as_scope()``).
+- `Connection`: the typed internal request representation; the handler context object exposing ``method``/``path``/``raw_path``/``query_string``/``headers``/``cookies``/``query``/``query_list``/``path_params``/``state`` and ``body()``/``json()``/``text()``/``form()``. The ASGI ``scope`` is a derived view (``Connection.as_scope()``).
 - `Request`: **deprecated** alias of ``Connection``. Accessing ``blackbull.Request`` emits a ``DeprecationWarning``; replace ``request: Request`` handler params with ``conn: Connection`` (identical API). Removal no earlier than 2027-08-01.
 - `WebSocket`: the high-level WebSocket handler object — ``await ws.accept()``, ``async for message in ws``, ``ws.send_text()``/``send_bytes()``/``send_json()``, ``await ws.close()``. Declare ``async def handler(ws: WebSocket)`` on a ``Scheme.websocket`` route to receive it; the raw ``(conn, receive, send)`` form keeps working unchanged.
 - `WebSocketDisconnect`: raised by ``ws.receive()`` when the peer closes; carries ``code`` and ``reason``. ``async for`` ends the loop instead of raising.
@@ -134,8 +134,9 @@ def __getattr__(name):
             'blackbull.Request is deprecated — use blackbull.Connection instead. '
             "Replace `request: Request` with `conn: Connection` in handler "
             'signatures. The API is identical: conn.method, conn.path, '
-            'conn.headers, conn.body(), conn.json(), conn.cookies. '
-            'Request will be removed no earlier than 2027-08-01.',
+            'conn.headers, conn.cookies, conn.query, conn.query_list, '
+            'conn.path_params, conn.body(), conn.json(), conn.text(), '
+            'conn.form(). Request will be removed no earlier than 2027-08-01.',
             DeprecationWarning, stacklevel=2)
         return Connection
     raise AttributeError(f'module {__name__!r} has no attribute {name!r}')

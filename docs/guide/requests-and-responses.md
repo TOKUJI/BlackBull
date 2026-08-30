@@ -299,60 +299,53 @@ Coercion and required-ness are resolved when the route is registered, not
 per request — handlers that declare no query params keep the exact adapted
 form they had before.
 
-### Raw query strings
+### Parsed query params: `conn.query` / `conn.query_list`
 
-For repeated keys, unusual encodings, or full control,
-`conn.query_string` contains the raw query string as bytes.
-Parse it with the standard library:
-
-```python
-from urllib.parse import parse_qs, parse_qsl
-
-# parse_qs: each key maps to a list of values (handles ?tag=a&tag=b correctly)
-params = parse_qs(conn.query_string.decode())
-page   = int(params.get('page', ['1'])[0])
-tags   = params.get('tag', [])             # ['a', 'b'] for ?tag=a&tag=b
-
-# parse_qsl: flat list of (key, value) pairs preserving order
-pairs = parse_qsl(conn.query_string.decode())
-```
-
-For convenience, wrap this in a helper:
+When the declared form cannot express the request — repeated keys, keys not
+known at registration time — `Connection` parses the query string for you,
+lazily and once:
 
 ```python
-def qp(scope) -> dict[str, str]:
-    """Return first value for each query parameter key."""
-    return {k: v[0]
-            for k, v in parse_qs(conn.query_string.decode()).items()}
-
-@app.route(path='/tasks')
-async def list_tasks(conn, receive, send):
-    p = qp(scope)
-    done = p.get('done', 'false').lower() == 'true'
-    await send(JSONResponse({'done_filter': done}))
+q = conn.query          # dict[str, str]; last value wins on ?tag=a&tag=b
+ql = conn.query_list    # dict[str, list[str]]; keeps every value
 ```
+
+- **`conn.query`** folds repeated keys to the **last** value:
+  `/search?q=bull&tag=a&tag=b` → `{'q': 'bull', 'tag': 'b'}`.  Values are
+  decoded, blank values are kept, and the result is cached on first access.
+- **`conn.query_list`** keeps **every** value:
+  `/search?tag=a&tag=b` → `{'tag': ['a', 'b']}`.  It is the escape hatch for
+  list-valued keys.
+- Both are lazy — a handler that never reads a query param allocates nothing —
+  and both are parsed **once** and cached, so re-reading them never re-parses
+  the raw `conn.query_string`.
+
+Neither coerces types.  That is the declared form's job (`q: int = 1`),
+which also answers a malformed value with **400** rather than a silent
+fallback — so the division is: **declared parameters are for typed scalars;
+`conn.query` is the honest exit for what the declared form cannot express**.
+If you want a typed scalar, declare it; don't plumb `conn.query` for one.
+
+For full control — unusual (non-UTF-8) encodings, or order-preserving pairs —
+`conn.query_string` (raw bytes) is still there; parse it with
+`urllib.parse.parse_qsl`.
 
 ## Form data
 
 HTML forms with `enctype="application/x-www-form-urlencoded"` (the
-default) send key=value pairs in the body.  Read and parse with
-`read_body` + `parse_qs`:
+default) send key=value pairs in the body.  `conn.form()` parses and caches
+them:
 
 ```python
-from urllib.parse import parse_qs
-from blackbull import read_body
-
-async def form_body_mw(conn, receive, send, call_next):
-    """Parse application/x-www-form-urlencoded body; inject conn.state['form']."""
-    raw = await read_body(receive)
-    conn.state['form'] = {k: v[0] for k, v in parse_qs(raw.decode()).items()}
-    await call_next(conn, receive, send)
-
-@app.route(methods=[HTTPMethod.POST], path='/submit', middlewares=[form_body_mw])
-async def submit(conn, receive, send):
-    name = conn.state['form'].get('name', '')
-    await send(JSONResponse({'received': name}))
+form = await conn.form()   # dict[str, str]; last value wins on repeats
+name = form.get('name', '')
 ```
+
+- Reads the body through `conn.body()`, so a later `conn.json()` /
+  `conn.text()` call reuses the cached bytes.
+- On a non-form `Content-Type` (or no body) it returns `{}` rather than
+  raising, and does not consume the body.
+- Like `conn.query`, it is parsed **once** and cached.
 
 Multipart file uploads (`multipart/form-data`) are not yet
 supported by a built-in helper.  Use the `python-multipart`

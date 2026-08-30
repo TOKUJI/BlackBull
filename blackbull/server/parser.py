@@ -59,6 +59,9 @@ def _build_h2_connection(method: str, path: str, raw_path: bytes,
     c._body = None
     c._body_read = False
     c._cookies = None
+    c._query = None
+    c._query_list = None
+    c._form = None
     c._receive = None
     c._disconnected = False
     c._ws = None
