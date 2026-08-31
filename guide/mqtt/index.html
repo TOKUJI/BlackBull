@@ -893,6 +893,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#testing-the-taps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing the taps
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#documenting-the-taps-with-asyncapi" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5001,6 +5012,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/testing/mqtt/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    mqtt
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/testing/native/" class="md-nav__link">
         
   
@@ -5441,6 +5480,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#testing-the-taps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing the taps
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#documenting-the-taps-with-asyncapi" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5802,6 +5852,39 @@ mosquitto_pub<span class="w"> </span>-t<span class="w"> </span><span class="s1">
 </code></pre></div>
 <p>The message appears in the subscriber's terminal and in any matching
 <code>@mqtt.on_message</code> handler.</p>
+<h2 id="testing-the-taps">Testing the taps<a class="headerlink" href="#testing-the-taps" title="Permanent link">&para;</a></h2>
+<p>Standing up a real broker and a real MQTT client to exercise a
+<code>@mqtt.on_message</code> handler is heavy for a unit or integration test.
+<code>MQTTTestBroker</code> feeds PUBLISHes into the app's registered taps directly —
+no socket, no CONNECT, no client:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">BlackBull</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.mqtt</span><span class="w"> </span><span class="kn">import</span> <span class="n">MQTTExtension</span><span class="p">,</span> <span class="n">Message</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.testing.mqtt</span><span class="w"> </span><span class="kn">import</span> <span class="n">MQTTTestBroker</span>
+
+<span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">()</span>
+<span class="n">mqtt</span> <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">add_extension</span><span class="p">(</span><span class="n">MQTTExtension</span><span class="p">(</span><span class="n">port</span><span class="o">=</span><span class="mi">1883</span><span class="p">))</span>
+<span class="n">captured</span> <span class="o">=</span> <span class="p">[]</span>
+
+<span class="nd">@mqtt</span><span class="o">.</span><span class="n">on_message</span><span class="p">(</span><span class="n">topic</span><span class="o">=</span><span class="s1">'sensors/</span><span class="si">{room}</span><span class="s1">/temperature'</span><span class="p">)</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">on_temp</span><span class="p">(</span><span class="n">msg</span><span class="p">:</span> <span class="n">Message</span><span class="p">,</span> <span class="n">room</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+    <span class="n">captured</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">room</span><span class="p">,</span> <span class="n">msg</span><span class="o">.</span><span class="n">payload</span><span class="p">))</span>
+
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_tap</span><span class="p">():</span>
+    <span class="k">async</span> <span class="k">with</span> <span class="n">MQTTTestBroker</span><span class="p">(</span><span class="n">app</span><span class="p">)</span> <span class="k">as</span> <span class="n">broker</span><span class="p">:</span>
+        <span class="k">await</span> <span class="n">broker</span><span class="o">.</span><span class="n">publish</span><span class="p">(</span><span class="n">topic</span><span class="o">=</span><span class="s1">'sensors/room1/temperature'</span><span class="p">,</span> <span class="n">payload</span><span class="o">=</span><span class="sa">b</span><span class="s1">'21.5'</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">captured</span> <span class="o">==</span> <span class="p">[(</span><span class="s1">'room1'</span><span class="p">,</span> <span class="sa">b</span><span class="s1">'21.5'</span><span class="p">)]</span>
+</code></pre></div>
+<p><code>publish</code> matches the topic against the registered filters — <code>+</code> / <code>#</code>
+wildcards and <code>{name}</code> captures included — runs the matching taps, and awaits
+them, so the assertion can run the moment <code>publish</code> returns.  A tap that
+raises propagates its exception out of <code>publish</code>: where production logs and
+isolates a failing tap (taps are best-effort observers), a test wants the
+failure visible, so the exception surfaces and the remaining taps in that
+<code>publish</code> are skipped.</p>
+<p>No broker needs to be running and no socket is bound — the helper is
+async-only, feeding the taps on the test's own event loop.  Only the tap
+pipeline is exercised: broker routing, QoS flows and retained messages are the
+conformance suite's territory, not this helper's.</p>
 <h2 id="documenting-the-taps-with-asyncapi">Documenting the taps with AsyncAPI<a class="headerlink" href="#documenting-the-taps-with-asyncapi" title="Permanent link">&para;</a></h2>
 <p>OpenAPI documents BlackBull's HTTP surface, but it has no vocabulary for topics
 or the publish/subscribe direction, so the broker is invisible to it. The

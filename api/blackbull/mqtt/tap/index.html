@@ -5058,6 +5058,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../testing/mqtt/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    mqtt
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../testing/native/" class="md-nav__link">
         
   
@@ -6016,7 +6044,7 @@ direct callers (tests, benchmarks) can keep the lightweight tuple form.</p>
 
 
 <h3 id="blackbull.mqtt.tap.run_taps" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">run_taps</span><span class="p">(</span><span class="n">taps</span><span class="p">,</span> <span class="n">message</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">run_taps</span><span class="p">(</span><span class="n">taps</span><span class="p">,</span> <span class="n">message</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">raise_exceptions</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
@@ -6030,6 +6058,11 @@ direct callers (tests, benchmarks) can keep the lightweight tuple form.</p>
         <p>Invoke every tap whose filter matches <em>message</em> (sequential, isolated).</p>
 <p>Captured <code>{name}</code> segments are passed as keyword arguments; a handler
 without captures is simply called <code>callback(message)</code>.</p>
+<p>A handler exception is logged and isolated by default — taps are
+best-effort observers, and one raising handler must not stop the others
+(nor the broker).  Pass <code>raise_exceptions=True</code> to propagate the first
+exception instead: the mode test instrumentation wants, where a failing
+tap should fail the test rather than vanish into a log line.</p>
 
 
     </div>

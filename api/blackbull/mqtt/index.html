@@ -3475,6 +3475,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.mqtt.MQTTExtension.iter_taps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        iter_taps
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.mqtt.MQTTExtension.on_message" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3542,6 +3553,45 @@
       
     </span>
   </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.Tap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tap
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Tap">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.Tap.display_filter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        display_filter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.Tap.bind" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bind
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
         
@@ -5125,6 +5175,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../testing/mqtt/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    mqtt
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../testing/native/" class="md-nav__link">
         
   
@@ -5601,6 +5679,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.mqtt.MQTTExtension.iter_taps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        iter_taps
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.mqtt.MQTTExtension.on_message" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5668,6 +5757,45 @@
       
     </span>
   </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.Tap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tap
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Tap">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.Tap.display_filter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        display_filter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.Tap.bind" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bind
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
         
@@ -6039,6 +6167,31 @@ documenting extension was wired in.</p>
 <div class="doc doc-object doc-function">
 
 
+<h4 id="blackbull.mqtt.MQTTExtension.iter_taps" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">iter_taps</span><span class="p">()</span></code>
+
+<a href="#blackbull.mqtt.MQTTExtension.iter_taps" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Yield the compiled :class:<code>Tap</code> for each registered <code>on_message</code> handler.</p>
+<p>The dispatch-side counterpart of :meth:<code>iter_subscriptions</code>: that
+method yields the <em>display</em> form (<code>topic</code> as the application wrote
+it, <code>{name}</code> captures restored) for documentation tools; this yields
+the already-compiled :class:<code>Tap</code> objects, so a dispatch consumer
+(<code>MQTTTestBroker</code>) can feed them straight to
+:func:<code>blackbull.mqtt.tap.run_taps</code> without re-parsing the filters.
+Both reflect the handlers registered <em>at call time</em>.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h4 id="blackbull.mqtt.MQTTExtension.on_message" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">on_message</span><span class="p">(</span><span class="n">topic</span><span class="o">=</span><span class="s1">'#'</span><span class="p">)</span></code>
 
@@ -6259,6 +6412,105 @@ coroutine function (its <code>__name__</code>/docstring name the AsyncAPI operat
 
 
 
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.mqtt.Tap" class="doc doc-heading">
+            <code>Tap</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#blackbull.mqtt.Tap" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>A compiled <code>on_message</code> registration.</p>
+<p><code>match_filter</code> is the topic filter with each <code>{name}</code> segment rewritten
+to <code>+</code> (so the validated :func:<code>topic_matches_filter</code> does the matching);
+<code>captures</code> records the <code>(level_index, name)</code> of each <code>{name}</code> segment
+for binding once a topic matches.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.mqtt.Tap.display_filter" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">display_filter</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#blackbull.mqtt.Tap.display_filter" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>The topic filter as originally written, with <code>{name}</code> captures
+restored (<code>match_filter</code> rewrites each to <code>+</code> for matching).</p>
+<p><code>'sensors/{room}/temperature'</code> round-trips back to itself; a plain
+<code>'sensors/+/temperature'</code> stays as <code>'sensors/+/temperature'</code>.  Used
+by documentation tooling (<code>AsyncAPIExtension</code>) that wants to show the
+filter the application declared rather than the internal match form.</p>
+
+    </div>
+
+</div>
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.mqtt.Tap.bind" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">bind</span><span class="p">(</span><span class="n">topic</span><span class="p">)</span></code>
+
+<a href="#blackbull.mqtt.Tap.bind" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return captured <code>{name: value}</code> if <em>topic</em> matches, else <code>None</code>.</p>
+
+
+    </div>
+
+</div>
 
 
 

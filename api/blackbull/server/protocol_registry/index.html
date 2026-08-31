@@ -4575,6 +4575,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.protocol_registry.ProtocolBinding.prefix_possible" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        prefix_possible
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.protocol_registry.ProtocolBinding.serve" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5202,6 +5213,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../testing/mqtt/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    mqtt
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../testing/native/" class="md-nav__link">
         
   
@@ -5681,6 +5720,17 @@
     <span class="md-ellipsis">
       
         on_detect_timeout
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.protocol_registry.ProtocolBinding.prefix_possible" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        prefix_possible
       
     </span>
   </a>
@@ -6245,6 +6295,31 @@ transport) — appropriate for a protocol with no meaningful "you were too
 slow" wire message.  HTTP overrides this to emit a 408.  Lets
 <code>ConnectionActor</code> stay free of protocol-specific status strings
 (decouple-connection-detection, Stage 3).</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.server.protocol_registry.ProtocolBinding.prefix_possible" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">prefix_possible</span><span class="p">(</span><span class="n">prefix</span><span class="p">)</span></code>
+
+<a href="#blackbull.server.protocol_registry.ProtocolBinding.prefix_possible" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return True if <em>prefix</em> could still grow into a prefix this binding
+claims.</p>
+<p>Consulted by the selector while <code>prefix</code> is shorter than
+<code>detect_prefix_len</code>.  Default: always True — the selector keeps
+growing the peek to the full length.  A binding that can rule <em>prefix</em>
+out cheaply overrides this and returns False, so the next binding
+claims without a full peek (the HTTP/2 preface's fixed first line rules
+a <code>GET</code> out on its first byte).</p>
 
 
     </div>

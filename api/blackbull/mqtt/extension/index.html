@@ -3531,6 +3531,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.mqtt.extension.MQTTExtension.iter_taps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        iter_taps
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.mqtt.extension.MQTTExtension.on_message" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5008,6 +5019,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../testing/mqtt/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    mqtt
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../testing/native/" class="md-nav__link">
         
   
@@ -5428,6 +5467,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.mqtt.extension.MQTTExtension.iter_taps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        iter_taps
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.mqtt.extension.MQTTExtension.on_message" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5628,6 +5678,31 @@ seam <code>AsyncAPIExtension</code> reads instead of touching <code>_handlers</c
 Reflects the handlers registered <em>at call time</em>, so a documentation
 endpoint that calls this per request picks up taps added after the
 documenting extension was wired in.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.mqtt.extension.MQTTExtension.iter_taps" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">iter_taps</span><span class="p">()</span></code>
+
+<a href="#blackbull.mqtt.extension.MQTTExtension.iter_taps" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Yield the compiled :class:<code>Tap</code> for each registered <code>on_message</code> handler.</p>
+<p>The dispatch-side counterpart of :meth:<code>iter_subscriptions</code>: that
+method yields the <em>display</em> form (<code>topic</code> as the application wrote
+it, <code>{name}</code> captures restored) for documentation tools; this yields
+the already-compiled :class:<code>Tap</code> objects, so a dispatch consumer
+(<code>MQTTTestBroker</code>) can feed them straight to
+:func:<code>blackbull.mqtt.tap.run_taps</code> without re-parsing the filters.
+Both reflect the handlers registered <em>at call time</em>.</p>
 
 
     </div>
