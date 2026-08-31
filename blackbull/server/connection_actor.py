@@ -132,11 +132,16 @@ class ConnectionActor(Actor):
         A binding is only consulted once ``prefix`` holds at least its
         ``detect_prefix_len`` bytes (or the peer has closed): until then we must
         not let a lower-priority catch-all (``http1``) claim a connection the
-        higher-priority protocol might still own.
+        higher-priority protocol might still own.  A binding that can rule the
+        bytes out cheaply (:meth:`ProtocolBinding.prefix_possible` returning
+        False) is skipped instead, so the http1 catch-all claims a plain HTTP
+        request on its first byte rather than after a full 16-byte peek.
         """
         for binding in order:
             if not at_eof and len(prefix) < binding.detect_prefix_len:
-                return None
+                if binding.prefix_possible(prefix):
+                    return None
+                continue   # this binding can never claim — try the next
             if binding.claims(prefix, self._alpn):
                 return binding
         return None
