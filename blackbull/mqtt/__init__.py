@@ -24,10 +24,10 @@ from .asyncapi import AsyncAPIExtension
 from .broker import BrokerActor
 from .connection import serve_connection
 from .extension import MQTTExtension, MQTTProtocolDetector, Subscription
-from .tap import Message, TapActor
+from .tap import Message, Tap, TapActor
 
 __all__ = [
-    'MQTTExtension', 'MQTTProtocolDetector', 'Message', 'Subscription',
+    'MQTTExtension', 'MQTTProtocolDetector', 'Message', 'Subscription', 'Tap',
     'AsyncAPIExtension',
     'BrokerActor', 'TapActor', 'serve_connection',
 ]

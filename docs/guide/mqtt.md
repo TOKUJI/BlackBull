@@ -244,6 +244,45 @@ mosquitto_pub -t 'sensors/room1/temperature' -m '21.5' -p 1883 -V 5
 The message appears in the subscriber's terminal and in any matching
 `@mqtt.on_message` handler.
 
+## Testing the taps
+
+Standing up a real broker and a real MQTT client to exercise a
+`@mqtt.on_message` handler is heavy for a unit or integration test.
+`MQTTTestBroker` feeds PUBLISHes into the app's registered taps directly —
+no socket, no CONNECT, no client:
+
+```python
+from blackbull import BlackBull
+from blackbull.mqtt import MQTTExtension, Message
+from blackbull.testing.mqtt import MQTTTestBroker
+
+app = BlackBull()
+mqtt = app.add_extension(MQTTExtension(port=1883))
+captured = []
+
+@mqtt.on_message(topic='sensors/{room}/temperature')
+async def on_temp(msg: Message, room: str):
+    captured.append((room, msg.payload))
+
+async def test_tap():
+    async with MQTTTestBroker(app) as broker:
+        await broker.publish(topic='sensors/room1/temperature', payload=b'21.5')
+    assert captured == [('room1', b'21.5')]
+```
+
+`publish` matches the topic against the registered filters — `+` / `#`
+wildcards and `{name}` captures included — runs the matching taps, and awaits
+them, so the assertion can run the moment `publish` returns.  A tap that
+raises propagates its exception out of `publish`: where production logs and
+isolates a failing tap (taps are best-effort observers), a test wants the
+failure visible, so the exception surfaces and the remaining taps in that
+`publish` are skipped.
+
+No broker needs to be running and no socket is bound — the helper is
+async-only, feeding the taps on the test's own event loop.  Only the tap
+pipeline is exercised: broker routing, QoS flows and retained messages are the
+conformance suite's territory, not this helper's.
+
 ## Documenting the taps with AsyncAPI
 
 OpenAPI documents BlackBull's HTTP surface, but it has no vocabulary for topics

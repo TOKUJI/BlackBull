@@ -26,7 +26,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Iterable
 
 from ..actor import Actor, Message as ActorMessage
 from .messages import topic_matches_filter
@@ -121,11 +121,18 @@ def compile_taps(handlers) -> list[Tap]:
     return taps
 
 
-async def run_taps(taps: list[Tap], message: Message) -> None:
+async def run_taps(taps: Iterable[Tap], message: Message, *,
+                   raise_exceptions: bool = False) -> None:
     """Invoke every tap whose filter matches *message* (sequential, isolated).
 
     Captured ``{name}`` segments are passed as keyword arguments; a handler
     without captures is simply called ``callback(message)``.
+
+    A handler exception is logged and isolated by default — taps are
+    best-effort observers, and one raising handler must not stop the others
+    (nor the broker).  Pass ``raise_exceptions=True`` to propagate the first
+    exception instead: the mode test instrumentation wants, where a failing
+    tap should fail the test rather than vanish into a log line.
     """
     for tap in taps:
         captures = tap.bind(message.topic)
@@ -133,7 +140,9 @@ async def run_taps(taps: list[Tap], message: Message) -> None:
             continue
         try:
             await tap.callback(message, **captures)
-        except Exception:  # pragma: no cover - user handler isolation
+        except Exception:
+            if raise_exceptions:
+                raise
             logger.exception('MQTT on_message handler for %r raised',
                              tap.match_filter)
 

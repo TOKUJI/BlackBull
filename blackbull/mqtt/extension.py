@@ -10,7 +10,7 @@ from ..extension import Extension
 from ..server.protocol_registry import ProtocolDetector
 from .broker import BrokerActor
 from .connection import serve_connection
-from .tap import TapActor, compile_tap
+from .tap import Tap, TapActor, compile_tap
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +114,19 @@ class MQTTExtension(Extension):
         """
         for tap in self._handlers:
             yield Subscription(topic=tap.display_filter, callback=tap.callback)
+
+    def iter_taps(self) -> Iterator[Tap]:
+        """Yield the compiled :class:`Tap` for each registered ``on_message`` handler.
+
+        The dispatch-side counterpart of :meth:`iter_subscriptions`: that
+        method yields the *display* form (``topic`` as the application wrote
+        it, ``{name}`` captures restored) for documentation tools; this yields
+        the already-compiled :class:`Tap` objects, so a dispatch consumer
+        (``MQTTTestBroker``) can feed them straight to
+        :func:`blackbull.mqtt.tap.run_taps` without re-parsing the filters.
+        Both reflect the handlers registered *at call time*.
+        """
+        yield from self._handlers
 
     def init_app(self, app: Any) -> None:
         broker = self._broker

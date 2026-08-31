@@ -84,7 +84,9 @@ async def test_run_taps_calls_captureless_handler_with_message_only():
 
 
 @asyncio_test
-async def test_run_taps_skips_non_matching_and_isolates_exceptions():
+async def test_run_taps_isolates_a_raising_handler_by_default():
+    """A matching tap that raises is logged and skipped, not propagated —
+    the best-effort observer contract.  A later matching tap still runs."""
     hits = []
 
     async def boom(msg):
@@ -93,9 +95,28 @@ async def test_run_taps_skips_non_matching_and_isolates_exceptions():
     async def ok(msg):
         hits.append(msg.topic)
 
-    await run_taps([compile_tap('a/#', boom), compile_tap('sensors/#', ok)],
+    # Both taps match; boom raising must not stop ok (default isolation).
+    await run_taps([compile_tap('#', boom), compile_tap('sensors/#', ok)],
                    _msg('sensors/temp'))
-    assert hits == ['sensors/temp']  # boom did not match; ok ran despite isolation
+    assert hits == ['sensors/temp']
+
+
+@asyncio_test
+async def test_run_taps_raise_exceptions_propagates_first_failure():
+    """raise_exceptions=True is the test-instrumentation mode: the exception
+    surfaces and the remaining taps in the same dispatch are skipped."""
+    hits = []
+
+    async def boom(msg):
+        raise RuntimeError('tap blew up')
+
+    async def ok(msg):
+        hits.append(msg.topic)
+
+    with pytest.raises(RuntimeError, match='tap blew up'):
+        await run_taps([compile_tap('#', boom), compile_tap('#', ok)],
+                       _msg('sensors/temp'), raise_exceptions=True)
+    assert hits == []   # first matching tap raised; ok never ran
 
 
 # -- TapActor (decoupled, bounded, drop-newest) -----------------------------
