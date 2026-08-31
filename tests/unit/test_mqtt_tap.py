@@ -98,6 +98,24 @@ async def test_run_taps_skips_non_matching_and_isolates_exceptions():
     assert hits == ['sensors/temp']  # boom did not match; ok ran despite isolation
 
 
+@asyncio_test
+async def test_run_taps_raise_exceptions_propagates_first_failure():
+    """raise_exceptions=True is the test-instrumentation mode: the exception
+    surfaces and the remaining taps in the same dispatch are skipped."""
+    hits = []
+
+    async def boom(msg):
+        raise RuntimeError('tap blew up')
+
+    async def ok(msg):
+        hits.append(msg.topic)
+
+    with pytest.raises(RuntimeError, match='tap blew up'):
+        await run_taps([compile_tap('#', boom), compile_tap('#', ok)],
+                       _msg('sensors/temp'), raise_exceptions=True)
+    assert hits == []   # first matching tap raised; ok never ran
+
+
 # -- TapActor (decoupled, bounded, drop-newest) -----------------------------
 
 @contextlib.asynccontextmanager

@@ -272,7 +272,14 @@ async def test_tap():
 
 `publish` matches the topic against the registered filters — `+` / `#`
 wildcards and `{name}` captures included — runs the matching taps, and awaits
-them, so the assertion can run the moment `publish` returns.  Only the tap
+them, so the assertion can run the moment `publish` returns.  A tap that
+raises propagates its exception out of `publish`: where production logs and
+isolates a failing tap (taps are best-effort observers), a test wants the
+failure visible, so the exception surfaces and the remaining taps in that
+`publish` are skipped.
+
+No broker needs to be running and no socket is bound — the helper is
+async-only, feeding the taps on the test's own event loop.  Only the tap
 pipeline is exercised: broker routing, QoS flows and retained messages are the
 conformance suite's territory, not this helper's.
 

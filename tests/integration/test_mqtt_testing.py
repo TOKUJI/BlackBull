@@ -1,18 +1,18 @@
-"""Integration tests for :class:`blackbull.testing.mqtt.MQTTTestBroker`.
+"""Tests for :class:`blackbull.testing.mqtt.MQTTTestBroker`.
 
 The helper feeds PUBLISHes into an app's ``on_message`` taps with no socket —
 the application-handler-level counterpart of the conformance suite's wire
 harness.  These tests assert the tap side effects a developer would assert:
-right payload, ``{name}`` captures bound, non-matching topics silent, and the
-missing-extension error.
+right payload, ``{name}`` captures bound, non-matching topics silent,
+exception propagation, and the missing-extension error.  They run in the
+default suite — the helper binds no socket, forks no process and touches no
+network, so the ``integration`` marker would only skip fast in-process tests.
 """
 import pytest
 
 from blackbull import BlackBull
 from blackbull.mqtt import MQTTExtension, Message
 from blackbull.testing.mqtt import MQTTTestBroker
-
-pytestmark = pytest.mark.integration
 
 
 def _app_with_tap(topic: str, captured: list):
@@ -94,6 +94,16 @@ async def test_missing_extension_raises_a_clear_error():
 
 
 @pytest.mark.asyncio
+async def test_non_mqtt_extension_under_the_key_is_rejected():
+    """Only a real MQTTExtension satisfies the broker — not any object that
+    happens to sit under the ``'mqtt'`` extension key."""
+    app = BlackBull()
+    app.extensions[MQTTExtension.extension_key] = object()
+    with pytest.raises(RuntimeError, match='MQTT extension'):
+        MQTTTestBroker(app)
+
+
+@pytest.mark.asyncio
 async def test_taps_registered_after_construction_are_seen():
     """iter_subscriptions reflects handlers at publish time (at-call-time)."""
     captured = []
@@ -107,3 +117,18 @@ async def test_taps_registered_after_construction_are_seen():
             captured.append(msg.payload)
         await broker.publish(topic='late/arrival', payload=b'now')
     assert captured == [b'now']
+
+
+@pytest.mark.asyncio
+async def test_raising_tap_propagates_the_exception():
+    """A failing tap fails the test: publish re-raises instead of logging."""
+    app = BlackBull()
+    mqtt = app.add_extension(MQTTExtension(port=1883))
+
+    @mqtt.on_message(topic='boom/#')
+    async def _boom(msg: Message):
+        raise RuntimeError('tap blew up')
+
+    async with MQTTTestBroker(app) as broker:
+        with pytest.raises(RuntimeError, match='tap blew up'):
+            await broker.publish(topic='boom/x', payload=b'1')
