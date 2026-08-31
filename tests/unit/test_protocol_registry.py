@@ -105,6 +105,21 @@ def test_claims_unified_predicate():
     assert RawBinding('bound', _noop, port=9000).claims(b'\x10', None) is False
 
 
+def test_http2_prefix_possible_shortcircuits_diverged_prefix():
+    """prefix_possible() is the cheap pre-claim gate: while the bytes in hand
+    could still grow into the fixed preface first line it stays True, and the
+    instant they diverge it is False — so the http1 catch-all decides without
+    waiting for a full 16-byte peek."""
+    h2 = Http2Binding()
+    assert h2.prefix_possible(b'') is True            # nothing yet — could be anything
+    assert h2.prefix_possible(b'P') is True           # preface starts with P
+    assert h2.prefix_possible(_HTTP2_PREFACE_FIRST_LINE) is True
+    assert h2.prefix_possible(b'G') is False          # GET can never be the preface
+    assert h2.prefix_possible(b'PRX') is False        # diverges mid-prefix
+    # The default for other bindings stays permissive.
+    assert Http1Binding().prefix_possible(b'G') is True
+
+
 def test_register_raw_binding():
     r = ProtocolRegistry()
     binding = r.register('echo', _noop, port=9000)
@@ -180,6 +195,11 @@ async def test_protocol_detector_claims_connection_before_http1():
     from blackbull.server.connection_actor import ConnectionActor
 
     class _EchoDetector(ProtocolDetector):
+        # Four bytes ('ECHO') to decide — declared so the selector keeps
+        # growing the peek until this binding can rule the prefix in or out,
+        # instead of letting http1 claim on the first byte.
+        prefix_len = 4
+
         def detect(self, first_bytes, alpn):
             return first_bytes.startswith(b'ECHO')
 
@@ -243,3 +263,67 @@ async def test_non_matching_detector_falls_through_to_http1():
         await actor._dispatch()
 
     assert http1_served == [b'GET / HTTP/1.1\r\n']
+
+
+# ---------------------------------------------------------------------------
+# The preface-prefix short-circuit: http1 claims without a full peek
+# ---------------------------------------------------------------------------
+
+def _actor(reader):
+    from blackbull.server.connection_actor import ConnectionActor
+    return ConnectionActor(reader, _StubWriter(), app=_noop_app, aggregator=None)
+
+
+def test_select_http1_claims_on_first_byte_without_full_peek():
+    """_select() lets the http1 catch-all claim as soon as the bytes in hand
+    cannot become the HTTP/2 preface: a 'GET' decides on its
+    first byte; a 'P' that could still be the preface keeps blocking."""
+    actor = _actor(_StubReader())
+    order = ProtocolRegistry().detection_order   # (http2, http1)
+    assert order[0].name == 'http2' and order[1].name == 'http1'
+
+    assert actor._select(b'G', at_eof=False, order=order) is order[1]
+    assert actor._select(b'P', at_eof=False, order=order) is None
+    assert actor._select(b'PRX', at_eof=False, order=order) is order[1]
+    assert actor._select(_HTTP2_PREFACE_FIRST_LINE,
+                         at_eof=False, order=order) is order[0]
+
+
+@pytest.mark.asyncio
+async def test_peek_and_select_http1_fills_one_byte_not_sixteen():
+    """The per-connection sniff used to grow the peek 1..16 bytes for every
+    plain HTTP request; with the short-circuit a single 1-byte fill decides."""
+    class _CountingReader(_StubReader):
+        def __init__(self, first_line: bytes = b''):
+            super().__init__(first_line)
+            self.fills = 0
+
+        async def fill(self, n: int) -> bool:
+            self.fills += 1
+            return await super().fill(n)
+
+    reader = _CountingReader(b'GET / HTTP/1.1\r\nHost: x\r\n\r\n')
+    binding = await _actor(reader)._peek_and_select(ProtocolRegistry().detection_order)
+    assert binding is not None and binding.name == 'http1'
+    assert reader.fills == 1, f'expected one fill, got {reader.fills}'
+
+
+@pytest.mark.asyncio
+async def test_peek_and_select_still_detects_http2_preface():
+    """The short-circuit must not break h2c: a real preface still claims
+    http2, growing the peek up to the full 16-byte first line."""
+    from blackbull.server.protocol_registry import _HTTP2_PREFACE
+
+    reader = _StubReader(first_line=_HTTP2_PREFACE)
+    binding = await _actor(reader)._peek_and_select(ProtocolRegistry().detection_order)
+    assert binding is not None and binding.name == 'http2'
+
+
+@pytest.mark.asyncio
+async def test_peek_and_select_diverged_preface_falls_to_http1():
+    """A client that starts like the preface ('PRI * HTTP/1...') but diverges
+    mid-way is http1, decided the moment the divergence is visible — not after
+    a full 16-byte peek."""
+    reader = _StubReader(first_line=b'PRI * HTTP/1.0\r\nHost: x\r\n\r\n')
+    binding = await _actor(reader)._peek_and_select(ProtocolRegistry().detection_order)
+    assert binding is not None and binding.name == 'http1'

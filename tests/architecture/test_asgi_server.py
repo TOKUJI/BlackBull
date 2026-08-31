@@ -541,6 +541,12 @@ class TestTimeoutHandling:
         sw = _make_fake_writer()
         reader = MagicMock()
         reader.read = AsyncMock(side_effect=slow_read)
+        # AsyncioReader.peek reads the stream's ``_buffer``; on a bare MagicMock
+        # that attribute is auto-mocked and yields a spurious byte, which the
+        # preface short-circuit correctly treats as "not http2", routing the
+        # connection to http1 instead of stalling at detection.  Model the
+        # stated premise — the peer sent nothing — with an empty buffer.
+        reader._buffer = b''
 
         async def noop_app(scope, receive, send):
             pass
@@ -574,6 +580,11 @@ class TestTimeoutHandling:
         reader = MagicMock()
         reader.read = AsyncMock(side_effect=head_then_hang)
         reader.readexactly = AsyncMock(side_effect=head_then_hang)
+        # Empty initial buffer, as a real StreamReader has — a bare MagicMock
+        # auto-mocks ``_buffer`` to spurious bytes, which the preface
+        # short-circuit would treat as "not http2" and route to http1 before
+        # the head has been consumed.
+        reader._buffer = b''
 
         async def noop_app(scope, receive, send):
             await receive()  # triggers body read

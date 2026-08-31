@@ -154,6 +154,19 @@ class ProtocolBinding:
         line is *first_line*.  Default: no match."""
         return False
 
+    def prefix_possible(self, prefix: bytes) -> bool:
+        """Return True if *prefix* could still grow into a prefix this binding
+        claims.
+
+        Consulted by the selector while ``prefix`` is shorter than
+        ``detect_prefix_len``.  Default: always True — the selector keeps
+        growing the peek to the full length.  A binding that can rule *prefix*
+        out cheaply overrides this and returns False, so the next binding
+        claims without a full peek (the HTTP/2 preface's fixed first line rules
+        a ``GET`` out on its first byte).
+        """
+        return True
+
     def claims(self, prefix: bytes, alpn: str | None) -> bool:
         """Unified detection predicate: does this binding own a connection whose
         first bytes are *prefix* (with negotiated *alpn*)?
@@ -191,6 +204,13 @@ class Http2Binding(ProtocolBinding):
 
     def matches_cleartext(self, first_line: bytes) -> bool:
         return first_line == _HTTP2_PREFACE_FIRST_LINE
+
+    def prefix_possible(self, prefix: bytes) -> bool:
+        # The preface's first line is fixed: once *prefix* diverges from it, no
+        # prefix that continues from it can ever match, so the http1 catch-all
+        # decides on the bytes already in hand instead of waiting for a
+        # 16-byte peek.
+        return _HTTP2_PREFACE_FIRST_LINE.startswith(prefix)
 
     async def serve(self, conn: ConnectionView) -> None:
         # One read path for both routes: whether the peer arrived via ALPN ``h2``
