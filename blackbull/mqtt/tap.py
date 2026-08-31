@@ -140,7 +140,7 @@ async def run_taps(taps: Iterable[Tap], message: Message, *,
             continue
         try:
             await tap.callback(message, **captures)
-        except Exception:  # pragma: no cover - user handler isolation
+        except Exception:
             if raise_exceptions:
                 raise
             logger.exception('MQTT on_message handler for %r raised',
