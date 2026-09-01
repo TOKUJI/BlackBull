@@ -1905,6 +1905,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.client.exceptions.ResponseTooLarge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ResponseTooLarge
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.client.exceptions.StreamReset" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5449,6 +5460,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.client.exceptions.ResponseTooLarge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ResponseTooLarge
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.client.exceptions.StreamReset" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5641,6 +5663,58 @@ whole family with one <code>except</code> clause and still distinguish specific 
 
 
 
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.client.exceptions.ResponseTooLarge" class="doc doc-heading">
+            <code>ResponseTooLarge</code>
+
+
+<a href="#blackbull.client.exceptions.ResponseTooLarge" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="ClientError (blackbull.client.exceptions.ClientError)" href="#blackbull.client.exceptions.ClientError">ClientError</a></code></p>
+
+
+
+        <p>The peer's response head passed a byte budget the client set.</p>
+<p>Distinct from :class:<code>ProtocolError</code>: the response was well-formed as far
+as it was read.  What failed is a limit this client chose, so a caller that
+wants the peer's output anyway can raise the budget rather than conclude
+the peer is broken.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
 
     </div>
 

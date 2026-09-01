@@ -1511,6 +1511,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#async-http-client" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Async HTTP client
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#socket-tuning" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5491,6 +5502,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#async-http-client" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Async HTTP client
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#socket-tuning" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5780,6 +5802,42 @@ first-hit-then-summary rate-limit model.</p>
 <td><code>BB_WS_QUEUE_DEPTH</code></td>
 <td><code>0</code></td>
 <td>WebSocket inbound <strong>read-ahead</strong> depth.  <code>0</code> (default) reads frames inline, in the handler's own task, when it calls <code>receive()</code> — no reader task and no per-message queue hop.  A positive value restores a background reader that reads <em>ahead</em> of the handler into a queue of that depth, so control frames are serviced between <code>receive()</code> calls and up to <code>N</code> messages buffer under a slow handler.  Registering a <code>websocket_message</code> listener does not force read-ahead on: that event fires when the server reads rather than when the handler consumes, and a consuming handler is already reading, so the reader is only marked <em>deferred</em> and the idle watchdog starts it if the handler goes quiet.  See the <a href="../../guide/websockets/">WebSocket guide</a>.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="async-http-client">Async HTTP client<a class="headerlink" href="#async-http-client" title="Permanent link">&para;</a></h2>
+<p>Bounds for the client under <code>blackbull/client/</code>, which reads responses the way
+the server reads requests and needs its own answer for a peer that never
+finishes one.  They are named and defaulted apart from the server's caps
+because the roles are not symmetric: a server is addressed by anyone, while a
+client picks its peer — and pointing one at a deliberately misbehaving server
+is what <a href="../../guide/fault_injection/"><code>blackbull.fault_injection</code></a> exists for,
+so a bound tight enough to hide such a peer would be a defect.  See
+<a href="https://github.com/TOKUJI/BlackBull/blob/master/SECURITY.md">SECURITY.md</a> for
+what a report should hold the client to.</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Controls</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>BB_CLIENT_HEAD_MAX_TOTAL</code></td>
+<td><code>65536</code></td>
+<td>Maximum total bytes in a response head the client will read (status line + all field lines + <code>CRLFCRLF</code>).  Bounds accumulation <em>as it reads</em>, so a peer that opens a header and never closes it cannot grow the client's memory.  Exceeded → <code>ResponseTooLarge</code>.  <code>0</code> disables.</td>
+</tr>
+<tr>
+<td><code>BB_CLIENT_HEAD_MAX_LINE</code></td>
+<td><code>8192</code></td>
+<td>Maximum bytes in a single status line or response field line.  Checked over the lines of an already-bounded head rather than during the read: no line can be longer than the block containing it, so this is a policy rule and not a second memory guard — the same division the server makes between <code>BB_HEADER_MAX_TOTAL</code> and <code>BB_HEADER_MAX_LINE</code>.  Exceeded → <code>ResponseTooLarge</code>.  <code>0</code> disables.</td>
+</tr>
+<tr>
+<td><code>BB_CLIENT_HEAD_TIMEOUT</code></td>
+<td><code>30.0</code></td>
+<td>Seconds the client will wait for a complete response head.  The time column for the read the two caps above bound by size: a peer that sends half a head and stops passes every byte budget forever.  Exceeded → <code>TimeoutError</code>, deliberately not a <code>ClientError</code>, so a caller can tell a peer that stalled from one that answered and refused — the same choice the client's connect deadline makes.  <code>0</code> disables.</td>
 </tr>
 </tbody>
 </table>
