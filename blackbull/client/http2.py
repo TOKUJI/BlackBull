@@ -254,6 +254,9 @@ class HTTP2Client:
                 pending.future.set_exception(
                     ConnectionError('client connection closed'))
         self._responses.clear()
+        # Each stream releases its own sender at its last send; this is for a
+        # connection torn down before that point was ever reached.
+        self._senders.clear()
 
         if self._raw_writer is not None:
             try:
@@ -320,6 +323,15 @@ class HTTP2Client:
             # a dict that grows once per failed send.
             self._responses.pop(stream_id, None)
             raise
+        finally:
+            # Released on the last *send*, never on the last receive.  A server
+            # may answer with END_STREAM while this body is still going up (an
+            # early 401 or 413), so a sender dropped when the response
+            # completes would leave ``_write_data`` parked on a window event
+            # nothing will set again.  Nothing sends on this stream past this
+            # point, so the sweeps in ``_on_window_update`` and
+            # ``_on_initial_window_size`` have no reason to keep reaching it.
+            self._senders.pop(stream_id, None)
 
         return await future
 
@@ -515,6 +527,10 @@ class HTTP2Client:
     def unregister_raw_stream(self, stream_id: int) -> None:
         """Stop routing frames for *stream_id* into its raw-frame queue."""
         self._raw_streams.pop(stream_id, None)
+        # A WebSocket-over-H2 session writes through its sender until it
+        # unregisters — its shutdown sends the CLOSE frame first — so this is
+        # that stream's last-send boundary, the same one ``request()`` uses.
+        self._senders.pop(stream_id, None)
 
     # ---- internal: senders, streams, frame I/O ---------------------------
 
