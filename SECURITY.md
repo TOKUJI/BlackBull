@@ -98,8 +98,25 @@ The following are in scope for security reports:
   a connection reach a handler as "accepted" when a middleware meant
   to reject it is a security report, not a bug report.
 - The `blackbull` CLI and module-level boot path (`blackbull.app.serve`).
-- The async HTTP client under `blackbull/client/` (experimental,
-  but in-scope).
+- **The async HTTP client under `blackbull/client/`** — experimental, in
+  scope.  Guaranteed: a broken peer produces a named failure, not an OOM
+  or a hang.  Not guaranteed: defence against a hostile third party.  A
+  read path that grows without a bound, or waits on a connection already
+  gone, is a security report.
+
+  The standard is lower than the server's because the roles are not
+  symmetric: a server cannot decline to be addressed, so its bounds are a
+  defence; a client chooses its peer, so its bounds are a diagnostic.
+  Pointing one at a misbehaving server is the advertised use —
+  `blackbull.fault_injection` ships to do it — so a bound that made such a
+  peer unobservable would be a defect, not a hardening.  A deployment
+  calling a party you do not control is outside this paragraph; tell us,
+  because that is the evidence that would change it.
+
+  The client's bounds are still being put in place, so this paragraph
+  states what a report should hold us to rather than a settled
+  configuration surface.  Each knob is documented in
+  `docs/reference/env-vars.md` as it lands.
 - The gRPC layer under `blackbull/grpc/` (message framing,
   compression negotiation and decompression limits, deadline
   enforcement) and the MQTT 5 broker under `blackbull/mqtt/` —
