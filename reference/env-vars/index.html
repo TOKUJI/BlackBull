@@ -5839,6 +5839,11 @@ what a report should hold the client to.</p>
 <td><code>30.0</code></td>
 <td>Seconds the client will wait for a complete response head.  The time column for the read the two caps above bound by size: a peer that sends half a head and stops passes every byte budget forever.  Exceeded → <code>TimeoutError</code>, deliberately not a <code>ClientError</code>, so a caller can tell a peer that stalled from one that answered and refused — the same choice the client's connect deadline makes.  <code>0</code> disables.</td>
 </tr>
+<tr>
+<td><code>BB_CLIENT_BODY_TIMEOUT</code></td>
+<td><code>30.0</code></td>
+<td>Seconds the client will wait for a <strong>single</strong> response-body read — the chunk-size line, a slice of body octets, or the CRLF after a chunk.  Per read, not per body: the peer must keep making progress, which is what <code>BB_BODY_TIMEOUT</code> means on the server and <code>client_body_timeout</code> in nginx.  It abandons a peer that <strong>stops</strong>; a peer that trickles satisfies every individual read, and bounding that is a rate floor this client does not have yet.  Exceeded → <code>TimeoutError</code>.  <code>0</code> disables.</td>
+</tr>
 </tbody>
 </table>
 <h2 id="socket-tuning">Socket tuning<a class="headerlink" href="#socket-tuning" title="Permanent link">&para;</a></h2>
