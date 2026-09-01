@@ -3,10 +3,10 @@
 #
 # The ab-verify counterpart to run.sh (which only drives compare_servers.sh).
 # `launch` starts bench/peers/ab_commit.sh detached on the server instance —
-# PATH-safe, stdin/stdout detached so the ssh session returns immediately —
-# and `finish` polls the raw.tsv results back, scp's them, and tears the
-# instance down.  install.sh (run with DEPLOY_GIT=1) provisions uv + .git so
-# ab_commit.sh works out of the box.
+# PATH-safe, in a new session with stdin/stdout/stderr detached so the ssh
+# session returns immediately — and `finish` polls the raw.tsv results back,
+# scp's them, and tears the instance down.  install.sh (run with
+# DEPLOY_GIT=1) provisions uv + .git so ab_commit.sh works out of the box.
 #
 # Usage:
 #   REF_BASE=b165880 REF_TREAT=fe83e4c URL_PATH=/conn ROUNDS=8 \
@@ -28,6 +28,7 @@
 #   after the H1 lanes; '' = no H2 lane) with H2_CONNS/H2_STREAMS/H2_N/H2_WARMUP
 #   EXPECT_LINES (raw.tsv completeness per session; default 1+ROUNDS*8)
 #   AB_FINISH_LOG (finish progress log; default bench/results/ab-finish.log)
+#   AB_LAUNCH_TIMEOUT(=30) — maximum seconds for the remote launch handshake
 #   AB_POLLS(=300) AB_POLL_INTERVAL(=10) — finish polling budget (~50 min)
 set -uo pipefail
 
@@ -75,6 +76,7 @@ H2_N="${H2_N:-100000}"
 H2_WARMUP="${H2_WARMUP:-10000}"
 EXPECT_LINES="${EXPECT_LINES:-$((1 + ROUNDS * 8))}"
 AB_FINISH_LOG="${AB_FINISH_LOG:-$REPO_ROOT/bench/results/ab-finish.log}"
+AB_LAUNCH_TIMEOUT="${AB_LAUNCH_TIMEOUT:-30}"
 AB_POLLS="${AB_POLLS:-300}"
 AB_POLL_INTERVAL="${AB_POLL_INTERVAL:-10}"
 
@@ -115,7 +117,7 @@ launch)
 
     # Preflight: uv on PATH (install.sh symlinks it) and both refs present,
     # so ab_commit.sh's git-checkout swap can actually run.
-    if ! ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
+    if ! ssh -n "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
         "command -v uv >/dev/null 2>&1 && cd $REMOTE_REPO && \
          git cat-file -e $REF_BASE^{commit} && git cat-file -e $REF_TREAT^{commit}" 2>/dev/null; then
         echo "bench/aws/ab.sh: preflight failed — uv or git refs missing." >&2
@@ -155,12 +157,35 @@ launch)
         fi
     } > "$RUNNER"
 
-    scp "${SSH_OPTS[@]}" "$RUNNER" "$SERVER_REMOTE:$REMOTE_REPO/bench/results/ab_runner.sh" \
-        >/dev/null 2>&1
-    ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
+    if ! scp "${SSH_OPTS[@]}" "$RUNNER" \
+        "$SERVER_REMOTE:$REMOTE_REPO/bench/results/ab_runner.sh" \
+        >/dev/null 2>&1; then
+        echo "bench/aws/ab.sh: runner upload failed." >&2
+        exit 1
+    fi
+    if ! timeout --signal=TERM --kill-after=5s "${AB_LAUNCH_TIMEOUT}s" \
+        ssh -n "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
         "cd $REMOTE_REPO && rm -rf bench/results/ab-commit-* && \
          chmod +x bench/results/ab_runner.sh && \
-         nohup bash bench/results/ab_runner.sh </dev/null >/dev/null 2>&1 & echo launched"
+         rm -f bench/results/ab_runner.pid && \
+         (nohup setsid bash -c 'echo \$\$ > bench/results/ab_runner.pid; \
+          exec bash bench/results/ab_runner.sh' </dev/null >/dev/null 2>&1 & \
+          launcher_pid=\$!; pid=; alive=0; \
+          for _ in 1 2 3 4 5; do \
+              if [ -s bench/results/ab_runner.pid ]; then \
+                  pid=\$(cat bench/results/ab_runner.pid); \
+                  if kill -0 \"\$pid\" 2>/dev/null; then alive=1; break; fi; \
+              fi; \
+              sleep 0.1; \
+          done; \
+          if [ \"\$alive\" -ne 1 ]; then \
+              kill \"\$launcher_pid\" 2>/dev/null || true; \
+              echo 'remote A/B runner exited during launch' >&2; exit 1; \
+          fi; \
+          echo launched pid=\$pid)"; then
+        echo "bench/aws/ab.sh: remote runner launch failed." >&2
+        exit 1
+    fi
     echo "ab_commit.sh launched on $SERVER_REMOTE"
     echo "  profiles : ${URLS[*]}${H2_PROFILES:+  h2: ${H2_PROFILES//,/, }}"
     echo "  base     : $REF_BASE   treat: $REF_TREAT"

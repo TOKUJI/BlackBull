@@ -4,9 +4,9 @@
 # bench/results/aws/<ts>/.
 #
 # Drop-safe lifecycle (ab.sh discipline): compare_servers.sh is launched
-# DETACHED on the instance (nohup, stdin/stdout detached), so an SSH drop
-# can never kill the measurement.  This driver then polls for the
-# completion marker and pulls the results before the caller tears down.
+# DETACHED on the instance (new session, nohup, stdin/stdout/stderr detached),
+# so an SSH drop can never kill the measurement.  This driver then polls for
+# the completion marker and pulls the results before the caller tears down.
 #
 # Modes:
 #   bash bench/aws/run.sh            # launch → poll → pull (default)
@@ -35,6 +35,7 @@
 #                 driver sets this so its driver.log co-locates with results)
 #   RUN_POLLS / RUN_POLL_INTERVAL  poll budget (default 720 × 15 s ≈ 180 min,
 #                 matching the driver's safety-shutdown window)
+#   RUN_LAUNCH_TIMEOUT  maximum seconds for the remote launch handshake
 #
 # Topology (read from bench/aws/.state):
 #   TOPO=single → compare_servers.sh runs on the sole instance
@@ -98,6 +99,7 @@ MODE="${1:-run}"
 # (720 × 15 s ≈ 180 min).  Override to shrink/expand.
 RUN_POLLS="${RUN_POLLS:-720}"
 RUN_POLL_INTERVAL="${RUN_POLL_INTERVAL:-15}"
+RUN_LAUNCH_TIMEOUT="${RUN_LAUNCH_TIMEOUT:-30}"
 
 # Names on the instance.  REMOTE_RUNNER_RE is the pgrep pattern with a
 # bracketed dot so the poll's own remote bash -c cmdline (which contains
@@ -192,11 +194,35 @@ if [ "$MODE" = "run" ]; then
         echo 'bash bench/peers/compare_servers.sh'
     } > "$RUNNER"
 
-    scp "${SSH_OPTS[@]}" "$RUNNER" "$REMOTE:$REMOTE_REPO/$REMOTE_RUNNER" >/dev/null 2>&1
-    ssh "${SSH_OPTS[@]}" "$REMOTE" \
+    REMOTE_PID="$REMOTE_RUNNER.pid"
+    if ! scp "${SSH_OPTS[@]}" "$RUNNER" "$REMOTE:$REMOTE_REPO/$REMOTE_RUNNER" \
+        >/dev/null 2>&1; then
+        echo "bench/aws/run.sh: runner upload failed." >&2
+        exit 1
+    fi
+    if ! timeout --signal=TERM --kill-after=5s "${RUN_LAUNCH_TIMEOUT}s" \
+        ssh -n "${SSH_OPTS[@]}" "$REMOTE" \
         "cd $REMOTE_REPO && chmod +x $REMOTE_RUNNER && \
          rm -f $REMOTE_LOG && \
-         nohup bash $REMOTE_RUNNER </dev/null >$REMOTE_LOG 2>&1 & echo launched"
+         rm -f $REMOTE_PID && \
+         (nohup setsid bash -c 'echo \$\$ > $REMOTE_PID; \
+          exec bash $REMOTE_RUNNER' </dev/null >$REMOTE_LOG 2>&1 & \
+          launcher_pid=\$!; pid=; alive=0; \
+          for _ in 1 2 3 4 5; do \
+              if [ -s $REMOTE_PID ]; then \
+                  pid=\$(cat $REMOTE_PID); \
+                  if kill -0 \"\$pid\" 2>/dev/null; then alive=1; break; fi; \
+              fi; \
+              sleep 0.1; \
+          done; \
+          if [ \"\$alive\" -ne 1 ]; then \
+              kill \"\$launcher_pid\" 2>/dev/null || true; \
+              echo 'remote runner exited during launch' >&2; exit 1; \
+          fi; \
+          echo launched pid=\$pid)"; then
+        echo "bench/aws/run.sh: remote runner launch failed." >&2
+        exit 1
+    fi
     echo "compare_servers.sh launched DETACHED on $REMOTE"
     echo "  remote runner: $REMOTE_REPO/$REMOTE_RUNNER"
     echo "  remote log:    $REMOTE_REPO/$REMOTE_LOG"
