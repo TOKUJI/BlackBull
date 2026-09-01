@@ -26,7 +26,8 @@
 #   empty entries fall back to the single values)
 #   H2_PROFILES (comma-separated h2load URL paths — each runs ab_commit_h2.sh
 #   after the H1 lanes; '' = no H2 lane) with H2_CONNS/H2_STREAMS/H2_N/H2_WARMUP
-#   EXPECT_LINES (raw.tsv completeness per session; default 1+ROUNDS*8)
+#   EXPECT_LINES (raw.tsv completeness per session; default
+#                1+ROUNDS*4*number-of-PHASES)
 #   AB_FINISH_LOG (finish progress log; default bench/results/ab-finish.log)
 #   AB_LAUNCH_TIMEOUT(=30) — maximum seconds for the remote launch handshake
 #   AB_POLLS(=300) AB_POLL_INTERVAL(=10) — finish polling budget (~50 min)
@@ -38,6 +39,13 @@ _bench_aws_load_state
 
 SERVER_REMOTE="$SSH_USER@$SERVER_PUBLIC_IP"
 REMOTE_REPO="/home/$SSH_USER/BlackBull"
+REMOTE_EXPECTED_LINES="bench/results/ab_expected_lines"
+REMOTE_EXPECTED_LINES_TMP="bench/results/ab_expected_lines.tmp"
+REMOTE_EXPECTED_RESULTS="bench/results/ab_expected_results"
+REMOTE_EXPECTED_RESULTS_TMP="bench/results/ab_expected_results.tmp"
+REMOTE_RUNNER_STATUS="bench/results/ab_runner.status"
+REMOTE_RUNNER_STATUS_TMP="bench/results/ab_runner.status.tmp"
+REMOTE_RUNNER_STATUS_REQUIRED="bench/results/ab_runner.status.required"
 
 REF_BASE="${REF_BASE:-HEAD~1}"
 REF_TREAT="${REF_TREAT:-HEAD}"
@@ -67,20 +75,49 @@ WRK_SCRIPT_ARGSS="${WRK_SCRIPT_ARGSS:-}"
 #: H2_PROFILES — comma-separated h2load URL paths, each run as its own
 #: ab_commit_h2.sh session after the H1 lanes (default '' = no H2 lane).
 #: The H2 knobs below pass through to ab_commit_h2.sh.  The h2 raw.tsv has
-#: the same shape as the H1 one (header + ROUNDS*8 rows), so EXPECT_LINES
-#: and the finish poll cover both.
+#: the same shape as the H1 one (header + ROUNDS*4*number-of-PHASES rows), so
+#: EXPECT_LINES and the finish poll cover both.
 H2_PROFILES="${H2_PROFILES:-}"
 H2_CONNS="${H2_CONNS:-32}"
 H2_STREAMS="${H2_STREAMS:-16}"
 H2_N="${H2_N:-100000}"
 H2_WARMUP="${H2_WARMUP:-10000}"
-EXPECT_LINES="${EXPECT_LINES:-$((1 + ROUNDS * 8))}"
+EXPECT_LINES_EXPLICIT=0
+[ -n "${EXPECT_LINES:-}" ] && EXPECT_LINES_EXPLICIT=1
+# Each phase contributes four rows per round (base, treat, treat, base), plus
+# the raw.tsv header.  Derive the default from the actual phase list so a
+# single-phase run cannot inherit the two-phase threshold.
+if ! [[ "$ROUNDS" =~ ^[1-9][0-9]*$ ]]; then
+    echo "bench/aws/ab.sh: ROUNDS must be a positive integer." >&2
+    exit 1
+fi
+PHASES_NORMALIZED="${PHASES//$'\r'/ }"
+PHASES_NORMALIZED="${PHASES_NORMALIZED//$'\n'/ }"
+PHASES_NORMALIZED="${PHASES_NORMALIZED//$'\t'/ }"
+read -r -a PHASE_LIST <<< "$PHASES_NORMALIZED"
+PHASE_COUNT="${#PHASE_LIST[@]}"
+if [ "$PHASE_COUNT" -eq 0 ]; then
+    echo "bench/aws/ab.sh: PHASES must select at least one phase." >&2
+    exit 1
+fi
+for phase in "${PHASE_LIST[@]}"; do
+    if [ "$phase" != "null" ] && [ "$phase" != "real" ]; then
+        echo "bench/aws/ab.sh: PHASES must contain only null and real." >&2
+        exit 1
+    fi
+done
+EXPECT_LINES="${EXPECT_LINES:-$((1 + ROUNDS * 4 * PHASE_COUNT))}"
 AB_FINISH_LOG="${AB_FINISH_LOG:-$REPO_ROOT/bench/results/ab-finish.log}"
 AB_LAUNCH_TIMEOUT="${AB_LAUNCH_TIMEOUT:-30}"
 AB_POLLS="${AB_POLLS:-300}"
 AB_POLL_INTERVAL="${AB_POLL_INTERVAL:-10}"
 
 MODE="${1:-launch}"
+
+if ! [[ "$EXPECT_LINES" =~ ^[1-9][0-9]*$ ]]; then
+    echo "bench/aws/ab.sh: EXPECT_LINES must be a positive integer." >&2
+    exit 1
+fi
 
 # --- build the env prefix for one ab_commit.sh invocation ------------------
 ab_env() {  # $1 = url, $2 = wrk script ('' = none), $3 = wrk script args
@@ -98,10 +135,24 @@ ab_env() {  # $1 = url, $2 = wrk script ('' = none), $3 = wrk script args
 case "$MODE" in
 launch)
     if [ -n "$URL_PATHS" ]; then
+        if [[ ",$URL_PATHS," == *",,"* ]]; then
+            echo "bench/aws/ab.sh: URL_PATHS must contain only non-empty paths." >&2
+            exit 1
+        fi
         IFS=',' read -r -a URLS <<< "$URL_PATHS"
     else
         URLS=("$URL_PATH")
     fi
+    if [ -n "$H2_PROFILES" ]; then
+        if [[ ",$H2_PROFILES," == *",,"* ]]; then
+            echo "bench/aws/ab.sh: H2_PROFILES must contain only non-empty paths." >&2
+            exit 1
+        fi
+        IFS=',' read -r -a H2URLS <<< "$H2_PROFILES"
+    else
+        H2URLS=()
+    fi
+    EXPECTED_RESULTS=$((${#URLS[@]} + ${#H2URLS[@]}))
     # Per-URL wrk script/args, parallel to URL_PATHS; an empty entry falls
     # back to the single WRK_SCRIPT / WRK_SCRIPT_ARGS (so the two forms mix).
     if [ -n "$WRK_SCRIPTS" ]; then
@@ -131,7 +182,7 @@ launch)
     trap 'rm -f "$RUNNER"' EXIT
     {
         echo '#!/usr/bin/env bash'
-        echo 'set -uo pipefail'
+        echo 'set -euo pipefail'
         printf 'cd %q\n' "$REMOTE_REPO"
         for i in "${!URLS[@]}"; do
             u="${URLS[$i]}"
@@ -146,15 +197,12 @@ launch)
         # already emits the vars ab_commit_h2.sh shares (REF_*, PATHSPEC,
         # URL_PATH, ROUNDS, PORT, BB_*, PHASES, pinning); the h2load knobs
         # are appended here.
-        if [ -n "$H2_PROFILES" ]; then
-            IFS=',' read -r -a H2URLS <<< "$H2_PROFILES"
-            for u in "${H2URLS[@]}"; do
-                log="bench/results/ec2-ab-h2-$(printf '%s' "${u#/}" | tr '/' '_').log"
-                printf 'env %s H2_CONNS=%q H2_STREAMS=%q H2_N=%q H2_WARMUP=%q bash bench/peers/ab_commit_h2.sh > %q 2>&1\n' \
-                    "$(ab_env "$u" '' '')" \
-                    "$H2_CONNS" "$H2_STREAMS" "$H2_N" "$H2_WARMUP" "$log"
-            done
-        fi
+        for u in "${H2URLS[@]}"; do
+            log="bench/results/ec2-ab-h2-$(printf '%s' "${u#/}" | tr '/' '_').log"
+            printf 'env %s H2_CONNS=%q H2_STREAMS=%q H2_N=%q H2_WARMUP=%q bash bench/peers/ab_commit_h2.sh > %q 2>&1\n' \
+                "$(ab_env "$u" '' '')" \
+                "$H2_CONNS" "$H2_STREAMS" "$H2_N" "$H2_WARMUP" "$log"
+        done
     } > "$RUNNER"
 
     if ! scp "${SSH_OPTS[@]}" "$RUNNER" \
@@ -165,11 +213,22 @@ launch)
     fi
     if ! timeout --signal=TERM --kill-after=5s "${AB_LAUNCH_TIMEOUT}s" \
         ssh -n "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
-        "cd $REMOTE_REPO && rm -rf bench/results/ab-commit-* && \
+        "cd $REMOTE_REPO && rm -rf bench/results/ab-commit-* bench/results/ab-h2-* && \
+         rm -f $REMOTE_RUNNER_STATUS_REQUIRED $REMOTE_RUNNER_STATUS \
+               $REMOTE_RUNNER_STATUS_TMP $REMOTE_EXPECTED_LINES_TMP \
+               $REMOTE_EXPECTED_RESULTS_TMP && \
+         printf '%s\\n' '$EXPECT_LINES' > $REMOTE_EXPECTED_LINES_TMP && \
+         printf '%s\\n' '$EXPECTED_RESULTS' > $REMOTE_EXPECTED_RESULTS_TMP && \
+         mv -f $REMOTE_EXPECTED_LINES_TMP $REMOTE_EXPECTED_LINES && \
+         mv -f $REMOTE_EXPECTED_RESULTS_TMP $REMOTE_EXPECTED_RESULTS && \
+         : > $REMOTE_RUNNER_STATUS_REQUIRED && \
          chmod +x bench/results/ab_runner.sh && \
          rm -f bench/results/ab_runner.pid && \
          (nohup setsid bash -c 'echo \$\$ > bench/results/ab_runner.pid; \
-          exec bash bench/results/ab_runner.sh' </dev/null >/dev/null 2>&1 & \
+          bash bench/results/ab_runner.sh; rc=\$?; \
+          printf \"%s\\n\" \"\$rc\" > $REMOTE_RUNNER_STATUS_TMP && \
+          mv -f $REMOTE_RUNNER_STATUS_TMP $REMOTE_RUNNER_STATUS; exit \"\$rc\"' \
+          </dev/null >/dev/null 2>&1 & \
           launcher_pid=\$!; pid=; alive=0; \
           for _ in 1 2 3 4 5; do \
               if [ -s bench/results/ab_runner.pid ]; then \
@@ -195,9 +254,81 @@ launch)
     ;;
 
 finish)
-    {
+    if ! (
         echo "ab.sh finish start: $(date -u)"
-        runner=-1; complete=0
+        # The marker is committed only after both launch-time sidecars.  Its
+        # presence therefore selects the current protocol; partial mixtures
+        # fail closed instead of being mistaken for a legacy run.  An explicit
+        # EXPECT_LINES overrides only the line threshold, never this handshake
+        # or the launch-declared number of result lanes.
+        if ! launch_metadata=$(ssh -n "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
+            "cd $REMOTE_REPO && r=0; [ -e $REMOTE_RUNNER_STATUS_REQUIRED ] && r=1; \
+             l=missing; if [ -e $REMOTE_EXPECTED_LINES ]; then l=invalid; \
+                 if [ -f $REMOTE_EXPECTED_LINES ]; then v=\$(cat $REMOTE_EXPECTED_LINES) || exit 1; \
+                     case \"\$v\" in ''|*[!0-9]*) ;; *) l=value:\$v;; esac; fi; fi; \
+             q=missing; if [ -e $REMOTE_EXPECTED_RESULTS ]; then q=invalid; \
+                 if [ -f $REMOTE_EXPECTED_RESULTS ]; then v=\$(cat $REMOTE_EXPECTED_RESULTS) || exit 1; \
+                     case \"\$v\" in ''|*[!0-9]*) ;; *) q=value:\$v;; esac; fi; fi; \
+             printf '%s %s %s\\n' \"\$r\" \"\$l\" \"\$q\"" \
+            2>/dev/null); then
+            echo "bench/aws/ab.sh: failed to read launch metadata." >&2
+            exit 1
+        fi
+        launch_metadata_required=; launch_expected=; launch_results=; metadata_extra=;
+        read -r launch_metadata_required launch_expected launch_results metadata_extra \
+            <<< "$launch_metadata"
+        if ! [[ "$launch_metadata_required" =~ ^[01]$ ]] || \
+           [ -n "$metadata_extra" ]; then
+            echo "bench/aws/ab.sh: invalid launch metadata protocol state." >&2
+            exit 1
+        fi
+        if [ "$launch_metadata_required" = "1" ]; then
+            case "$launch_expected" in
+                value:*) launch_expected="${launch_expected#value:}" ;;
+                missing)
+                    echo "bench/aws/ab.sh: launch metadata is missing for a current-format run." >&2
+                    exit 1
+                    ;;
+                *)
+                    echo "bench/aws/ab.sh: invalid launch metadata in $REMOTE_EXPECTED_LINES." >&2
+                    exit 1
+                    ;;
+            esac
+            case "$launch_results" in
+                value:*) EXPECTED_RESULTS="${launch_results#value:}" ;;
+                missing)
+                    echo "bench/aws/ab.sh: launch metadata is missing for a current-format run." >&2
+                    exit 1
+                    ;;
+                *)
+                    echo "bench/aws/ab.sh: invalid launch metadata in $REMOTE_EXPECTED_RESULTS." >&2
+                    exit 1
+                    ;;
+            esac
+            if ! [[ "$launch_expected" =~ ^[1-9][0-9]*$ ]]; then
+                echo "bench/aws/ab.sh: invalid launch metadata in $REMOTE_EXPECTED_LINES." >&2
+                exit 1
+            fi
+            if ! [[ "$EXPECTED_RESULTS" =~ ^[1-9][0-9]*$ ]]; then
+                echo "bench/aws/ab.sh: invalid launch metadata in $REMOTE_EXPECTED_RESULTS." >&2
+                exit 1
+            fi
+            [ "$EXPECT_LINES_EXPLICIT" = "1" ] || EXPECT_LINES="$launch_expected"
+            run_format=current
+        elif [ "$launch_expected" = "missing" ] && [ "$launch_results" = "missing" ]; then
+            run_format=legacy
+            EXPECTED_RESULTS=0
+        else
+            # Observe one runner state before rejecting this partial protocol.
+            # This keeps terminal-state diagnostics deterministic while still
+            # preventing any result copy or teardown.
+            run_format=inconsistent
+            EXPECTED_RESULTS=0
+        fi
+        echo "expected raw.tsv lines: $EXPECT_LINES"
+        runner=-1; total=0; complete=0; results_complete=0
+        status_required=0
+        runner_status=missing
         # NOTE: the pattern is 'bench/results/ab_runner[.]sh', NOT
         # 'bench/results/ab_runner.sh'.  ssh runs this command as the remote
         # shell's `bash -c "<full command>"`, whose own cmdline contains the
@@ -206,23 +337,97 @@ finish)
         # bracket makes the regex require a literal dot, which the bracketed
         # text in the wrapper's cmdline does not contain.
         for i in $(seq 1 "$AB_POLLS"); do
-            state=$(ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
+            if ! state=$(ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
                 "cd $REMOTE_REPO && n=\$(pgrep -f 'bench/results/ab_runner[.]sh' | wc -l); \
-                 c=0; for f in bench/results/ab-commit-*/raw.tsv bench/results/ab-h2-*/raw.tsv; do [ -f \"\$f\" ] && \
-                 [ \"\$(wc -l < \"\$f\")\" -ge $EXPECT_LINES ] && c=\$((c+1)); done; echo \"\$n \$c\"" \
-                2>/dev/null)
-            runner="${state%% *}"
-            complete="${state##* }"
-            [ "$runner" = "0" ] && [ "$complete" -ge 1 ] && break
+                 t=0; c=0; for d in bench/results/ab-commit-* bench/results/ab-h2-*; do \
+                 [ -d \"\$d\" ] || continue; t=\$((t+1)); f=\"\$d/raw.tsv\"; \
+                 [ -f \"\$f\" ] && [ \"\$(wc -l < \"\$f\")\" -ge $EXPECT_LINES ] && c=\$((c+1)); done; \
+                 r=0; [ -e $REMOTE_RUNNER_STATUS_REQUIRED ] && r=1; \
+                 s=missing; [ -f $REMOTE_RUNNER_STATUS ] && s=\$(cat $REMOTE_RUNNER_STATUS); \
+                 echo \"\$n \$t \$c \$r \$s\"" \
+                2>/dev/null); then
+                echo "bench/aws/ab.sh: failed to poll remote runner state." >&2
+                exit 1
+            fi
+            state_extra=;
+            read -r runner total complete status_required runner_status state_extra <<< "$state"
+            if ! [[ "$runner" =~ ^[0-9]+$ && "$total" =~ ^[0-9]+$ && \
+                    "$complete" =~ ^[0-9]+$ && "$status_required" =~ ^[01]$ ]] || \
+               [ -n "$state_extra" ]; then
+                echo "bench/aws/ab.sh: invalid remote runner state: $state" >&2
+                exit 1
+            fi
+            case "$runner_status" in
+                missing|[0-9]|[1-9][0-9]*) ;;
+                *)
+                    echo "bench/aws/ab.sh: invalid remote runner status: $runner_status" >&2
+                    exit 1
+                    ;;
+            esac
+            results_complete=0
+            if [ "$run_format" = "current" ]; then
+                if [ "$total" -eq "$EXPECTED_RESULTS" ] && \
+                   [ "$complete" -eq "$EXPECTED_RESULTS" ]; then
+                    results_complete=1
+                fi
+            elif [ "$total" -ge 1 ] && [ "$complete" -eq "$total" ]; then
+                results_complete=1
+            fi
+            if [ "$runner" = "0" ]; then
+                if [ "$run_format" = "inconsistent" ]; then
+                    echo "bench/aws/ab.sh: launch metadata protocol marker is missing." >&2
+                    exit 1
+                elif [ "$run_format" = "current" ]; then
+                    if [ "$status_required" != "1" ]; then
+                        echo "bench/aws/ab.sh: current-format status protocol marker is missing." >&2
+                        exit 1
+                    fi
+                    if [ "$runner_status" = "missing" ]; then
+                        echo "bench/aws/ab.sh: remote A/B runner success marker is missing." >&2
+                        exit 1
+                    fi
+                elif [ "$status_required" != "0" ] || [ "$runner_status" != "missing" ]; then
+                    echo "bench/aws/ab.sh: legacy run has an inconsistent status protocol marker." >&2
+                    exit 1
+                fi
+                if [ "$runner_status" != "missing" ] && [ "$runner_status" != "0" ]; then
+                    echo "bench/aws/ab.sh: remote A/B runner failed (status=$runner_status)." >&2
+                    exit 1
+                fi
+                if [ "$results_complete" = "1" ]; then break; fi
+                echo "bench/aws/ab.sh: not all configured A/B results are complete." >&2
+                exit 1
+            fi
             sleep "$AB_POLL_INTERVAL"
         done
-        echo "poll done: runner_procs=${runner:-?} complete_rawtsv=${complete:-?} at $(date -u)"
+        echo "poll done: runner_procs=${runner:-?} result_dirs=${total:-?} complete_rawtsv=${complete:-?} at $(date -u)"
+
+        if [ "$runner" != "0" ]; then
+            echo "bench/aws/ab.sh: remote A/B runner did not finish within the poll budget." >&2
+            exit 1
+        fi
+        if [ "$results_complete" != "1" ]; then
+            echo "bench/aws/ab.sh: not all configured A/B results are complete." >&2
+            exit 1
+        fi
 
         echo "pulling results ..."
-        for d in $(ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
-            "cd $REMOTE_REPO && ls -d bench/results/ab-commit-* bench/results/ab-h2-* 2>/dev/null"); do
-            scp "${SSH_OPTS[@]}" -r "$SERVER_REMOTE:$REMOTE_REPO/$d" "$REPO_ROOT/bench/results/" \
-                && echo "scp OK: $d" || echo "SCP FAILED: $d"
+        if ! result_dirs=$(ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
+            "cd $REMOTE_REPO && find bench/results -maxdepth 1 -type d \\
+             \( -name 'ab-commit-*' -o -name 'ab-h2-*' \) -print"); then
+            echo "bench/aws/ab.sh: failed to list remote A/B results." >&2
+            exit 1
+        fi
+        if [ -z "$result_dirs" ]; then
+            echo "bench/aws/ab.sh: no remote A/B result directories found." >&2
+            exit 1
+        fi
+        for d in $result_dirs; do
+            if ! scp "${SSH_OPTS[@]}" -r "$SERVER_REMOTE:$REMOTE_REPO/$d" "$REPO_ROOT/bench/results/"; then
+                echo "bench/aws/ab.sh: failed to copy A/B result: $d" >&2
+                exit 1
+            fi
+            echo "scp OK: $d"
         done
         for f in "$REPO_ROOT"/bench/results/ab-commit-*/raw.tsv \
                  "$REPO_ROOT"/bench/results/ab-h2-*/raw.tsv; do
@@ -235,12 +440,18 @@ finish)
         # self-shutdown) remain the backstop; down.sh is just skipped here.
         if [ "${TEARDOWN:-1}" = "1" ]; then
             echo "tearing down: $(date -u)"
-            bash "$(dirname "$0")/down.sh" 2>&1 | tail -4
+            if ! bash "$(dirname "$0")/down.sh" 2>&1 | tail -4; then
+                echo "bench/aws/ab.sh: teardown failed; instance was left running." >&2
+                exit 1
+            fi
         else
             echo "teardown skipped (TEARDOWN=0) — instance left up for chained runs"
         fi
         echo "AB FINISH COMPLETE: $(date -u)"
-    } >> "$AB_FINISH_LOG" 2>&1
+    ) >> "$AB_FINISH_LOG" 2>&1; then
+        echo "bench/aws/ab.sh: finish failed; details -> $AB_FINISH_LOG" >&2
+        exit 1
+    fi
     echo "finish running in background; progress -> $AB_FINISH_LOG"
     ;;
 

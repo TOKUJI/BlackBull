@@ -85,6 +85,21 @@ that the runner is alive and fails closed if the upload or remote start fails.
 `RUN_LAUNCH_TIMEOUT` and `AB_LAUNCH_TIMEOUT` bound that handshake; both
 default to 30 seconds.
 
+`ab.sh launch` records the expected `raw.tsv` line count and configured result
+lane count in `bench/results/ab_expected_lines` and `ab_expected_results` on
+the instance.  `ab.sh finish` reads both values, so it remains safe when finish
+is invoked with different `ROUNDS` or profile variables, and succeeds only
+when every launch-declared lane is present and complete.  If `EXPECT_LINES` is
+explicitly supplied to finish, it overrides only the recorded line threshold
+for manual recovery; the metadata and status protocol checks still apply.  For
+runs created before this metadata existed, finish falls back to its local
+`EXPECT_LINES` value and requires every discovered result to be complete;
+metadata read failures, partial protocol state, or invalid metadata abort the
+finish instead of starting a misleading copy or teardown.
+The detached runner writes a success status only after every configured lane
+finishes successfully; runner failures, poll failures, and result-copy
+failures leave the instance running for recovery.
+
 ## What gets created (and what `down.sh` removes)
 
 | Resource           | Default name         | Created when    | Removed by  |

@@ -156,7 +156,14 @@ Instance lifecycle via `bench/aws/up.sh` / `install.sh` / `down.sh`, with
    PID and is bounded by `AB_LAUNCH_TIMEOUT` (default 30 seconds).
 5. **Finish:** `bash bench/aws/ab.sh finish` (run nohup'd locally) polls the
    remote `raw.tsv` files to their expected line count, scp's the result dirs
-   back, then runs `down.sh`.  (Instance self-termination is the backstop.)
+   back, then runs `down.sh`.  The expected line count and result-lane count
+   are recorded at launch, so finish may use different `ROUNDS` or profile
+   values without changing the completeness check.  An explicit
+   `EXPECT_LINES` overrides only the line threshold; launch metadata and
+   runner-status checks remain mandatory.  The detached runner writes a
+   success marker only after every lane succeeds; missing, incomplete, or
+   extra result lanes and poll or result-copy failures abort before teardown.
+   (Instance self-termination is the backstop.)
 
 ## 5. Tools
 
