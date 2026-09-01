@@ -365,10 +365,10 @@ class HTTP1ResponseRecipient:
                 raise ResponseTooLarge(
                     f'declared body {declared} bytes exceeds '
                     f'BB_CLIENT_BODY_MAX_TOTAL={max_total}')
-            body = await self._body_read(reader.readexactly(declared))
-            if len(body) < declared:
-                raise ConnectionError('connection closed mid-body')
-            return body
+            # In slices, like the streaming path: one ``readexactly`` for the
+            # whole body is a single read to every bound above it.
+            return b''.join([chunk async for chunk in
+                             self._read_declared(reader, declared)])
         # No Content-Length and no chunked: caller (e.g. HEAD, 204, 304) must
         # interpret as empty body.  We don't read-until-EOF here because that
         # would break keep-alive.
@@ -384,14 +384,31 @@ class HTTP1ResponseRecipient:
         declared = self._declared_length(headers)
         if not declared:
             return
-        # In slices, not one ``readexactly(declared)``.  This method's whole
-        # promise is that a large response need not fit in memory, and a
-        # single exact read hands the caller the entire body as one chunk —
-        # the memory bound absent on exactly the path that asked for it.
+        async for chunk in self._read_declared(reader, declared):
+            yield chunk
+
+    async def _read_declared(self, reader: AbstractReader,
+                             declared: int) -> AsyncIterator[bytes]:
+        """A ``Content-Length`` body, in transport-paced slices.
+
+        Slices, so a large response need not fit in memory: a single exact
+        read hands the caller the whole body as one chunk, which is the
+        memory bound missing on exactly the path that asked for it.
+
+        Up-to-n rather than ``readexactly``, because an exact read loops
+        internally until its slice is full and every bound above it therefore
+        sees one read.  On the buffering path that made
+        ``BB_CLIENT_BODY_TIMEOUT`` the deadline for the entire body, so a
+        large response that never once stopped arriving was refused for
+        outlasting what one read is allowed — while its own documentation
+        promised a per-read progress deadline.  Transport-paced reads return
+        whatever arrived, which is the shape and the reason of the server's
+        ``body_chunk_max`` path.
+        """
         remaining = declared
         while remaining > 0:
             chunk = await self._body_read(
-                reader.readexactly(min(remaining, _STREAM_CHUNK_SIZE)))
+                reader.read(min(remaining, _STREAM_CHUNK_SIZE)))
             if not chunk:
                 # A short-reading reader answers EOF with b'', so subtracting
                 # it left the loop spinning on a condition nothing could
@@ -525,12 +542,11 @@ class HTTP1ResponseRecipient:
                 raise ResponseTooLarge(
                     f'body exceeds BB_CLIENT_BODY_MAX_TOTAL={max_total}')
             # In slices, so one peer-declared chunk-size is never one
-            # allocation.  ``_stream_body`` already does this for a declared
-            # length; a chunked body reached the same caller without it.
+            # allocation and one chunk is not one read.
             remaining = size
             while remaining > 0:
                 piece = await self._body_read(
-                    reader.readexactly(min(remaining, _STREAM_CHUNK_SIZE)))
+                    reader.read(min(remaining, _STREAM_CHUNK_SIZE)))
                 if not piece:
                     raise ConnectionError('connection closed mid-chunk')
                 remaining -= len(piece)
