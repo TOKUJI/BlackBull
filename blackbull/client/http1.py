@@ -19,7 +19,8 @@ import logging
 from ..env import get_settings
 from ..headers import Headers, HeaderList
 from ..server.recipient import (AbstractReader, AsyncioReader,
-                                IncompleteReadError, ReadLimitExceeded)
+                                IncompleteReadError, ReadLimitExceeded,
+                                _accepts_read_limit)
 from ..server.sender import AbstractWriter, AsyncioWriter
 from ._connect import DEFAULT_CONNECT_TIMEOUT, open_connection as _open_connection
 from .exceptions import ConnectionError, ProtocolError, ResponseTooLarge
@@ -408,9 +409,29 @@ class HTTP1ResponseRecipient:
         a trailer field are discarded on receipt, so nothing legitimate needs
         more; the chunk-*size* is not discarded, but no legitimate one is
         anywhere near this long either.
+
+        Not every reader's ``readuntil`` takes the budget.  ``AbstractReader``
+        ships ``_accepts_read_limit`` for exactly that, and ``read_head``
+        consults it; passing the budget positionally and unconditionally
+        raised ``TypeError`` on a one-argument reader — and, because
+        ``receive`` marks the framing broken on any exception, abandoned the
+        connection along with it.  Falling back must not fall open, so the
+        default bounded implementation carries the same budget.  The answer is
+        cached on the reader, as ``read_head`` caches it, so the question is
+        asked once per connection rather than once per framing line.
         """
+        native = reader.__dict__.get('_readuntil_accepts_limit')
+        if native is None:
+            native = _accepts_read_limit(reader.readuntil)
+            try:
+                reader.__dict__['_readuntil_accepts_limit'] = native
+            except (AttributeError, TypeError):
+                pass  # a __slots__ reader answers the question every time.
         try:
-            return await cls._body_read(reader.readuntil(_CRLF, limit))
+            if native:
+                return await cls._body_read(reader.readuntil(_CRLF, limit))
+            return await cls._body_read(
+                AbstractReader._readuntil_bounded(reader, _CRLF, limit))
         except ReadLimitExceeded as exc:
             raise ResponseTooLarge(
                 f'chunk framing line exceeds '

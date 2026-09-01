@@ -155,3 +155,69 @@ class TestChunkTermination:
                 b'5\r\nhelloXX\r\n0\r\n\r\n')
         with pytest.raises(ProtocolError):
             await HTTP1ResponseRecipient().receive(_CannedReader(wire))
+
+
+class TestReaderCompatibility:
+    """A reader whose ``readuntil`` takes no budget still works.
+
+    ``AbstractReader`` ships ``_accepts_read_limit`` because implementations
+    with a one-argument ``readuntil`` exist — ``read_head`` consults it, and
+    ``PrefixReader`` is built on it.  The framing read passed the budget
+    positionally and unconditionally, so those readers raised ``TypeError`` on
+    the chunked path only.  Worse than a crash: ``receive()`` catches
+    ``BaseException`` to mark the framing broken, so the ``TypeError`` also
+    abandoned the connection.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_one_argument_readuntil_still_reads_a_chunked_body(self):
+        from blackbull.server.recipient import _accepts_read_limit
+
+        class _Legacy(AbstractReader):
+            def __init__(self, payload: bytes) -> None:
+                self._buf, self._pos = payload, 0
+
+            async def read(self, n: int = -1) -> bytes:
+                out = (self._buf[self._pos:] if n < 0
+                       else self._buf[self._pos:self._pos + n])
+                self._pos += len(out)
+                return out
+
+            async def readuntil(self, sep: bytes) -> bytes:      # no limit
+                idx = self._buf.find(sep, self._pos)
+                end = len(self._buf) if idx < 0 else idx + len(sep)
+                out = self._buf[self._pos:end]
+                self._pos = end
+                return out
+
+        reader = _Legacy(_chunked(b'hi'))
+        assert not _accepts_read_limit(reader.readuntil), 'the double is wrong'
+        res = await HTTP1ResponseRecipient().receive(reader)
+        assert res.body == b'hi'
+
+    @pytest.mark.asyncio
+    async def test_such_a_reader_is_still_bounded(self, monkeypatch):
+        """Falling back must not mean falling open."""
+        monkeypatch.setenv('BB_CLIENT_HEAD_MAX_LINE', '32')
+
+        class _Legacy(AbstractReader):
+            def __init__(self, payload: bytes) -> None:
+                self._buf, self._pos = payload, 0
+
+            async def read(self, n: int = -1) -> bytes:
+                out = (self._buf[self._pos:] if n < 0
+                       else self._buf[self._pos:self._pos + n])
+                self._pos += len(out)
+                return out
+
+            async def readuntil(self, sep: bytes) -> bytes:
+                idx = self._buf.find(sep, self._pos)
+                end = len(self._buf) if idx < 0 else idx + len(sep)
+                out = self._buf[self._pos:end]
+                self._pos = end
+                return out
+
+        wire = (b'HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n'
+                b'5;ext=' + b'a' * 200 + b'\r\nhello\r\n0\r\n\r\n')
+        with pytest.raises(ResponseTooLarge):
+            await HTTP1ResponseRecipient().receive(_Legacy(wire))
