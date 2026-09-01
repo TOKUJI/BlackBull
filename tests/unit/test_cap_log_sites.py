@@ -698,6 +698,52 @@ async def test_h2_ws_max_streams_per_connection_logs(caps_caplog, monkeypatch):
 
 
 # ----------------------------------------------------------------------
+# client_min_body_rate — the async client's response-body rate floor
+# ----------------------------------------------------------------------
+
+class _DrippingPeer(AbstractReader):
+    """A response body arriving at 10 B/s, on a clock the test moves."""
+
+    def __init__(self, script, clock) -> None:
+        self._script, self._clock, self._buf = list(script), clock, b''
+
+    async def read(self, n: int = -1) -> bytes:
+        await asyncio.sleep(0)
+        while not self._buf:
+            if not self._script:
+                return b''
+            gap, data = self._script.pop(0)
+            self._clock.now += gap
+            self._buf = data
+        want = len(self._buf) if n < 0 else min(n, len(self._buf))
+        out, self._buf = self._buf[:want], self._buf[want:]
+        return out
+
+
+@pytest.mark.asyncio
+async def test_client_min_body_rate_logs(caps_caplog, monkeypatch):
+    from types import SimpleNamespace
+
+    from blackbull.client.http1 import HTTP1ResponseRecipient
+
+    monkeypatch.setenv('BB_CLIENT_MIN_BODY_RATE', '1000')
+    monkeypatch.setenv('BB_CLIENT_MIN_BODY_RATE_GRACE', '1')
+    clock = SimpleNamespace(now=0.0)
+    monkeypatch.setattr('blackbull.client.http1._monotonic', lambda: clock.now)
+
+    script = [(0.0, b'HTTP/1.1 200 OK\r\ncontent-length: 100\r\n\r\n')]
+    script += [(0.0 if i == 0 else 1.0, b'x' * 10) for i in range(10)]
+    with pytest.raises(TimeoutError):
+        await HTTP1ResponseRecipient().receive(_DrippingPeer(script, clock))
+
+    records = _records_for(caps_caplog, 'client_min_body_rate')
+    assert len(records) >= 1
+    assert records[0].levelno == logging.WARNING
+    assert records[0].protocol == 'http1'
+    assert records[0].limit == 1000.0
+
+
+# ----------------------------------------------------------------------
 # Wiring audit — every cap in the inventory appears at >= 1 log_cap_hit()
 # call in the codebase.  Static check; catches "removed wiring without
 # noticing" regressions even when a functional test happens to skip.
@@ -717,6 +763,7 @@ _INVENTORY = (
     'h2_max_concurrent_streams',
     'h2_ws_max_streams_per_connection',
     'compression_max_inflight',
+    'client_min_body_rate',
 )
 
 

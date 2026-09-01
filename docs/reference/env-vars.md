@@ -74,8 +74,32 @@ what a report should hold the client to.
 | `BB_CLIENT_HEAD_MAX_TOTAL` | `65536` | Maximum total bytes in a response head the client will read (status line + all field lines + `CRLFCRLF`).  Bounds accumulation *as it reads*, so a peer that opens a header and never closes it cannot grow the client's memory.  Exceeded → `ResponseTooLarge`.  `0` disables. |
 | `BB_CLIENT_HEAD_MAX_LINE` | `8192` | Maximum bytes in a single status line or response field line.  Checked over the lines of an already-bounded head rather than during the read: no line can be longer than the block containing it, so this is a policy rule and not a second memory guard — the same division the server makes between `BB_HEADER_MAX_TOTAL` and `BB_HEADER_MAX_LINE`.  Also bounds a **chunk-size line and a trailer field line**, which are the same kind of thing and are discarded on receipt.  Exceeded → `ResponseTooLarge`.  `0` disables. |
 | `BB_CLIENT_HEAD_TIMEOUT` | `30.0` | Seconds the client will wait for a complete response head.  The time column for the read the two caps above bound by size: a peer that sends half a head and stops passes every byte budget forever.  Exceeded → `TimeoutError`, deliberately not a `ClientError`, so a caller can tell a peer that stalled from one that answered and refused — the same choice the client's connect deadline makes.  `0` disables. |
-| `BB_CLIENT_BODY_TIMEOUT` | `30.0` | Seconds the client will wait for a **single** response-body read — the chunk-size line, a slice of body octets, or the CRLF after a chunk.  Per read, not per body: the peer must keep making progress, which is what `BB_BODY_TIMEOUT` means on the server and `client_body_timeout` in nginx.  It abandons a peer that **stops**; a peer that trickles satisfies every individual read, and bounding that is a rate floor this client does not have yet.  Exceeded → `TimeoutError`.  `0` disables. |
+| `BB_CLIENT_BODY_TIMEOUT` | `30.0` | Seconds the client will wait for a **single** response-body read — the chunk-size line, a slice of body octets, or the CRLF after a chunk.  Per read, not per body: the peer must keep making progress, which is what `BB_BODY_TIMEOUT` means on the server and `client_body_timeout` in nginx.  It abandons a peer that **stops**; a peer that trickles satisfies every individual read, and bounding that is `BB_CLIENT_MIN_BODY_RATE`.  Exceeded → `TimeoutError`.  `0` disables. |
 | `BB_CLIENT_BODY_MAX_TOTAL` | `0` (off) | Maximum total response-body octets the client will **buffer** for one response.  Bounds `receive()` only — `stream()` exists so a large response need not fit in memory, and a cap on the shared chunked reader would cap the path that asked not to be capped.  A declared `Content-Length` over the cap is refused before a body octet is read; a chunked body is refused the moment the running total passes it.  **Off by default**, unlike the server's `BB_MAX_BODY_SIZE`: that number bounds what strangers may push into a process, while this bounds what you asked for, and a wheel or a dataset is not the size of a form post.  Set it when you know what your peer should be returning.  Exceeded → `ResponseTooLarge`. |
+| `BB_CLIENT_MIN_BODY_RATE` | `0` (off) | Minimum sustained rate, in **bytes per second**, at which a response **body** must arrive; below it, past `BB_CLIENT_MIN_BODY_RATE_GRACE`, the response is abandoned and the connection with it.  What is measured is a policy, not just a number.  The numerator is body payload only — chunk-size lines, chunk extensions, terminators and trailers are discarded on receipt, so octets a peer may pad at will buy no credit.  The denominator is every second spent waiting on the transport, framing reads included, so a peer cannot stall in front of the parts that are not counted; time your own code spends between `stream()` yields is *not* in it, because the clock runs only inside a read.  The window opens at the **first body octet**: a peer that flushes its head and then works — a slow query, a report built while it is streamed, an LLM's time to first token — is not dripping.  **Off by default**, unlike the server's `BB_MIN_BODY_RATE`; see the note below.  Exceeded → `TimeoutError`.  `0` disables. |
+| `BB_CLIENT_MIN_BODY_RATE_GRACE` | `5.0` | Seconds of body-read waiting, after the first body octet, before `BB_CLIENT_MIN_BODY_RATE` is enforced.  Also the width of the window the rate is averaged over: it rolls forward whenever it is satisfied, so a burst buys the window it happened in rather than the whole response. |
+
+### Why the client's rate floor is off and the server's is on
+
+The server's `BB_MIN_BODY_RATE` defaults to Kestrel's 240 B/s, and that number
+is `MinRequestBodyDataRate` — a **request** knob.  A request body is pushed by
+a peer that already holds the bytes, so a gap in it is anomalous.  A response
+body is generated while it is sent, so a gap is the normal signature of work.
+Same constant, different distribution.
+
+The client's floor exempts the wait before the first body octet, which covers
+the common shape of a peer that flushes its head and then thinks.  After that
+octet no exemption is possible: a gap that eventually produces a body and one
+that never does are the same observation until the next octet arrives, so an
+event stream, a long poll or any response held open deliberately cannot be
+told from a drip while it is happening.  No threshold fixes that, and no
+widely used Python client (requests, httpx, aiohttp, urllib3) enables a
+response rate floor by default.
+
+So the floor is off, and setting it is the operator stating that this peer is
+a transfer rather than a stream.  Until it is set, a trickling peer is a known
+open path — bounded by `BB_CLIENT_BODY_TIMEOUT` only insofar as it stops
+entirely.
 
 ## Socket tuning
 
