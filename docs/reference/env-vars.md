@@ -57,6 +57,24 @@ first-hit-then-summary rate-limit model.
 | `BB_STREAM_QUEUE_DEPTH` | `64` | `asyncio.Queue` depth for HTTP/2 per-stream request-body events.  Caps memory growth when an ASGI handler is slower than the client uploading data. |
 | `BB_WS_QUEUE_DEPTH` | `0` | WebSocket inbound **read-ahead** depth.  `0` (default) reads frames inline, in the handler's own task, when it calls `receive()` — no reader task and no per-message queue hop.  A positive value restores a background reader that reads *ahead* of the handler into a queue of that depth, so control frames are serviced between `receive()` calls and up to `N` messages buffer under a slow handler.  Registering a `websocket_message` listener does not force read-ahead on: that event fires when the server reads rather than when the handler consumes, and a consuming handler is already reading, so the reader is only marked *deferred* and the idle watchdog starts it if the handler goes quiet.  See the [WebSocket guide](../guide/websockets.md). |
 
+## Async HTTP client
+
+Bounds for the client under `blackbull/client/`, which reads responses the way
+the server reads requests and needs its own answer for a peer that never
+finishes one.  They are named and defaulted apart from the server's caps
+because the roles are not symmetric: a server is addressed by anyone, while a
+client picks its peer — and pointing one at a deliberately misbehaving server
+is what [`blackbull.fault_injection`](../guide/fault_injection.md) exists for,
+so a bound tight enough to hide such a peer would be a defect.  See
+[SECURITY.md](https://github.com/TOKUJI/BlackBull/blob/master/SECURITY.md) for
+what a report should hold the client to.
+
+| Variable | Default | Controls |
+|---|---|---|
+| `BB_CLIENT_HEAD_MAX_TOTAL` | `65536` | Maximum total bytes in a response head the client will read (status line + all field lines + `CRLFCRLF`).  Bounds accumulation *as it reads*, so a peer that opens a header and never closes it cannot grow the client's memory.  Exceeded → `ResponseTooLarge`.  `0` disables. |
+| `BB_CLIENT_HEAD_MAX_LINE` | `8192` | Maximum bytes in a single status line or response field line.  Checked over the lines of an already-bounded head rather than during the read: no line can be longer than the block containing it, so this is a policy rule and not a second memory guard — the same division the server makes between `BB_HEADER_MAX_TOTAL` and `BB_HEADER_MAX_LINE`.  Exceeded → `ResponseTooLarge`.  `0` disables. |
+| `BB_CLIENT_HEAD_TIMEOUT` | `30.0` | Seconds the client will wait for a complete response head.  The time column for the read the two caps above bound by size: a peer that sends half a head and stops passes every byte budget forever.  Exceeded → `TimeoutError`, deliberately not a `ClientError`, so a caller can tell a peer that stalled from one that answered and refused — the same choice the client's connect deadline makes.  `0` disables. |
+
 ## Socket tuning
 
 | Variable | Default | Controls |

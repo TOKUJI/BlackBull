@@ -728,6 +728,28 @@ class Settings:
     #: typical reverse-proxy defaults.
     header_max_total: int = 65536
 
+    #: Maximum total bytes in a response head the async client will read
+    #: (status line + all field lines + CRLFCRLF).  Bounds accumulation as it
+    #: reads, so an endless header cannot grow the client's memory.  Held
+    #: apart from ``header_max_total`` because the roles are not symmetric: a
+    #: server is addressed by anyone, a client picks its peer, and pointing
+    #: one at a deliberately hostile server is what
+    #: ``blackbull.fault_injection`` exists for.  0 disables.
+    client_head_max_total: int = 65536
+
+    #: Maximum bytes in a single status line or response field line.  Checked
+    #: over the lines of an already-bounded head rather than during the read:
+    #: no line can be longer than the block containing it, so this is a policy
+    #: rule, not a second memory guard — the same division the server makes
+    #: between ``header_max_total`` and ``header_max_line``.  0 disables.
+    client_head_max_line: int = 8192
+
+    #: Seconds the async client will wait for a complete response head.  The
+    #: time column for the read that ``client_head_max_total`` bounds by size:
+    #: a peer that sends half a head and stops passes every byte budget
+    #: forever.  0 disables.
+    client_head_timeout: float = 30.0
+
     #: Dual-path conformance lane.  When true, every request
     #: round-trips the native :class:`~blackbull.connection.Connection` through
     #: ``as_scope()`` + ``from_scope()`` before dispatch, so the ASGI compat
@@ -1017,6 +1039,9 @@ def get_settings() -> Settings:
         write_timeout=_float_env_nonneg('BB_WRITE_TIMEOUT', 30.0),
         header_max_line=_int_env_nonneg('BB_HEADER_MAX_LINE', 8192),
         header_max_total=_int_env_nonneg('BB_HEADER_MAX_TOTAL', 65536),
+        client_head_max_total=_int_env_nonneg('BB_CLIENT_HEAD_MAX_TOTAL', 65536),
+        client_head_max_line=_int_env_nonneg('BB_CLIENT_HEAD_MAX_LINE', 8192),
+        client_head_timeout=_float_env_nonneg('BB_CLIENT_HEAD_TIMEOUT', 30.0),
         force_asgi_scope=_bool_env('BB_FORCE_ASGI_SCOPE', False),
         body_chunk_size=_int_env('BB_BODY_CHUNK_SIZE', 65536),
         body_chunk_max=_int_env('BB_BODY_CHUNK_MAX', 524288),
