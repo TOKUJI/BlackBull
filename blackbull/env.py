@@ -750,6 +750,14 @@ class Settings:
     #: forever.  0 disables.
     client_head_timeout: float = 30.0
 
+    #: Seconds the async client will wait for a single response-body read.
+    #: Per read, not per body: a peer must keep making progress, which is the
+    #: same shape as ``body_timeout`` and as nginx's ``client_body_timeout``.
+    #: It stops a peer that **stops**; a peer that trickles satisfies every
+    #: individual read and is the rate floor's job, which does not exist yet.
+    #: 0 disables.
+    client_body_timeout: float = 30.0
+
     #: Dual-path conformance lane.  When true, every request
     #: round-trips the native :class:`~blackbull.connection.Connection` through
     #: ``as_scope()`` + ``from_scope()`` before dispatch, so the ASGI compat
@@ -1042,6 +1050,7 @@ def get_settings() -> Settings:
         client_head_max_total=_int_env_nonneg('BB_CLIENT_HEAD_MAX_TOTAL', 65536),
         client_head_max_line=_int_env_nonneg('BB_CLIENT_HEAD_MAX_LINE', 8192),
         client_head_timeout=_float_env_nonneg('BB_CLIENT_HEAD_TIMEOUT', 30.0),
+        client_body_timeout=_float_env_nonneg('BB_CLIENT_BODY_TIMEOUT', 30.0),
         force_asgi_scope=_bool_env('BB_FORCE_ASGI_SCOPE', False),
         body_chunk_size=_int_env('BB_BODY_CHUNK_SIZE', 65536),
         body_chunk_max=_int_env('BB_BODY_CHUNK_MAX', 524288),
