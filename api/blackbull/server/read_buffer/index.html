@@ -5960,7 +5960,7 @@ a per-read one — the same shape as the reader's own <code>maybe_pause</code>.<
 
 
 <h4 id="blackbull.server.read_buffer.ReadBuffer.find" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">find</span><span class="p">(</span><span class="n">sep</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">find</span><span class="p">(</span><span class="n">sep</span><span class="p">,</span> <span class="n">start</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span></code>
 
 <a href="#blackbull.server.read_buffer.ReadBuffer.find" class="headerlink" title="Permanent link">&para;</a></h4>
 
@@ -5972,6 +5972,8 @@ a per-read one — the same shape as the reader's own <code>maybe_pause</code>.<
 call: its callers are the generic <code>readuntil</code> paths (chunk-size lines,
 WebSocket framing), where the search target changes between calls so a
 carried scan offset would be wrong rather than merely wasteful.</p>
+<p><em>start</em> is a relative offset used by one <code>readuntil</code> call to resume
+its scan while a fixed separator is still pending.</p>
 
 
     </div>

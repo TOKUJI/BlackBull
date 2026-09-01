@@ -6779,7 +6779,7 @@ Concrete transport readers override this.</p>
 
 
 <h4 id="blackbull.server.recipient.AbstractReader.readuntil" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">readuntil</span><span class="p">(</span><span class="n">sep</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">readuntil</span><span class="p">(</span><span class="n">sep</span><span class="p">,</span> <span class="n">limit</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
@@ -6790,9 +6790,7 @@ Concrete transport readers override this.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Read until <em>sep</em> is seen (inclusive).  Default: byte-wise via
-:meth:<code>read</code>.  Concrete transport readers override this with the
-stream's native, buffered implementation.</p>
+        <p>Read until <em>sep</em> is seen, choosing one limit policy at entry.</p>
 
 
     </div>
@@ -7717,7 +7715,7 @@ UTF-8 violations use 1007.</p>
 
 
 
-        <p><code>read_head</code> was given a byte budget and the head passed it.</p>
+        <p>A bounded reader operation was given a byte budget and passed it.</p>
 <p>Belongs to the reader contract rather than to any protocol: the reader is
 told a budget and reports that it was passed.  Which status that becomes
 (431 for a head with too many fields, 400 for bytes that were never a head

@@ -6569,6 +6569,26 @@ only <code>readuntil</code> can do.  Both are held to the same behaviour by
 <code>tests/unit/test_read_head_contract.py</code>, which drives every reader kind
 through the same cases — a reader that disagreed on one of them would put
 a hole in exactly one deployment shape.</p>
+<p>The same reader contract supports <code>readuntil(separator, limit=0)</code>.  A positive
+limit includes the separator and is enforced while <code>BufferReader</code> accumulates
+bytes, so a chunk-framing line cannot use the transport's released
+backpressure window as unbounded storage.  <code>AsyncioReader</code> temporarily applies
+the same budget to the native stream read, and <code>PrefixReader</code> counts replayed
+bytes and underlying bytes as one unit, including separators that cross that
+boundary.  An overrun remains resident in whichever reader owns those bytes
+and carries bounded evidence in <code>ReadLimitExceeded</code>; the HTTP/1.1 recipient
+turns that evidence into its 400 framing response.</p>
+<p>The public reader methods choose the policy once: <code>limit &lt;= 0</code> enters an
+unbounded implementation, while a positive value enters a bounded
+implementation whose precondition is that the budget is positive.  Concrete
+readers override those two paths separately, so accumulation loops do not
+scatter checks for whether a limit is enabled.</p>
+<p>The default line-by-line <code>read_head</code> path passes the head limit to each line
+read as a per-line accumulation bound, then applies the same limit to the
+completed head.  If a later line overruns, evidence from earlier lines is
+prepended before the exception reaches HTTP/1.1.  This keeps one malformed
+line bounded while retaining the request-line terminator needed to distinguish
+a 431-sized header block from a 400-sized unterminated request line.</p>
 <p><code>limit</code> is what makes the read bounded, and it applies to <em>every</em> request
 on the connection, not just the first.  A keep-alive peer's second head
 gets the same budget as its first.</p>

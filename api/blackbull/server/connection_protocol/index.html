@@ -4251,17 +4251,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol.BufferReader.read_head" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        read_head
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.server.connection_protocol.BufferReader.wait_for_data" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5561,17 +5550,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.connection_protocol.BufferReader.read_head" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        read_head
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.server.connection_protocol.BufferReader.wait_for_data" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5927,34 +5905,6 @@ condition backpressure exists to prevent is not the one in play.
 Pausing anyway would cost a <code>pause_reading</code>/<code>resume_reading</code> pair —
 two <code>epoll_ctl</code> calls — on every arrival for the whole of a large
 read, since the next park releases it again.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.server.connection_protocol.BufferReader.read_head" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">read_head</span><span class="p">(</span><span class="n">limit</span><span class="p">)</span></code>
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-async"><code>async</code></small>
-  </span>
-
-<a href="#blackbull.server.connection_protocol.BufferReader.read_head" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>The message head, terminator included — found in one scan.</p>
-<p>The override the whole rewrite exists for: the terminator is looked for
-once, across everything resident, and the head leaves the buffer in a
-single copy.  Resumable, so bytes already scanned are not scanned again
-when the head arrives split across reads.</p>
-<p>Contract as documented on :meth:<code>AbstractReader.read_head</code> — an idle
-close returns <code>b''</code> and a truncated one raises with the partial.</p>
 
 
     </div>
