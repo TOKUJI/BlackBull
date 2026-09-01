@@ -11,12 +11,15 @@ body, and *reads* status lines + response headers + response body.
 """
 import asyncio
 import ssl as _ssl
+from time import monotonic as _monotonic
 from collections.abc import AsyncIterable, AsyncIterator
 from http import HTTPMethod
 from typing import Union
 
 import logging
 from ..env import get_settings
+from ..server.cap_log import log_cap_hit
+from ..server.rate_window import ByteRateFloor
 from ..headers import Headers, HeaderList
 from ..server.recipient import (AbstractReader, AsyncioReader,
                                 IncompleteReadError, ReadLimitExceeded)
@@ -199,6 +202,10 @@ class HTTP1ResponseRecipient:
         #: begin inside it and parse a body as a response.  The server's
         #: recipient carries the same flag for the same reason.
         self.framing_broken = False
+        #: Built on the first body read, from the settings then in force, and
+        #: kept for the message: the window has to span reads to mean
+        #: anything.
+        self._rate_floor: ByteRateFloor | None = None
 
     def _refuse_if_broken(self) -> None:
         if self.framing_broken:
@@ -257,12 +264,18 @@ class HTTP1ResponseRecipient:
             else:
                 head = await reader.read_head(cfg.client_head_max_total)
         except ReadLimitExceeded as exc:
+            log_cap_hit('client_head_max_total', requested=len(exc.seen),
+                        limit=cfg.client_head_max_total, protocol='http1')
             raise ResponseTooLarge(
                 f'response head exceeds '
                 f'BB_CLIENT_HEAD_MAX_TOTAL={cfg.client_head_max_total}',
                 exc.seen) from None
         except IncompleteReadError as exc:
             raise ConnectionError('connection closed before response') from exc
+        except TimeoutError:
+            log_cap_hit('client_head_timeout', requested=timeout,
+                        limit=timeout, protocol='http1')
+            raise
         if not head:
             raise ConnectionError('connection closed before response')
 
@@ -271,6 +284,8 @@ class HTTP1ResponseRecipient:
         if max_line > 0 and len(head) > max_line:
             for line in head.split(_CRLF):
                 if len(line) > max_line:
+                    log_cap_hit('client_head_max_line', requested=len(line),
+                                limit=max_line, protocol='http1')
                     raise ResponseTooLarge(
                         f'response header line {len(line)} bytes > '
                         f'BB_CLIENT_HEAD_MAX_LINE={max_line}', head[:max_line])
@@ -325,27 +340,51 @@ class HTTP1ResponseRecipient:
                 f'{sorted(values)!r}')
         return int(values.pop())
 
-    @staticmethod
-    async def _body_read(coro):
-        """One body read under ``BB_CLIENT_BODY_TIMEOUT``.
+    async def _body_read(self, coro):
+        """One body read, under both of the body's time bounds.
 
-        Per read, not per body — the peer must keep making progress, which is
-        what ``body_timeout`` means on the server and ``client_body_timeout``
-        in nginx.  It abandons a peer that **stops**; one that trickles
-        satisfies every individual read, and that is the rate floor's job.
+        ``BB_CLIENT_BODY_TIMEOUT`` is per read, not per body — the peer must
+        keep making progress, which is what ``body_timeout`` means on the
+        server and ``client_body_timeout`` in nginx.  It abandons a peer that
+        **stops**.
+
+        ``BB_CLIENT_MIN_BODY_RATE`` is what it cannot do: a read returns on
+        any arrival, so the deadline degrades to "send something every N
+        seconds", which a one-byte drip always satisfies.  The elapsed time
+        measured here is transport-wait time only — this is the one place a
+        body read waits — so a caller slow to consume is never mistaken for a
+        peer slow to send.
 
         Truncation is named here too: ``AbstractReader.readexactly`` returns
         short at EOF while ``AsyncioReader`` raises, and neither answer
         belonged to the client's exception family.
         """
-        timeout = get_settings().client_body_timeout
+        cfg = get_settings()
+        timeout = cfg.client_body_timeout
+        if self._rate_floor is None:
+            self._rate_floor = ByteRateFloor(cfg.client_min_body_rate,
+                                             cfg.client_min_body_rate_grace)
+        started = _monotonic()
         try:
             if timeout > 0:
                 async with asyncio.timeout(timeout):
-                    return await coro
-            return await coro
+                    data = await coro
+            else:
+                data = await coro
         except IncompleteReadError as exc:
             raise ConnectionError('connection closed mid-body') from exc
+        except TimeoutError:
+            log_cap_hit('client_body_timeout', requested=timeout,
+                        limit=timeout, protocol='http1')
+            raise
+        if self._rate_floor.record(len(data), _monotonic() - started):
+            log_cap_hit('client_min_body_rate',
+                        requested=self._rate_floor.observed,
+                        limit=self._rate_floor.rate, protocol='http1')
+            raise TimeoutError(
+                f'response body below '
+                f'BB_CLIENT_MIN_BODY_RATE={self._rate_floor.rate} B/s')
+        return data
 
     async def _read_body(self, reader: AbstractReader, headers: Headers) -> bytes:
         # The total lives here and not in ``_read_chunked``, which
@@ -361,13 +400,18 @@ class HTTP1ResponseRecipient:
             if max_total and declared > max_total:
                 # Refused on the declaration, before an octet is read — the
                 # peer already told us it will not fit.
+                log_cap_hit('client_body_max_total', requested=declared,
+                            limit=max_total, protocol='http1')
                 raise ResponseTooLarge(
                     f'declared body {declared} bytes exceeds '
                     f'BB_CLIENT_BODY_MAX_TOTAL={max_total}')
-            body = await self._body_read(reader.readexactly(declared))
-            if len(body) < declared:
-                raise ConnectionError('connection closed mid-body')
-            return body
+            # In slices, like the streaming path.  One ``readexactly`` for
+            # the whole body would be a single read to every bound above it:
+            # the per-read deadline would become a per-body one, and the rate
+            # floor would get one sample, at the end, from a peer that never
+            # reaches it.
+            return b''.join([chunk async for chunk in
+                             self._read_declared(reader, declared)])
         # No Content-Length and no chunked: caller (e.g. HEAD, 204, 304) must
         # interpret as empty body.  We don't read-until-EOF here because that
         # would break keep-alive.
@@ -387,10 +431,27 @@ class HTTP1ResponseRecipient:
         # promise is that a large response need not fit in memory, and a
         # single exact read hands the caller the entire body as one chunk —
         # the memory bound absent on exactly the path that asked for it.
+        async for chunk in self._read_declared(reader, declared):
+            yield chunk
+
+    async def _read_declared(self, reader: AbstractReader,
+                             declared: int) -> AsyncIterator[bytes]:
+        """A ``Content-Length`` body, in slices, for both entry points.
+
+        Slicing is what makes the body's bounds mean what they say: each
+        slice is one read, so the deadline is per read and the rate floor
+        gets a sample per read rather than one at the end.
+
+        Up-to-n, not ``readexactly``: an exact read loops internally until it
+        has its full slice, so a trickling peer would still produce one
+        sample — at the end of a slice it never finishes.  Transport-paced
+        reads return whatever has arrived, which is the same reason the
+        server's ``body_chunk_max`` path is shaped this way.
+        """
         remaining = declared
         while remaining > 0:
             chunk = await self._body_read(
-                reader.readexactly(min(remaining, _STREAM_CHUNK_SIZE)))
+                reader.read(min(remaining, _STREAM_CHUNK_SIZE)))
             if not chunk:
                 # A short-reading reader answers EOF with b'', so subtracting
                 # it left the loop spinning on a condition nothing could
@@ -399,8 +460,7 @@ class HTTP1ResponseRecipient:
             remaining -= len(chunk)
             yield chunk
 
-    @classmethod
-    async def _read_framing_line(cls, reader: AbstractReader,
+    async def _read_framing_line(self, reader: AbstractReader,
                                  limit: int) -> bytes:
         """One chunk-framing line — chunk-size line or trailer field line.
 
@@ -410,8 +470,10 @@ class HTTP1ResponseRecipient:
         anywhere near this long either.
         """
         try:
-            return await cls._body_read(reader.readuntil(_CRLF, limit))
+            return await self._body_read(reader.readuntil(_CRLF, limit))
         except ReadLimitExceeded as exc:
+            log_cap_hit('client_head_max_line', requested=len(exc.seen),
+                        limit=limit, protocol='http1')
             raise ResponseTooLarge(
                 f'chunk framing line exceeds '
                 f'BB_CLIENT_HEAD_MAX_LINE={limit}', exc.seen) from None
@@ -420,6 +482,8 @@ class HTTP1ResponseRecipient:
             # limit it has of its own and reports it in its own vocabulary.
             # Same condition, so the same answer leaves the client — a raw
             # asyncio error is not part of its exception family.
+            log_cap_hit('client_head_max_line', requested=exc.consumed,
+                        limit=limit, protocol='http1')
             raise ResponseTooLarge(
                 f'chunk framing line exceeds the reader buffer '
                 f'({exc.consumed} bytes)') from None
@@ -462,6 +526,8 @@ class HTTP1ResponseRecipient:
                 return
             total += len(line)
             if total_max and total > total_max:
+                log_cap_hit('client_head_max_total', requested=total,
+                            limit=total_max, protocol='http1')
                 raise ResponseTooLarge(
                     f'trailer section exceeds '
                     f'BB_CLIENT_HEAD_MAX_TOTAL={total_max}')
@@ -480,6 +546,8 @@ class HTTP1ResponseRecipient:
                 return
             seen += size
             if max_total and seen > max_total:
+                log_cap_hit('client_body_max_total', requested=seen,
+                            limit=max_total, protocol='http1')
                 raise ResponseTooLarge(
                     f'body exceeds BB_CLIENT_BODY_MAX_TOTAL={max_total}')
             # In slices, so one peer-declared chunk-size is never one
@@ -488,7 +556,7 @@ class HTTP1ResponseRecipient:
             remaining = size
             while remaining > 0:
                 piece = await self._body_read(
-                    reader.readexactly(min(remaining, _STREAM_CHUNK_SIZE)))
+                    reader.read(min(remaining, _STREAM_CHUNK_SIZE)))
                 if not piece:
                     raise ConnectionError('connection closed mid-chunk')
                 remaining -= len(piece)

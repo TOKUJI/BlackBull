@@ -775,6 +775,25 @@ class Settings:
     #: a defence.
     client_body_max_total: int = 0
 
+    #: Minimum sustained response-body delivery rate in **bytes per second**;
+    #: below it, past ``client_min_body_rate_grace``, the response is
+    #: abandoned.  ``client_body_timeout`` returns on *any* arrival, so it
+    #: degrades to "send something every 30 s", which a one-byte drip always
+    #: satisfies; a rate is what a drip cannot fake.
+    #:
+    #: **On by default**, unlike ``client_body_max_total``, and the difference
+    #: is deliberate.  A total refuses a response for being large, and
+    #: legitimate responses are large.  A floor refuses one for being slower
+    #: than a dying link — 240 B/s is under 2G, under satellite, under
+    #: anything a real transfer sustains — so it fires on the pathological
+    #: case and not on the merely big one.  0 disables.
+    client_min_body_rate: float = 240.0
+
+    #: Seconds of body delivery before ``client_min_body_rate`` is enforced,
+    #: and the width of the window the average is taken over.  The slow-start
+    #: allowance, so nothing is judged on its first packets.
+    client_min_body_rate_grace: float = 5.0
+
     #: Dual-path conformance lane.  When true, every request
     #: round-trips the native :class:`~blackbull.connection.Connection` through
     #: ``as_scope()`` + ``from_scope()`` before dispatch, so the ASGI compat
@@ -1069,6 +1088,9 @@ def get_settings() -> Settings:
         client_head_timeout=_float_env_nonneg('BB_CLIENT_HEAD_TIMEOUT', 30.0),
         client_body_timeout=_float_env_nonneg('BB_CLIENT_BODY_TIMEOUT', 30.0),
         client_body_max_total=_int_env_nonneg('BB_CLIENT_BODY_MAX_TOTAL', 0),
+        client_min_body_rate=_float_env_nonneg('BB_CLIENT_MIN_BODY_RATE', 240.0),
+        client_min_body_rate_grace=_float_env_nonneg(
+            'BB_CLIENT_MIN_BODY_RATE_GRACE', 5.0),
         force_asgi_scope=_bool_env('BB_FORCE_ASGI_SCOPE', False),
         body_chunk_size=_int_env('BB_BODY_CHUNK_SIZE', 65536),
         body_chunk_max=_int_env('BB_BODY_CHUNK_MAX', 524288),

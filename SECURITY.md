@@ -99,16 +99,20 @@ The following are in scope for security reports:
   to reject it is a security report, not a bug report.
 - The `blackbull` CLI and module-level boot path (`blackbull.app.serve`).
 - **The async HTTP client under `blackbull/client/`** — experimental, in
-  scope.  What holds today: a peer that **stops** part-way through a
-  response is abandoned with a named failure rather than waited on
-  forever, and a response refused for breaching a limit abandons the
-  connection instead of reading the rest of the message as the next
-  response.  What does not hold yet: a peer that **trickles** satisfies
-  every individual deadline, and the response body has no size ceiling on
-  the buffering path — both are being added, and a report about either is
-  welcome rather than already known.  Not guaranteed at all: defence
-  against a hostile third party.  A read path that grows without a bound,
-  or waits on a connection already gone, is a security report.
+  scope.  What holds: a peer that **stops** part-way through a response,
+  or one that **trickles** below `BB_CLIENT_MIN_BODY_RATE`, is abandoned
+  with a named failure rather than waited on forever; and a response
+  refused for breaching a limit abandons the connection instead of reading
+  the rest of the message as the next response.  Every refusal is recorded
+  on the `blackbull.caps` logger, so a limit that fires is visible rather
+  than inferred.  What is left to you: `BB_CLIENT_BODY_MAX_TOTAL` is off by
+  default, because a cap that refuses a response for being large would
+  refuse legitimate ones — set it when you know what your peer should be
+  returning, or read large bodies through `stream()`, which never
+  accumulates.  Bounds on the HTTP/2 client are still being added, and the
+  peer picks the protocol.  Not guaranteed at all: defence against a
+  hostile third party.  A read path that grows without a bound, or waits on
+  a connection already gone, is a security report.
 
   The standard is lower than the server's because the roles are not
   symmetric: a server cannot decline to be addressed, so its bounds are a

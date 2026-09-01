@@ -734,3 +734,139 @@ def test_cap_present_in_codebase(cap):
         if p.is_file() and needle in p.read_text()
     ]
     assert hits, f'{cap!r} not wired in any blackbull/ file'
+
+
+# ---------------------------------------------------------------------------
+# Async HTTP client caps
+#
+# The client rejects traffic the same way the server does, so it owes the same
+# records.  Its five caps shipped without them, which is what this section is
+# here to stop recurring.
+# ---------------------------------------------------------------------------
+
+def _client_reader(payload: bytes):
+    """Minimal reader: plays a fixed stream, then EOF."""
+    from blackbull.server.recipient import AbstractReader
+
+    class _R(AbstractReader):
+        def __init__(self) -> None:
+            self._buf, self._pos = payload, 0
+
+        async def read(self, n: int = -1) -> bytes:
+            out = (self._buf[self._pos:] if n < 0
+                   else self._buf[self._pos:self._pos + n])
+            self._pos += len(out)
+            return out
+
+    return _R()
+
+
+async def _client_receive(payload: bytes):
+    from blackbull.client.http1 import HTTP1ResponseRecipient
+    return await HTTP1ResponseRecipient().receive(_client_reader(payload))
+
+
+@pytest.mark.asyncio
+async def test_client_head_max_total_logs(caps_caplog, monkeypatch):
+    from blackbull.env import reset_settings_cache
+    monkeypatch.setenv('BB_CLIENT_HEAD_MAX_TOTAL', '128')
+    reset_settings_cache()
+    head = b'HTTP/1.1 200 OK\r\n' + b''.join(
+        b'x-pad-%03d: %s\r\n' % (i, b'v' * 40) for i in range(20)) + b'\r\n'
+    with pytest.raises(Exception):
+        await _client_receive(head)
+    records = _records_for(caps_caplog, 'client_head_max_total')
+    assert len(records) >= 1
+    assert records[0].levelno == logging.WARNING
+    assert records[0].protocol == 'http1'
+
+
+@pytest.mark.asyncio
+async def test_client_head_max_line_logs(caps_caplog, monkeypatch):
+    from blackbull.env import reset_settings_cache
+    monkeypatch.setenv('BB_CLIENT_HEAD_MAX_TOTAL', '8192')
+    monkeypatch.setenv('BB_CLIENT_HEAD_MAX_LINE', '64')
+    reset_settings_cache()
+    head = b'HTTP/1.1 200 OK\r\nx-big: ' + b'v' * 200 + b'\r\n\r\n'
+    with pytest.raises(Exception):
+        await _client_receive(head)
+    assert _records_for(caps_caplog, 'client_head_max_line')
+
+
+@pytest.mark.asyncio
+async def test_client_body_max_total_logs(caps_caplog, monkeypatch):
+    from blackbull.env import reset_settings_cache
+    monkeypatch.setenv('BB_CLIENT_BODY_MAX_TOTAL', '4')
+    reset_settings_cache()
+    with pytest.raises(Exception):
+        await _client_receive(
+            b'HTTP/1.1 200 OK\r\ncontent-length: 10\r\n\r\n' + b'x' * 10)
+    assert _records_for(caps_caplog, 'client_body_max_total')
+
+
+@pytest.mark.asyncio
+async def test_client_head_timeout_logs(caps_caplog, monkeypatch):
+    from blackbull.env import reset_settings_cache
+    from blackbull.server.recipient import AbstractReader
+    monkeypatch.setenv('BB_CLIENT_HEAD_TIMEOUT', '0.05')
+    reset_settings_cache()
+
+    class _Stall(AbstractReader):
+        async def read(self, n: int = -1) -> bytes:
+            await asyncio.Event().wait()
+
+    from blackbull.client.http1 import HTTP1ResponseRecipient
+    with pytest.raises(TimeoutError):
+        await HTTP1ResponseRecipient().receive(_Stall())
+    assert _records_for(caps_caplog, 'client_head_timeout')
+
+
+@pytest.mark.asyncio
+async def test_client_body_timeout_logs(caps_caplog, monkeypatch):
+    from blackbull.env import reset_settings_cache
+    from blackbull.server.recipient import AbstractReader
+    monkeypatch.setenv('BB_CLIENT_BODY_TIMEOUT', '0.05')
+    reset_settings_cache()
+
+    head = b'HTTP/1.1 200 OK\r\ncontent-length: 10\r\n\r\nabc'
+
+    class _Half(AbstractReader):
+        def __init__(self): self._i = 0
+        async def read(self, n: int = -1) -> bytes:
+            if self._i < len(head):
+                out = head[self._i:] if n < 0 else head[self._i:self._i + n]
+                self._i += len(out)
+                return out
+            await asyncio.Event().wait()
+
+    from blackbull.client.http1 import HTTP1ResponseRecipient
+    with pytest.raises(TimeoutError):
+        await HTTP1ResponseRecipient().receive(_Half())
+    assert _records_for(caps_caplog, 'client_body_timeout')
+
+
+@pytest.mark.asyncio
+async def test_client_min_body_rate_logs(caps_caplog, monkeypatch):
+    from blackbull.env import reset_settings_cache
+    from blackbull.server.recipient import AbstractReader
+    monkeypatch.setenv('BB_CLIENT_BODY_TIMEOUT', '5')
+    monkeypatch.setenv('BB_CLIENT_MIN_BODY_RATE', '1000')
+    monkeypatch.setenv('BB_CLIENT_MIN_BODY_RATE_GRACE', '0.1')
+    reset_settings_cache()
+
+    head = b'HTTP/1.1 200 OK\r\ncontent-length: 1000000\r\n\r\n'
+
+    class _Trickle(AbstractReader):
+        def __init__(self): self._i = 0
+        async def read(self, n: int = -1) -> bytes:
+            if self._i < len(head):
+                out = head[self._i:] if n < 0 else head[self._i:self._i + n]
+                self._i += len(out)
+                return out
+            await asyncio.sleep(0.02)
+            return b'x'
+
+    from blackbull.client.http1 import HTTP1ResponseRecipient
+    with pytest.raises(TimeoutError):
+        await HTTP1ResponseRecipient().receive(_Trickle())
+    assert _records_for(caps_caplog, 'client_min_body_rate')
