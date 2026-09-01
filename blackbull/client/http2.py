@@ -20,7 +20,8 @@ from ..protocol.frame_types import (DEFAULT_INITIAL_WINDOW_SIZE,
                                     HeaderFrameFlags, PseudoHeaders)
 from ..headers import Headers
 from ..server.recipient import AbstractReader, AsyncioReader
-from ..server.sender import AbstractWriter, AsyncioWriter, HTTP2Sender
+from ..server.sender import (AbstractWriter, AsyncioWriter, ConnectionWindow,
+                             HTTP2Sender)
 from ..utils import HTTP2 as _HTTP2_PREFACE
 from ._connect import DEFAULT_CONNECT_TIMEOUT, open_connection as _open_connection
 from .exceptions import ConnectionError, ProtocolError, StreamReset
@@ -154,9 +155,16 @@ class HTTP2Client:
         self._receive_task: asyncio.Task | None = None
 
         # The peer's announced SETTINGS_INITIAL_WINDOW_SIZE.  Seeded into
-        # each sender at construction; the windows themselves live there,
+        # each sender at construction; the per-stream windows live there,
         # because the sender is what waits on them.
         self.initial_window_size: int = DEFAULT_INITIAL_WINDOW_SIZE
+
+        # The connection-level send window (RFC 9113 §6.9.1) is one budget
+        # every stream debits, so it is owned here and handed to each sender
+        # rather than allocated per sender.  Held apart from the senders
+        # because it outlives them: a stream that finishes sending stops
+        # needing credit, but the credit it spent is still gone.
+        self._conn_window = ConnectionWindow(DEFAULT_INITIAL_WINDOW_SIZE)
 
         # Connection-level received-but-unacked DATA bytes (see
         # _credit_received).  Stream-level credit is tracked per
@@ -246,6 +254,9 @@ class HTTP2Client:
                 pending.future.set_exception(
                     ConnectionError('client connection closed'))
         self._responses.clear()
+        # Each stream releases its own sender at its last send; this is for a
+        # connection torn down before that point was ever reached.
+        self._senders.clear()
 
         if self._raw_writer is not None:
             try:
@@ -312,6 +323,15 @@ class HTTP2Client:
             # a dict that grows once per failed send.
             self._responses.pop(stream_id, None)
             raise
+        finally:
+            # Released on the last *send*, never on the last receive.  A server
+            # may answer with END_STREAM while this body is still going up (an
+            # early 401 or 413), so a sender dropped when the response
+            # completes would leave ``_write_data`` parked on a window event
+            # nothing will set again.  Nothing sends on this stream past this
+            # point, so the sweeps in ``_on_window_update`` and
+            # ``_on_initial_window_size`` have no reason to keep reaching it.
+            self._senders.pop(stream_id, None)
 
         return await future
 
@@ -507,6 +527,10 @@ class HTTP2Client:
     def unregister_raw_stream(self, stream_id: int) -> None:
         """Stop routing frames for *stream_id* into its raw-frame queue."""
         self._raw_streams.pop(stream_id, None)
+        # A WebSocket-over-H2 session writes through its sender until it
+        # unregisters — its shutdown sends the CLOSE frame first — so this is
+        # that stream's last-send boundary, the same one ``request()`` uses.
+        self._senders.pop(stream_id, None)
 
     # ---- internal: senders, streams, frame I/O ---------------------------
 
@@ -526,6 +550,7 @@ class HTTP2Client:
             # ``make_sender`` (refactor 2.11).
             self._senders[stream_id] = HTTP2Sender(
                 self._writer, self._factory, stream_id,
+                conn_window=self._conn_window,
                 initial_window=self.initial_window_size)
         return self._senders[stream_id]
 
@@ -709,8 +734,11 @@ class HTTP2Client:
     def _on_window_update(self, frame) -> None:
         increment = frame.window_size
         if frame.stream_id == 0:
+            # Credited once, not once per sender: they all debit this same
+            # object, so a per-sender credit would multiply the peer's grant.
+            # Waking is still per sender, because each parks on its own event.
+            self._conn_window.size += increment
             for sender in self._senders.values():
-                sender.connection_window_size += increment
                 sender.wake_window()
         else:
             sender = self._senders.get(frame.stream_id)
