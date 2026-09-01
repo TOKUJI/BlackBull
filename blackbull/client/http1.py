@@ -436,8 +436,29 @@ class HTTP1ResponseRecipient:
         zeros either.  The line length is already bounded by the caller, and
         a declared size too large to satisfy is refused where the octets are
         counted, not where the numeral is read.
+
+        The terminator is required rather than stripped, which is what makes
+        a bare CR inside the element fail: stripping every trailing CR/LF
+        deleted it and let the rest parse as though it were clean.  RFC 9112
+        §2.2 gives a recipient of a bare CR two options — treat the element as
+        invalid, or replace it with SP — and a replaced SP leaves a numeral
+        that is not ``1*HEXDIG``, so refusal is the only conforming outcome
+        either way.  A line that reached EOF without its CRLF is refused by
+        the same check.
+
+        ``BWS`` is removed only where the grammar has it: ``chunk-ext =
+        *( BWS ";" BWS chunk-ext-name … )``, so whitespace is legal before a
+        ``;`` and nowhere else.  RFC 9110 §5.6.3 makes removing it a MUST;
+        a bare ``5 \r\n`` with no extension has no BWS to remove and stays a
+        smuggling vector.  Mirrors the server's parser, which is the oracle
+        the tests compare against.
         """
-        numeral = size_line.rstrip(_CRLF).split(b';', 1)[0]
+        if not size_line.endswith(_CRLF) or size_line.count(b'\n') != 1:
+            raise ProtocolError(
+                f'chunk-size line not CRLF-terminated: {size_line!r}')
+        numeral, sep, _ext = size_line[:-2].partition(b';')
+        if sep:
+            numeral = numeral.rstrip(b' \t')
         if not numeral or not _HEXDIG.issuperset(numeral):
             raise ProtocolError(f'invalid chunk size: {size_line!r}')
         return int(numeral, 16)
