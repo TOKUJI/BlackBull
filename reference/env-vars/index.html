@@ -5832,7 +5832,7 @@ what a report should hold the client to.</p>
 <tr>
 <td><code>BB_CLIENT_HEAD_MAX_LINE</code></td>
 <td><code>8192</code></td>
-<td>Maximum bytes in a single status line or response field line.  Checked over the lines of an already-bounded head rather than during the read: no line can be longer than the block containing it, so this is a policy rule and not a second memory guard — the same division the server makes between <code>BB_HEADER_MAX_TOTAL</code> and <code>BB_HEADER_MAX_LINE</code>.  Exceeded → <code>ResponseTooLarge</code>.  <code>0</code> disables.</td>
+<td>Maximum bytes in a single status line or response field line.  Checked over the lines of an already-bounded head rather than during the read: no line can be longer than the block containing it, so this is a policy rule and not a second memory guard — the same division the server makes between <code>BB_HEADER_MAX_TOTAL</code> and <code>BB_HEADER_MAX_LINE</code>.  Also bounds a <strong>chunk-size line and a trailer field line</strong>, which are the same kind of thing and are discarded on receipt.  Exceeded → <code>ResponseTooLarge</code>.  <code>0</code> disables.</td>
 </tr>
 <tr>
 <td><code>BB_CLIENT_HEAD_TIMEOUT</code></td>
@@ -5843,6 +5843,11 @@ what a report should hold the client to.</p>
 <td><code>BB_CLIENT_BODY_TIMEOUT</code></td>
 <td><code>30.0</code></td>
 <td>Seconds the client will wait for a <strong>single</strong> response-body read — the chunk-size line, a slice of body octets, or the CRLF after a chunk.  Per read, not per body: the peer must keep making progress, which is what <code>BB_BODY_TIMEOUT</code> means on the server and <code>client_body_timeout</code> in nginx.  It abandons a peer that <strong>stops</strong>; a peer that trickles satisfies every individual read, and bounding that is a rate floor this client does not have yet.  Exceeded → <code>TimeoutError</code>.  <code>0</code> disables.</td>
+</tr>
+<tr>
+<td><code>BB_CLIENT_BODY_MAX_TOTAL</code></td>
+<td><code>0</code> (off)</td>
+<td>Maximum total response-body octets the client will <strong>buffer</strong> for one response.  Bounds <code>receive()</code> only — <code>stream()</code> exists so a large response need not fit in memory, and a cap on the shared chunked reader would cap the path that asked not to be capped.  A declared <code>Content-Length</code> over the cap is refused before a body octet is read; a chunked body is refused the moment the running total passes it.  <strong>Off by default</strong>, unlike the server's <code>BB_MAX_BODY_SIZE</code>: that number bounds what strangers may push into a process, while this bounds what you asked for, and a wheel or a dataset is not the size of a form post.  Set it when you know what your peer should be returning.  Exceeded → <code>ResponseTooLarge</code>.</td>
 </tr>
 </tbody>
 </table>
