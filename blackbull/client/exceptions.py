@@ -17,6 +17,22 @@ class ConnectionError(ClientError):  # noqa: A001 — shadows builtin intentiona
     """The connection was closed unexpectedly (e.g. server sent GOAWAY)."""
 
 
+class ResponseTooLarge(ClientError):
+    """The peer's response head passed a byte budget the client set.
+
+    Distinct from :class:`ProtocolError`: the response was well-formed as far
+    as it was read.  What failed is a limit this client chose, so a caller that
+    wants the peer's output anyway can raise the budget rather than conclude
+    the peer is broken.
+    """
+
+    def __init__(self, message: str, seen: bytes = b'') -> None:
+        super().__init__(message)
+        #: What had been read when the budget was passed — enough to identify
+        #: the peer and the field, and deliberately not the whole overrun.
+        self.seen = seen
+
+
 class HandshakeError(ClientError):
     """A WebSocket or HTTP/2 handshake failed."""
 

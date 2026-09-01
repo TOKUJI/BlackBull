@@ -16,12 +16,13 @@ from http import HTTPMethod
 from typing import Union
 
 import logging
+from ..env import get_settings
 from ..headers import Headers, HeaderList
 from ..server.recipient import (AbstractReader, AsyncioReader,
-                                IncompleteReadError)
+                                IncompleteReadError, ReadLimitExceeded)
 from ..server.sender import AbstractWriter, AsyncioWriter
 from ._connect import DEFAULT_CONNECT_TIMEOUT, open_connection as _open_connection
-from .exceptions import ConnectionError, ProtocolError
+from .exceptions import ConnectionError, ProtocolError, ResponseTooLarge
 from .http2 import ClientResponse  # shared dataclass
 from blackbull.fault_injection._transport import half_close as _sc_half_close
 from blackbull.fault_injection.scenario_h1 import (
@@ -198,26 +199,65 @@ class HTTP1ResponseRecipient:
         async for chunk in self._stream_body(reader, headers):
             yield chunk
 
-    async def _read_start(self, reader: AbstractReader) -> tuple[int, Headers]:
+    @staticmethod
+    async def _read_head(reader: AbstractReader) -> bytes:
+        """The whole response head, bounded in all three triad columns.
+
+        ``read_head`` is the reader contract's own bounded head read, so the
+        total column costs a budget rather than a mechanism, and every reader
+        under the client answers it the same way.
+
+        The per-line rule runs over the returned head instead of during the
+        read.  No line can be longer than the block containing it, so the
+        total has already capped what a single field can accumulate; what is
+        left is a policy the caller chose, and the server draws the same line
+        between ``header_max_total`` and ``header_max_line``.
+        """
+        cfg = get_settings()
+        timeout = cfg.client_head_timeout
         try:
-            status_line = await reader.readuntil(_CRLF)
+            if timeout > 0:
+                async with asyncio.timeout(timeout):
+                    head = await reader.read_head(cfg.client_head_max_total)
+            else:
+                head = await reader.read_head(cfg.client_head_max_total)
+        except ReadLimitExceeded as exc:
+            raise ResponseTooLarge(
+                f'response head exceeds '
+                f'BB_CLIENT_HEAD_MAX_TOTAL={cfg.client_head_max_total}',
+                exc.seen) from None
         except IncompleteReadError as exc:
             raise ConnectionError('connection closed before response') from exc
-        # "HTTP/1.1 200 OK\r\n" — split into version, status, reason.
-        parts = status_line.rstrip(_CRLF).split(b' ', 2)
+        if not head:
+            raise ConnectionError('connection closed before response')
+
+        max_line = cfg.client_head_max_line
+        # One comparison retires the walk for every head under the budget.
+        if max_line > 0 and len(head) > max_line:
+            for line in head.split(_CRLF):
+                if len(line) > max_line:
+                    raise ResponseTooLarge(
+                        f'response header line {len(line)} bytes > '
+                        f'BB_CLIENT_HEAD_MAX_LINE={max_line}', head[:max_line])
+        return head
+
+    async def _read_start(self, reader: AbstractReader) -> tuple[int, Headers]:
+        head = await self._read_head(reader)
+        lines = head.split(_CRLF)
+        # "HTTP/1.1 200 OK" — split into version, status, reason.
+        parts = lines[0].split(b' ', 2)
         if len(parts) < 2:
-            raise ProtocolError(f'malformed status line: {status_line!r}')
+            raise ProtocolError(f'malformed status line: {lines[0]!r}')
         try:
             status = int(parts[1])
         except ValueError as exc:
             raise ProtocolError(f'invalid status code: {parts[1]!r}') from exc
 
         pairs: list[tuple[bytes, bytes]] = []
-        while True:
-            line = await reader.readuntil(_CRLF)
-            if line == _CRLF:
+        for line in lines[1:]:
+            if not line:
                 break
-            name, _, value = line.rstrip(_CRLF).partition(b':')
+            name, _, value = line.partition(b':')
             pairs.append((name.strip().lower(), value.strip()))
         return status, Headers(pairs)
 
