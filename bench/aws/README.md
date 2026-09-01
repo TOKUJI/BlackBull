@@ -79,6 +79,12 @@ Override the matrix without editing scripts:
 LANES="A B-wrk" STACKS="blackbull granian" bash bench/aws/run.sh
 ```
 
+`run.sh` and `ab.sh launch` upload their runner before starting it in a new
+session with all standard streams detached.  The launch handshake verifies
+that the runner is alive and fails closed if the upload or remote start fails.
+`RUN_LAUNCH_TIMEOUT` and `AB_LAUNCH_TIMEOUT` bound that handshake; both
+default to 30 seconds.
+
 ## What gets created (and what `down.sh` removes)
 
 | Resource           | Default name         | Created when    | Removed by  |

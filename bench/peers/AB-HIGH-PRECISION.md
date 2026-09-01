@@ -152,7 +152,8 @@ Instance lifecycle via `bench/aws/up.sh` / `install.sh` / `down.sh`, with
 4. **Run:** `REF_BASE=.. REF_TREAT=.. URL_PATH=/conn ROUNDS=8
    bash bench/aws/ab.sh launch` — starts one or more profiles
    (`URL_PATHS=/conn,/plaintext`) detached on the instance; the ssh call
-   returns immediately.
+   returns immediately.  The launch handshake checks the uploaded runner's
+   PID and is bounded by `AB_LAUNCH_TIMEOUT` (default 30 seconds).
 5. **Finish:** `bash bench/aws/ab.sh finish` (run nohup'd locally) polls the
    remote `raw.tsv` files to their expected line count, scp's the result dirs
    back, then runs `down.sh`.  (Instance self-termination is the backstop.)
