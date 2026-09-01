@@ -26,7 +26,7 @@ from .exceptions import (
     ClientError,
     ConnectionError,
     HandshakeError,
-    ProtocolError,
+    ProtocolError, ResponseTooLarge,
     StreamReset,
 )
 
@@ -54,5 +54,6 @@ __all__ = [
     'ConnectionError',
     'HandshakeError',
     'ProtocolError',
+    'ResponseTooLarge',
     'StreamReset',
 ]

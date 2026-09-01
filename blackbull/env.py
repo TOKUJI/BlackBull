@@ -758,6 +758,23 @@ class Settings:
     #: 0 disables.
     client_body_timeout: float = 30.0
 
+    #: Maximum total response-body octets the async client will buffer for
+    #: one response.  Bounds ``receive()`` only: ``stream()`` exists so a large
+    #: response need not fit in memory, and a cap on the shared reader would
+    #: cap the path that asked not to be capped.  A declared
+    #: ``Content-Length`` over the cap is refused before a body octet is read;
+    #: a chunked body is refused the moment the running total passes it.
+    #:
+    #: **Off by default**, unlike the server's ``max_body_size``.  That number
+    #: and its peers (Kestrel, nginx, axum) bound what strangers may push into
+    #: a process; this bounds what you asked for, and the size distribution of
+    #: a wheel, a container layer or a dataset is not the distribution of a
+    #: form post.  No widely used Python client caps a response by default
+    #: either.  Set it when you know what your peer should be returning — that
+    #: is the shape of a client-side bound, which is a diagnostic rather than
+    #: a defence.
+    client_body_max_total: int = 0
+
     #: Dual-path conformance lane.  When true, every request
     #: round-trips the native :class:`~blackbull.connection.Connection` through
     #: ``as_scope()`` + ``from_scope()`` before dispatch, so the ASGI compat
@@ -1051,6 +1068,7 @@ def get_settings() -> Settings:
         client_head_max_line=_int_env_nonneg('BB_CLIENT_HEAD_MAX_LINE', 8192),
         client_head_timeout=_float_env_nonneg('BB_CLIENT_HEAD_TIMEOUT', 30.0),
         client_body_timeout=_float_env_nonneg('BB_CLIENT_BODY_TIMEOUT', 30.0),
+        client_body_max_total=_int_env_nonneg('BB_CLIENT_BODY_MAX_TOTAL', 0),
         force_asgi_scope=_bool_env('BB_FORCE_ASGI_SCOPE', False),
         body_chunk_size=_int_env('BB_BODY_CHUNK_SIZE', 65536),
         body_chunk_max=_int_env('BB_BODY_CHUNK_MAX', 524288),

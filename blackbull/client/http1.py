@@ -53,6 +53,12 @@ _STREAM_CHUNK_SIZE: int = 64 * 1024
 
 _CRLF = b'\r\n'
 
+#: RFC 9112 §7.1 — ``chunk-size = 1*HEXDIG``.  ``int(x, 16)`` is far laxer:
+#: it takes a sign, an ``0x`` prefix, underscore separators and surrounding
+#: whitespace, and a negative numeral reached ``readexactly()``.
+_HEXDIG = frozenset(b'0123456789abcdefABCDEF')
+
+
 # Methods for which an empty body still warrants an
 # explicit ``Content-Length: 0`` on the wire.  RFC 9110 §8.6 makes the
 # header optional in this case, but always emitting it removes ambiguity
@@ -342,11 +348,22 @@ class HTTP1ResponseRecipient:
             raise ConnectionError('connection closed mid-body') from exc
 
     async def _read_body(self, reader: AbstractReader, headers: Headers) -> bytes:
+        # The total lives here and not in ``_read_chunked``, which
+        # ``_stream_body`` shares: this is the path that accumulates, and the
+        # other one exists precisely so a large response need not.
+        max_total = get_settings().client_body_max_total
         te = headers.get(b'transfer-encoding', b'').lower()
         if te == b'chunked':
-            return b''.join([c async for c in self._read_chunked(reader)])
+            return b''.join([c async for c in
+                             self._read_chunked(reader, max_total=max_total)])
         declared = self._declared_length(headers)
         if declared:
+            if max_total and declared > max_total:
+                # Refused on the declaration, before an octet is read — the
+                # peer already told us it will not fit.
+                raise ResponseTooLarge(
+                    f'declared body {declared} bytes exceeds '
+                    f'BB_CLIENT_BODY_MAX_TOTAL={max_total}')
             body = await self._body_read(reader.readexactly(declared))
             if len(body) < declared:
                 raise ConnectionError('connection closed mid-body')
@@ -382,24 +399,107 @@ class HTTP1ResponseRecipient:
             remaining -= len(chunk)
             yield chunk
 
-    async def _read_chunked(self, reader: AbstractReader) -> AsyncIterator[bytes]:
+    @classmethod
+    async def _read_framing_line(cls, reader: AbstractReader,
+                                 limit: int) -> bytes:
+        """One chunk-framing line — chunk-size line or trailer field line.
+
+        Bounded by the same budget as a header field line.  A chunk-*ext* and
+        a trailer field are discarded on receipt, so nothing legitimate needs
+        more; the chunk-*size* is not discarded, but no legitimate one is
+        anywhere near this long either.
+        """
+        try:
+            return await cls._body_read(reader.readuntil(_CRLF, limit))
+        except ReadLimitExceeded as exc:
+            raise ResponseTooLarge(
+                f'chunk framing line exceeds '
+                f'BB_CLIENT_HEAD_MAX_LINE={limit}', exc.seen) from None
+        except asyncio.LimitOverrunError as exc:
+            # With the budget switched off the reader falls back to whatever
+            # limit it has of its own and reports it in its own vocabulary.
+            # Same condition, so the same answer leaves the client — a raw
+            # asyncio error is not part of its exception family.
+            raise ResponseTooLarge(
+                f'chunk framing line exceeds the reader buffer '
+                f'({exc.consumed} bytes)') from None
+
+    @staticmethod
+    def _parse_chunk_size(size_line: bytes) -> int:
+        """The chunk-size numeral, by the grammar rather than by ``int``.
+
+        No digit ceiling.  RFC 9112 §7.1 asks recipients to *anticipate*
+        potentially large hexadecimal numerals and not to lose precision on
+        them, which Python's arbitrary-precision ``int`` already satisfies;
+        reading that as licence to reject long numerals would refuse
+        conforming wire, and ``last-chunk = 1*("0")`` puts no ceiling on the
+        zeros either.  The line length is already bounded by the caller, and
+        a declared size too large to satisfy is refused where the octets are
+        counted, not where the numeral is read.
+        """
+        numeral = size_line.rstrip(_CRLF).split(b';', 1)[0]
+        if not numeral or not _HEXDIG.issuperset(numeral):
+            raise ProtocolError(f'invalid chunk size: {size_line!r}')
+        return int(numeral, 16)
+
+    async def _read_trailer_section(self, reader: AbstractReader,
+                                    line_max: int, total_max: int) -> None:
+        """Consume the trailer section whole (RFC 9112 §7.1.2).
+
+        Reading one line assumed the section was empty.  With real trailers
+        the rest stayed buffered, so the next keep-alive response began
+        parsing at a trailer field line and took it for a status line — the
+        response-side twin of the desync ``_declared_length`` guards against.
+
+        Discarded, not surfaced: nothing on ``ClientResponse`` carries them,
+        and inventing a field for them here would be a second decision hiding
+        inside a framing fix.
+        """
+        total = 0
         while True:
-            size_line = await self._body_read(reader.readuntil(_CRLF))
-            try:
-                size = int(size_line.rstrip(_CRLF).split(b';', 1)[0], 16)
-            except ValueError as exc:
-                raise ProtocolError(f'invalid chunk size: {size_line!r}') from exc
-            if size == 0:
-                # Read trailing CRLF after the terminator chunk; ignore any
-                # trailers (RFC 7230 §4.1.2) — they are rarely used.
-                await self._body_read(reader.readuntil(_CRLF))
+            line = await self._read_framing_line(reader, line_max)
+            if not line.rstrip(_CRLF):
                 return
-            chunk = await self._body_read(reader.readexactly(size))
-            if len(chunk) < size:
-                raise ConnectionError('connection closed mid-chunk')
-            # consume CRLF after chunk data
-            await self._body_read(reader.readuntil(_CRLF))
-            yield chunk
+            total += len(line)
+            if total_max and total > total_max:
+                raise ResponseTooLarge(
+                    f'trailer section exceeds '
+                    f'BB_CLIENT_HEAD_MAX_TOTAL={total_max}')
+
+    async def _read_chunked(self, reader: AbstractReader, *,
+                            max_total: int = 0) -> AsyncIterator[bytes]:
+        cfg = get_settings()
+        line_max = cfg.client_head_max_line
+        seen = 0
+        while True:
+            size = self._parse_chunk_size(
+                await self._read_framing_line(reader, line_max))
+            if size == 0:
+                await self._read_trailer_section(
+                    reader, line_max, cfg.client_head_max_total)
+                return
+            seen += size
+            if max_total and seen > max_total:
+                raise ResponseTooLarge(
+                    f'body exceeds BB_CLIENT_BODY_MAX_TOTAL={max_total}')
+            # In slices, so one peer-declared chunk-size is never one
+            # allocation.  ``_stream_body`` already does this for a declared
+            # length; a chunked body reached the same caller without it.
+            remaining = size
+            while remaining > 0:
+                piece = await self._body_read(
+                    reader.readexactly(min(remaining, _STREAM_CHUNK_SIZE)))
+                if not piece:
+                    raise ConnectionError('connection closed mid-chunk')
+                remaining -= len(piece)
+                yield piece
+            # Exactly CRLF, not read-until: reading until would swallow spill
+            # up to the next one and tolerate a bare CR or LF terminator —
+            # what the server refuses as SMUG-CHUNK-SPILL.
+            term = await self._body_read(reader.readexactly(2))
+            if term != _CRLF:
+                raise ProtocolError(
+                    f'chunk-data not CRLF-terminated: {term!r}')
 
 
 def _record_response(result, response) -> None:
