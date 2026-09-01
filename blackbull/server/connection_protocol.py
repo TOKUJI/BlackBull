@@ -257,15 +257,44 @@ class BufferReader(AbstractReader):
         self._consumed()
         return out
 
-    async def readuntil(self, sep: bytes = b'\n') -> bytes:
+    async def _readuntil_unbounded(self, sep: bytes) -> bytes:
+        """Read through *sep* without an application byte budget."""
+        scan_from = 0
         while True:
-            idx = self._buf.find(sep)
+            idx = self._buf.find(sep, scan_from)
             if idx >= 0:
-                out = self._buf.take(idx + len(sep))
+                end = idx + len(sep)
+                out = self._buf.take(end)
                 self._consumed()
                 return out
             if self._proto.peer_closed:
                 raise IncompleteReadError(self._buf.take(self._buf.available))
+            scan_from = max(0, self._buf.available - len(sep) + 1)
+            await self.wait_for_data()
+
+    async def _readuntil_bounded(self, sep: bytes, limit: int) -> bytes:
+        """Read through *sep* with a known-positive accumulation budget."""
+        scan_from = 0
+        while True:
+            idx = self._buf.find(sep, scan_from)
+            if idx >= 0:
+                end = idx + len(sep)
+                if end > limit:
+                    raise ReadLimitExceeded(
+                        f'readuntil exceeds {limit} bytes',
+                        bytes(self._buf.view(min(self._buf.available,
+                                                 limit + len(sep)))))
+                out = self._buf.take(end)
+                self._consumed()
+                return out
+            if self._buf.available > limit:
+                raise ReadLimitExceeded(
+                    f'readuntil exceeds {limit} bytes',
+                    bytes(self._buf.view(min(self._buf.available,
+                                             limit + len(sep)))))
+            if self._proto.peer_closed:
+                raise IncompleteReadError(self._buf.take(self._buf.available))
+            scan_from = max(0, self._buf.available - len(sep) + 1)
             await self.wait_for_data()
 
     async def discard(self, max_bytes: int, deadline: float) -> int:
@@ -336,7 +365,27 @@ class BufferReader(AbstractReader):
 
     # -- the one-scan header read ------------------------------------------
 
-    async def read_head(self, limit: int) -> bytes:
+    async def _read_head_unbounded(self) -> bytes:
+        """The message head, terminator included, with no byte budget."""
+        while True:
+            if not self._buf.available:
+                if self._proto.peer_closed:
+                    return b''
+                await self.wait_for_data()
+                continue
+            end = self._buf.find_head_end()
+            if end >= 0:
+                out = self._buf.take(end)
+                self._consumed()
+                return out
+            if self._proto.peer_closed:
+                partial = self._buf.take(self._buf.available)
+                if not partial:
+                    return b''
+                raise IncompleteReadError(partial)
+            await self.wait_for_data()
+
+    async def _read_head_bounded(self, limit: int) -> bytes:
         """The message head, terminator included — found in one scan.
 
         The override the whole rewrite exists for: the terminator is looked for
@@ -352,8 +401,8 @@ class BufferReader(AbstractReader):
                 # Nothing resident: go straight to the wait — the "check" of
                 # the check-then-wait-then-check pattern.  The empty scan it
                 # skips is a control-flow artifact (~0.79 µs/req on EC2, F5):
-                # an empty buffer can never be LIMIT_EXCEEDED (0 > limit is
-                # false) and the scan's resumption state is untouched (it
+                # an empty buffer cannot exceed a positive limit and the
+                # scan's resumption state is untouched (it
                 # sets ``_scanned = _w``, which already equals ``_r``), so the
                 # idle-close and truncated-head contracts below are unchanged.
                 if self._proto.peer_closed:

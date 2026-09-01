@@ -15,13 +15,14 @@ Covers:
   never straight off the wire.
 """
 from http import HTTPStatus
+import logging
 
 import pytest
 
 from blackbull.headers import Headers
 from blackbull.router import HTTPException
 from blackbull.server.recipient import (
-    AbstractReader, HTTP1Recipient, _parse_chunk_size,
+    AbstractReader, HTTP1Recipient, ReadLimitExceeded, _parse_chunk_size,
 )
 from blackbull.server.sender import AbstractWriter
 
@@ -399,7 +400,7 @@ class TestChunkLineLengthBound:
             async def read(self, n: int) -> bytes:  # pragma: no cover
                 return b''
 
-            async def readuntil(self, sep: bytes) -> bytes:
+            async def readuntil(self, sep: bytes, limit: int = 0) -> bytes:
                 raise asyncio.LimitOverrunError(
                     'Separator is found, but chunk is longer than limit', 65536)
 
@@ -412,6 +413,40 @@ class TestChunkLineLengthBound:
             await recipient()
         assert exc_info.value.status == HTTPStatus.BAD_REQUEST
         assert recipient.framing_broken is True
+
+    @pytest.mark.asyncio
+    async def test_reader_limit_is_exact_and_overrun_maps_to_400(
+            self, caplog):
+        caplog.set_level(logging.WARNING, logger='blackbull.caps')
+        class _BoundedReader(AbstractReader):
+            received_limit = 0
+
+            async def read(self, n: int) -> bytes:  # pragma: no cover
+                return b''
+
+            async def readuntil(self, sep: bytes, limit: int = 0) -> bytes:
+                self.received_limit = limit
+                raise ReadLimitExceeded('too long', b'x' * (limit + 1))
+
+        reader = _BoundedReader()
+        recipient = HTTP1Recipient(
+            reader,
+            _conn([(b'transfer-encoding', b'chunked')]),
+            chunk_size=64 * 1024,
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            await recipient()
+
+        assert reader.received_limit == 8192
+        assert exc_info.value.status == HTTPStatus.BAD_REQUEST
+        assert recipient.framing_broken is True
+        records = [
+            record for record in caplog.records
+            if (record.name == 'blackbull.caps'
+                and getattr(record, 'cap', None) == 'h1_chunk_line_length')
+        ]
+        assert len(records) == 1
 
     @pytest.mark.asyncio
     async def test_oversized_trailer_line_raises_400(self):

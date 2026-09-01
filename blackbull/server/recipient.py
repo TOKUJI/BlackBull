@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 from abc import ABC, abstractmethod
 from collections import deque
+from inspect import signature
 from time import monotonic as _monotonic
 from typing import Awaitable, Callable, NoReturn, Optional
 
@@ -104,7 +105,7 @@ class IncompleteReadError(EOFError):
 
 
 class ReadLimitExceeded(Exception):
-    """``read_head`` was given a byte budget and the head passed it.
+    """A bounded reader operation was given a byte budget and passed it.
 
     Belongs to the reader contract rather than to any protocol: the reader is
     told a budget and reports that it was passed.  Which status that becomes
@@ -119,6 +120,20 @@ class ReadLimitExceeded(Exception):
         #: on the caller's behalf: a reader that owns its buffer leaves them
         #: resident so the connection can still be lingered closed.
         self.seen = seen
+
+
+def _accepts_read_limit(readuntil) -> bool:
+    """Whether a bound ``readuntil`` method accepts the budget argument.
+
+    Compatibility is decided before the read, never by catching a TypeError
+    raised from inside reader code.  Old implementations take the bounded
+    byte-wise path below rather than being retried without a limit.
+    """
+    try:
+        signature(readuntil).bind(b'\n', 1)
+    except (TypeError, ValueError):
+        return False
+    return True
 
 
 #: End of an HTTP message head.  Lives here because :meth:`AbstractReader.read_head`
@@ -395,16 +410,33 @@ class AbstractReader(ABC):
         """
         return False
 
-    async def readuntil(self, sep: bytes) -> bytes:
-        """Read until *sep* is seen (inclusive).  Default: byte-wise via
-        :meth:`read`.  Concrete transport readers override this with the
-        stream's native, buffered implementation."""
+    async def readuntil(self, sep: bytes, limit: int = 0) -> bytes:
+        """Read until *sep* is seen, choosing one limit policy at entry."""
+        if limit <= 0:
+            return await self._readuntil_unbounded(sep)
+        return await self._readuntil_bounded(sep, limit)
+
+    async def _readuntil_unbounded(self, sep: bytes) -> bytes:
+        """Default unbounded implementation: read one byte at a time."""
         buf = bytearray()
         while sep not in buf:
             chunk = await self.read(1)
             if not chunk:
                 break
             buf += chunk
+        return bytes(buf)
+
+    async def _readuntil_bounded(self, sep: bytes, limit: int) -> bytes:
+        """Default bounded implementation; *limit* is known to be positive."""
+        buf = bytearray()
+        while sep not in buf:
+            chunk = await self.read(1)
+            if not chunk:
+                break
+            buf += chunk
+            if len(buf) > limit:
+                raise ReadLimitExceeded(
+                    f'readuntil exceeds {limit} bytes', bytes(buf))
         return bytes(buf)
 
     async def readexactly(self, n: int) -> bytes:
@@ -440,10 +472,53 @@ class AbstractReader(ABC):
         passed and carries the bytes, and the protocol decides which status
         that becomes.
         """
+        if limit <= 0:
+            return await self._read_head_unbounded()
+        return await self._read_head_bounded(limit)
+
+    async def _read_head_unbounded(self) -> bytes:
+        """Line-wise head read with no application byte budget."""
         buf = bytearray()
         while not buf.endswith(_HEAD_END):
             try:
                 line = await self.readuntil(b'\r\n')
+            except asyncio.LimitOverrunError as exc:
+                raise ReadLimitExceeded(
+                    f'stream buffer overflow ({exc.consumed} bytes) '
+                    f'while reading the head', bytes(buf)) from exc
+            except IncompleteReadError as exc:
+                partial = bytes(buf) + exc.partial
+                if not partial:
+                    return b''
+                raise IncompleteReadError(partial) from None
+            if not line:
+                if not buf:
+                    return b''
+                raise IncompleteReadError(bytes(buf))
+            buf += line
+        return bytes(buf)
+
+    async def _read_head_bounded(self, limit: int) -> bytes:
+        """Line-wise head read with a positive whole-head byte budget."""
+        buf = bytearray()
+        native_limit = self.__dict__.get('_readuntil_accepts_limit')
+        if native_limit is None:
+            native_limit = _accepts_read_limit(self.readuntil)
+            self.__dict__['_readuntil_accepts_limit'] = native_limit
+        while not buf.endswith(_HEAD_END):
+            try:
+                if native_limit:
+                    line = await self.readuntil(b'\r\n', limit)
+                else:
+                    line = await AbstractReader._readuntil_bounded(
+                        self, b'\r\n', limit)
+            except ReadLimitExceeded as exc:
+                # ``readuntil`` reports only the current line.  Classification
+                # belongs to the whole head: without the prior request line a
+                # large header field looks like an unterminated request line
+                # and one reader answers 400 where another answers 431.
+                seen = bytes(buf) + exc.seen
+                raise ReadLimitExceeded(str(exc), seen) from exc
             except asyncio.LimitOverrunError as exc:
                 # ``asyncio.StreamReader`` enforces a buffer limit of its own
                 # and gets there first for a single enormous line.  Same
@@ -458,7 +533,8 @@ class AbstractReader(ABC):
                 # peer that overran it and *then* went away overran it, and a
                 # reader that let EOF mask the breach would answer differently
                 # from one that scans its own buffer.
-                self._over_budget(bytes(buf) + exc.partial, limit)
+                self._raise_if_head_over_budget(
+                    bytes(buf) + exc.partial, limit)
                 partial = bytes(buf) + exc.partial
                 if not partial:
                     return b''
@@ -466,22 +542,18 @@ class AbstractReader(ABC):
             if not line:
                 # A reader that reports EOF by returning empty rather than by
                 # raising — the default ``readuntil`` above does exactly that.
-                self._over_budget(bytes(buf), limit)
+                self._raise_if_head_over_budget(bytes(buf), limit)
                 if not buf:
                     return b''
                 raise IncompleteReadError(bytes(buf))
             buf += line
-            self._over_budget(bytes(buf), limit)
+            self._raise_if_head_over_budget(bytes(buf), limit)
         return bytes(buf)
 
     @staticmethod
-    def _over_budget(seen: bytes, limit: int) -> None:
-        """Raise if *seen* has passed *limit*.  ``limit=0`` disables the bound.
-
-        One predicate for every exit of :meth:`read_head`, because a budget
-        enforced on some of them is not a budget.
-        """
-        if limit > 0 and len(seen) > limit:
+    def _raise_if_head_over_budget(seen: bytes, limit: int) -> None:
+        """Raise when *seen* passes the known-positive head *limit*."""
+        if len(seen) > limit:
             raise ReadLimitExceeded(f'head exceeds {limit} bytes', seen)
 
 
@@ -507,24 +579,91 @@ class AsyncioReader(AbstractReader):
                 f"got {type(stream_reader)}"
             )
         self._sr = stream_reader
+        # A native stream read normally consumes only on success.  Keep the
+        # same property when adapting a stream-like test double which lacks
+        # asyncio's resident ``_buffer``/``_limit`` machinery: bytes consumed
+        # before this adapter detects an overrun are replayed here.
+        self._replay = bytearray()
 
     async def read(self, n: int) -> bytes:
+        if self._replay:
+            take = len(self._replay) if n < 0 else min(n, len(self._replay))
+            out = bytes(self._replay[:take])
+            del self._replay[:take]
+            if n < 0 or take == n:
+                return out
+            return out + await self.read(n - take)
         try:
             return await self._sr.read(n)
         except asyncio.IncompleteReadError as exc:
             raise IncompleteReadError(exc.partial) from exc
 
     def at_eof(self) -> bool:
+        if self._replay:
+            return False
         at_eof = getattr(self._sr, 'at_eof', None)
         return bool(at_eof()) if at_eof is not None else False
 
-    async def readuntil(self, sep: bytes) -> bytes:
+    async def _readuntil_unbounded(self, sep: bytes) -> bytes:
+        if self._replay:
+            replay = PrefixReader(bytes(self._take_replay()), self)
+            try:
+                return await replay.readuntil(sep)
+            finally:
+                if replay._buf:
+                    self._replay[:0] = replay._buf
         try:
             return await self._sr.readuntil(sep)
         except asyncio.IncompleteReadError as exc:
             raise IncompleteReadError(exc.partial) from exc
 
+    async def _readuntil_bounded(self, sep: bytes, limit: int) -> bytes:
+        if self._replay:
+            replay = PrefixReader(bytes(self._take_replay()), self)
+            try:
+                return await replay.readuntil(sep, limit)
+            finally:
+                if replay._buf:
+                    self._replay[:0] = replay._buf
+        old_limit = getattr(self._sr, '_limit', None)
+        if old_limit is not None:
+            # StreamReader's limit excludes the separator.  Using the total
+            # budget here still caps separator-free accumulation at the right
+            # boundary; the inclusive contract is checked below before a
+            # successful native result is allowed to remain consumed.
+            self._sr._limit = limit
+        try:
+            out = await self._sr.readuntil(sep)
+        except asyncio.LimitOverrunError as exc:
+            seen = self._resident_prefix(limit + len(sep))
+            raise ReadLimitExceeded(
+                f'readuntil exceeds {limit} bytes', seen) from exc
+        except asyncio.IncompleteReadError as exc:
+            if len(exc.partial) > limit:
+                self._restore(exc.partial)
+                raise ReadLimitExceeded(
+                    f'readuntil exceeds {limit} bytes',
+                    exc.partial[:limit + len(sep)]) from exc
+            raise IncompleteReadError(exc.partial) from exc
+        finally:
+            if old_limit is not None:
+                self._sr._limit = old_limit
+        if len(out) <= limit:
+            return out
+        self._restore(out)
+        raise ReadLimitExceeded(
+            f'readuntil exceeds {limit} bytes', out[:limit + len(sep)])
+
     async def readexactly(self, n: int) -> bytes:
+        if self._replay:
+            head = bytes(self._replay[:n])
+            del self._replay[:len(head)]
+            if len(head) == n:
+                return head
+            try:
+                return head + await self._sr.readexactly(n - len(head))
+            except asyncio.IncompleteReadError as exc:
+                raise IncompleteReadError(head + exc.partial) from exc
         try:
             return await self._sr.readexactly(n)
         except asyncio.IncompleteReadError as exc:
@@ -535,7 +674,7 @@ class AsyncioReader(AbstractReader):
         # in ``_buffer`` until a read consumes it, so "buffer non-empty" is
         # the honest "a read won't block" probe.  A buffer-owning reader
         # exposes ``buffered_len()`` instead.
-        if self.__dict__.get('_ahead_buf'):
+        if self._replay or self.__dict__.get('_ahead_buf'):
             return True
         buf = getattr(self._sr, '_buffer', None)
         if buf is not None:
@@ -543,7 +682,8 @@ class AsyncioReader(AbstractReader):
         return getattr(self._sr, 'buffered', 0) > 0
 
     def buffered_len(self) -> int:
-        ahead = len(self.__dict__.get('_ahead_buf') or b'')
+        ahead = (len(self._replay)
+                 + len(self.__dict__.get('_ahead_buf') or b''))
         buf = getattr(self._sr, '_buffer', None)
         if buf is not None:
             return ahead + len(buf)
@@ -552,12 +692,34 @@ class AsyncioReader(AbstractReader):
     def peek(self, n: int) -> bytes:
         # Anything detection parked sits in front of what the stream still
         # holds — same order the bytes arrived in.
+        replay = bytes(self._replay)
         ahead = self.__dict__.get('_ahead_buf')
+        if replay:
+            if len(replay) >= n:
+                return replay[:n]
+            following = bytes(ahead) if ahead else b''
+            return (replay + following + self._peek_stream(n))[:n]
         if ahead:
             if len(ahead) >= n:
                 return bytes(ahead[:n])
             return (bytes(ahead) + self._peek_stream(n))[:n]
         return self._peek_stream(n)
+
+    def _resident_prefix(self, n: int) -> bytes:
+        return self.peek(n)
+
+    def _restore(self, data: bytes) -> None:
+        """Replay bytes a non-native stream consumed before limit failure."""
+        stream_buf = getattr(self._sr, '_buffer', None)
+        if isinstance(stream_buf, bytearray):
+            stream_buf[:0] = data
+        else:
+            self._replay[:0] = data
+
+    def _take_replay(self) -> bytes:
+        out = bytes(self._replay)
+        self._replay.clear()
+        return out
 
     def _peek_stream(self, n: int) -> bytes:
         buf = getattr(self._sr, '_buffer', None)
@@ -587,6 +749,7 @@ class PrefixReader(AbstractReader):
     def __init__(self, prefix: bytes, reader: AbstractReader) -> None:
         self._buf = bytearray(prefix)
         self._reader = reader
+        self._reader_accepts_limit = _accepts_read_limit(reader.readuntil)
 
     async def read(self, n: int) -> bytes:
         if self._buf:
@@ -604,7 +767,7 @@ class PrefixReader(AbstractReader):
         self._buf.clear()
         return head + await self._reader.readexactly(n - len(head))
 
-    async def readuntil(self, sep: bytes) -> bytes:
+    async def _readuntil_unbounded(self, sep: bytes) -> bytes:
         # Short-circuit: once the prefix is drained (the common keep-alive
         # case), delegate directly to the underlying reader's native,
         # buffered readuntil without any per-call overhead.
@@ -625,6 +788,59 @@ class PrefixReader(AbstractReader):
         end = combined.find(sep) + len(sep)
         self._buf[:0] = combined[end:]          # push back over-read (usually none)
         return combined[:end]
+
+    async def _readuntil_bounded(self, sep: bytes, limit: int) -> bytes:
+        """Read a bounded line without consuming the replay prefix on error."""
+        if not self._buf:
+            if self._reader_accepts_limit:
+                return await self._reader.readuntil(sep, limit)
+            try:
+                return await AbstractReader._readuntil_bounded(self, sep, limit)
+            except ReadLimitExceeded as exc:
+                self._buf[:0] = exc.seen
+                raise
+        prefix = bytes(self._buf)
+        idx = prefix.find(sep)
+        if idx >= 0:
+            end = idx + len(sep)
+            if end > limit:
+                raise ReadLimitExceeded(
+                    f'readuntil exceeds {limit} bytes',
+                    prefix[:limit + len(sep)])
+            del self._buf[:end]
+            return prefix[:end]
+        if len(prefix) > limit:
+            raise ReadLimitExceeded(
+                f'readuntil exceeds {limit} bytes',
+                prefix[:limit + len(sep)])
+
+        # The underlying reader cannot see separator candidates beginning in
+        # the prefix.  Resolve the seam incrementally; searching only from the
+        # previous overlap keeps the scan linear and handles candidates that
+        # overlap one another (for example ``...\r`` + ``\r\n``).
+        combined = bytearray(prefix)
+        scan_from = max(0, len(combined) - len(sep) + 1)
+        while True:
+            chunk = await self._reader.read(1)
+            if not chunk:
+                self._buf.clear()
+                raise IncompleteReadError(bytes(combined))
+            combined += chunk
+            idx = combined.find(sep, scan_from)
+            if idx >= 0:
+                end = idx + len(sep)
+                if end <= limit:
+                    self._buf.clear()
+                    self._buf[:0] = combined[end:]
+                    return bytes(combined[:end])
+            if len(combined) > limit:
+                # Prefix bytes were never removed and seam bytes consumed from
+                # the underlying stream are moved into the replay buffer.
+                self._buf[:] = combined
+                raise ReadLimitExceeded(
+                    f'readuntil exceeds {limit} bytes',
+                    bytes(combined[:limit + len(sep)]))
+            scan_from = max(scan_from, len(combined) - len(sep) + 1)
 
     def at_eof(self) -> bool:
         return not self._buf and self._reader.at_eof()
@@ -1028,7 +1244,15 @@ class HTTP1Recipient(BaseRecipient):
         (SMUG-CHUNK-LF-TERM / SMUG-CHUNK-LF-TRAILER).
         """
         try:
-            line = await self._read_with_timeout(self._reader.readuntil(b'\n'))
+            line = await self._read_with_timeout(self._readuntil_chunk_line())
+        except ReadLimitExceeded as exc:
+            self.framing_broken = True
+            log_cap_hit('h1_chunk_line_length',
+                        requested=len(exc.seen), limit=_CHUNK_LINE_MAX,
+                        scope_path=self._req_path,
+                        protocol='http1')
+            raise _bad_request(
+                'chunk framing line exceeds length limit') from None
         except asyncio.LimitOverrunError as exc:
             self.framing_broken = True
             log_cap_hit('h1_chunk_line_length',
@@ -1045,6 +1269,10 @@ class HTTP1Recipient(BaseRecipient):
                         protocol='http1')
             raise _bad_request('chunk framing line exceeds length limit')
         return line
+
+    async def _readuntil_chunk_line(self) -> bytes:
+        """Read a chunk line with the framing unit cap applied at the reader."""
+        return await self._reader.readuntil(b'\n', limit=_CHUNK_LINE_MAX)
 
     def _account(self, chunk: bytes) -> bytes:
         """Weigh *chunk* against the two body limits, giving up if it fails one.

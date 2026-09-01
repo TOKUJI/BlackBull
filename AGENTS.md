@@ -145,6 +145,10 @@ The general table — search priority `ast-grep` → `rg` → `grep`, plus `uv`,
 - **`py-spy`** — the profiling workflow lives in
   `.claude/patterns/benchmarking.md` §Profiling [private].
 
+- **YouTrack** — use the `just yt-*` commands in `justfile` for all tracker
+  access; they read `YOUTRACK_URL` and `YOUTRACK_TOKEN` internally. Do not
+  access the REST API directly, hard-code credentials, or print the token.
+
 ---
 
 ## Working docs map
@@ -213,4 +217,3 @@ tags anything unresolved and `active` that has gone thirty days without an
 update.  That report is the reason the material moved — the file layout could
 record a status line but could not tell anyone the status had stopped being
 true.
-
