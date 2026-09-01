@@ -186,18 +186,47 @@ class HTTP1ResponseRecipient:
     ``Content-Length`` path stopped reading the body in one call.
     """
 
+    def __init__(self) -> None:
+        #: Set when a read failed part-way through a message, which makes the
+        #: reader's position unknown.  The connection is then unusable: the
+        #: rest of the message is still on the wire, so the next read would
+        #: begin inside it and parse a body as a response.  The server's
+        #: recipient carries the same flag for the same reason.
+        self.framing_broken = False
+
+    def _refuse_if_broken(self) -> None:
+        if self.framing_broken:
+            raise ConnectionError(
+                'this reader was abandoned part-way through a message — '
+                'its position in the byte stream is unknown')
+
     async def receive(self, reader: AbstractReader) -> ClientResponse:
-        status, headers = await self._read_start(reader)
-        body = await self._read_body(reader, headers)
+        self._refuse_if_broken()
+        try:
+            status, headers = await self._read_start(reader)
+            body = await self._read_body(reader, headers)
+        except BaseException:
+            # Every refusal below this point leaves unread octets behind, and
+            # a peer whose body is itself a well-formed response gets one
+            # delivered for a request the server answered differently.  Which
+            # error it was does not matter — what matters is that we stopped
+            # somewhere the peer chose.
+            self.framing_broken = True
+            raise
         return ClientResponse(status=status, headers=headers, body=body)
 
     async def stream(self, reader: AbstractReader) -> AsyncIterator[bytes]:
         # Body-only streaming: callers that need status/headers should use
         # ``receive``.  Yielding the start-line as the first item would force
         # callers to special-case the iterator's first element.
-        _, headers = await self._read_start(reader)
-        async for chunk in self._stream_body(reader, headers):
-            yield chunk
+        self._refuse_if_broken()
+        try:
+            _, headers = await self._read_start(reader)
+            async for chunk in self._stream_body(reader, headers):
+                yield chunk
+        except BaseException:
+            self.framing_broken = True
+            raise
 
     @staticmethod
     async def _read_head(reader: AbstractReader) -> bytes:
@@ -290,13 +319,38 @@ class HTTP1ResponseRecipient:
                 f'{sorted(values)!r}')
         return int(values.pop())
 
+    @staticmethod
+    async def _body_read(coro):
+        """One body read under ``BB_CLIENT_BODY_TIMEOUT``.
+
+        Per read, not per body — the peer must keep making progress, which is
+        what ``body_timeout`` means on the server and ``client_body_timeout``
+        in nginx.  It abandons a peer that **stops**; one that trickles
+        satisfies every individual read, and that is the rate floor's job.
+
+        Truncation is named here too: ``AbstractReader.readexactly`` returns
+        short at EOF while ``AsyncioReader`` raises, and neither answer
+        belonged to the client's exception family.
+        """
+        timeout = get_settings().client_body_timeout
+        try:
+            if timeout > 0:
+                async with asyncio.timeout(timeout):
+                    return await coro
+            return await coro
+        except IncompleteReadError as exc:
+            raise ConnectionError('connection closed mid-body') from exc
+
     async def _read_body(self, reader: AbstractReader, headers: Headers) -> bytes:
         te = headers.get(b'transfer-encoding', b'').lower()
         if te == b'chunked':
             return b''.join([c async for c in self._read_chunked(reader)])
         declared = self._declared_length(headers)
         if declared:
-            return await reader.readexactly(declared)
+            body = await self._body_read(reader.readexactly(declared))
+            if len(body) < declared:
+                raise ConnectionError('connection closed mid-body')
+            return body
         # No Content-Length and no chunked: caller (e.g. HEAD, 204, 304) must
         # interpret as empty body.  We don't read-until-EOF here because that
         # would break keep-alive.
@@ -318,13 +372,19 @@ class HTTP1ResponseRecipient:
         # the memory bound absent on exactly the path that asked for it.
         remaining = declared
         while remaining > 0:
-            chunk = await reader.readexactly(min(remaining, _STREAM_CHUNK_SIZE))
+            chunk = await self._body_read(
+                reader.readexactly(min(remaining, _STREAM_CHUNK_SIZE)))
+            if not chunk:
+                # A short-reading reader answers EOF with b'', so subtracting
+                # it left the loop spinning on a condition nothing could
+                # change — and with no await in the reader, uncancellable.
+                raise ConnectionError('connection closed mid-body')
             remaining -= len(chunk)
             yield chunk
 
     async def _read_chunked(self, reader: AbstractReader) -> AsyncIterator[bytes]:
         while True:
-            size_line = await reader.readuntil(_CRLF)
+            size_line = await self._body_read(reader.readuntil(_CRLF))
             try:
                 size = int(size_line.rstrip(_CRLF).split(b';', 1)[0], 16)
             except ValueError as exc:
@@ -332,10 +392,13 @@ class HTTP1ResponseRecipient:
             if size == 0:
                 # Read trailing CRLF after the terminator chunk; ignore any
                 # trailers (RFC 7230 §4.1.2) — they are rarely used.
-                await reader.readuntil(_CRLF)
+                await self._body_read(reader.readuntil(_CRLF))
                 return
-            chunk = await reader.readexactly(size)
-            await reader.readuntil(_CRLF)  # consume CRLF after chunk data
+            chunk = await self._body_read(reader.readexactly(size))
+            if len(chunk) < size:
+                raise ConnectionError('connection closed mid-chunk')
+            # consume CRLF after chunk data
+            await self._body_read(reader.readuntil(_CRLF))
             yield chunk
 
 
@@ -390,6 +453,8 @@ class HTTP1Client:
         # an unbounded wait per TestOneInput.  None opts out, leaving the
         # caller to impose their own deadline.
         self._connect_timeout = connect_timeout
+        #: Set once a response read stopped part-way.  See :meth:`_abandon`.
+        self._framing_broken = False
 
     # ---- async context manager -------------------------------------------
 
@@ -436,13 +501,45 @@ class HTTP1Client:
 
     # ---- public API ------------------------------------------------------
 
+    def _abandon(self) -> None:
+        """Stop using this connection: its place in the byte stream is lost.
+
+        A read that stopped part-way leaves the rest of the message on the
+        wire, so the next response read would begin inside it — and a peer
+        whose body is itself a well-formed response gets one delivered for a
+        request the server answered differently.  The server answers the same
+        situation by closing rather than by keep-aliving a desynced stream.
+
+        Deliberately not applied to :meth:`read_response`, the fault-injection
+        primitive: driving a misbehaving peer and then looking at what else it
+        sent is what that method is for.
+        """
+        self._framing_broken = True
+        if self._raw_writer is not None:
+            try:
+                self._raw_writer.close()
+            except Exception:
+                pass  # best-effort: the peer may already be gone.
+
+    def _refuse_if_desynced(self) -> None:
+        if self._framing_broken:
+            raise ConnectionError(
+                'connection abandoned after a framing error — '
+                'its position in the byte stream is unknown')
+
     async def request(self, method: str | HTTPMethod, path: str, *,
                       headers: HeaderList = (),
                       body: RequestBody = b'') -> ClientResponse:
+        self._refuse_if_desynced()
         assert self._writer is not None and self._reader is not None
         h = self._headers_with_host(headers)
         await HTTP1RequestSender(self._writer).send(method, path, h, body)
-        return await HTTP1ResponseRecipient().receive(self._reader)
+        recipient = HTTP1ResponseRecipient()
+        try:
+            return await recipient.receive(self._reader)
+        finally:
+            if recipient.framing_broken:
+                self._abandon()
 
     async def stream(self, method: str | HTTPMethod, path: str, *,
                      headers: HeaderList = (),
@@ -454,12 +551,17 @@ class HTTP1Client:
         headers are not exposed by this method; use ``request()`` if you
         need them.
         """
+        self._refuse_if_desynced()
         assert self._writer is not None and self._reader is not None
         h = self._headers_with_host(headers)
         await HTTP1RequestSender(self._writer).send(method, path, h, body)
         recipient = HTTP1ResponseRecipient()
-        async for chunk in recipient.stream(self._reader):
-            yield chunk
+        try:
+            async for chunk in recipient.stream(self._reader):
+                yield chunk
+        finally:
+            if recipient.framing_broken:
+                self._abandon()
 
     def _headers_with_host(self, headers: HeaderList) -> Headers:
         h = Headers(list(headers))
