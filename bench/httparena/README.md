@@ -30,7 +30,7 @@ profiles BlackBull's runtime supports today:
 | limited-conn    | GET/POST `/baseline11` | ✓ |
 | json            | GET `/json/{count}`    | ✓ |
 | json-tls        | GET `/json/{count}` on :8081 | ✓ |
-| upload          | POST `/upload`         | ✓ |
+| `/echo` | POST | Returns the request body back verbatim |
 | baseline-h2     | GET/POST `/baseline11` on :8443 (TLS, ALPN h2) | ✓ (claimed in `meta.json`) |
 | baseline-h2c    | GET `/baseline11`  on :8082 (h2 prior-knowledge) | runtime-capable; not claimed in `meta.json` yet |
 | json-h2c        | GET `/json/{count}` on :8082 (h2 prior-knowledge) | runtime-capable; not claimed in `meta.json` yet |
@@ -44,29 +44,15 @@ benchmark runs that do not exercise h2c.  `baseline-h2c` /
 `json-h2c` are runtime-capable on `:8082` but currently unclaimed in
 `meta.json`.
 
-Full-stack profiles implemented (v0.46.0+ — gRPC and the Postgres/Redis
-profiles):
-
-| Profile | Endpoint(s) | Backing |
-|---|---|---|
-| `async-db` | `GET /async-db?min&max&limit` | asyncpg pool (size = `DATABASE_MAX_CONN`), price-range `SELECT`; empty result when the DB is unavailable |
-| `crud` | `GET/POST /crud/items`, `GET/PUT /crud/items/{id}` | asyncpg + Redis cache (get-by-id cached, update invalidates) |
-| `api-4`, `api-16` | `/baseline11` (+ json / async-db) | load-generator CPU-budget profiles — no dedicated endpoint |
-| `unary-grpc`, `unary-grpc-tls` | `benchmark.BenchmarkService/GetSum` | BlackBull gRPC bridge (`app.enable_grpc`); hand-rolled `SumRequest`/`SumReply` codec, no protobuf dep |
-
-The `async-db` / `crud` profiles connect to the seeded Postgres (and Redis)
-sidecars the HttpArena harness starts; connection details come from
-`DATABASE_URL` / `REDIS_URL` / `DATABASE_MAX_CONN` (see `db.py`).  With no DB
-configured the read paths return empty results rather than erroring, so the
-container still boots for the protocol-only profiles.
-
 Profiles **not** implemented (intentional carve-out):
 
 | Profile | Why not |
 |---|---|
-| `static-h3`, `*-h3` | HTTP/3 / QUIC transport is intentionally out-of-scope per the project roadmap. |
-| `StreamSum` (gRPC server-streaming) | BlackBull serves unary gRPC only this release; streaming is a follow-up. |
-| `fortunes`, `gateway-*`, `production-stack` | Templated/aggregation/sidecar workloads beyond the current harness scope. |
+| `static-h3` | HTTP/3 / QUIC transport is intentionally out-of-scope per the project roadmap. |
+| `async-db`, `crud`, `fortunes` | Out of scope.  BlackBull is a protocol-layer framework, not a full-stack one — Postgres-backed implementations belong in a separate submission if we ever pursue the leaderboard (see Flask's HttpArena entry for the pattern). |
+| `*-h3`           | HTTP/3 / QUIC is out-of-scope. |
+| `*-grpc`         | No gRPC. |
+| `gateway-*`, `production-stack` | Need sidecar + DB work first; same scope rationale as the DB profiles. |
 
 ## Local smoke test
 
@@ -120,22 +106,6 @@ cd ~/work/HttpArena
 ./scripts/validate.sh blackbull           # 18-point correctness check
 ./scripts/benchmark.sh blackbull baseline # one profile
 ```
-
-## Local validation (WSL2) and the EC2 gate
-
-Validation is correctness-only and hardware-independent, so the standard flow
-runs the full 20-profile `validate.sh` on the local box and lets the EC2 run
-skip it in favour of the minimal `ready_check.sh` smoke:
-
-```bash
-bash bench/httparena/validate_local.sh HEAD   # verdict: bench/results/httparena-local/<UTC>/verdict.txt
-bash bench/httparena/build_wheel.sh HEAD      # wheel path + sha256 for BB_WHEEL_PATH
-```
-
-`validate_local.sh` clones `MDA2AV/HttpArena` to `~/HttpArena`, applies
-`patch_httparena.py` / `patch_cpuset.sh`, stages this directory as the
-`blackbull` framework, pre-builds the image, and runs `validate.sh` under a
-wall-clock bound.  See `USAGE.md` for the manual path.
 
 ## Versioning + apples-to-apples
 
