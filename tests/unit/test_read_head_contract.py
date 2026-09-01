@@ -24,9 +24,12 @@ import asyncio
 import pytest
 
 from blackbull.server.connection_protocol import ConnectionProtocol
+from blackbull.server.http1_actor import (BadRequestError, HeaderTooLargeError,
+                                          _reject_oversized_head)
 from blackbull.server.read_buffer import ReadBuffer
-from blackbull.server.recipient import (AsyncioReader, IncompleteReadError,
-                                        PrefixReader, ReadLimitExceeded)
+from blackbull.server.recipient import (AbstractReader, AsyncioReader,
+                                        IncompleteReadError, PrefixReader,
+                                        ReadLimitExceeded)
 
 pytestmark = pytest.mark.asyncio
 
@@ -75,6 +78,26 @@ class _NullTransport:
     def close(self): pass
     def is_closing(self): return False
     def get_extra_info(self, name, default=None): return default
+
+
+class _BytewiseReader(AbstractReader):
+    """Reader using the AbstractReader byte-wise read_head implementation."""
+
+    def __init__(self, data: bytes) -> None:
+        self._data = bytearray(data)
+
+    async def read(self, n: int) -> bytes:
+        chunk = bytes(self._data[:n])
+        del self._data[:n]
+        return chunk
+
+    async def readexactly(self, n: int) -> bytes:
+        if len(self._data) < n:
+            raise IncompleteReadError(bytes(self._data))
+        return await self.read(n)
+
+    def at_eof(self) -> bool:
+        return not self._data
 
 
 READERS = pytest.mark.parametrize(
@@ -142,6 +165,84 @@ async def test_a_zero_budget_disables_the_bound(make_reader):
     that here too — otherwise the budget check fires on every request."""
     fat = b'GET /x HTTP/1.1\r\nX-Pad: ' + b'p' * 20_000 + b'\r\n\r\n'
     assert await make_reader(fat).read_head(0) == fat
+
+
+async def test_bytewise_read_head_enforces_limit_during_line_accumulation():
+    reader = _BytewiseReader(b'x' * 10000 + b'\r\n')
+
+    with pytest.raises(ReadLimitExceeded) as caught:
+        await reader.read_head(8)
+
+    assert len(caught.value.seen) <= 9
+
+
+async def test_asyncio_readuntil_overrun_stays_resident():
+    reader = _asyncio_reader(b'x' * 10_000 + b'\n')
+
+    with pytest.raises(ReadLimitExceeded) as caught:
+        await reader.readuntil(b'\n', limit=8)
+
+    assert len(caught.value.seen) <= 9
+    assert reader.buffered_len() == 10_001
+
+
+async def test_asyncio_readuntil_limit_wins_over_eof():
+    reader = _asyncio_reader(b'x' * 9_000)
+
+    with pytest.raises(ReadLimitExceeded):
+        await reader.readuntil(b'\n', limit=8192)
+
+    assert reader.buffered_len() == 9_000
+
+
+@READERS
+async def test_oversized_header_keeps_request_line_for_431_classification(make_reader):
+    raw = b'GET / HTTP/1.1\r\nX-Pad: ' + b'x' * 2_000 + b'\r\n\r\n'
+
+    with pytest.raises(ReadLimitExceeded) as caught:
+        await make_reader(raw).read_head(128)
+
+    assert caught.value.seen.startswith(b'GET / HTTP/1.1\r\n')
+    with pytest.raises(HeaderTooLargeError):
+        _reject_oversized_head(caught.value.seen, 128)
+
+
+async def test_oversized_request_line_remains_a_400():
+    reader = _asyncio_reader(b'G' * 2_000 + b'\r\n\r\n')
+
+    with pytest.raises(ReadLimitExceeded) as caught:
+        await reader.read_head(128)
+
+    with pytest.raises(BadRequestError):
+        _reject_oversized_head(caught.value.seen, 128)
+
+
+async def test_read_head_passes_exact_limit_without_legacy_retry():
+    class RecordingReader(_BytewiseReader):
+        seen_limits: list[int]
+
+        def __init__(self) -> None:
+            super().__init__(HEAD)
+            self.seen_limits = []
+
+        async def readuntil(self, sep: bytes, limit: int = 0) -> bytes:
+            self.seen_limits.append(limit)
+            return await super().readuntil(sep, limit)
+
+    reader = RecordingReader()
+    assert await reader.read_head(123) == HEAD
+    assert reader.seen_limits == [123, 123, 123]
+
+
+async def test_legacy_readuntil_uses_bounded_bytewise_compatibility():
+    class LegacyReader(_BytewiseReader):
+        async def readuntil(self, sep: bytes) -> bytes:
+            raise AssertionError('legacy unbounded readuntil must not run')
+
+    reader = LegacyReader(b'x' * 10_000 + b'\r\n')
+    with pytest.raises(ReadLimitExceeded) as caught:
+        await reader.read_head(8)
+    assert len(caught.value.seen) <= 9
 
 
 @READERS

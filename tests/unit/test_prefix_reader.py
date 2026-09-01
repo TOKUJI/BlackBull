@@ -6,10 +6,13 @@ underlying reader, using its fast native readuntil/readexactly once the prefix
 is drained — including the seam case where the separator straddles the
 prefix/underlying boundary.
 """
+import asyncio
+
 import pytest
 
 from blackbull.server.recipient import (
-    AbstractReader, IncompleteReadError, PrefixReader,
+    AbstractReader, AsyncioReader, IncompleteReadError, PrefixReader,
+    ReadLimitExceeded,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -87,6 +90,68 @@ async def test_readuntil_sep_straddles_boundary():
     assert await pr.readuntil(b'\r\n') == b'GET / HTTP/1.1\r\n'
     # the over-read underlying bytes were pushed back, not lost
     assert await pr.readuntil(b'\r\n') == b'Host: x\r\n'
+
+
+async def test_limited_readuntil_handles_separator_at_boundary():
+    pr = PrefixReader(b'abc\r', _Under(b'\n', eof=True))
+
+    assert await pr.readuntil(b'\r\n', limit=5) == b'abc\r\n'
+
+
+async def test_limited_readuntil_preserves_prefix_on_overrun():
+    pr = PrefixReader(b'123456', _Under(b'\n', eof=True))
+
+    with pytest.raises(ReadLimitExceeded) as caught:
+        await pr.readuntil(b'\n', limit=5)
+
+    assert caught.value.seen == b'123456'
+    assert pr.buffered_len() == 6
+
+
+async def test_limited_readuntil_empty_prefix_preserves_underlying_overrun():
+    sr = asyncio.StreamReader()
+    sr.feed_data(b'x' * 10_000 + b'\n')
+    sr.feed_eof()
+    pr = PrefixReader(b'', AsyncioReader(sr))
+
+    with pytest.raises(ReadLimitExceeded):
+        await pr.readuntil(b'\n', limit=5)
+
+    assert pr.buffered_len() == 10_001
+
+
+async def test_limited_readuntil_legacy_underlying_replays_overrun():
+    underlying = _Under(b'x' * 20 + b'\n')
+    pr = PrefixReader(b'', underlying)
+
+    with pytest.raises(ReadLimitExceeded):
+        await pr.readuntil(b'\n', limit=5)
+
+    assert pr.peek(6) == b'x' * 6
+    assert pr.buffered_len() == 6
+    assert len(underlying.buf) == 15
+
+
+async def test_limited_readuntil_handles_overlapping_separator_at_boundary():
+    sr = asyncio.StreamReader()
+    sr.feed_data(b'\r\n')
+    sr.feed_eof()
+    pr = PrefixReader(b'abc\r', AsyncioReader(sr))
+
+    assert await pr.readuntil(b'\r\n', limit=6) == b'abc\r\r\n'
+
+
+async def test_limited_readuntil_replays_consumed_seam_bytes_on_overrun():
+    sr = asyncio.StreamReader()
+    sr.feed_data(b'\r' + b'x' * 20 + b'\n')
+    sr.feed_eof()
+    pr = PrefixReader(b'abc\r', AsyncioReader(sr))
+
+    with pytest.raises(ReadLimitExceeded) as caught:
+        await pr.readuntil(b'\r\n', limit=6)
+
+    assert caught.value.seen.startswith(b'abc\r\r')
+    assert pr.peek(7).startswith(b'abc\r\rxx')
 
 
 async def test_at_eof_reflects_prefix_and_underlying():

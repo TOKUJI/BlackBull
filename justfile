@@ -20,3 +20,22 @@ docs:
 # Build docs strictly (CI mode)
 docs-build:
     DISABLE_MKDOCS_2_WARNING=true uv run mkdocs build --strict
+
+# YouTrack REST access. Credentials are read only by scripts/youtrack.sh.
+yt-search query='project: BLA #Unresolved':
+    scripts/youtrack.sh search "{{query}}"
+
+yt-show issue:
+    scripts/youtrack.sh show "{{issue}}"
+
+yt-create summary description:
+    scripts/youtrack.sh create "{{summary}}" "{{description}}"
+
+yt-comment issue text:
+    scripts/youtrack.sh comment "{{issue}}" "{{text}}"
+
+yt-command issue command:
+    scripts/youtrack.sh command "{{issue}}" "{{command}}"
+
+yt-close issue:
+    scripts/youtrack.sh close "{{issue}}"

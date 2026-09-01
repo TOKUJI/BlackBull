@@ -259,15 +259,18 @@ class ReadBuffer:
             return self.LIMIT_EXCEEDED
         return end
 
-    def find(self, sep: bytes) -> int:
+    def find(self, sep: bytes, start: int = 0) -> int:
         """Offset of *sep* within the resident bytes, or ``-1``.
 
         Unlike :meth:`find_head_end` this scans from the read cursor every
         call: its callers are the generic `readuntil` paths (chunk-size lines,
         WebSocket framing), where the search target changes between calls so a
         carried scan offset would be wrong rather than merely wasteful.
+
+        *start* is a relative offset used by one ``readuntil`` call to resume
+        its scan while a fixed separator is still pending.
         """
-        idx = self._buf.find(sep, self._r, self._w)
+        idx = self._buf.find(sep, self._r + start, self._w)
         return -1 if idx < 0 else idx - self._r
 
     def take(self, n: int) -> bytes:

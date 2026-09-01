@@ -15,6 +15,8 @@ import asyncio
 import pytest
 
 from blackbull.server.connection_protocol import ConnectionProtocol
+from blackbull.server.read_buffer import ReadBuffer
+from blackbull.server.recipient import ReadLimitExceeded
 
 
 class _FakeTransport:
@@ -155,6 +157,69 @@ class TestReaderWakes:
         _deliver(proto, b' line\r\nrest')
         assert await asyncio.wait_for(task, timeout=1) == b'partial line\r\n'
         assert proto.reader.buffered_len() == 4        # 'rest' stays put
+
+    async def test_readuntil_limit_fails_while_line_is_accumulating(self, wired):
+        proto, _ = wired
+
+        async def consumer():
+            return await proto.reader.readuntil(b'\n', limit=8)
+
+        task = asyncio.create_task(consumer())
+        await asyncio.sleep(0)
+        _deliver(proto, b'12345678')
+        await asyncio.sleep(0)
+        assert not task.done()
+        _deliver(proto, b'9')
+        with pytest.raises(ReadLimitExceeded) as caught:
+            await asyncio.wait_for(task, timeout=1)
+        assert caught.value.seen == b'123456789'
+        assert proto.reader.buffered_len() == 9
+
+    async def test_readuntil_limit_includes_separator(self, wired):
+        proto, _ = wired
+        _deliver(proto, b'1234567\nrest')
+
+        assert await proto.reader.readuntil(b'\n', limit=8) == b'1234567\n'
+        assert proto.reader.buffered_len() == 4
+
+    async def test_readuntil_limit_handles_separator_split_across_arrivals(self, wired):
+        proto, _ = wired
+
+        async def consumer():
+            return await proto.reader.readuntil(b'\r\n', limit=8)
+
+        task = asyncio.create_task(consumer())
+        await asyncio.sleep(0)
+        _deliver(proto, b'123456')
+        await asyncio.sleep(0)
+        _deliver(proto, b'\r')
+        await asyncio.sleep(0)
+        assert not task.done()
+        _deliver(proto, b'\nrest')
+
+        assert await asyncio.wait_for(task, timeout=1) == b'123456\r\n'
+        assert proto.reader.buffered_len() == 4
+
+    async def test_readuntil_resumes_scan_in_linear_work(self, wired, monkeypatch):
+        proto, _ = wired
+        examined = 0
+        original = ReadBuffer.find
+
+        def counting_find(buffer, sep: bytes, start: int = 0) -> int:
+            nonlocal examined
+            examined += buffer.available - start
+            return original(buffer, sep, start)
+
+        monkeypatch.setattr(ReadBuffer, 'find', counting_find)
+        task = asyncio.create_task(proto.reader.readuntil(b'\n', limit=32))
+        await asyncio.sleep(0)
+        for byte in b'x' * 33:
+            _deliver(proto, bytes((byte,)))
+            await asyncio.sleep(0)
+
+        with pytest.raises(ReadLimitExceeded):
+            await asyncio.wait_for(task, timeout=1)
+        assert examined <= 33
 
 
 class TestHeadScan:

@@ -120,6 +120,9 @@ venv.bak/
 # moved to the tracker.  It is no longer symlinked in: these are working files
 # now, and the companion repo is an archive rather than their home.
 .claude
+# Project-scoped dsh skill discovery root — symlinks into the frozen skills
+# archive (../blackbull-assets/frozen/skills), machine-local, never committed.
+.dsh
 # CLAUDE.md is a symlink to AGENTS.md — create locally: ln -s AGENTS.md CLAUDE.md
 CLAUDE.md
 # Convenience link so GitHub-side tooling finds the skills locally — create

@@ -385,6 +385,29 @@ only `readuntil` can do.  Both are held to the same behaviour by
 through the same cases — a reader that disagreed on one of them would put
 a hole in exactly one deployment shape.
 
+The same reader contract supports `readuntil(separator, limit=0)`.  A positive
+limit includes the separator and is enforced while `BufferReader` accumulates
+bytes, so a chunk-framing line cannot use the transport's released
+backpressure window as unbounded storage.  `AsyncioReader` temporarily applies
+the same budget to the native stream read, and `PrefixReader` counts replayed
+bytes and underlying bytes as one unit, including separators that cross that
+boundary.  An overrun remains resident in whichever reader owns those bytes
+and carries bounded evidence in `ReadLimitExceeded`; the HTTP/1.1 recipient
+turns that evidence into its 400 framing response.
+
+The public reader methods choose the policy once: `limit <= 0` enters an
+unbounded implementation, while a positive value enters a bounded
+implementation whose precondition is that the budget is positive.  Concrete
+readers override those two paths separately, so accumulation loops do not
+scatter checks for whether a limit is enabled.
+
+The default line-by-line `read_head` path passes the head limit to each line
+read as a per-line accumulation bound, then applies the same limit to the
+completed head.  If a later line overruns, evidence from earlier lines is
+prepended before the exception reaches HTTP/1.1.  This keeps one malformed
+line bounded while retaining the request-line terminator needed to distinguish
+a 431-sized header block from a 400-sized unterminated request line.
+
 `limit` is what makes the read bounded, and it applies to *every* request
 on the connection, not just the first.  A keep-alive peer's second head
 gets the same budget as its first.
