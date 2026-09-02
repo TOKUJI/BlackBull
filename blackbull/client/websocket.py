@@ -233,11 +233,18 @@ class WebSocketClient:
             request_headers.append(b'sec-websocket-protocol', b', '.join(offered))
 
         await HTTP1RequestSender(self._writer).send('GET', path, request_headers)
+        # What keeps the first WebSocket frame from being read as a body is
+        # the 1xx half of RFC 9112 §6.3 item 1, which applies to the status
+        # alone; passing GET changes no outcome, since the method half names
+        # only HEAD and CONNECT.  It is passed because it is known and because
+        # a call that omits it is indistinguishable from one that forgot.
         if response_timeout is None:
-            response = await HTTP1ResponseRecipient().receive(self._reader)
+            response = await HTTP1ResponseRecipient().receive(
+                self._reader, method='GET')
         else:
             async with asyncio.timeout(response_timeout):
-                response = await HTTP1ResponseRecipient().receive(self._reader)
+                response = await HTTP1ResponseRecipient().receive(
+                    self._reader, method='GET')
 
         if response.status != HTTPStatus.SWITCHING_PROTOCOLS:
             raise HandshakeError(
