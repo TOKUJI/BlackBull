@@ -753,9 +753,24 @@ class Settings:
     #: Seconds the async client will wait for a single response-body read.
     #: Per read, not per body: a peer must keep making progress, which is the
     #: same shape as ``body_timeout`` and as nginx's ``client_body_timeout``.
-    #: It stops a peer that **stops**; a peer that trickles satisfies every
-    #: individual read and is the rate floor's job, which does not exist yet.
-    #: 0 disables.
+    #:
+    #: What counts as one read differs between payload and framing, and the
+    #: difference is deliberate.  A payload read is transport-paced, so the
+    #: deadline covers **one arrival**: its unit would otherwise be a whole
+    #: body, and a deadline over unbounded work is not a bound.  A framing
+    #: operation — a chunk-size line, a trailer field line, the two-octet
+    #: chunk terminator — is read whole, so the deadline covers **the
+    #: operation**.  Each is bounded by ``client_head_max_line`` and is
+    #: normally a handful of octets, so a deadline can afford to own its total;
+    #: pacing them by arrival would leave that total unowned whenever
+    #: ``client_min_body_rate`` is off, which is its default.  The response
+    #: head is bounded the same way — one ``client_head_timeout`` for the whole
+    #: block, not one per line.
+    #:
+    #: Operations do not share a budget: the deadline is fresh for each, so a
+    #: response of many chunks may take many deadlines in total.  It stops a
+    #: peer that **stops**; a peer that trickles satisfies every individual
+    #: read, and that is ``client_min_body_rate``'s job.  0 disables.
     client_body_timeout: float = 30.0
 
     #: Maximum total response-body octets the async client will buffer for
@@ -774,6 +789,46 @@ class Settings:
     #: is the shape of a client-side bound, which is a diagnostic rather than
     #: a defence.
     client_body_max_total: int = 0
+
+    #: Minimum sustained rate, in octets per second, at which the async client
+    #: requires a response **body** to arrive.  ``client_body_timeout`` returns
+    #: on any arrival, so it degrades from "deliver a slice in N seconds" to
+    #: "send something every N seconds", which a one-byte drip always
+    #: satisfies; a rate is what a drip cannot fake.
+    #:
+    #: What it measures, exactly, because the answer is a policy and not just a
+    #: number.  The numerator is response-body payload only: chunk-size lines,
+    #: chunk extensions, terminators and trailers are discarded on receipt, so
+    #: octets a peer may pad at will buy no credit.  The denominator is every
+    #: second spent waiting on the transport, framing reads included, so a peer
+    #: cannot stall in front of the parts that are not counted.  Time a caller
+    #: spends between ``stream()`` yields is not in it, because the clock runs
+    #: only inside a read.  And the wait before the *first* body octet is
+    #: outside the window entirely: a peer that flushes its head and then
+    #: thinks — a slow query, a report built while it is streamed, an LLM's
+    #: time to first token — is working, not dripping.
+    #:
+    #: **Off by default**, unlike the server's ``min_body_rate``.  After the
+    #: first octet a long gap that eventually produces a body and one that
+    #: never does are the same observation, so no threshold can separate an
+    #: event stream or a long poll from a drip.  Setting this is the operator
+    #: stating that their peer is neither.  No widely used Python client
+    #: (requests, httpx, aiohttp, urllib3) enables a response rate floor by
+    #: default, and Kestrel's 240/5 — the numbers the server's default comes
+    #: from — is ``MinRequestBodyDataRate``, a *request* knob: a request body
+    #: is pushed by a peer already holding the bytes, so a gap is anomalous,
+    #: while a response body is generated as it is sent, so a gap is the
+    #: normal signature of work.  Same constant, different distribution.
+    #:
+    #: A peer that stops entirely is ``client_body_timeout``'s, whatever this
+    #: is set to.  0 disables.
+    client_min_body_rate: float = 0.0
+
+    #: Seconds of body-read waiting, after the first body octet, before
+    #: ``client_min_body_rate`` starts being enforced.  The window is one grace
+    #: period wide and rolls forward whenever it is satisfied, so a burst buys
+    #: the window it happened in rather than the whole response.
+    client_min_body_rate_grace: float = 5.0
 
     #: Dual-path conformance lane.  When true, every request
     #: round-trips the native :class:`~blackbull.connection.Connection` through
@@ -1069,6 +1124,9 @@ def get_settings() -> Settings:
         client_head_timeout=_float_env_nonneg('BB_CLIENT_HEAD_TIMEOUT', 30.0),
         client_body_timeout=_float_env_nonneg('BB_CLIENT_BODY_TIMEOUT', 30.0),
         client_body_max_total=_int_env_nonneg('BB_CLIENT_BODY_MAX_TOTAL', 0),
+        client_min_body_rate=_float_env_nonneg('BB_CLIENT_MIN_BODY_RATE', 0.0),
+        client_min_body_rate_grace=_float_env_nonneg(
+            'BB_CLIENT_MIN_BODY_RATE_GRACE', 5.0),
         force_asgi_scope=_bool_env('BB_FORCE_ASGI_SCOPE', False),
         body_chunk_size=_int_env('BB_BODY_CHUNK_SIZE', 65536),
         body_chunk_max=_int_env('BB_BODY_CHUNK_MAX', 524288),
