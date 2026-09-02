@@ -847,6 +847,31 @@ class Settings:
     #: the window it happened in rather than the whole response.
     client_min_body_rate_grace: float = 5.0
 
+    #: Maximum number of interim (``1xx``) responses the async client will read
+    #: and discard while waiting for the final one.  RFC 9110 §15.2 makes
+    #: parsing past them a MUST, which turns "read one response" into a loop,
+    #: and a loop over peer-supplied messages needs a count.
+    #:
+    #: Count is a fourth axis the size/total/time triad does not contain — and
+    #: here it is also what owns the triad's aggregates.  ``client_head_max_-
+    #: total`` and ``client_head_timeout`` are both **per head**, and each
+    #: interim is a head, so neither one grows: what grows is how many times
+    #: they are spent.  The deadline must stay per head, because a ``103 Early
+    #: Hints`` is exactly a peer saying "still working" before it answers, and
+    #: judging that wait would refuse a slow query for being slow — the
+    #: exemption the body's progress deadline makes for the same reason.  So
+    #: this number, not those two, is what bounds one ``receive()``: at most
+    #: ``limit + 1`` heads, hence at most ``(limit + 1)`` head deadlines and
+    #: ``(limit + 1)`` head budgets.  0 disables the cap, and with it the only
+    #: owner those aggregates have.
+    #:
+    #: 8 because interim responses are used a handful at a time — a
+    #: ``100 Continue`` for an ``Expect``, one or two ``103 Early Hints`` link
+    #: sets — and no deployed pattern needs more.  ``101`` is not counted: it
+    #: is 1xx by number and final by meaning, so it ends the loop rather than
+    #: extending it.
+    client_max_interim_responses: int = 8
+
     #: Dual-path conformance lane.  When true, every request
     #: round-trips the native :class:`~blackbull.connection.Connection` through
     #: ``as_scope()`` + ``from_scope()`` before dispatch, so the ASGI compat
@@ -1144,6 +1169,8 @@ def get_settings() -> Settings:
         client_min_body_rate=_float_env_nonneg('BB_CLIENT_MIN_BODY_RATE', 0.0),
         client_min_body_rate_grace=_float_env_nonneg(
             'BB_CLIENT_MIN_BODY_RATE_GRACE', 5.0),
+        client_max_interim_responses=_int_env_nonneg(
+            'BB_CLIENT_MAX_INTERIM_RESPONSES', 8),
         force_asgi_scope=_bool_env('BB_FORCE_ASGI_SCOPE', False),
         body_chunk_size=_int_env('BB_BODY_CHUNK_SIZE', 65536),
         body_chunk_max=_int_env('BB_BODY_CHUNK_MAX', 524288),

@@ -77,7 +77,7 @@ class TestConflictingContentLength:
         reader = _Reader(b'HELLOSURPLUS!')
 
         with pytest.raises(ProtocolError):
-            await c._read_body(reader, headers)
+            await c._read_body(reader, headers, status=200)
 
     async def test_the_comma_combined_form_is_refused_too(self):
         """One header line, two values — the same conflict, different spelling."""
@@ -86,7 +86,7 @@ class TestConflictingContentLength:
         reader = _Reader(b'HELLOSURPLUS!')
 
         with pytest.raises(ProtocolError):
-            await c._read_body(reader, headers)
+            await c._read_body(reader, headers, status=200)
 
     async def test_repeated_but_equal_lengths_are_accepted(self):
         """RFC 9110 §8.6 permits the repeat when the values agree.
@@ -100,12 +100,13 @@ class TestConflictingContentLength:
                            (b'content-length', b'005')])
         reader = _Reader(b'HELLO')
 
-        assert await c._read_body(reader, headers) == b'HELLO'
+        assert await c._read_body(reader, headers, status=200) == b'HELLO'
 
     async def test_a_single_length_still_works(self):
         c = _client()
         headers = Headers([(b'content-length', b'5')])
-        assert await c._read_body(_Reader(b'HELLO'), headers) == b'HELLO'
+        assert await c._read_body(_Reader(b'HELLO'), headers,
+                          status=200) == b'HELLO'
 
 
 # ===========================================================================
@@ -124,7 +125,8 @@ class TestStreamingIsIncremental:
         body = b'x' * 200_000
         headers = Headers([(b'content-length', str(len(body)).encode())])
 
-        chunks = [chunk async for chunk in c._stream_body(_Reader(body), headers)]
+        chunks = [chunk async for chunk in
+                  c._stream_body(_Reader(body), headers, status=200)]
 
         assert b''.join(chunks) == body
         assert len(chunks) > 1, (
@@ -134,7 +136,8 @@ class TestStreamingIsIncremental:
     async def test_a_short_body_is_still_one_chunk(self):
         c = _client()
         headers = Headers([(b'content-length', b'5')])
-        chunks = [chunk async for chunk in c._stream_body(_Reader(b'HELLO'), headers)]
+        chunks = [chunk async for chunk in
+                  c._stream_body(_Reader(b'HELLO'), headers, status=200)]
         assert chunks == [b'HELLO']
 
     async def test_streaming_refuses_a_conflicting_length_too(self):
@@ -145,4 +148,4 @@ class TestStreamingIsIncremental:
                            (b'content-length', b'10')])
         with pytest.raises(ProtocolError):
             [chunk async for chunk in c._stream_body(_Reader(b'HELLOSURPLUS!'),
-                                                     headers)]
+                                                     headers, status=200)]

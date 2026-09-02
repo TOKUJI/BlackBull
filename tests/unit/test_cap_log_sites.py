@@ -812,6 +812,40 @@ async def test_client_body_timeout_logs_on_http2(caps_caplog, monkeypatch):
 
 
 # ----------------------------------------------------------------------
+# client_max_interim_responses — the count axis on the response head
+# ----------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_client_max_interim_responses_logs(caps_caplog, monkeypatch):
+    """A peer that keeps answering ``100 Continue`` passes every size and
+    every deadline: each head is small and prompt, and no body is involved.
+    Only the count is anomalous."""
+    from blackbull.client.exceptions import ResponseTooLarge
+    from blackbull.client.http1 import HTTP1ResponseRecipient
+    from blackbull.server.recipient import AbstractReader
+
+    monkeypatch.setenv('BB_CLIENT_MAX_INTERIM_RESPONSES', '3')
+
+    class _Interims(AbstractReader):
+        def __init__(self) -> None:
+            self._buf = b'HTTP/1.1 100 Continue\r\n\r\n' * 40
+            self._pos = 0
+
+        async def read(self, n: int = -1) -> bytes:
+            out = (self._buf[self._pos:] if n < 0
+                   else self._buf[self._pos:self._pos + n])
+            self._pos += len(out)
+            return out
+
+    with pytest.raises(ResponseTooLarge):
+        await HTTP1ResponseRecipient().receive(_Interims())
+
+    records = _records_for(caps_caplog, 'client_max_interim_responses')
+    assert records and records[0].protocol == 'http1'
+    assert records[0].limit == 3
+
+
+# ----------------------------------------------------------------------
 # Wiring audit — every cap in the inventory appears at >= 1 log_cap_hit()
 # call in the codebase.  Static check; catches "removed wiring without
 # noticing" regressions even when a functional test happens to skip.
@@ -838,6 +872,7 @@ _INVENTORY = (
     'client_body_max_total',
     'client_head_max_total',
     'client_body_timeout',
+    'client_max_interim_responses',
 )
 
 
