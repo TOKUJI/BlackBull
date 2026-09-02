@@ -69,7 +69,7 @@ class HeaderResponder(Responder):
     FRAME_TYPE = FrameTypes.HEADERS
 
     async def respond(self, client) -> None:
-        client._on_response_headers(self.frame)
+        await client._on_response_headers(self.frame)
 
 
 class DataResponder(Responder):

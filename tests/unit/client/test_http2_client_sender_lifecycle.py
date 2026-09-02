@@ -84,6 +84,11 @@ class TestSenderRelease:
         c = _client()
         c._on_initial_window_size(10)          # park after ten octets
         task = asyncio.create_task(c.request('POST', '/', body=b'z' * 100))
+        # Two turns, not one: the body write is a task now, so that a refusal
+        # can cancel it (a stream refused mid-upload otherwise parked the
+        # caller on a window RST_STREAM guaranteed would never reopen).  It
+        # therefore starts one loop iteration after ``request()`` does.
+        await asyncio.sleep(0)
         await asyncio.sleep(0)
         assert c._writer.payload_bytes == 10, 'expected the upload to park'
 

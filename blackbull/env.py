@@ -735,6 +735,10 @@ class Settings:
     #: server is addressed by anyone, a client picks its peer, and pointing
     #: one at a deliberately hostile server is what
     #: ``blackbull.fault_injection`` exists for.  0 disables.
+    #:
+    #: Under HTTP/2 this bounds the response's field lines **in aggregate**
+    #: across every HEADERS frame on the stream, since a single field section
+    #: is already bounded by hpack's ``max_header_list_size``.
     client_head_max_total: int = 65536
 
     #: Maximum bytes in a single status line or response field line.  Checked
@@ -753,6 +757,19 @@ class Settings:
     #: Seconds the async client will wait for a single response-body read.
     #: Per read, not per body: a peer must keep making progress, which is the
     #: same shape as ``body_timeout`` and as nginx's ``client_body_timeout``.
+    #:
+    #: Under HTTP/2 the unit is a **frame for that stream**, so what it bounds
+    #: there is the gap *between* frames — which
+    #: ``_FRAME_READ_TIMEOUT`` does not, since that bounds the remainder of a
+    #: frame whose header has already arrived.  Per stream rather than per
+    #: connection: a connection-wide clock is reset by any peer traffic, so a
+    #: busy stream would shelter a stalled one indefinitely.  Armed by the
+    #: *final* response head, not by the request and not by an interim (1xx)
+    #: one, for the reason the rate floor exempts the wait before the first
+    #: body octet — a peer that has not answered yet is working, not stalling;
+    #: ``103 Early Hints`` followed by real work is that peer.  Re-armed only
+    #: by a DATA frame that delivers body octets, since an empty one is not
+    #: progress and re-arming on it let a peer hold a stream open forever.
     #:
     #: What counts as one read differs between payload and framing, and the
     #: difference is deliberate.  A payload read is transport-paced, so the
