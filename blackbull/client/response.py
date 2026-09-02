@@ -53,8 +53,17 @@ class Responder:
 
 
 class _NullResponder(Responder):
-    """Drops frame types the client does not handle (PRIORITY, PRIORITY_UPDATE,
-    PUSH_PROMISE, CONTINUATION until reassembly is added) without raising.
+    """Drops frame types the client does not act on (PRIORITY,
+    PRIORITY_UPDATE, PUSH_PROMISE) without raising.
+
+    Dropped is not the same as unread.  A PUSH_PROMISE arrives here with its
+    field block already decoded, and CONTINUATION does not arrive here at all
+    — ``HTTP2Client._absorb_field_block`` reassembles it into the frame that
+    opened the block.  RFC 9113 §4.3 requires both blocks decompressed *even
+    when the frames are to be discarded*, because the connection-wide HPACK
+    table advances as a side effect of reading them: a block skipped here
+    leaves every later block on the connection decoding against a table
+    missing its insertions, which is silent corruption rather than an error.
 
     Inherits from ``Responder`` but keeps ``FRAME_TYPE = None`` so
     ``__init_subclass__`` skips registration — this class is only ever

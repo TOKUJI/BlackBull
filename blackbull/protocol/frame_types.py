@@ -337,12 +337,25 @@ class Headers(FrameBase):
             self.parse_payload()
 
     def parse_payload(self):
+        """Decode the field block, which may span several frames.
+
+        Padding and the priority field belong to the frame that carried the
+        flags — the one that *opened* the block — and ``self.length`` is that
+        frame's payload length, so everything past it was appended by
+        CONTINUATION and is field-block fragment throughout.  Measuring the
+        padding from the end of the accumulation instead placed it in the
+        middle of the block and took an equal number of octets off the tail of
+        the last fragment: an unsplit block was fine, a split padded one
+        decoded to wrong values about as often as it raised.
+        """
         assert self.decoder is not None
-        payload = BytesIO(self.raw_block)
-        # Track how many bytes of self.raw_block belong to the HPACK block;
-        # start with the full payload and subtract pad-length octet, padding,
+        opening = self.raw_block[:self.length]
+        continued = self.raw_block[self.length:]
+        payload = BytesIO(opening)
+        # Track how many bytes of the opening frame belong to the HPACK block;
+        # start with its payload and subtract pad-length octet, padding,
         # and the priority field as we go.
-        remaining = len(self.raw_block)
+        remaining = len(opening)
         if self.padded:
             # RFC 9113 §6.2 — padding length must be smaller than the frame
             # payload length (otherwise pad would cover the pad-length octet
@@ -371,7 +384,10 @@ class Headers(FrameBase):
 
         # raw=True keeps hpack output as bytes-bytes tuples and bypasses
         # hpack's _unicode_if_needed UTF-8 decode (~4% CPU under load).
-        fields = self.decoder.decode(payload.read(remaining), raw=True)
+        block = payload.read(remaining)
+        if continued:
+            block = bytes(block) + bytes(continued)
+        fields = self.decoder.decode(block, raw=True)
         debug = _DEBUG
 
         seen_regular = False
@@ -499,13 +515,62 @@ class PushPromise(FrameBase):
     FRAME_TYPE = FrameTypes.PUSH_PROMISE
 
     def __init__(self, length: int, type_, flags: int, stream_id: int,
-                 *, data: bytes = b'', encoder=None, **kwds):
+                 *, data: bytes = b'', decoder=None, encoder=None, **kwds):
         super().__init__(length, type_, flags, stream_id)
-        buf = BytesIO(data)
-        self.promised_stream_id = int.from_bytes(buf.read(4), 'big') & 0x7FFFFFFF
         self.pseudo_headers: dict[PseudoHeaders, str] = {}
         self.headers: list[tuple[str, str]] = []
         self.encoder = encoder
+        self.decoder = decoder
+        self.end_headers = HeaderFrameFlags.END_HEADERS & self.flags
+        self.padded = HeaderFrameFlags.PADDED & self.flags
+        self.raw_block: bytes = data or b''
+        buf = BytesIO(self.raw_block)
+        # §6.6 puts the pad-length octet *before* the promised stream id, so
+        # reading the id off the front of the payload finds padding on a
+        # PADDED frame and promises a stream nobody named.
+        if self.padded:
+            buf.read(1)
+        self.promised_stream_id = int.from_bytes(buf.read(4), 'big') & 0x7FFFFFFF
+        if self.raw_block and self.end_headers:
+            self.parse_payload()
+
+    def parse_payload(self) -> None:
+        """Decode the promised request's field block, for the decoder's sake.
+
+        The client acts on no push — it has no cache to populate, and the
+        promise is dropped after this — but RFC 9113 §4.3 requires the block
+        to be decompressed *anyway*: HPACK's dynamic table advances as a side
+        effect of reading it, and the table is connection-wide.  A promise
+        skipped undecoded leaves every later field block on the connection
+        decoding against a table missing these insertions, which is silent
+        corruption rather than an error.  The decoded fields are discarded on
+        purpose; it is the side effect that is the point.
+
+        Same split-block rule as :meth:`Headers.parse_payload` — padding
+        belongs to the opening frame, which ``self.length`` delimits.
+        """
+        if self.decoder is None:
+            return
+        opening = self.raw_block[:self.length]
+        continued = self.raw_block[self.length:]
+        payload = BytesIO(opening)
+        remaining = len(opening)
+        if self.padded:
+            pad_length = int.from_bytes(payload.read(1), 'big', signed=False)
+            if pad_length >= self.length:
+                # §6.6 borrows §6.2's rule: padding cannot cover its own
+                # length octet.  Nothing here can be decoded, and the caller
+                # answers an undecodable block for us.
+                raise ValueError(
+                    f'PUSH_PROMISE pad_length ({pad_length}) >= '
+                    f'frame length ({self.length})')
+            remaining -= 1 + pad_length
+        payload.read(4)  # the promised stream id, already taken
+        remaining -= 4
+        block = payload.read(remaining)
+        if continued:
+            block = bytes(block) + bytes(continued)
+        self.decoder.decode(block, raw=True)
 
     def save(self) -> bytes:
         encoder = self.encoder if self.encoder is not None else Encoder()
