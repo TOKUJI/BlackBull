@@ -14,17 +14,20 @@ from dataclasses import dataclass, field
 from http import HTTPMethod, HTTPStatus
 
 import logging
+from ..env import get_settings
 from ..protocol.frame import FrameFactory
-from ..protocol.frame_types import (DEFAULT_INITIAL_WINDOW_SIZE,
+from ..protocol.frame_types import (DEFAULT_INITIAL_WINDOW_SIZE, ErrorCodes,
                                     FrameBase, FrameTypes,
                                     HeaderFrameFlags, PseudoHeaders)
 from ..headers import Headers
+from ..server.cap_log import log_cap_hit
 from ..server.recipient import AbstractReader, AsyncioReader
 from ..server.sender import (AbstractWriter, AsyncioWriter, ConnectionWindow,
                              HTTP2Sender)
 from ..utils import HTTP2 as _HTTP2_PREFACE
 from ._connect import DEFAULT_CONNECT_TIMEOUT, open_connection as _open_connection
-from .exceptions import ConnectionError, ProtocolError, StreamReset
+from .exceptions import (ConnectionError, ProtocolError, ResponseTooLarge,
+                         StreamReset)
 # Module-level and at runtime, as ``http1.py`` imports its own scenario
 # types: the annotation on ``execute_scenario`` has to be resolvable from
 # this module, and a TYPE_CHECKING import is not (beartype looks in the
@@ -90,6 +93,29 @@ class _PendingResponse:
     body_parts: list[bytes] = field(default_factory=list)
     # Stream-level received-but-unacked DATA bytes (see _credit_received).
     unacked: int = 0
+    #: Response-body octets accepted so far, against BB_CLIENT_BODY_MAX_TOTAL.
+    #: The flow-control window cannot serve as this: ``_credit_received``
+    #: returns credit for every DATA frame, so the window bounds what is in
+    #: flight and never what has accumulated.
+    body_seen: int = 0
+    #: Field-line octets accepted across *every* HEADERS frame on this stream,
+    #: against BB_CLIENT_HEAD_MAX_TOTAL.  One field section is hpack's to bound
+    #: (``max_header_list_size``); the sum over informational responses, the
+    #: final headers and trailers is nobody's until here.
+    headers_seen: int = 0
+    #: Progress timer for this stream (BB_CLIENT_BODY_TIMEOUT), re-armed by
+    #: every frame that arrives for it.  Per stream and not per connection:
+    #: a connection-wide clock is reset by any peer traffic, so a busy stream
+    #: shelters a stalled one indefinitely.
+    deadline: asyncio.TimerHandle | None = None
+
+    def disarm(self) -> None:
+        """Stop the progress timer.  Idempotent — the response may end
+        because it completed, because it was refused, or because the
+        connection did."""
+        if self.deadline is not None:
+            self.deadline.cancel()
+            self.deadline = None
 
 
 def _record_frame(result, frame) -> None:
@@ -250,6 +276,7 @@ class HTTP2Client:
 
         # Fail any still-pending responses so awaiters don't hang.
         for pending in self._responses.values():
+            pending.disarm()
             if not pending.future.done():
                 pending.future.set_exception(
                     ConnectionError('client connection closed'))
@@ -633,6 +660,7 @@ class HTTP2Client:
             self._connection_lost = True
             # Connection ended; fail any still-pending responses.
             for pending in self._responses.values():
+                pending.disarm()
                 if not pending.future.done():
                     pending.future.set_exception(
                         ConnectionError('connection closed before response'))
@@ -640,11 +668,77 @@ class HTTP2Client:
 
     # ---- internal: callbacks invoked by Responders -----------------------
 
-    def _on_response_headers(self, frame) -> None:
+    def _arm_progress_deadline(self, stream_id: int) -> None:
+        """Start or restart the stream's progress timer.
+
+        Armed by the first response frame rather than by the request, for the
+        reason the HTTP/1.1 rate floor exempts the wait before the first body
+        octet: a peer that has not answered yet is working, not stalling, and
+        judging that wait would refuse a slow query for being slow.  What is
+        bounded here is the gap between frames once a response has begun.
+
+        ``_FRAME_READ_TIMEOUT`` does not cover this.  It bounds the remainder
+        of a frame whose 9-byte header has arrived, so a peer sending one
+        complete 1-byte DATA frame every 29 s never trips it.
+        """
+        pending = self._responses.get(stream_id)
+        if pending is None:
+            return
+        timeout = get_settings().client_body_timeout
+        if timeout <= 0:
+            return
+        pending.disarm()
+        pending.deadline = asyncio.get_running_loop().call_later(
+            timeout, self._on_stream_stalled, stream_id, timeout)
+
+    def _on_stream_stalled(self, stream_id: int, timeout: float) -> None:
+        """No frame for this stream within the deadline."""
+        if stream_id not in self._responses:
+            return
+        asyncio.ensure_future(self._refuse_stream(
+            stream_id, 'client_body_timeout', timeout, timeout,
+            TimeoutError(
+                f'no HTTP/2 frame for stream {stream_id} within '
+                f'BB_CLIENT_BODY_TIMEOUT={timeout}s')))
+
+    async def _refuse_stream(self, stream_id: int, cap: str,
+                             seen: int | float, limit: int | float,
+                             error: Exception) -> None:
+        """Refuse one response without ending the connection.
+
+        The difference from the HTTP/1.1 client is real and belongs here.  A
+        refusal there leaves the reader's position inside a message, so the
+        connection is abandoned; HTTP/2 frames are self-delimiting, so the
+        peer's remaining DATA parses as DATA whether or not we want it.
+        ``RST_STREAM`` refuses this response and every other stream, and the
+        connection, survives — which is what makes a per-stream cap usable at
+        all.
+
+        ``CANCEL`` rather than ``ENHANCE_YOUR_CALM``: the peer did nothing
+        abusive by protocol, it exceeded a budget *this* client chose, and
+        RFC 9113 §7 gives CANCEL for "no longer interested in this response".
+        """
+        pending = self._responses.pop(stream_id, None)
+        log_cap_hit(cap, requested=seen, limit=limit, protocol='http2')
+        if pending is not None:
+            pending.disarm()
+            if not pending.future.done():
+                pending.future.set_exception(error)
+        try:
+            await self._send_raw_frame(
+                self._factory.rst_stream(stream_id, ErrorCodes.CANCEL))
+        except Exception:
+            # The refusal already happened; a peer that has gone away cannot
+            # also be told about it, and raising here would replace the
+            # caller's ResponseTooLarge with a write error.
+            logger.debug('could not send RST_STREAM for stream %d', stream_id)
+
+    async def _on_response_headers(self, frame) -> None:
         pending = self._responses.get(frame.stream_id)
         if pending is None:
             logger.debug('HEADERS for unknown stream %d — dropping', frame.stream_id)
             return
+        self._arm_progress_deadline(frame.stream_id)
         status_str = frame.pseudo_headers.get(PseudoHeaders.STATUS)
         if status_str is not None:
             try:
@@ -654,8 +748,19 @@ class HTTP2Client:
                     ProtocolError(f'invalid :status pseudo-header: {status_str!r}'))
                 self._responses.pop(frame.stream_id, None)
                 return
+        max_headers = get_settings().client_head_max_total
         for name, value in frame.headers:
-            pending.headers.append((_to_bytes(name), _to_bytes(value)))
+            name, value = _to_bytes(name), _to_bytes(value)
+            pending.headers_seen += len(name) + len(value)
+            if max_headers and pending.headers_seen > max_headers:
+                await self._refuse_stream(
+                    frame.stream_id, 'client_head_max_total',
+                    pending.headers_seen, max_headers,
+                    ResponseTooLarge(
+                        f'response header fields exceed '
+                        f'BB_CLIENT_HEAD_MAX_TOTAL={max_headers}'))
+                return
+            pending.headers.append((name, value))
         if frame.end_stream:
             self._complete(frame.stream_id)
 
@@ -672,7 +777,24 @@ class HTTP2Client:
             # DATA was in flight is ordinary, not hostile.
             await self._credit_connection(len(frame.payload))
             return
+        self._arm_progress_deadline(frame.stream_id)
         payload = frame.payload
+        max_body = get_settings().client_body_max_total
+        if max_body and pending.body_seen + len(payload) > max_body:
+            # Checked before the append: the cap bounds memory, so the frame
+            # that breaches it must not be held.  Credit is still owed for it
+            # — see the shared-window note above — and the peer will keep
+            # sending until RST_STREAM reaches it, which the branch below
+            # keeps crediting.
+            await self._refuse_stream(
+                frame.stream_id, 'client_body_max_total',
+                pending.body_seen + len(payload), max_body,
+                ResponseTooLarge(
+                    f'response body exceeds '
+                    f'BB_CLIENT_BODY_MAX_TOTAL={max_body}'))
+            await self._credit_connection(len(payload))
+            return
+        pending.body_seen += len(payload)
         pending.body_parts.append(payload)
         # RFC 9113 §6.9 — the receiver MUST return flow-control credit for
         # consumed DATA via WINDOW_UPDATE.  Without this the server's send
@@ -722,7 +844,10 @@ class HTTP2Client:
 
     def _complete(self, stream_id: int) -> None:
         pending = self._responses.pop(stream_id, None)
-        if pending is None or pending.future.done():
+        if pending is None:
+            return
+        pending.disarm()
+        if pending.future.done():
             return
         response = ClientResponse(
             status=pending.status or HTTPStatus.OK,
@@ -767,13 +892,19 @@ class HTTP2Client:
         self._goaway_error_code = frame.error_code
         for sid, pending in list(self._responses.items()):
             if sid > last_stream_id and not pending.future.done():
+                pending.disarm()
                 pending.future.set_exception(ConnectionError(
                     f'connection closed by peer (GOAWAY error_code={frame.error_code})'))
                 self._responses.pop(sid, None)
 
     def _on_rst_stream(self, frame) -> None:
         pending = self._responses.pop(frame.stream_id, None)
-        if pending is not None and not pending.future.done():
+        if pending is None:
+            return
+        # Before the future, so a timer cannot outlive the response it was
+        # watching and hold this client on the loop until it fires.
+        pending.disarm()
+        if not pending.future.done():
             pending.future.set_exception(
                 StreamReset(frame.stream_id, int(frame.error_code)))
 

@@ -744,6 +744,70 @@ async def test_client_min_body_rate_logs(caps_caplog, monkeypatch):
 
 
 # ----------------------------------------------------------------------
+# The async client's HTTP/2 response bounds
+# ----------------------------------------------------------------------
+
+async def _refused_h2(monkeypatch, env, value, feed):
+    """Drive one HTTP/2 client rejection site and return the client."""
+    from blackbull.client.http2 import HTTP2Client, _PendingResponse
+
+    monkeypatch.setenv(env, value)
+    c = HTTP2Client('localhost', 1)
+
+    async def _sink(_frame):
+        pass
+
+    c._control_sender = _sink
+    c._responses[1] = _PendingResponse(
+        future=asyncio.get_running_loop().create_future())
+    await feed(c)
+    return c
+
+
+@pytest.mark.asyncio
+async def test_client_body_max_total_logs_on_http2(caps_caplog, monkeypatch):
+    from blackbull.protocol.frame_types import FrameTypes
+
+    async def _feed(c):
+        frame = c._factory.create(FrameTypes.DATA, 0, 1, data=b'x' * 5000)
+        await c._on_response_data(frame)
+
+    await _refused_h2(monkeypatch, 'BB_CLIENT_BODY_MAX_TOTAL', '1000', _feed)
+    records = _records_for(caps_caplog, 'client_body_max_total')
+    assert records and records[0].protocol == 'http2'
+
+
+@pytest.mark.asyncio
+async def test_client_head_max_total_logs_on_http2(caps_caplog, monkeypatch):
+    from blackbull.protocol.frame_types import FrameTypes
+
+    async def _feed(c):
+        frame = c._factory.create(FrameTypes.HEADERS, 4, 1)
+        frame.headers.extend((f'x-{i}', 'v' * 200) for i in range(50))
+        await c._on_response_headers(frame)
+
+    await _refused_h2(monkeypatch, 'BB_CLIENT_HEAD_MAX_TOTAL', '1000', _feed)
+    records = _records_for(caps_caplog, 'client_head_max_total')
+    assert records and records[0].protocol == 'http2'
+
+
+@pytest.mark.asyncio
+async def test_client_body_timeout_logs_on_http2(caps_caplog, monkeypatch):
+    """The per-stream progress deadline — the timer, not a read."""
+    from blackbull.protocol.frame_types import FrameTypes
+
+    async def _feed(c):
+        frame = c._factory.create(FrameTypes.HEADERS, 4, 1)
+        frame.headers.append(('x-a', 'b'))
+        await c._on_response_headers(frame)
+        await asyncio.sleep(0.1)
+
+    await _refused_h2(monkeypatch, 'BB_CLIENT_BODY_TIMEOUT', '0.02', _feed)
+    records = _records_for(caps_caplog, 'client_body_timeout')
+    assert records and records[0].protocol == 'http2'
+
+
+# ----------------------------------------------------------------------
 # Wiring audit — every cap in the inventory appears at >= 1 log_cap_hit()
 # call in the codebase.  Static check; catches "removed wiring without
 # noticing" regressions even when a functional test happens to skip.
@@ -764,6 +828,12 @@ _INVENTORY = (
     'h2_ws_max_streams_per_connection',
     'compression_max_inflight',
     'client_min_body_rate',
+    # HTTP/2 response bounds; the HTTP/1.1 sites for these three
+    # are still unwired — see BLA-302, and note that this static
+    # audit is by *name*, so it cannot see that gap.
+    'client_body_max_total',
+    'client_head_max_total',
+    'client_body_timeout',
 )
 
 
@@ -772,12 +842,19 @@ def test_cap_present_in_codebase(cap):
     """Static audit — every inventory cap must appear in at least one
     ``log_cap_hit('<cap>', ...)`` call under ``blackbull/``.  Cheap and
     catches the developer-forgot-to-wire mistake even when a functional
-    test would silently skip."""
+    test would silently skip.
+
+    The name and the call need not be on the same line.  A rejection site that
+    shares one refusal helper — as the HTTP/2 client's three bounds do — passes
+    the cap name *to the helper*, so the literal ``log_cap_hit('<cap>'`` never
+    appears.  Requiring that spelling would make this audit an argument for
+    copying the helper; what it requires instead is the name and a
+    ``log_cap_hit`` call in the same file."""
     from pathlib import Path
-    needle = f"log_cap_hit('{cap}'"
     root = Path(__file__).resolve().parents[2] / 'blackbull'
     hits = [
         p for p in root.rglob('*.py')
-        if p.is_file() and needle in p.read_text()
+        if p.is_file() and f"'{cap}'" in (text := p.read_text())
+        and 'log_cap_hit' in text
     ]
     assert hits, f'{cap!r} not wired in any blackbull/ file'
