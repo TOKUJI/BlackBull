@@ -4514,6 +4514,56 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.rate_window.ByteRateFloor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ByteRateFloor
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ByteRateFloor">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.rate_window.ByteRateFloor.observed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        observed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.rate_window.ByteRateFloor.record" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        record
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.rate_window.ByteRateFloor.reset" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        reset
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.rate_window.RateWindow" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5400,6 +5450,56 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.rate_window.ByteRateFloor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ByteRateFloor
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ByteRateFloor">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.rate_window.ByteRateFloor.observed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        observed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.rate_window.ByteRateFloor.record" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        record
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.rate_window.ByteRateFloor.reset" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        reset
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.rate_window.RateWindow" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5525,6 +5625,132 @@ second primitive with its own name, not a quietly different <code>hit()</code>.<
 
 
 
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.server.rate_window.ByteRateFloor" class="doc doc-heading">
+            <code>ByteRateFloor</code>
+
+
+<a href="#blackbull.server.rate_window.ByteRateFloor" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Minimum sustained <em>byte</em> rate over a rolling window.</p>
+<p>:class:<code>RateWindow</code> counts events; this weighs octets against the time
+spent waiting for them, which is the other half of the same defence and a
+different question.  The module docstring's rule applies: a site needing
+different arithmetic gets a second primitive with its own name rather than
+a quietly different <code>hit()</code>.</p>
+<p>Why a rate and not a deadline: a per-read timeout returns on <em>any</em>
+arrival, so it degrades from "deliver a slice in N seconds" to "send
+something every N seconds", which a one-byte drip always satisfies.  A
+rate is what a drip cannot fake (Kestrel's <code>MinRequestBodyDataRate</code>).</p>
+<p>The window is one grace period wide and rolls when it is satisfied, so a
+burst buys the window it happened in and not the whole message: a peer
+that ran ahead and then stalled is judged on the stall.  Nothing is judged
+before a grace period of waiting has accumulated.</p>
+<p>Both arguments to :meth:<code>record</code> are the caller's to define, and the
+difference between them is the whole design.  <em>waited</em> should be every
+second the caller sat on the transport, including reads that delivered
+nothing countable — otherwise a peer stalls before the parts that are not
+counted and buys unbounded time.  <em>nbytes</em> should be only the octets the
+caller actually wanted; framing a peer can pad at will is not payload.  A
+<code>rate</code> of <code>0</code> disables the floor, which is how every cap in this tree
+spells "off".</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.server.rate_window.ByteRateFloor.observed" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">observed</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#blackbull.server.rate_window.ByteRateFloor.observed" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Bytes per second in the window currently open (diagnostics only).</p>
+
+    </div>
+
+</div>
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.server.rate_window.ByteRateFloor.record" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">record</span><span class="p">(</span><span class="n">nbytes</span><span class="p">,</span> <span class="n">waited</span><span class="p">)</span></code>
+
+<a href="#blackbull.server.rate_window.ByteRateFloor.record" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Add one delivery.  Returns <code>True</code> when the window came up short.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.server.rate_window.ByteRateFloor.reset" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">reset</span><span class="p">()</span></code>
+
+<a href="#blackbull.server.rate_window.ByteRateFloor.reset" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Forget the current window.  For reuse, not for callers that dislike
+the answer.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
 
 <div class="doc doc-object doc-class">
 
