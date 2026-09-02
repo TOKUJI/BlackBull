@@ -19,7 +19,8 @@ import logging
 from ..env import get_settings
 from ..headers import Headers, HeaderList
 from ..server.recipient import (AbstractReader, AsyncioReader,
-                                IncompleteReadError, ReadLimitExceeded)
+                                IncompleteReadError, ReadLimitExceeded,
+                                _accepts_read_limit)
 from ..server.sender import AbstractWriter, AsyncioWriter
 from ._connect import DEFAULT_CONNECT_TIMEOUT, open_connection as _open_connection
 from .exceptions import ConnectionError, ProtocolError, ResponseTooLarge
@@ -408,9 +409,29 @@ class HTTP1ResponseRecipient:
         a trailer field are discarded on receipt, so nothing legitimate needs
         more; the chunk-*size* is not discarded, but no legitimate one is
         anywhere near this long either.
+
+        Not every reader's ``readuntil`` takes the budget.  ``AbstractReader``
+        ships ``_accepts_read_limit`` for exactly that, and ``read_head``
+        consults it; passing the budget positionally and unconditionally
+        raised ``TypeError`` on a one-argument reader — and, because
+        ``receive`` marks the framing broken on any exception, abandoned the
+        connection along with it.  Falling back must not fall open, so the
+        default bounded implementation carries the same budget.  The answer is
+        cached on the reader, as ``read_head`` caches it, so the question is
+        asked once per connection rather than once per framing line.
         """
+        native = reader.__dict__.get('_readuntil_accepts_limit')
+        if native is None:
+            native = _accepts_read_limit(reader.readuntil)
+            try:
+                reader.__dict__['_readuntil_accepts_limit'] = native
+            except (AttributeError, TypeError):
+                pass  # a __slots__ reader answers the question every time.
         try:
-            return await cls._body_read(reader.readuntil(_CRLF, limit))
+            if native:
+                return await cls._body_read(reader.readuntil(_CRLF, limit))
+            return await cls._body_read(
+                AbstractReader._readuntil_bounded(reader, _CRLF, limit))
         except ReadLimitExceeded as exc:
             raise ResponseTooLarge(
                 f'chunk framing line exceeds '
@@ -436,8 +457,29 @@ class HTTP1ResponseRecipient:
         zeros either.  The line length is already bounded by the caller, and
         a declared size too large to satisfy is refused where the octets are
         counted, not where the numeral is read.
+
+        The terminator is required rather than stripped, which is what makes
+        a bare CR inside the element fail: stripping every trailing CR/LF
+        deleted it and let the rest parse as though it were clean.  RFC 9112
+        §2.2 gives a recipient of a bare CR two options — treat the element as
+        invalid, or replace it with SP — and a replaced SP leaves a numeral
+        that is not ``1*HEXDIG``, so refusal is the only conforming outcome
+        either way.  A line that reached EOF without its CRLF is refused by
+        the same check.
+
+        ``BWS`` is removed only where the grammar has it: ``chunk-ext =
+        *( BWS ";" BWS chunk-ext-name … )``, so whitespace is legal before a
+        ``;`` and nowhere else.  RFC 9110 §5.6.3 makes removing it a MUST;
+        a bare ``5 \r\n`` with no extension has no BWS to remove and stays a
+        smuggling vector.  Mirrors the server's parser, which is the oracle
+        the tests compare against.
         """
-        numeral = size_line.rstrip(_CRLF).split(b';', 1)[0]
+        if not size_line.endswith(_CRLF) or size_line.count(b'\n') != 1:
+            raise ProtocolError(
+                f'chunk-size line not CRLF-terminated: {size_line!r}')
+        numeral, sep, _ext = size_line[:-2].partition(b';')
+        if sep:
+            numeral = numeral.rstrip(b' \t')
         if not numeral or not _HEXDIG.issuperset(numeral):
             raise ProtocolError(f'invalid chunk size: {size_line!r}')
         return int(numeral, 16)
