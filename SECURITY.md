@@ -103,11 +103,15 @@ The following are in scope for security reports:
   response is abandoned with a named failure rather than waited on
   forever, and a response refused for breaching a limit abandons the
   connection instead of reading the rest of the message as the next
-  response.  What does not hold yet: a peer that **trickles** satisfies
-  every individual deadline, and the response body has no size ceiling on
-  the buffering path — both are being added, and a report about either is
-  welcome rather than already known.  Not guaranteed at all: defence
-  against a hostile third party.  A read path that grows without a bound,
+  response.  What holds only when configured: a ceiling on the size of a
+  buffered response body (`BB_CLIENT_BODY_MAX_TOTAL`) and a floor under the
+  rate one arrives at (`BB_CLIENT_MIN_BODY_RATE`) both exist and both ship
+  **off**, so out of the box a peer that **trickles** satisfies every
+  individual deadline and is not refused.  Why they ship off, and what
+  enabling the floor asserts about your peer, is in
+  `docs/reference/env-vars.md`; a report that one of them fails to hold
+  *when set* is welcome rather than already known.  Not guaranteed at all:
+  defence against a hostile third party.  A read path that grows without a bound,
   or waits on a connection already gone, is a security report.
 
   The standard is lower than the server's because the roles are not
