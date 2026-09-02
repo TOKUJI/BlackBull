@@ -114,3 +114,107 @@ class TestOneLongGapIsStillRefused:
     async def test_stream_refuses_a_stalled_peer(self, wire):
         with pytest.raises(TimeoutError):
             await _streamed(_Dribbler(wire(_BODY), stall_at=_MID_BODY))
+
+
+# ----------------------------------------------------------------------
+# What "one read" means for the framing operations
+# ----------------------------------------------------------------------
+
+_CHUNKED_HEAD = b'HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n'
+
+
+class _Scripted(AbstractReader):
+    """Delivers ``(gap, data)`` arrivals exactly as scripted.
+
+    ``_Dribbler`` above slices the wire for the test; this one lets a test
+    place a TCP segment boundary in the middle of a chosen operation, which is
+    what distinguishes an operation's deadline from an arrival's.
+    """
+
+    def __init__(self, script: list[tuple[float, bytes]]) -> None:
+        self._script, self._buf = list(script), b''
+
+    async def read(self, n: int = -1) -> bytes:
+        while not self._buf:
+            if not self._script:
+                return b''
+            gap, data = self._script.pop(0)
+            await asyncio.sleep(gap)
+            self._buf = data
+        want = len(self._buf) if n < 0 else min(n, len(self._buf))
+        out, self._buf = self._buf[:want], self._buf[want:]
+        return out
+
+
+#: Each entry splits exactly one operation across four arrivals, each gap
+#: comfortably inside the deadline while the operation as a whole is not.
+#:
+#: The payload row is the contrast the other three exist against.  A payload
+#: read is transport-paced, so it returns on each arrival and the deadline is
+#: per arrival.  A framing operation is *not* split: the chunk-size line, a
+#: trailer field line and the two-byte terminator are each read whole, and the
+#: deadline covers the operation.
+#:
+#: That is deliberate, not an oversight of the transport-pacing fix.  The
+#: reason a payload read had to be paced is that its unit was unbounded — one
+#: ``readexactly`` covered a whole body — so the deadline covered unbounded
+#: work.  A framing line is bounded by ``BB_CLIENT_HEAD_MAX_LINE`` (8 KiB) and
+#: is normally five bytes, and the terminator is two.  Pacing them would trade
+#: a bound that owns the operation's *total* time for one that owns a single
+#: arrival, leaving the total unowned whenever the rate floor is off — which is
+#: its default.  A peer dribbling an 8 KiB chunk-size line one byte per 29 s
+#: would then hold the connection for 66 hours.  The response head is bounded
+#: the same way and for the same reason: one ``BB_CLIENT_HEAD_TIMEOUT`` covers
+#: the whole 64 KiB block, not each line and not each arrival.
+_SPLIT_OPERATIONS = {
+    'payload': ([(0.0, _CHUNKED_HEAD), (0.0, b'8\r\n'),
+                 (_GAP4 := _TIMEOUT / 3, b'ab'), (_GAP4, b'cd'),
+                 (_GAP4, b'ef'), (_GAP4, b'gh'),
+                 (0.0, b'\r\n0\r\n\r\n')], b'abcdefgh'),
+    'chunk-size line': ([(0.0, _CHUNKED_HEAD),
+                         (_GAP4, b'8'), (_GAP4, b';x'), (_GAP4, b'=y'),
+                         (_GAP4, b'\r\n'),
+                         (0.0, b'abcdefgh\r\n0\r\n\r\n')], None),
+    'trailer line': ([(0.0, _CHUNKED_HEAD), (0.0, b'2\r\nhi\r\n'), (0.0, b'0\r\n'),
+                      (_GAP4, b'x:'), (_GAP4, b' y'), (_GAP4, b'z'),
+                      (_GAP4, b'\r\n'), (0.0, b'\r\n')], None),
+    'chunk terminator': ([(0.0, _CHUNKED_HEAD), (0.0, b'2\r\nhi'),
+                          (_TIMEOUT * 0.7, b'\r'), (_TIMEOUT * 0.7, b'\n'),
+                          (0.0, b'0\r\n\r\n')], None),
+}
+
+_OPERATIONS = pytest.mark.parametrize(
+    'operation', sorted(_SPLIT_OPERATIONS), ids=sorted(_SPLIT_OPERATIONS))
+_PATHS = pytest.mark.parametrize('path', ['receive', 'stream'])
+
+
+async def _body_via(path: str, reader) -> bytes:
+    recipient = HTTP1ResponseRecipient()
+    if path == 'receive':
+        return (await recipient.receive(reader)).body
+    return b''.join([chunk async for chunk in recipient.stream(reader)])
+
+
+@_PATHS
+@_OPERATIONS
+async def test_the_deadlines_unit_is_the_operation(operation, path):
+    """A payload read is paced by arrival; a framing operation is not."""
+    script, expected = _SPLIT_OPERATIONS[operation]
+    read = _body_via(path, _Scripted(script))
+    if expected is not None:
+        assert await read == expected
+        return
+    with pytest.raises(TimeoutError):
+        await read
+
+
+@_PATHS
+async def test_operations_do_not_share_one_budget(path):
+    """Ten chunks, each a third of a deadline apart — the response takes several
+    deadlines in total and must still complete.  This is the half of "the peer
+    must keep making progress" that does hold, and the half a single
+    whole-response deadline would break."""
+    script = [(0.0, _CHUNKED_HEAD)]
+    script += [(_TIMEOUT / 3, b'4\r\nabcd\r\n') for _ in range(10)]
+    script += [(_TIMEOUT / 3, b'0\r\n\r\n')]
+    assert await _body_via(path, _Scripted(script)) == b'abcd' * 10

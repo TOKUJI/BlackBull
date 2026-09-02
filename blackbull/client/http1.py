@@ -210,6 +210,9 @@ class HTTP1ResponseRecipient:
         #: Set by the first read that delivered a body octet.  Until then the
         #: peer is thinking, not dripping, and the floor is not watching.
         self._body_open = False
+        #: A short window seen on a read that delivered no payload.  Not yet a
+        #: verdict — see :meth:`_body_read`.
+        self._unpaid_framing = False
 
     def _refuse_if_broken(self) -> None:
         if self.framing_broken:
@@ -381,13 +384,24 @@ class HTTP1ResponseRecipient:
             raise ConnectionError('connection closed mid-body') from exc
         if payload and data:
             self._body_open = True
-        if watching and floor.record(len(data) if payload else 0,
-                                     _monotonic() - started):
-            log_cap_hit('client_min_body_rate', requested=floor.observed,
-                        limit=floor.rate, protocol='http1')
-            raise TimeoutError(
-                f'response body arriving below '
-                f'BB_CLIENT_MIN_BODY_RATE={floor.rate} B/s')
+        if watching:
+            short = floor.record(len(data) if payload else 0,
+                                 _monotonic() - started)
+            # A framing read is judged one read too early.  The octets that
+            # pay for its wait arrive in the same delivery as the chunk-size
+            # line and are read on the *next* call, so a framing read that is
+            # short has proved nothing yet — a peer sending 2 KiB/s against a
+            # 1 KiB/s floor was refused for it.  A second read that still
+            # cannot clear the window has: either payload arrived and was not
+            # enough, or none is coming.  The seconds stay in the denominator
+            # throughout, so nothing is forgiven — only deferred.
+            if short and (payload or self._unpaid_framing):
+                log_cap_hit('client_min_body_rate', requested=floor.observed,
+                            limit=floor.rate, protocol='http1')
+                raise TimeoutError(
+                    f'response body arriving below '
+                    f'BB_CLIENT_MIN_BODY_RATE={floor.rate} B/s')
+            self._unpaid_framing = short
         return data
 
     async def _read_body(self, reader: AbstractReader, headers: Headers) -> bytes:

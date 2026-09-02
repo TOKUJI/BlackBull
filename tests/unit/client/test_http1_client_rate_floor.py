@@ -89,14 +89,14 @@ def _fixed(pieces: list[tuple[float, bytes]]) -> list[tuple[float, bytes]]:
     return [(0.0, head), *pieces]
 
 
-def _chunked(pieces: list[tuple[float, bytes]], *,
-             ext: bytes = b'') -> list[tuple[float, bytes]]:
+def _chunked(pieces: list[tuple[float, bytes]], *, ext: bytes = b'',
+             last_gap: float = 0.0) -> list[tuple[float, bytes]]:
     """Each piece becomes one whole chunk, so its gap falls on the size line."""
     head = b'HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n'
     script = [(0.0, head)]
     for gap, data in pieces:
         script.append((gap, b'%x' % len(data) + ext + b'\r\n' + data + b'\r\n'))
-    script.append((0.0, b'0\r\n\r\n'))
+    script.append((last_gap, b'0\r\n\r\n'))
     return script
 
 
@@ -104,6 +104,12 @@ def _steady(count: int, size: int, gap: float) -> list[tuple[float, bytes]]:
     """*count* equal pieces; the first arrives with the head, the rest apart."""
     return [(0.0 if i == 0 else gap, bytes([0x61 + i % 26]) * size)
             for i in range(count)]
+
+
+def _first_byte_then(count: int, size: int,
+                     gap: float) -> list[tuple[float, bytes]]:
+    """One byte to open the window, then *count* pieces *gap* apart."""
+    return [(0.0, b'x'), *((gap, b'y' * size) for _ in range(count))]
 
 
 #: Every shape is (script, whether an enabled floor refuses it).
@@ -125,6 +131,16 @@ _SHAPES = {
     # The control for it, and a claim of its own: the gap falls on the
     # chunk-size line, so the refusal proves framing reads keep their seconds.
     'stall-before-the-size-line': (_chunked(_steady(10, 10, 1.0)), True),
+    # 2 KiB/s, twice the floor, but chunked — so the octets that pay for a
+    # framing read's wait arrive in the same delivery and are read on the
+    # *next* call.  Judging the framing read alone refuses this peer.
+    'chunked-payload-pays-for-its-size-line':
+        (_chunked(_first_byte_then(3, 4000, 2.0)), False),
+    # The body is delivered fast and then the connection is held for 20 s
+    # before the last chunk.  No payload read follows, so this is the case a
+    # deferral that never confirms would forgive entirely.
+    'stall-before-the-last-chunk':
+        (_chunked(_first_byte_then(1, 4000, 0.0), last_gap=20.0), True),
 }
 _SHAPE_IDS = sorted(_SHAPES)
 
@@ -141,24 +157,37 @@ def _enable(monkeypatch):
     monkeypatch.setenv('BB_CLIENT_MIN_BODY_RATE_GRACE', str(_GRACE))
 
 
+async def _body_via(path: str, reader) -> bytes:
+    """``receive`` and ``stream`` share one meter and are separate public
+    paths, so every shape is asserted through both."""
+    recipient = HTTP1ResponseRecipient()
+    if path == 'receive':
+        return (await recipient.receive(reader)).body
+    return b''.join([chunk async for chunk in recipient.stream(reader)])
+
+
+_PATHS = pytest.mark.parametrize('path', ['receive', 'stream'])
+
+
+@_PATHS
 @pytest.mark.parametrize('shape', _SHAPE_IDS)
-async def test_off_by_default_every_shape_completes(shape, clock, monkeypatch):
+async def test_off_by_default_every_shape_completes(
+        shape, path, clock, monkeypatch):
     """The shipped default refuses none of them, including the drip."""
     script, _ = _SHAPES[shape]
-    response = await HTTP1ResponseRecipient().receive(_Paced(clock, script))
-    assert response.status == 200
-    assert response.body
+    assert await _body_via(path, _Paced(clock, script))
 
 
+@_PATHS
 @pytest.mark.parametrize('shape', _SHAPE_IDS)
 async def test_enabled_refuses_exactly_the_documented_shapes(
-        shape, clock, monkeypatch):
+        shape, path, clock, monkeypatch):
     """And when it is on, it fires on the rate — not on the size or the wait."""
     _enable(monkeypatch)
     script, refused = _SHAPES[shape]
-    read = HTTP1ResponseRecipient().receive(_Paced(clock, script))
+    read = _body_via(path, _Paced(clock, script))
     if not refused:
-        assert (await read).body
+        assert await read
         return
     with pytest.raises(TimeoutError) as caught:
         await read
@@ -166,8 +195,7 @@ async def test_enabled_refuses_exactly_the_documented_shapes(
 
 
 class TestTheFloorIsTheOneThatFires:
-    """Not the deadline standing in for it, and not on the streaming path
-    only — ``receive`` and ``stream`` share one meter."""
+    """Not the deadline standing in for it."""
 
     async def test_the_refusal_names_the_rate_not_the_deadline(
             self, clock, monkeypatch):
@@ -176,14 +204,6 @@ class TestTheFloorIsTheOneThatFires:
         script, _ = _SHAPES['drip']
         with pytest.raises(TimeoutError, match='BB_CLIENT_MIN_BODY_RATE'):
             await HTTP1ResponseRecipient().receive(_Paced(clock, script))
-
-    async def test_stream_is_metered_too(self, clock, monkeypatch):
-        _enable(monkeypatch)
-        script, _ = _SHAPES['drip']
-        recipient = HTTP1ResponseRecipient()
-        with pytest.raises(TimeoutError, match='BB_CLIENT_MIN_BODY_RATE'):
-            async for _ in recipient.stream(_Paced(clock, script)):
-                pass
 
     async def test_a_refused_response_abandons_the_connection(
             self, clock, monkeypatch):

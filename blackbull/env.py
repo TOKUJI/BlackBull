@@ -753,9 +753,24 @@ class Settings:
     #: Seconds the async client will wait for a single response-body read.
     #: Per read, not per body: a peer must keep making progress, which is the
     #: same shape as ``body_timeout`` and as nginx's ``client_body_timeout``.
-    #: It stops a peer that **stops**; a peer that trickles satisfies every
-    #: individual read, and that is ``client_min_body_rate``'s job.
-    #: 0 disables.
+    #:
+    #: What counts as one read differs between payload and framing, and the
+    #: difference is deliberate.  A payload read is transport-paced, so the
+    #: deadline covers **one arrival**: its unit would otherwise be a whole
+    #: body, and a deadline over unbounded work is not a bound.  A framing
+    #: operation — a chunk-size line, a trailer field line, the two-octet
+    #: chunk terminator — is read whole, so the deadline covers **the
+    #: operation**.  Each is bounded by ``client_head_max_line`` and is
+    #: normally a handful of octets, so a deadline can afford to own its total;
+    #: pacing them by arrival would leave that total unowned whenever
+    #: ``client_min_body_rate`` is off, which is its default.  The response
+    #: head is bounded the same way — one ``client_head_timeout`` for the whole
+    #: block, not one per line.
+    #:
+    #: Operations do not share a budget: the deadline is fresh for each, so a
+    #: response of many chunks may take many deadlines in total.  It stops a
+    #: peer that **stops**; a peer that trickles satisfies every individual
+    #: read, and that is ``client_min_body_rate``'s job.  0 disables.
     client_body_timeout: float = 30.0
 
     #: Maximum total response-body octets the async client will buffer for
