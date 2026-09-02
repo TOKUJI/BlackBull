@@ -2057,6 +2057,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="HTTP1ResponseRecipient">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.client.http1.HTTP1ResponseRecipient.receive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        receive
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
       </ul>
@@ -5689,6 +5706,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="HTTP1ResponseRecipient">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.client.http1.HTTP1ResponseRecipient.receive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        receive
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
       </ul>
@@ -6208,6 +6242,39 @@ in memory — true of both framings, which it was not until the
 
 
 
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.client.http1.HTTP1ResponseRecipient.receive" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">receive</span><span class="p">(</span><span class="n">reader</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">method</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">skip_interim</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.client.http1.HTTP1ResponseRecipient.receive" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>One complete response.</p>
+<p><em>method</em> is the request's, and it is not decoration: RFC 9112 §6.3
+decides the body's length from the status code <strong>and</strong> the method, so
+a recipient handed only the header fields cannot apply the first and
+most overriding of its rules.  <code>None</code> means the caller does not know
+— the fault-injection primitives drive peers whose request never went
+through this client — and only the status-code half is then applied.</p>
+<p><em>skip_interim</em> is what RFC 9110 §15.2 requires, and every production
+call wants it.  The fault-injection primitives do not: their whole
+purpose is to drive a peer and see what it actually sent, and a reader
+that silently discards part of that answers a different question.  The
+same distinction <code>_abandon</code> already makes for those primitives.</p>
+
+
+    </div>
+
+</div>
 
 
 
