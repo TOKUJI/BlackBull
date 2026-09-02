@@ -67,7 +67,7 @@ def _fake_aws_tools(
         'printf "%s" "$cmd" > "$FAKE_SSH_COMMAND"\n'
         'if [[ "$cmd" == *"command -v uv"* ]]; then exit 0; fi\n'
         'if [[ "${FAKE_SSH_METADATA_FAIL:-0}" == 1 && "$cmd" == *"ab_expected_lines"* ]]; then exit 255; fi\n'
-        'if [[ "$cmd" == *"pgrep -f"* ]]; then\n'
+        'if [[ "$cmd" == *"ab-poll"* ]]; then\n'
         '  if [[ -n "${FAKE_SSH_POLL_COUNT:-}" ]]; then\n'
         '    count=0\n'
         '    [[ ! -f "$FAKE_SSH_POLL_COUNT" ]] || read -r count < "$FAKE_SSH_POLL_COUNT"\n'
@@ -997,3 +997,104 @@ def test_ab_finish_rejects_invalid_expected_result_count_metadata(
 
     assert completed.returncode == 1
     assert message in finish_log.read_text()
+
+
+def test_ab_finish_ignores_a_foreign_runner_process(tmp_path):
+    """Liveness is this checkout's pidfile, not a match over the process table.
+
+    ``pgrep -f 'ab_runner[.]sh'`` saw every process on the host, so a second
+    A/B job — or, under ``pytest -n auto``, a second test — was counted as
+    this run's runner and the finish waited out its whole poll budget for one
+    that had already exited.  Nine of these tests failed on every parallel
+    round because of it, and which nine varied with scheduling, which is what
+    made it look like flakiness belonging to whatever was being worked on.
+
+    The decoy is a second checkout running its own runner — the production
+    shape of the collision, not just the test-harness one.
+    """
+    env = _fake_aws_tools(tmp_path)
+    state = tmp_path / 'state'
+    state.write_text('SERVER_PUBLIC_IP=fake\n')
+    remote = Path(env['FAKE_REMOTE'])
+    results = remote / 'bench' / 'results'
+    (results / 'ab-commit-smoke').mkdir()
+    (results / 'ab-commit-smoke' / 'raw.tsv').write_text('header\nrow\nrow\nrow\nrow\n')
+    (results / 'ab_expected_lines').write_text('65\n')
+    (results / 'ab_expected_results').write_text('1\n')
+    (results / 'ab_runner.status.required').write_text('')
+    (results / 'ab_runner.status').write_text('0\n')
+    # No ab_runner.pid: this run's runner is done.
+    assert not (results / 'ab_runner.pid').exists()
+
+    finish_log = tmp_path / 'finish.log'
+    env.update({
+        'STATE_FILE': str(state),
+        'EXPECT_LINES': '4',
+        'AB_POLLS': '1',
+        'AB_POLL_INTERVAL': '0',
+        'AB_FINISH_LOG': str(finish_log),
+        'TEARDOWN': '0',
+    })
+
+    # A second checkout running its own runner — the production shape of the
+    # collision, and what the old pattern matched.  It has to be a real script
+    # at that path: bash exec-optimises `bash -c '... # marker'` down to the
+    # bare command, so a comment never reaches the live command line.
+    other = tmp_path / 'other-checkout' / 'bench' / 'results'
+    other.mkdir(parents=True)
+    (other / 'ab_runner.sh').write_text('#!/usr/bin/env bash\nsleep 30\n')
+    decoy = subprocess.Popen(
+        ('bash', str(other / 'ab_runner.sh')),
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        completed = subprocess.run(
+            ('bash', str(ROOT / 'bench/aws/ab.sh'), 'finish'),
+            capture_output=True, text=True, timeout=10, env=env,
+        )
+    finally:
+        decoy.kill()
+        decoy.wait()
+
+    assert completed.returncode == 0, (
+        f'a foreign process was taken for this run\'s runner:\n'
+        f'{finish_log.read_text() if finish_log.exists() else completed.stderr}')
+    assert 'did not finish within the poll budget' not in finish_log.read_text()
+
+
+def test_ab_finish_waits_while_its_own_runner_is_alive(tmp_path):
+    """The control: the pidfile must still be able to say "still running"."""
+    env = _fake_aws_tools(tmp_path)
+    state = tmp_path / 'state'
+    state.write_text('SERVER_PUBLIC_IP=fake\n')
+    remote = Path(env['FAKE_REMOTE'])
+    results = remote / 'bench' / 'results'
+    (results / 'ab-commit-smoke').mkdir()
+    (results / 'ab-commit-smoke' / 'raw.tsv').write_text('header\nrow\nrow\nrow\nrow\n')
+    (results / 'ab_expected_lines').write_text('65\n')
+    (results / 'ab_expected_results').write_text('1\n')
+
+    alive = subprocess.Popen(('sleep', '30'),
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    (results / 'ab_runner.pid').write_text(f'{alive.pid}\n')
+    finish_log = tmp_path / 'finish.log'
+    env.update({
+        'STATE_FILE': str(state),
+        'EXPECT_LINES': '4',
+        'AB_POLLS': '1',
+        'AB_POLL_INTERVAL': '0',
+        'AB_FINISH_LOG': str(finish_log),
+        'TEARDOWN': '0',
+    })
+
+    try:
+        completed = subprocess.run(
+            ('bash', str(ROOT / 'bench/aws/ab.sh'), 'finish'),
+            capture_output=True, text=True, timeout=10, env=env,
+        )
+    finally:
+        alive.kill()
+        alive.wait()
+
+    assert completed.returncode != 0
+    assert 'did not finish within the poll budget' in finish_log.read_text()

@@ -329,16 +329,26 @@ finish)
         runner=-1; total=0; complete=0; results_complete=0
         status_required=0
         runner_status=missing
-        # NOTE: the pattern is 'bench/results/ab_runner[.]sh', NOT
-        # 'bench/results/ab_runner.sh'.  ssh runs this command as the remote
-        # shell's `bash -c "<full command>"`, whose own cmdline contains the
-        # literal pattern — a plain pattern would self-match and n would never
-        # reach 0, forcing every finish into the full poll budget.  The [.]
-        # bracket makes the regex require a literal dot, which the bracketed
-        # text in the wrapper's cmdline does not contain.
+        # Liveness comes from this run's own pidfile, not from a pattern
+        # match over the process table.  `pgrep -f 'ab_runner[.]sh'` matched
+        # host-globally, so a second A/B job on the same box — or, in the unit
+        # tests, a second test — was counted as this run's runner and the
+        # finish waited out its whole poll budget for a runner that had
+        # already exited.  The pidfile is per checkout, which is the scope the
+        # question is actually about, and it is the same check the launch
+        # above already uses to confirm the runner came up.
+        #
+        # `: ab-poll` is a no-op that names this command.  The launch command
+        # also mentions ab_runner.pid, so a test double cannot tell the two
+        # apart by their contents without guessing at an incidental substring
+        # — which is how the double came to key on `pgrep -f` and break the
+        # moment that went away.
         for i in $(seq 1 "$AB_POLLS"); do
             if ! state=$(ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
-                "cd $REMOTE_REPO && n=\$(pgrep -f 'bench/results/ab_runner[.]sh' | wc -l); \
+                "cd $REMOTE_REPO && : ab-poll; n=0; \
+                 if [ -s bench/results/ab_runner.pid ]; then \
+                 p=\$(cat bench/results/ab_runner.pid); \
+                 kill -0 \"\$p\" 2>/dev/null && n=1; fi; \
                  t=0; c=0; for d in bench/results/ab-commit-* bench/results/ab-h2-*; do \
                  [ -d \"\$d\" ] || continue; t=\$((t+1)); f=\"\$d/raw.tsv\"; \
                  [ -f \"\$f\" ] && [ \"\$(wc -l < \"\$f\")\" -ge $EXPECT_LINES ] && c=\$((c+1)); done; \
