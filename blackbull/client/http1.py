@@ -12,12 +12,15 @@ body, and *reads* status lines + response headers + response body.
 import asyncio
 import ssl as _ssl
 from collections.abc import AsyncIterable, AsyncIterator
+from time import monotonic as _monotonic
 from http import HTTPMethod
 from typing import Union
 
 import logging
 from ..env import get_settings
 from ..headers import Headers, HeaderList
+from ..server.cap_log import log_cap_hit
+from ..server.rate_window import ByteRateFloor
 from ..server.recipient import (AbstractReader, AsyncioReader,
                                 IncompleteReadError, ReadLimitExceeded,
                                 _accepts_read_limit)
@@ -200,6 +203,16 @@ class HTTP1ResponseRecipient:
         #: begin inside it and parse a body as a response.  The server's
         #: recipient carries the same flag for the same reason.
         self.framing_broken = False
+        #: Built on the first body read from the settings then in force and
+        #: kept for the message: a window that did not span reads could not
+        #: measure a rate.  One recipient per response, so it needs no reset.
+        self._rate_floor: ByteRateFloor | None = None
+        #: Set by the first read that delivered a body octet.  Until then the
+        #: peer is thinking, not dripping, and the floor is not watching.
+        self._body_open = False
+        #: A short window seen on a read that delivered no payload.  Not yet a
+        #: verdict — see :meth:`_body_read`.
+        self._unpaid_framing = False
 
     def _refuse_if_broken(self) -> None:
         if self.framing_broken:
@@ -326,27 +339,70 @@ class HTTP1ResponseRecipient:
                 f'{sorted(values)!r}')
         return int(values.pop())
 
-    @staticmethod
-    async def _body_read(coro):
-        """One body read under ``BB_CLIENT_BODY_TIMEOUT``.
+    async def _body_read(self, coro, *, payload: bool = False):
+        """One body read, under both of the body's time bounds.
 
-        Per read, not per body — the peer must keep making progress, which is
-        what ``body_timeout`` means on the server and ``client_body_timeout``
-        in nginx.  It abandons a peer that **stops**; one that trickles
-        satisfies every individual read, and that is the rate floor's job.
+        ``BB_CLIENT_BODY_TIMEOUT`` is per read, not per body — the peer must
+        keep making progress, which is what ``body_timeout`` means on the
+        server and ``client_body_timeout`` in nginx.  It stops a peer that
+        **stops**; one that trickles satisfies every individual read, which is
+        why ``BB_CLIENT_MIN_BODY_RATE`` exists.
+
+        *payload* is the floor's numerator and the reason it means anything:
+        only response-body octets count, because chunk-size lines, extensions,
+        terminators and trailers are discarded on receipt and a peer can pad
+        them at will.  The denominator is every read's wait, framing reads
+        included — a peer that stalls in front of the octets that are not
+        counted must not buy free time with the gap.  This is the one place a
+        body read waits, so the seconds measured here are transport wait: a
+        caller slow between ``stream()`` yields is never mistaken for a peer
+        slow to send.
 
         Truncation is named here too: ``AbstractReader.readexactly`` returns
         short at EOF while ``AsyncioReader`` raises, and neither answer
         belonged to the client's exception family.
         """
-        timeout = get_settings().client_body_timeout
+        cfg = get_settings()
+        timeout = cfg.client_body_timeout
+        floor = self._rate_floor
+        if floor is None:
+            floor = self._rate_floor = ByteRateFloor(
+                cfg.client_min_body_rate, cfg.client_min_body_rate_grace)
+        # Read the flag before the read, not after: the wait that *delivers*
+        # the first octet is the peer's think time, which is outside the
+        # window.  A peer that flushes its head and then works — a slow query,
+        # a report built while it is streamed — is not dripping.
+        watching = self._body_open
+        started = _monotonic() if watching else 0.0
         try:
             if timeout > 0:
                 async with asyncio.timeout(timeout):
-                    return await coro
-            return await coro
+                    data = await coro
+            else:
+                data = await coro
         except IncompleteReadError as exc:
             raise ConnectionError('connection closed mid-body') from exc
+        if payload and data:
+            self._body_open = True
+        if watching:
+            short = floor.record(len(data) if payload else 0,
+                                 _monotonic() - started)
+            # A framing read is judged one read too early.  The octets that
+            # pay for its wait arrive in the same delivery as the chunk-size
+            # line and are read on the *next* call, so a framing read that is
+            # short has proved nothing yet — a peer sending 2 KiB/s against a
+            # 1 KiB/s floor was refused for it.  A second read that still
+            # cannot clear the window has: either payload arrived and was not
+            # enough, or none is coming.  The seconds stay in the denominator
+            # throughout, so nothing is forgiven — only deferred.
+            if short and (payload or self._unpaid_framing):
+                log_cap_hit('client_min_body_rate', requested=floor.observed,
+                            limit=floor.rate, protocol='http1')
+                raise TimeoutError(
+                    f'response body arriving below '
+                    f'BB_CLIENT_MIN_BODY_RATE={floor.rate} B/s')
+            self._unpaid_framing = short
+        return data
 
     async def _read_body(self, reader: AbstractReader, headers: Headers) -> bytes:
         # The total lives here and not in ``_read_chunked``, which
@@ -365,10 +421,10 @@ class HTTP1ResponseRecipient:
                 raise ResponseTooLarge(
                     f'declared body {declared} bytes exceeds '
                     f'BB_CLIENT_BODY_MAX_TOTAL={max_total}')
-            body = await self._body_read(reader.readexactly(declared))
-            if len(body) < declared:
-                raise ConnectionError('connection closed mid-body')
-            return body
+            # In slices, like the streaming path: one ``readexactly`` for the
+            # whole body is a single read to every bound above it.
+            return b''.join([chunk async for chunk in
+                             self._read_declared(reader, declared)])
         # No Content-Length and no chunked: caller (e.g. HEAD, 204, 304) must
         # interpret as empty body.  We don't read-until-EOF here because that
         # would break keep-alive.
@@ -384,14 +440,31 @@ class HTTP1ResponseRecipient:
         declared = self._declared_length(headers)
         if not declared:
             return
-        # In slices, not one ``readexactly(declared)``.  This method's whole
-        # promise is that a large response need not fit in memory, and a
-        # single exact read hands the caller the entire body as one chunk —
-        # the memory bound absent on exactly the path that asked for it.
+        async for chunk in self._read_declared(reader, declared):
+            yield chunk
+
+    async def _read_declared(self, reader: AbstractReader,
+                             declared: int) -> AsyncIterator[bytes]:
+        """A ``Content-Length`` body, in transport-paced slices.
+
+        Slices, so a large response need not fit in memory: a single exact
+        read hands the caller the whole body as one chunk, which is the
+        memory bound missing on exactly the path that asked for it.
+
+        Up-to-n rather than ``readexactly``, because an exact read loops
+        internally until its slice is full and every bound above it therefore
+        sees one read.  On the buffering path that made
+        ``BB_CLIENT_BODY_TIMEOUT`` the deadline for the entire body, so a
+        large response that never once stopped arriving was refused for
+        outlasting what one read is allowed — while its own documentation
+        promised a per-read progress deadline.  Transport-paced reads return
+        whatever arrived, which is the shape and the reason of the server's
+        ``body_chunk_max`` path.
+        """
         remaining = declared
         while remaining > 0:
             chunk = await self._body_read(
-                reader.readexactly(min(remaining, _STREAM_CHUNK_SIZE)))
+                reader.read(min(remaining, _STREAM_CHUNK_SIZE)), payload=True)
             if not chunk:
                 # A short-reading reader answers EOF with b'', so subtracting
                 # it left the loop spinning on a condition nothing could
@@ -400,8 +473,7 @@ class HTTP1ResponseRecipient:
             remaining -= len(chunk)
             yield chunk
 
-    @classmethod
-    async def _read_framing_line(cls, reader: AbstractReader,
+    async def _read_framing_line(self, reader: AbstractReader,
                                  limit: int) -> bytes:
         """One chunk-framing line — chunk-size line or trailer field line.
 
@@ -429,8 +501,8 @@ class HTTP1ResponseRecipient:
                 pass  # a __slots__ reader answers the question every time.
         try:
             if native:
-                return await cls._body_read(reader.readuntil(_CRLF, limit))
-            return await cls._body_read(
+                return await self._body_read(reader.readuntil(_CRLF, limit))
+            return await self._body_read(
                 AbstractReader._readuntil_bounded(reader, _CRLF, limit))
         except ReadLimitExceeded as exc:
             raise ResponseTooLarge(
@@ -525,12 +597,12 @@ class HTTP1ResponseRecipient:
                 raise ResponseTooLarge(
                     f'body exceeds BB_CLIENT_BODY_MAX_TOTAL={max_total}')
             # In slices, so one peer-declared chunk-size is never one
-            # allocation.  ``_stream_body`` already does this for a declared
-            # length; a chunked body reached the same caller without it.
+            # allocation and one chunk is not one read.
             remaining = size
             while remaining > 0:
                 piece = await self._body_read(
-                    reader.readexactly(min(remaining, _STREAM_CHUNK_SIZE)))
+                    reader.read(min(remaining, _STREAM_CHUNK_SIZE)),
+                    payload=True)
                 if not piece:
                     raise ConnectionError('connection closed mid-chunk')
                 remaining -= len(piece)

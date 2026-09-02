@@ -71,3 +71,68 @@ class RateWindow:
         that dislike the answer."""
         self._count = 0
         self._started_at = 0.0
+
+
+class ByteRateFloor:
+    """Minimum sustained *byte* rate over a rolling window.
+
+    :class:`RateWindow` counts events; this weighs octets against the time
+    spent waiting for them, which is the other half of the same defence and a
+    different question.  The module docstring's rule applies: a site needing
+    different arithmetic gets a second primitive with its own name rather than
+    a quietly different ``hit()``.
+
+    Why a rate and not a deadline: a per-read timeout returns on *any*
+    arrival, so it degrades from "deliver a slice in N seconds" to "send
+    something every N seconds", which a one-byte drip always satisfies.  A
+    rate is what a drip cannot fake (Kestrel's ``MinRequestBodyDataRate``).
+
+    The window is one grace period wide and rolls when it is satisfied, so a
+    burst buys the window it happened in and not the whole message: a peer
+    that ran ahead and then stalled is judged on the stall.  Nothing is judged
+    before a grace period of waiting has accumulated.
+
+    Both arguments to :meth:`record` are the caller's to define, and the
+    difference between them is the whole design.  *waited* should be every
+    second the caller sat on the transport, including reads that delivered
+    nothing countable — otherwise a peer stalls before the parts that are not
+    counted and buys unbounded time.  *nbytes* should be only the octets the
+    caller actually wanted; framing a peer can pad at will is not payload.  A
+    ``rate`` of ``0`` disables the floor, which is how every cap in this tree
+    spells "off".
+    """
+
+    __slots__ = ('rate', 'grace', '_waited', '_seen')
+
+    def __init__(self, rate: float, grace: float) -> None:
+        self.rate = rate
+        self.grace = grace
+        self._waited = 0.0
+        self._seen = 0
+
+    @property
+    def observed(self) -> float:
+        """Bytes per second in the window currently open (diagnostics only)."""
+        return self._seen / self._waited if self._waited else 0.0
+
+    def record(self, nbytes: int, waited: float) -> bool:
+        """Add one delivery.  Returns ``True`` when the window came up short."""
+        if not self.rate:
+            return False
+        self._waited += waited
+        self._seen += nbytes
+        if self._waited <= self.grace:
+            return False
+        if self._seen < self.rate * self._waited:
+            return True
+        # The window earned its keep: roll it forward, so the next judgement
+        # looks at the next grace period only.
+        self._waited = 0.0
+        self._seen = 0
+        return False
+
+    def reset(self) -> None:
+        """Forget the current window.  For reuse, not for callers that dislike
+        the answer."""
+        self._waited = 0.0
+        self._seen = 0
