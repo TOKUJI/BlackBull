@@ -104,10 +104,18 @@ class _PendingResponse:
     #: final headers and trailers is nobody's until here.
     headers_seen: int = 0
     #: Progress timer for this stream (BB_CLIENT_BODY_TIMEOUT), re-armed by
-    #: every frame that arrives for it.  Per stream and not per connection:
-    #: a connection-wide clock is reset by any peer traffic, so a busy stream
-    #: shelters a stalled one indefinitely.
+    #: the final response head and by every DATA frame that delivers payload.
+    #: Per stream and not per connection: a connection-wide clock is reset by
+    #: any peer traffic, so a busy stream shelters a stalled one indefinitely.
     deadline: asyncio.TimerHandle | None = None
+    #: The request body still going up, if any.  A refusal has to cancel it:
+    #: ``request()`` awaits the upload *before* it awaits this future, and
+    #: RST_STREAM is exactly what makes the peer stop crediting the stream
+    #: window — so a refusal mid-upload parked the caller forever on a window
+    #: that would never reopen.
+    upload: asyncio.Future | None = None
+    #: When the response began, for the diagnostic on a stalled stream.
+    opened_at: float = 0.0
 
     def disarm(self) -> None:
         """Stop the progress timer.  Idempotent — the response may end
@@ -163,6 +171,9 @@ class HTTP2Client:
 
         self._factory = FrameFactory()
         self._control_sender: HTTP2Sender | None = None
+        #: Detached refusal tasks, held so neither the GC nor __aexit__
+        #: leaves one running against a closed transport.
+        self._detached: set[asyncio.Future] = set()
         self._senders: dict[int, HTTP2Sender] = {}
 
         # Client-initiated streams use odd IDs starting at 1 (RFC 7540 §5.1.1).
@@ -275,12 +286,16 @@ class HTTP2Client:
                 pass  # teardown: the receive task was just cancelled; ignore its unwind.
 
         # Fail any still-pending responses so awaiters don't hang.
-        for pending in self._responses.values():
-            pending.disarm()
-            if not pending.future.done():
+        for sid in list(self._responses):
+            pending = self._drop_pending(sid)
+            if pending is not None and not pending.future.done():
                 pending.future.set_exception(
                     ConnectionError('client connection closed'))
-        self._responses.clear()
+        # A refusal still in flight would write RST_STREAM to the transport
+        # this method has just closed.
+        for task in list(self._detached):
+            task.cancel()
+        self._detached.clear()
         # Each stream releases its own sender at its last send; this is for a
         # connection torn down before that point was ever reached.
         self._senders.clear()
@@ -335,20 +350,43 @@ class HTTP2Client:
             await sender(h_frame)
 
             if body:
-            # Use the sender's flow-controlled DATA path rather than a single
-            # raw DATA frame: it splits the body across SETTINGS_MAX_FRAME_SIZE
-            # chunks and blocks on flow-control credit, so bodies larger than
-            # one frame (e.g. >16 KiB gRPC messages) are sent correctly.
-            # WINDOW_UPDATE frames are routed to this sender in
-            # ``_on_window_update``, keeping its send window in sync.
-                await sender._write_data(body, end_stream=True)
+                # Use the sender's flow-controlled DATA path rather than a
+                # single raw DATA frame: it splits the body across
+                # SETTINGS_MAX_FRAME_SIZE chunks and blocks on flow-control
+                # credit, so bodies larger than one frame (e.g. >16 KiB gRPC
+                # messages) are sent correctly.  WINDOW_UPDATE frames are
+                # routed to this sender in ``_on_window_update``, keeping its
+                # send window in sync.
+                #
+                # Run as a task the refusal can reach.  This await happens
+                # before the one on ``future``, and RST_STREAM is precisely
+                # what makes a peer stop crediting the stream window — so a
+                # response refused mid-upload left the caller parked here on
+                # a window that would never reopen, holding an answer it
+                # could not deliver.
+                upload = asyncio.ensure_future(
+                    sender._write_data(body, end_stream=True))
+                pending = self._responses.get(stream_id)
+                if pending is not None:
+                    pending.upload = upload
+                try:
+                    await upload
+                except asyncio.CancelledError:
+                    # ``_drop_pending`` cancelled it, and the verdict is
+                    # already on the future.  A cancellation from the caller
+                    # leaves the future unresolved and must propagate — and
+                    # takes the upload with it, since awaiting a task does not
+                    # cancel it when the awaiting coroutine is cancelled.
+                    if not future.done():
+                        upload.cancel()
+                        raise
         except BaseException:
             # The future is only resolvable by the receive loop, and the
             # receive loop only knows about streams the peer answered.  A
             # send that never reached the wire has no answer coming, so its
             # entry would sit in ``_responses`` until GOAWAY or __aexit__ —
             # a dict that grows once per failed send.
-            self._responses.pop(stream_id, None)
+            self._drop_pending(stream_id)
             raise
         finally:
             # Released on the last *send*, never on the last receive.  A server
@@ -659,14 +697,53 @@ class HTTP2Client:
             # remaining resolver.
             self._connection_lost = True
             # Connection ended; fail any still-pending responses.
-            for pending in self._responses.values():
-                pending.disarm()
-                if not pending.future.done():
+            for sid in list(self._responses):
+                pending = self._drop_pending(sid)
+                if pending is not None and not pending.future.done():
                     pending.future.set_exception(
                         ConnectionError('connection closed before response'))
-            self._responses.clear()
 
     # ---- internal: callbacks invoked by Responders -----------------------
+
+    def _drop_pending(self, stream_id: int, *,
+                      aborted: bool = True) -> '_PendingResponse | None':
+        """Remove a stream's state and release what was holding it open.
+
+        Every path that ends a response goes through here.  Popping alone left
+        a progress timer on the loop — a strong reference to this client until
+        it fired — and, on an aborted stream, an upload still writing DATA on
+        a stream we had just closed, which RFC 9113 §5.1 forbids and a peer
+        MAY answer with a connection error, losing the point of refusing only
+        one stream.
+
+        *aborted* is ``False`` when the response merely finished.  The upload
+        and its sender are then left alone: a server may answer with
+        END_STREAM while the request body is still going up (an early 401 or
+        413), and releasing the sender there parks ``_write_data`` on a window
+        event nothing will set again.  That is the defect BLA-269 fixed, and
+        this helper re-introduced until ``test_an_early_response_does_not_
+        strand_the_upload`` caught it.
+        """
+        pending = self._responses.pop(stream_id, None)
+        if pending is None:
+            return None
+        pending.disarm()
+        if aborted:
+            if pending.upload is not None and not pending.upload.done():
+                pending.upload.cancel()
+            self._senders.pop(stream_id, None)
+        return pending
+
+    def _spawn(self, coro) -> None:
+        """Run *coro* detached, holding a strong reference until it ends.
+
+        asyncio keeps only a weak reference to a task, and a bare
+        ``ensure_future`` also outlived ``__aexit__`` here — still writing to
+        a transport the client had just closed.
+        """
+        task = asyncio.ensure_future(coro)
+        self._detached.add(task)
+        task.add_done_callback(self._detached.discard)
 
     def _arm_progress_deadline(self, stream_id: int) -> None:
         """Start or restart the stream's progress timer.
@@ -687,23 +764,36 @@ class HTTP2Client:
         timeout = get_settings().client_body_timeout
         if timeout <= 0:
             return
+        loop = asyncio.get_running_loop()
+        if not pending.opened_at:
+            pending.opened_at = loop.time()
         pending.disarm()
-        pending.deadline = asyncio.get_running_loop().call_later(
+        pending.deadline = loop.call_later(
             timeout, self._on_stream_stalled, stream_id, timeout)
 
     def _on_stream_stalled(self, stream_id: int, timeout: float) -> None:
-        """No frame for this stream within the deadline."""
-        if stream_id not in self._responses:
+        """No frame for this stream within the deadline.
+
+        The verdict is taken again inside :meth:`_refuse_stream`, not here.
+        A timer callback cannot await, so this hands off to a task, and in
+        that gap the receive loop can finish the response — checking only
+        here reset a stream that had already succeeded and logged a cap hit
+        against it.
+        """
+        pending = self._responses.get(stream_id)
+        if pending is None:
             return
-        asyncio.ensure_future(self._refuse_stream(
-            stream_id, 'client_body_timeout', timeout, timeout,
+        elapsed = asyncio.get_running_loop().time() - pending.opened_at
+        self._spawn(self._refuse_stream(
+            stream_id, 'client_body_timeout', elapsed, timeout,
             TimeoutError(
                 f'no HTTP/2 frame for stream {stream_id} within '
                 f'BB_CLIENT_BODY_TIMEOUT={timeout}s')))
 
     async def _refuse_stream(self, stream_id: int, cap: str,
                              seen: int | float, limit: int | float,
-                             error: Exception) -> None:
+                             error: Exception,
+                             code: ErrorCodes = ErrorCodes.CANCEL) -> None:
         """Refuse one response without ending the connection.
 
         The difference from the HTTP/1.1 client is real and belongs here.  A
@@ -714,19 +804,27 @@ class HTTP2Client:
         connection, survives — which is what makes a per-stream cap usable at
         all.
 
-        ``CANCEL`` rather than ``ENHANCE_YOUR_CALM``: the peer did nothing
-        abusive by protocol, it exceeded a budget *this* client chose, and
-        RFC 9113 §7 gives CANCEL for "no longer interested in this response".
+        *code* defaults to ``CANCEL`` — RFC 9113 §7, "the stream is no longer
+        needed" — which fits a budget *this* client chose and the peer did not
+        violate.  The header-aggregate breach passes ``ENHANCE_YOUR_CALM``
+        instead, because the server answers its own header cap that way and
+        cites nginx and Envoy for it; one cap should not get two codes
+        depending on which end enforces it.
+
+        Nothing happens if the stream has already ended, and that check has to
+        be here rather than at the call sites: the timeout path arrives
+        through a task, and in the gap the receive loop can complete the
+        response.
         """
-        pending = self._responses.pop(stream_id, None)
+        pending = self._drop_pending(stream_id)
+        if pending is None:
+            return
         log_cap_hit(cap, requested=seen, limit=limit, protocol='http2')
-        if pending is not None:
-            pending.disarm()
-            if not pending.future.done():
-                pending.future.set_exception(error)
+        if not pending.future.done():
+            pending.future.set_exception(error)
         try:
             await self._send_raw_frame(
-                self._factory.rst_stream(stream_id, ErrorCodes.CANCEL))
+                self._factory.rst_stream(stream_id, code))
         except Exception:
             # The refusal already happened; a peer that has gone away cannot
             # also be told about it, and raising here would replace the
@@ -738,7 +836,6 @@ class HTTP2Client:
         if pending is None:
             logger.debug('HEADERS for unknown stream %d — dropping', frame.stream_id)
             return
-        self._arm_progress_deadline(frame.stream_id)
         status_str = frame.pseudo_headers.get(PseudoHeaders.STATUS)
         if status_str is not None:
             try:
@@ -746,8 +843,16 @@ class HTTP2Client:
             except (TypeError, ValueError):
                 pending.future.set_exception(
                     ProtocolError(f'invalid :status pseudo-header: {status_str!r}'))
-                self._responses.pop(frame.stream_id, None)
+                self._drop_pending(frame.stream_id)
                 return
+        # An interim response is not the response.  Arming on a 1xx starts the
+        # progress clock while the peer is still working — 103 Early Hints
+        # followed by a second of real work was refused, which is exactly the
+        # "a peer that has not answered yet is working" case the deadline is
+        # supposed to be exempt from.  Its field lines still count: they are
+        # accumulation whatever they announce.
+        if pending.status >= 200:
+            self._arm_progress_deadline(frame.stream_id)
         max_headers = get_settings().client_head_max_total
         for name, value in frame.headers:
             name, value = _to_bytes(name), _to_bytes(value)
@@ -758,7 +863,8 @@ class HTTP2Client:
                     pending.headers_seen, max_headers,
                     ResponseTooLarge(
                         f'response header fields exceed '
-                        f'BB_CLIENT_HEAD_MAX_TOTAL={max_headers}'))
+                        f'BB_CLIENT_HEAD_MAX_TOTAL={max_headers}'),
+                    ErrorCodes.ENHANCE_YOUR_CALM)
                 return
             pending.headers.append((name, value))
         if frame.end_stream:
@@ -775,9 +881,13 @@ class HTTP2Client:
             # such frame, and once it reaches zero every stream's body
             # stalls in the peer's writer.  A stream that closed while its
             # DATA was in flight is ordinary, not hostile.
-            await self._credit_connection(len(frame.payload))
+            # ``frame.length``, not ``len(payload)``: RFC 9113 §6.9.1 counts
+            # the whole DATA payload against the window, and ``payload`` has
+            # already had the pad-length octet and the padding stripped.
+            # Crediting the visible half leaked the window by the padding —
+            # 7.9% on a 20%-padded stream, and a leak only ever closes.
+            await self._credit_connection(frame.length)
             return
-        self._arm_progress_deadline(frame.stream_id)
         payload = frame.payload
         max_body = get_settings().client_body_max_total
         if max_body and pending.body_seen + len(payload) > max_body:
@@ -792,18 +902,28 @@ class HTTP2Client:
                 ResponseTooLarge(
                     f'response body exceeds '
                     f'BB_CLIENT_BODY_MAX_TOTAL={max_body}'))
-            await self._credit_connection(len(payload))
+            await self._credit_connection(frame.length)
             return
-        pending.body_seen += len(payload)
-        pending.body_parts.append(payload)
+        if payload:
+            # Only a frame that delivered body octets is progress, and only
+            # such a frame is held.  A peer sending empty (or all-padding)
+            # DATA re-armed the deadline and appended to body_parts while
+            # body_seen stayed at zero: neither bound could fire, and 200,000
+            # such frames held 1.6 MB against a 1 KiB cap.
+            self._arm_progress_deadline(frame.stream_id)
+            pending.body_seen += len(payload)
+            pending.body_parts.append(payload)
         # RFC 9113 §6.9 — the receiver MUST return flow-control credit for
         # consumed DATA via WINDOW_UPDATE.  Without this the server's send
         # window drains and ``HTTP2Sender._write_data`` blocks once a
         # response exceeds the 65535-byte initial window — a deadlock that
         # affects any large HTTP/2 body, not just gRPC.
-        if payload:
+        if frame.length:
+            # Gated on the flow-controlled length, not on the visible payload:
+            # an all-padding DATA frame delivers nothing and still consumed
+            # the window, so crediting only when payload arrived leaked it.
             await self._credit_received(
-                frame.stream_id, pending, len(payload),
+                frame.stream_id, pending, frame.length,
                 end_stream=bool(frame.end_stream))
         if frame.end_stream:
             self._complete(frame.stream_id)
@@ -843,11 +963,8 @@ class HTTP2Client:
             self._unacked_conn = 0
 
     def _complete(self, stream_id: int) -> None:
-        pending = self._responses.pop(stream_id, None)
-        if pending is None:
-            return
-        pending.disarm()
-        if pending.future.done():
+        pending = self._drop_pending(stream_id, aborted=False)
+        if pending is None or pending.future.done():
             return
         response = ClientResponse(
             status=pending.status or HTTPStatus.OK,
@@ -892,18 +1009,14 @@ class HTTP2Client:
         self._goaway_error_code = frame.error_code
         for sid, pending in list(self._responses.items()):
             if sid > last_stream_id and not pending.future.done():
-                pending.disarm()
+                self._drop_pending(sid)
                 pending.future.set_exception(ConnectionError(
                     f'connection closed by peer (GOAWAY error_code={frame.error_code})'))
-                self._responses.pop(sid, None)
 
     def _on_rst_stream(self, frame) -> None:
-        pending = self._responses.pop(frame.stream_id, None)
+        pending = self._drop_pending(frame.stream_id)
         if pending is None:
             return
-        # Before the future, so a timer cannot outlive the response it was
-        # watching and hold this client on the loop until it fires.
-        pending.disarm()
         if not pending.future.done():
             pending.future.set_exception(
                 StreamReset(frame.stream_id, int(frame.error_code)))

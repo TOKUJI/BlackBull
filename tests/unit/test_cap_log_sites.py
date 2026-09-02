@@ -797,7 +797,11 @@ async def test_client_body_timeout_logs_on_http2(caps_caplog, monkeypatch):
     from blackbull.protocol.frame_types import FrameTypes
 
     async def _feed(c):
+        from blackbull.protocol.frame_types import PseudoHeaders
+
         frame = c._factory.create(FrameTypes.HEADERS, 4, 1)
+        # A final status: an interim (1xx) head does not start the clock.
+        frame.pseudo_headers[PseudoHeaders.STATUS] = '200'
         frame.headers.append(('x-a', 'b'))
         await c._on_response_headers(frame)
         await asyncio.sleep(0.1)
@@ -849,12 +853,14 @@ def test_cap_present_in_codebase(cap):
     the cap name *to the helper*, so the literal ``log_cap_hit('<cap>'`` never
     appears.  Requiring that spelling would make this audit an argument for
     copying the helper; what it requires instead is the name and a
-    ``log_cap_hit`` call in the same file."""
+    ``log_cap_hit`` call in the same file, with the name spelled as a call
+    argument — which is how both the direct sites and the forwarded ones
+    write it, and which a mention in prose is not."""
     from pathlib import Path
     root = Path(__file__).resolve().parents[2] / 'blackbull'
     hits = [
         p for p in root.rglob('*.py')
-        if p.is_file() and f"'{cap}'" in (text := p.read_text())
+        if p.is_file() and f"'{cap}'," in (text := p.read_text())
         and 'log_cap_hit' in text
     ]
     assert hits, f'{cap!r} not wired in any blackbull/ file'

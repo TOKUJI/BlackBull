@@ -43,7 +43,8 @@ import pytest
 from blackbull.client.exceptions import ResponseTooLarge
 from blackbull.client.http2 import (HTTP2Client, _PendingResponse,
                                     _WINDOW_UPDATE_THRESHOLD)
-from blackbull.protocol.frame_types import ErrorCodes, FrameTypes
+from blackbull.protocol.frame_types import (ErrorCodes, FrameTypes,
+                                            PseudoHeaders)
 from blackbull.server.sender import AbstractWriter
 
 # A bound that does not fire presents as a hang, not as a wrong value, so
@@ -59,6 +60,38 @@ async def _resolved(future, seconds: float = 1.0):
 class _RecordingWriter(AbstractWriter):
     async def write(self, data: bytes) -> None:
         pass
+
+
+class _CapHits:
+    """A live view of ``blackbull.caps`` records.
+
+    Snapshotting in the fixture would read the log before the test wrote to
+    it, and every assertion here would pass vacuously.
+    """
+
+    def __init__(self, caplog) -> None:
+        self._caplog = caplog
+
+    def _records(self) -> list:
+        return [r for r in self._caplog.records if getattr(r, 'cap', None)]
+
+    def __iter__(self):
+        return iter(self._records())
+
+    def __len__(self) -> int:
+        # Not ``len(list(self))``: ``list`` asks ``__len__`` for a size hint.
+        return len(self._records())
+
+    def __repr__(self) -> str:
+        return repr([(r.cap, r.requested) for r in self._records()])
+
+
+@pytest.fixture
+def caps_log(caplog):
+    """Cap hits, so a *spurious* refusal is as visible as a missing one."""
+    import logging
+    caplog.set_level(logging.WARNING, logger='blackbull.caps')
+    return _CapHits(caplog)
 
 
 def _client() -> HTTP2Client:
@@ -92,9 +125,12 @@ async def _feed_data(c: HTTP2Client, stream_id: int, payload: bytes, *,
 
 async def _feed_headers(c: HTTP2Client, stream_id: int,
                         headers: list[tuple[str, str]], *,
-                        end_stream: bool = False) -> None:
+                        end_stream: bool = False, status: int = 200) -> None:
+    """A response head.  *status* below 200 makes it an interim response,
+    which must not start the progress clock."""
     frame = c._factory.create(FrameTypes.HEADERS, 5 if end_stream else 4,
                               stream_id)
+    frame.pseudo_headers[PseudoHeaders.STATUS] = str(status)
     frame.headers.extend(headers)
     await c._on_response_headers(frame)
 
@@ -383,3 +419,197 @@ class TestThePerStreamProgressDeadline:
                 if not h.cancelled()
                 and 'stalled' in repr(getattr(h, '_callback', ''))]
         assert not live, f'{len(live)} progress timer(s) outlived their response'
+
+
+# ----------------------------------------------------------------------
+# What two independent reviews of the first cut found
+# ----------------------------------------------------------------------
+
+class TestAnInterimResponseIsNotTheResponse:
+    """1xx must not start the progress clock.
+
+    ``103 Early Hints`` followed by a second of real work was refused: the
+    deadline was armed by *every* HEADERS frame, including one that announces
+    the peer is still working.  That is precisely the case
+    ``_arm_progress_deadline`` documents itself as exempt from.
+    """
+
+    @pytest.mark.parametrize('status', [100, 103, 199])
+    async def test_an_interim_head_does_not_arm_the_deadline(
+            self, status, monkeypatch):
+        monkeypatch.setenv('BB_CLIENT_BODY_TIMEOUT', '30')
+        c = _client()
+        _pending(c)
+        await _feed_headers(c, 1, [('link', '</s.css>; rel=preload')],
+                            status=status)
+        assert c._responses[1].deadline is None
+
+    async def test_the_final_head_after_an_interim_one_does_arm_it(
+            self, monkeypatch):
+        monkeypatch.setenv('BB_CLIENT_BODY_TIMEOUT', '30')
+        c = _client()
+        _pending(c)
+        await _feed_headers(c, 1, [], status=103)
+        await _feed_headers(c, 1, [], status=200)
+        assert c._responses[1].deadline is not None
+
+    async def test_interim_field_lines_still_count_toward_the_total(
+            self, monkeypatch):
+        """Exempt from the clock is not exempt from the budget — they are
+        accumulation whatever they announce."""
+        monkeypatch.setenv('BB_CLIENT_HEAD_MAX_TOTAL', '4096')
+        c = _client()
+        future = _pending(c)
+        for _ in range(20):
+            await _feed_headers(c, 1, [(f'x-{i}', 'v' * 100)
+                                       for i in range(10)], status=103)
+        with pytest.raises(ResponseTooLarge):
+            await _resolved(future)
+
+
+class TestAFrameThatDeliversNothingIsNotProgress:
+    """Empty and all-padding DATA defeated both body bounds at once.
+
+    ``body_seen`` grew by zero while ``body_parts`` grew by an entry and the
+    deadline was re-armed, so neither the total nor the clock could ever fire:
+    200,000 such frames held 1.6 MB against a 1 KiB cap.
+    """
+
+    async def test_empty_data_does_not_rearm_the_deadline(self, monkeypatch):
+        monkeypatch.setenv('BB_CLIENT_BODY_TIMEOUT', '30')
+        c = _client()
+        _pending(c)
+        await _feed_headers(c, 1, [])
+        armed = c._responses[1].deadline.when()
+        for _ in range(5):
+            await asyncio.sleep(0)
+            await _feed_data(c, 1, b'')
+        assert c._responses[1].deadline.when() == armed
+
+    async def test_empty_data_is_not_accumulated(self, monkeypatch):
+        monkeypatch.setenv('BB_CLIENT_BODY_MAX_TOTAL', '1024')
+        c = _client()
+        _pending(c)
+        await _feed_headers(c, 1, [])
+        for _ in range(2000):
+            await _feed_data(c, 1, b'')
+        held = c._responses[1]
+        assert held.body_parts == [] and held.body_seen == 0
+
+    async def test_an_all_padding_frame_still_credits_the_window(self):
+        """It delivered nothing and still consumed the connection window."""
+        c = _client()
+        _pending(c)
+        await _feed_headers(c, 1, [])
+        padded = c._factory.create(
+            FrameTypes.DATA, 0x8, 1,
+            data=bytes([255]) + b'' + b'\x00' * 255)
+        for _ in range(200):
+            await c._on_response_data(padded)
+        updates = _frames_of(c, FrameTypes.WINDOW_UPDATE)
+        assert updates, ('padding consumed the shared window and returned no '
+                         'credit — a leak that only ever closes')
+
+
+class TestARefusalDuringAnUploadReachesTheCaller:
+    """RST_STREAM is what makes a peer stop crediting the stream window, so a
+    refusal mid-upload parked ``request()`` on a window that would never
+    reopen — holding an answer it could not deliver."""
+
+    async def test_the_upload_is_cancelled_by_the_refusal(self):
+        c = _client()
+        future = _pending(c)
+        stalled = asyncio.get_running_loop().create_future()
+        c._responses[1].upload = stalled
+        await c._refuse_stream(1, 'client_body_max_total', 1, 0,
+                               ResponseTooLarge('too big'))
+        assert stalled.cancelled()
+        with pytest.raises(ResponseTooLarge):
+            await _resolved(future)
+
+    async def test_request_returns_the_refusal_instead_of_parking(
+            self, monkeypatch):
+        """The caller-facing claim: ``request()`` awaits the upload before it
+        awaits the response, so without the cancellation it never returns."""
+        monkeypatch.setenv('BB_CLIENT_BODY_MAX_TOTAL', '1000')
+        c = _client()
+        c._on_initial_window_size(10)          # the upload parks after 10 B
+        call = asyncio.ensure_future(c.request('POST', '/', body=b'z' * 5000))
+        for _ in range(4):
+            await asyncio.sleep(0)
+        await _feed_headers(c, 1, [])
+        await _feed_data(c, 1, b'x' * 2000)    # over the cap, mid-upload
+        with pytest.raises(ResponseTooLarge):
+            await asyncio.wait_for(call, 2.0)
+
+    async def test_a_completed_response_leaves_its_upload_alone(self):
+        """The other half: a server may answer with END_STREAM while the body
+        is still going up, and that upload must finish."""
+        c = _client()
+        _pending(c)
+        upload = asyncio.get_running_loop().create_future()
+        c._responses[1].upload = upload
+        await _feed_data(c, 1, b'ok', end_stream=True)
+        assert not upload.cancelled()
+        upload.cancel()
+
+
+class TestTheVerdictIsRetakenWhenTheTimerFires:
+    """A timer callback cannot await, so it hands off to a task — and in that
+    gap the receive loop can finish the response."""
+
+    async def test_a_response_that_completes_first_is_not_reset(
+            self, caps_log, monkeypatch):
+        monkeypatch.setenv('BB_CLIENT_BODY_TIMEOUT', '30')
+        c = _client()
+        future = _pending(c)
+        await _feed_headers(c, 1, [])
+        c._on_stream_stalled(1, 30.0)          # timer fires…
+        await _feed_data(c, 1, b'hello', end_stream=True)   # …response wins
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert (await _resolved(future)).body == b'hello'
+        assert not _frames_of(c, FrameTypes.RST_STREAM), (
+            'a successful response was reset by a timer that had already lost')
+        assert not caps_log, f'a cap hit was logged against it: {caps_log}'
+
+    async def test_one_stream_is_refused_once(self, caps_log, monkeypatch):
+        monkeypatch.setenv('BB_CLIENT_BODY_MAX_TOTAL', '1000')
+        c = _client()
+        future = _pending(c)
+        await _feed_headers(c, 1, [])
+        await _feed_data(c, 1, b'x' * 2000)
+        c._on_stream_stalled(1, 30.0)
+        await asyncio.sleep(0)
+        with pytest.raises(ResponseTooLarge):
+            await _resolved(future)
+        assert len(_frames_of(c, FrameTypes.RST_STREAM)) == 1
+        assert len(caps_log) == 1, f'refused twice: {caps_log}'
+
+
+class TestTheRefusalDoesNotOutliveTheClient:
+    async def test_a_detached_refusal_is_cancelled_by_aexit(self, monkeypatch):
+        monkeypatch.setenv('BB_CLIENT_BODY_TIMEOUT', '30')
+        c = _client()
+        _pending(c)
+        await _feed_headers(c, 1, [])
+        c._on_stream_stalled(1, 30.0)
+        assert c._detached, 'the refusal task is not tracked'
+        await c.__aexit__(None, None, None)
+        assert not c._detached
+
+
+class TestTheHeaderCapUsesTheServersErrorCode:
+    async def test_enhance_your_calm_for_the_header_aggregate(self, monkeypatch):
+        """The server answers its own header cap with ENHANCE_YOUR_CALM and
+        cites nginx and Envoy; one cap should not get two codes."""
+        monkeypatch.setenv('BB_CLIENT_HEAD_MAX_TOTAL', '1024')
+        c = _client()
+        future = _pending(c)
+        for _ in range(20):
+            await _feed_headers(c, 1, [(f'x-{i}', 'v' * 100)
+                                       for i in range(10)])
+        with pytest.raises(ResponseTooLarge):
+            await _resolved(future)
+        resets = _frames_of(c, FrameTypes.RST_STREAM)
+        assert resets[0].error_code == ErrorCodes.ENHANCE_YOUR_CALM
