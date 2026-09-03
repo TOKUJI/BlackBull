@@ -5771,6 +5771,9 @@ normal dispatcher — the read-side twin of :meth:<code>send_raw_frame</code>.</
 <p>Only safe to call when the receive loop is not running (i.e. before
 <code>__aenter__</code> finishes or after the loop has been cancelled); a
 concurrent loop would race this call for the reader.</p>
+<p>Inherits <code>client_h2_max_frame_size</code>: one rule, not a second path
+around it.  A scenario needing an over-sized frame opts out with
+<code>BB_CLIENT_H2_MAX_FRAME_SIZE=0</code>.</p>
 
 
     </div>

@@ -3803,6 +3803,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.protocol.frame_types.FrameFormatError" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FrameFormatError
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.protocol.frame_types.GoAway" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5593,6 +5604,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.protocol.frame_types.FrameFormatError" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FrameFormatError
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.protocol.frame_types.GoAway" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5985,6 +6007,57 @@ a non-empty <code>IntEnum</code> does not apply.</p>
 
 
 
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.protocol.frame_types.FrameFormatError" class="doc doc-heading">
+            <code>FrameFormatError</code>
+
+
+<a href="#blackbull.protocol.frame_types.FrameFormatError" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="ValueError">ValueError</span></code></p>
+
+
+
+        <p>A frame the RFC calls malformed, carrying the code its own section names.</p>
+<p>A parser that raises a bare <code>Exception</code> leaves the caller to guess the
+error code from the message, and the guess is the thing the peer acts on.
+<code>ValueError</code> because that is what the padding checks already raised.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
 
     </div>
 
