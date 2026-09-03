@@ -3822,6 +3822,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Headers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.protocol.frame_types.Headers.parse_payload" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        parse_payload
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -3865,6 +3882,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="PushPromise">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.protocol.frame_types.PushPromise.parse_payload" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        parse_payload
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
         
@@ -5578,6 +5612,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Headers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.protocol.frame_types.Headers.parse_payload" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        parse_payload
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -5621,6 +5672,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="PushPromise">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.protocol.frame_types.PushPromise.parse_payload" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        parse_payload
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
         
@@ -6016,6 +6084,27 @@ accepting the GOAWAY for the connection-error tests.</p>
 
 
 
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.protocol.frame_types.Headers.parse_payload" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">parse_payload</span><span class="p">()</span></code>
+
+<a href="#blackbull.protocol.frame_types.Headers.parse_payload" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Decode the field block, which may span several frames.</p>
+<p>Padding and priority belong to the frame that carried the flags, and
+<code>self.length</code> is that frame's payload; everything past it was
+appended by CONTINUATION and is fragment throughout.</p>
+
+
+    </div>
+
+</div>
+
 
 
   </div>
@@ -6212,6 +6301,27 @@ and the HPACK-encoded synthetic request headers for the pushed resource.</p>
 
 
 
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.protocol.frame_types.PushPromise.parse_payload" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">parse_payload</span><span class="p">()</span></code>
+
+<a href="#blackbull.protocol.frame_types.PushPromise.parse_payload" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Decode the promised block and discard it: the side effect on the
+connection-wide HPACK table is the point, and RFC 9113 §4.3 requires
+it even though the client acts on no push.</p>
+<p>Splitting works as in :meth:<code>Headers.parse_payload</code>.</p>
+
+
+    </div>
+
+</div>
 
 
 

@@ -5905,7 +5905,7 @@ what a report should hold the client to.</p>
 <tr>
 <td><code>BB_CLIENT_HEAD_MAX_TOTAL</code></td>
 <td><code>65536</code></td>
-<td>Maximum total bytes in a response head the client will read (status line + all field lines + <code>CRLFCRLF</code>).  Bounds accumulation <em>as it reads</em>, so a peer that opens a header and never closes it cannot grow the client's memory.  Exceeded → <code>ResponseTooLarge</code>.  <code>0</code> disables.  Under HTTP/2 the same budget bounds the response's field lines <strong>in aggregate</strong> across every HEADERS frame on the stream — informational responses, the final headers and trailers — because each section is individually legal and only the sum is not.  One section is bounded by hpack's <code>max_header_list_size</code> (65536), not by this — and that bound is neither advertised to the peer (the client sends an empty SETTINGS frame) nor per-stream: hpack raises during frame parsing, which fails the <strong>whole connection</strong> rather than one response.</td>
+<td>Maximum total bytes in a response head the client will read (status line + all field lines + <code>CRLFCRLF</code>).  Bounds accumulation <em>as it reads</em>, so a peer that opens a header and never closes it cannot grow the client's memory.  Exceeded → <code>ResponseTooLarge</code>.  <code>0</code> disables.  Under HTTP/2 the same budget is spent at two points, on two different quantities, because the field block is the HTTP/2 spelling of "the head".  <em>Decoded</em>: the response's field lines <strong>in aggregate</strong> across every HEADERS frame on the stream — informational responses, the final headers and trailers — because each section is individually legal and only the sum is not; that breach is a <strong>stream</strong> error, since the block was decoded and the connection stays sound.  <em>Encoded</em>: the octets accumulated while reassembling a field block across CONTINUATION frames — after a <code>HEADERS</code> or a <code>PUSH_PROMISE</code>, both of which open one — checked on the opening frame and again on every append, so the cap bounds the memory and not merely the answer; that breach is a <strong>connection</strong> error of type <code>COMPRESSION_ERROR</code>, because a block refused before decoding leaves the connection-wide HPACK decoder unable to read any later block (RFC 9113 §4.3).  Same budget, different blast radius, decided by whether the decoder walked the block.  One section is bounded by hpack's <code>max_header_list_size</code> (65536), not by this — and that bound is neither advertised to the peer (the client sends an empty SETTINGS frame) nor per-stream: hpack raises during frame parsing, which fails the <strong>whole connection</strong> rather than one response.</td>
 </tr>
 <tr>
 <td><code>BB_CLIENT_HEAD_MAX_LINE</code></td>
@@ -5950,8 +5950,8 @@ chooses which client you get</strong>.  A limit that existed under one protocol 
 not the other would be escapable by advertising the other, which is why these
 knobs are shared rather than duplicated under <code>BB_CLIENT_H2_*</code> names: you
 configure a limit, not a limit-per-protocol.</p>
-<p><strong>Three knobs are not shared yet</strong>, and until they are, a peer that
-negotiates <code>h2</code> does escape them:</p>
+<p><strong>Two and a half knobs are not shared yet</strong>, and until they are, a peer
+that negotiates <code>h2</code> does escape them:</p>
 <table>
 <thead>
 <tr>
@@ -5962,7 +5962,7 @@ negotiates <code>h2</code> does escape them:</p>
 <tbody>
 <tr>
 <td><code>BB_CLIENT_HEAD_TIMEOUT</code></td>
-<td>nothing bounds the wait for the <em>first</em> response frame; a peer that completes the handshake and then says nothing parks the call.</td>
+<td><strong>half shared.</strong>  It bounds the wait for END_HEADERS once a field block is open — the peer has committed to a message and stopped mid-delivery — running from when the block opened rather than from the last frame, so a stream of zero-length CONTINUATION frames cannot re-arm it forever.  It does <strong>not</strong> bound the wait for the <em>first</em> response frame: a peer that completes the handshake and then says nothing still parks the call.</td>
 </tr>
 <tr>
 <td><code>BB_CLIENT_HEAD_MAX_LINE</code></td>
