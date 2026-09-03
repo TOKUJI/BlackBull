@@ -360,18 +360,22 @@ async def test_transfer_encoding_repeated_empty_members_are_ignored():
     b'Transfer-Encoding:\r\nTransfer-Encoding: \t\r\n',
 ])
 @pytest.mark.asyncio
-async def test_present_empty_transfer_encoding_overrides_content_length_buffered(
+async def test_present_empty_transfer_encoding_with_content_length_is_refused(
         te_headers):
+    """The server refuses Content-Length beside Transfer-Encoding on the
+    presence of the field, not on what the field parses to, so an empty one
+    counts.  RFC 9112 §6.3 item 3 gives the precedence *and* calls the message
+    one that "ought to be handled as an error"; taking the precedence alone
+    leaves the client trusting whichever field an intermediary did not."""
     reader = _Reader(
         _head(200, headers=te_headers + b'Content-Length: 4\r\n')
         + b'body-through-eof')
     recipient = HTTP1ResponseRecipient(request_method='GET')
 
-    response = await recipient.receive(reader)
+    with pytest.raises(ProtocolError):
+        await recipient.receive(reader)
 
-    assert response.body == b'body-through-eof'
-    assert reader.remaining == b''
-    assert recipient.reusable is False
+    assert recipient.framing_broken is True
 
 
 @pytest.mark.parametrize('te_headers', [
@@ -379,18 +383,18 @@ async def test_present_empty_transfer_encoding_overrides_content_length_buffered
     b'Transfer-Encoding:\r\nTransfer-Encoding: \t\r\n',
 ])
 @pytest.mark.asyncio
-async def test_present_empty_transfer_encoding_overrides_content_length_streaming(
+async def test_present_empty_transfer_encoding_with_content_length_streaming(
         te_headers):
+    """The streaming entry point answers the same field pair the same way."""
     reader = _Reader(
         _head(200, headers=te_headers + b'Content-Length: 4\r\n')
         + b'body-through-eof')
     recipient = HTTP1ResponseRecipient(request_method='GET')
 
-    chunks = [chunk async for chunk in recipient.stream(reader)]
+    with pytest.raises(ProtocolError):
+        [chunk async for chunk in recipient.stream(reader)]
 
-    assert b''.join(chunks) == b'body-through-eof'
-    assert reader.remaining == b''
-    assert recipient.reusable is False
+    assert recipient.framing_broken is True
 
 
 @pytest.mark.parametrize('header', [
@@ -464,12 +468,31 @@ async def test_stream_uses_final_chunked_coding_in_a_transfer_encoding_list():
 
 
 @pytest.mark.asyncio
-async def test_nonchunked_transfer_encoding_overrides_content_length():
+async def test_nonchunked_transfer_encoding_with_content_length_is_refused():
+    """Whether or not chunked is the final coding, the two framing fields
+    together are the response-splitting shape, and one repository should not
+    hold two answers to one field pair."""
     reader = _Reader(
         _head(200, headers=(b'Transfer-Encoding: gzip\r\n'
                            b'Content-Length: 3\r\n'))
         + b'encoded-payload'
     )
+
+    recipient = HTTP1ResponseRecipient(request_method='GET')
+
+    with pytest.raises(ProtocolError):
+        await recipient.receive(reader)
+
+    assert recipient.framing_broken is True
+
+
+@pytest.mark.asyncio
+async def test_nonchunked_transfer_encoding_alone_is_close_delimited():
+    """The control for the refusal above: Transfer-Encoding without
+    Content-Length keeps §6.3 item 4's response branch — chunked is not the
+    final coding, so the length is the connection's."""
+    reader = _Reader(_head(200, headers=b'Transfer-Encoding: gzip\r\n')
+                     + b'encoded-payload')
 
     recipient = HTTP1ResponseRecipient(request_method='GET')
     response = await recipient.receive(reader)

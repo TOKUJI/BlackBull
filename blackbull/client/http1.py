@@ -82,6 +82,45 @@ _TCHAR = frozenset(
 _MAX_EMPTY_TRANSFER_MEMBERS = 16
 
 
+def _skip_ows(value: bytes, pos: int) -> int:
+    while pos < len(value) and value[pos] in (0x20, 0x09):
+        pos += 1
+    return pos
+
+
+def _te_token(value: bytes, pos: int) -> tuple[bytes, int]:
+    start = pos
+    while pos < len(value) and value[pos] in _TCHAR:
+        pos += 1
+    if pos == start:
+        raise ProtocolError(
+            f'invalid Transfer-Encoding token at position {pos}')
+    return value[start:pos], pos
+
+
+def _te_quoted_string(value: bytes, pos: int) -> int:
+    """The opening quote is consumed here.  quoted-pair permits only
+    HTAB/SP/VCHAR/obs-text after the backslash."""
+    pos += 1
+    while pos < len(value):
+        octet = value[pos]
+        if octet == 0x22:
+            return pos + 1
+        if octet == 0x5c:
+            pos += 1
+            if pos >= len(value) or not (
+                    value[pos] == 0x09 or value[pos] == 0x20
+                    or 0x21 <= value[pos] <= 0x7e
+                    or value[pos] >= 0x80):
+                raise ProtocolError(
+                    'invalid quoted Transfer-Encoding parameter')
+        elif (octet < 0x20 and octet != 0x09) or octet == 0x7f:
+            raise ProtocolError(
+                'invalid quoted Transfer-Encoding parameter')
+        pos += 1
+    raise ProtocolError('unterminated quoted Transfer-Encoding parameter')
+
+
 # Methods for which an empty body still warrants an
 # explicit ``Content-Length: 0`` on the wire.  RFC 9110 §8.6 makes the
 # header optional in this case, but always emitting it removes ambiguity
@@ -308,18 +347,10 @@ class HTTP1ResponseRecipient:
         """
         self._refuse_if_broken()
         try:
-            version, status, headers = await self._read_start(
-                reader, skip_interim=skip_interim)
-            self.http_version = version
-            response_persistent = self._response_is_persistent(version, headers)
-            self.response_persistent = response_persistent
-            effective_method = (request_method if request_method is not None
-                                else method if method is not None
-                                else self.request_method)
-            body = await self._read_body(
-                reader, headers, status=status,
-                request_method=effective_method)
-            self.reusable = self.reusable and response_persistent
+            status, headers, framing = await self._read_head_and_policy(
+                reader, skip_interim=skip_interim, method=method,
+                request_method=request_method)
+            body = await self._read_body(reader, headers, framing=framing)
         except BaseException:
             # Every refusal below this point leaves unread octets behind, and
             # a peer whose body is itself a well-formed response gets one
@@ -342,18 +373,11 @@ class HTTP1ResponseRecipient:
         # whether there is a body to yield at all.
         self._refuse_if_broken()
         try:
-            version, status, headers = await self._read_start(reader)
-            self.http_version = version
-            response_persistent = self._response_is_persistent(version, headers)
-            self.response_persistent = response_persistent
-            effective_method = (request_method if request_method is not None
-                                else method if method is not None
-                                else self.request_method)
+            _status, headers, framing = await self._read_head_and_policy(
+                reader, method=method, request_method=request_method)
             async for chunk in self._stream_body(
-                    reader, headers, status=status,
-                    request_method=effective_method):
+                    reader, headers, framing=framing):
                 yield chunk
-            self.reusable = self.reusable and response_persistent
         except BaseException:
             self.framing_broken = True
             raise
@@ -621,43 +645,7 @@ class HTTP1ResponseRecipient:
         """
         codings: list[bytes] = []
         empty_members = 0
-
-        def skip_ows(value: bytes, pos: int) -> int:
-            while pos < len(value) and value[pos] in (0x20, 0x09):
-                pos += 1
-            return pos
-
-        def token(value: bytes, pos: int) -> tuple[bytes, int]:
-            start = pos
-            while pos < len(value) and value[pos] in _TCHAR:
-                pos += 1
-            if pos == start:
-                raise ProtocolError(
-                    f'invalid Transfer-Encoding token at position {pos}')
-            return value[start:pos], pos
-
-        def quoted_string(value: bytes, pos: int) -> int:
-            # The opening quote is consumed here.  quoted-pair permits only
-            # HTAB/SP/VCHAR/obs-text after the backslash.
-            pos += 1
-            while pos < len(value):
-                octet = value[pos]
-                if octet == 0x22:
-                    return pos + 1
-                if octet == 0x5c:
-                    pos += 1
-                    if pos >= len(value) or not (
-                            value[pos] == 0x09 or value[pos] == 0x20
-                            or 0x21 <= value[pos] <= 0x7e
-                            or value[pos] >= 0x80):
-                        raise ProtocolError(
-                            'invalid quoted Transfer-Encoding parameter')
-                elif (octet < 0x20 and octet != 0x09) or octet == 0x7f:
-                    raise ProtocolError(
-                        'invalid quoted Transfer-Encoding parameter')
-                pos += 1
-            raise ProtocolError(
-                'unterminated quoted Transfer-Encoding parameter')
+        skip_ows, token, quoted_string = _skip_ows, _te_token, _te_quoted_string
 
         for _, value in fields:
             pos = 0
@@ -729,6 +717,17 @@ class HTTP1ResponseRecipient:
 
         transfer_fields = headers.getlist(b'transfer-encoding')
         if transfer_fields:
+            if headers.getlist(b'content-length'):
+                # RFC 9112 §6.3 item 3 gives the precedence *and* says the
+                # message "ought to be handled as an error".  Taking the
+                # precedence alone leaves the client trusting whichever field
+                # an intermediary in front of us did not, which is the
+                # response-splitting shape.  The server refuses this exact
+                # combination on the request side; one repository should not
+                # hold two answers to one field pair.
+                raise ProtocolError(
+                    'Content-Length and Transfer-Encoding both present in '
+                    'the response (response-splitting vector)')
             codings = cls._parse_transfer_encoding(transfer_fields)
             if codings.count(b'chunked') > 1:
                 raise ProtocolError(
@@ -747,20 +746,55 @@ class HTTP1ResponseRecipient:
             return 'declared', declared, True, False
         return 'close', None, False, False
 
+    def _record_framing(self, framing: tuple[str, int | None, bool, bool], *,
+                        request_method: str | bytes | HTTPMethod | None,
+                        response_persistent: bool) -> None:
+        """The one place the connection's fate is decided.
+
+        Framing says whether this message delimits itself; ``Connection`` says
+        whether the peer means to keep the connection.  Reuse needs both, so
+        both are spent here — not assigned by the body reader and corrected by
+        its caller afterwards, which is one invariant in two places under two
+        different operators.
+        """
+        mode, _declared, framing_reusable, tunnel = framing
+        self.reusable = framing_reusable and response_persistent
+        self.protocol_switched = tunnel
+        self.tunnel = tunnel and self._method_is(request_method, 'CONNECT')
+        self.connection_exhausted = mode == 'close'
+
+    async def _read_head_and_policy(
+            self, reader: AbstractReader, *, skip_interim: bool = True,
+            method: str | bytes | HTTPMethod | None = None,
+            request_method: str | bytes | HTTPMethod | None = None,
+    ) -> tuple[int, Headers, tuple[str, int | None, bool, bool]]:
+        """Read the head and settle everything the body read must not decide."""
+        version, status, headers = await self._read_start(
+            reader, skip_interim=skip_interim)
+        self.http_version = version
+        response_persistent = self._response_is_persistent(version, headers)
+        self.response_persistent = response_persistent
+        effective_method = (request_method if request_method is not None
+                            else method if method is not None
+                            else self.request_method)
+        framing = self._body_framing(status, headers, effective_method)
+        self._record_framing(framing, request_method=effective_method,
+                             response_persistent=response_persistent)
+        return status, headers, framing
+
     async def _read_body(self, reader: AbstractReader, headers: Headers,
                          *, status: int | None = None,
-                         request_method: str | bytes | HTTPMethod | None = None
+                         request_method: str | bytes | HTTPMethod | None = None,
+                         framing: tuple[str, int | None, bool, bool] | None = None
                          ) -> bytes:
         # The total lives here and not in ``_read_chunked``, which
         # ``_stream_body`` shares: this is the path that accumulates, and the
         # other one exists precisely so a large response need not.
         max_total = get_settings().client_body_max_total
-        mode, declared, reusable, tunnel = self._body_framing(
-            status if status is not None else 200, headers, request_method)
-        self.reusable = reusable
-        self.protocol_switched = tunnel
-        self.tunnel = (tunnel and self._method_is(request_method, 'CONNECT'))
-        self.connection_exhausted = mode == 'close'
+        if framing is None:
+            framing = self._body_framing(
+                status if status is not None else 200, headers, request_method)
+        mode, declared, _reusable, _tunnel = framing
         if mode == 'none':
             return b''
         if mode == 'chunked':
@@ -783,14 +817,13 @@ class HTTP1ResponseRecipient:
 
     async def _stream_body(self, reader: AbstractReader,
                            headers: Headers, *, status: int | None = None,
-                           request_method: str | bytes | HTTPMethod | None = None
+                           request_method: str | bytes | HTTPMethod | None = None,
+                           framing: tuple[str, int | None, bool, bool] | None = None
                            ) -> AsyncIterator[bytes]:
-        mode, declared, reusable, tunnel = self._body_framing(
-            status if status is not None else 200, headers, request_method)
-        self.reusable = reusable
-        self.protocol_switched = tunnel
-        self.tunnel = (tunnel and self._method_is(request_method, 'CONNECT'))
-        self.connection_exhausted = mode == 'close'
+        if framing is None:
+            framing = self._body_framing(
+                status if status is not None else 200, headers, request_method)
+        mode, declared, _reusable, _tunnel = framing
         if mode == 'none':
             return
         if mode == 'chunked':

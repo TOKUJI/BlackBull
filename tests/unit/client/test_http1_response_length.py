@@ -285,15 +285,16 @@ class TestTransferCodingList:
         assert res.body == b'raw octets to the close'
 
     @pytest.mark.asyncio
-    async def test_transfer_encoding_with_content_length_uses_te_framing(self):
-        """Transfer-Encoding determines framing when both fields are sent;
-        Content-Length must not truncate the transfer-coded payload."""
+    async def test_transfer_encoding_with_content_length_is_refused(self):
+        """§6.3 item 3 — the two disagree by construction, and the message
+        'ought to be handled as an error'.  The server refuses the same shape
+        on the request side; this is that rule facing the other way."""
         wire = (b'HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n'
                 b'content-length: 5\r\n\r\n2\r\nhi\r\n0\r\n\r\n')
         recipient = HTTP1ResponseRecipient()
-        response = await _within(recipient.receive(_Canned(wire)))
-        assert response.body == b'hi'
-        assert not recipient.framing_broken
+        with pytest.raises(ProtocolError):
+            await _within(recipient.receive(_Canned(wire)))
+        assert recipient.framing_broken
 
 
 # ----------------------------------------------------------------------
