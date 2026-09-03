@@ -602,3 +602,167 @@ class TestRawStreamQueueDepth:
         assert 1 in c._raw_streams
         assert not [f for f in sent if f.FrameType() == FrameTypes.RST_STREAM]
         await self._end(c, task)
+
+
+# ===========================================================================
+# bounds 5 — the frame length is peer-declared, and it was never checked
+# ===========================================================================
+
+class TestFrameSizeCheck:
+    """``_receive_frame`` parsed a 3-byte length and handed it to
+    ``readexactly`` unexamined — up to 16 MiB of the peer's choosing, per
+    frame, allocated before anything looked at the frame at all.
+
+    There is nothing here to announce.  RFC 9113 §6.5.2 makes 2^14 the
+    *initial* SETTINGS_MAX_FRAME_SIZE, in force from connection start, and the
+    client's empty SETTINGS advertises nothing larger — so an explicit setting
+    could only loosen the bound.  What was missing is the receive-side check.
+
+    The refusal is a **connection** error even for a frame on a non-zero
+    stream, which §4.2 would otherwise permit to be a stream error.  We refuse
+    *before* reading the payload, so those octets stay in the socket and the
+    next 9-byte read would land mid-payload: a stream error here desyncs the
+    reader for every stream.  The server refuses the same way for the same
+    reason.  Draining the payload first to keep the stream option open would
+    turn a refusal into unbounded work the peer chooses.
+    """
+
+    _LIMIT = 16384
+
+    @staticmethod
+    def _capture(c: HTTP2Client) -> list:
+        sent: list = []
+
+        async def _send(frame):
+            sent.append(frame)
+
+        # Without this ``_send_raw_frame``'s assert fires, ``_fail_connection``
+        # logs it and swallows it, and a GOAWAY assertion passes vacuously.
+        c._control_sender = _send
+        return sent
+
+    @staticmethod
+    def _header(length: int, *, stream_id: int = 1,
+                type_: bytes = FrameTypes.DATA) -> bytes:
+        """A frame header declaring *length* payload octets."""
+        return (length.to_bytes(3, 'big') + type_ + bytes([0])
+                + stream_id.to_bytes(4, 'big'))
+
+    def _oversize(self, declared: int, *, trailing: int = 64,
+                  stream_id: int = 1):
+        """A client whose peer declared *declared* octets and sent *trailing*.
+
+        The gap is the point: a check that reads first would block on the
+        octets the peer never sent.
+        """
+        reader = _BlockingReader(
+            self._header(declared, stream_id=stream_id) + b'x' * trailing)
+        c = _client(reader=reader)
+        return c, reader, self._capture(c)
+
+    async def test_an_oversize_frame_is_refused_with_frame_size_error(self):
+        """RFC 9113 §4.2 — FRAME_SIZE_ERROR, told to the peer."""
+        c, _reader, sent = self._oversize(self._LIMIT + 1)
+
+        await asyncio.wait_for(c._receive_loop(), timeout=1.0)
+
+        goaway = [f for f in sent if f.FrameType() == FrameTypes.GOAWAY]
+        assert goaway, 'an over-sized frame was refused without a GOAWAY'
+        assert goaway[0].error_code == ErrorCodes.FRAME_SIZE_ERROR
+
+    async def test_the_refusal_is_not_a_silent_close(self):
+        """``None`` from ``_receive_frame`` means EOF to the receive loop, so
+        a refusal spelled that way is indistinguishable from the peer hanging
+        up — the caller cannot tell a rejection from a disconnect."""
+        c, _reader, _sent = self._oversize(self._LIMIT + 1)
+
+        await asyncio.wait_for(c._receive_loop(), timeout=1.0)
+
+        assert c._connection_lost, 'the connection was left usable'
+        assert c._failure, (
+            'the refusal recorded no reason — a caller cannot tell it from '
+            'the peer simply going away')
+        assert str(self._LIMIT + 1) in c._failure
+
+    async def test_the_payload_is_never_read(self):
+        """The whole memory argument: refusing *before* the read is what keeps
+        a peer-declared length from sizing an allocation."""
+        c, reader, _sent = self._oversize(self._LIMIT + 1, trailing=64)
+
+        await asyncio.wait_for(c._receive_loop(), timeout=1.0)
+
+        assert len(reader._buf) == 64, (
+            'the declared payload was consumed before it was refused — the '
+            'peer still chose the read size')
+
+    async def test_a_frame_at_the_limit_is_accepted(self):
+        """The boundary, and the reason the default refuses nothing legal: a
+        conforming peer may send exactly ``SETTINGS_MAX_FRAME_SIZE``."""
+        payload = b'x' * self._LIMIT
+        reader = _BlockingReader(self._header(self._LIMIT) + payload)
+        c = _client(reader=reader)
+        self._capture(c)
+
+        frame = await asyncio.wait_for(c._receive_frame(), timeout=1.0)
+
+        assert frame is not None and frame.payload == payload
+
+    async def test_zero_disables_the_bound(self, monkeypatch):
+        """The opt-out every bound owes a fault-injection scenario."""
+        monkeypatch.setenv('BB_CLIENT_H2_MAX_FRAME_SIZE', '0')
+        payload = b'x' * (self._LIMIT + 1)
+        reader = _BlockingReader(self._header(len(payload)) + payload)
+        c = _client(reader=reader)
+        sent = self._capture(c)
+
+        frame = await asyncio.wait_for(c._receive_frame(), timeout=1.0)
+
+        assert frame is not None and frame.payload == payload
+        assert not sent, 'a disabled bound still refused the frame'
+
+    async def test_the_escape_hatch_inherits_the_check(self):
+        """``receive_raw_frame`` reads the same wire through the same method,
+        so one rule covers both paths — otherwise the bound is escapable by
+        calling the public escape hatch instead of running the loop."""
+        from blackbull.client.http2 import _ConnectionFailed
+
+        c, reader, sent = self._oversize(self._LIMIT + 1)
+
+        with pytest.raises(_ConnectionFailed):
+            await asyncio.wait_for(c.receive_raw_frame(), timeout=1.0)
+
+        assert len(reader._buf) == 64
+        assert [f for f in sent if f.FrameType() == FrameTypes.GOAWAY]
+
+    async def test_the_refusal_is_logged_as_a_cap_hit(self, caplog):
+        """A bound that fires invisibly cannot be sized by an operator."""
+        import logging
+
+        caplog.set_level(logging.WARNING, logger='blackbull.caps')
+        c, _reader, _sent = self._oversize(self._LIMIT + 99)
+
+        await asyncio.wait_for(c._receive_loop(), timeout=1.0)
+
+        hits = [r for r in caplog.records
+                if getattr(r, 'cap', None) == 'client_h2_max_frame_size']
+        assert hits, 'the refusal emitted no cap-hit record'
+        assert hits[0].limit == self._LIMIT
+        assert hits[0].requested == self._LIMIT + 99
+        assert hits[0].protocol == 'http2'
+
+    async def test_an_ordinary_frame_is_untouched(self, caplog):
+        """The control — a bound that refuses conformant traffic is a defect,
+        not a defence."""
+        import logging
+
+        caplog.set_level(logging.WARNING, logger='blackbull.caps')
+        payload = b'hello'
+        reader = _BlockingReader(self._header(len(payload)) + payload)
+        c = _client(reader=reader)
+        sent = self._capture(c)
+
+        frame = await asyncio.wait_for(c._receive_frame(), timeout=1.0)
+
+        assert frame is not None and frame.payload == payload
+        assert not sent
+        assert not [r for r in caplog.records if getattr(r, 'cap', None)]

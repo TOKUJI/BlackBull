@@ -595,6 +595,10 @@ class HTTP2Client:
         Only safe to call when the receive loop is not running (i.e. before
         ``__aenter__`` finishes or after the loop has been cancelled); a
         concurrent loop would race this call for the reader.
+
+        Inherits ``client_h2_max_frame_size``: one rule, not a second path
+        around it.  A scenario needing an over-sized frame opts out with
+        ``BB_CLIENT_H2_MAX_FRAME_SIZE=0``.
         """
         return await self._receive_frame()
 
@@ -735,6 +739,11 @@ class HTTP2Client:
         client-side twin of the server's ``BB_HEADER_TIMEOUT``, and it
         ends the read the same way EOF does: ``None``, which the receive
         loop already treats as the connection being over.
+
+        The declared length is checked before either payload read, so no
+        peer-declared number ever sizes an allocation.  Over it is
+        FRAME_SIZE_ERROR (RFC 9113 §4.2) rather than ``None``, which the loop
+        would read as the peer having gone away.
         """
         assert self._reader is not None
         try:
@@ -742,6 +751,18 @@ class HTTP2Client:
         except (asyncio.IncompleteReadError, EOFError):
             return None
         length = int.from_bytes(header[:3], 'big', signed=False)
+        max_frame = get_settings().client_h2_max_frame_size
+        if max_frame and length > max_frame:
+            log_cap_hit('client_h2_max_frame_size', requested=length,
+                        limit=max_frame, protocol='http2')
+            # Connection, never stream, though §4.2 would allow one here: the
+            # payload is not read, so it stays in the socket and the next
+            # 9-byte read would land inside it.  Draining it first to keep the
+            # stream option open would cost whatever the peer declared.
+            await self._fail_connection(
+                ErrorCodes.FRAME_SIZE_ERROR,
+                f'frame length {length} exceeds '
+                f'BB_CLIENT_H2_MAX_FRAME_SIZE={max_frame}')
         if not length:
             return await self._load(header)
         timeout = self._frame_read_timeout
