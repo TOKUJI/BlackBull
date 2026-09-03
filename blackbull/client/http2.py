@@ -13,11 +13,13 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from http import HTTPMethod, HTTPStatus
 
+from hpack import HPACKError
+
 import logging
 from ..env import get_settings
 from ..protocol.frame import FrameFactory, _UnknownFrame
 from ..protocol.frame_types import (DEFAULT_INITIAL_WINDOW_SIZE, ErrorCodes,
-                                    FrameBase, FrameTypes,
+                                    FrameBase, FrameFormatError, FrameTypes,
                                     HeaderFrameFlags, PseudoHeaders)
 from ..headers import Headers
 from ..server.cap_log import log_cap_hit
@@ -783,16 +785,35 @@ class HTTP2Client:
 
     async def _load(self, data: bytes) -> _InboundFrame | None:
         """Parse one frame.  A whole block is decoded in the constructor, so
-        this is the other place a decode can fail — §4.3 either way."""
+        this is one of the two places a parse can fail."""
         try:
             return self._factory.load(data)
         except _ConnectionFailed:
             raise
         except Exception as exc:
+            await self._fail_parse(exc)
+            return None  # unreachable: _fail_parse raises
+
+    async def _fail_parse(self, exc: Exception) -> None:
+        """End the connection with the code the failure earned.
+
+        COMPRESSION_ERROR for everything told the peer its HPACK state was
+        unusable (§5.4.1) over a wrong length octet — or over our own bug.
+        Connection-wide in every arm: §6.1, §6.4 and §6.7 say so, and §4.3
+        leaves an undecoded block's table unrecoverable.  §4.2's stream-error
+        option is ``_receive_frame``'s, not this one's.
+        """
+        if isinstance(exc, FrameFormatError):
+            await self._fail_connection(exc.error_code, str(exc))
+        elif isinstance(exc, HPACKError):
             await self._fail_connection(
                 ErrorCodes.COMPRESSION_ERROR,
                 f'could not decode the field block: {exc}')
-            return None  # unreachable: _fail_connection raises
+        else:
+            logger.exception('HTTP/2 frame parse failed')
+            await self._fail_connection(
+                ErrorCodes.INTERNAL_ERROR,
+                f'the client failed to parse a frame: {exc!r}')
 
     async def _next_frame(self) -> _InboundFrame | None:
         """The next frame — deadlined only while a field block is open.
@@ -888,9 +909,7 @@ class HTTP2Client:
         except Exception as exc:
             # §4.3.  hpack may have applied part of the block to the dynamic
             # table before raising, so there is no sound way to carry on.
-            await self._fail_connection(
-                ErrorCodes.COMPRESSION_ERROR,
-                f'could not decode the field block: {exc}')
+            await self._fail_parse(exc)
         return open_frame
 
     async def _guard_field_block(self, open_frame) -> None:

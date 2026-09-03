@@ -94,6 +94,19 @@ class ErrorCodes(IntEnum):
     HTTP_1_1_REQUIRED = 0xd
 
 
+class FrameFormatError(ValueError):
+    """A frame the RFC calls malformed, carrying the code its own section names.
+
+    A parser that raises a bare ``Exception`` leaves the caller to guess the
+    error code from the message, and the guess is the thing the peer acts on.
+    ``ValueError`` because that is what the padding checks already raised.
+    """
+
+    def __init__(self, message: str, error_code: ErrorCodes) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+
+
 class FrameBase:
     """docstring for FrameBase"""
     FRAME_TYPE = None
@@ -540,9 +553,10 @@ class PushPromise(FrameBase):
         if self.padded:
             pad_length = int.from_bytes(payload.read(1), 'big', signed=False)
             if pad_length >= self.length:  # §6.6 borrows §6.2's rule
-                raise ValueError(
+                raise FrameFormatError(
                     f'PUSH_PROMISE pad_length ({pad_length}) >= '
-                    f'frame length ({self.length})')
+                    f'frame length ({self.length})',
+                    ErrorCodes.PROTOCOL_ERROR)
             remaining -= 1 + pad_length
         payload.read(4)  # the promised stream id, already taken
         remaining -= 4
@@ -611,8 +625,10 @@ class RstStream(FrameBase):
         if _DEBUG:
             logger.debug('RstStream is called.')
         data = data or b''
-        if len(data) != 4:
-            raise Exception('Frame size error')
+        if len(data) != 4:  # §6.4
+            raise FrameFormatError(
+                f'RST_STREAM length {len(data)} != 4',
+                ErrorCodes.FRAME_SIZE_ERROR)
 
         # RFC 9113 §7 — unknown or unsupported error codes MUST NOT trigger
         # any special behaviour.  Keep the raw integer when it does not match
@@ -651,9 +667,10 @@ class Data(FrameBase):
         if self.padded:
             payload = BytesIO(data)
             pad_length = int.from_bytes(payload.read(1), 'big', signed=False)
-            if pad_length >= length:
-                raise ValueError(
-                    f'DATA pad_length ({pad_length}) >= frame length ({length}): PROTOCOL_ERROR')
+            if pad_length >= length:  # §6.1
+                raise FrameFormatError(
+                    f'DATA pad_length ({pad_length}) >= frame length ({length})',
+                    ErrorCodes.PROTOCOL_ERROR)
             data_length = length - pad_length - 1
             self.payload = payload.read(data_length)
         else:
@@ -719,8 +736,9 @@ class Ping(FrameBase):
             logger.debug('Ping is called.')
         if _DEBUG:
             logger.debug('FRAME_SIZE: {}'.format(length))
-        if length != 8:
-            raise Exception('FRAME_SIZE_ERROR: {}'.format(length))
+        if length != 8:  # §6.7
+            raise FrameFormatError(
+                f'PING length {length} != 8', ErrorCodes.FRAME_SIZE_ERROR)
 
         self.payload = data
         if _DEBUG:
