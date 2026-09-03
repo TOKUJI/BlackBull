@@ -316,6 +316,8 @@ class HTTP2Client:
         # Each stream releases its own sender at its last send; this is for a
         # connection torn down before that point was ever reached.
         self._senders.clear()
+        # Already empty when the receive loop's own teardown ran first.
+        self._end_raw_streams()
 
         if self._raw_writer is not None:
             try:
@@ -600,6 +602,8 @@ class HTTP2Client:
         Returning a fresh queue each call is intentional — registering
         the same stream twice would be a programming error.
         """
+        if self._connection_lost:
+            raise ConnectionError('connection closed by peer')
         if stream_id in self._raw_streams:
             raise ValueError(f'stream {stream_id} already registered as raw')
         q: asyncio.Queue = asyncio.Queue()
@@ -613,6 +617,19 @@ class HTTP2Client:
         # unregisters — its shutdown sends the CLOSE frame first — so this is
         # that stream's last-send boundary, the same one ``request()`` uses.
         self._senders.pop(stream_id, None)
+
+    def _end_raw_streams(self) -> None:
+        """Signal every raw stream, then forget it — clearing first would
+        drop the queues unsignalled.
+
+        A consumer parked in ``Queue.get()`` is reachable by a frame and not
+        by a flag.  CONNECT_ERROR: these are Extended CONNECT streams
+        (RFC 9113 §7).
+        """
+        for stream_id, queue in self._raw_streams.items():
+            queue.put_nowait(self._factory.rst_stream(
+                stream_id=stream_id, error_code=ErrorCodes.CONNECT_ERROR))
+        self._raw_streams.clear()
 
     # ---- internal: senders, streams, frame I/O ---------------------------
 
@@ -854,6 +871,8 @@ class HTTP2Client:
                 if pending is not None and not pending.future.done():
                     pending.future.set_exception(ConnectionError(
                         self._failure or 'connection closed before response'))
+            # The other half of who is waiting on this connection.
+            self._end_raw_streams()
 
     # ---- internal: callbacks invoked by Responders -----------------------
 
