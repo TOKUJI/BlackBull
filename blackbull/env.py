@@ -872,6 +872,35 @@ class Settings:
     #: extending it.
     client_max_interim_responses: int = 8
 
+    #: Frames the async client will hold for one **raw** HTTP/2 stream — the
+    #: escape hatch where the receive loop hands frames to a registrant
+    #: (``WebSocketH2Client``) instead of routing them through the
+    #: request/response machine.  Full → that stream alone is reset with
+    #: ``ENHANCE_YOUR_CALM`` and its consumer woken with the same terminal
+    #: frame a disconnect delivers; the connection, and every other stream on
+    #: it, survives.  0 disables (unbounded).
+    #:
+    #: This is the triad's **total**, and it is denominated in frames, not
+    #: bytes.  Flow control cannot stand in for it: the queue takes every
+    #: frame type on that stream but WINDOW_UPDATE and SETTINGS, most of which
+    #: are not flow-controlled at all, and RFC 9113 §6.9.1 charges only a DATA
+    #: frame's payload — so a zero-length DATA frame buys depth for free.
+    #: DATA bytes are held to the window regardless, being credited on drain;
+    #: the **unit** — a receive-side frame-size check the client does not yet
+    #: make — is unowned, so for every other frame type here depth times an
+    #: unbounded frame is still unbounded bytes.  The **count** axis proper, a
+    #: sustained flood of such frames, wants the ``RateWindow`` the server
+    #: already meters empty frames with; the client has none.
+    #:
+    #: 1024 is the server's own number for this shape — its consume-credited
+    #: queue caps the frame count at ``stream_queue_depth`` x 16 — because a
+    #: peer may legally burst its whole 65535-byte window as small frames, and
+    #: a depth that refuses that resets a conformant stream.  The server can
+    #: afford a tighter one: it drops the frame and continues, where a raw
+    #: stream carrying WebSocket bytes cannot be dropped without corrupting
+    #: it, so this cap resets and must not fire on legal traffic.
+    client_raw_queue_depth: int = 1024
+
     #: Dual-path conformance lane.  When true, every request
     #: round-trips the native :class:`~blackbull.connection.Connection` through
     #: ``as_scope()`` + ``from_scope()`` before dispatch, so the ASGI compat
@@ -1171,6 +1200,8 @@ def get_settings() -> Settings:
             'BB_CLIENT_MIN_BODY_RATE_GRACE', 5.0),
         client_max_interim_responses=_int_env_nonneg(
             'BB_CLIENT_MAX_INTERIM_RESPONSES', 8),
+        client_raw_queue_depth=_int_env_nonneg(
+            'BB_CLIENT_RAW_QUEUE_DEPTH', 1024),
         force_asgi_scope=_bool_env('BB_FORCE_ASGI_SCOPE', False),
         body_chunk_size=_int_env('BB_BODY_CHUNK_SIZE', 65536),
         body_chunk_max=_int_env('BB_BODY_CHUNK_MAX', 524288),

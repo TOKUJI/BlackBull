@@ -83,6 +83,15 @@ class _ConnectionFailed(Exception):
 _WINDOW_UPDATE_THRESHOLD = 32768
 
 
+def _flow_controlled_length(frame) -> int:
+    """Octets *frame* charged against the connection window.
+
+    RFC 9113 §6.9.1: DATA only, and the whole payload — ``frame.length``
+    rather than ``len(frame.payload)``, which has had the padding stripped.
+    """
+    return frame.length if frame.FrameType() == FrameTypes.DATA else 0
+
+
 @dataclass
 class ClientResponse:
     """A complete HTTP response received by the client.
@@ -601,12 +610,18 @@ class HTTP2Client:
 
         Returning a fresh queue each call is intentional — registering
         the same stream twice would be a programming error.
+
+        The depth is ``client_raw_queue_depth``.  Flow control does not
+        substitute for it: most of what lands here is not flow-controlled,
+        and RFC 9113 §6.9.1 charges a DATA frame's payload only, so a
+        zero-length one costs the peer no credit at all.
         """
         if self._connection_lost:
             raise ConnectionError('connection closed by peer')
         if stream_id in self._raw_streams:
             raise ValueError(f'stream {stream_id} already registered as raw')
-        q: asyncio.Queue = asyncio.Queue()
+        q: asyncio.Queue = asyncio.Queue(
+            maxsize=get_settings().client_raw_queue_depth)
         self._raw_streams[stream_id] = q
         return q
 
@@ -618,18 +633,65 @@ class HTTP2Client:
         # that stream's last-send boundary, the same one ``request()`` uses.
         self._senders.pop(stream_id, None)
 
+    def _signal_raw_stream(self, stream_id: int, queue: asyncio.Queue,
+                           code: ErrorCodes) -> int:
+        """End one raw stream's queue with a synthetic RST_STREAM; return the
+        flow-controlled octets displaced to make room for it.
+
+        A consumer parked in ``Queue.get()`` is reachable by a frame and not
+        by a flag, so the terminator has to fit.  On a full queue it displaces
+        the backlog instead of raising: a stream being ended will never act on
+        those frames, and a ``QueueFull`` here leaves every raw stream after
+        this one unsignalled.  A queue that is not full drops nothing, so a
+        clean teardown still delivers what already arrived.
+        """
+        displaced = 0
+        if queue.full():
+            while not queue.empty():
+                displaced += _flow_controlled_length(queue.get_nowait())
+        queue.put_nowait(self._factory.rst_stream(
+            stream_id=stream_id, error_code=code))
+        return displaced
+
     def _end_raw_streams(self) -> None:
         """Signal every raw stream, then forget it — clearing first would
         drop the queues unsignalled.
 
-        A consumer parked in ``Queue.get()`` is reachable by a frame and not
-        by a flag.  CONNECT_ERROR: these are Extended CONNECT streams
-        (RFC 9113 §7).
+        CONNECT_ERROR: these are Extended CONNECT streams (RFC 9113 §7).
+        Displaced credit is not returned; the connection that would carry the
+        WINDOW_UPDATE is the one this method exists to end.
         """
         for stream_id, queue in self._raw_streams.items():
-            queue.put_nowait(self._factory.rst_stream(
-                stream_id=stream_id, error_code=ErrorCodes.CONNECT_ERROR))
+            self._signal_raw_stream(stream_id, queue, ErrorCodes.CONNECT_ERROR)
         self._raw_streams.clear()
+
+    async def _refuse_raw_stream(self, frame) -> None:
+        """Refuse the raw stream whose queue *frame* overflowed, and only it.
+
+        ENHANCE_YOUR_CALM (RFC 9113 §7) — the peer is generating load faster
+        than the registrant consumes it — which is also why
+        :meth:`_refuse_stream` sends it for the header-aggregate breach.
+        """
+        stream_id = frame.stream_id
+        queue = self._raw_streams[stream_id]
+        limit = get_settings().client_raw_queue_depth
+        log_cap_hit('client_raw_queue_depth', requested=queue.qsize() + 1,
+                    limit=limit, protocol='http2')
+        displaced = self._signal_raw_stream(
+            stream_id, queue, ErrorCodes.ENHANCE_YOUR_CALM)
+        self.unregister_raw_stream(stream_id)
+        try:
+            await self._send_raw_frame(self._factory.rst_stream(
+                stream_id, ErrorCodes.ENHANCE_YOUR_CALM))
+            # The payload is dropped; the credit is not — the shared-window
+            # rule ``_on_response_data`` explains.  A raw stream's DATA is
+            # credited on drain, so the backlog still holds window.
+            await self._credit_connection(
+                displaced + _flow_controlled_length(frame))
+        except Exception:
+            # A peer that has gone away can be neither told nor credited, and
+            # raising would end the loop this cap exists to keep running.
+            logger.debug('could not send RST_STREAM for stream %d', stream_id)
 
     # ---- internal: senders, streams, frame I/O ---------------------------
 
@@ -847,7 +909,12 @@ class HTTP2Client:
                 if raw_q is not None and frame.FrameType() not in (
                         FrameTypes.WINDOW_UPDATE, FrameTypes.SETTINGS,
                 ):
-                    raw_q.put_nowait(frame)
+                    try:
+                        raw_q.put_nowait(frame)
+                    except asyncio.QueueFull:
+                        # Inside the loop's try: outside it, the catch-all
+                        # below would end every stream to bound one.
+                        await self._refuse_raw_stream(frame)
                     continue
                 try:
                     await ResponderFactory.create(frame).respond(self)
