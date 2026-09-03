@@ -243,9 +243,13 @@ working on both protocols.
 ### Caveats
 
 - Clients can disable server push by sending
-  `SETTINGS_ENABLE_PUSH=0`.  BlackBull does not currently check
-  this setting; if the client rejects the push it will send a
-  `RST_STREAM`, which BlackBull logs and ignores.
+  `SETTINGS_ENABLE_PUSH=0`.  BlackBull's server does not read that
+  setting; if the client rejects the push it will send a
+  `RST_STREAM`, which BlackBull logs and ignores.  A conforming
+  client is entitled to answer with `GOAWAY(PROTOCOL_ERROR)`
+  instead (RFC 9113 §6.5.2) — BlackBull's own client does exactly
+  that under `BB_CLIENT_H2_ENABLE_PUSH=0`, which is why that knob
+  defaults to leaving push permitted.
 - Pushed resources should be cacheable.  Pushing non-cacheable
   content wastes bandwidth and may confuse browsers.
 

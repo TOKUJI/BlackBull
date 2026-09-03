@@ -615,7 +615,7 @@ class TestFrameSizeCheck:
 
     There is nothing here to announce.  RFC 9113 §6.5.2 makes 2^14 the
     *initial* SETTINGS_MAX_FRAME_SIZE, in force from connection start, and the
-    client's empty SETTINGS advertises nothing larger — so an explicit setting
+    client advertises no MAX_FRAME_SIZE of its own — so an explicit setting
     could only loosen the bound.  What was missing is the receive-side check.
 
     The refusal is a **connection** error even for a frame on a non-zero

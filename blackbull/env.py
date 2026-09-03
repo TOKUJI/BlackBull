@@ -914,7 +914,7 @@ class Settings:
     #:
     #: A receive-side check, not an announcement.  RFC 9113 §6.5.2 makes
     #: 16384 the *initial* SETTINGS_MAX_FRAME_SIZE, in force from connection
-    #: start, and the client's empty SETTINGS advertises nothing larger — so
+    #: start, and the client advertises no MAX_FRAME_SIZE of its own — so
     #: the default is the one value that neither refuses a conforming peer
     #: (below it) nor accepts what was never advertised (above it).  Move it
     #: only to give a fault-injection scenario the peer it needs.
@@ -926,6 +926,46 @@ class Settings:
     #: keep the stream option open would make the refusal cost whatever the
     #: peer declared.
     client_h2_max_frame_size: int = 16384
+
+    #: Maximum octets in one **decoded** field section the async client will
+    #: accept.  One number, two effects: it is advertised as
+    #: SETTINGS_MAX_HEADER_LIST_SIZE and installed as the HPACK decoder's
+    #: ``max_header_list_size``.  RFC 9113 §6.5.2 calls the announcement
+    #: *advisory* — advice to the peer, while the decoder is the defence — so
+    #: the two must be the same number.
+    #:
+    #: The triad's **total** for a field section, and the only bound counted
+    #: in decoded octets: compression decouples the two sizes, so a measured
+    #: 3528-octet block decoding to 80,740 clears every bound denominated in
+    #: wire octets.  **Unit**: ``client_h2_max_frame_size``.  **Time**: the
+    #: frame-read deadline, then ``client_head_timeout`` across CONTINUATION.
+    #:
+    #: Breach is a **connection** error of type COMPRESSION_ERROR, never a
+    #: stream error: hpack may have applied part of the block to the
+    #: connection-wide table before raising (§4.3).
+    #:
+    #: 65536 is what hpack enforces unasked, so the default changes what the
+    #: peer is *told*, not what is accepted.  0 disables: nothing advertised
+    #: (§6.5.2 makes the initial value unlimited) and the decoder opened to
+    #: the largest value the 32-bit setting can express, hpack having no off.
+    client_h2_max_header_list_size: int = 65536
+
+    #: Whether the async client permits the peer to push (RFC 9113 §6.5.2).
+    #: A conformance switch, not a bound: it occupies no triad column.
+    #:
+    #: True advertises nothing — 1 is the parameter's initial value — and a
+    #: PUSH_PROMISE is decoded and dropped.  False advertises
+    #: SETTINGS_ENABLE_PUSH=0 **and** refuses a PUSH_PROMISE that arrives
+    #: after the ACK with a connection error of type PROTOCOL_ERROR.  One
+    #: setting for both halves: §6.5.2 makes the refusal a MUST for whoever
+    #: sends the 0, so advertising without refusing is worse than silence.
+    #:
+    #: Default True because BlackBull's server does not read a peer's
+    #: ENABLE_PUSH (BLA-319), so a client defaulting to 0 would GOAWAY its own
+    #: server the moment an application pushed, both ends correct by their own
+    #: lights.  False is how a fault-injection scenario asks a server "I told
+    #: you not to push — did you push anyway?".
+    client_h2_enable_push: bool = True
 
     #: Dual-path conformance lane.  When true, every request
     #: round-trips the native :class:`~blackbull.connection.Connection` through
@@ -1230,6 +1270,9 @@ def get_settings() -> Settings:
             'BB_CLIENT_RAW_QUEUE_DEPTH', 1024),
         client_h2_max_frame_size=_int_env_nonneg(
             'BB_CLIENT_H2_MAX_FRAME_SIZE', 16384),
+        client_h2_max_header_list_size=_int_env_nonneg(
+            'BB_CLIENT_H2_MAX_HEADER_LIST_SIZE', 65536),
+        client_h2_enable_push=_bool_env('BB_CLIENT_H2_ENABLE_PUSH', True),
         force_asgi_scope=_bool_env('BB_FORCE_ASGI_SCOPE', False),
         body_chunk_size=_int_env('BB_BODY_CHUNK_SIZE', 65536),
         body_chunk_max=_int_env('BB_BODY_CHUNK_MAX', 524288),
