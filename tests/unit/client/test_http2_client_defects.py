@@ -13,14 +13,19 @@ a connection window that never reopens, a coroutine that never returns.
 from __future__ import annotations
 
 import asyncio
+import struct
 
 import pytest
 
 from blackbull.client.exceptions import ConnectionError as ClientConnectionError
+from blackbull.client.exceptions import HandshakeError
 from blackbull.client.http2 import HTTP2Client
+from blackbull.client.websocket_h2 import WebSocketH2Client, WebSocketH2Session
+from blackbull.protocol.frame import FrameFactory
 from blackbull.protocol.frame_types import ErrorCodes, FrameTypes
 from blackbull.server.recipient import AbstractReader
 from blackbull.server.sender import AbstractWriter
+from blackbull.server.ws_codec import WSOpcode
 
 pytestmark = pytest.mark.asyncio
 
@@ -273,3 +278,134 @@ class TestPartialFrameDeadline:
         # the gap *between* frames, this returns None instead of timing out.
         with pytest.raises(asyncio.TimeoutError):
             await asyncio.wait_for(c._receive_frame(), timeout=0.3)
+
+
+# ===========================================================================
+# C-M6 — a raw stream must end when the connection does
+# ===========================================================================
+
+class TestRawStreamTeardown:
+    """Teardown failed every pending response and left ``_raw_streams``
+    untouched, so a WebSocket-over-H2 consumer parked on its queue outlived
+    the connection feeding it — woken only by its own caller's deadline, if
+    it had one, and never by the disconnect itself.
+    """
+
+    @staticmethod
+    def _session(client: HTTP2Client, stream_id: int = 1) -> WebSocketH2Session:
+        queue = client.register_raw_stream(stream_id)
+        return WebSocketH2Session(client, FrameFactory(), stream_id, queue)
+
+    async def test_a_parked_consumer_is_woken_when_the_loop_ends(self):
+        """The peer vanishes; the session must surface abnormal closure."""
+        reader = _BlockingReader()
+        c = _client(reader=reader)
+        session = self._session(c)
+
+        loop_task = asyncio.ensure_future(c._receive_loop())
+        reader.close()
+        await loop_task
+
+        # The bound is the assertion: unsignalled, this waits out the
+        # caller's deadline instead of ending on the disconnect.
+        opcode, payload = await session.receive(timeout=1.0)
+        assert (opcode, payload) == (WSOpcode.CLOSE, struct.pack('>H', 1006))
+
+    async def test_a_parked_consumer_is_woken_by_deliberate_teardown(self):
+        """``__aexit__`` cancels a running loop, whose ``finally`` signals;
+        the second signal then lands on an empty registry and must not
+        disturb the one disconnect the session has already been given."""
+        reader = _BlockingReader()
+        c = _client(reader=reader)
+        session = self._session(c)
+        c._receive_task = asyncio.ensure_future(c._receive_loop())
+        await asyncio.sleep(0)          # let the loop reach the reader
+
+        await c.__aexit__(None, None, None)
+
+        opcode, payload = await session.receive(timeout=1.0)
+        assert (opcode, payload) == (WSOpcode.CLOSE, struct.pack('>H', 1006))
+
+    async def test_a_consumer_is_woken_when_no_loop_ever_ran(self):
+        """A client whose receive loop never started — adopted, or torn down
+        before its first turn — has no ``finally`` to run, so ``__aexit__``
+        is the only thing left that can end the stream."""
+        c = _client()
+        session = self._session(c)
+
+        await c.__aexit__(None, None, None)
+
+        opcode, payload = await session.receive(timeout=1.0)
+        assert (opcode, payload) == (WSOpcode.CLOSE, struct.pack('>H', 1006))
+
+    async def test_the_handshake_stops_waiting_when_the_connection_ends(self):
+        """The other queue consumer: Extended CONNECT awaiting its response.
+
+        ``response_timeout`` is thirty times the test's own bound, so this
+        only passes if the handshake ended because the connection did.
+        """
+        reader = _BlockingReader()
+        c = _client(reader=reader)
+        ws_client = WebSocketH2Client('localhost', 1)
+        ws_client._client = c
+
+        task = asyncio.ensure_future(
+            ws_client.connect('/ws', response_timeout=30.0))
+        await asyncio.sleep(0)
+        assert 1 in c._raw_streams, 'the handshake never registered its stream'
+
+        loop_task = asyncio.ensure_future(c._receive_loop())
+        reader.close()
+        await loop_task
+
+        with pytest.raises(HandshakeError, match='expected HEADERS'):
+            await asyncio.wait_for(task, timeout=1.0)
+
+    async def test_the_registry_is_emptied_when_the_loop_ends(self):
+        """The same leak ``_senders`` had: nothing dropped the entry."""
+        reader = _BlockingReader()
+        c = _client(reader=reader)
+        c.register_raw_stream(1)
+
+        loop_task = asyncio.ensure_future(c._receive_loop())
+        reader.close()
+        await loop_task
+
+        assert c._raw_streams == {}
+
+    async def test_the_registry_is_emptied_by_deliberate_teardown(self):
+        c = _client()
+        c.register_raw_stream(1)
+
+        await c.__aexit__(None, None, None)
+
+        assert c._raw_streams == {}
+
+    async def test_registering_after_the_connection_is_lost_is_refused(self):
+        """``request()`` refuses here; registration did not, and its consumer
+        then parked on a queue no receive loop was left to fill."""
+        reader = _BlockingReader()
+        c = _client(reader=reader)
+
+        loop_task = asyncio.ensure_future(c._receive_loop())
+        reader.close()
+        await loop_task
+
+        with pytest.raises(ClientConnectionError):
+            c.register_raw_stream(1)
+
+    async def test_a_stream_that_already_left_is_not_touched(self):
+        """The control.  ``unregister_raw_stream`` is how a session departs
+        normally; teardown must neither signal nor resurrect it."""
+        reader = _BlockingReader()
+        c = _client(reader=reader)
+        queue = c.register_raw_stream(1)
+        c.unregister_raw_stream(1)
+
+        loop_task = asyncio.ensure_future(c._receive_loop())
+        reader.close()
+        await loop_task
+        await c.__aexit__(None, None, None)
+
+        assert queue.empty(), 'a stream that had already left was signalled'
+        assert c._raw_streams == {}
