@@ -337,12 +337,18 @@ class Headers(FrameBase):
             self.parse_payload()
 
     def parse_payload(self):
+        """Decode the field block, which may span several frames.
+
+        Padding and priority belong to the frame that carried the flags, and
+        ``self.length`` is that frame's payload; everything past it was
+        appended by CONTINUATION and is fragment throughout.
+        """
         assert self.decoder is not None
-        payload = BytesIO(self.raw_block)
-        # Track how many bytes of self.raw_block belong to the HPACK block;
-        # start with the full payload and subtract pad-length octet, padding,
-        # and the priority field as we go.
-        remaining = len(self.raw_block)
+        opening = self.raw_block[:self.length]
+        continued = self.raw_block[self.length:]
+        payload = BytesIO(opening)
+        # What is left of the opening frame once its flags are paid for.
+        remaining = len(opening)
         if self.padded:
             # RFC 9113 §6.2 — padding length must be smaller than the frame
             # payload length (otherwise pad would cover the pad-length octet
@@ -369,9 +375,12 @@ class Headers(FrameBase):
                 return
             remaining -= 5
 
-        # raw=True keeps hpack output as bytes-bytes tuples and bypasses
-        # hpack's _unicode_if_needed UTF-8 decode (~4% CPU under load).
-        fields = self.decoder.decode(payload.read(remaining), raw=True)
+        # raw=True keeps hpack output as bytes and bypasses its
+        # _unicode_if_needed UTF-8 decode (~4% CPU under load).
+        block = payload.read(remaining)
+        if continued:
+            block = bytes(block) + bytes(continued)
+        fields = self.decoder.decode(block, raw=True)
         debug = _DEBUG
 
         seen_regular = False
@@ -499,13 +508,48 @@ class PushPromise(FrameBase):
     FRAME_TYPE = FrameTypes.PUSH_PROMISE
 
     def __init__(self, length: int, type_, flags: int, stream_id: int,
-                 *, data: bytes = b'', encoder=None, **kwds):
+                 *, data: bytes = b'', decoder=None, encoder=None, **kwds):
         super().__init__(length, type_, flags, stream_id)
-        buf = BytesIO(data)
-        self.promised_stream_id = int.from_bytes(buf.read(4), 'big') & 0x7FFFFFFF
         self.pseudo_headers: dict[PseudoHeaders, str] = {}
         self.headers: list[tuple[str, str]] = []
         self.encoder = encoder
+        self.decoder = decoder
+        self.end_headers = HeaderFrameFlags.END_HEADERS & self.flags
+        self.padded = HeaderFrameFlags.PADDED & self.flags
+        self.raw_block: bytes = data or b''
+        buf = BytesIO(self.raw_block)
+        if self.padded:  # §6.6 puts the pad octet before the promised id
+            buf.read(1)
+        self.promised_stream_id = int.from_bytes(buf.read(4), 'big') & 0x7FFFFFFF
+        if self.raw_block and self.end_headers:
+            self.parse_payload()
+
+    def parse_payload(self) -> None:
+        """Decode the promised block and discard it: the side effect on the
+        connection-wide HPACK table is the point, and RFC 9113 §4.3 requires
+        it even though the client acts on no push.
+
+        Splitting works as in :meth:`Headers.parse_payload`.
+        """
+        if self.decoder is None:
+            return
+        opening = self.raw_block[:self.length]
+        continued = self.raw_block[self.length:]
+        payload = BytesIO(opening)
+        remaining = len(opening)
+        if self.padded:
+            pad_length = int.from_bytes(payload.read(1), 'big', signed=False)
+            if pad_length >= self.length:  # §6.6 borrows §6.2's rule
+                raise ValueError(
+                    f'PUSH_PROMISE pad_length ({pad_length}) >= '
+                    f'frame length ({self.length})')
+            remaining -= 1 + pad_length
+        payload.read(4)  # the promised stream id, already taken
+        remaining -= 4
+        block = payload.read(remaining)
+        if continued:
+            block = bytes(block) + bytes(continued)
+        self.decoder.decode(block, raw=True)
 
     def save(self) -> bytes:
         encoder = self.encoder if self.encoder is not None else Encoder()

@@ -15,7 +15,7 @@ from http import HTTPMethod, HTTPStatus
 
 import logging
 from ..env import get_settings
-from ..protocol.frame import FrameFactory
+from ..protocol.frame import FrameFactory, _UnknownFrame
 from ..protocol.frame_types import (DEFAULT_INITIAL_WINDOW_SIZE, ErrorCodes,
                                     FrameBase, FrameTypes,
                                     HeaderFrameFlags, PseudoHeaders)
@@ -66,6 +66,19 @@ _FRAME_HEADER_BYTES = 9
 #: already arrived.  Not a bound on waiting for the next frame — see
 #: ``HTTP2Client._receive_frame``.
 _FRAME_READ_TIMEOUT: float = 30.0
+
+#: RFC 9113 §6.10.
+_OPENS_A_FIELD_BLOCK = frozenset({FrameTypes.HEADERS, FrameTypes.PUSH_PROMISE})
+
+_InboundFrame = FrameBase | _UnknownFrame
+
+
+class _ConnectionFailed(Exception):
+    """The receive loop ended the connection on purpose, with its reason.
+
+    An exception that merely escapes a handler is logged as a crash instead.
+    """
+
 
 _WINDOW_UPDATE_THRESHOLD = 32768
 
@@ -208,6 +221,10 @@ class HTTP2Client:
         # _PendingResponse.
         self._unacked_conn: int = 0
 
+        # While these are set the peer owes CONTINUATION (RFC 9113 §6.10).
+        self._open_field_block = None
+        self._field_block_opened_at: float | None = None
+        self._failure: str | None = None
         # Set when the peer sends GOAWAY; subsequent request() calls raise.
         self._goaway_received: bool = False
         # Set when the receive loop ends for any reason.  ``_goaway_received``
@@ -557,7 +574,7 @@ class HTTP2Client:
         """Escape hatch: write a raw frame to the wire (negative-path tests)."""
         await self._send_raw_frame(frame)
 
-    async def receive_raw_frame(self) -> FrameBase | None:
+    async def receive_raw_frame(self) -> _InboundFrame | None:
         """Escape hatch: read one raw frame, bypassing the receive loop's dispatch.
 
         For negative-path / fault-injection tests and raw-frame clients that
@@ -623,7 +640,7 @@ class HTTP2Client:
         assert self._control_sender is not None
         await self._control_sender(frame)
 
-    async def _receive_frame(self) -> FrameBase | None:
+    async def _receive_frame(self) -> _InboundFrame | None:
         """Read one frame, or ``None`` when the peer is finished with us.
 
         The wait for a frame to *begin* is deliberately unbounded: an
@@ -647,7 +664,7 @@ class HTTP2Client:
             return None
         length = int.from_bytes(header[:3], 'big', signed=False)
         if not length:
-            return self._factory.load(header)
+            return await self._load(header)
         timeout = self._frame_read_timeout
         try:
             if timeout and timeout > 0:
@@ -662,14 +679,146 @@ class HTTP2Client:
                 'HTTP/2 peer began a %d-byte frame and stopped for %.1fs — '
                 'treating the connection as gone', length, timeout)
             return None
-        return self._factory.load(header + payload)
+        return await self._load(header + payload)
+
+    async def _load(self, data: bytes) -> _InboundFrame | None:
+        """Parse one frame.  A whole block is decoded in the constructor, so
+        this is the other place a decode can fail — §4.3 either way."""
+        try:
+            return self._factory.load(data)
+        except _ConnectionFailed:
+            raise
+        except Exception as exc:
+            await self._fail_connection(
+                ErrorCodes.COMPRESSION_ERROR,
+                f'could not decode the field block: {exc}')
+            return None  # unreachable: _fail_connection raises
+
+    async def _next_frame(self) -> _InboundFrame | None:
+        """The next frame — deadlined only while a field block is open.
+
+        ``_receive_frame`` waits for a frame to *begin* without a bound, and
+        must: server streaming and long polling are a peer behaving correctly.
+        A peer that owes CONTINUATION has instead stopped mid-message.
+        """
+        opened_at = self._field_block_opened_at
+        if opened_at is None:
+            return await self._receive_frame()
+        timeout = get_settings().client_head_timeout
+        if timeout <= 0:
+            return await self._receive_frame()
+        try:
+            async with asyncio.timeout_at(opened_at + timeout):
+                return await self._receive_frame()
+        except TimeoutError:
+            log_cap_hit('client_head_timeout', requested=timeout,
+                        limit=timeout, protocol='http2')
+            await self._fail_connection(
+                ErrorCodes.ENHANCE_YOUR_CALM,
+                f'field block incomplete after '
+                f'BB_CLIENT_HEAD_TIMEOUT={timeout}s')
+            return None  # unreachable: _fail_connection raises
+
+    async def _fail_connection(self, code: ErrorCodes, message: str) -> None:
+        """End the connection, telling the peer why before telling the caller.
+
+        Never one stream: HPACK state is connection-wide, so a block the
+        decoder did not walk leaves it unable to read any later block.
+        """
+        last_stream_id = max(self._next_stream_id - 2, 0)  # §6.8
+        try:
+            await self._send_raw_frame(
+                self._factory.goaway(last_stream_id, code))
+        except Exception:
+            # exc_info because a bug in the frame we build looks from here
+            # exactly like a peer that has gone away.
+            logger.warning('could not send GOAWAY(%r)', code, exc_info=True)
+        raise _ConnectionFailed(message)
+
+    async def _absorb_field_block(self, frame) -> _InboundFrame | None:
+        """Reassemble a split field block; return what to dispatch, or
+        ``None`` while the block is still open.
+
+        RFC 9113 §4.3 requires the block decompressed *even if the frames are
+        to be discarded*: the decoder's dynamic table advances as a side
+        effect, and it is connection-wide.
+        """
+        frame_type = frame.FrameType()
+        open_frame = self._open_field_block
+        if open_frame is not None:
+            # §6.10 — a block is atomic on the wire, so even an unknown type
+            # that §5.5 would have us ignore ends the connection here.
+            if frame_type is not FrameTypes.CONTINUATION:
+                name = frame_type.name if frame_type is not None else 'unknown'
+                await self._fail_connection(
+                    ErrorCodes.PROTOCOL_ERROR,
+                    f'expected CONTINUATION, got {name}')
+            if frame.stream_id != open_frame.stream_id:
+                await self._fail_connection(
+                    ErrorCodes.PROTOCOL_ERROR,
+                    f'CONTINUATION on stream {frame.stream_id} while stream '
+                    f'{open_frame.stream_id} has a field block open')
+            return await self._extend_field_block(open_frame, frame)
+        if frame_type is FrameTypes.CONTINUATION:
+            await self._fail_connection(
+                ErrorCodes.PROTOCOL_ERROR,
+                'CONTINUATION without a preceding HEADERS')
+        if frame_type in _OPENS_A_FIELD_BLOCK and not frame.end_headers:
+            self._open_field_block = frame
+            self._field_block_opened_at = asyncio.get_running_loop().time()
+            await self._guard_field_block(frame)
+            return None
+        return frame
+
+    async def _extend_field_block(self, open_frame, frame):
+        payload = frame.payload or b''
+        # A bytearray extends in amortised O(1); ``bytes += bytes`` is O(n^2).
+        if not isinstance(open_frame.raw_block, bytearray):
+            open_frame.raw_block = bytearray(open_frame.raw_block)
+        open_frame.raw_block += payload
+        await self._guard_field_block(open_frame)
+        if not frame.end_headers:
+            return None
+        self._open_field_block = None
+        self._field_block_opened_at = None
+        try:
+            open_frame.parse_payload()
+        except _ConnectionFailed:
+            raise
+        except Exception as exc:
+            # §4.3.  hpack may have applied part of the block to the dynamic
+            # table before raising, so there is no sound way to carry on.
+            await self._fail_connection(
+                ErrorCodes.COMPRESSION_ERROR,
+                f'could not decode the field block: {exc}')
+        return open_frame
+
+    async def _guard_field_block(self, open_frame) -> None:
+        """The field block is the HTTP/2 spelling of "the head", so it answers
+        to the head's total.  Called on every append, so the cap bounds the
+        memory and not just the answer.
+
+        Connection-wide, unlike the same budget in ``_on_response_headers``:
+        there the block had been decoded, here it has not.
+        """
+        max_total = get_settings().client_head_max_total
+        seen = len(open_frame.raw_block)
+        if max_total and seen > max_total:
+            log_cap_hit('client_head_max_total', requested=seen,
+                        limit=max_total, protocol='http2')
+            await self._fail_connection(
+                ErrorCodes.COMPRESSION_ERROR,
+                f'field block exceeds BB_CLIENT_HEAD_MAX_TOTAL={max_total}')
 
     async def _receive_loop(self) -> None:
         try:
             while True:
-                frame = await self._receive_frame()
+                frame = await self._next_frame()
                 if frame is None:
                     break
+                frame = await self._absorb_field_block(frame)
+                if frame is None:
+                    continue
                 # Raw-frame streams (WebSocket-over-H2, etc.) bypass the
                 # request/response dispatcher — the registrant drains
                 # the queue itself.  Connection-level frames
@@ -687,6 +836,9 @@ class HTTP2Client:
                     await ResponderFactory.create(frame).respond(self)
                 except Exception:
                     logger.exception('responder failed for frame %r', frame)
+        except _ConnectionFailed as exc:
+            self._failure = str(exc)
+            logger.warning('HTTP/2 connection ended: %s', exc)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -700,8 +852,8 @@ class HTTP2Client:
             for sid in list(self._responses):
                 pending = self._drop_pending(sid)
                 if pending is not None and not pending.future.done():
-                    pending.future.set_exception(
-                        ConnectionError('connection closed before response'))
+                    pending.future.set_exception(ConnectionError(
+                        self._failure or 'connection closed before response'))
 
     # ---- internal: callbacks invoked by Responders -----------------------
 

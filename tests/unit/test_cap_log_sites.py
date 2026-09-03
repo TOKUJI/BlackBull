@@ -812,6 +812,51 @@ async def test_client_body_timeout_logs_on_http2(caps_caplog, monkeypatch):
 
 
 # ----------------------------------------------------------------------
+# client_head_timeout — the HTTP/2 field block's own wait
+# ----------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_client_head_timeout_logs_on_http2(caps_caplog, monkeypatch):
+    """A peer that opens a field block without END_HEADERS and stops.  The
+    wait for a frame to *begin* is otherwise unbounded on purpose, so this is
+    the one place the head deadline reaches HTTP/2."""
+    from blackbull.client.http2 import HTTP2Client
+    from blackbull.server.recipient import AbstractReader
+
+    monkeypatch.setenv('BB_CLIENT_HEAD_TIMEOUT', '0.1')
+
+    class _Silent(AbstractReader):
+        """A HEADERS without END_HEADERS, then nothing."""
+
+        def __init__(self) -> None:
+            self._buf = ((1).to_bytes(3, 'big') + bytes([0x1, 0x0])
+                         + (1).to_bytes(4, 'big') + b'\x88')
+            self._pos = 0
+
+        async def readexactly(self, n: int) -> bytes:
+            while len(self._buf) - self._pos < n:
+                await asyncio.sleep(0.005)
+            out = self._buf[self._pos:self._pos + n]
+            self._pos += n
+            return out
+
+        async def read(self, n: int = -1) -> bytes:
+            return await self.readexactly(max(n, 0))
+
+    c = HTTP2Client('localhost', 1)
+    c._reader = _Silent()
+
+    async def _sink(_frame):
+        pass
+
+    c._control_sender = _sink
+    await asyncio.wait_for(c._receive_loop(), 2.0)
+
+    records = _records_for(caps_caplog, 'client_head_timeout')
+    assert records and records[0].protocol == 'http2'
+
+
+# ----------------------------------------------------------------------
 # client_max_interim_responses — the count axis on the response head
 # ----------------------------------------------------------------------
 
@@ -873,6 +918,10 @@ _INVENTORY = (
     'client_head_max_total',
     'client_body_timeout',
     'client_max_interim_responses',
+    # Wired on the HTTP/2 field-block wait; the HTTP/1.1 site is still
+    # unwired — see BLA-302, and note this audit is by *name*, so it
+    # cannot see that gap.
+    'client_head_timeout',
 )
 
 
