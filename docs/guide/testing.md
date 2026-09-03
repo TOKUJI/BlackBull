@@ -602,7 +602,40 @@ async def test_keep_alive(server_port):
 The client persists the TCP connection across `request()`
 calls inside one `async with` block (HTTP/1.1 persistent
 connections, RFC 9112 §9.3) — useful for verifying keep-alive
-behaviour.  The `Host` header is injected automatically.
+behaviour.  `Connection: close` from either endpoint retires the connection;
+an HTTP/1.0 response is reusable only when it explicitly carries
+`Connection: keep-alive` and has self-delimited framing.  The `Host` header is
+injected automatically.
+
+### CONNECT tunnels and protocol upgrades
+
+A successful `CONNECT` response or a generic `101 Switching Protocols`
+response always ends HTTP processing.  When persistence policy also permits
+the transport to remain open—neither endpoint sent `Connection: close`, and an
+HTTP/1.0 response explicitly selected `keep-alive`—bytes already read into the
+client buffer are preserved.  Call `handoff()` exactly once to transfer both
+sides of that transport to an `HTTP1UpgradeSession`:
+
+```python
+async with HTTP1Client('localhost', proxy_port) as client:
+    response = await client.request(
+        HTTPMethod.CONNECT, 'origin.example:443')
+    assert response.status == 200
+    tunnel = client.handoff()
+
+# The session, not the HTTP client, now owns transport closure.
+async with tunnel:
+    await tunnel.write(b'protocol bytes')
+    reply = await tunnel.read(4096)
+```
+
+After a successful switch, further HTTP requests are refused.  Before
+`handoff()`, exiting the `HTTP1Client` context closes the transport; after the
+handoff, only `HTTP1UpgradeSession.close()` (or its context-manager exit)
+closes it.  A switch on a non-persistent exchange is closed and cannot be
+handed off, and `handoff()` cannot be called after the client context has
+exited.  This API exposes raw protocol bytes and performs no TLS wrapping,
+content decoding, or protocol-specific framing.
 
 ### Streaming request bodies
 

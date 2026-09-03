@@ -285,16 +285,15 @@ class TestTransferCodingList:
         assert res.body == b'raw octets to the close'
 
     @pytest.mark.asyncio
-    async def test_transfer_encoding_with_content_length_is_refused(self):
-        """§6.3 item 3 — the two disagree by construction, and the message
-        'ought to be handled as an error'.  The server refuses the same shape
-        on the request side; this is that rule facing the other way."""
+    async def test_transfer_encoding_with_content_length_uses_te_framing(self):
+        """Transfer-Encoding determines framing when both fields are sent;
+        Content-Length must not truncate the transfer-coded payload."""
         wire = (b'HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n'
                 b'content-length: 5\r\n\r\n2\r\nhi\r\n0\r\n\r\n')
         recipient = HTTP1ResponseRecipient()
-        with pytest.raises(ProtocolError):
-            await _within(recipient.receive(_Canned(wire)))
-        assert recipient.framing_broken
+        response = await _within(recipient.receive(_Canned(wire)))
+        assert response.body == b'hi'
+        assert not recipient.framing_broken
 
 
 # ----------------------------------------------------------------------
@@ -424,12 +423,13 @@ class TestTheCodingListIsAList:
             await _within(HTTP1ResponseRecipient().receive(_Canned(wire)))
 
     @pytest.mark.asyncio
-    async def test_a_transfer_encoding_naming_no_coding_is_refused(self):
-        """``transfer-coding`` is a ``1#`` list, so a field whose elements are
-        all empty names none — a framing field that frames nothing."""
+    async def test_a_transfer_encoding_naming_no_coding_uses_close(self):
+        """Physical TE presence still overrides Content-Length semantics;
+        an empty parsed list therefore remains close-delimited."""
         wire = b'HTTP/1.1 200 OK\r\ntransfer-encoding: ,\r\n\r\nbody'
-        with pytest.raises(ProtocolError):
-            await _within(HTTP1ResponseRecipient().receive(_Canned(wire)))
+        response = await _within(
+            HTTP1ResponseRecipient().receive(_Canned(wire)))
+        assert response.body == b'body'
 
 
 # ----------------------------------------------------------------------

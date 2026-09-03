@@ -48,6 +48,7 @@ logger = logging.getLogger(__name__)
 # Type for request bodies — either a complete byte string or an async iterable
 # of byte chunks (the streaming case, encoded as Transfer-Encoding: chunked).
 RequestBody = Union[bytes, bytearray, memoryview, AsyncIterable[bytes]]
+_PreparedRequest = tuple[bytes, bytes | AsyncIterable[bytes], bool]
 
 # CRLF as used throughout RFC 7230.
 #: Slice size for streaming a ``Content-Length`` body.  Matches the
@@ -68,6 +69,17 @@ _UNTIL_CLOSE = 'until-close'
 #: it takes a sign, an ``0x`` prefix, underscore separators and surrounding
 #: whitespace, and a negative numeral reached ``readexactly()``.
 _HEXDIG = frozenset(b'0123456789abcdefABCDEF')
+
+# RFC 9110 §5.6.2.  Transfer-Encoding is an HTTP list, not a comma split:
+# parameters may contain quoted commas and each coding is a token followed by
+# zero or more ``; name=value`` parameters.
+_TCHAR = frozenset(
+    b"!#$%&'*+-.^_`|~"
+    b'0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz')
+# Empty list members are tolerated for interoperability, but the parser must
+# not spend unbounded work on a peer sending only commas.  The head-size budget
+# remains the total byte bound; this is only a small structural sanity bound.
+_MAX_EMPTY_TRANSFER_MEMBERS = 16
 
 
 # Methods for which an empty body still warrants an
@@ -95,20 +107,47 @@ class HTTP1RequestSender:
 
     async def send(self, method: str | HTTPMethod, path: str,
                    headers: Headers, body: RequestBody = b'') -> None:
+        await self.send_prepared(self.prepare(method, path, headers, body))
+
+    @classmethod
+    def prepare(cls, method: str | HTTPMethod, path: str,
+                headers: Headers, body: RequestBody = b'') -> _PreparedRequest:
+        """Validate and render everything that can fail before wire I/O.
+
+        The high-level client claims response ownership only after this method
+        succeeds.  A caller error such as a mismatched Content-Length or an
+        unencodable request target therefore cannot retire an untouched
+        keep-alive connection.
+        """
         if b'host' not in headers:
             raise ProtocolError('HTTP/1.1 request requires a Host header')
 
+        method_text = str(method)
         if isinstance(body, (bytes, bytearray, memoryview)):
-            await self._send_fixed(str(method), path, headers, bytes(body))
-        else:
-            await self._send_chunked(str(method), path, headers, body)
+            fixed_body = bytes(body)
+            cls._normalize_content_length(method_text, headers, fixed_body)
+            return cls._build_start(method_text, path, headers), fixed_body, False
 
-    async def _send_fixed(self, method: str, path: str, headers: Headers,
-                          body: bytes) -> None:
-        self._normalize_content_length(method, headers, body)
-        await self._write_start(method, path, headers)
-        if body:
-            await self._writer.write(body)
+        if b'transfer-encoding' not in headers:
+            headers.append(b'transfer-encoding', b'chunked')
+        return cls._build_start(method_text, path, headers), body, True
+
+    async def send_prepared(self, prepared: _PreparedRequest) -> None:
+        """Write a request returned by :meth:`prepare`."""
+        head, body, chunked = prepared
+        await self._writer.write(head)
+        if not chunked:
+            assert isinstance(body, bytes)
+            if body:
+                await self._writer.write(body)
+            return
+
+        assert not isinstance(body, bytes)
+        async for chunk in body:
+            if chunk:
+                await self._writer.write(
+                    f'{len(chunk):x}'.encode() + _CRLF + chunk + _CRLF)
+        await self._writer.write(b'0' + _CRLF + _CRLF)
 
     @staticmethod
     def _normalize_content_length(method: str, headers: Headers,
@@ -174,42 +213,57 @@ class HTTP1RequestSender:
         # empty body.
         return
 
-    async def _send_chunked(self, method: str, path: str, headers: Headers,
-                            body: AsyncIterable[bytes]) -> None:
-        if b'transfer-encoding' not in headers:
-            headers.append(b'transfer-encoding', b'chunked')
-        await self._write_start(method, path, headers)
-        async for chunk in body:
-            if chunk:
-                await self._writer.write(
-                    f'{len(chunk):x}'.encode() + _CRLF + chunk + _CRLF)
-        await self._writer.write(b'0' + _CRLF + _CRLF)
-
-    async def _write_start(self, method: str, path: str, headers: Headers) -> None:
+    @staticmethod
+    def _build_start(method: str, path: str, headers: Headers) -> bytes:
         chunks: list[bytes] = [f'{method} {path} HTTP/1.1'.encode() + _CRLF]
         for k, v in headers:
             chunks.append(k + b': ' + v + _CRLF)
         chunks.append(_CRLF)
-        await self._writer.write(b''.join(chunks))
+        return b''.join(chunks)
 
 
 class HTTP1ResponseRecipient:
     """Reads an HTTP/1.1 response from an ``AbstractReader``.
 
-    Decodes both ``Content-Length``-bound and ``Transfer-Encoding: chunked``
-    bodies.  Returns a ``ClientResponse``; ``stream()`` returns an async
-    iterator of body chunks instead, so large responses don't have to fit
-    in memory — true of both framings, which it was not until the
-    ``Content-Length`` path stopped reading the body in one call.
+    Decodes ``Content-Length``-bound, ``Transfer-Encoding: chunked``, and
+    connection-close-delimited bodies.  Returns a ``ClientResponse``;
+    ``stream()`` returns an async iterator of body chunks instead, so large
+    responses don't have to fit in memory — true of all body framings.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, request_method: str | bytes | HTTPMethod | None = None) -> None:
+        #: The method that caused this response, when known.  Direct users of
+        #: the low-level recipient may omit it for compatibility; the public
+        #: HTTP1Client paths always provide it.
+        self.request_method = request_method
         #: Set when a read failed part-way through a message, which makes the
         #: reader's position unknown.  The connection is then unusable: the
         #: rest of the message is still on the wire, so the next read would
         #: begin inside it and parse a body as a response.  The server's
         #: recipient carries the same flag for the same reason.
         self.framing_broken = False
+        #: False for a successful EOF-delimited response or a successful
+        #: CONNECT tunnel.  Those outcomes are not framing errors, but the
+        #: HTTP/1.1 connection cannot be used for another request.
+        self.reusable = True
+        #: A successful CONNECT changes the transport into a tunnel.  It is
+        #: non-reusable for HTTP, but closing the writer would discard the
+        #: tunnel rather than merely retiring the HTTP protocol.
+        self.tunnel = False
+        #: True after either a successful CONNECT or a 101 response.  HTTP
+        #: parsing is over, but the transport and any read-ahead bytes belong
+        #: to the switched protocol and must remain available for handoff.
+        self.protocol_switched = False
+        #: Parsed response protocol version, retained for persistence policy.
+        self.http_version: bytes | None = None
+        #: Persistence of the response head alone.  A protocol switch always
+        #: retires HTTP parsing, but only a persistent response is eligible to
+        #: hand its still-open transport to another protocol.
+        self.response_persistent = True
+        #: The high-level sender sets this when its request included
+        #: ``Connection: close``.  It is deliberately separate from response
+        #: body framing.
+        self.request_close = False
         #: Built on the first body read from the settings then in force and
         #: kept for the message: a window that did not span reads could not
         #: measure a rate.  One recipient per response, so it needs no reset.
@@ -231,31 +285,41 @@ class HTTP1ResponseRecipient:
             raise ConnectionError(
                 'this reader was abandoned part-way through a message — '
                 'its position in the byte stream is unknown')
+        if not self.reusable:
+            raise ConnectionError(
+                'this reader is not reusable after a non-reusable response')
 
-    async def receive(self, reader: AbstractReader, *,
-                      method: str | HTTPMethod | None = None,
-                      skip_interim: bool = True) -> ClientResponse:
-        """One complete response.
+    async def receive(
+            self, reader: AbstractReader, *,
+            method: str | bytes | HTTPMethod | None = None,
+            skip_interim: bool = True,
+            request_method: str | bytes | HTTPMethod | None = None,
+    ) -> ClientResponse:
+        """Read one final response, optionally exposing an interim response.
 
-        *method* is the request's, and it is not decoration: RFC 9112 §6.3
-        decides the body's length from the status code **and** the method, so
-        a recipient handed only the header fields cannot apply the first and
-        most overriding of its rules.  ``None`` means the caller does not know
-        — the fault-injection primitives drive peers whose request never went
-        through this client — and only the status-code half is then applied.
+        Production callers keep ``skip_interim=True`` and therefore pass over
+        100/102/103 responses until the final response.  ``101`` is final by
+        protocol-switch semantics.  The low-level fault-injection API passes
+        ``skip_interim=False`` so each peer message remains observable.
 
-        *skip_interim* is what RFC 9110 §15.2 requires, and every production
-        call wants it.  The fault-injection primitives do not: their whole
-        purpose is to drive a peer and see what it actually sent, and a reader
-        that silently discards part of that answers a different question.  The
-        same distinction ``_abandon`` already makes for those primitives.
+        ``method=`` is the public spelling introduced with response-length
+        framing.  ``request_method=`` and the constructor value remain
+        accepted for compatibility with direct recipient users.
         """
         self._refuse_if_broken()
         try:
-            status, headers = await self._read_start(
+            version, status, headers = await self._read_start(
                 reader, skip_interim=skip_interim)
-            body = await self._read_body(reader, headers,
-                                         status=status, method=method)
+            self.http_version = version
+            response_persistent = self._response_is_persistent(version, headers)
+            self.response_persistent = response_persistent
+            effective_method = (request_method if request_method is not None
+                                else method if method is not None
+                                else self.request_method)
+            body = await self._read_body(
+                reader, headers, status=status,
+                request_method=effective_method)
+            self.reusable = self.reusable and response_persistent
         except BaseException:
             # Every refusal below this point leaves unread octets behind, and
             # a peer whose body is itself a well-formed response gets one
@@ -266,8 +330,11 @@ class HTTP1ResponseRecipient:
             raise
         return ClientResponse(status=status, headers=headers, body=body)
 
-    async def stream(self, reader: AbstractReader, *,
-                     method: str | HTTPMethod | None = None) -> AsyncIterator[bytes]:
+    async def stream(
+            self, reader: AbstractReader, *,
+            method: str | bytes | HTTPMethod | None = None,
+            request_method: str | bytes | HTTPMethod | None = None,
+    ) -> AsyncIterator[bytes]:
         # Body-only streaming: callers that need status/headers should use
         # ``receive``.  Yielding the start-line as the first item would force
         # callers to special-case the iterator's first element.  The status is
@@ -275,10 +342,18 @@ class HTTP1ResponseRecipient:
         # whether there is a body to yield at all.
         self._refuse_if_broken()
         try:
-            status, headers = await self._read_start(reader)
-            async for chunk in self._stream_body(reader, headers,
-                                                 status=status, method=method):
+            version, status, headers = await self._read_start(reader)
+            self.http_version = version
+            response_persistent = self._response_is_persistent(version, headers)
+            self.response_persistent = response_persistent
+            effective_method = (request_method if request_method is not None
+                                else method if method is not None
+                                else self.request_method)
+            async for chunk in self._stream_body(
+                    reader, headers, status=status,
+                    request_method=effective_method):
                 yield chunk
+            self.reusable = self.reusable and response_persistent
         except BaseException:
             self.framing_broken = True
             raise
@@ -325,57 +400,24 @@ class HTTP1ResponseRecipient:
                         f'BB_CLIENT_HEAD_MAX_LINE={max_line}', head[:max_line])
         return head
 
-    async def _read_start(self, reader: AbstractReader, *,
-                          skip_interim: bool = True) -> tuple[int, Headers]:
-        """The **final** response's status line and header fields.
+    async def _read_start(
+            self, reader: AbstractReader, *, skip_interim: bool = True,
+    ) -> tuple[bytes, int, Headers]:
+        """Read through bounded interim heads and return the final head.
 
-        RFC 9110 §15.2: *"A client MUST be able to parse one or more 1xx
-        responses received prior to a final response, even if the client does
-        not expect one.  A user agent MAY ignore unexpected 1xx responses."*
-        The MAY is *ignore*; the MUST is *reach the final response*.  Returning
-        the interim as the answer does neither — the caller gets a status it
-        never asked about while the real response is still on the wire, which
-        is the desync shape the trailer fix and the refusal fix closed from
-        their own directions.  ``103 Early Hints`` is served by Cloudflare and
-        Fastly today, so the peer that does this is an ordinary one.
-
-        Ignored rather than surfaced, deliberately.  An ``Early Hints`` link
-        set is worth having and a ``100 Continue`` matters to a sender waiting
-        on it, but this client sends no ``Expect``, and exposing the interims
-        means widening ``ClientResponse``, which HTTP/2 shares and reaches by
-        another route.  Discarding is what the MAY permits; what was wrong was
-        not discarding them but returning one.
-
-        ``101`` is 1xx by number and final by meaning: the connection switches
-        protocols, so nothing this parser should read follows it.  The
-        WebSocket handshake reads its ``101`` through here.
-
-        The triad, because the loop moves where two of its columns sit.
-        ``client_head_max_total`` and ``client_head_max_line`` still bound one
-        head, and each interim is a head, so the *unit* is unchanged.
-        ``client_head_timeout`` is likewise per head — and must be, since a
-        ``103 Early Hints`` exists precisely so a peer can say "still working"
-        before it answers, which is the wait the deadline is exempt from for
-        the same reason the body's progress deadline is re-armed by each
-        frame.  What that leaves unowned is the aggregate, in both columns, and
-        ``client_max_interim_responses`` is what owns it: at most
-        ``limit + 1`` heads, so at most ``(limit + 1) x client_head_timeout``
-        seconds and ``(limit + 1) x client_head_max_total`` octets read.  With
-        the cap disabled there is no aggregate owner at all, which is what
-        setting it to 0 buys.
+        RFC 9110 requires clients to parse one or more 1xx responses before a
+        final response.  101 is returned immediately because the following
+        bytes belong to the switched protocol.  The count cap owns aggregate
+        work while the existing head limits continue to own each individual
+        head.
         """
-        cfg = get_settings()
-        limit = cfg.client_max_interim_responses
+        limit = get_settings().client_max_interim_responses
         seen = 0
         while True:
-            status, headers = await self._read_message_head(reader)
-            if not (100 <= status < 200) or status == 101 or not skip_interim:
-                return status, headers
-            # Interim responses are the count axis in miniature: each head is
-            # small, arrives whole and promptly, and carries no body, so it
-            # satisfies the head total, the head deadline and every body
-            # bound.  Only how *many* there are is anomalous, and no size or
-            # deadline can see that.
+            version, status, headers = await self._read_message_head(reader)
+            if (not skip_interim or status == 101
+                    or not 100 <= status < 200):
+                return version, status, headers
             seen += 1
             if limit and seen > limit:
                 log_cap_hit('client_max_interim_responses', requested=seen,
@@ -385,21 +427,20 @@ class HTTP1ResponseRecipient:
                     f'BB_CLIENT_MAX_INTERIM_RESPONSES={limit} interim '
                     f'responses without a final one')
 
-    async def _read_message_head(self,
-                                 reader: AbstractReader) -> tuple[int, Headers]:
+    async def _read_message_head(
+            self, reader: AbstractReader) -> tuple[bytes, int, Headers]:
         head = await self._read_head(reader)
         lines = head.split(_CRLF)
         # "HTTP/1.1 200 OK" — split into version, status, reason.
         parts = lines[0].split(b' ', 2)
         if len(parts) < 2:
             raise ProtocolError(f'malformed status line: {lines[0]!r}')
-        # RFC 9112 §4: ``status-code = 3DIGIT``.  ``int()`` is laxer in the
-        # same ways ``int(x, 16)`` was on the chunk-size numeral — a sign, an
-        # underscore separator, surrounding whitespace — and the status no
-        # longer only gets reported: §6.3 items 1 and 2 let it decide whether a
-        # body is read at all, so ``2_0_4`` would suppress a body that an
-        # intermediary enforcing the grammar had framed.
-        if len(parts[1]) != 3 or not parts[1].isdigit() or not parts[1].isascii():
+        version = parts[0]
+        if version not in (b'HTTP/1.0', b'HTTP/1.1'):
+            raise ProtocolError(f'unsupported response version: {version!r}')
+        # RFC 9112 §4: status-code is exactly three ASCII decimal digits.
+        if (len(parts[1]) != 3 or not parts[1].isdigit()
+                or not parts[1].isascii()):
             raise ProtocolError(f'invalid status code: {parts[1]!r}')
         status = int(parts[1])
 
@@ -407,9 +448,46 @@ class HTTP1ResponseRecipient:
         for line in lines[1:]:
             if not line:
                 break
-            name, _, value = line.partition(b':')
-            pairs.append((name.strip().lower(), value.strip()))
-        return status, Headers(pairs)
+            name, separator, value = line.partition(b':')
+            if not separator:
+                raise ProtocolError(f'malformed response field: {line!r}')
+            # RFC 9110 field-value permits SP/HTAB as OWS at the boundaries.
+            # bytes.strip() also removes VT, FF, CR and LF, which can turn an
+            # invalid value into a valid framing instruction (for example,
+            # VT + "chunked").  Preserve those octets long enough to reject
+            # them consistently for every response field.
+            value = value.strip(b' \t')
+            if any(((octet < 0x20 and octet != 0x09) or octet == 0x7f)
+                   for octet in value):
+                raise ProtocolError(
+                    f'prohibited control in response field {name!r}')
+            pairs.append((name.strip(b' \t').lower(), value))
+        return version, status, Headers.from_lowered(pairs)
+
+    @staticmethod
+    def _connection_options(headers: Headers) -> set[bytes]:
+        """Parse repeated/comma-combined ``Connection`` token fields."""
+        options: set[bytes] = set()
+        for _, value in headers.getlist(b'connection'):
+            for raw in value.split(b','):
+                option = raw.strip(b' \t')
+                if not option:
+                    continue
+                if not _TCHAR.issuperset(option):
+                    raise ProtocolError(
+                        f'invalid Connection option {option!r}')
+                options.add(option.lower())
+        return options
+
+    @classmethod
+    def _response_is_persistent(cls, version: bytes,
+                                headers: Headers) -> bool:
+        options = cls._connection_options(headers)
+        if b'close' in options:
+            return False
+        if version == b'HTTP/1.0':
+            return b'keep-alive' in options
+        return True
 
     @staticmethod
     def _declared_length(headers: Headers) -> int | None:
@@ -440,7 +518,8 @@ class HTTP1ResponseRecipient:
                 f'{sorted(values)!r}')
         return int(values.pop())
 
-    async def _body_read(self, coro, *, payload: bool = False):
+    async def _body_read(self, coro, *, payload: bool = False,
+                         allow_eof: bool = False):
         """One body read, under both of the body's time bounds.
 
         ``BB_CLIENT_BODY_TIMEOUT`` is per read, not per body — the peer must
@@ -483,6 +562,21 @@ class HTTP1ResponseRecipient:
                 data = await coro
         except IncompleteReadError as exc:
             raise ConnectionError('connection closed mid-body') from exc
+        if allow_eof and not data:
+            # EOF is the delimiter for this framing mode, but after the first
+            # body octet the wait for that delimiter is still peer wait.  The
+            # first body read remains exempt; only an open floor is settled
+            # here, so close-delimited completion cannot bypass it.
+            if watching:
+                short = floor.record(0, _monotonic() - started)
+                if short:
+                    log_cap_hit('client_min_body_rate', requested=floor.observed,
+                                limit=floor.rate, protocol='http1')
+                    raise TimeoutError(
+                        f'response body arriving below '
+                        f'BB_CLIENT_MIN_BODY_RATE={floor.rate} B/s')
+                self._unpaid_framing = short
+            return data
         if payload and data:
             self._body_open = True
         if watching:
@@ -506,191 +600,238 @@ class HTTP1ResponseRecipient:
         return data
 
     @staticmethod
-    def _has_no_body(status: int,
-                     method: 'str | bytes | HTTPMethod | None') -> bool:
-        """RFC 9112 §6.3 items 1 and 2, which override every header field
-        present and therefore run before any of them is read.
+    def _method_is(request_method: str | bytes | HTTPMethod | None,
+                   expected: str) -> bool:
+        if isinstance(request_method, bytes):
+            return request_method == expected.encode('ascii')
+        return (request_method is not None
+                and str(request_method) == expected)
 
-        > 1. Any response to a HEAD request and any response with a 1xx, 204,
-        >    or 304 status code is always terminated by the first empty line
-        >    after the header fields, regardless of the header fields present
-        >    in the message, and thus cannot contain a message body or trailer
-        >    section.
-        > 2. Any 2xx response to a CONNECT request implies that the connection
-        >    will become a tunnel immediately after the empty line that
-        >    concludes the header fields.  A client MUST ignore any
-        >    Content-Length or Transfer-Encoding header fields received in
-        >    such a message.
+    @staticmethod
+    def _parse_transfer_encoding(
+            fields: list[tuple[bytes, bytes]],) -> list[bytes]:
+        """Parse repeated/comma-combined ``Transfer-Encoding`` fields.
 
-        A ``CONNECT`` that *failed* is an ordinary response and keeps its
-        body: only 2xx opens the tunnel.
-
-        None of this was reachable, because the decision was handed the header
-        fields alone.  A ``204`` carrying ``content-length: 5`` therefore read
-        five octets — of the *next* response — and the response after it still
-        parsed, out of what the theft left behind.  A desync that produces a
-        plausible answer is worse than one that raises.
+        This is deliberately narrower than a general HTTP field parser: it
+        returns only coding names because response framing does not interpret
+        coding parameters.  It nevertheless validates the complete grammar so
+        a malformed ignored parameter cannot hide a different final coding.
+        Empty list members are accepted within a fixed bound, as permitted by
+        the HTTP list rules used by the client for compatibility.
         """
-        if 100 <= status < 200 or status in (204, 304):
-            return True
-        if method is None:
-            return False
-        # A bytes method reaches the low-level primitives, and ``str(b'HEAD')``
-        # is ``"b'HEAD'"`` — a name that matches nothing, so the rule would
-        # silently not apply rather than fail.
-        name = (method.decode('latin-1') if isinstance(method, bytes)
-                else str(method)).upper()
-        return name == 'HEAD' or (name == 'CONNECT' and 200 <= status < 300)
+        codings: list[bytes] = []
+        empty_members = 0
+
+        def skip_ows(value: bytes, pos: int) -> int:
+            while pos < len(value) and value[pos] in (0x20, 0x09):
+                pos += 1
+            return pos
+
+        def token(value: bytes, pos: int) -> tuple[bytes, int]:
+            start = pos
+            while pos < len(value) and value[pos] in _TCHAR:
+                pos += 1
+            if pos == start:
+                raise ProtocolError(
+                    f'invalid Transfer-Encoding token at position {pos}')
+            return value[start:pos], pos
+
+        def quoted_string(value: bytes, pos: int) -> int:
+            # The opening quote is consumed here.  quoted-pair permits only
+            # HTAB/SP/VCHAR/obs-text after the backslash.
+            pos += 1
+            while pos < len(value):
+                octet = value[pos]
+                if octet == 0x22:
+                    return pos + 1
+                if octet == 0x5c:
+                    pos += 1
+                    if pos >= len(value) or not (
+                            value[pos] == 0x09 or value[pos] == 0x20
+                            or 0x21 <= value[pos] <= 0x7e
+                            or value[pos] >= 0x80):
+                        raise ProtocolError(
+                            'invalid quoted Transfer-Encoding parameter')
+                elif (octet < 0x20 and octet != 0x09) or octet == 0x7f:
+                    raise ProtocolError(
+                        'invalid quoted Transfer-Encoding parameter')
+                pos += 1
+            raise ProtocolError(
+                'unterminated quoted Transfer-Encoding parameter')
+
+        for _, value in fields:
+            pos = 0
+            while True:
+                pos = skip_ows(value, pos)
+                if pos == len(value):
+                    # An empty field and the member after a trailing comma are
+                    # both harmless, but not an unbounded amount of work.
+                    empty_members += 1
+                    if empty_members > _MAX_EMPTY_TRANSFER_MEMBERS:
+                        raise ProtocolError(
+                            'too many empty Transfer-Encoding list members')
+                    break
+                if value[pos] == 0x2c:  # comma: empty member
+                    empty_members += 1
+                    if empty_members > _MAX_EMPTY_TRANSFER_MEMBERS:
+                        raise ProtocolError(
+                            'too many empty Transfer-Encoding list members')
+                    pos += 1
+                    continue
+
+                coding, pos = token(value, pos)
+                pos = skip_ows(value, pos)
+                while pos < len(value) and value[pos] == 0x3b:  # ';'
+                    pos = skip_ows(value, pos + 1)
+                    _, pos = token(value, pos)
+                    pos = skip_ows(value, pos)
+                    if pos >= len(value) or value[pos] != 0x3d:  # '='
+                        raise ProtocolError(
+                            'Transfer-Encoding parameter requires "="')
+                    pos = skip_ows(value, pos + 1)
+                    if pos < len(value) and value[pos] == 0x22:
+                        pos = quoted_string(value, pos)
+                    else:
+                        _, pos = token(value, pos)
+                    pos = skip_ows(value, pos)
+                codings.append(coding.lower())
+                if pos == len(value):
+                    break
+                if value[pos] != 0x2c:
+                    raise ProtocolError(
+                        'invalid Transfer-Encoding list separator')
+                pos += 1
+
+        return codings
 
     @classmethod
-    def _body_delimiter(cls, headers: Headers) -> tuple[str, int]:
-        """How this body ends, by RFC 9112 §6.3 items 3, 4, 6 and 8.
+    def _body_framing(cls, status: int, headers: Headers,
+                      request_method: str | bytes | HTTPMethod | None
+                      ) -> tuple[str, int | None, bool, bool]:
+        """Return ``(mode, declared_length, reusable, tunnel)``.
 
-        Item 3 first, because it is the one that must not be resolved by
-        preference: a message carrying both ``Transfer-Encoding`` and
-        ``Content-Length`` *"might indicate an attempt to perform request
-        smuggling … or response splitting and ought to be handled as an
-        error"*.  The server refuses exactly this shape on the request side;
-        this is the same rule facing the other way.
-
-        Item 4 is a list, not a token.  ``te == b'chunked'`` was an exact
-        match, so ``gzip, chunked`` — a legal coding list whose final coding is
-        chunked — missed the chunked branch, fell through to
-        ``Content-Length``, found none, and returned an empty body while a
-        whole chunked message stayed on the wire.  The codings are flattened
-        across comma-combined values and repeated fields, in order, because
-        §6.1 permits both spellings of the same list.
-
-        Empty elements are dropped before the list is judged, which RFC 9110
-        §5.6.1.2 makes a MUST: *"A recipient of such a list that contains an
-        empty element MUST treat it as if the empty element were not
-        present."*  Judging them instead reads ``chunked,`` as a list whose
-        final coding is the empty one — not chunked, therefore delimited by
-        the close — so the chunked body **and every response pipelined behind
-        it** became this response's body, with no error and no sign that a
-        second response had existed.  That is the smuggling probe the rule
-        exists to defeat, and dropping empties is also what makes the leading
-        and trailing spellings agree.
-
-        Applying chunked twice is refused rather than read.  RFC 9112 §7.1
-        makes it a sender MUST NOT, so no conforming peer sends it, and the
-        server already answers this exact field value on the request side; a
-        recipient that instead read it one way while its own server read it
-        another would hold two answers to one message.
-
-        Non-chunked codings are not decoded: the octets are handed back as the
-        transfer coding delivered them.  Length is this function's question,
-        and refusing a conforming message because a coding above the framing
-        is unfamiliar would answer a different one.
+        RFC 9112 §6.3 gives method/status precedence over all response
+        framing fields.  Transfer-Encoding also takes precedence over
+        Content-Length; a non-chunked final coding therefore remains
+        close-delimited rather than accidentally trusting Content-Length.
         """
-        tes = headers.getlist(b'transfer-encoding')
-        if not tes:
-            declared = cls._declared_length(headers)
-            if declared is None:
-                return _UNTIL_CLOSE, 0
-            return _DECLARED, declared
-        if headers.getlist(b'content-length'):
-            raise ProtocolError(
-                'Content-Length and Transfer-Encoding both present in the '
-                'response (response-splitting vector)')
-        codings = [coding for coding in
-                   (c.strip().lower()
-                    for _, raw_value in tes for c in raw_value.split(b','))
-                   if coding]
-        if not codings:
-            # ``transfer-coding`` is a ``1#`` list, so a field whose elements
-            # are all empty has none, and a framing field that frames nothing
-            # is not a message this reader can place.
-            raise ProtocolError(
-                'Transfer-Encoding field carries no transfer coding')
-        if codings.count(b'chunked') > 1:
-            raise ProtocolError(
-                f'chunked applied more than once: {codings!r}')
-        if codings[-1] == b'chunked':
-            return _CHUNKED, 0
-        # §6.3 item 4, response branch: chunked present but not the final
-        # coding leaves the framing undeterminable, and for a response the RFC
-        # names the remedy rather than an error — read until the close.
-        return _UNTIL_CLOSE, 0
+        body_forbidden = (
+            100 <= status < 200 or status in (204, 304)
+            or cls._method_is(request_method, 'HEAD')
+        )
+        successful_connect = (
+            cls._method_is(request_method, 'CONNECT')
+            and 200 <= status < 300
+        )
+        protocol_switched = status == 101 or successful_connect
+        if body_forbidden or successful_connect:
+            return 'none', None, not protocol_switched, protocol_switched
 
-    async def _read_body(self, reader: AbstractReader, headers: Headers, *,
-                         status: int,
-                         method: 'str | HTTPMethod | None' = None) -> bytes:
+        transfer_fields = headers.getlist(b'transfer-encoding')
+        if transfer_fields:
+            codings = cls._parse_transfer_encoding(transfer_fields)
+            if codings.count(b'chunked') > 1:
+                raise ProtocolError(
+                    f'chunked applied more than once: {codings!r}')
+            if codings and codings[-1] == b'chunked':
+                return 'chunked', None, True, False
+            # Transfer-Encoding overrides Content-Length even when the
+            # final coding is not chunked; the message ends at connection EOF.
+            # This includes a physically present field whose list members are
+            # all empty: an empty parsed list does not erase TE's precedence
+            # over Content-Length.
+            return 'close', None, False, False
+
+        declared = cls._declared_length(headers)
+        if declared is not None:
+            return 'declared', declared, True, False
+        return 'close', None, False, False
+
+    async def _read_body(self, reader: AbstractReader, headers: Headers,
+                         *, status: int | None = None,
+                         request_method: str | bytes | HTTPMethod | None = None
+                         ) -> bytes:
         # The total lives here and not in ``_read_chunked``, which
         # ``_stream_body`` shares: this is the path that accumulates, and the
         # other one exists precisely so a large response need not.
-        if self._has_no_body(status, method):
-            return b''
         max_total = get_settings().client_body_max_total
-        kind, declared = self._body_delimiter(headers)
-        if kind == _CHUNKED:
+        mode, declared, reusable, tunnel = self._body_framing(
+            status if status is not None else 200, headers, request_method)
+        self.reusable = reusable
+        self.protocol_switched = tunnel
+        self.tunnel = (tunnel and self._method_is(request_method, 'CONNECT'))
+        self.connection_exhausted = mode == 'close'
+        if mode == 'none':
+            return b''
+        if mode == 'chunked':
             return b''.join([c async for c in
                              self._read_chunked(reader, max_total=max_total)])
-        if kind == _UNTIL_CLOSE:
-            return b''.join([c async for c in
-                             self._read_until_close(reader,
-                                                    max_total=max_total)])
-        if max_total and declared > max_total:
-            # Refused on the declaration, before an octet is read — the peer
-            # already told us it will not fit.
-            raise ResponseTooLarge(
-                f'declared body {declared} bytes exceeds '
-                f'BB_CLIENT_BODY_MAX_TOTAL={max_total}')
-        # In slices, like the streaming path: one ``readexactly`` for the
-        # whole body is a single read to every bound above it.
+        if mode == 'declared':
+            assert declared is not None
+            if max_total and declared > max_total:
+                # Refused on the declaration, before an octet is read — the
+                # peer already told us it will not fit.
+                raise ResponseTooLarge(
+                    f'declared body {declared} bytes exceeds '
+                    f'BB_CLIENT_BODY_MAX_TOTAL={max_total}')
+            # In slices, like the streaming path: one ``readexactly`` for the
+            # whole body is a single read to every bound above it.
+            return b''.join([chunk async for chunk in
+                             self._read_declared(reader, declared)])
         return b''.join([chunk async for chunk in
-                         self._read_declared(reader, declared)])
+                         self._read_close_delimited(reader, max_total)])
 
-    async def _stream_body(self, reader: AbstractReader, headers: Headers, *,
-                           status: int,
-                           method: 'str | HTTPMethod | None' = None
+    async def _stream_body(self, reader: AbstractReader,
+                           headers: Headers, *, status: int | None = None,
+                           request_method: str | bytes | HTTPMethod | None = None
                            ) -> AsyncIterator[bytes]:
-        if self._has_no_body(status, method):
+        mode, declared, reusable, tunnel = self._body_framing(
+            status if status is not None else 200, headers, request_method)
+        self.reusable = reusable
+        self.protocol_switched = tunnel
+        self.tunnel = (tunnel and self._method_is(request_method, 'CONNECT'))
+        self.connection_exhausted = mode == 'close'
+        if mode == 'none':
             return
-        kind, declared = self._body_delimiter(headers)
-        if kind == _CHUNKED:
+        if mode == 'chunked':
             async for chunk in self._read_chunked(reader):
                 yield chunk
             return
-        if kind == _UNTIL_CLOSE:
-            async for chunk in self._read_until_close(reader):
+        if mode == 'declared':
+            assert declared is not None
+            async for chunk in self._read_declared(reader, declared):
                 yield chunk
             return
-        async for chunk in self._read_declared(reader, declared):
+        async for chunk in self._read_close_delimited(reader):
             yield chunk
 
-    async def _read_until_close(self, reader: AbstractReader, *,
-                                max_total: int = 0) -> AsyncIterator[bytes]:
-        """RFC 9112 §6.3 item 8 — a body whose only delimiter is the close.
+    async def _read_close_delimited(
+            self, reader: AbstractReader, max_total: int = 0
+    ) -> AsyncIterator[bytes]:
+        """Read an allowed response body through connection EOF.
 
-        The branch this replaces returned an empty body and gave keep-alive as
-        the reason.  It is the other way round: the octets *are* the response,
-        and a message the close delimits has already spent the connection,
-        which is what ``connection_exhausted`` records for the caller.
-
-        The unit is the transport-paced read; the time is ``_body_read``'s
-        per-read deadline, which is what stops a peer that sends a head and
-        then neither sends nor closes.  The total is ``max_total``, enforceable
-        only as the octets arrive because this is the one framing that declares
-        nothing to refuse in advance — and passed only by the buffering entry
-        point, exactly as ``_read_chunked`` is: ``stream()`` exists so a large
-        response need not fit in memory, and a cap on the shared reader would
-        cap the path that asked not to be capped.
+        The buffered path passes its total budget here.  Once the budget has
+        been reached, one additional byte is read only to prove that the
+        peer exceeded it; it is never appended to the accumulated body.
         """
-        self.connection_exhausted = True
-        total = 0
+        seen = 0
         while True:
-            chunk = await self._body_read(reader.read(_STREAM_CHUNK_SIZE),
-                                          payload=True)
+            read_size = _STREAM_CHUNK_SIZE
+            if max_total:
+                read_size = min(read_size, max_total - seen)
+                if read_size <= 0:
+                    read_size = 1
+            chunk = await self._body_read(
+                reader.read(read_size), payload=True, allow_eof=True)
             if not chunk:
                 return
-            total += len(chunk)
-            if max_total and total > max_total:
-                log_cap_hit('client_body_max_total', requested=total,
+            if max_total and seen + len(chunk) > max_total:
+                log_cap_hit('client_body_max_total',
+                            requested=seen + len(chunk),
                             limit=max_total, protocol='http1')
                 raise ResponseTooLarge(
-                    f'response body exceeds '
-                    f'BB_CLIENT_BODY_MAX_TOTAL={max_total}')
+                    f'body exceeds BB_CLIENT_BODY_MAX_TOTAL={max_total}')
+            seen += len(chunk)
             yield chunk
 
     async def _read_declared(self, reader: AbstractReader,
@@ -879,6 +1020,48 @@ def _record_response(result, response) -> None:
     result.server_bytes_received += len(body)
 
 
+class HTTP1UpgradeSession:
+    """Bidirectional transport after CONNECT or an HTTP 101 switch.
+
+    Obtain one with :meth:`HTTP1Client.handoff`.  The handoff is one-shot:
+    once returned, this session owns transport closure and the originating
+    HTTP client can no longer read or write the connection.
+    """
+
+    def __init__(self, reader: AbstractReader, writer: AbstractWriter,
+                 raw_writer: asyncio.StreamWriter) -> None:
+        self._reader = reader
+        self._writer = writer
+        self._raw_writer = raw_writer
+        self._closed = False
+
+    async def read(self, n: int = -1) -> bytes:
+        """Read switched-protocol bytes, including HTTP read-ahead bytes."""
+        if self._closed:
+            raise ConnectionError('upgrade session is closed')
+        return await self._reader.read(n)
+
+    async def write(self, data: bytes) -> None:
+        """Write raw switched-protocol bytes."""
+        if self._closed:
+            raise ConnectionError('upgrade session is closed')
+        await self._writer.write(data)
+
+    async def close(self) -> None:
+        """Close the transferred transport.  Idempotent."""
+        if self._closed:
+            return
+        self._closed = True
+        self._raw_writer.close()
+        await self._raw_writer.wait_closed()
+
+    async def __aenter__(self) -> 'HTTP1UpgradeSession':
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        await self.close()
+
+
 class HTTP1Client:
     """Async HTTP/1.1 client.
 
@@ -887,9 +1070,11 @@ class HTTP1Client:
         async with HTTP1Client('localhost', 8000) as c:
             res = await c.request(HTTPMethod.GET, '/path')
 
-    The connection persists across multiple ``request()`` calls (HTTP/1.1
-    persistent connections, RFC 7230 §6.3) until ``__aexit__`` closes it.
-    Pass ``ssl=`` to use TLS.
+    The connection persists across multiple ``request()`` calls when HTTP
+    version, Connection options, and body framing permit it.  A successful
+    CONNECT or 101 can be transferred with :meth:`handoff`; after that, the
+    returned :class:`HTTP1UpgradeSession` owns transport closure.  Pass
+    ``ssl=`` to use TLS.
 
     The ``Host`` header is injected automatically when the caller omits it.
     """
@@ -919,8 +1104,27 @@ class HTTP1Client:
         self._connect_timeout = connect_timeout
         #: Set once a response read stopped part-way.  See :meth:`_abandon`.
         self._framing_broken = False
-        #: Set once a response was delimited by the close.  See :meth:`_spend`.
+        #: A successful close-delimited response and a successful CONNECT
+        #: switch protocols at EOF / the HTTP tunnel boundary.  They are not
+        #: framing errors, but neither permits another HTTP/1.1 request.
+        self._reusable = True
+        #: The response body currently owns the reader.  This remains set
+        #: between stream yields; ``_reusable`` alone cannot represent that
+        #: intermediate state because a self-delimited response is reusable
+        #: only after its delimiter has been consumed.
+        self._active_response: HTTP1ResponseRecipient | None = None
+        #: True only when close-delimited framing consumed the connection.
+        #: Kept separate from other valid non-reusable outcomes so diagnostics
+        #: name the actual lifecycle mechanism.
         self._connection_exhausted = False
+        #: A CONNECT/101 response permanently ends HTTP parsing, regardless of
+        #: whether persistence policy permits preserving its transport.
+        self._protocol_switched = False
+        #: Set after CONNECT/101 has completed and cleared by the one-shot
+        #: public handoff.  Until handoff, this client still owns closure.
+        self._handoff_ready = False
+        self._transport_handed_off = False
+        self._closed = False
 
     # ---- async context manager -------------------------------------------
 
@@ -958,6 +1162,11 @@ class HTTP1Client:
         return None
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
+        self._closed = True
+        # A session can only be created while this client still owns a live
+        # transport.  Context exit is irreversible even if close itself is
+        # best-effort or the peer closed first.
+        self._handoff_ready = False
         if self._raw_writer is not None:
             try:
                 self._raw_writer.close()
@@ -981,29 +1190,73 @@ class HTTP1Client:
         sent is what that method is for.
         """
         self._framing_broken = True
+        self._reusable = False
+        self._handoff_ready = False
         if self._raw_writer is not None:
             try:
                 self._raw_writer.close()
             except Exception:
                 pass  # best-effort: the peer may already be gone.
 
-    def _spend(self) -> None:
-        """The last response's delimiter was the close, so this is spent.
-
-        Distinct from :meth:`_abandon`, and deliberately worded differently:
-        nothing desynced — the body ended exactly where the peer said it
-        would — but a message RFC 9112 §6.3 item 8 delimits has consumed the
-        connection along with itself, so a second request would go into a
-        socket the peer is closing.
-        """
-        self._connection_exhausted = True
+    def _close_nonreusable(self, *, connection_exhausted: bool = False) -> None:
+        """Close after a valid response that consumed the connection."""
+        self._reusable = False
+        self._handoff_ready = False
+        self._connection_exhausted = (
+            self._connection_exhausted or connection_exhausted)
         if self._raw_writer is not None:
             try:
                 self._raw_writer.close()
             except Exception:
-                pass  # best-effort: the peer is closing it from its end.
+                pass  # best-effort: the peer may already be gone.
+
+    def _enter_protocol_switch(self, *, handoff_allowed: bool) -> None:
+        """Retire HTTP and preserve only a policy-persistent transport."""
+        self._reusable = False
+        self._protocol_switched = True
+        self._handoff_ready = handoff_allowed and not self._closed
+        if not self._handoff_ready and self._raw_writer is not None:
+            try:
+                self._raw_writer.close()
+            except Exception:
+                pass  # best-effort retirement after a valid switch response.
+
+    def _begin_response(self, recipient: HTTP1ResponseRecipient) -> None:
+        if self._active_response is not None:
+            raise ConnectionError(
+                'a response body is still being consumed on this connection')
+        self._refuse_if_desynced()
+        self._active_response = recipient
+
+    def _finish_response(self, recipient: HTTP1ResponseRecipient, *,
+                         complete: bool,
+                         abandon_incomplete: bool = True) -> None:
+        """Release response ownership and apply its terminal state."""
+        if self._active_response is recipient:
+            self._active_response = None
+        if recipient.framing_broken:
+            if abandon_incomplete:
+                self._abandon()
+            return
+        elif not complete:
+            if abandon_incomplete:
+                # Closing between yields has not proved that the body
+                # delimiter was consumed, even if the previous transport read
+                # happened to contain the final octets.
+                self._abandon()
+        elif recipient.protocol_switched:
+            self._enter_protocol_switch(handoff_allowed=(
+                recipient.response_persistent and not recipient.request_close))
+        elif recipient.request_close or not recipient.reusable:
+            self._close_nonreusable(
+                connection_exhausted=recipient.connection_exhausted)
 
     def _refuse_if_desynced(self) -> None:
+        if self._closed:
+            raise ConnectionError('HTTP1Client context is closed')
+        if self._active_response is not None:
+            raise ConnectionError(
+                'a response body is still being consumed on this connection')
         if self._framing_broken:
             raise ConnectionError(
                 'connection abandoned after a framing error — '
@@ -1012,6 +1265,9 @@ class HTTP1Client:
             raise ConnectionError(
                 'the last response was delimited by the connection close — '
                 'this connection cannot carry another request')
+        if not self._reusable:
+            raise ConnectionError(
+                'connection is not reusable after a non-reusable response')
 
     async def request(self, method: str | HTTPMethod, path: str, *,
                       headers: HeaderList = (),
@@ -1019,15 +1275,21 @@ class HTTP1Client:
         self._refuse_if_desynced()
         assert self._writer is not None and self._reader is not None
         h = self._headers_with_host(headers)
-        await HTTP1RequestSender(self._writer).send(method, path, h, body)
-        recipient = HTTP1ResponseRecipient()
+        sender = HTTP1RequestSender(self._writer)
+        prepared = sender.prepare(method, path, h, body)
+        request_close = (
+            b'close' in HTTP1ResponseRecipient._connection_options(h))
+        recipient = HTTP1ResponseRecipient(request_method=method)
+        recipient.request_close = request_close
+        self._begin_response(recipient)
+        complete = False
         try:
-            return await recipient.receive(self._reader, method=method)
+            await sender.send_prepared(prepared)
+            response = await recipient.receive(self._reader, method=method)
+            complete = True
+            return response
         finally:
-            if recipient.framing_broken:
-                self._abandon()
-            elif recipient.connection_exhausted:
-                self._spend()
+            self._finish_response(recipient, complete=complete)
 
     async def stream(self, method: str | HTTPMethod, path: str, *,
                      headers: HeaderList = (),
@@ -1042,22 +1304,53 @@ class HTTP1Client:
         self._refuse_if_desynced()
         assert self._writer is not None and self._reader is not None
         h = self._headers_with_host(headers)
-        await HTTP1RequestSender(self._writer).send(method, path, h, body)
-        recipient = HTTP1ResponseRecipient()
+        sender = HTTP1RequestSender(self._writer)
+        prepared = sender.prepare(method, path, h, body)
+        request_close = (
+            b'close' in HTTP1ResponseRecipient._connection_options(h))
+        recipient = HTTP1ResponseRecipient(request_method=method)
+        recipient.request_close = request_close
+        self._begin_response(recipient)
+        complete = False
         try:
+            await sender.send_prepared(prepared)
             async for chunk in recipient.stream(self._reader, method=method):
                 yield chunk
+            complete = True
         finally:
-            if recipient.framing_broken:
-                self._abandon()
-            elif recipient.connection_exhausted:
-                self._spend()
+            self._finish_response(recipient, complete=complete)
 
     def _headers_with_host(self, headers: HeaderList) -> Headers:
         h = Headers(list(headers))
         if b'host' not in h:
             h.append(b'host', f'{self._host}:{self._port}'.encode())
         return h
+
+    def handoff(self) -> HTTP1UpgradeSession:
+        """Transfer a completed CONNECT/101 transport to a raw session.
+
+        The returned session preserves bytes already buffered by the HTTP
+        reader and exposes both read and write sides.  This operation is
+        available exactly once.  If the client context exits before handoff,
+        the client closes the transport; after handoff, the session owns it.
+        """
+        if self._closed:
+            raise ConnectionError('HTTP1Client context is closed')
+        if self._transport_handed_off:
+            raise ConnectionError('the switched transport was already handed off')
+        if not self._handoff_ready:
+            raise ConnectionError(
+                'no completed CONNECT or 101 response is available for handoff')
+        assert self._reader is not None and self._writer is not None
+        assert self._raw_writer is not None
+        session = HTTP1UpgradeSession(
+            self._reader, self._writer, self._raw_writer)
+        self._handoff_ready = False
+        self._transport_handed_off = True
+        # The session now owns close.  In particular HTTP1Client.__aexit__
+        # must not close a transport that has escaped its context.
+        self._raw_writer = None
+        return session
 
     # ---- Low-level test-instrument primitives ----------------------------
     #
@@ -1093,6 +1386,8 @@ class HTTP1Client:
         :class:`AsyncioWriter`), so the bytes actually leave the socket
         on schedule rather than accumulating in the asyncio send buffer.
         """
+        if self._transport_handed_off:
+            raise ConnectionError('transport ownership was handed off')
         assert self._writer is not None, 'connect via __aenter__ first'
         if self._record_wire_bytes:
             self._wire_buffer.extend(data)
@@ -1157,24 +1452,46 @@ class HTTP1Client:
         """Emit the size-0 terminator chunk that closes a chunked body."""
         await self.send_raw(b'0' + _CRLF + _CRLF)
 
-    async def read_response(self, *,
-                            timeout: float | None = None) -> ClientResponse:
+    async def read_response(
+            self, *,
+            request_method: str | bytes | HTTPMethod | None = None,
+            timeout: float | None = None) -> ClientResponse:
         """Read one HTTP/1.1 response from the connection.
 
         Optional ``timeout`` bounds the entire read (status line + headers
         + body).  Raises :class:`asyncio.TimeoutError` if the deadline is
         hit; the caller decides whether to treat that as a transport-
         fail or a normal protocol outcome."""
+        if self._closed:
+            raise ConnectionError('HTTP1Client context is closed')
+        if not self._reusable:
+            raise ConnectionError(
+                'connection is not reusable after a non-reusable response')
+        if self._active_response is not None:
+            raise ConnectionError(
+                'a response body is still being consumed on this connection')
         assert self._reader is not None, 'connect via __aenter__ first'
-        # Interims are not skipped here.  This primitive exists to drive a
-        # peer and report what it actually sent, so a ``100 Continue`` is an
-        # observation rather than noise on the way to the answer — the same
-        # exemption ``_abandon`` already makes for it.
-        coro = HTTP1ResponseRecipient().receive(self._reader,
-                                                skip_interim=False)
-        if timeout is None:
-            return await coro
-        return await asyncio.wait_for(coro, timeout=timeout)
+        recipient = HTTP1ResponseRecipient(request_method=request_method)
+        self._active_response = recipient
+        complete = False
+        try:
+            # The fault-injection primitive observes each peer response;
+            # unlike high-level request()/stream(), it must surface 1xx.
+            coro = recipient.receive(
+                self._reader, method=request_method, skip_interim=False)
+            if timeout is None:
+                response = await coro
+            else:
+                response = await asyncio.wait_for(coro, timeout=timeout)
+            complete = True
+            return response
+        finally:
+            # Keep read_response()'s low-level fault-injection contract: a
+            # failed read is returned to the caller without automatically
+            # poisoning the client.  Successful terminal states still retire
+            # HTTP or enter CONNECT tunnel mode.
+            self._finish_response(
+                recipient, complete=complete, abandon_incomplete=False)
 
     # ---- Scenario executor -----------------------------------------------
     #
