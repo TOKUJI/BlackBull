@@ -597,7 +597,7 @@ class HTTP2Client:
         """Escape hatch: write a raw frame to the wire (negative-path tests)."""
         await self._send_raw_frame(frame)
 
-    async def receive_raw_frame(self) -> '_InboundFrame | None':
+    async def receive_raw_frame(self) -> _InboundFrame | None:
         """Escape hatch: read one raw frame, bypassing the receive loop's dispatch.
 
         For negative-path / fault-injection tests and raw-frame clients that
@@ -663,7 +663,7 @@ class HTTP2Client:
         assert self._control_sender is not None
         await self._control_sender(frame)
 
-    async def _receive_frame(self) -> '_InboundFrame | None':
+    async def _receive_frame(self) -> _InboundFrame | None:
         """Read one frame, or ``None`` when the peer is finished with us.
 
         The wait for a frame to *begin* is deliberately unbounded: an
@@ -704,7 +704,7 @@ class HTTP2Client:
             return None
         return await self._load(header + payload)
 
-    async def _load(self, data: bytes) -> '_InboundFrame | None':
+    async def _load(self, data: bytes) -> _InboundFrame | None:
         """Parse one frame, answering an undecodable field block by §4.3.
 
         A block that arrives whole is decoded inside the frame's constructor,
@@ -724,7 +724,7 @@ class HTTP2Client:
                 f'could not decode the field block: {exc}')
             return None  # unreachable: _fail_connection raises
 
-    async def _next_frame(self) -> '_InboundFrame | None':
+    async def _next_frame(self) -> _InboundFrame | None:
         """The next frame, under the field block's deadline when one is open.
 
         ``_receive_frame``'s wait for a frame to *begin* is deliberately
@@ -784,7 +784,7 @@ class HTTP2Client:
             logger.warning('could not send GOAWAY(%r)', code, exc_info=True)
         raise _ConnectionFailed(message)
 
-    async def _absorb_field_block(self, frame) -> '_InboundFrame | None':
+    async def _absorb_field_block(self, frame) -> _InboundFrame | None:
         """Reassemble HEADERS + CONTINUATION; return what to dispatch.
 
         ``None`` means the frame was absorbed into an open block and there is
