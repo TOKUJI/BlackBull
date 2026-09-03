@@ -1335,6 +1335,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#connect-tunnels-and-protocol-upgrades" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CONNECT tunnels and protocol upgrades
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#streaming-request-bodies" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5786,6 +5797,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#connect-tunnels-and-protocol-upgrades" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CONNECT tunnels and protocol upgrades
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#streaming-request-bodies" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6447,7 +6469,35 @@ to opt out and impose your own deadline instead.</p>
 <p>The client persists the TCP connection across <code>request()</code>
 calls inside one <code>async with</code> block (HTTP/1.1 persistent
 connections, RFC 9112 §9.3) — useful for verifying keep-alive
-behaviour.  The <code>Host</code> header is injected automatically.</p>
+behaviour.  <code>Connection: close</code> from either endpoint retires the connection;
+an HTTP/1.0 response is reusable only when it explicitly carries
+<code>Connection: keep-alive</code> and has self-delimited framing.  The <code>Host</code> header is
+injected automatically.</p>
+<h3 id="connect-tunnels-and-protocol-upgrades">CONNECT tunnels and protocol upgrades<a class="headerlink" href="#connect-tunnels-and-protocol-upgrades" title="Permanent link">&para;</a></h3>
+<p>A successful <code>CONNECT</code> response or a generic <code>101 Switching Protocols</code>
+response always ends HTTP processing.  When persistence policy also permits
+the transport to remain open—neither endpoint sent <code>Connection: close</code>, and an
+HTTP/1.0 response explicitly selected <code>keep-alive</code>—bytes already read into the
+client buffer are preserved.  Call <code>handoff()</code> exactly once to transfer both
+sides of that transport to an <code>HTTP1UpgradeSession</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="k">async</span> <span class="k">with</span> <span class="n">HTTP1Client</span><span class="p">(</span><span class="s1">'localhost'</span><span class="p">,</span> <span class="n">proxy_port</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
+    <span class="n">response</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">request</span><span class="p">(</span>
+        <span class="n">HTTPMethod</span><span class="o">.</span><span class="n">CONNECT</span><span class="p">,</span> <span class="s1">'origin.example:443'</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">response</span><span class="o">.</span><span class="n">status</span> <span class="o">==</span> <span class="mi">200</span>
+    <span class="n">tunnel</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">handoff</span><span class="p">()</span>
+
+<span class="c1"># The session, not the HTTP client, now owns transport closure.</span>
+<span class="k">async</span> <span class="k">with</span> <span class="n">tunnel</span><span class="p">:</span>
+    <span class="k">await</span> <span class="n">tunnel</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="sa">b</span><span class="s1">'protocol bytes'</span><span class="p">)</span>
+    <span class="n">reply</span> <span class="o">=</span> <span class="k">await</span> <span class="n">tunnel</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="mi">4096</span><span class="p">)</span>
+</code></pre></div>
+<p>After a successful switch, further HTTP requests are refused.  Before
+<code>handoff()</code>, exiting the <code>HTTP1Client</code> context closes the transport; after the
+handoff, only <code>HTTP1UpgradeSession.close()</code> (or its context-manager exit)
+closes it.  A switch on a non-persistent exchange is closed and cannot be
+handed off, and <code>handoff()</code> cannot be called after the client context has
+exited.  This API exposes raw protocol bytes and performs no TLS wrapping,
+content decoding, or protocol-specific framing.</p>
 <h3 id="streaming-request-bodies">Streaming request bodies<a class="headerlink" href="#streaming-request-bodies" title="Permanent link">&para;</a></h3>
 <p><code>request(...)</code>'s <code>body=</code> accepts an async generator for
 streaming uploads:</p>

@@ -1916,6 +1916,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.client.HTTP1Client.handoff" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        handoff
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.client.HTTP1Client.read_response" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2017,6 +2028,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="HTTP1RequestSender">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.client.HTTP1RequestSender.prepare" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        prepare
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.client.HTTP1RequestSender.send_prepared" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        send_prepared
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -2036,6 +2075,56 @@
     <span class="md-ellipsis">
       
         receive
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.client.HTTP1UpgradeSession" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HTTP1UpgradeSession
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="HTTP1UpgradeSession">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.client.HTTP1UpgradeSession.close" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        close
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.client.HTTP1UpgradeSession.read" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        read
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.client.HTTP1UpgradeSession.write" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        write
       
     </span>
   </a>
@@ -6103,6 +6192,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.client.HTTP1Client.handoff" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        handoff
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.client.HTTP1Client.read_response" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6204,6 +6304,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="HTTP1RequestSender">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.client.HTTP1RequestSender.prepare" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        prepare
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.client.HTTP1RequestSender.send_prepared" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        send_prepared
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -6223,6 +6351,56 @@
     <span class="md-ellipsis">
       
         receive
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.client.HTTP1UpgradeSession" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HTTP1UpgradeSession
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="HTTP1UpgradeSession">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.client.HTTP1UpgradeSession.close" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        close
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.client.HTTP1UpgradeSession.read" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        read
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.client.HTTP1UpgradeSession.write" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        write
       
     </span>
   </a>
@@ -6936,9 +7114,11 @@ DATA-frame payloads received on the stream.</p>
 <pre><code>async with HTTP1Client('localhost', 8000) as c:
     res = await c.request(HTTPMethod.GET, '/path')
 </code></pre>
-<p>The connection persists across multiple <code>request()</code> calls (HTTP/1.1
-persistent connections, RFC 7230 §6.3) until <code>__aexit__</code> closes it.
-Pass <code>ssl=</code> to use TLS.</p>
+<p>The connection persists across multiple <code>request()</code> calls when HTTP
+version, Connection options, and body framing permit it.  A successful
+CONNECT or 101 can be transferred with :meth:<code>handoff</code>; after that, the
+returned :class:<code>HTTP1UpgradeSession</code> owns transport closure.  Pass
+<code>ssl=</code> to use TLS.</p>
 <p>The <code>Host</code> header is injected automatically when the caller omits it.</p>
 
 
@@ -7070,8 +7250,30 @@ try/except boilerplate per scenario.</p>
 <div class="doc doc-object doc-function">
 
 
+<h4 id="blackbull.client.HTTP1Client.handoff" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">handoff</span><span class="p">()</span></code>
+
+<a href="#blackbull.client.HTTP1Client.handoff" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Transfer a completed CONNECT/101 transport to a raw session.</p>
+<p>The returned session preserves bytes already buffered by the HTTP
+reader and exposes both read and write sides.  This operation is
+available exactly once.  If the client context exits before handoff,
+the client closes the transport; after handoff, the session owns it.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h4 id="blackbull.client.HTTP1Client.read_response" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">read_response</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">read_response</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">request_method</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
@@ -7315,6 +7517,54 @@ to <code>Transfer-Encoding: chunked</code> for <code>AsyncIterable</code> bodies
 
 
 
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.client.HTTP1RequestSender.prepare" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">prepare</span><span class="p">(</span><span class="n">method</span><span class="p">,</span> <span class="n">path</span><span class="p">,</span> <span class="n">headers</span><span class="p">,</span> <span class="n">body</span><span class="o">=</span><span class="sa">b</span><span class="s1">''</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-classmethod"><code>classmethod</code></small>
+  </span>
+
+<a href="#blackbull.client.HTTP1RequestSender.prepare" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Validate and render everything that can fail before wire I/O.</p>
+<p>The high-level client claims response ownership only after this method
+succeeds.  A caller error such as a mismatched Content-Length or an
+unencodable request target therefore cannot retire an untouched
+keep-alive connection.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.client.HTTP1RequestSender.send_prepared" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">send_prepared</span><span class="p">(</span><span class="n">prepared</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.client.HTTP1RequestSender.send_prepared" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Write a request returned by :meth:<code>prepare</code>.</p>
+
+
+    </div>
+
+</div>
+
 
 
   </div>
@@ -7339,11 +7589,10 @@ to <code>Transfer-Encoding: chunked</code> for <code>AsyncIterable</code> bodies
 
 
         <p>Reads an HTTP/1.1 response from an <code>AbstractReader</code>.</p>
-<p>Decodes both <code>Content-Length</code>-bound and <code>Transfer-Encoding: chunked</code>
-bodies.  Returns a <code>ClientResponse</code>; <code>stream()</code> returns an async
-iterator of body chunks instead, so large responses don't have to fit
-in memory — true of both framings, which it was not until the
-<code>Content-Length</code> path stopped reading the body in one call.</p>
+<p>Decodes <code>Content-Length</code>-bound, <code>Transfer-Encoding: chunked</code>, and
+connection-close-delimited bodies.  Returns a <code>ClientResponse</code>;
+<code>stream()</code> returns an async iterator of body chunks instead, so large
+responses don't have to fit in memory — true of all body framings.</p>
 
 
 
@@ -7381,18 +7630,128 @@ in memory — true of both framings, which it was not until the
 
     <div class="doc doc-contents ">
 
-        <p>One complete response.</p>
-<p><em>method</em> is the request's, and it is not decoration: RFC 9112 §6.3
-decides the body's length from the status code <strong>and</strong> the method, so
-a recipient handed only the header fields cannot apply the first and
-most overriding of its rules.  <code>None</code> means the caller does not know
-— the fault-injection primitives drive peers whose request never went
-through this client — and only the status-code half is then applied.</p>
-<p><em>skip_interim</em> is what RFC 9110 §15.2 requires, and every production
-call wants it.  The fault-injection primitives do not: their whole
-purpose is to drive a peer and see what it actually sent, and a reader
-that silently discards part of that answers a different question.  The
-same distinction <code>_abandon</code> already makes for those primitives.</p>
+        <p>Read one final response, optionally exposing an interim response.</p>
+<p>Production callers keep <code>skip_interim=True</code> and therefore pass over
+100/102/103 responses until the final response.  <code>101</code> is final by
+protocol-switch semantics.  The low-level fault-injection API passes
+<code>skip_interim=False</code> so each peer message remains observable.</p>
+<p><code>method=</code> overrides the constructor's, for a caller that knows it
+only at the read.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.client.HTTP1UpgradeSession" class="doc doc-heading">
+            <code>HTTP1UpgradeSession</code>
+
+
+<a href="#blackbull.client.HTTP1UpgradeSession" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Bidirectional transport after CONNECT or an HTTP 101 switch.</p>
+<p>Obtain one with :meth:<code>HTTP1Client.handoff</code>.  The handoff is one-shot:
+once returned, this session owns transport closure and the originating
+HTTP client can no longer read or write the connection.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.client.HTTP1UpgradeSession.close" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">close</span><span class="p">()</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.client.HTTP1UpgradeSession.close" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Close the transferred transport.  Idempotent.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.client.HTTP1UpgradeSession.read" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">read</span><span class="p">(</span><span class="n">n</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.client.HTTP1UpgradeSession.read" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Read switched-protocol bytes, including HTTP read-ahead bytes.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.client.HTTP1UpgradeSession.write" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">write</span><span class="p">(</span><span class="n">data</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.client.HTTP1UpgradeSession.write" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Write raw switched-protocol bytes.</p>
 
 
     </div>
