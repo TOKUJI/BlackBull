@@ -180,9 +180,9 @@ fallback where one exists.
 
 **Skills** (invocable, harness-surfaced; they live in `.claude/skills/` [private] —
 `.github/skills` is an optional local symlink, see `.gitignore`):
-`ab-verify`, `refactor`, `sprint-close`, `bench-compare`, `peer-compare`, `pre-release-docs`,
-`update-roadmap`, `create-test`, `type-check`, `add-event`, `new-http2-frame`,
-`protocol-handler`, `httparena-bench`, `run-http11probe`.
+`plan-change`, `ab-verify`, `refactor`, `sprint-close`, `bench-compare`, `peer-compare`,
+`pre-release-docs`, `update-roadmap`, `create-test`, `type-check`, `add-event`,
+`new-http2-frame`, `protocol-handler`, `httparena-bench`, `run-http11probe`.
 
 ### Task-to-skill mapping
 
@@ -202,6 +202,7 @@ Before acting on a request, read the corresponding skill file first.
 | Pre-release audit | `.claude/skills/pre-release-docs/SKILL.md` [private] |
 | Sprint close | `.claude/skills/sprint-close/SKILL.md` [private] |
 | Roadmap update | `.claude/skills/update-roadmap/SKILL.md` [private] |
+| Planning any change / scoping an issue / briefing a subagent | `.claude/skills/plan-change/SKILL.md` [private] |
 
 ### Doc lifecycle (so docs don't rot)
 
