@@ -602,3 +602,347 @@ class TestRawStreamQueueDepth:
         assert 1 in c._raw_streams
         assert not [f for f in sent if f.FrameType() == FrameTypes.RST_STREAM]
         await self._end(c, task)
+
+
+# ===========================================================================
+# bounds 5 — the frame length is peer-declared, and it was never checked
+# ===========================================================================
+
+class TestFrameSizeCheck:
+    """``_receive_frame`` parsed a 3-byte length and handed it to
+    ``readexactly`` unexamined — up to 16 MiB of the peer's choosing, per
+    frame, allocated before anything looked at the frame at all.
+
+    There is nothing here to announce.  RFC 9113 §6.5.2 makes 2^14 the
+    *initial* SETTINGS_MAX_FRAME_SIZE, in force from connection start, and the
+    client's empty SETTINGS advertises nothing larger — so an explicit setting
+    could only loosen the bound.  What was missing is the receive-side check.
+
+    The refusal is a **connection** error even for a frame on a non-zero
+    stream, which §4.2 would otherwise permit to be a stream error.  We refuse
+    *before* reading the payload, so those octets stay in the socket and the
+    next 9-byte read would land mid-payload: a stream error here desyncs the
+    reader for every stream.  The server refuses the same way for the same
+    reason.  Draining the payload first to keep the stream option open would
+    turn a refusal into unbounded work the peer chooses.
+    """
+
+    _LIMIT = 16384
+
+    @staticmethod
+    def _capture(c: HTTP2Client) -> list:
+        sent: list = []
+
+        async def _send(frame):
+            sent.append(frame)
+
+        # Without this ``_send_raw_frame``'s assert fires, ``_fail_connection``
+        # logs it and swallows it, and a GOAWAY assertion passes vacuously.
+        c._control_sender = _send
+        return sent
+
+    @staticmethod
+    def _header(length: int, *, stream_id: int = 1,
+                type_: bytes = FrameTypes.DATA) -> bytes:
+        """A frame header declaring *length* payload octets."""
+        return (length.to_bytes(3, 'big') + type_ + bytes([0])
+                + stream_id.to_bytes(4, 'big'))
+
+    def _oversize(self, declared: int, *, trailing: int = 64,
+                  stream_id: int = 1):
+        """A client whose peer declared *declared* octets and sent *trailing*.
+
+        The gap is the point: a check that reads first would block on the
+        octets the peer never sent.
+        """
+        reader = _BlockingReader(
+            self._header(declared, stream_id=stream_id) + b'x' * trailing)
+        c = _client(reader=reader)
+        return c, reader, self._capture(c)
+
+    async def test_an_oversize_frame_is_refused_with_frame_size_error(self):
+        """RFC 9113 §4.2 — FRAME_SIZE_ERROR, told to the peer."""
+        c, _reader, sent = self._oversize(self._LIMIT + 1)
+
+        await asyncio.wait_for(c._receive_loop(), timeout=1.0)
+
+        goaway = [f for f in sent if f.FrameType() == FrameTypes.GOAWAY]
+        assert goaway, 'an over-sized frame was refused without a GOAWAY'
+        assert goaway[0].error_code == ErrorCodes.FRAME_SIZE_ERROR
+
+    async def test_the_refusal_is_not_a_silent_close(self):
+        """``None`` from ``_receive_frame`` means EOF to the receive loop, so
+        a refusal spelled that way is indistinguishable from the peer hanging
+        up — the caller cannot tell a rejection from a disconnect."""
+        c, _reader, _sent = self._oversize(self._LIMIT + 1)
+
+        await asyncio.wait_for(c._receive_loop(), timeout=1.0)
+
+        assert c._connection_lost, 'the connection was left usable'
+        assert c._failure, (
+            'the refusal recorded no reason — a caller cannot tell it from '
+            'the peer simply going away')
+        assert str(self._LIMIT + 1) in c._failure
+
+    async def test_the_payload_is_never_read(self):
+        """The whole memory argument: refusing *before* the read is what keeps
+        a peer-declared length from sizing an allocation."""
+        c, reader, _sent = self._oversize(self._LIMIT + 1, trailing=64)
+
+        await asyncio.wait_for(c._receive_loop(), timeout=1.0)
+
+        assert len(reader._buf) == 64, (
+            'the declared payload was consumed before it was refused — the '
+            'peer still chose the read size')
+
+    async def test_a_frame_at_the_limit_is_accepted(self):
+        """The boundary, and the reason the default refuses nothing legal: a
+        conforming peer may send exactly ``SETTINGS_MAX_FRAME_SIZE``."""
+        payload = b'x' * self._LIMIT
+        reader = _BlockingReader(self._header(self._LIMIT) + payload)
+        c = _client(reader=reader)
+        self._capture(c)
+
+        frame = await asyncio.wait_for(c._receive_frame(), timeout=1.0)
+
+        assert frame is not None and frame.payload == payload
+
+    async def test_zero_disables_the_bound(self, monkeypatch):
+        """The opt-out every bound owes a fault-injection scenario."""
+        monkeypatch.setenv('BB_CLIENT_H2_MAX_FRAME_SIZE', '0')
+        payload = b'x' * (self._LIMIT + 1)
+        reader = _BlockingReader(self._header(len(payload)) + payload)
+        c = _client(reader=reader)
+        sent = self._capture(c)
+
+        frame = await asyncio.wait_for(c._receive_frame(), timeout=1.0)
+
+        assert frame is not None and frame.payload == payload
+        assert not sent, 'a disabled bound still refused the frame'
+
+    async def test_the_escape_hatch_inherits_the_check(self):
+        """``receive_raw_frame`` reads the same wire through the same method,
+        so one rule covers both paths — otherwise the bound is escapable by
+        calling the public escape hatch instead of running the loop."""
+        from blackbull.client.http2 import _ConnectionFailed
+
+        c, reader, sent = self._oversize(self._LIMIT + 1)
+
+        with pytest.raises(_ConnectionFailed):
+            await asyncio.wait_for(c.receive_raw_frame(), timeout=1.0)
+
+        assert len(reader._buf) == 64
+        assert [f for f in sent if f.FrameType() == FrameTypes.GOAWAY]
+
+    async def test_the_refusal_is_logged_as_a_cap_hit(self, caplog):
+        """A bound that fires invisibly cannot be sized by an operator."""
+        import logging
+
+        caplog.set_level(logging.WARNING, logger='blackbull.caps')
+        c, _reader, _sent = self._oversize(self._LIMIT + 99)
+
+        await asyncio.wait_for(c._receive_loop(), timeout=1.0)
+
+        hits = [r for r in caplog.records
+                if getattr(r, 'cap', None) == 'client_h2_max_frame_size']
+        assert hits, 'the refusal emitted no cap-hit record'
+        assert hits[0].limit == self._LIMIT
+        assert hits[0].requested == self._LIMIT + 99
+        assert hits[0].protocol == 'http2'
+
+    async def test_an_ordinary_frame_is_untouched(self, caplog):
+        """The control — a bound that refuses conformant traffic is a defect,
+        not a defence."""
+        import logging
+
+        caplog.set_level(logging.WARNING, logger='blackbull.caps')
+        payload = b'hello'
+        reader = _BlockingReader(self._header(len(payload)) + payload)
+        c = _client(reader=reader)
+        sent = self._capture(c)
+
+        frame = await asyncio.wait_for(c._receive_frame(), timeout=1.0)
+
+        assert frame is not None and frame.payload == payload
+        assert not sent
+        assert not [r for r in caplog.records if getattr(r, 'cap', None)]
+
+
+# ===========================================================================
+# BLA-317 — a parse failure was reported as the peer's HPACK fault, whatever
+# it actually was
+# ===========================================================================
+
+class TestParseFailureNamesItsOwnReason:
+    """``_load`` wrapped ``FrameFactory.load`` in one handler that answered
+    COMPRESSION_ERROR for every failure.
+
+    §5.4.1 and §4.3 make COMPRESSION_ERROR mean *the HPACK decoder state is
+    unusable* — a claim about the connection, which a peer may answer by
+    discarding a pool.  It is false for a RST_STREAM of the wrong length.
+
+    The RFC assigns both halves of a refusal, and each frame's own section
+    assigns them: §6.4 (RST_STREAM length), §6.7 (PING length), §6.1 (DATA
+    padding), §6.6 (PUSH_PROMISE padding), §4.3 (a block that will not
+    decode).  Every one of those five says *connection* error, so nothing
+    here narrows to a stream error — §4.2's stream/connection split governs
+    a frame that merely exceeds SETTINGS_MAX_FRAME_SIZE, which is
+    ``_receive_frame``'s check, not this one.
+    """
+
+    @staticmethod
+    def _capture(c: HTTP2Client) -> list:
+        sent: list = []
+
+        async def _send(frame):
+            sent.append(frame)
+
+        # ``_send_raw_frame`` asserts on this; ``_fail_connection`` swallows
+        # the AssertionError, so without it a GOAWAY assertion passes vacuously.
+        c._control_sender = _send
+        return sent
+
+    @staticmethod
+    def _wire(type_: bytes, flags: int, stream_id: int, payload: bytes) -> bytes:
+        return (len(payload).to_bytes(3, 'big') + type_ + bytes([flags])
+                + stream_id.to_bytes(4, 'big') + payload)
+
+    async def _drive(self, wire: bytes):
+        """Run the receive loop over *wire*; return the client and what it sent."""
+        c = _client(reader=_BlockingReader(wire))
+        sent = self._capture(c)
+        await asyncio.wait_for(c._receive_loop(), timeout=1.0)
+        return c, sent
+
+    @staticmethod
+    def _goaway(sent: list):
+        return [f for f in sent if f.FrameType() == FrameTypes.GOAWAY]
+
+    # -- the code each section names ------------------------------------
+
+    async def test_a_short_rst_stream_is_a_frame_size_error(self):
+        """RFC 9113 §6.4 — a RST_STREAM of any length but 4 octets."""
+        c, sent = await self._drive(
+            self._wire(FrameTypes.RST_STREAM, 0, 1, b'\x00\x00\x00'))
+
+        goaway = self._goaway(sent)
+        assert goaway, 'a malformed RST_STREAM was refused without a GOAWAY'
+        assert goaway[-1].error_code == ErrorCodes.FRAME_SIZE_ERROR
+        assert 'field block' not in (c._failure or ''), (
+            'the refusal blamed the field block for a frame-length breach')
+
+    async def test_a_short_ping_is_a_frame_size_error(self):
+        """RFC 9113 §6.7 — a PING of any length but 8 octets."""
+        _c, sent = await self._drive(
+            self._wire(FrameTypes.PING, 0, 0, b'\x00' * 7))
+
+        goaway = self._goaway(sent)
+        assert goaway, 'a malformed PING was refused without a GOAWAY'
+        assert goaway[-1].error_code == ErrorCodes.FRAME_SIZE_ERROR
+
+    async def test_data_padding_over_the_frame_is_a_protocol_error(self):
+        """RFC 9113 §6.1 — padding at least as long as the payload."""
+        _c, sent = await self._drive(
+            self._wire(FrameTypes.DATA, 0x8, 1, bytes([255, 1, 2])))
+
+        goaway = self._goaway(sent)
+        assert goaway, 'over-long DATA padding was refused without a GOAWAY'
+        assert goaway[-1].error_code == ErrorCodes.PROTOCOL_ERROR
+
+    async def test_push_promise_padding_over_the_frame_is_a_protocol_error(self):
+        """RFC 9113 §6.6 borrows §6.2's padding rule.  The block never
+        decoded, so the connection ends either way — but it ends for the
+        reason it actually failed for."""
+        _c, sent = await self._drive(
+            self._wire(FrameTypes.PUSH_PROMISE, 0x8 | 0x4, 1,
+                       bytes([255, 0, 0, 0, 2, 0])))
+
+        goaway = self._goaway(sent)
+        assert goaway, 'over-long PUSH_PROMISE padding was refused without a GOAWAY'
+        assert goaway[-1].error_code == ErrorCodes.PROTOCOL_ERROR
+
+    async def test_a_continued_block_reports_its_own_reason_too(self):
+        """The reassembly site decodes the block the reader could not, so it
+        is the second place a parse can fail — and it answered
+        COMPRESSION_ERROR for a padding breach as well."""
+        _c, sent = await self._drive(
+            self._wire(FrameTypes.PUSH_PROMISE, 0x8, 1,
+                       bytes([255, 0, 0, 0, 2, 0]))
+            + self._wire(FrameTypes.CONTINUATION, 0x4, 1, b'\x00'))
+
+        goaway = self._goaway(sent)
+        assert goaway, 'a padding breach in a split block sent no GOAWAY'
+        assert goaway[-1].error_code == ErrorCodes.PROTOCOL_ERROR
+
+    async def test_an_undecodable_field_block_is_still_a_compression_error(self):
+        """The one case the blanket handler had right, and the reason it is
+        not enough to map the exceptions one at a time: §4.3 — hpack may have
+        applied part of the block to the connection-wide table before raising."""
+        _c, sent = await self._drive(
+            self._wire(FrameTypes.HEADERS, 0x1 | 0x4, 1, b'\xff\xff\xff\xff\xff'))
+
+        goaway = self._goaway(sent)
+        assert goaway, 'an undecodable block was refused without a GOAWAY'
+        assert goaway[-1].error_code == ErrorCodes.COMPRESSION_ERROR
+
+    async def test_a_bug_on_our_side_is_not_reported_as_the_peers(self):
+        """INTERNAL_ERROR (§7).  A TypeError in our own parser is not evidence
+        about the peer's encoder, and telling the peer its HPACK state is
+        unusable invites it to throw away a connection pool over our defect."""
+        c = _client(reader=_BlockingReader(
+            self._wire(FrameTypes.DATA, 0, 1, b'hello')))
+        sent = self._capture(c)
+
+        def _boom(_data):
+            raise TypeError("'NoneType' object is not subscriptable")
+
+        c._factory.load = _boom            # type: ignore[method-assign]
+
+        await asyncio.wait_for(c._receive_loop(), timeout=1.0)
+
+        goaway = self._goaway(sent)
+        assert goaway, 'a parser bug ended the connection without a GOAWAY'
+        assert goaway[-1].error_code == ErrorCodes.INTERNAL_ERROR
+
+    # -- the blast radius each section assigns ---------------------------
+
+    async def test_a_malformed_rst_stream_is_not_answered_with_a_rst_stream(self):
+        """§6.4 makes this a *connection* error, and §5.4.2 forbids answering
+        a RST_STREAM with a RST_STREAM.  The wire is synchronised here — the
+        payload was read in full — so a stream error would be available; the
+        RFC simply does not assign one."""
+        c, sent = await self._drive(
+            self._wire(FrameTypes.RST_STREAM, 0, 1, b'\x00\x00\x00'))
+
+        assert not [f for f in sent if f.FrameType() == FrameTypes.RST_STREAM], (
+            'a malformed RST_STREAM was answered with a RST_STREAM')
+        assert c._connection_lost, 'the connection was left usable'
+
+    async def test_every_named_refusal_still_ends_the_connection(self):
+        """Nothing narrows.  §6.1, §6.4, §6.7 and §4.3 all say connection
+        error, so the only thing this changes is which reason is given."""
+        cases = {
+            'RST_STREAM': self._wire(FrameTypes.RST_STREAM, 0, 1, b'\x00' * 3),
+            'PING': self._wire(FrameTypes.PING, 0, 0, b'\x00' * 7),
+            'DATA': self._wire(FrameTypes.DATA, 0x8, 1, bytes([255, 1, 2])),
+            'HEADERS': self._wire(FrameTypes.HEADERS, 0x5, 1, b'\xff' * 5),
+        }
+        for name, wire in cases.items():
+            c, sent = await self._drive(wire)
+            assert c._connection_lost, f'{name}: the connection survived'
+            assert c._failure, f'{name}: the refusal recorded no reason'
+            assert self._goaway(sent), f'{name}: no GOAWAY told the peer why'
+
+    async def test_a_well_formed_frame_of_each_kind_is_untouched(self):
+        """The control — a check that refuses conformant traffic is a defect."""
+        c = _client(reader=_BlockingReader(
+            self._wire(FrameTypes.RST_STREAM, 0, 1, b'\x00' * 4)
+            + self._wire(FrameTypes.PING, 0, 0, b'\x00' * 8)))
+        sent = self._capture(c)
+
+        first = await asyncio.wait_for(c._receive_frame(), timeout=1.0)
+        second = await asyncio.wait_for(c._receive_frame(), timeout=1.0)
+
+        assert first is not None and first.FrameType() == FrameTypes.RST_STREAM
+        assert second is not None and second.FrameType() == FrameTypes.PING
+        assert not sent, 'a conformant frame was refused'

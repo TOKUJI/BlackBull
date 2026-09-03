@@ -921,6 +921,52 @@ async def test_client_raw_queue_depth_logs_on_http2(caps_caplog, monkeypatch):
 
 
 # ----------------------------------------------------------------------
+# client_h2_max_frame_size — the HTTP/2 frame, refused before it is read
+# ----------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_client_h2_max_frame_size_logs_on_http2(caps_caplog, monkeypatch):
+    """A 9-byte header declaring more than the client's effective
+    SETTINGS_MAX_FRAME_SIZE.  The payload is never sent, and never read:
+    the record is written from the declared length alone."""
+    from blackbull.client.http2 import HTTP2Client, _ConnectionFailed
+    from blackbull.protocol.frame_types import FrameTypes
+    from blackbull.server.recipient import AbstractReader
+
+    monkeypatch.setenv('BB_CLIENT_H2_MAX_FRAME_SIZE', '1024')
+
+    class _Header(AbstractReader):
+        def __init__(self, data: bytes) -> None:
+            self._buf = bytearray(data)
+
+        async def readexactly(self, n: int) -> bytes:
+            if len(self._buf) < n:
+                raise AssertionError('the refused payload was read')
+            out = bytes(self._buf[:n])
+            del self._buf[:n]
+            return out
+
+        async def read(self, n: int = -1) -> bytes:
+            return await self.readexactly(max(n, 0))
+
+    c = HTTP2Client('localhost', 1)
+    c._reader = _Header((4096).to_bytes(3, 'big') + FrameTypes.DATA
+                        + bytes([0]) + (1).to_bytes(4, 'big'))
+
+    async def _sink(_frame):
+        pass
+
+    c._control_sender = _sink
+    with pytest.raises(_ConnectionFailed):
+        await c._receive_frame()
+
+    records = _records_for(caps_caplog, 'client_h2_max_frame_size')
+    assert records and records[0].protocol == 'http2'
+    assert records[0].limit == 1024
+    assert records[0].requested == 4096
+
+
+# ----------------------------------------------------------------------
 # Wiring audit — every cap in the inventory appears at >= 1 log_cap_hit()
 # call in the codebase.  Static check; catches "removed wiring without
 # noticing" regressions even when a functional test happens to skip.
@@ -954,6 +1000,8 @@ _INVENTORY = (
     'client_head_timeout',
     # HTTP/2 only: HTTP/1.1 has no raw-stream escape hatch to bound.
     'client_raw_queue_depth',
+    # HTTP/2 only: the frame is the unit HTTP/1.1 does not have.
+    'client_h2_max_frame_size',
 )
 
 

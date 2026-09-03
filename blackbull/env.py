@@ -886,11 +886,11 @@ class Settings:
     #: are not flow-controlled at all, and RFC 9113 §6.9.1 charges only a DATA
     #: frame's payload — so a zero-length DATA frame buys depth for free.
     #: DATA bytes are held to the window regardless, being credited on drain;
-    #: the **unit** — a receive-side frame-size check the client does not yet
-    #: make — is unowned, so for every other frame type here depth times an
-    #: unbounded frame is still unbounded bytes.  The **count** axis proper, a
-    #: sustained flood of such frames, wants the ``RateWindow`` the server
-    #: already meters empty frames with; the client has none.
+    #: every other frame type here is bounded by the **unit**,
+    #: ``client_h2_max_frame_size``, so depth times that size is the ceiling.
+    #: The **count** axis proper, a sustained flood of such frames, wants the
+    #: ``RateWindow`` the server already meters empty frames with; the client
+    #: has none.
     #:
     #: 1024 is the server's own number for this shape — its consume-credited
     #: queue caps the frame count at ``stream_queue_depth`` x 16 — because a
@@ -900,6 +900,32 @@ class Settings:
     #: stream carrying WebSocket bytes cannot be dropped without corrupting
     #: it, so this cap resets and must not fire on legal traffic.
     client_raw_queue_depth: int = 1024
+
+    #: Maximum octets in one inbound HTTP/2 frame payload the async client
+    #: will read.  Judged from the 3-byte length in the frame header, so an
+    #: over-sized frame is refused *before* its payload is read and a
+    #: peer-declared number never sizes an allocation.  0 disables.
+    #:
+    #: This is the triad's **unit** for the HTTP/2 client.  The **total**
+    #: belongs to ``client_head_max_total`` (field blocks),
+    #: ``client_body_max_total`` (bodies) and ``client_raw_queue_depth`` (the
+    #: raw-stream queue); the **time** to ``client_head_timeout``,
+    #: ``client_body_timeout`` and the frame-read deadline.
+    #:
+    #: A receive-side check, not an announcement.  RFC 9113 §6.5.2 makes
+    #: 16384 the *initial* SETTINGS_MAX_FRAME_SIZE, in force from connection
+    #: start, and the client's empty SETTINGS advertises nothing larger — so
+    #: the default is the one value that neither refuses a conforming peer
+    #: (below it) nor accepts what was never advertised (above it).  Move it
+    #: only to give a fault-injection scenario the peer it needs.
+    #:
+    #: Breach is a **connection** error of type FRAME_SIZE_ERROR even on a
+    #: non-zero stream, which RFC 9113 §4.2 would let us refuse per stream:
+    #: refusing before the read leaves the payload in the socket, so the next
+    #: frame header would be read from the middle of it.  Draining first to
+    #: keep the stream option open would make the refusal cost whatever the
+    #: peer declared.
+    client_h2_max_frame_size: int = 16384
 
     #: Dual-path conformance lane.  When true, every request
     #: round-trips the native :class:`~blackbull.connection.Connection` through
@@ -1202,6 +1228,8 @@ def get_settings() -> Settings:
             'BB_CLIENT_MAX_INTERIM_RESPONSES', 8),
         client_raw_queue_depth=_int_env_nonneg(
             'BB_CLIENT_RAW_QUEUE_DEPTH', 1024),
+        client_h2_max_frame_size=_int_env_nonneg(
+            'BB_CLIENT_H2_MAX_FRAME_SIZE', 16384),
         force_asgi_scope=_bool_env('BB_FORCE_ASGI_SCOPE', False),
         body_chunk_size=_int_env('BB_BODY_CHUNK_SIZE', 65536),
         body_chunk_max=_int_env('BB_BODY_CHUNK_MAX', 524288),
