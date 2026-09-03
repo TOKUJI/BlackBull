@@ -157,7 +157,7 @@ async def test_bodyless_status_ignores_misleading_framing(status, reason):
     )
 
     response = await HTTP1ResponseRecipient().receive(
-        reader, request_method='GET', skip_interim=False)
+        reader, method='GET', skip_interim=False)
 
     assert response.status == status
     assert response.body == b''
@@ -766,6 +766,29 @@ async def test_response_field_prohibited_controls_retire_connection(value):
 
     assert client._framing_broken is True
     assert raw.close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_every_octet_is_judged_by_the_rule_and_not_by_a_sample():
+    """RFC 9110 §5.5 admits HTAB, VCHAR and obs-text — and nothing else.
+
+    The samples above name the octets an attacker reaches for.  This one
+    names the rule, so any rewrite of the check (a comprehension, a
+    translation table) has to answer for all 256 rather than for the seven
+    that were thought of.
+    """
+    for octet in range(256):
+        value = b'a' + bytes([octet]) + b'b'
+        reader = _Reader(_head(200, headers=b'X-Test: ' + value
+                               + b'\r\nContent-Length: 0\r\n'))
+        recipient = HTTP1ResponseRecipient('GET')
+
+        if (octet < 0x20 and octet != 0x09) or octet == 0x7f:
+            with pytest.raises(ProtocolError):
+                await recipient.receive(reader)
+        else:
+            response = await recipient.receive(reader)
+            assert response.headers.get(b'x-test') == value
 
 
 @pytest.mark.asyncio

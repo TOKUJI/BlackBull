@@ -76,6 +76,12 @@ _HEXDIG = frozenset(b'0123456789abcdefABCDEF')
 _TCHAR = frozenset(
     b"!#$%&'*+-.^_`|~"
     b'0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz')
+
+#: RFC 9110 §5.5 field-value: HTAB, VCHAR and obs-text.  Deleting these from a
+#: value leaves exactly the octets it may not carry, so the whole check is one
+#: C-level ``translate`` rather than one Python step per octet.
+_FIELD_VCHAR = (bytes([0x09]) + bytes(range(0x20, 0x7f))
+                + bytes(range(0x80, 0x100)))
 # Empty list members are tolerated for interoperability, but the parser must
 # not spend unbounded work on a peer sending only commas.  The head-size budget
 # remains the total byte bound; this is only a small structural sanity bound.
@@ -332,7 +338,6 @@ class HTTP1ResponseRecipient:
             self, reader: AbstractReader, *,
             method: str | bytes | HTTPMethod | None = None,
             skip_interim: bool = True,
-            request_method: str | bytes | HTTPMethod | None = None,
     ) -> ClientResponse:
         """Read one final response, optionally exposing an interim response.
 
@@ -341,16 +346,14 @@ class HTTP1ResponseRecipient:
         protocol-switch semantics.  The low-level fault-injection API passes
         ``skip_interim=False`` so each peer message remains observable.
 
-        ``method=`` is the public spelling introduced with response-length
-        framing.  ``request_method=`` and the constructor value remain
-        accepted for compatibility with direct recipient users.
+        ``method=`` overrides the constructor's, for a caller that knows it
+        only at the read.
         """
         self._refuse_if_broken()
         try:
             status, headers, framing = await self._read_head_and_policy(
-                reader, skip_interim=skip_interim, method=method,
-                request_method=request_method)
-            body = await self._read_body(reader, headers, framing=framing)
+                reader, skip_interim=skip_interim, method=method)
+            body = await self._read_body(reader, framing)
         except BaseException:
             # Every refusal below this point leaves unread octets behind, and
             # a peer whose body is itself a well-formed response gets one
@@ -364,7 +367,6 @@ class HTTP1ResponseRecipient:
     async def stream(
             self, reader: AbstractReader, *,
             method: str | bytes | HTTPMethod | None = None,
-            request_method: str | bytes | HTTPMethod | None = None,
     ) -> AsyncIterator[bytes]:
         # Body-only streaming: callers that need status/headers should use
         # ``receive``.  Yielding the start-line as the first item would force
@@ -373,10 +375,9 @@ class HTTP1ResponseRecipient:
         # whether there is a body to yield at all.
         self._refuse_if_broken()
         try:
-            _status, headers, framing = await self._read_head_and_policy(
-                reader, method=method, request_method=request_method)
-            async for chunk in self._stream_body(
-                    reader, headers, framing=framing):
+            _status, _headers, framing = await self._read_head_and_policy(
+                reader, method=method)
+            async for chunk in self._stream_body(reader, framing):
                 yield chunk
         except BaseException:
             self.framing_broken = True
@@ -475,14 +476,10 @@ class HTTP1ResponseRecipient:
             name, separator, value = line.partition(b':')
             if not separator:
                 raise ProtocolError(f'malformed response field: {line!r}')
-            # RFC 9110 field-value permits SP/HTAB as OWS at the boundaries.
-            # bytes.strip() also removes VT, FF, CR and LF, which can turn an
-            # invalid value into a valid framing instruction (for example,
-            # VT + "chunked").  Preserve those octets long enough to reject
-            # them consistently for every response field.
+            # bytes.strip() would also take VT, FF, CR and LF, turning an
+            # invalid value into a valid framing instruction (VT + "chunked").
             value = value.strip(b' \t')
-            if any(((octet < 0x20 and octet != 0x09) or octet == 0x7f)
-                   for octet in value):
+            if value.translate(None, _FIELD_VCHAR):
                 raise ProtocolError(
                     f'prohibited control in response field {name!r}')
             pairs.append((name.strip(b' \t').lower(), value))
@@ -766,7 +763,6 @@ class HTTP1ResponseRecipient:
     async def _read_head_and_policy(
             self, reader: AbstractReader, *, skip_interim: bool = True,
             method: str | bytes | HTTPMethod | None = None,
-            request_method: str | bytes | HTTPMethod | None = None,
     ) -> tuple[int, Headers, tuple[str, int | None, bool, bool]]:
         """Read the head and settle everything the body read must not decide."""
         version, status, headers = await self._read_start(
@@ -774,26 +770,19 @@ class HTTP1ResponseRecipient:
         self.http_version = version
         response_persistent = self._response_is_persistent(version, headers)
         self.response_persistent = response_persistent
-        effective_method = (request_method if request_method is not None
-                            else method if method is not None
-                            else self.request_method)
-        framing = self._body_framing(status, headers, effective_method)
-        self._record_framing(framing, request_method=effective_method,
+        request_method = (method if method is not None
+                          else self.request_method)
+        framing = self._body_framing(status, headers, request_method)
+        self._record_framing(framing, request_method=request_method,
                              response_persistent=response_persistent)
         return status, headers, framing
 
-    async def _read_body(self, reader: AbstractReader, headers: Headers,
-                         *, status: int | None = None,
-                         request_method: str | bytes | HTTPMethod | None = None,
-                         framing: tuple[str, int | None, bool, bool] | None = None
-                         ) -> bytes:
+    async def _read_body(self, reader: AbstractReader,
+                         framing: tuple[str, int | None, bool, bool]) -> bytes:
         # The total lives here and not in ``_read_chunked``, which
         # ``_stream_body`` shares: this is the path that accumulates, and the
         # other one exists precisely so a large response need not.
         max_total = get_settings().client_body_max_total
-        if framing is None:
-            framing = self._body_framing(
-                status if status is not None else 200, headers, request_method)
         mode, declared, _reusable, _tunnel = framing
         if mode == 'none':
             return b''
@@ -816,13 +805,8 @@ class HTTP1ResponseRecipient:
                          self._read_close_delimited(reader, max_total)])
 
     async def _stream_body(self, reader: AbstractReader,
-                           headers: Headers, *, status: int | None = None,
-                           request_method: str | bytes | HTTPMethod | None = None,
-                           framing: tuple[str, int | None, bool, bool] | None = None
+                           framing: tuple[str, int | None, bool, bool]
                            ) -> AsyncIterator[bytes]:
-        if framing is None:
-            framing = self._body_framing(
-                status if status is not None else 200, headers, request_method)
         mode, declared, _reusable, _tunnel = framing
         if mode == 'none':
             return

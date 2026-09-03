@@ -16,7 +16,6 @@ import pytest
 
 from blackbull.client.exceptions import ProtocolError
 from blackbull.client.http1 import HTTP1ResponseRecipient
-from blackbull.headers import Headers
 from blackbull.server.recipient import AbstractReader
 
 pytestmark = pytest.mark.asyncio
@@ -53,9 +52,13 @@ class _Reader(AbstractReader):
         return chunk
 
 
-def _client() -> HTTP1ResponseRecipient:
+def _recipient() -> HTTP1ResponseRecipient:
     """The recipient owns response framing; the client just drives it."""
     return HTTP1ResponseRecipient()
+
+
+def _response(fields: bytes, body: bytes = b'') -> bytes:
+    return b'HTTP/1.1 200 OK\r\n' + fields + b'\r\n' + body
 
 
 # ===========================================================================
@@ -71,22 +74,19 @@ class TestConflictingContentLength:
         (`_validate_message_framing`); a client that does not refuse it on
         the response side is the same defect facing the other way.
         """
-        c = _client()
-        headers = Headers([(b'content-length', b'5'),
-                           (b'content-length', b'10')])
-        reader = _Reader(b'HELLOSURPLUS!')
+        reader = _Reader(_response(
+            b'content-length: 5\r\ncontent-length: 10\r\n', b'HELLOSURPLUS!'))
 
         with pytest.raises(ProtocolError):
-            await c._read_body(reader, headers, status=200)
+            await _recipient().receive(reader)
 
     async def test_the_comma_combined_form_is_refused_too(self):
         """One header line, two values — the same conflict, different spelling."""
-        c = _client()
-        headers = Headers([(b'content-length', b'5, 10')])
-        reader = _Reader(b'HELLOSURPLUS!')
+        reader = _Reader(_response(b'content-length: 5, 10\r\n',
+                                   b'HELLOSURPLUS!'))
 
         with pytest.raises(ProtocolError):
-            await c._read_body(reader, headers, status=200)
+            await _recipient().receive(reader)
 
     async def test_repeated_but_equal_lengths_are_accepted(self):
         """RFC 9110 §8.6 permits the repeat when the values agree.
@@ -95,18 +95,19 @@ class TestConflictingContentLength:
         server applies exactly this rule to requests, including the leading
         -zero normalisation.
         """
-        c = _client()
-        headers = Headers([(b'content-length', b'5'),
-                           (b'content-length', b'005')])
-        reader = _Reader(b'HELLO')
+        reader = _Reader(_response(
+            b'content-length: 5\r\ncontent-length: 005\r\n', b'HELLO'))
 
-        assert await c._read_body(reader, headers, status=200) == b'HELLO'
+        response = await _recipient().receive(reader)
+
+        assert response.body == b'HELLO'
 
     async def test_a_single_length_still_works(self):
-        c = _client()
-        headers = Headers([(b'content-length', b'5')])
-        assert await c._read_body(_Reader(b'HELLO'), headers,
-                          status=200) == b'HELLO'
+        reader = _Reader(_response(b'content-length: 5\r\n', b'HELLO'))
+
+        response = await _recipient().receive(reader)
+
+        assert response.body == b'HELLO'
 
 
 # ===========================================================================
@@ -121,12 +122,11 @@ class TestStreamingIsIncremental:
         bound streaming exists to provide is absent on exactly the path
         that needs it.
         """
-        c = _client()
         body = b'x' * 200_000
-        headers = Headers([(b'content-length', str(len(body)).encode())])
+        reader = _Reader(_response(
+            b'content-length: %d\r\n' % len(body), body))
 
-        chunks = [chunk async for chunk in
-                  c._stream_body(_Reader(body), headers, status=200)]
+        chunks = [chunk async for chunk in _recipient().stream(reader)]
 
         assert b''.join(chunks) == body
         assert len(chunks) > 1, (
@@ -134,18 +134,17 @@ class TestStreamingIsIncremental:
             f'stream() buffered the whole response')
 
     async def test_a_short_body_is_still_one_chunk(self):
-        c = _client()
-        headers = Headers([(b'content-length', b'5')])
-        chunks = [chunk async for chunk in
-                  c._stream_body(_Reader(b'HELLO'), headers, status=200)]
+        reader = _Reader(_response(b'content-length: 5\r\n', b'HELLO'))
+
+        chunks = [chunk async for chunk in _recipient().stream(reader)]
+
         assert chunks == [b'HELLO']
 
     async def test_streaming_refuses_a_conflicting_length_too(self):
         """The two defects meet here: streaming must not trust value one
         either."""
-        c = _client()
-        headers = Headers([(b'content-length', b'5'),
-                           (b'content-length', b'10')])
+        reader = _Reader(_response(
+            b'content-length: 5\r\ncontent-length: 10\r\n', b'HELLOSURPLUS!'))
+
         with pytest.raises(ProtocolError):
-            [chunk async for chunk in c._stream_body(_Reader(b'HELLOSURPLUS!'),
-                                                     headers, status=200)]
+            [chunk async for chunk in _recipient().stream(reader)]
