@@ -7906,6 +7906,10 @@ WebSocket frames (carried in DATA frames after RFC 8441
 Extended CONNECT) without racing the receive loop.</p>
 <p>Returning a fresh queue each call is intentional — registering
 the same stream twice would be a programming error.</p>
+<p>The depth is <code>client_raw_queue_depth</code>.  Flow control does not
+substitute for it: most of what lands here is not flow-controlled,
+and RFC 9113 §6.9.1 charges a DATA frame's payload only, so a
+zero-length one costs the peer no credit at all.</p>
 
 
     </div>
