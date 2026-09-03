@@ -891,6 +891,36 @@ async def test_client_max_interim_responses_logs(caps_caplog, monkeypatch):
 
 
 # ----------------------------------------------------------------------
+# client_raw_queue_depth — the raw-stream escape hatch's own queue
+# ----------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_client_raw_queue_depth_logs_on_http2(caps_caplog, monkeypatch):
+    """A raw stream whose registrant does not drain.  Zero-length DATA is the
+    shape that reaches it for free: RFC 9113 §6.9.1 charges the payload, so
+    flow control never sees the frames pile up."""
+    from blackbull.client.http2 import HTTP2Client
+    from blackbull.protocol.frame_types import FrameTypes
+
+    monkeypatch.setenv('BB_CLIENT_RAW_QUEUE_DEPTH', '2')
+    c = HTTP2Client('localhost', 1)
+
+    async def _sink(_frame):
+        pass
+
+    c._control_sender = _sink
+    queue = c.register_raw_stream(1)
+    for _ in range(2):
+        queue.put_nowait(c._factory.create(FrameTypes.DATA, 0, 1, data=b''))
+    await c._refuse_raw_stream(
+        c._factory.create(FrameTypes.DATA, 0, 1, data=b''))
+
+    records = _records_for(caps_caplog, 'client_raw_queue_depth')
+    assert records and records[0].protocol == 'http2'
+    assert records[0].limit == 2
+
+
+# ----------------------------------------------------------------------
 # Wiring audit — every cap in the inventory appears at >= 1 log_cap_hit()
 # call in the codebase.  Static check; catches "removed wiring without
 # noticing" regressions even when a functional test happens to skip.
@@ -922,6 +952,8 @@ _INVENTORY = (
     # unwired — see BLA-302, and note this audit is by *name*, so it
     # cannot see that gap.
     'client_head_timeout',
+    # HTTP/2 only: HTTP/1.1 has no raw-stream escape hatch to bound.
+    'client_raw_queue_depth',
 )
 
 

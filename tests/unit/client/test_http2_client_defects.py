@@ -409,3 +409,196 @@ class TestRawStreamTeardown:
 
         assert queue.empty(), 'a stream that had already left was signalled'
         assert c._raw_streams == {}
+
+
+# ===========================================================================
+# bounds 6 — the raw-stream queue is unbounded, and flow control does not
+#            bound it: RFC 9113 §6.9.1 charges the payload only, so a
+#            zero-length DATA frame buys queue depth for free
+# ===========================================================================
+
+class TestRawStreamQueueDepth:
+    """``register_raw_stream`` handed out an unbounded queue, and every frame
+    on that stream but WINDOW_UPDATE and SETTINGS lands in it.  A peer that
+    sends faster than the registrant drains — or one that sends frames costing
+    it no flow-control credit at all — grows that queue with nothing to stop
+    it, and the bound that stops it must refuse the one stream rather than the
+    connection every other stream is riding on.
+    """
+
+    @staticmethod
+    def _capture(c: HTTP2Client) -> list:
+        """Collect the frames the client sends to the peer."""
+        sent: list = []
+
+        async def _send(frame):
+            sent.append(frame)
+
+        c._control_sender = _send
+        return sent
+
+    @staticmethod
+    def _data(c: HTTP2Client, stream_id: int, payload: bytes = b'') -> bytes:
+        return c._factory.create(
+            FrameTypes.DATA, 0, stream_id, data=payload).save()
+
+    @staticmethod
+    async def _wait_until(pred, timeout: float = 1.0) -> None:
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        while not pred() and loop.time() < deadline:
+            await asyncio.sleep(0.001)
+
+    @staticmethod
+    async def _end(c: HTTP2Client, task) -> None:
+        c._reader.close()
+        await task
+
+    def _flood(self, monkeypatch, depth: int, frames: int,
+               payload: bytes = b''):
+        """Two raw streams; only the first is flooded.  Returns the client,
+        the receive-loop task, the frames sent to the peer and both queues.
+        """
+        monkeypatch.setenv('BB_CLIENT_RAW_QUEUE_DEPTH', str(depth))
+        c = _client(reader=_BlockingReader())
+        sent = self._capture(c)
+        flooded = c.register_raw_stream(1)
+        quiet = c.register_raw_stream(3)
+        c._reader.feed(self._data(c, 3, b'ok')
+                       + b''.join(self._data(c, 1, payload)
+                                  for _ in range(frames)))
+        return c, asyncio.ensure_future(c._receive_loop()), sent, flooded, quiet
+
+    async def test_the_flooded_stream_is_refused_and_its_consumer_woken(
+            self, monkeypatch):
+        """The queue fills, so the stream goes — and its consumer is told,
+        rather than left parked on a queue nothing will fill again.  That the
+        *connection* survives is the next test's claim."""
+        c, task, _sent, flooded, _quiet = self._flood(monkeypatch, 4, 8)
+        session = WebSocketH2Session(c, FrameFactory(), 1, flooded)
+        await self._wait_until(lambda: 1 not in c._raw_streams)
+
+        assert 1 not in c._raw_streams, 'the flooded stream was not refused'
+        opcode, close = await session.receive(timeout=1.0)
+        assert (opcode, close) == (WSOpcode.CLOSE, struct.pack('>H', 1006))
+        await self._end(c, task)
+
+    async def test_the_peer_is_told_to_slow_down(self, monkeypatch):
+        """RFC 9113 §7 ENHANCE_YOUR_CALM — the peer is generating load faster
+        than this end consumes it, which is what that code is for and what the
+        header-aggregate breach already sends."""
+        c, task, sent, _flooded, _quiet = self._flood(monkeypatch, 4, 8)
+        await self._wait_until(lambda: 1 not in c._raw_streams)
+
+        resets = [f for f in sent if f.FrameType() == FrameTypes.RST_STREAM]
+        assert [(f.stream_id, f.error_code) for f in resets] == [
+            (1, ErrorCodes.ENHANCE_YOUR_CALM)]
+        await self._end(c, task)
+
+    async def test_the_other_stream_on_that_connection_is_untouched(
+            self, monkeypatch):
+        """The point of the bound: one stream refused, never the connection.
+
+        The receive loop must still be running, the well-behaved stream still
+        registered and unsignalled, and still fed by the loop afterwards.
+        """
+        c, task, _sent, _flooded, quiet = self._flood(monkeypatch, 4, 8)
+        await self._wait_until(lambda: 1 not in c._raw_streams)
+
+        assert 1 not in c._raw_streams, 'the flood was never refused'
+        assert not task.done(), 'one stream\'s bound ended the receive loop'
+        assert 3 in c._raw_streams, 'the well-behaved stream was dropped too'
+        assert quiet.qsize() == 1, 'the well-behaved stream was signalled too'
+        assert quiet.get_nowait().FrameType() == FrameTypes.DATA
+
+        c._reader.feed(self._data(c, 3, b'more'))
+        await self._wait_until(lambda: quiet.qsize() == 1)
+        assert quiet.qsize() == 1, 'the well-behaved stream stopped receiving'
+        await self._end(c, task)
+
+    async def test_teardown_signals_every_stream_past_a_full_one(
+            self, monkeypatch):
+        """The C-M6 regression guard.
+
+        ``_end_raw_streams`` wakes a parked consumer with a synthetic
+        RST_STREAM, and it runs in the receive loop's ``finally``.  A bound
+        makes that ``put_nowait`` raise on a full queue, which leaves every
+        later stream unsignalled, the registry uncleared, and the exception
+        escaping the loop.
+        """
+        monkeypatch.setenv('BB_CLIENT_RAW_QUEUE_DEPTH', '2')
+        reader = _BlockingReader()
+        c = _client(reader=reader)
+        full = c.register_raw_stream(1)
+        later = c.register_raw_stream(3)
+        for _ in range(2):
+            full.put_nowait(c._factory.create(FrameTypes.DATA, 0, 1, data=b''))
+        assert full.full()
+
+        loop_task = asyncio.ensure_future(c._receive_loop())
+        reader.close()
+        await loop_task
+
+        assert c._raw_streams == {}, 'the registry leaked past a full queue'
+        assert full.get_nowait().FrameType() == FrameTypes.RST_STREAM
+        assert later.get_nowait().FrameType() == FrameTypes.RST_STREAM
+
+    async def test_a_clean_teardown_keeps_what_already_arrived(
+            self, monkeypatch):
+        """Displacement is for a full queue only.  A consumer merely behind
+        must still be able to drain the frames the peer really sent."""
+        monkeypatch.setenv('BB_CLIENT_RAW_QUEUE_DEPTH', '4')
+        c = _client()
+        queue = c.register_raw_stream(1)
+        for payload in (b'a', b'b'):
+            queue.put_nowait(
+                c._factory.create(FrameTypes.DATA, 0, 1, data=payload))
+
+        c._end_raw_streams()
+
+        assert [queue.get_nowait().payload for _ in range(2)] == [b'a', b'b']
+        assert queue.get_nowait().FrameType() == FrameTypes.RST_STREAM
+
+    async def test_displaced_payload_still_returns_connection_credit(
+            self, monkeypatch):
+        """RFC 9113 §6.9 — the connection window is shared by every stream.
+
+        A raw stream's DATA is credited when its consumer drains it, so a
+        refusal that discards the backlog and keeps its credit shrinks the
+        window for every other stream: refusing one stream by stalling the
+        rest.  Same rule ``_on_response_data`` follows for a stream it no
+        longer tracks.
+        """
+        from blackbull.client.http2 import _WINDOW_UPDATE_THRESHOLD
+
+        c, task, sent, _flooded, _quiet = self._flood(
+            monkeypatch, 4, 5, b'x' * (_WINDOW_UPDATE_THRESHOLD // 4 + 1))
+        await self._wait_until(lambda: 1 not in c._raw_streams)
+
+        credit = [f for f in sent
+                  if f.FrameType() == FrameTypes.WINDOW_UPDATE
+                  and f.stream_id == 0]
+        assert credit, 'the displaced payload kept the connection window'
+        await self._end(c, task)
+
+    async def test_zero_disables_the_bound(self, monkeypatch):
+        """The escape hatch, and the behaviour every existing raw-stream
+        consumer had before the bound."""
+        c, task, sent, flooded, _quiet = self._flood(monkeypatch, 0, 200)
+        await self._wait_until(lambda: flooded.qsize() == 200)
+
+        assert flooded.qsize() == 200
+        assert 1 in c._raw_streams
+        assert not [f for f in sent if f.FrameType() == FrameTypes.RST_STREAM]
+        await self._end(c, task)
+
+    async def test_traffic_under_the_bound_is_untouched(self, monkeypatch):
+        """The control — a bound that refuses conformant traffic is a defect,
+        not a defence."""
+        c, task, sent, flooded, _quiet = self._flood(monkeypatch, 8, 6)
+        await self._wait_until(lambda: flooded.qsize() == 6)
+
+        assert flooded.qsize() == 6
+        assert 1 in c._raw_streams
+        assert not [f for f in sent if f.FrameType() == FrameTypes.RST_STREAM]
+        await self._end(c, task)
