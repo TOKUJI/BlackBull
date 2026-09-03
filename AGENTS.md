@@ -213,8 +213,10 @@ moving a file to `archives/` used to mean.  Nothing is relocated and nothing is
 deleted, so a superseded proposal stays readable rather than disappearing from
 a git-ignored tree.
 
-An item that stops being touched no longer drifts unnoticed: a scheduled rule
-tags anything unresolved and `active` that has gone thirty days without an
-update.  That report is the reason the material moved — the file layout could
-record a status line but could not tell anyone the status had stopped being
-true.
+There is deliberately **no age-based staleness rule**.  One existed — a
+scheduled rule tagging anything unresolved and `active` after thirty days
+without an update — and it was withdrawn: against a backlog of this size and a
+closure rate that keeps the count roughly flat, it labelled most of the
+tracker, and a label most items carry says nothing.  Age is not evidence that
+an item has stopped being true.  What an item is worth is read from `Priority`
+and from the triage query above, both of which someone has to think about.
