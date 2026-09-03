@@ -83,6 +83,17 @@ class _Paced(AbstractReader):
         return out
 
 
+class _AfterHeadPaced(_Paced):
+    """The head is already parsed before scripted body wait begins."""
+
+    def __init__(self, clock: _Clock, script: list[tuple[float, bytes]]) -> None:
+        super().__init__(clock, script)
+        self._head = b'HTTP/1.1 200 OK\r\n\r\n'
+
+    async def read_head(self, limit: int) -> bytes:
+        return self._head
+
+
 def _fixed(pieces: list[tuple[float, bytes]]) -> list[tuple[float, bytes]]:
     total = sum(len(data) for _, data in pieces)
     head = b'HTTP/1.1 200 OK\r\ncontent-length: %d\r\n\r\n' % total
@@ -98,6 +109,11 @@ def _chunked(pieces: list[tuple[float, bytes]], *, ext: bytes = b'',
         script.append((gap, b'%x' % len(data) + ext + b'\r\n' + data + b'\r\n'))
     script.append((last_gap, b'0\r\n\r\n'))
     return script
+
+
+def _close_delimited(pieces: list[tuple[float, bytes]]) -> list[tuple[float, bytes]]:
+    """A close-delimited response, including a separately timed EOF read."""
+    return [(0.0, b'HTTP/1.1 200 OK\r\n\r\n'), *pieces]
 
 
 def _steady(count: int, size: int, gap: float) -> list[tuple[float, bytes]]:
@@ -229,3 +245,31 @@ class TestCallerTimeIsNotPeerTime:
             clock.now += 60.0  # the caller thinks for a minute per chunk
             body += chunk
         assert len(body) == 12000
+
+
+class TestCloseDelimitedCompletion:
+    """EOF is a body-read boundary after the first close-delimited byte."""
+
+    @_PATHS
+    async def test_terminal_eof_wait_is_charged_to_enabled_floor(
+            self, path, clock, monkeypatch):
+        _enable(monkeypatch)
+        script = _close_delimited([(0.0, b'x'), (2.0, b'')])
+        with pytest.raises(TimeoutError, match='BB_CLIENT_MIN_BODY_RATE'):
+            await _body_via(path, _Paced(clock, script))
+
+    @_PATHS
+    async def test_terminal_eof_completes_when_floor_disabled(
+            self, path, clock, monkeypatch):
+        monkeypatch.setenv('BB_CLIENT_MIN_BODY_RATE', '0')
+        script = _close_delimited([(0.0, b'x'), (2.0, b'')])
+        assert await _body_via(path, _Paced(clock, script)) == b'x'
+
+    @_PATHS
+    async def test_first_byte_think_time_remains_exempt(
+            self, path, clock, monkeypatch):
+        _enable(monkeypatch)
+        # read_head() returns first; the ten-second wait is in the first body
+        # read, where the exemption must apply.
+        script = [(10.0, b'x'), (0.0, b'')]
+        assert await _body_via(path, _AfterHeadPaced(clock, script)) == b'x'

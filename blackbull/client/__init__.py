@@ -1,5 +1,6 @@
 from .client import Client
-from .http1 import HTTP1Client, HTTP1RequestSender, HTTP1ResponseRecipient
+from .http1 import (HTTP1Client, HTTP1RequestSender, HTTP1ResponseRecipient,
+                    HTTP1UpgradeSession)
 from .http2 import ClientResponse, HTTP2Client
 from .response import ResponderFactory
 # The scenario primitives live in blackbull.fault_injection.
@@ -37,6 +38,7 @@ __all__ = [
     'HTTP1Client',
     'HTTP1RequestSender',
     'HTTP1ResponseRecipient',
+    'HTTP1UpgradeSession',
     'HTTP2Client',
     'ReadResponse',
     'ResponderFactory',

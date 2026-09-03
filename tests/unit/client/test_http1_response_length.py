@@ -424,12 +424,13 @@ class TestTheCodingListIsAList:
             await _within(HTTP1ResponseRecipient().receive(_Canned(wire)))
 
     @pytest.mark.asyncio
-    async def test_a_transfer_encoding_naming_no_coding_is_refused(self):
-        """``transfer-coding`` is a ``1#`` list, so a field whose elements are
-        all empty names none — a framing field that frames nothing."""
+    async def test_a_transfer_encoding_naming_no_coding_uses_close(self):
+        """Physical TE presence still overrides Content-Length semantics;
+        an empty parsed list therefore remains close-delimited."""
         wire = b'HTTP/1.1 200 OK\r\ntransfer-encoding: ,\r\n\r\nbody'
-        with pytest.raises(ProtocolError):
-            await _within(HTTP1ResponseRecipient().receive(_Canned(wire)))
+        response = await _within(
+            HTTP1ResponseRecipient().receive(_Canned(wire)))
+        assert response.body == b'body'
 
 
 # ----------------------------------------------------------------------
