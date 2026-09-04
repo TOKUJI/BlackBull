@@ -192,6 +192,12 @@ class SettingsResponder(Responder):
                 f'SETTINGS_MAX_FRAME_SIZE out of range: {mfs}')
             return
 
+        # RFC 9113 §6.5.2 — ENABLE_PUSH has an initial value of 1 and is
+        # connection-scoped.  Update only after all frame validation succeeds;
+        # an invalid SETTINGS frame must not partially mutate connection state.
+        if ep is not None:
+            handler._peer_enable_push = bool(ep)
+
         # RFC 9113 §6.9.2 — when SETTINGS_INITIAL_WINDOW_SIZE changes mid-
         # connection, adjust every active stream's send-window by the delta
         # (new − old).  This can drive an already-drained window negative,
@@ -339,4 +345,3 @@ class RstStreamResponder(Responder):
             handler._release_recipient_credit(released)
 
     FRAME_TYPE = FrameTypes.RST_STREAM
-

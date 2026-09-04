@@ -514,6 +514,54 @@ async def test_settings_responder_does_not_mutate_decoder_table_size():
     )
 
 
+@pytest.mark.asyncio
+async def test_settings_responder_tracks_peer_enable_push_state():
+    """Valid peer ENABLE_PUSH settings update the connection state."""
+    factory = FrameFactory()
+    handler = SimpleNamespace(
+        factory=factory,
+        _senders={},
+        _peer_initial_window_size=65535,
+        _peer_enable_push=True,
+        send_frame=AsyncMock(),
+    )
+
+    for value, expected in ((0, False), (1, True)):
+        wire = _make_h2_frame(
+            FrameTypes.SETTINGS,
+            SettingFrameFlags.INIT,
+            0,
+            (0x2).to_bytes(2, 'big') + value.to_bytes(4, 'big'),
+        )
+        await SettingsResponder(factory.load(wire)).respond(handler)
+        assert handler._peer_enable_push is expected
+
+
+@pytest.mark.asyncio
+async def test_invalid_enable_push_retains_state_and_connection_error():
+    """An invalid ENABLE_PUSH value remains a connection error."""
+    factory = FrameFactory()
+    handler = SimpleNamespace(
+        factory=factory,
+        _senders={},
+        _peer_initial_window_size=65535,
+        _peer_enable_push=False,
+        send_frame=AsyncMock(),
+        _connection_error=AsyncMock(),
+    )
+    wire = _make_h2_frame(
+        FrameTypes.SETTINGS,
+        SettingFrameFlags.INIT,
+        0,
+        (0x2).to_bytes(2, 'big') + (2).to_bytes(4, 'big'),
+    )
+
+    await SettingsResponder(factory.load(wire)).respond(handler)
+
+    assert handler._peer_enable_push is False
+    handler._connection_error.assert_awaited_once()
+
+
 # ---------------------------------------------------------------------------
 # DATA frame splitting — RFC 7540 §6.9 and §4.2
 # ---------------------------------------------------------------------------

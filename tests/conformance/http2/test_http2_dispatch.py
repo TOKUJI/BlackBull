@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 from hpack import Encoder
 
 from blackbull.server.http2_actor import HTTP2Actor
+from blackbull.server.response import SettingsResponder
 from blackbull.server.recipient import AbstractReader, IncompleteReadError
 from blackbull.server.sender import AsyncioWriter
 from blackbull.protocol.frame import FrameFactory
@@ -734,6 +735,9 @@ class TestHTTP2ServerPush:
         assert method == 'GET', (
             f"Pushed request must have method=GET; got {method!r}"
         )
+        push_ext = (push_conn['extensions'] if isinstance(push_conn, dict)
+                    else push_conn.extensions) or {}
+        assert 'http.response.push' not in push_ext
 
     async def test_scope_has_push_extension(self):
         """HTTP/2 scope must advertise 'http.response.push' in extensions."""
@@ -756,6 +760,114 @@ class TestHTTP2ServerPush:
         assert 'http.response.push' in exts, (
             f"conn.extensions must contain 'http.response.push'; got {exts!r}"
         )
+
+    async def test_peer_disable_push_drops_event_without_synthetic_request(self, caplog):
+        """ENABLE_PUSH=0 suppresses promise, task, allocation, and push scope."""
+        settings = _make_h2_frame(
+            FrameTypes.SETTINGS,
+            SettingFrameFlags.INIT,
+            0,
+            (0x2).to_bytes(2, 'big') + (0).to_bytes(4, 'big'),
+        )
+        h_frame = _make_headers_frame(stream_id=1, end_stream=True)
+        scopes = []
+
+        async def app(scope, receive, send):
+            scopes.append(scope)
+            await send({'type': 'http.response.push', 'path': '/late.css'})
+            await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+            await send({'type': 'http.response.body', 'body': b''})
+
+        handler, _ = _make_h2_actor(app=app)
+        handler.receive = AsyncMock(side_effect=[settings, h_frame, None])
+        with caplog.at_level('WARNING'):
+            await handler.run()
+
+        sent_types = [
+            call.args[0].FrameType()
+            for call in handler.send_frame.call_args_list
+            if hasattr(call.args[0], 'FrameType')
+        ]
+        assert FrameTypes.PUSH_PROMISE not in sent_types
+        assert len(scopes) == 1
+        assert handler._next_push_stream_id == 2
+        ext = scopes[0]['extensions'] if isinstance(scopes[0], dict) else scopes[0].extensions
+        assert 'http.response.push' not in (ext or {})
+        assert 'push' in caplog.text.lower()
+
+    async def test_late_disable_drops_push_before_allocation(self, caplog):
+        """A SETTINGS change after dispatch still cannot leak a promise."""
+        handler, _ = _make_h2_actor()
+        scopes = []
+
+        async def app(scope, receive, send):
+            scopes.append(scope)
+            # Apply a parsed valid peer SETTINGS update after this scope was
+            # built but before the application emits its push event.
+            settings = _make_h2_frame(
+                FrameTypes.SETTINGS,
+                SettingFrameFlags.INIT,
+                0,
+                (0x2).to_bytes(2, 'big') + (0).to_bytes(4, 'big'),
+            )
+            await SettingsResponder(handler.factory.load(settings)).respond(handler)
+            await send({'type': 'http.response.push', 'path': '/late.css'})
+            await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+            await send({'type': 'http.response.body', 'body': b''})
+
+        h_frame = _make_headers_frame(stream_id=1, end_stream=True)
+        handler.app = app
+        handler.receive = AsyncMock(side_effect=[h_frame, None])
+        with caplog.at_level('WARNING'):
+            await handler.run()
+
+        assert handler._next_push_stream_id == 2
+        assert len(scopes) == 1
+        sent_types = [
+            call.args[0].FrameType()
+            for call in handler.send_frame.call_args_list
+            if hasattr(call.args[0], 'FrameType')
+        ]
+        assert FrameTypes.PUSH_PROMISE not in sent_types
+        assert 'push' in caplog.text.lower()
+
+    async def test_peer_push_disable_then_enable_reenables_push(self):
+        """A valid ENABLE_PUSH=1 restores extension and promise emission."""
+        settings_off = _make_h2_frame(
+            FrameTypes.SETTINGS,
+            SettingFrameFlags.INIT,
+            0,
+            (0x2).to_bytes(2, 'big') + (0).to_bytes(4, 'big'),
+        )
+        settings_on = _make_h2_frame(
+            FrameTypes.SETTINGS,
+            SettingFrameFlags.INIT,
+            0,
+            (0x2).to_bytes(2, 'big') + (1).to_bytes(4, 'big'),
+        )
+        h_frame = _make_headers_frame(stream_id=1, end_stream=True)
+        scopes = []
+
+        async def app(scope, receive, send):
+            scopes.append(scope)
+            await send({'type': 'http.response.push', 'path': '/enabled.css'})
+            await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+            await send({'type': 'http.response.body', 'body': b''})
+
+        handler, _ = _make_h2_actor(app=app)
+        handler.receive = AsyncMock(side_effect=[settings_off, settings_on, h_frame, None])
+        await handler.run()
+
+        sent_types = [
+            call.args[0].FrameType()
+            for call in handler.send_frame.call_args_list
+            if hasattr(call.args[0], 'FrameType')
+        ]
+        assert FrameTypes.PUSH_PROMISE in sent_types
+        assert len(scopes) == 2
+        original_ext = (scopes[0]['extensions'] if isinstance(scopes[0], dict)
+                        else scopes[0].extensions) or {}
+        assert 'http.response.push' in original_ext
 
 
 # ---------------------------------------------------------------------------

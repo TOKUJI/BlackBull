@@ -46,6 +46,18 @@ class TestBuildExtensions:
         assert 'http.response.priority' in default_extensions
         assert 'http.response.http2_stream' in default_extensions
 
+    def test_omits_push_when_peer_does_not_permit_it(self):
+        ext = _build_h2_extensions(
+            stream_id=1,
+            priority=_DEFAULT_PRIORITY,
+            peer_initial_window=65535,
+            connection_window=65535,
+            peer_push_permitted=False,
+        )
+        assert ASGIEvent.HTTP_RESPONSE_PUSH not in ext
+        assert 'http.response.priority' in ext
+        assert 'http.response.http2_stream' in ext
+
     def test_push_marker_is_empty_dict(self, default_extensions):
         """Push is signalled by the *presence* of the key, not by
         contents — matches BlackBull's older behaviour."""

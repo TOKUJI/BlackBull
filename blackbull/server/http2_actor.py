@@ -107,13 +107,15 @@ def _build_h2_extensions(
     priority: dict,
     peer_initial_window: int,
     connection_window: int,
+    peer_push_permitted: bool = True,
 ) -> dict:
     """Return a freshly-built ``scope['extensions']`` dict for one HTTP/2 request.
 
     The shape:
 
-    - ``http.response.push`` — empty marker; signals the application can
-      send ``http.response.push`` events on this scope (existing behaviour).
+    - ``http.response.push`` — empty marker when the peer permits server push
+      at scope construction time; its absence tells the application not to
+      send push events on this scope.
     - ``http.response.priority`` — ``{'urgency': int, 'incremental': bool}``
       per RFC 9218 §4.1.  Field names match the gunicorn beta HTTP/2
       surface; the *contents* are RFC 9218 rather than the deprecated
@@ -129,8 +131,7 @@ def _build_h2_extensions(
     WINDOW_UPDATE per consumed DATA frame, so there is no scalar to
     snapshot.
     """
-    return {
-        ASGIEvent.HTTP_RESPONSE_PUSH: {},
+    extensions = {
         'http.response.priority': priority,
         'http.response.http2_stream': {
             'stream_id': stream_id,
@@ -138,6 +139,9 @@ def _build_h2_extensions(
             'connection_send_window_remaining': connection_window,
         },
     }
+    if peer_push_permitted:
+        extensions[ASGIEvent.HTTP_RESPONSE_PUSH] = {}
+    return extensions
 
 
 
@@ -363,6 +367,9 @@ class HTTP2Actor(Actor):
             asyncio.Semaphore(_stream_cap) if _stream_cap > 0 else None
         )
         self._next_push_stream_id = 2
+        # RFC 9113 §6.5.2 — ENABLE_PUSH has an initial value of 1.  A peer's
+        # valid SETTINGS value updates this connection-scoped permission.
+        self._peer_enable_push: bool = True
         self._task_group: asyncio.TaskGroup | None = None
 
         # -- the time axis (see _liveness_watchdog) --------------------------
@@ -1353,7 +1360,8 @@ class HTTP2Actor(Actor):
         priority = _resolve_priority(stream, conn)
         conn.extensions = _build_h2_extensions(
             stream.stream_id, priority,
-            self._peer_initial_window_size, self._conn_window.size)
+            self._peer_initial_window_size, self._conn_window.size,
+            self._peer_enable_push)
 
     async def _on_headers_frame(
         self,
@@ -1820,6 +1828,12 @@ class HTTP2Actor(Actor):
         the synthetic ASGI scope gets the same decoded ``path`` /
         ``raw_path`` / ``query_string`` contract.
         """
+        if not self._peer_enable_push:
+            logger.warning(
+                'HTTP2Actor: dropping http.response.push on stream %d — '
+                'peer SETTINGS_ENABLE_PUSH=0', parent_stream_id)
+            return
+
         from .parser import _split_h2_path  # noqa: PLC0415
 
         push_stream_id = self._allocate_push_stream_id()
@@ -1887,7 +1901,8 @@ class HTTP2Actor(Actor):
             extensions=_build_h2_extensions(
                 push_stream_id, _DEFAULT_PRIORITY,
                 self._peer_initial_window_size,
-                self._conn_window.size),
+                self._conn_window.size,
+                peer_push_permitted=False),
         )
         push_recipient = RecipientFactory.http2(
             queue_depth=self._stream_queue_depth,

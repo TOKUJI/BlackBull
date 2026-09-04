@@ -228,7 +228,8 @@ automatically — do not include them in `headers`.
 
 ### Checking for support
 
-The server advertises push support in `conn.extensions`:
+The server advertises push support in `conn.extensions` when the peer permits
+it at request-dispatch time:
 
 ```python
 if 'http.response.push' in conn.extensions:
@@ -238,18 +239,20 @@ if 'http.response.push' in conn.extensions:
 
 For HTTP/1.1 requests `conn.extensions` does not contain
 `'http.response.push'`, so the guard above keeps the same handler
-working on both protocols.
+working on both protocols.  If the peer changes `SETTINGS_ENABLE_PUSH` after
+the scope was built, the send path checks the current connection permission as
+well: a late push event is logged and dropped without sending a
+`PUSH_PROMISE` or creating a pushed request.
 
 ### Caveats
 
-- Clients can disable server push by sending
-  `SETTINGS_ENABLE_PUSH=0`.  BlackBull's server does not read that
-  setting; if the client rejects the push it will send a
-  `RST_STREAM`, which BlackBull logs and ignores.  A conforming
-  client is entitled to answer with `GOAWAY(PROTOCOL_ERROR)`
-  instead (RFC 9113 §6.5.2) — BlackBull's own client does exactly
-  that under `BB_CLIENT_H2_ENABLE_PUSH=0`, which is why that knob
-  defaults to leaving push permitted.
+- Clients can disable server push by sending `SETTINGS_ENABLE_PUSH=0`.
+  BlackBull tracks that connection setting (whose RFC 9113 §6.5.2 initial value
+  is `1`) and omits the push extension from subsequently dispatched scopes.
+  A push event from a scope built before the setting changed is logged and
+  dropped at send time, so it cannot send a `PUSH_PROMISE` after permission was
+  withdrawn.  Sending `SETTINGS_ENABLE_PUSH=1` re-enables push for later
+  events and scopes.
 - Pushed resources should be cacheable.  Pushing non-cacheable
   content wastes bandwidth and may confuse browsers.
 

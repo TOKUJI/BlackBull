@@ -308,7 +308,11 @@ log names which limit it kept hitting so an operator can tell abuse from a bug.
 **§6.5 SETTINGS — `SettingFrame(FrameBase)`** ✅
 The server sends its own SETTINGS first from `HTTP2Actor.run()` (§3.4); a peer's
 `SettingFrame` is handled by `SettingsResponder`, which updates the window sizes
-and answers with ACK (§6.5.3).
+and answers with ACK (§6.5.3).  The peer's `SETTINGS_ENABLE_PUSH` is tracked
+per connection, starting at its §6.5.2 initial value of `1`; valid `0` and `1`
+values disable and re-enable server push respectively.  Request extensions
+reflect that permission when each scope is built, while `_handle_push()` checks
+the current value again at send time and logs/drops a late-disabled event.
 `SETTINGS_ENABLE_CONNECT_PROTOCOL` (§6.5.2 / RFC 8441 §3) is advertised **only**
 when `BB_H2_ENABLE_WEBSOCKET=1`.  *Because* you must not invite Extended CONNECT
 unless you can service it.
@@ -513,7 +517,9 @@ Triggered by the ASGI `http.response.push` event from inside a handler.  Pushed
 requests are GET, safe, cacheable, body-less (**§8.4.1**); the pushed response
 streams on its own even-numbered stream (**§8.4.2**).  *Because* push lets the
 server pre-empt a request it knows the client will make — but only for the
-method/cacheability class the RFC permits.
+method/cacheability class the RFC permits.  The actor also gates the event on
+the peer's current `SETTINGS_ENABLE_PUSH` permission before allocating a stream
+ID or mutating stream state.
 
 **§8.5 The CONNECT Method** ✅ (Extended CONNECT only)
 Plain CONNECT tunnelling is not offered, but **Extended CONNECT** (RFC 8441,
