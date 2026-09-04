@@ -5195,10 +5195,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#three-limits-that-are-less-obvious-than-they-look" class="md-nav__link">
+  <a href="#four-limits-that-are-less-obvious-than-they-look" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Three limits that are less obvious than they look
+        Four limits that are less obvious than they look
       
     </span>
   </a>
@@ -5443,10 +5443,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#three-limits-that-are-less-obvious-than-they-look" class="md-nav__link">
+  <a href="#four-limits-that-are-less-obvious-than-they-look" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Three limits that are less obvious than they look
+        Four limits that are less obvious than they look
       
     </span>
   </a>
@@ -5529,6 +5529,11 @@ peer can and cannot make the server spend, what the limits are out of the box,
 and what BlackBull explicitly does <strong>not</strong> claim.</p>
 <p>It describes the version it ships with. Where a limit is on by default, that is
 stated; where it is off, that is stated too, along with what to set.</p>
+<p>Most of it is about the server. The async HTTP client under <code>blackbull/client/</code>
+appears <strong>after</strong> the server rows in the tables below, at its own posture: it
+reads a response from a peer the operator chose, not a request from one who
+chose us, and that is a different standard — stated where it differs rather
+than assumed.</p>
 <h2 id="scope-and-trust-boundary">Scope and trust boundary<a class="headerlink" href="#scope-and-trust-boundary" title="Permanent link">&para;</a></h2>
 <p><strong>Every byte from a peer is untrusted until dispatch.</strong> Request lines, headers,
 bodies, WebSocket frames, HTTP/2 frames and MQTT packets are all parsed by
@@ -5727,10 +5732,46 @@ column.</p>
 <td><code>BB_MAX_CONNECTIONS</code> (derived)</td>
 <td>detect deadline, keep-alive</td>
 </tr>
+<tr>
+<td><em>Client</em> response head (HTTP/1.1)</td>
+<td><code>BB_CLIENT_HEAD_MAX_LINE</code> 8 KiB</td>
+<td><code>BB_CLIENT_HEAD_MAX_TOTAL</code> 64 KiB</td>
+<td><code>BB_CLIENT_HEAD_TIMEOUT</code> 30 s</td>
+</tr>
+<tr>
+<td><em>Client</em> response head (HTTP/2)</td>
+<td><code>BB_CLIENT_H2_MAX_FRAME_SIZE</code> 16 KiB</td>
+<td><code>BB_CLIENT_HEAD_MAX_TOTAL</code> 64 KiB, spent twice — encoded, per field block reassembled across CONTINUATION; and decoded, across every section on the stream — plus <code>BB_CLIENT_H2_MAX_HEADER_LIST_SIZE</code> 64 KiB decoded, per section, inside the decoder</td>
+<td><code>BB_CLIENT_HEAD_TIMEOUT</code> 30 s</td>
+</tr>
+<tr>
+<td><em>Client</em> response body</td>
+<td>64 KiB read (HTTP/1.1); <code>BB_CLIENT_H2_MAX_FRAME_SIZE</code> (HTTP/2)</td>
+<td><code>BB_CLIENT_BODY_MAX_TOTAL</code> <strong>off</strong></td>
+<td><code>BB_CLIENT_BODY_TIMEOUT</code> 30 s + <code>BB_CLIENT_MIN_BODY_RATE</code> <strong>off</strong>, and HTTP/1.1 only</td>
+</tr>
+<tr>
+<td><em>Client</em> raw HTTP/2 stream</td>
+<td><code>BB_CLIENT_H2_MAX_FRAME_SIZE</code> 16 KiB</td>
+<td><code>BB_CLIENT_RAW_QUEUE_DEPTH</code> 1024 frames</td>
+<td>—</td>
+</tr>
+<tr>
+<td><em>Client</em> send path</td>
+<td>—</td>
+<td>HTTP/2 flow-control window</td>
+<td><code>BB_WRITE_TIMEOUT</code> 30 s on the HTTP/2 flow-control wait — the server's knob, read by the client too</td>
+</tr>
 </tbody>
 </table>
+<p>One client bound is not in that grid, because it is not one of the three.
+<code>BB_CLIENT_MAX_INTERIM_RESPONSES</code> (8) bounds how many <code>1xx</code> heads may precede
+the final one on HTTP/1.1: a <strong>count</strong>, and what owns the aggregate of the two
+per-head bounds above it, each of which is spent afresh on every interim.
+HTTP/2 needs no such number — every interim section adds to the same
+<code>BB_CLIENT_HEAD_MAX_TOTAL</code>.</p>
 <p>Full descriptions: <a href="../../reference/env-vars/">Environment variables</a>.</p>
-<h3 id="three-limits-that-are-less-obvious-than-they-look">Three limits that are less obvious than they look<a class="headerlink" href="#three-limits-that-are-less-obvious-than-they-look" title="Permanent link">&para;</a></h3>
+<h3 id="four-limits-that-are-less-obvious-than-they-look">Four limits that are less obvious than they look<a class="headerlink" href="#four-limits-that-are-less-obvious-than-they-look" title="Permanent link">&para;</a></h3>
 <p><strong>A message is bounded by what your handler receives, not by what the wire
 carried.</strong> <code>permessage-deflate</code> ratios measured in this codebase reach
 <strong>1028.8:1</strong>, so a WebSocket frame far under the 64 MiB frame cap can still
@@ -5762,9 +5803,14 @@ one more byte.</p>
 <li><strong><code>bounded-when-configured</code></strong> — the bounds exist but one or more default open.</li>
 <li><strong><code>bounded-unit-only</code></strong> — individual units are bounded; totals are not.</li>
 </ul>
+<p>The rungs are read against the rows above, so the table needs to say <em>whose</em>
+path each row was. A protocol is not a role: the same HTTP/2 parser bounds a
+request we were sent and a response we asked for, and only one of those came
+from a peer who chose us.</p>
 <table>
 <thead>
 <tr>
+<th>Role</th>
 <th>Protocol</th>
 <th>Posture</th>
 <th>Notes</th>
@@ -5772,33 +5818,50 @@ one more byte.</p>
 </thead>
 <tbody>
 <tr>
+<td>Server</td>
 <td>HTTP/1.1</td>
 <td><code>bounded-by-default</code></td>
 <td>see qualifications 1 and 2 below</td>
 </tr>
 <tr>
+<td>Server</td>
 <td>HTTP/2</td>
 <td><code>bounded-by-default</code></td>
 <td>includes control-frame rate metering and PING-based liveness</td>
 </tr>
 <tr>
+<td>Server</td>
 <td>gRPC</td>
 <td><code>bounded-by-default</code></td>
 <td>own message bounds, plus everything HTTP/2 provides</td>
 </tr>
 <tr>
+<td>Server</td>
 <td>WebSocket</td>
 <td><code>bounded-by-default</code></td>
 <td>message bounded post-reassembly and post-inflation; a silent peer is probed with a PING and closed if it does not answer</td>
 </tr>
 <tr>
+<td>Server</td>
 <td>MQTT</td>
 <td><code>bounded-by-default</code></td>
 <td>limits are also <em>advertised</em> in CONNACK, so conforming clients stay inside them; see qualification 3</td>
 </tr>
+<tr>
+<td>Client</td>
+<td>HTTP/1.1</td>
+<td><code>bounded-when-configured</code></td>
+<td>two of its bounds ship off; see qualification 4</td>
+</tr>
+<tr>
+<td>Client</td>
+<td>HTTP/2</td>
+<td><code>bounded-when-configured</code></td>
+<td>the same two, and one of them is not merely off but absent; see qualification 4</td>
+</tr>
 </tbody>
 </table>
-<p><strong>Three qualifications, stated here rather than in a footnote</strong>, because they
+<p><strong>Four qualifications, stated here rather than in a footnote</strong>, because they
 are the difference between the label and the whole truth:</p>
 <ol>
 <li>
@@ -5830,13 +5893,28 @@ are the difference between the label and the whole truth:</p>
    deadline, so they cost nothing while none is pending. Sessions live in
    memory only and do not survive a restart.</p>
 </li>
+<li>
+<p><strong>The client's rung is the generous reading.</strong> Ten <code>BB_CLIENT_*</code>
+   bounds refuse traffic, and two — <code>BB_CLIENT_BODY_MAX_TOTAL</code> and
+   <code>BB_CLIENT_MIN_BODY_RATE</code> — ship off, which is exactly what
+   <code>bounded-when-configured</code> says. (Twelve <code>BB_CLIENT_*</code> variables exist;
+   <code>BB_CLIENT_H2_ENABLE_PUSH</code> is a conformance switch and
+   <code>BB_CLIENT_MIN_BODY_RATE_GRACE</code> a modifier of the floor, and neither
+   refuses anything on its own. That split is not an editorial choice:
+   <code>_CLIENT_CAPS</code> and <code>_CLIENT_NOT_A_CAP</code> in
+   <code>tests/unit/test_cap_log_sites.py</code> declare it, and
+   <code>test_every_client_env_var_has_a_verdict</code> fails on the day a new variable
+   arrives with neither verdict.)</p>
+</li>
 </ol>
 <h2 id="defaults-and-deployment-checklist">Defaults and deployment checklist<a class="headerlink" href="#defaults-and-deployment-checklist" title="Permanent link">&para;</a></h2>
 <p>On out of the box:</p>
 <ul>
-<li>every limit in the invariant table except <code>BB_REQUEST_TIMEOUT</code>;</li>
+<li>every limit in the invariant table except <code>BB_REQUEST_TIMEOUT</code> and the
+  client's two, <code>BB_CLIENT_BODY_MAX_TOTAL</code> and <code>BB_CLIENT_MIN_BODY_RATE</code>;</li>
 <li>cap-hit logging on <code>blackbull.caps</code> — every refusal above emits a structured
-  <code>WARNING</code> naming the limit, the requested value and the configured one (see
+  <code>WARNING</code> naming the limit, the requested value and the configured one, the
+  client's included, on <em>each</em> protocol that enforces the bound (see
   <a href="../../guide/logging/#cap-hit-log-blackbullcaps">Logging</a>);</li>
 <li>MQTT limits advertised to clients in CONNACK, so a conforming client never
   reaches the enforcement path.</li>
@@ -5872,6 +5950,12 @@ are the difference between the label and the whole truth:</p>
 </tr>
 </tbody>
 </table>
+<p>The client's two turn on a different question — not <em>is this deployment
+internet-facing</em> but <em>do I know what this peer should return</em>. Set
+<code>BB_CLIENT_BODY_MAX_TOTAL</code> when you do, at half of what one response may
+occupy, because the buffered body costs about <strong>twice</strong> the cap in peak
+memory. <code>BB_CLIENT_MIN_BODY_RATE</code> asserts the peer is a transfer rather than a
+stream, which an event stream or a long poll is not.</p>
 <p>How the defaults compare, verified against primary sources:</p>
 <table>
 <thead>
@@ -5954,6 +6038,22 @@ are the difference between the label and the whole truth:</p>
 <td>Protocol conformance</td>
 <td>h2spec (HTTP/2 + HPACK), Autobahn (WebSocket), http11probe — see <a href="../conformance/">Conformance</a></td>
 </tr>
+<tr>
+<td>Client response bounds, and that a peer which stops is abandoned rather than waited on</td>
+<td><code>tests/unit/client/test_http1_client_head_bounds.py</code>, <code>tests/unit/client/test_http1_client_desync_and_deadline.py</code>, <code>tests/unit/client/test_http2_client_response_bounds.py</code></td>
+</tr>
+<tr>
+<td>Client rate floor, including that a slow <em>consumer</em> does not trip it</td>
+<td><code>tests/unit/client/test_http1_client_rate_floor.py</code></td>
+</tr>
+<tr>
+<td>Every client bound names itself on <code>blackbull.caps</code>, on every protocol that enforces it</td>
+<td><code>tests/unit/test_cap_log_sites.py</code> — the per-cap tests, plus <code>test_client_caps_are_wired_on_every_protocol_that_enforces_them</code> and <code>test_every_client_env_var_has_a_verdict</code></td>
+</tr>
+<tr>
+<td>A buffered client response body costs about twice the cap</td>
+<td><code>tests/unit/client/test_client_body_buffer_cost.py</code></td>
+</tr>
 </tbody>
 </table>
 <h2 id="non-claims">Non-claims<a class="headerlink" href="#non-claims" title="Permanent link">&para;</a></h2>
@@ -5974,6 +6074,20 @@ less than one that draws its own boundary:</p>
 <li><strong>"No known gaps" is not "no gaps."</strong> A bound that no one has found missing is
   not the same as a bound proven complete. This work is continuing, not
   finished.</li>
+</ul>
+<p>On the async HTTP client specifically, and after the server ones so the
+contrast is visible:</p>
+<ul>
+<li><strong>It does not follow redirects and does not pool connections.</strong> Neither
+  exists in <code>blackbull/client/</code> — so neither is bounded <em>or</em> unbounded, and a
+  report that one of them is unsafe is a feature request.</li>
+<li><strong>A buffered response body costs about twice the cap in peak memory.</strong>
+  Reaching ~1× means <code>stream()</code>, which exposes no status, no headers and sits
+  outside the cap — so today a caller can have ~1× <em>or</em> all three, never both.</li>
+<li><strong>This is an audit result, not a proof.</strong> The client's read paths were
+  enumerated by hand; that method has missed paths on this codebase before,
+  and it will again. No known gaps is not no gaps. What the rows above claim
+  is that each named bound holds — not that the list of rows is complete.</li>
 </ul>
 <p>Found something? Please open an issue at
 <a href="https://github.com/TOKUJI/BlackBull/issues">github.com/TOKUJI/BlackBull</a>.</p>
