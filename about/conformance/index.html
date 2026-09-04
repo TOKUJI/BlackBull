@@ -5790,6 +5790,12 @@ BlackBull-specific behaviour h2spec does not exercise (RFC 8441
 Extended CONNECT, CONTINUATION boundary cases, server-response
 shapes, and the <code>BB_MAX_BODY_SIZE</code> / <code>BB_MIN_BODY_RATE</code> refusals in
 <code>test_rfc9113_body_cap.py</code>), and run in normal <code>pytest</code> runs.</p>
+<p>The in-tree client tests also exercise negative validation for malformed
+response HEADERS and fixed-length control frames before response or raw-stream
+dispatch, including the RFC-required connection-versus-stream error scope.
+The h2spec command above targets the BlackBull server; it does not establish
+full conformance of <code>HTTP2Client</code>, whose client-side coverage remains the
+focused pytest suite and is not a claim of complete client conformance.</p>
 <h2 id="websocket-autobahntestsuite">WebSocket — Autobahn|Testsuite<a class="headerlink" href="#websocket-autobahntestsuite" title="Permanent link">&para;</a></h2>
 <p>The de-facto external conformance suite for WebSocket — ~500
 numbered cases over framing, control frames, UTF-8 validation,
