@@ -74,6 +74,18 @@ _FRAME_READ_TIMEOUT: float = 30.0
 #: RFC 9113 §6.10.
 _OPENS_A_FIELD_BLOCK = frozenset({FrameTypes.HEADERS, FrameTypes.PUSH_PROMISE})
 
+#: What a raw-stream consumer acts on, and therefore all its queue takes.
+#: ``_H2QueueReader._fill`` reads DATA (payload and END_STREAM) and
+#: RST_STREAM (EOF); the RFC 8441 Extended CONNECT handshake reads HEADERS.
+#: HEADERS is also how trailers arrive, and at this layer the two are the
+#: same frame — so this set bounds the *types* a raw stream admits, not the
+#: count of each.  A whitelist and not a blacklist because a queue slot is
+#: spent by whoever sends the frame: every excluded type has a destination
+#: of its own, and the queue was the destination of everything unnamed.
+_RAW_STREAM_FRAME_TYPES = frozenset({
+    FrameTypes.DATA, FrameTypes.HEADERS, FrameTypes.RST_STREAM,
+})
+
 class _DiscardedFrame:
     """Marker for a frame rejected at the stream level before dispatch."""
 
@@ -318,6 +330,14 @@ class HTTP2Client:
         # nobody was left to resolve.  ``HTTP1Client`` raises here, so the two
         # clients used to disagree about the same event.
         self._connection_lost: bool = False
+        # Set by ``__aexit__``: the close this process performed, which is a
+        # different event from the peer's departure above and owes the caller
+        # a different answer.  Setting ``_connection_lost`` here instead would
+        # shut every door for one line and make a client built for diagnosis
+        # report a disconnect it performed itself.  Spelled as
+        # ``HTTP1Client._closed`` is, so the two clients answer the same
+        # question with the same word.
+        self._closed: bool = False
         # Bounds the *rest* of a frame the peer has already begun — never
         # the gap between frames.  See ``_receive_frame``.
         self._frame_read_timeout: float = _FRAME_READ_TIMEOUT
@@ -334,6 +354,12 @@ class HTTP2Client:
     # ---- async context manager -------------------------------------------
 
     async def __aenter__(self) -> 'HTTP2Client':
+        # Re-entry cannot re-open what ``__aexit__`` closed.  ``_raw_writer``
+        # still holds the writer that method closed, so the connect below is
+        # skipped and ``_start`` would put the preface on a dead transport and
+        # run a receive loop against a dead reader — handing the caller back a
+        # client that presents as open.
+        self._refuse_if_closed()
         if self._raw_writer is None:
             r, w = await _open_connection(self._host, self._port, self._ssl,
                                           self._connect_timeout)
@@ -396,6 +422,9 @@ class HTTP2Client:
         self._receive_task = asyncio.create_task(self._receive_loop())
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
+        # Before anything is torn down, so a door opened while this method
+        # awaits is refused rather than handed half a connection.
+        self._closed = True
         # Cancel the receive loop first so it doesn't read past close.
         if self._receive_task is not None and not self._receive_task.done():
             self._receive_task.cancel()
@@ -427,6 +456,19 @@ class HTTP2Client:
                 await self._raw_writer.wait_closed()
             except Exception:
                 pass  # best-effort close; the connection may already be gone.
+
+    def _refuse_if_closed(self) -> None:
+        """Refuse a door into a client whose context has exited.
+
+        Checked *after* ``_goaway_received`` and ``_connection_lost`` wherever
+        both apply: a peer that went away is the first cause and the news
+        worth reporting, and this is the consequence.  Never folded into
+        those two — the caller of a wire-level client is diagnosing a peer,
+        and a close it performed itself named as the peer's is a wrong
+        answer where none would have been an honest one.
+        """
+        if self._closed:
+            raise ConnectionError('HTTP2Client context is closed')
 
     # ---- public API ------------------------------------------------------
 
@@ -463,6 +505,7 @@ class HTTP2Client:
                 f'connection closed by peer (GOAWAY error_code={self._goaway_error_code})')
         if self._connection_lost:
             raise ConnectionError('connection closed by peer')
+        self._refuse_if_closed()
         if self._writer is None:
             raise ConnectionError('client is not connected')
 
@@ -570,10 +613,15 @@ class HTTP2Client:
 
         The HTTP/2 counterpart of
         :meth:`blackbull.client.http1.HTTP1Client.execute_scenario`, and
-        deliberately the same shape: it **never raises**, folding every
-        outcome — a frame read, a timeout, a transport failure, a
-        hard-abort — into the returned result so callers categorise without
-        a try/except per scenario.
+        deliberately the same shape: every *outcome* — a frame read, a
+        timeout, a transport failure, a hard-abort — is folded into the
+        returned result so callers categorise without a try/except per
+        scenario.  What is raised instead is the scenario this connection
+        cannot express at all: an unowned step (see
+        :meth:`_check_scenario_ownership`) or a client whose context has
+        exited.  Neither is news about the peer, and folding one would make
+        a closed client indistinguishable in the result from a silent
+        server.
 
         Step dispatch:
           * ``SendPreface``  → the RFC 9113 §3.4 preface bytes
@@ -592,6 +640,7 @@ class HTTP2Client:
         import time as _time  # noqa: PLC0415
 
         assert self._writer is not None, 'connect via __aenter__ first'
+        self._refuse_if_closed()
         self._check_scenario_ownership(scenario)
         result = ScenarioH2ClientResult()
         t0 = _time.monotonic()
@@ -717,7 +766,13 @@ class HTTP2Client:
             await asyncio.sleep(byte_interval)
 
     async def send_raw_frame(self, frame: FrameBase) -> None:
-        """Escape hatch: write a raw frame to the wire (negative-path tests)."""
+        """Escape hatch: write a raw frame to the wire (negative-path tests).
+
+        Refused after the context exits: the transport is closed, so the
+        write is discarded by asyncio without a word and the caller is told
+        its frame reached the peer.
+        """
+        self._refuse_if_closed()
         await self._send_raw_frame(frame)
 
     async def receive_raw_frame(self) -> _InboundFrame | None:
@@ -734,7 +789,12 @@ class HTTP2Client:
         Inherits ``client_h2_max_frame_size``: one rule, not a second path
         around it.  A scenario needing an over-sized frame opts out with
         ``BB_CLIENT_H2_MAX_FRAME_SIZE=0``.
+
+        Refused after the context exits — the wait for a frame to *begin* is
+        deliberately unbounded, so on a closed connection this parks for the
+        life of the process.
         """
+        self._refuse_if_closed()
         return await self._receive_frame()
 
     def register_raw_stream(self, stream_id: int) -> asyncio.Queue:
@@ -757,6 +817,7 @@ class HTTP2Client:
         """
         if self._connection_lost:
             raise ConnectionError('connection closed by peer')
+        self._refuse_if_closed()
         if stream_id in self._raw_streams:
             raise ValueError(f'stream {stream_id} already registered as raw')
         q: asyncio.Queue = asyncio.Queue(
@@ -765,7 +826,13 @@ class HTTP2Client:
         return q
 
     def unregister_raw_stream(self, stream_id: int) -> None:
-        """Stop routing frames for *stream_id* into its raw-frame queue."""
+        """Stop routing frames for *stream_id* into its raw-frame queue.
+
+        The one door a closed client still admits, and deliberately: this is
+        teardown, ``WebSocketH2Session.close`` calls it from a ``finally``,
+        and a cleanup path that raises after close turns an orderly shutdown
+        into an error.  Nothing here needs the connection.
+        """
         self._raw_streams.pop(stream_id, None)
         # A WebSocket-over-H2 session writes through its sender until it
         # unregisters — its shutdown sends the CLOSE frame first — so this is
@@ -1187,16 +1254,27 @@ class HTTP2Client:
                 if isinstance(frame, _DiscardedFrame):
                     continue
                 # Raw-frame streams (WebSocket-over-H2, etc.) bypass the
-                # request/response dispatcher — the registrant drains
-                # the queue itself.  Connection-level frames
-                # (WINDOW_UPDATE keeps send-side flow control alive,
-                # SETTINGS is connection-wide) must still go through the
-                # normal handler so the per-stream sender wakes when
-                # the peer credits its window.
+                # request/response dispatcher for the frames their registrant
+                # reads — ``_RAW_STREAM_FRAME_TYPES`` names them.  Every other
+                # type keeps the destination it has on any other stream,
+                # because a queue slot is spent by whoever sent the frame and
+                # the consumer would only discard it:
+                #   WINDOW_UPDATE, SETTINGS — connection-level bookkeeping; a
+                #     per-stream sender parked on its window wakes here.
+                #   PUSH_PROMISE — ``_on_push_promise`` is what refuses a
+                #     promise after we advertised ENABLE_PUSH=0, and queueing
+                #     it skipped that MUST on exactly the streams a WebSocket
+                #     uses.  Its block is decoded at parse time either way.
+                #   PRIORITY, PRIORITY_UPDATE — deprecated by RFC 9113 §5.3.1
+                #     and this client stores no priority state, so there is
+                #     nothing to hand anyone.
+                #   an unknown type — §5.5 says ignore it, which the null
+                #     responder does for the price of a dispatch instead of a
+                #     queue slot.
+                # CONTINUATION never arrives here: ``_absorb_field_block``
+                # folds it into the frame that opened the block.
                 raw_q = self._raw_streams.get(frame.stream_id)
-                if raw_q is not None and frame.FrameType() not in (
-                        FrameTypes.WINDOW_UPDATE, FrameTypes.SETTINGS,
-                ):
+                if raw_q is not None and frame.FrameType() in _RAW_STREAM_FRAME_TYPES:
                     try:
                         raw_q.put_nowait(frame)
                     except asyncio.QueueFull:
