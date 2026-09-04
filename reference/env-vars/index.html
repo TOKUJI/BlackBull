@@ -5893,6 +5893,15 @@ is what <a href="../../guide/fault_injection/"><code>blackbull.fault_injection</
 so a bound tight enough to hide such a peer would be a defect.  See
 <a href="https://github.com/TOKUJI/BlackBull/blob/master/SECURITY.md">SECURITY.md</a> for
 what a report should hold the client to.</p>
+<p>Every cap in this section emits one <code>WARNING</code> record on the
+<code>blackbull.caps</code> logger when it fires, on <strong>each protocol that enforces
+it</strong> — see the client table in
+<a href="../../guide/logging/#cap-hit-log-blackbullcaps">Logging</a> for what each
+one records and what <code>requested</code> means where it is not the obvious
+number.  That record is the point of the bounds: a client picks its
+peer, so what a bound here buys is a diagnosis, and one that refuses
+without naming itself is not one.  <code>BB_CLIENT_H2_ENABLE_PUSH</code> and
+<code>BB_CLIENT_MIN_BODY_RATE_GRACE</code> are not caps and keep no record.</p>
 <table>
 <thead>
 <tr>
