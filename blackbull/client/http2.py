@@ -11,6 +11,7 @@ import asyncio
 import ssl as _ssl
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from enum import Enum
 from http import HTTPMethod, HTTPStatus
 
 from hpack import HPACKError, OversizedHeaderListError
@@ -125,6 +126,21 @@ class ClientResponse:
     body: bytes
 
 
+class _Phase(Enum):
+    """The phase of a response whose clock is running, and the cap that owns it.
+
+    ``HEAD`` is the wait for the peer to begin answering; ``BODY`` is the gap
+    between frames once it has.  They are consecutive and never concurrent, so
+    one timer serves both and the handover is a disarm and a re-arm.
+
+    The member's value is the cap's name, which is also its ``Settings`` field
+    and — upper-cased under ``BB_`` — its environment variable.  Both
+    identities are audited in ``tests/unit/test_cap_log_sites.py``.
+    """
+    HEAD = 'client_head_timeout'
+    BODY = 'client_body_timeout'
+
+
 @dataclass
 class _PendingResponse:
     """In-flight response state, keyed by stream_id in ``HTTP2Client._responses``."""
@@ -144,24 +160,35 @@ class _PendingResponse:
     #: (``max_header_list_size``); the sum over informational responses, the
     #: final headers and trailers is nobody's until here.
     headers_seen: int = 0
-    #: Progress timer for this stream (BB_CLIENT_BODY_TIMEOUT), re-armed by
-    #: the final response head and by every DATA frame that delivers payload.
-    #: Per stream and not per connection: a connection-wide clock is reset by
-    #: any peer traffic, so a busy stream shelters a stalled one indefinitely.
+    #: The one timer this stream ever has, whichever phase is running: armed
+    #: for the head once the request is on the wire, handed over to the body
+    #: by the final response head, re-armed by every DATA frame that delivers
+    #: payload.  One field and not two, so that every path which ends a
+    #: response — completion, refusal, GOAWAY, a lost connection, ``__aexit__``
+    #: — inherits the disarm by going through ``_drop_pending`` as it already
+    #: does.  Per stream and not per connection: a connection-wide clock is
+    #: reset by any peer traffic, so a busy stream shelters a stalled one
+    #: indefinitely.
     deadline: asyncio.TimerHandle | None = None
+    #: Which phase :attr:`deadline` is timing, so a handover re-stamps
+    #: :attr:`opened_at` and a re-arm within one phase does not.
+    phase: _Phase | None = None
     #: The request body still going up, if any.  A refusal has to cancel it:
     #: ``request()`` awaits the upload *before* it awaits this future, and
     #: RST_STREAM is exactly what makes the peer stop crediting the stream
     #: window — so a refusal mid-upload parked the caller forever on a window
     #: that would never reopen.
     upload: asyncio.Future | None = None
-    #: When the response began, for the diagnostic on a stalled stream.
+    #: When the *current phase* began, for the diagnostic on a stalled stream.
+    #: Per phase and not per response: a record that charged the body phase
+    #: with the head phase's wait would report a ``requested`` many times its
+    #: own ``limit``, which reads as a bug in the cap rather than as the peer
+    #: behaviour it describes.
     opened_at: float = 0.0
 
     def disarm(self) -> None:
-        """Stop the progress timer.  Idempotent — the response may end
-        because it completed, because it was refused, or because the
-        connection did."""
+        """Stop the deadline.  Idempotent — the response may end because it
+        completed, because it was refused, or because the connection did."""
         if self.deadline is not None:
             self.deadline.cancel()
             self.deadline = None
@@ -469,7 +496,30 @@ class HTTP2Client:
             # ``_on_initial_window_size`` have no reason to keep reaching it.
             self._senders.pop(stream_id, None)
 
-        return await future
+        # The question is asked, so from here the peer owes an answer and the
+        # wait for it is bounded.  Not one line earlier: a send parked on our
+        # own flow-control window is our backpressure, and a deadline that
+        # covered it would refuse a peer for our own slowness.
+        #
+        # Unless the peer has already answered — an early 401 or 413 arrives
+        # while the request body is still going up, and the body deadline is
+        # running by the time this line is reached.  Arming over it would
+        # restart the clock the answer just handed off, and charge the body
+        # phase with a head phase that had ended.
+        pending = self._responses.get(stream_id)
+        if pending is not None and pending.status < 200:
+            self._arm_deadline(stream_id, _Phase.HEAD)
+
+        try:
+            return await future
+        except BaseException:
+            # A caller that walks away — its own ``wait_for`` expiring, or a
+            # cancelled task group — takes the deadline with it.  Left armed,
+            # it would later refuse a stream nobody is waiting on: a cap
+            # record against a peer that was never judged, and an exception
+            # set on a future no one will retrieve.
+            self._drop_pending(stream_id)
+            raise
 
     async def execute_scenario(
         self, scenario: ScenarioH2Client,
@@ -1091,29 +1141,43 @@ class HTTP2Client:
         self._detached.add(task)
         task.add_done_callback(self._detached.discard)
 
-    def _arm_progress_deadline(self, stream_id: int) -> None:
-        """Start or restart the stream's progress timer.
+    def _arm_deadline(self, stream_id: int, phase: _Phase) -> None:
+        """Put the stream on *phase*'s clock, starting or restarting it.
 
-        Armed by the first response frame rather than by the request, for the
-        reason the HTTP/1.1 rate floor exempts the wait before the first body
-        octet: a peer that has not answered yet is working, not stalling, and
-        judging that wait would refuse a slow query for being slow.  What is
-        bounded here is the gap between frames once a response has begun.
+        The single arming point for both phases, because they share one timer
+        field and a stream is only ever in one of them.  ``HEAD`` runs from
+        the moment the request is fully on the wire — before that the peer
+        owes nothing and a send parked on our own flow-control window would be
+        charged to it — until the final response head arrives.  ``BODY`` takes
+        over there and is re-armed by every DATA frame that delivers payload,
+        which is progress rather than duration: a response of many frames may
+        outlast the deadline many times over so long as no single gap does.
 
-        ``_FRAME_READ_TIMEOUT`` does not cover this.  It bounds the remainder
-        of a frame whose 9-byte header has arrived, so a peer sending one
-        complete 1-byte DATA frame every 29 s never trips it.
+        A 1xx is not the handover.  It announces that the peer is still
+        working, so it neither starts the body clock nor stops the head one —
+        which falls out of ``_on_response_headers`` arming only at
+        ``status >= 200`` rather than out of a branch here.
+
+        ``_FRAME_READ_TIMEOUT`` does not cover either phase.  It bounds the
+        remainder of a frame whose 9-byte header has arrived, so a peer
+        sending one complete 1-byte DATA frame every 29 s never trips it.
         """
         pending = self._responses.get(stream_id)
         if pending is None:
             return
-        timeout = get_settings().client_body_timeout
+        loop = asyncio.get_running_loop()
+        if pending.phase is not phase:
+            pending.phase = phase
+            pending.opened_at = loop.time()
+        # Unconditional, and before the ``timeout <= 0`` test: the timer a
+        # handover replaces belongs to the phase that just ended, so a body
+        # phase with its cap disabled must still stop the head phase's clock
+        # rather than let it refuse a peer that is answering.
+        pending.disarm()
+        # The cap's name is its ``Settings`` field; ``_Phase`` says why.
+        timeout = float(getattr(get_settings(), phase.value))
         if timeout <= 0:
             return
-        loop = asyncio.get_running_loop()
-        if not pending.opened_at:
-            pending.opened_at = loop.time()
-        pending.disarm()
         pending.deadline = loop.call_later(
             timeout, self._on_stream_stalled, stream_id, timeout)
 
@@ -1125,16 +1189,32 @@ class HTTP2Client:
         that gap the receive loop can finish the response — checking only
         here reset a stream that had already succeeded and logged a cap hit
         against it.
+
+        The phase is read from the pending rather than passed: a timer that
+        survives to fire is the current phase's, since a handover disarms the
+        one before it.
         """
         pending = self._responses.get(stream_id)
         if pending is None:
             return
         elapsed = asyncio.get_running_loop().time() - pending.opened_at
-        self._spawn(self._refuse_stream(
-            stream_id, 'client_body_timeout', elapsed, timeout,
-            TimeoutError(
-                f'no HTTP/2 frame for stream {stream_id} within '
-                f'BB_CLIENT_BODY_TIMEOUT={timeout}s')))
+        # Each phase names its own cap at the call that writes the record.
+        # The name is what makes a refusal a diagnostic rather than a hang
+        # with extra steps, so a grep for the cap has to reach the line that
+        # refuses on it — forwarding the name from ``phase`` would hide the
+        # site from a reader and from the cap-record audit alike.
+        if pending.phase is _Phase.HEAD:
+            self._spawn(self._refuse_stream(
+                stream_id, 'client_head_timeout', elapsed, timeout,
+                TimeoutError(
+                    f'no HTTP/2 response for stream {stream_id} within '
+                    f'BB_CLIENT_HEAD_TIMEOUT={timeout}s')))
+        else:
+            self._spawn(self._refuse_stream(
+                stream_id, 'client_body_timeout', elapsed, timeout,
+                TimeoutError(
+                    f'no HTTP/2 frame for stream {stream_id} within '
+                    f'BB_CLIENT_BODY_TIMEOUT={timeout}s')))
 
     async def _refuse_stream(self, stream_id: int, cap: str,
                              seen: int | float, limit: int | float,
@@ -1197,8 +1277,13 @@ class HTTP2Client:
         # "a peer that has not answered yet is working" case the deadline is
         # supposed to be exempt from.  Its field lines still count: they are
         # accumulation whatever they announce.
+        #
+        # The same line is what keeps the head deadline running across a 1xx,
+        # since the handover is the only thing that disarms it: a peer that
+        # sends 103 Early Hints and then goes quiet is bounded by the phase it
+        # never left, with no branch here to say so.
         if pending.status >= 200:
-            self._arm_progress_deadline(frame.stream_id)
+            self._arm_deadline(frame.stream_id, _Phase.BODY)
         max_headers = get_settings().client_head_max_total
         for name, value in frame.headers:
             name, value = _to_bytes(name), _to_bytes(value)
@@ -1256,7 +1341,7 @@ class HTTP2Client:
             # DATA re-armed the deadline and appended to body_parts while
             # body_seen stayed at zero: neither bound could fire, and 200,000
             # such frames held 1.6 MB against a 1 KiB cap.
-            self._arm_progress_deadline(frame.stream_id)
+            self._arm_deadline(frame.stream_id, _Phase.BODY)
             pending.body_seen += len(payload)
             pending.body_parts.append(payload)
         # RFC 9113 §6.9 — the receiver MUST return flow-control credit for

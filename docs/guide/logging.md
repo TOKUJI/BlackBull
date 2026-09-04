@@ -346,7 +346,7 @@ protocol rather than a row per cap:
 |---|---|---|
 | `BB_CLIENT_HEAD_MAX_TOTAL` | the response head over the budget; the trailer section over the same one | the stream's field lines in aggregate; the encoded block reassembled across CONTINUATION |
 | `BB_CLIENT_HEAD_MAX_LINE` | a status line, response field line, chunk-size line or trailer field line over the per-line rule | — no field *line* exists; the section is the unit |
-| `BB_CLIENT_HEAD_TIMEOUT` | the response head did not arrive in time | a field block opened and never finished with END_HEADERS |
+| `BB_CLIENT_HEAD_TIMEOUT` | the response head did not arrive in time | the peer took the request and never began to answer — that stream is reset; or a field block opened and never finished with END_HEADERS — the connection ends |
 | `BB_CLIENT_BODY_TIMEOUT` | one body read outlasted its deadline | no frame for that stream inside the deadline |
 | `BB_CLIENT_BODY_MAX_TOTAL` | a declared `Content-Length` over the cap, or the running total of a chunked or close-delimited body | the running total, checked before a DATA payload is held |
 | `BB_CLIENT_MIN_BODY_RATE` | body arriving below the floor past the grace period — `requested` is the observed rate in bytes/second | — no rate floor on HTTP/2 |

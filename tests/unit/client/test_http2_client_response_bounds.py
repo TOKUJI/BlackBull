@@ -9,7 +9,7 @@ limits and does not choose which path answers.  So the knobs are shared rather
 than duplicated under HTTP/2 names; a second name would let a limit be
 configured on one path and answered on the other, which is the defect itself.
 
-Three things were unbounded, and they are separate rows of the triad rather
+Four things were unbounded, and they are separate rows of the triad rather
 than one:
 
 *The body total.*  ``_on_response_data`` appended every DATA payload to
@@ -28,6 +28,13 @@ frame whose header has arrived; nothing bounded the gap between frames.  A
 connection-wide clock cannot stand in for it, because another stream's traffic
 hides a stalled one — which is what ``test_a_busy_stream_does_not_shelter_a_stalled_one``
 is for.
+
+*The time before the first frame.*  The deadline above is armed by the first
+response frame and exempts the wait ahead of it, because a peer that has not
+answered yet is working rather than stalling.  That left the wait for the
+answer to *begin* owned by nobody, and a peer that took the request and went
+quiet parked the caller forever.  ``BB_CLIENT_HEAD_TIMEOUT`` owns it — the same
+knob that owns it on HTTP/1.1, since the peer chooses which client answers.
 
 Refusal is a *stream* error here, not a connection one.  The HTTP/1.1 client
 abandons the connection because a refusal leaves its position in the byte
@@ -55,6 +62,16 @@ pytestmark = [pytest.mark.asyncio, pytest.mark.timeout(10)]
 async def _resolved(future, seconds: float = 1.0):
     """The response, or a failure — never an unbounded wait."""
     return await asyncio.wait_for(asyncio.shield(future), seconds)
+
+
+async def _settle(turns: int = 12) -> None:
+    """Let ``request()`` put its frames on the wire and park on the answer.
+
+    Loop turns rather than wall-clock: a test that measures a deadline must
+    not spend the deadline getting to the starting line.
+    """
+    for _ in range(turns):
+        await asyncio.sleep(0)
 
 
 class _RecordingWriter(AbstractWriter):
@@ -411,14 +428,222 @@ class TestThePerStreamProgressDeadline:
             await c._refuse_stream(5, 'client_body_max_total', 1, 0,
                                    ResponseTooLarge('refused'))
 
+        async def _ended_while_still_awaiting_the_head():
+            """The head phase has a timer too, and it is armed by the send
+            rather than by a frame — so it is the one ending no receive-path
+            test reaches."""
+            sid = c._next_stream_id
+            call = asyncio.ensure_future(c.request('GET', '/'))
+            await _settle()
+            await _feed_headers(c, sid, [('x-a', 'b')], end_stream=True)
+            await asyncio.wait_for(call, 2.0)
+
         for ending in (_ended_by_completion, _ended_by_peer_reset,
-                       _ended_by_refusal):
+                       _ended_by_refusal,
+                       _ended_while_still_awaiting_the_head):
             await ending()
         assert c._responses == {}
         live = [h for h in asyncio.get_running_loop()._scheduled
                 if not h.cancelled()
                 and 'stalled' in repr(getattr(h, '_callback', ''))]
         assert not live, f'{len(live)} progress timer(s) outlived their response'
+
+
+# ----------------------------------------------------------------------
+# The wait for the response to begin
+# ----------------------------------------------------------------------
+
+class TestTheWaitForTheResponseToBegin:
+    """The deadline above starts at the *first* response frame, so nothing
+    bounded the wait for that frame: a peer that completed the handshake,
+    took the HEADERS and then said nothing parked ``request()`` forever.
+    HTTP/1.1 refuses exactly that shape at ``BB_CLIENT_HEAD_TIMEOUT``, and an
+    operator configures one number for a client whose protocol the *peer*
+    chooses.
+
+    So it is the same knob, and the stream is bounded from the moment the
+    request is fully on the wire until the head completes — never before,
+    because a send still parked on our own flow-control window is our
+    backpressure and not the peer's silence, and never twice, because the
+    final head hands the clock straight to ``BB_CLIENT_BODY_TIMEOUT``.
+
+    The consequence to know is a real one: an HTTP/2 server that legitimately
+    defers its response head past 30 s — long polling, or a query it computes
+    before flushing headers — is now refused where it used to be waited for.
+    ``BB_CLIENT_HEAD_TIMEOUT=0`` is the opt-out.  The connection-level wait is
+    untouched: what acquires a deadline is a stream that has asked a question.
+    """
+
+    async def test_a_peer_that_never_answers_is_refused(
+            self, caps_log, monkeypatch):
+        monkeypatch.setenv('BB_CLIENT_HEAD_TIMEOUT', '0.2')
+        c = _client()
+        with pytest.raises(TimeoutError) as excinfo:
+            await asyncio.wait_for(c.request('GET', '/'), 3.0)
+        assert 'BB_CLIENT_HEAD_TIMEOUT' in str(excinfo.value)
+        assert [r.cap for r in caps_log] == ['client_head_timeout'], caps_log
+        resets = _frames_of(c, FrameTypes.RST_STREAM)
+        assert len(resets) == 1 and resets[0].stream_id == 1
+        assert resets[0].error_code == ErrorCodes.CANCEL
+        assert 1 not in c._responses
+        # A stream error: the connection is still good for the next request.
+        after = _pending(c, 3)
+        await _feed_headers(c, 3, [], end_stream=True)
+        assert (await _resolved(after)).status == 200
+
+    async def test_a_peer_that_answers_within_the_deadline_is_not_refused(
+            self, caps_log, monkeypatch):
+        """The control.  A spurious refusal has to be as visible as a missing
+        one, which is what ``caps_log`` staying empty says."""
+        monkeypatch.setenv('BB_CLIENT_HEAD_TIMEOUT', '1.0')
+        c = _client()
+        call = asyncio.ensure_future(c.request('GET', '/'))
+        await _settle()
+        await asyncio.sleep(0.2)        # slow for a peer, well inside the cap
+        await _feed_headers(c, 1, [('x-a', 'b')], end_stream=True)
+        assert (await asyncio.wait_for(call, 2.0)).status == 200
+        assert not caps_log, f'a peer that answered in time was refused: {caps_log}'
+        assert not _frames_of(c, FrameTypes.RST_STREAM)
+
+    async def test_an_interim_response_then_silence_is_still_refused(
+            self, caps_log, monkeypatch):
+        """A ``103 Early Hints`` is the peer saying it is still working, so it
+        does not start the body clock — which is why the head clock must not
+        stop for it either.  Disarming on the first frame would hand a
+        103-then-silence peer the unbounded wait back."""
+        monkeypatch.setenv('BB_CLIENT_HEAD_TIMEOUT', '0.2')
+        c = _client()
+        call = asyncio.ensure_future(c.request('GET', '/'))
+        await _settle()
+        await _feed_headers(c, 1, [('link', '</s.css>; rel=preload')],
+                            status=103)
+        with pytest.raises(TimeoutError) as excinfo:
+            await asyncio.wait_for(call, 3.0)
+        assert 'BB_CLIENT_HEAD_TIMEOUT' in str(excinfo.value)
+        assert [r.cap for r in caps_log] == ['client_head_timeout'], caps_log
+
+    async def test_an_early_response_leaves_the_body_deadline_running(
+            self, caps_log, monkeypatch):
+        """A server may answer while the request body is still going up — an
+        early 401 or 413.  The body deadline is already running by the time
+        the upload finishes, and arming the head one there would restart the
+        clock the answer had just handed over."""
+        monkeypatch.setenv('BB_CLIENT_HEAD_TIMEOUT', '30')
+        monkeypatch.setenv('BB_CLIENT_BODY_TIMEOUT', '0.2')
+        c = _client()
+        c._on_initial_window_size(10)          # the upload parks after 10 B
+        call = asyncio.ensure_future(c.request('POST', '/', body=b'z' * 5000))
+        await _settle()
+        await _feed_headers(c, 1, [('x-a', 'b')], status=401)   # mid-upload
+        c._on_window_update(c._factory.window_update(1, 5000))  # it finishes
+        await _settle()
+        with pytest.raises(TimeoutError) as excinfo:
+            await asyncio.wait_for(call, 2.0)
+        assert 'BB_CLIENT_BODY_TIMEOUT' in str(excinfo.value), (
+            'the head deadline was armed over a body deadline already running')
+        assert [r.cap for r in caps_log] == ['client_body_timeout'], caps_log
+
+    async def test_our_own_send_window_is_not_charged_to_the_peer(
+            self, caps_log, monkeypatch):
+        """Never bounded before the peer owes an answer.  A request parked on
+        our own flow-control window has not finished asking."""
+        monkeypatch.setenv('BB_CLIENT_HEAD_TIMEOUT', '0.2')
+        c = _client()
+        c._on_initial_window_size(10)
+        call = asyncio.ensure_future(c.request('POST', '/', body=b'z' * 5000))
+        await _settle()
+        await asyncio.sleep(0.5)               # far past the cap, still asking
+        assert not caps_log, f'charged for our own backpressure: {caps_log}'
+        assert not call.done()
+        c._on_window_update(c._factory.window_update(1, 5000))
+        await _settle()
+        await _feed_headers(c, 1, [('x-a', 'b')], end_stream=True)
+        assert (await asyncio.wait_for(call, 2.0)).status == 200
+        assert not caps_log, caps_log
+
+    async def test_off_when_the_head_deadline_is_disabled(
+            self, caps_log, monkeypatch):
+        """``0`` is how every cap in this tree spells off, and it is the
+        opt-out for a peer that legitimately answers slowly."""
+        monkeypatch.setenv('BB_CLIENT_HEAD_TIMEOUT', '0')
+        c = _client()
+        call = asyncio.ensure_future(c.request('GET', '/'))
+        await _settle()
+        await asyncio.sleep(0.3)
+        assert not caps_log and not call.done()
+        await _feed_headers(c, 1, [('x-a', 'b')], end_stream=True)
+        assert (await asyncio.wait_for(call, 2.0)).status == 200
+
+    async def test_the_head_deadline_stops_at_the_head_with_the_body_cap_off(
+            self, caps_log, monkeypatch):
+        """The handover disarms whatever was running *before* it asks whether
+        the next phase has a cap at all.  Ordered the other way, a
+        ``BB_CLIENT_BODY_TIMEOUT`` of ``0`` leaves the head's clock ticking
+        over a peer that is answering — and it refuses one that breached
+        nothing, under the other phase's name."""
+        monkeypatch.setenv('BB_CLIENT_HEAD_TIMEOUT', '0.3')
+        monkeypatch.setenv('BB_CLIENT_BODY_TIMEOUT', '0')
+        c = _client()
+        call = asyncio.ensure_future(c.request('GET', '/'))
+        await _settle()
+        await _feed_headers(c, 1, [('x-a', 'b')])      # the handover
+        await asyncio.sleep(0.5)                       # past the head deadline
+        assert not caps_log, f'the head deadline outlived the head: {caps_log}'
+        await _feed_data(c, 1, b'ok', end_stream=True)
+        assert (await asyncio.wait_for(call, 2.0)).body == b'ok'
+
+    async def test_a_body_record_reports_the_body_phase_not_the_request(
+            self, caps_log, monkeypatch):
+        """``opened_at`` is when the *phase* began, not when the request did.
+        A head phase that stamped it and never re-stamped inflates every later
+        body record on that stream by the head phase's own duration — the
+        refusal stays correct and only the number lies, which is the harder
+        defect to notice."""
+        monkeypatch.setenv('BB_CLIENT_HEAD_TIMEOUT', '5')
+        monkeypatch.setenv('BB_CLIENT_BODY_TIMEOUT', '0.2')
+        c = _client()
+        call = asyncio.ensure_future(c.request('GET', '/'))
+        await _settle()
+        await asyncio.sleep(0.4)                       # spent awaiting the head
+        await _feed_headers(c, 1, [('x-a', 'b')])      # the handover
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(call, 2.0)
+        record, = list(caps_log)
+        assert record.cap == 'client_body_timeout'
+        assert record.requested < 0.4, (
+            f'the body record was charged the head phase as well: '
+            f'requested={record.requested} against limit={record.limit}')
+
+    async def test_a_caller_that_walks_away_takes_its_deadline_with_it(
+            self, caps_log, monkeypatch):
+        """``asyncio.wait_for(client.request(...), n)`` is the ordinary way to
+        put a caller's own deadline on a request, and it cancels ``request()``
+        while the head deadline is running.  A timer left behind would later
+        refuse a stream nobody is waiting on — a cap record against a peer
+        that was never judged."""
+        monkeypatch.setenv('BB_CLIENT_HEAD_TIMEOUT', '0.3')
+        c = _client()
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(c.request('GET', '/'), 0.05)
+        assert c._responses == {}
+        await asyncio.sleep(0.5)        # past the deadline that was running
+        assert not caps_log, f'refused a request its caller had abandoned: {caps_log}'
+        assert not _frames_of(c, FrameTypes.RST_STREAM)
+
+    async def test_another_stream_on_the_connection_is_unaffected(
+            self, monkeypatch):
+        monkeypatch.setenv('BB_CLIENT_HEAD_TIMEOUT', '0.3')
+        c = _client()
+        silent = asyncio.ensure_future(c.request('GET', '/silent'))
+        await _settle()
+        answered = asyncio.ensure_future(c.request('GET', '/answered'))
+        await _settle()
+        await _feed_headers(c, 3, [('x-a', 'b')], end_stream=True)
+        assert (await asyncio.wait_for(answered, 2.0)).status == 200
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(silent, 3.0)
+        resets = _frames_of(c, FrameTypes.RST_STREAM)
+        assert [f.stream_id for f in resets] == [1]
 
 
 # ----------------------------------------------------------------------

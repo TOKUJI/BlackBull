@@ -1526,6 +1526,22 @@ def test_every_declared_client_cap_is_a_settings_field():
     assert not missing, f'not Settings fields: {sorted(missing)}'
 
 
+def test_every_response_phase_names_a_declared_client_cap():
+    """``_Phase`` spells a cap name and reads the ``Settings`` field of the
+    same name, which puts the enum inside this file's source of truth rather
+    than beside it.  Declared as an audit because the alternative is
+    incidental coverage: a misspelt member would surface as an
+    ``AttributeError`` somewhere in the deadline tests, which is a symptom
+    report and not a check."""
+    from blackbull.client.http2 import _Phase
+    from blackbull.env import get_settings
+    settings = get_settings()
+    wrong = [p.name for p in _Phase
+             if p.value not in _CLIENT_CAPS or not hasattr(settings, p.value)]
+    assert not wrong, (
+        f'_Phase members naming no declared cap or no Settings field: {wrong}')
+
+
 # ----------------------------------------------------------------------
 # Wiring audit — every cap in the inventory appears at >= 1 log_cap_hit()
 # call in the codebase.  Static check; catches "removed wiring without
