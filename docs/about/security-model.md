@@ -82,7 +82,7 @@ column.
 | MQTT retained store | — | `BB_MQTT_MAX_RETAINED` 10000 | — |
 | Connections | — | `BB_MAX_CONNECTIONS` (derived) | detect deadline, keep-alive |
 | *Client* response head (HTTP/1.1) | `BB_CLIENT_HEAD_MAX_LINE` 8 KiB | `BB_CLIENT_HEAD_MAX_TOTAL` 64 KiB | `BB_CLIENT_HEAD_TIMEOUT` 30 s |
-| *Client* response head (HTTP/2) | `BB_CLIENT_H2_MAX_FRAME_SIZE` 16 KiB | `BB_CLIENT_HEAD_MAX_TOTAL` 64 KiB encoded + `BB_CLIENT_H2_MAX_HEADER_LIST_SIZE` 64 KiB decoded | `BB_CLIENT_HEAD_TIMEOUT` 30 s |
+| *Client* response head (HTTP/2) | `BB_CLIENT_H2_MAX_FRAME_SIZE` 16 KiB | `BB_CLIENT_HEAD_MAX_TOTAL` 64 KiB, spent twice — encoded, per field block reassembled across CONTINUATION; and decoded, across every section on the stream — plus `BB_CLIENT_H2_MAX_HEADER_LIST_SIZE` 64 KiB decoded, per section, inside the decoder | `BB_CLIENT_HEAD_TIMEOUT` 30 s |
 | *Client* response body | 64 KiB read (HTTP/1.1); `BB_CLIENT_H2_MAX_FRAME_SIZE` (HTTP/2) | `BB_CLIENT_BODY_MAX_TOTAL` **off** | `BB_CLIENT_BODY_TIMEOUT` 30 s + `BB_CLIENT_MIN_BODY_RATE` **off**, and HTTP/1.1 only |
 | *Client* raw HTTP/2 stream | `BB_CLIENT_H2_MAX_FRAME_SIZE` 16 KiB | `BB_CLIENT_RAW_QUEUE_DEPTH` 1024 frames | — |
 | *Client* send path | — | HTTP/2 flow-control window | `BB_WRITE_TIMEOUT` 30 s on the HTTP/2 flow-control wait — a *server* knob — and **none** on the socket drain |
@@ -96,7 +96,7 @@ HTTP/2 needs no such number — every interim section adds to the same
 
 Full descriptions: [Environment variables](../reference/env-vars.md).
 
-### Three limits that are less obvious than they look
+### Four limits that are less obvious than they look
 
 **A message is bounded by what your handler receives, not by what the wire
 carried.** `permessage-deflate` ratios measured in this codebase reach
