@@ -1,7 +1,7 @@
 """Integration tests for HTTP/2 advanced features.
 
-Server push (PUSH_PROMISE) and priority hints require a real TLS + h2
-connection and cannot be verified over HTTP/1.1.
+Server-push negotiation and priority hints require a real TLS + h2 connection
+and cannot be verified over HTTP/1.1.
 """
 import asyncio
 import pathlib
@@ -115,47 +115,16 @@ def priority_app(manage_cert_and_key):
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_server_push_route_reachable(push_app):
-    """Verify the pushed resource route is reachable and the server stays up.
+    """The resource an application might push remains directly reachable.
 
-    Modern HTTP clients (including httpx) do not handle PUSH_PROMISE frames and
-    reset the pushed stream immediately, which is valid per RFC 7540 §6.6.  The
-    test therefore only verifies that:
-    1. The /style.css route exists and returns the expected content.
-    2. The server continues serving requests after a push-enabled request.
+    httpx refuses server push with SETTINGS_ENABLE_PUSH=0, so the application
+    does not attempt a PUSH_PROMISE on this connection.
     """
     base = f'https://127.0.0.1:{push_app.port}'
     async with httpx.AsyncClient(http2=True, verify=False) as c:
         css = await c.get(f'{base}/style.css')
     assert css.status_code == 200
     assert b'body' in css.content
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_server_push_extension_present(push_app):
-    """http.response.push is advertised in conn.extensions for HTTP/2."""
-    _extensions = {}
-
-    # Use a separate app to capture the extensions without triggering a
-    # push to httpx.
-    app2 = BlackBull()
-
-    @app2.route(path='/ext')
-    async def ext(conn, receive, send):
-        _extensions.update(conn.extensions)
-        await send({'type': 'http.response.start', 'status': 200, 'headers': []})
-        await send({'type': 'http.response.body', 'body': b'ok', 'more_body': False})
-
-    import pathlib
-    _CERT = pathlib.Path(__file__).parent.parent / 'cert.pem'
-    _KEY  = pathlib.Path(__file__).parent.parent / 'key.pem'
-    from .conftest import live_server
-    with live_server(app2, certfile=str(_CERT), keyfile=str(_KEY)) as live:
-        async with httpx.AsyncClient(http2=True, verify=_test_ssl_context()) as c:
-            r = await c.get(f'https://127.0.0.1:{live.port}/ext')
-        assert r.status_code == 200
-        # Verify that the framework advertises push support in the scope
-        # (the assertion lives in the server process; we just check the response)
 
 
 @pytest.mark.integration
@@ -228,14 +197,19 @@ async def test_http2_stream_extension_present(stream_info_app):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_advertises_three_extension_keys(stream_info_app):
-    """An HTTP/2 request advertises push, priority, and http2_stream keys."""
+async def test_httpx_disable_push_omits_only_push_extension(stream_info_app):
+    """A real peer refusal removes push without hiding other H/2 extensions.
+
+    httpcore sends SETTINGS_ENABLE_PUSH=0 because it does not consume pushed
+    responses.  This pins the server side of that real negotiation rather than
+    assuming every HTTP/2 peer permits push.
+    """
     async with httpx.AsyncClient(
         http2=True, verify=_test_ssl_context(),
         base_url=f'https://127.0.0.1:{stream_info_app.port}',
     ) as c:
         r = await c.get('/stream-info')
     keys = set(r.json()['extension_keys'])
-    assert 'http.response.push' in keys
+    assert 'http.response.push' not in keys
     assert 'http.response.priority' in keys
     assert 'http.response.http2_stream' in keys
