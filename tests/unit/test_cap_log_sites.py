@@ -1291,10 +1291,12 @@ async def test_client_h2_max_header_list_size_logs_on_http2(
         caps_caplog, monkeypatch):
     """A field section over the advertised decoded total.
 
-    ``requested`` is the block's *encoded* length: hpack reports the limit
-    it refused at and never the decoded total it reached, and compression
-    makes the two independent — which is why this record can carry a
-    ``requested`` below its own ``limit``.
+    ``requested`` is a lower bound rather than the figure, because hpack
+    reports the limit it refused at and never the total it reached.  A
+    tight one: it charges each entry and compares immediately, so it
+    raises on the entry that crosses and the section is provably *just*
+    over.  What is gated below is therefore the property — over the limit,
+    in the limit's own unit — and not the constant.
     """
     from hpack import Encoder
     from blackbull.client.http2 import _ConnectionFailed
@@ -1318,7 +1320,7 @@ async def test_client_h2_max_header_list_size_logs_on_http2(
     records = _records_for(caps_caplog, 'client_h2_max_header_list_size')
     assert records and records[0].protocol == 'http2'
     assert records[0].limit == 2048
-    assert records[0].requested == len(block)
+    assert records[0].requested > records[0].limit
 
 
 @pytest.mark.asyncio

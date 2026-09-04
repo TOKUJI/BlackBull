@@ -353,7 +353,7 @@ protocol rather than a row per cap:
 | `BB_CLIENT_MAX_INTERIM_RESPONSES` | too many `1xx` responses before the final one | — `BB_CLIENT_HEAD_MAX_TOTAL` owns that aggregate |
 | `BB_CLIENT_RAW_QUEUE_DEPTH` | — no raw-stream hatch | the raw-stream queue is full |
 | `BB_CLIENT_H2_MAX_FRAME_SIZE` | — no frame | the declared frame length is over the cap |
-| `BB_CLIENT_H2_MAX_HEADER_LIST_SIZE` | — no field section | the decoded field section is over the cap.  `requested` is the block's **encoded** length: hpack reports the limit it refused at and never the decoded total it reached, and compression makes the two independent, so this record can carry a `requested` below its own `limit` |
+| `BB_CLIENT_H2_MAX_HEADER_LIST_SIZE` | — no field section | the decoded field section is over the cap.  `requested` is a **lower bound**, not the figure: hpack reports the limit it refused at and never the total it reached.  A tight one — it charges each entry and compares immediately, so it raises on the entry that crosses and the section is provably just over the limit |
 
 A time bound records only when **its own** deadline expired.  A
 `TimeoutError` that reached the client from inside the transport is not

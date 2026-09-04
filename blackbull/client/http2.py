@@ -832,10 +832,10 @@ class HTTP2Client:
         except _ConnectionFailed:
             raise
         except Exception as exc:
-            await self._fail_parse(exc, max(len(data) - _FRAME_HEADER_BYTES, 0))
+            await self._fail_parse(exc)
             return None  # unreachable: _fail_parse raises
 
-    async def _fail_parse(self, exc: Exception, encoded: int) -> None:
+    async def _fail_parse(self, exc: Exception) -> None:
         """End the connection with the code the failure earned.
 
         COMPRESSION_ERROR for everything told the peer its HPACK state was
@@ -843,11 +843,6 @@ class HTTP2Client:
         Connection-wide in every arm: §6.1, §6.4 and §6.7 say so, and §4.3
         leaves an undecoded block's table unrecoverable.  §4.2's stream-error
         option is ``_receive_frame``'s, not this one's.
-
-        *encoded* is how many octets arrived carrying the block — the frame
-        payload for a block that fitted one frame, the reassembled block for
-        one that did not.  It is the only size this method can attribute to a
-        refusal; see the oversize arm for what that costs.
         """
         if isinstance(exc, FrameFormatError):
             await self._fail_connection(exc.error_code, str(exc))
@@ -857,13 +852,17 @@ class HTTP2Client:
             # is the peer's own error, and a cap-hit record for one would be
             # a record of a refusal that never happened.
             #
-            # ``requested`` is the *encoded* block length because hpack
-            # reports the limit it refused at and never the decoded total it
-            # reached.  Compression makes the two independent — 3528 encoded
-            # octets decode to 80,740 in this tree's own test — so the number
-            # here is what arrived on the wire and is not the quantity the
-            # cap measures.
-            log_cap_hit('client_h2_max_header_list_size', requested=encoded,
+            # ``requested`` is the limit plus one because that is the tight
+            # lower bound on the decoded total, and no exact figure exists to
+            # report: hpack charges each entry and compares immediately
+            # (``Decoder.decode``, hpack 4.2.0 at hpack.py:545), so it raises
+            # on the entry that crosses and the section is provably *just*
+            # over.  The encoded length is the number reachable here
+            # instead, and it is the wrong unit: compression makes it
+            # independent of what the cap counts, and low enough to read as a
+            # refusal below its own limit.
+            log_cap_hit('client_h2_max_header_list_size',
+                        requested=self._enforced_header_list_size + 1,
                         limit=self._enforced_header_list_size,
                         protocol='http2')
             await self._fail_connection(
@@ -973,7 +972,7 @@ class HTTP2Client:
         except Exception as exc:
             # §4.3.  hpack may have applied part of the block to the dynamic
             # table before raising, so there is no sound way to carry on.
-            await self._fail_parse(exc, len(open_frame.raw_block))
+            await self._fail_parse(exc)
         return open_frame
 
     async def _guard_field_block(self, open_frame) -> None:
