@@ -5976,9 +5976,13 @@ working on both protocols.</p>
 <h3 id="caveats">Caveats<a class="headerlink" href="#caveats" title="Permanent link">&para;</a></h3>
 <ul>
 <li>Clients can disable server push by sending
-  <code>SETTINGS_ENABLE_PUSH=0</code>.  BlackBull does not currently check
-  this setting; if the client rejects the push it will send a
-  <code>RST_STREAM</code>, which BlackBull logs and ignores.</li>
+  <code>SETTINGS_ENABLE_PUSH=0</code>.  BlackBull's server does not read that
+  setting; if the client rejects the push it will send a
+  <code>RST_STREAM</code>, which BlackBull logs and ignores.  A conforming
+  client is entitled to answer with <code>GOAWAY(PROTOCOL_ERROR)</code>
+  instead (RFC 9113 §6.5.2) — BlackBull's own client does exactly
+  that under <code>BB_CLIENT_H2_ENABLE_PUSH=0</code>, which is why that knob
+  defaults to leaving push permitted.</li>
 <li>Pushed resources should be cacheable.  Pushing non-cacheable
   content wastes bandwidth and may confuse browsers.</li>
 </ul>

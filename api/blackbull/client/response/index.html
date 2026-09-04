@@ -1945,6 +1945,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.client.response.PushPromiseResponder" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PushPromiseResponder
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.client.response.Responder" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5372,6 +5383,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.client.response.PushPromiseResponder" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PushPromiseResponder
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.client.response.Responder" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5460,6 +5482,61 @@ stay thin dispatchers.</p>
 
 
 
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.client.response.PushPromiseResponder" class="doc doc-heading">
+            <code>PushPromiseResponder</code>
+
+
+<a href="#blackbull.client.response.PushPromiseResponder" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="Responder (blackbull.client.response.Responder)" href="#blackbull.client.response.Responder">Responder</a></code></p>
+
+
+
+        <p>The client consumes no push, but a promise is never merely skipped.</p>
+<p>Its field block arrives here already decoded — RFC 9113 §4.3 requires
+that even for a frame to be discarded, because the HPACK table is
+connection-wide and a block left unread leaves every later block on the
+connection decoding against a table missing its insertions, which is
+silent corruption rather than an error.  CONTINUATION never reaches a
+responder at all: <code>HTTP2Client._absorb_field_block</code> folds it into the
+frame that opened the block.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
 
 <div class="doc doc-object doc-class">
 
