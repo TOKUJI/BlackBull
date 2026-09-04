@@ -990,11 +990,11 @@ class Settings:
     #: setting for both halves: §6.5.2 makes the refusal a MUST for whoever
     #: sends the 0, so advertising without refusing is worse than silence.
     #:
-    #: Default True because BlackBull's server does not read a peer's
-    #: ENABLE_PUSH (BLA-319), so a client defaulting to 0 would GOAWAY its own
-    #: server the moment an application pushed, both ends correct by their own
-    #: lights.  False is how a fault-injection scenario asks a server "I told
-    #: you not to push — did you push anyway?".
+    #: Default True follows the parameter's RFC initial value, so the client
+    #: stays silent about push and remains compatible with peers that support
+    #: the default.  False is the explicit conformance setting and lets a
+    #: fault-injection scenario ask a server "I told you not to push — did you
+    #: push anyway?".
     client_h2_enable_push: bool = True
 
     #: Dual-path conformance lane.  When true, every request

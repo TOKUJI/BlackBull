@@ -64,6 +64,12 @@ so the editable install's metadata catches up.
 
 ### Changed
 
+- **HTTP/2 server push now honors the peer's `SETTINGS_ENABLE_PUSH`.**  The
+  connection starts with the RFC 9113 §6.5.2 initial value of `1`; valid peer
+  `0` and `1` settings disable and re-enable push.  Request extensions reflect
+  the permission at dispatch time, and a send-time guard logs and drops a late
+  push event if the peer disables push after the scope was built.
+
 - **`BB_CLIENT_HEAD_TIMEOUT` now bounds the HTTP/2 wait for a response to
   begin, and this refuses traffic that was previously accepted.**  The
   HTTP/2 client's progress deadline (`BB_CLIENT_BODY_TIMEOUT`) is armed by the
