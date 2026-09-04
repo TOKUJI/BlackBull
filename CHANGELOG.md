@@ -60,6 +60,44 @@ The runtime version is exposed as `blackbull.__version__` via
 `pyproject.toml`.  Re-run `pip install -e .` after a local version bump
 so the editable install's metadata catches up.
 
+## [Unreleased]
+
+### Changed
+
+- **`BB_CLIENT_HEAD_TIMEOUT` now bounds the HTTP/2 wait for a response to
+  begin, and this refuses traffic that was previously accepted.**  The
+  HTTP/2 client's progress deadline (`BB_CLIENT_BODY_TIMEOUT`) is armed by the
+  first response frame and deliberately exempts the wait before it — a peer
+  that has not answered yet is working, not stalling.  Nothing then owned the
+  wait for the answer to *begin*, so a peer that completed the handshake, took
+  the HEADERS and said nothing parked `request()` forever.  HTTP/1.1 refuses
+  exactly that shape at `BB_CLIENT_HEAD_TIMEOUT`, and `Client` dispatches on
+  ALPN — so the peer chose which of the two bounds it faced.
+
+  **What this breaks.**  An HTTP/2 server that legitimately defers its
+  response head past the deadline — **long polling**, or a query computed
+  before the headers are flushed — is now refused where it used to be waited
+  for, at the **30 second** default.  Set **`BB_CLIENT_HEAD_TIMEOUT=0`** to opt
+  out; `0` disables every wait the knob owns.  HTTP/1.1 callers see no change,
+  and neither does the connection-level wait: what acquires a deadline is a
+  stream that has asked a question.  A breach resets that stream with
+  `RST_STREAM(CANCEL)` and the connection, with every other stream on it,
+  survives.
+
+  The same knob rather than a `BB_CLIENT_H2_*` name, because a second name
+  would let the limit be configured on one path and answered on the other,
+  which is the defect restated.  The bound runs from the moment the request is
+  fully on the wire — a send parked on our own flow-control window is our
+  backpressure, not the peer's silence — until the final (`>= 200`) response
+  head, which hands the stream to `BB_CLIENT_BODY_TIMEOUT`.  A `1xx` interim
+  response neither stops the clock nor restarts it.
+
+  Also fixed with it: a `client_body_timeout` record on a stream now reports
+  the body phase's own elapsed time rather than the whole request's, and a
+  caller that abandons `request()` — an outer `asyncio.wait_for`, a cancelled
+  task group — takes its deadline with it instead of leaving one to refuse a
+  stream nobody is waiting on.
+
 ## [0.80.0] — 2026-08-29
 
 ### Changed
