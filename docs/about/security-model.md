@@ -8,6 +8,12 @@ and what BlackBull explicitly does **not** claim.
 It describes the version it ships with. Where a limit is on by default, that is
 stated; where it is off, that is stated too, along with what to set.
 
+Most of it is about the server. The async HTTP client under `blackbull/client/`
+appears **after** the server rows in the tables below, at its own posture: it
+reads a response from a peer the operator chose, not a request from one who
+chose us, and that is a different standard — stated where it differs rather
+than assumed.
+
 ## Scope and trust boundary
 
 **Every byte from a peer is untrusted until dispatch.** Request lines, headers,
@@ -75,10 +81,22 @@ column.
 | MQTT session state | `BB_MQTT_MAX_SUBSCRIPTIONS` 1000, `BB_MQTT_MAX_QUEUED_MESSAGES` 1000, 16-bit packet-identifier space | `BB_MQTT_MAX_SESSIONS` 10000 | Session Expiry Interval, swept *(see qualification 3)* |
 | MQTT retained store | — | `BB_MQTT_MAX_RETAINED` 10000 | — |
 | Connections | — | `BB_MAX_CONNECTIONS` (derived) | detect deadline, keep-alive |
+| *Client* response head (HTTP/1.1) | `BB_CLIENT_HEAD_MAX_LINE` 8 KiB | `BB_CLIENT_HEAD_MAX_TOTAL` 64 KiB | `BB_CLIENT_HEAD_TIMEOUT` 30 s |
+| *Client* response head (HTTP/2) | `BB_CLIENT_H2_MAX_FRAME_SIZE` 16 KiB | `BB_CLIENT_HEAD_MAX_TOTAL` 64 KiB, spent twice — encoded, per field block reassembled across CONTINUATION; and decoded, across every section on the stream — plus `BB_CLIENT_H2_MAX_HEADER_LIST_SIZE` 64 KiB decoded, per section, inside the decoder | `BB_CLIENT_HEAD_TIMEOUT` 30 s |
+| *Client* response body | 64 KiB read (HTTP/1.1); `BB_CLIENT_H2_MAX_FRAME_SIZE` (HTTP/2) | `BB_CLIENT_BODY_MAX_TOTAL` **off** | `BB_CLIENT_BODY_TIMEOUT` 30 s + `BB_CLIENT_MIN_BODY_RATE` **off**, and HTTP/1.1 only |
+| *Client* raw HTTP/2 stream | `BB_CLIENT_H2_MAX_FRAME_SIZE` 16 KiB | `BB_CLIENT_RAW_QUEUE_DEPTH` 1024 frames | — |
+| *Client* send path | — | HTTP/2 flow-control window | `BB_WRITE_TIMEOUT` 30 s on the HTTP/2 flow-control wait — the server's knob, read by the client too |
+
+One client bound is not in that grid, because it is not one of the three.
+`BB_CLIENT_MAX_INTERIM_RESPONSES` (8) bounds how many `1xx` heads may precede
+the final one on HTTP/1.1: a **count**, and what owns the aggregate of the two
+per-head bounds above it, each of which is spent afresh on every interim.
+HTTP/2 needs no such number — every interim section adds to the same
+`BB_CLIENT_HEAD_MAX_TOTAL`.
 
 Full descriptions: [Environment variables](../reference/env-vars.md).
 
-### Three limits that are less obvious than they look
+### Four limits that are less obvious than they look
 
 **A message is bounded by what your handler receives, not by what the wire
 carried.** `permessage-deflate` ratios measured in this codebase reach
@@ -116,15 +134,22 @@ Three rungs, and the difference between them is what an operator has to do:
 - **`bounded-when-configured`** — the bounds exist but one or more default open.
 - **`bounded-unit-only`** — individual units are bounded; totals are not.
 
-| Protocol | Posture | Notes |
-|---|---|---|
-| HTTP/1.1 | `bounded-by-default` | see qualifications 1 and 2 below |
-| HTTP/2 | `bounded-by-default` | includes control-frame rate metering and PING-based liveness |
-| gRPC | `bounded-by-default` | own message bounds, plus everything HTTP/2 provides |
-| WebSocket | `bounded-by-default` | message bounded post-reassembly and post-inflation; a silent peer is probed with a PING and closed if it does not answer |
-| MQTT | `bounded-by-default` | limits are also *advertised* in CONNACK, so conforming clients stay inside them; see qualification 3 |
+The rungs are read against the rows above, so the table needs to say *whose*
+path each row was. A protocol is not a role: the same HTTP/2 parser bounds a
+request we were sent and a response we asked for, and only one of those came
+from a peer who chose us.
 
-**Three qualifications, stated here rather than in a footnote**, because they
+| Role | Protocol | Posture | Notes |
+|---|---|---|---|
+| Server | HTTP/1.1 | `bounded-by-default` | see qualifications 1 and 2 below |
+| Server | HTTP/2 | `bounded-by-default` | includes control-frame rate metering and PING-based liveness |
+| Server | gRPC | `bounded-by-default` | own message bounds, plus everything HTTP/2 provides |
+| Server | WebSocket | `bounded-by-default` | message bounded post-reassembly and post-inflation; a silent peer is probed with a PING and closed if it does not answer |
+| Server | MQTT | `bounded-by-default` | limits are also *advertised* in CONNACK, so conforming clients stay inside them; see qualification 3 |
+| Client | HTTP/1.1 | `bounded-when-configured` | two of its bounds ship off; see qualification 4 |
+| Client | HTTP/2 | `bounded-when-configured` | the same two, and one of them is not merely off but absent; see qualification 4 |
+
+**Four qualifications, stated here rather than in a footnote**, because they
 are the difference between the label and the whole truth:
 
 1. **There is no total request-duration bound by default.**
@@ -153,13 +178,27 @@ are the difference between the label and the whole truth:
    deadline, so they cost nothing while none is pending. Sessions live in
    memory only and do not survive a restart.
 
+4. **The client's rung is the generous reading.** Ten `BB_CLIENT_*`
+   bounds refuse traffic, and two — `BB_CLIENT_BODY_MAX_TOTAL` and
+   `BB_CLIENT_MIN_BODY_RATE` — ship off, which is exactly what
+   `bounded-when-configured` says. (Twelve `BB_CLIENT_*` variables exist;
+   `BB_CLIENT_H2_ENABLE_PUSH` is a conformance switch and
+   `BB_CLIENT_MIN_BODY_RATE_GRACE` a modifier of the floor, and neither
+   refuses anything on its own. That split is not an editorial choice:
+   `_CLIENT_CAPS` and `_CLIENT_NOT_A_CAP` in
+   `tests/unit/test_cap_log_sites.py` declare it, and
+   `test_every_client_env_var_has_a_verdict` fails on the day a new variable
+   arrives with neither verdict.)
+
 ## Defaults and deployment checklist
 
 On out of the box:
 
-- every limit in the invariant table except `BB_REQUEST_TIMEOUT`;
+- every limit in the invariant table except `BB_REQUEST_TIMEOUT` and the
+  client's two, `BB_CLIENT_BODY_MAX_TOTAL` and `BB_CLIENT_MIN_BODY_RATE`;
 - cap-hit logging on `blackbull.caps` — every refusal above emits a structured
-  `WARNING` naming the limit, the requested value and the configured one (see
+  `WARNING` naming the limit, the requested value and the configured one, the
+  client's included, on *each* protocol that enforces the bound (see
   [Logging](../guide/logging.md#cap-hit-log-blackbullcaps));
 - MQTT limits advertised to clients in CONNACK, so a conforming client never
   reaches the enforcement path.
@@ -173,6 +212,13 @@ Worth setting for an internet-facing deployment:
 | `BB_WS_MAX_MESSAGE_SIZE` | the default admits 16 MiB so the WebSocket conformance suite passes unconfigured; lower it if you do not serve huge messages |
 | `BB_MAX_BODY_SIZE` | lower it if you accept no uploads |
 | `BB_TCP_USER_TIMEOUT_MS` | evicts dead peers behind NATs without waiting for keepalives |
+
+The client's two turn on a different question — not *is this deployment
+internet-facing* but *do I know what this peer should return*. Set
+`BB_CLIENT_BODY_MAX_TOTAL` when you do, at half of what one response may
+occupy, because the buffered body costs about **twice** the cap in peak
+memory. `BB_CLIENT_MIN_BODY_RATE` asserts the peer is a transfer rather than a
+stream, which an event stream or a long poll is not.
 
 How the defaults compare, verified against primary sources:
 
@@ -199,6 +245,10 @@ Every claim on this page is backed by a test or an external conformance suite.
 | Frame-rate metering | `tests/unit/test_rate_window.py`, `tests/unit/test_frame_rate_metering.py` |
 | Derived connection cap | `tests/unit/test_max_connections_default.py` |
 | Protocol conformance | h2spec (HTTP/2 + HPACK), Autobahn (WebSocket), http11probe — see [Conformance](conformance.md) |
+| Client response bounds, and that a peer which stops is abandoned rather than waited on | `tests/unit/client/test_http1_client_head_bounds.py`, `tests/unit/client/test_http1_client_desync_and_deadline.py`, `tests/unit/client/test_http2_client_response_bounds.py` |
+| Client rate floor, including that a slow *consumer* does not trip it | `tests/unit/client/test_http1_client_rate_floor.py` |
+| Every client bound names itself on `blackbull.caps`, on every protocol that enforces it | `tests/unit/test_cap_log_sites.py` — the per-cap tests, plus `test_client_caps_are_wired_on_every_protocol_that_enforces_them` and `test_every_client_env_var_has_a_verdict` |
+| A buffered client response body costs about twice the cap | `tests/unit/client/test_client_body_buffer_cost.py` |
 
 ## Non-claims
 
@@ -219,6 +269,20 @@ less than one that draws its own boundary:
 - **"No known gaps" is not "no gaps."** A bound that no one has found missing is
   not the same as a bound proven complete. This work is continuing, not
   finished.
+
+On the async HTTP client specifically, and after the server ones so the
+contrast is visible:
+
+- **It does not follow redirects and does not pool connections.** Neither
+  exists in `blackbull/client/` — so neither is bounded *or* unbounded, and a
+  report that one of them is unsafe is a feature request.
+- **A buffered response body costs about twice the cap in peak memory.**
+  Reaching ~1× means `stream()`, which exposes no status, no headers and sits
+  outside the cap — so today a caller can have ~1× *or* all three, never both.
+- **This is an audit result, not a proof.** The client's read paths were
+  enumerated by hand; that method has missed paths on this codebase before,
+  and it will again. No known gaps is not no gaps. What the rows above claim
+  is that each named bound holds — not that the list of rows is complete.
 
 Found something? Please open an issue at
 [github.com/TOKUJI/BlackBull](https://github.com/TOKUJI/BlackBull/issues).

@@ -400,8 +400,6 @@ counter emits one summary record per suppressed cap:
 cap hit summary: ws_max_frame_payload suppressed=99 more
 ```
 
-Inventory and audit details live in `BLA-116` [private].
-
 ### Subscribing
 
 ```python
