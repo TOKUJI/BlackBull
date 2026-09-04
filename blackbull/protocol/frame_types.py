@@ -10,7 +10,6 @@ pulling in the codec.
 from enum import Enum, IntEnum, StrEnum
 from io import BytesIO
 from itertools import chain
-from hpack import Encoder
 
 from . import hpack_fastpath, structured_fields
 
@@ -305,6 +304,30 @@ def field_value_is_valid(value: bytes) -> bool:
     return not (0x00 in value or 0x0A in value or 0x0D in value)
 
 
+def no_hpack_context(frame: 'FrameBase', codec: str) -> TypeError:
+    """The refusal for a header frame that cannot name its connection's codec.
+
+    HPACK state is connection-wide and the peer keeps exactly one table for it
+    (RFC 7541 §2.3, RFC 9113 §4.3), so a substitute codec is never a weaker
+    version of the right one — it is a different table.  Both directions fail
+    the same way and silently: a private encoder writes indices the peer
+    resolves against entries someone else inserted, and a block that never
+    reaches the connection's decoder leaves it behind its peer for good.
+    Valid-looking bytes, wrong fields, no exception on either side.
+
+    The message has to send the reader to the connection rather than to the
+    signature, because "missing argument" is answered by passing *any* codec.
+    """
+    return TypeError(
+        f'{frame.FRAME_TYPE.name} frame on stream {frame.stream_id} has no '
+        f'HPACK {codec}: a header frame is encoded and decoded by the one '
+        f'HPACK context of the connection it belongs to (RFC 7541 §2.3, '
+        f'RFC 9113 §4.3) and cannot supply its own. Build it through that '
+        f"connection's FrameFactory, which passes both codecs; a private "
+        f"context indexes a table the peer's single decoder never built, so "
+        f'the peer reads fields nobody sent and neither side raises.')
+
+
 class Headers(FrameBase):
     FRAME_TYPE = FrameTypes.HEADERS
 
@@ -356,7 +379,8 @@ class Headers(FrameBase):
         ``self.length`` is that frame's payload; everything past it was
         appended by CONTINUATION and is fragment throughout.
         """
-        assert self.decoder is not None
+        if self.decoder is None:
+            raise no_hpack_context(self, 'decoder')
         opening = self.raw_block[:self.length]
         continued = self.raw_block[self.length:]
         payload = BytesIO(opening)
@@ -464,7 +488,9 @@ class Headers(FrameBase):
 
     @log
     def save(self):
-        encoder = self.encoder if self.encoder is not None else Encoder()
+        if self.encoder is None:
+            raise no_hpack_context(self, 'encoder')
+        encoder = self.encoder
         # Pseudo-headers MUST come before regular headers (RFC 7540 §8.1.2.1)
         # Fast-path :status when its value is one of the
         # static-table entries (RFC 7541 App A indices 8-14).  The encoder
@@ -545,7 +571,7 @@ class PushPromise(FrameBase):
         Splitting works as in :meth:`Headers.parse_payload`.
         """
         if self.decoder is None:
-            return
+            raise no_hpack_context(self, 'decoder')
         opening = self.raw_block[:self.length]
         continued = self.raw_block[self.length:]
         payload = BytesIO(opening)
@@ -566,7 +592,9 @@ class PushPromise(FrameBase):
         self.decoder.decode(block, raw=True)
 
     def save(self) -> bytes:
-        encoder = self.encoder if self.encoder is not None else Encoder()
+        if self.encoder is None:
+            raise no_hpack_context(self, 'encoder')
+        encoder = self.encoder
         # Extend the HPACK static fastpath to the request-side
         # pseudo-headers that PUSH_PROMISE emits (``:method``, ``:scheme``,
         # ``:path``).  Same wire-equivalence + dynamic-table-neutrality
