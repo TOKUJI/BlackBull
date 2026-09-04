@@ -103,6 +103,16 @@ shared dynamic table); re-implementing a conformant codec is a sub-project of
 its own, and `hpack` is the de-facto Python reference — itself pure Python, so
 it stays `pdb`-debuggable.
 
+That connection-level state is why **one `FrameFactory` serves a whole
+connection** and everything framing on it takes that one — `HTTP2Actor.factory`
+on the server, `HTTP2Client.frame_factory` on the client, and the RFC 8441
+WebSocket client layered over it, which reads the context off the connection
+rather than holding one.  A second factory is a second dynamic table, and it
+stays consistent only until the two encoders interleave: the peer resolves
+every index against the single table its one decoder built, so a field indexed
+by one encoder is read back as a field the other inserted — one stream's header
+resolved inside another's block, with no error raised on either side.
+
 ---
 
 ## §5 — Streams and Multiplexing
