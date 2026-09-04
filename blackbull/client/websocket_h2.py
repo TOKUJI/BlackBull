@@ -131,10 +131,13 @@ class WebSocketH2Session:
     codec the server and the H1 client use.
     """
 
-    def __init__(self, http2_client: HTTP2Client, factory: FrameFactory,
+    def __init__(self, http2_client: HTTP2Client,
                  stream_id: int, frame_queue: asyncio.Queue) -> None:
         self._client = http2_client
-        self._factory = factory
+        # Read from the connection, never taken as a parameter: a session
+        # has no choice about which HPACK context it frames with, so a
+        # parameter could only ever be passed a wrong one.
+        self._factory = http2_client.frame_factory
         self._stream_id = stream_id
         self._queue = frame_queue
         self._closed = False
@@ -288,8 +291,10 @@ class WebSocketH2Client:
         self._ssl = ssl
         self._connect_timeout = connect_timeout
         self._stream_id = stream_id
+        # No HPACK context is held here.  It belongs to the connection —
+        # see ``frame_factory`` — and the connection is opened in
+        # ``__aenter__``, so anything built at this line would be a second one.
         self._client: HTTP2Client | None = None
-        self._factory = FrameFactory()
         self._connect_status: int | None = None
 
     async def __aenter__(self) -> 'WebSocketH2Client':
@@ -305,11 +310,35 @@ class WebSocketH2Client:
             finally:
                 self._client = None
 
+    def _require_client(self) -> HTTP2Client:
+        """The underlying connection, or a message saying how to open one."""
+        if self._client is None:
+            raise RuntimeError(
+                'use as async context manager: '
+                '`async with WebSocketH2Client(...) as c:`')
+        return self._client
+
     @property
     def connect_status(self) -> int | None:
         """``:status`` from the last Extended CONNECT response, or ``None``
         if :meth:`connect` has not run yet."""
         return self._connect_status
+
+    @property
+    def frame_factory(self) -> FrameFactory:
+        """The connection's HPACK context — the ``HTTP2Client``'s own.
+
+        Extended CONNECT rides an ordinary HTTP/2 connection that may already
+        be carrying ``request()`` traffic, and RFC 9113 §4.3 gives that
+        connection one dynamic table in each direction.  Reading the context
+        from the connection is what keeps the CONNECT's header block and
+        every other block on the wire encoded against the same table the
+        peer's single decoder is building.
+
+        Raises :class:`RuntimeError` before ``__aenter__``: the context comes
+        into being with the connection, so there is none to hand out yet.
+        """
+        return self._require_client().frame_factory
 
     async def connect(self, path: str = '/',
                       *, response_timeout: float = 5.0) -> WebSocketH2Session:
@@ -320,14 +349,11 @@ class WebSocketH2Client:
         or :class:`TimeoutError` if no response arrives within
         *response_timeout*.
         """
-        if self._client is None:
-            raise RuntimeError(
-                'use as async context manager: '
-                '`async with WebSocketH2Client(...) as c:`')
+        client = self._require_client()
 
-        queue = self._client.register_raw_stream(self._stream_id)
+        queue = client.register_raw_stream(self._stream_id)
 
-        h_frame = self._factory.create(
+        h_frame = client.frame_factory.create(
             FrameTypes.HEADERS,
             HeaderFrameFlags.END_HEADERS,
             self._stream_id,
@@ -340,18 +366,18 @@ class WebSocketH2Client:
         h_frame.pseudo_headers[PseudoHeaders.AUTHORITY] = (
             f'{self._host}:{self._port}')
 
-        sender = self._client._make_sender(self._stream_id)
+        sender = client._make_sender(self._stream_id)
         await sender(h_frame)
 
         try:
             frame = await asyncio.wait_for(queue.get(), response_timeout)
         except asyncio.TimeoutError as e:
-            self._client.unregister_raw_stream(self._stream_id)
+            client.unregister_raw_stream(self._stream_id)
             raise TimeoutError(
                 f'no CONNECT response within {response_timeout}s') from e
 
         if frame.FrameType() != FrameTypes.HEADERS:
-            self._client.unregister_raw_stream(self._stream_id)
+            client.unregister_raw_stream(self._stream_id)
             raise HandshakeError(
                 f'expected HEADERS response for Extended CONNECT, '
                 f'got frame type {frame.FrameType()!r}')
@@ -360,15 +386,14 @@ class WebSocketH2Client:
         try:
             self._connect_status = int(status)
         except (TypeError, ValueError):
-            self._client.unregister_raw_stream(self._stream_id)
+            client.unregister_raw_stream(self._stream_id)
             raise HandshakeError(
                 f'invalid :status pseudo-header in CONNECT response: '
                 f'{status!r}')
         if self._connect_status != 200:
-            self._client.unregister_raw_stream(self._stream_id)
+            client.unregister_raw_stream(self._stream_id)
             raise HandshakeError(
                 f'server rejected WebSocket-over-H2 CONNECT: '
                 f':status={self._connect_status}')
 
-        return WebSocketH2Session(
-            self._client, self._factory, self._stream_id, queue)
+        return WebSocketH2Session(client, self._stream_id, queue)

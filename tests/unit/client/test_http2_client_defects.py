@@ -294,7 +294,7 @@ class TestRawStreamTeardown:
     @staticmethod
     def _session(client: HTTP2Client, stream_id: int = 1) -> WebSocketH2Session:
         queue = client.register_raw_stream(stream_id)
-        return WebSocketH2Session(client, FrameFactory(), stream_id, queue)
+        return WebSocketH2Session(client, stream_id, queue)
 
     async def test_a_parked_consumer_is_woken_when_the_loop_ends(self):
         """The peer vanishes; the session must surface abnormal closure."""
@@ -475,7 +475,7 @@ class TestRawStreamQueueDepth:
         rather than left parked on a queue nothing will fill again.  That the
         *connection* survives is the next test's claim."""
         c, task, _sent, flooded, _quiet = self._flood(monkeypatch, 4, 8)
-        session = WebSocketH2Session(c, FrameFactory(), 1, flooded)
+        session = WebSocketH2Session(c, 1, flooded)
         await self._wait_until(lambda: 1 not in c._raw_streams)
 
         assert 1 not in c._raw_streams, 'the flooded stream was not refused'

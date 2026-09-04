@@ -104,6 +104,46 @@ so the editable install's metadata catches up.
   task group — takes its deadline with it instead of leaving one to refuse a
   stream nobody is waiting on.
 
+### Security
+
+- **A WebSocket-over-HTTP/2 client shared a connection with a second HPACK
+  encoder, and a header field from one stream could be resolved into
+  another stream's request.**  `WebSocketH2Client` built its own
+  `FrameFactory` — its own HPACK encoder and decoder — and sent the RFC 8441
+  Extended CONNECT header block through the `HTTP2Client` it is layered over.
+  Two encoders therefore wrote header blocks to one connection.
+
+  HPACK's dynamic table is connection state and a peer keeps exactly one
+  decoder for it (RFC 7541 §2.3, RFC 9113 §4.3), so the two tables diverge as
+  soon as the writes interleave: an index that means one field to the encoder
+  that wrote it means whatever the *other* encoder inserted at that position to
+  the peer reading it.  Nothing raises — on either side.  On one connection
+  carrying a `request()`, a WebSocket CONNECT, and a further `request()`, the
+  peer read the second request's `:path` as the WebSocket's `/ws`, read
+  `:protocol: websocket` inside an ordinary GET, and did not see that request's
+  own header field at all.  A field that belongs to one stream — an
+  `authorization` header is the obvious one — is readable inside another
+  stream's block, and a request can arrive at the peer addressed somewhere its
+  caller did not send it.
+
+  Reachable by any application that opened a WebSocket over HTTP/2 with this
+  client and used the same connection for ordinary requests.  It was latent
+  only because the client's WebSocket path is usually the connection's sole
+  user: one encoder is always consistent with itself.  Server-side framing was
+  never affected — `HTTP2Actor` has always kept one factory per served
+  connection — and no inbound decoding went through the second context, so no
+  response was ever misread.
+
+  The connection now owns the context and everything framing on it takes that
+  one, rather than the WebSocket layer being fixed at the site where it showed:
+  `HTTP2Client.frame_factory` names it, `WebSocketH2Client.frame_factory` reads
+  it from the connection (and says so, rather than raising `AttributeError`,
+  before the context manager is entered), and `WebSocketH2Session` no longer
+  takes a factory argument at all — a session on a connection has no choice
+  about which context it frames with, so the parameter could only ever be
+  passed a wrong one.  **Callers constructing `WebSocketH2Session` directly
+  drop the second argument**; `WebSocketH2Client.connect()` is unchanged.
+
 ### Docs
 
 - **The client's security posture is published, and the hedge that stood in

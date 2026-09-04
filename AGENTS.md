@@ -148,6 +148,19 @@ The general table — search priority `ast-grep` → `rg` → `grep`, plus `uv`,
 - **YouTrack** — use the `just yt-*` commands in `justfile` for all tracker
   access; they read `YOUTRACK_URL` and `YOUTRACK_TOKEN` internally. Do not
   access the REST API directly, hard-code credentials, or print the token.
+  Two namespaces, not one: issues are `BLA-<n>` and articles — the Knowledge
+  Base — are `BLA-<n>`'s sibling `BLA-A-<n>`. An article id handed to
+  `yt-show` answers 404 and reads as a typo, so reach for `yt-article`
+  (no id lists them all).
+
+- **Never rewrite a Knowledge Base article without asking first.** `just
+  yt-article-update` exists, and every use of it needs the user's explicit
+  say-so *for that edit*, not a standing permission carried over from an
+  earlier one. Articles are the research and design notes the tracker holds
+  still: `docs/about/security-model.md` is a projection of `BLA-A-1`, and
+  `BLA-A-10` specifies how — so an article edited in passing silently moves
+  what a public page is supposed to be derived from. Issues change with the
+  work and need no such gate; articles do not.
 
 ---
 

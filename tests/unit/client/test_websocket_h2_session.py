@@ -44,8 +44,10 @@ def _make_session(stream_id: int = 1):
 
     client.send_raw_frame = _record_raw  # type: ignore[method-assign]
     queue = client.register_raw_stream(stream_id)
+    # The peer's factory — this is what hand-feeds inbound DATA frames.
+    # The session takes its own from the connection.
     factory = FrameFactory()
-    session = WebSocketH2Session(client, factory, stream_id, queue)
+    session = WebSocketH2Session(client, stream_id, queue)
     return session, queue, factory, writer, sent_raw
 
 

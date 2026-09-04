@@ -430,6 +430,25 @@ class HTTP2Client:
 
     # ---- public API ------------------------------------------------------
 
+    @property
+    def frame_factory(self) -> FrameFactory:
+        """This connection's one HPACK context (RFC 7541 §2.3, RFC 9113 §4.3).
+
+        The dynamic table is connection state and the peer keeps a single
+        decoder for it, so every header block written to this connection has
+        to come from this one encoder.  A second ``FrameFactory`` on the same
+        connection keeps a second table that diverges the moment the two
+        interleave, and the peer then resolves one stream's index against a
+        field the other inserted.  Anything that frames on this connection —
+        including the RFC 8441 WebSocket client layered over it — takes its
+        factory from here rather than building one.
+
+        It also carries the decoder's ``max_header_list_size``, so a second
+        factory would decode inbound blocks without the cap this connection
+        advertises.
+        """
+        return self._factory
+
     async def request(self, method: str | HTTPMethod, path: str, *,
                       headers: Iterable[tuple[str | bytes, str | bytes]] = (),
                       body: bytes = b'') -> ClientResponse:
