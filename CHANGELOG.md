@@ -174,22 +174,16 @@ so the editable install's metadata catches up.
   `test_every_client_env_var_has_a_verdict` fails the day a new variable
   arrives with neither verdict — and not a count made by hand.
 
-  **What is named as absent, because a page listing ten bounds and omitting
-  the gaps reads as a stronger claim than the truth**: no redirect following
-  and no connection pooling (neither exists, so neither is a bound that
-  failed); the peer's `SETTINGS_MAX_CONCURRENT_STREAMS` never read and
-  `SETTINGS_ENABLE_CONNECT_PROTOCOL` never checked before Extended CONNECT;
-  no rate floor on HTTP/2 at all (`BLA-326` [private]); a send path with no
-  time bound of its own, borrowing the server's `BB_WRITE_TIMEOUT` for the
-  flow-control wait and having none on the socket drain (`BLA-324`
-  [private]); the ~2× peak-memory cost of a buffered body against `stream()`'s
-  ~1× without status, headers or the cap (`BLA-325` [private]); an unmetered
-  count axis (`BLA-272` [private]); and WebSocket sessions bounded by a
-  caller's `timeout` argument rather than by a `BB_CLIENT_*` cap.
+  **What is named as absent**: the client follows no redirects and pools no
+  connections — neither exists, so neither is a bound that failed — and a
+  buffered response body costs about twice the cap in peak memory, against
+  `stream()`'s ~1× without status, headers or the cap.  Both are things a
+  reader can act on, which is the line: the posture is an audit result and
+  not a proof, the read paths were enumerated by hand, that method has missed
+  paths here before, and no known gaps is not no gaps.
 
-  `docs/reference/env-vars.md` records the two places it had gone stale
-  against that: `BB_WRITE_TIMEOUT` is read by the client too, and the HTTP/2
-  rate-floor absence now carries its tracker id.
+  `docs/reference/env-vars.md` records where it had gone stale against that:
+  `BB_WRITE_TIMEOUT` is read by the client too.
 
   **No behaviour changed** — documentation only, no new tests.
 
@@ -216,8 +210,8 @@ so the editable install's metadata catches up.
   instead of replacing it.  The rewrite is therefore not the fix, and the pin
   cannot say so on its own: 2.07 is inside any band that tolerates the
   2.030 a 4 KiB-slice peer produces.  An opt-in way to receive a body into a
-  buffer while keeping status, headers and the cap is tracked as `BLA-325`
-  [private].
+  buffer while keeping status, headers and the cap would remove it, and is a
+  separate decision about the public type of `ClientResponse.body`.
 
 ## [0.80.0] — 2026-08-29
 
