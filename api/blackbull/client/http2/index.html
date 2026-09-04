@@ -1940,6 +1940,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.client.http2.HTTP2Client.frame_factory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        frame_factory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.client.http2.HTTP2Client.execute_scenario" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5467,6 +5478,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.client.http2.HTTP2Client.frame_factory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        frame_factory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.client.http2.HTTP2Client.execute_scenario" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5700,6 +5722,39 @@ odd, monotonically-increasing client-initiated stream ID
 
 
 
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.client.http2.HTTP2Client.frame_factory" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">frame_factory</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#blackbull.client.http2.HTTP2Client.frame_factory" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>This connection's one HPACK context (RFC 7541 §2.3, RFC 9113 §4.3).</p>
+<p>The dynamic table is connection state and the peer keeps a single
+decoder for it, so every header block written to this connection has
+to come from this one encoder.  A second <code>FrameFactory</code> on the same
+connection keeps a second table that diverges the moment the two
+interleave, and the peer then resolves one stream's index against a
+field the other inserted.  Anything that frames on this connection —
+including the RFC 8441 WebSocket client layered over it — takes its
+factory from here rather than building one.</p>
+<p>It also carries the decoder's <code>max_header_list_size</code>, so a second
+factory would decode inbound blocks without the cap this connection
+advertises.</p>
+
+    </div>
+
+</div>
 
 
 

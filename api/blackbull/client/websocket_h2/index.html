@@ -2080,6 +2080,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.client.websocket_h2.WebSocketH2Client.frame_factory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        frame_factory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.client.websocket_h2.WebSocketH2Client.connect" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5451,6 +5462,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.client.websocket_h2.WebSocketH2Client.frame_factory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        frame_factory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.client.websocket_h2.WebSocketH2Client.connect" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5656,6 +5678,36 @@ BlackBull's server does so when <code>BB_H2_ENABLE_WEBSOCKET=1</code>.</p>
 
         <p><code>:status</code> from the last Extended CONNECT response, or <code>None</code>
 if :meth:<code>connect</code> has not run yet.</p>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.client.websocket_h2.WebSocketH2Client.frame_factory" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">frame_factory</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#blackbull.client.websocket_h2.WebSocketH2Client.frame_factory" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>The connection's HPACK context — the <code>HTTP2Client</code>'s own.</p>
+<p>Extended CONNECT rides an ordinary HTTP/2 connection that may already
+be carrying <code>request()</code> traffic, and RFC 9113 §4.3 gives that
+connection one dynamic table in each direction.  Reading the context
+from the connection is what keeps the CONNECT's header block and
+every other block on the wire encoded against the same table the
+peer's single decoder is building.</p>
+<p>Raises :class:<code>RuntimeError</code> before <code>__aenter__</code>: the context comes
+into being with the connection, so there is none to hand out yet.</p>
 
     </div>
 
