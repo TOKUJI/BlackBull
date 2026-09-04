@@ -17,12 +17,16 @@ import struct
 
 import pytest
 
+from hpack import Encoder
+
 from blackbull.client.exceptions import ConnectionError as ClientConnectionError
 from blackbull.client.exceptions import HandshakeError
 from blackbull.client.http2 import HTTP2Client
 from blackbull.client.websocket_h2 import WebSocketH2Client, WebSocketH2Session
 from blackbull.protocol.frame import FrameFactory
-from blackbull.protocol.frame_types import ErrorCodes, FrameTypes
+from blackbull.protocol.frame_types import (ErrorCodes, FrameTypes,
+                                            HeaderFrameFlags, PseudoHeaders,
+                                            SettingFrameFlags)
 from blackbull.server.recipient import AbstractReader
 from blackbull.server.sender import AbstractWriter
 from blackbull.server.ws_codec import WSOpcode
@@ -76,6 +80,27 @@ class _BlockingReader(AbstractReader):
         return chunk
 
 
+class _FakeRawWriter:
+    """The preface sink.  ``_start`` writes the preface straight to the raw
+    writer rather than through the sender, and ``__aexit__`` closes it."""
+
+    def __init__(self) -> None:
+        self.data = bytearray()
+        self.closed = False
+
+    def write(self, data: bytes) -> None:
+        self.data += data
+
+    async def drain(self) -> None:
+        pass
+
+    def close(self) -> None:
+        self.closed = True
+
+    async def wait_closed(self) -> None:
+        pass
+
+
 def _client(writer=None, reader=None) -> HTTP2Client:
     c = HTTP2Client('localhost', 1)
     c._writer = writer or _RecordingWriter()
@@ -86,6 +111,18 @@ def _client(writer=None, reader=None) -> HTTP2Client:
 
 def _frame_types_written(writer: _RecordingWriter) -> list[int]:
     return [buf[3] for buf in writer.frames if len(buf) >= 4]
+
+
+async def _wait_until(pred, timeout: float = 1.0) -> None:
+    """Poll *pred* until it holds or *timeout* elapses.
+
+    The bound is the assertion in every caller: what follows must be true
+    because the receive loop did something, not because the test waited.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while not pred() and loop.time() < deadline:
+        await asyncio.sleep(0.001)
 
 
 # ===========================================================================
@@ -444,10 +481,7 @@ class TestRawStreamQueueDepth:
 
     @staticmethod
     async def _wait_until(pred, timeout: float = 1.0) -> None:
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + timeout
-        while not pred() and loop.time() < deadline:
-            await asyncio.sleep(0.001)
+        await _wait_until(pred, timeout)
 
     @staticmethod
     async def _end(c: HTTP2Client, task) -> None:
@@ -601,6 +635,467 @@ class TestRawStreamQueueDepth:
         assert flooded.qsize() == 6
         assert 1 in c._raw_streams
         assert not [f for f in sent if f.FrameType() == FrameTypes.RST_STREAM]
+        await self._end(c, task)
+
+
+# ===========================================================================
+# BLA-315 — a client that has been closed refuses every door into it, and
+#           the refusal says whose close it was
+# ===========================================================================
+
+class TestClosedClientDoors:
+    """``__aexit__`` closed the transport and left every door open.
+
+    ``request`` and ``register_raw_stream`` were guarded, but on
+    ``_connection_lost`` — the *peer's* departure, which a close we perform
+    ourselves never sets.  So after ``async with`` exited, ``request`` and
+    ``receive_raw_frame`` parked, ``send_raw_frame`` and ``execute_scenario``
+    wrote to a closed transport, ``register_raw_stream`` handed out a queue
+    nothing would ever fill, and ``__aenter__`` re-admitted the caller to a
+    client that could not carry a byte.
+
+    The second half is the message.  Setting ``_connection_lost`` in
+    ``__aexit__`` would have shut every door for one line of code and made a
+    diagnostic client report a disconnect it performed itself.
+    """
+
+    @staticmethod
+    async def _closed(reader=None) -> HTTP2Client:
+        """A client whose context has exited and whose loop never ran.
+
+        Reachable through ``_adopt`` (which deliberately does not start the
+        loop) or a hand-built client torn down before its first turn.  No
+        production path arrives here today; the guard is what keeps the
+        state from depending on that staying true.
+        """
+        c = _client(reader=reader)
+        await c.__aexit__(None, None, None)
+        assert not c._connection_lost, (
+            'the peer never went away; only this process closed')
+        return c
+
+    async def test_request_after_our_own_close_is_refused(self):
+        c = await self._closed()
+        with pytest.raises(ClientConnectionError, match='context is closed'):
+            await asyncio.wait_for(c.request('GET', '/'), timeout=1.0)
+
+    async def test_execute_scenario_after_our_own_close_is_refused(self):
+        """Up front, beside ``_check_scenario_ownership``: a scenario either
+        runs whole or not at all, and a closed client can run none of it."""
+        from blackbull.fault_injection.scenario_h2_client import (
+            ScenarioH2Client, Sleep)
+
+        c = await self._closed()
+        with pytest.raises(ClientConnectionError, match='context is closed'):
+            await c.execute_scenario(ScenarioH2Client(steps=(Sleep(0.0),)))
+
+    async def test_send_raw_frame_after_our_own_close_is_refused(self):
+        c = await self._closed()
+        c._control_sender = c._make_sender(0)
+        with pytest.raises(ClientConnectionError, match='context is closed'):
+            await c.send_raw_frame(
+                c._factory.rst_stream(1, ErrorCodes.NO_ERROR))
+
+    async def test_receive_raw_frame_after_our_own_close_is_refused(self):
+        """It parked on a reader whose transport was already closed."""
+        c = await self._closed(reader=_BlockingReader())
+        with pytest.raises(ClientConnectionError, match='context is closed'):
+            await asyncio.wait_for(c.receive_raw_frame(), timeout=1.0)
+
+    async def test_register_raw_stream_after_our_own_close_is_refused(self):
+        """The door BLA-315 was filed for: it handed out a queue no receive
+        loop was left to fill, and the consumer parked on it."""
+        c = await self._closed()
+        with pytest.raises(ClientConnectionError, match='context is closed'):
+            c.register_raw_stream(1)
+
+    async def test_re_entering_a_closed_client_is_refused(self):
+        """The door the enumeration nearly missed.
+
+        ``__aenter__`` skips connecting when ``_raw_writer`` is set — which
+        it still is after ``__aexit__``, holding the writer it just closed.
+        So re-entry wrote the connection preface to a closed transport and
+        started a receive loop on a dead reader, and the caller got back a
+        client that presents as open.
+        """
+        c = _client(reader=_BlockingReader())
+        c._raw_writer = _FakeRawWriter()      # type: ignore[assignment]
+        await c.__aexit__(None, None, None)
+        written = len(c._raw_writer.data)
+
+        with pytest.raises(ClientConnectionError, match='context is closed'):
+            await c.__aenter__()
+
+        assert len(c._raw_writer.data) == written, (
+            'the preface went out on a transport __aexit__ had closed')
+        assert c._receive_task is None, (
+            'a receive loop was started against a closed connection')
+
+    async def test_unregistering_after_our_own_close_still_succeeds(self):
+        """The pinned asymmetry, and the reason it is one.
+
+        ``unregister_raw_stream`` is teardown.  A cleanup path that raises
+        after close turns an orderly shutdown into an error, and
+        ``WebSocketH2Session.close`` calls it from a ``finally``.
+        """
+        c = _client()
+        c.register_raw_stream(1)
+        await c.__aexit__(None, None, None)
+
+        c.unregister_raw_stream(1)          # must not raise
+        assert c._raw_streams == {}
+
+    async def test_the_two_closes_do_not_share_a_message(self):
+        """A peer that went away and a close we performed are different
+        events, and a client that reports one as the other is worse than one
+        that says nothing."""
+        peer = _client(reader=_BlockingReader())
+        loop_task = asyncio.ensure_future(peer._receive_loop())
+        peer._reader.close()
+        await loop_task
+        with pytest.raises(ClientConnectionError) as peer_exc:
+            await asyncio.wait_for(peer.request('GET', '/'), timeout=1.0)
+
+        ours = await self._closed()
+        with pytest.raises(ClientConnectionError) as our_exc:
+            await asyncio.wait_for(ours.request('GET', '/'), timeout=1.0)
+
+        assert 'closed by peer' in str(peer_exc.value)
+        assert 'context is closed' in str(our_exc.value)
+        assert str(peer_exc.value) != str(our_exc.value)
+
+    async def test_a_peer_that_went_away_is_still_reported_as_the_peer(self):
+        """The regression guard on the cheap fix.  A connection lost *and*
+        then closed by us must still name the peer: its departure is the
+        first cause, and it is the one worth telling the caller about."""
+        c = _client(reader=_BlockingReader())
+        loop_task = asyncio.ensure_future(c._receive_loop())
+        c._reader.close()
+        await loop_task
+        await c.__aexit__(None, None, None)
+
+        assert c._connection_lost and c._closed
+        with pytest.raises(ClientConnectionError, match='closed by peer'):
+            await asyncio.wait_for(c.request('GET', '/'), timeout=1.0)
+
+    async def test_registering_is_still_refused_when_the_peer_leaves(self):
+        """The other half of the same guard: the pre-existing refusal keeps
+        its own message."""
+        c = _client(reader=_BlockingReader())
+        loop_task = asyncio.ensure_future(c._receive_loop())
+        c._reader.close()
+        await loop_task
+
+        with pytest.raises(ClientConnectionError, match='closed by peer'):
+            c.register_raw_stream(1)
+
+
+# ===========================================================================
+# BLA-316 — the raw queue holds only frames a raw consumer acts on
+# ===========================================================================
+
+class TestRawStreamFrameFilter:
+    """The filter was a blacklist of two — WINDOW_UPDATE and SETTINGS — so
+    every other type on a raw stream bought a queue slot, whether or not
+    anything would ever read it.
+
+    Between them the two consumers act on three types: ``_H2QueueReader._fill``
+    reads DATA and RST_STREAM, and the Extended CONNECT handshake reads
+    HEADERS.  Everything else was held until the depth cap fired, and the
+    cap's answer is to reset the stream — so a flood of frames nobody reads
+    killed the WebSocket riding on it.
+    """
+
+    @staticmethod
+    def _wire(type_byte: bytes, payload: bytes, stream_id: int,
+              flags: int = 0) -> bytes:
+        return (len(payload).to_bytes(3, 'big') + type_byte + bytes([flags])
+                + stream_id.to_bytes(4, 'big') + payload)
+
+    @classmethod
+    def _priority(cls, stream_id: int = 1, depends_on: int = 3) -> bytes:
+        """A conformant PRIORITY frame: five octets, and never depending on
+        its own stream, which ``_load`` refuses as a stream error."""
+        return cls._wire(FrameTypes.PRIORITY.value,
+                         depends_on.to_bytes(4, 'big') + b'\x00', stream_id)
+
+    @staticmethod
+    def _fed(peer_bytes: bytes, stream_id: int = 1):
+        """A client with one raw stream registered, fed *peer_bytes*.
+
+        Returns ``(client, receive-loop task, frames sent to the peer,
+        the raw queue)``.
+        """
+        c = _client(reader=_BlockingReader())
+        sent: list = []
+
+        async def _send(frame):
+            sent.append(frame)
+
+        c._control_sender = _send
+        queue = c.register_raw_stream(stream_id)
+        c._reader.feed(peer_bytes)
+        return c, asyncio.ensure_future(c._receive_loop()), sent, queue
+
+    @staticmethod
+    async def _end(c: HTTP2Client, task) -> None:
+        c._reader.close()
+        try:
+            await asyncio.wait_for(task, timeout=1.0)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            task.cancel()
+
+    @staticmethod
+    def _drain(queue: asyncio.Queue) -> list[str]:
+        out = []
+        while not queue.empty():
+            frame = queue.get_nowait()
+            ftype = frame.FrameType()
+            out.append(ftype.name if ftype is not None else 'unknown')
+        return out
+
+    # ---- the flood ------------------------------------------------------
+
+    async def test_a_priority_flood_neither_fills_the_queue_nor_resets_it(
+            self, monkeypatch):
+        """The defect, at the depth the cap makes reachable.
+
+        On master the queue took 1024 PRIORITY frames and the 1025th tripped
+        the cap, which resets the stream — so a flood of frames no consumer
+        reads succeeded in killing the WebSocket the cap exists to protect.
+        """
+        monkeypatch.setenv('BB_CLIENT_RAW_QUEUE_DEPTH', '8')
+        c, task, sent, queue = self._fed(self._priority() * 32)
+        await _wait_until(lambda: 1 not in c._raw_streams, timeout=0.5)
+
+        assert queue.qsize() == 0, (
+            'PRIORITY frames spent queue slots no consumer would read')
+        assert 1 in c._raw_streams, 'the flood reset the WebSocket stream'
+        assert not [f for f in sent if f.FrameType() == FrameTypes.RST_STREAM]
+        assert not task.done(), 'the flood ended the receive loop'
+        await self._end(c, task)
+
+    async def test_the_stream_still_works_after_a_flood(self, monkeypatch):
+        """A dropped frame must not desync the stream it arrived on: the
+        WebSocket's own DATA still lands, and in order."""
+        monkeypatch.setenv('BB_CLIENT_RAW_QUEUE_DEPTH', '8')
+        data = self._wire(FrameTypes.DATA.value, b'ws', 1)
+        c, task, _sent, queue = self._fed(
+            self._priority() * 32 + data + self._priority() * 32 + data)
+        await _wait_until(lambda: queue.qsize() >= 2, timeout=1.0)
+
+        assert self._drain(queue) == ['DATA', 'DATA']
+        assert 1 in c._raw_streams
+        await self._end(c, task)
+
+    # ---- the whitelist: what must still arrive --------------------------
+
+    async def test_data_still_reaches_the_queue(self):
+        """Half of what ``_H2QueueReader`` reads: payload and END_STREAM."""
+        c, task, _sent, queue = self._fed(
+            self._wire(FrameTypes.DATA.value, b'payload', 1))
+        await _wait_until(lambda: queue.qsize() == 1)
+
+        frame = queue.get_nowait()
+        assert frame.FrameType() is FrameTypes.DATA
+        assert frame.payload == b'payload'
+        await self._end(c, task)
+
+    async def test_headers_still_reaches_the_queue(self):
+        """What the Extended CONNECT handshake reads — and how trailers
+        arrive, which is why the whitelist is not DATA and RST_STREAM."""
+        block = Encoder().encode([(':status', '200')])
+        c, task, _sent, queue = self._fed(
+            self._wire(FrameTypes.HEADERS.value, block, 1,
+                       int(HeaderFrameFlags.END_HEADERS)))
+        await _wait_until(lambda: queue.qsize() == 1)
+
+        frame = queue.get_nowait()
+        assert frame.FrameType() is FrameTypes.HEADERS
+        assert frame.pseudo_headers.get(PseudoHeaders.STATUS) == '200'
+        await self._end(c, task)
+
+    async def test_rst_stream_still_reaches_the_queue(self):
+        """The other half of ``_H2QueueReader``: EOF for a parked consumer."""
+        c, task, _sent, queue = self._fed(
+            self._wire(FrameTypes.RST_STREAM.value,
+                       int(ErrorCodes.CANCEL).to_bytes(4, 'big'), 1))
+        await _wait_until(lambda: queue.qsize() == 1)
+
+        assert queue.get_nowait().FrameType() is FrameTypes.RST_STREAM
+        await self._end(c, task)
+
+    async def test_a_websocket_handshake_and_echo_survive_the_filter(self):
+        """The guard against fixing the flood by breaking the WebSocket:
+        the handshake reads its HEADERS off the queue and the session then
+        reads a WebSocket frame out of DATA, through the real consumers."""
+        from blackbull.server.ws_codec import encode_frame
+
+        c = _client(reader=_BlockingReader())
+
+        async def _send(frame):
+            pass
+
+        c._control_sender = _send
+        ws_client = WebSocketH2Client('localhost', 1)
+        ws_client._client = c
+        task = asyncio.ensure_future(
+            ws_client.connect('/ws', response_timeout=5.0))
+        await asyncio.sleep(0)
+
+        loop_task = asyncio.ensure_future(c._receive_loop())
+        block = Encoder().encode([(':status', '200')])
+        c._reader.feed(
+            self._priority() * 4
+            + self._wire(FrameTypes.HEADERS.value, block, 1,
+                         int(HeaderFrameFlags.END_HEADERS))
+            + self._priority() * 4
+            + self._wire(FrameTypes.DATA.value,
+                         encode_frame(b'pong', opcode=WSOpcode.TEXT,
+                                      mask=False), 1))
+
+        session = await asyncio.wait_for(task, timeout=2.0)
+        opcode, payload = await session.receive(timeout=2.0)
+        assert (opcode, payload) == (WSOpcode.TEXT, b'pong')
+        await self._end(c, loop_task)
+
+    # ---- the whitelist: where the excluded types go ---------------------
+
+    async def test_priority_is_dropped_rather_than_queued(self):
+        """RFC 9113 §5.3.1 deprecates it and this client stores no priority
+        state, so there is nothing to hand a consumer."""
+        c, task, sent, queue = self._fed(self._priority())
+        await asyncio.sleep(0.05)
+
+        assert self._drain(queue) == []
+        assert 1 in c._raw_streams
+        assert sent == [], 'a dropped frame was answered on the wire'
+        await self._end(c, task)
+
+    async def test_a_priority_update_is_dropped_rather_than_queued(self):
+        """RFC 9218 §7.1.  The same verdict as PRIORITY and for the same
+        reason — the client keeps no priority state to update."""
+        c, task, _sent, queue = self._fed(
+            self._wire(FrameTypes.PRIORITY_UPDATE.value,
+                       (1).to_bytes(4, 'big') + b'u=1', 1))
+        await asyncio.sleep(0.05)
+
+        assert self._drain(queue) == []
+        assert 1 in c._raw_streams
+        await self._end(c, task)
+
+    async def test_an_unknown_type_is_ignored_before_it_costs_a_slot(self):
+        """RFC 9113 §5.5 requires ignoring it, which the client already did
+        — one queue slot later.  Ignoring is not refusing: the stream and
+        the connection both carry on."""
+        c, task, sent, queue = self._fed(
+            self._wire(b'\x63', b'junk', 1))
+        await asyncio.sleep(0.05)
+
+        assert self._drain(queue) == []
+        assert 1 in c._raw_streams
+        assert sent == [], 'an unknown type was answered instead of ignored'
+        assert not task.done()
+        await self._end(c, task)
+
+    async def test_continuation_never_reaches_the_queue(self):
+        """Verified rather than assumed: ``_absorb_field_block`` runs ahead
+        of the raw-stream check, and a CONTINUATION with no open block ends
+        the connection (§6.10) instead of being routed anywhere.
+
+        What the queue holds afterwards is the synthetic terminator
+        ``_end_raw_streams`` puts there to wake the consumer — not the
+        CONTINUATION.
+        """
+        c, task, _sent, queue = self._fed(
+            self._wire(FrameTypes.CONTINUATION.value, b'\x82', 1,
+                       int(HeaderFrameFlags.END_HEADERS)))
+        await asyncio.wait_for(task, timeout=1.0)
+
+        assert self._drain(queue) == ['RST_STREAM']
+        assert 'CONTINUATION without a preceding HEADERS' in (c._failure or '')
+
+    async def test_a_push_promise_on_a_raw_stream_is_refused(self, monkeypatch):
+        """The refusal the queue was skipping.
+
+        ``_on_push_promise`` ends the connection when a promise arrives after
+        our ``SETTINGS_ENABLE_PUSH=0`` was acknowledged (§6.5.2, §6.5.3).  A
+        promise on a *raw* stream never reached it — so the one MUST the
+        client accepts an obligation for was unenforced on exactly the
+        streams a WebSocket uses.
+
+        The block is decoded either way, in ``PushPromise.__init__``; what
+        was skipped is the refusal, not the decode.
+        """
+        monkeypatch.setenv('BB_CLIENT_H2_ENABLE_PUSH', '0')
+        c = HTTP2Client('localhost', 1)
+        c._raw_writer = _FakeRawWriter()      # type: ignore[assignment]
+        c._writer = _RecordingWriter()        # type: ignore[assignment]
+        c._reader = _BlockingReader()         # type: ignore[assignment]
+        await c._start()
+        queue = c.register_raw_stream(1)
+
+        block = Encoder().encode([(':method', 'GET'), (':path', '/pushed')])
+        c._reader.feed(
+            self._wire(FrameTypes.SETTINGS.value, b'',
+                       0, int(SettingFrameFlags.ACK))
+            + self._wire(FrameTypes.PUSH_PROMISE.value,
+                         (2).to_bytes(4, 'big') + block, 1,
+                         int(HeaderFrameFlags.END_HEADERS)))
+        assert c._receive_task is not None
+        await asyncio.wait_for(c._receive_task, timeout=1.0)
+
+        assert 'PUSH_PROMISE' in (c._failure or ''), (
+            'the promise was queued instead of refused')
+        assert 'SETTINGS_ENABLE_PUSH=0' in (c._failure or '')
+        goaways = [buf for buf in c._writer.frames
+                   if len(buf) >= 4 and buf[3:4] == FrameTypes.GOAWAY.value]
+        assert goaways, 'the peer was never told'
+        assert self._drain(queue) == ['RST_STREAM'], (
+            'the promise reached a consumer that would silently drop it')
+
+    async def test_a_promise_before_the_ack_is_still_accepted(self, monkeypatch):
+        """The window §6.5.3 protects.  Routing to the dispatcher must not
+        turn a conforming promise into a connection error."""
+        monkeypatch.setenv('BB_CLIENT_H2_ENABLE_PUSH', '0')
+        c = HTTP2Client('localhost', 1)
+        c._raw_writer = _FakeRawWriter()      # type: ignore[assignment]
+        c._writer = _RecordingWriter()        # type: ignore[assignment]
+        c._reader = _BlockingReader()         # type: ignore[assignment]
+        await c._start()
+        queue = c.register_raw_stream(1)
+
+        block = Encoder().encode([(':method', 'GET'), (':path', '/pushed')])
+        c._reader.feed(self._wire(FrameTypes.PUSH_PROMISE.value,
+                                  (2).to_bytes(4, 'big') + block, 1,
+                                  int(HeaderFrameFlags.END_HEADERS)))
+        await asyncio.sleep(0.05)
+
+        assert c._failure is None, 'a conforming promise ended the connection'
+        assert 1 in c._raw_streams
+        assert self._drain(queue) == []
+        assert c._receive_task is not None
+        c._reader.close()
+        await asyncio.wait_for(c._receive_task, timeout=1.0)
+
+    # ---- the connection-level exclusions the blacklist already had ------
+
+    async def test_window_update_still_reaches_the_sender(self):
+        """The reason the filter existed at all: a per-stream sender parked
+        on its window must wake when the peer credits it, so a queue slot is
+        the one place a WINDOW_UPDATE must not go."""
+        c = _client(reader=_BlockingReader())
+        queue = c.register_raw_stream(1)
+        sender = c._make_sender(1)
+        before = sender.stream_window_size
+        c._reader.feed(self._wire(FrameTypes.WINDOW_UPDATE.value,
+                                  (100).to_bytes(4, 'big'), 1))
+        task = asyncio.ensure_future(c._receive_loop())
+        await _wait_until(lambda: sender.stream_window_size != before)
+
+        assert sender.stream_window_size == before + 100
+        assert self._drain(queue) == []
+        assert 1 in c._raw_streams
         await self._end(c, task)
 
 

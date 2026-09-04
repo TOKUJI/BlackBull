@@ -143,6 +143,54 @@ so the editable install's metadata catches up.
   about which context it frames with, so the parameter could only ever be
   passed a wrong one.  **Callers constructing `WebSocketH2Session` directly
   drop the second argument**; `WebSocketH2Client.connect()` is unchanged.
+- **A raw HTTP/2 stream's queue accepted frames nothing would ever read, and
+  filling it reset the stream.**  The queue behind `register_raw_stream` — the
+  hatch `WebSocketH2Client` uses to carry WebSocket frames over one HTTP/2
+  stream — filtered by a blacklist of two types.  Everything else a peer put on
+  that stream bought a slot, including types the two consumers between them
+  never look at.  Only three are ever read: `DATA` and `RST_STREAM` by the
+  WebSocket reader, `HEADERS` by the Extended CONNECT handshake.
+
+  Two consequences, both from the peer's side of the connection.  The queue
+  filled with frames no consumer would act on, and at `BB_CLIENT_RAW_QUEUE_DEPTH`
+  the client's answer is to reset that stream — so traffic that costs the peer
+  no flow-control credit at all ended a WebSocket session.  Ahead of the
+  handshake it did not even need the depth: one stray frame arriving before the
+  `CONNECT` response failed the handshake outright, because the handshake reads
+  whatever is first in the queue.
+
+  The queue now takes only those three types.  Every other type keeps the
+  destination it has on any other stream, which closes the second gap: a
+  `PUSH_PROMISE` on a raw stream never reached `_on_push_promise`, so a client
+  that had advertised `SETTINGS_ENABLE_PUSH=0` skipped the refusal RFC 9113
+  §6.5.2 obliges it to make — on exactly the streams a WebSocket uses.  The
+  promised field block was decoded before and is decoded now; the HPACK table
+  was never at risk.  `PRIORITY` and `PRIORITY_UPDATE` are dropped, an unknown
+  type is ignored per §5.5, and `WINDOW_UPDATE` and `SETTINGS` keep the
+  connection-level handling they already had.
+
+### Fixed
+
+- **A closed `HTTP2Client` refuses every door into it, and says whose close it
+  was.**  `__aexit__` closed the transport and left the client's public surface
+  open.  `request` and `register_raw_stream` were guarded, but on the *peer's*
+  departure — a state a close we perform ourselves never sets — so after
+  `async with` exited, `request` and `receive_raw_frame` parked, `send_raw_frame`
+  and `execute_scenario` wrote to a closed transport, `register_raw_stream`
+  handed out a queue nothing would fill, and `__aenter__` re-admitted the caller
+  to a client that could not carry a byte.  All five now raise
+  `ConnectionError('HTTP2Client context is closed')`; `unregister_raw_stream`
+  stays permissive, because it is teardown and a cleanup path that raises after
+  close turns an orderly shutdown into an error.
+
+  **No production path reaches this state** — it needs a client adopted or
+  hand-built and torn down before its receive loop ever ran — so this is depth
+  rather than a live defect.  What it buys is the message: closing the doors by
+  setting the peer-departure flag would have cost one line and made a client
+  built for diagnosing servers report a disconnect it had performed itself.
+  The two states are kept apart, and a connection the peer really dropped still
+  says so.  `_closed` is spelled as `HTTP1Client._closed` is, so the two clients
+  answer the same question with the same word.
 
 ### Docs
 
