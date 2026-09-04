@@ -5903,7 +5903,11 @@ log names which limit it kept hitting so an operator can tell abuse from a bug.<
 <p><strong>§6.5 SETTINGS — <code>SettingFrame(FrameBase)</code></strong> ✅
 The server sends its own SETTINGS first from <code>HTTP2Actor.run()</code> (§3.4); a peer's
 <code>SettingFrame</code> is handled by <code>SettingsResponder</code>, which updates the window sizes
-and answers with ACK (§6.5.3).
+and answers with ACK (§6.5.3).  The peer's <code>SETTINGS_ENABLE_PUSH</code> is tracked
+per connection, starting at its §6.5.2 initial value of <code>1</code>; valid <code>0</code> and <code>1</code>
+values disable and re-enable server push respectively.  Request extensions
+reflect that permission when each scope is built, while <code>_handle_push()</code> checks
+the current value again at send time and logs/drops a late-disabled event.
 <code>SETTINGS_ENABLE_CONNECT_PROTOCOL</code> (§6.5.2 / RFC 8441 §3) is advertised <strong>only</strong>
 when <code>BB_H2_ENABLE_WEBSOCKET=1</code>.  <em>Because</em> you must not invite Extended CONNECT
 unless you can service it.</p>
@@ -6083,7 +6087,9 @@ Triggered by the ASGI <code>http.response.push</code> event from inside a handle
 requests are GET, safe, cacheable, body-less (<strong>§8.4.1</strong>); the pushed response
 streams on its own even-numbered stream (<strong>§8.4.2</strong>).  <em>Because</em> push lets the
 server pre-empt a request it knows the client will make — but only for the
-method/cacheability class the RFC permits.</p>
+method/cacheability class the RFC permits.  The actor also gates the event on
+the peer's current <code>SETTINGS_ENABLE_PUSH</code> permission before allocating a stream
+ID or mutating stream state.</p>
 <p><strong>§8.5 The CONNECT Method</strong> ✅ (Extended CONNECT only)
 Plain CONNECT tunnelling is not offered, but <strong>Extended CONNECT</strong> (RFC 8441,
 <code>:protocol=websocket</code>) is — that is the WebSocket-over-HTTP/2 path, opt-in via

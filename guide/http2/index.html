@@ -5965,24 +5965,27 @@ automatically — do not include them in <code>headers</code>.</p>
    middleware, same response cycle.</li>
 </ol>
 <h3 id="checking-for-support">Checking for support<a class="headerlink" href="#checking-for-support" title="Permanent link">&para;</a></h3>
-<p>The server advertises push support in <code>conn.extensions</code>:</p>
+<p>The server advertises push support in <code>conn.extensions</code> when the peer permits
+it at request-dispatch time:</p>
 <div class="highlight"><pre><span></span><code><span class="k">if</span> <span class="s1">'http.response.push'</span> <span class="ow">in</span> <span class="n">conn</span><span class="o">.</span><span class="n">extensions</span><span class="p">:</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">'type'</span><span class="p">:</span> <span class="s1">'http.response.push'</span><span class="p">,</span>
                 <span class="s1">'path'</span><span class="p">:</span> <span class="s1">'/logo.png'</span><span class="p">,</span> <span class="s1">'headers'</span><span class="p">:</span> <span class="p">[]})</span>
 </code></pre></div>
 <p>For HTTP/1.1 requests <code>conn.extensions</code> does not contain
 <code>'http.response.push'</code>, so the guard above keeps the same handler
-working on both protocols.</p>
+working on both protocols.  If the peer changes <code>SETTINGS_ENABLE_PUSH</code> after
+the scope was built, the send path checks the current connection permission as
+well: a late push event is logged and dropped without sending a
+<code>PUSH_PROMISE</code> or creating a pushed request.</p>
 <h3 id="caveats">Caveats<a class="headerlink" href="#caveats" title="Permanent link">&para;</a></h3>
 <ul>
-<li>Clients can disable server push by sending
-  <code>SETTINGS_ENABLE_PUSH=0</code>.  BlackBull's server does not read that
-  setting; if the client rejects the push it will send a
-  <code>RST_STREAM</code>, which BlackBull logs and ignores.  A conforming
-  client is entitled to answer with <code>GOAWAY(PROTOCOL_ERROR)</code>
-  instead (RFC 9113 §6.5.2) — BlackBull's own client does exactly
-  that under <code>BB_CLIENT_H2_ENABLE_PUSH=0</code>, which is why that knob
-  defaults to leaving push permitted.</li>
+<li>Clients can disable server push by sending <code>SETTINGS_ENABLE_PUSH=0</code>.
+  BlackBull tracks that connection setting (whose RFC 9113 §6.5.2 initial value
+  is <code>1</code>) and omits the push extension from subsequently dispatched scopes.
+  A push event from a scope built before the setting changed is logged and
+  dropped at send time, so it cannot send a <code>PUSH_PROMISE</code> after permission was
+  withdrawn.  Sending <code>SETTINGS_ENABLE_PUSH=1</code> re-enables push for later
+  events and scopes.</li>
 <li>Pushed resources should be cacheable.  Pushing non-cacheable
   content wastes bandwidth and may confuse browsers.</li>
 </ul>
