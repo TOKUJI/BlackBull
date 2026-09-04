@@ -43,9 +43,16 @@ class _UnknownFrame:
 
 class FrameFactory:
     """docstring for FrameFactory"""
-    def __init__(self):
+    def __init__(self, *, max_header_list_size: int | None = None):
+        """*max_header_list_size* is the decoded field-section total this
+        connection will accept (RFC 9113 §6.5.2).  ``None`` leaves hpack's
+        own default in force; a caller that advertises the value to its peer
+        passes the same number here, so advice and defence cannot disagree.
+        """
         super().__init__()
         self.decoder = Decoder()
+        if max_header_list_size is not None:
+            self.decoder.max_header_list_size = max_header_list_size
         self.encoder = Encoder()
 
     def create(self, type_: FrameTypes, flags: FrameFlags | int, stream_id: int, *, data: bytes = b'', **kwds):
@@ -90,8 +97,14 @@ class FrameFactory:
 
     def settings(self, *, ack: bool = False, enable_connect_protocol: bool = False,
                  initial_window_size: int | None = None,
-                 max_concurrent_streams: int | None = None):
+                 max_concurrent_streams: int | None = None,
+                 enable_push: int | None = None,
+                 max_header_list_size: int | None = None):
         """Create a SETTINGS frame (INIT or ACK).
+
+        Every identifier is opt-in: ``None`` emits no entry, so a caller
+        stays silent about a parameter rather than announcing the RFC's
+        initial value back at the peer as if it were a position.
 
         Parameters
         ----------
@@ -104,6 +117,13 @@ class FrameFactory:
         max_concurrent_streams:
             Include SETTINGS_MAX_CONCURRENT_STREAMS (identifier 0x3, RFC 7540 §6.5.2).
             Tells the peer the maximum number of concurrent streams we will accept.
+        enable_push:
+            Include SETTINGS_ENABLE_PUSH (identifier 0x2, RFC 9113 §6.5.2).
+            0 forbids the peer to push; §6.5.2 binds it only once acknowledged.
+        max_header_list_size:
+            Include SETTINGS_MAX_HEADER_LIST_SIZE (identifier 0x6, RFC 9113
+            §6.5.2).  Advisory: it is advice to the peer, and the local
+            decoder's limit is what enforces it.
         """
         flags = SettingFrameFlags.ACK if ack else SettingFrameFlags.INIT
         if ack:
@@ -115,6 +135,10 @@ class FrameFactory:
             data += b'\x00\x08\x00\x00\x00\x01'  # ENABLE_CONNECT_PROTOCOL = 1
         if initial_window_size is not None:
             data += b'\x00\x04' + initial_window_size.to_bytes(4, 'big')  # INITIAL_WINDOW_SIZE
+        if enable_push is not None:
+            data += b'\x00\x02' + enable_push.to_bytes(4, 'big')  # ENABLE_PUSH
+        if max_header_list_size is not None:
+            data += b'\x00\x06' + max_header_list_size.to_bytes(4, 'big')  # MAX_HEADER_LIST_SIZE
         return self.create(FrameTypes.SETTINGS, flags, 0, data=data)
 
     def push_promise(self, parent_stream_id: int, promised_stream_id: int,

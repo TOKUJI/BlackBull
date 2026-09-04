@@ -54,16 +54,7 @@ class Responder:
 
 class _NullResponder(Responder):
     """Drops frame types the client does not act on (PRIORITY,
-    PRIORITY_UPDATE, PUSH_PROMISE) without raising.
-
-    Dropped is not the same as unread.  A PUSH_PROMISE arrives here with its
-    field block already decoded, and CONTINUATION does not arrive here at all
-    — ``HTTP2Client._absorb_field_block`` reassembles it into the frame that
-    opened the block.  RFC 9113 §4.3 requires both blocks decompressed *even
-    when the frames are to be discarded*, because the connection-wide HPACK
-    table advances as a side effect of reading them: a block skipped here
-    leaves every later block on the connection decoding against a table
-    missing its insertions, which is silent corruption rather than an error.
+    PRIORITY_UPDATE) without raising.
 
     Inherits from ``Responder`` but keeps ``FRAME_TYPE = None`` so
     ``__init_subclass__`` skips registration — this class is only ever
@@ -106,11 +97,30 @@ class SettingsResponder(Responder):
 
     async def respond(self, client) -> None:
         if self.frame.flags & SettingFrameFlags.ACK:
-            return  # ACK to our SETTINGS — nothing to do
+            client._on_settings_ack()
+            return
         if getattr(self.frame, 'initial_window_size', None) is not None:
             client._on_initial_window_size(self.frame.initial_window_size)
         ack = client._factory.create(FrameTypes.SETTINGS, SettingFrameFlags.ACK, 0)
         await client._send_raw_frame(ack)
+
+
+class PushPromiseResponder(Responder):
+    """The client consumes no push, but a promise is never merely skipped.
+
+    Its field block arrives here already decoded — RFC 9113 §4.3 requires
+    that even for a frame to be discarded, because the HPACK table is
+    connection-wide and a block left unread leaves every later block on the
+    connection decoding against a table missing its insertions, which is
+    silent corruption rather than an error.  CONTINUATION never reaches a
+    responder at all: ``HTTP2Client._absorb_field_block`` folds it into the
+    frame that opened the block.
+    """
+
+    FRAME_TYPE = FrameTypes.PUSH_PROMISE
+
+    async def respond(self, client) -> None:
+        await client._on_push_promise(self.frame)
 
 
 class WindowUpdateResponder(Responder):

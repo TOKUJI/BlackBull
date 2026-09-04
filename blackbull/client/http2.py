@@ -84,6 +84,23 @@ class _ConnectionFailed(Exception):
 
 _WINDOW_UPDATE_THRESHOLD = 32768
 
+#: Largest value SETTINGS_MAX_HEADER_LIST_SIZE can express (RFC 9113 §6.5.2,
+#: a 32-bit field).  What "disabled" installs, hpack having no unlimited.
+_HEADER_LIST_SIZE_UNBOUNDED = 0xFFFFFFFF
+
+
+def _header_list_size() -> tuple[int | None, int]:
+    """``(advertised, enforced)`` for the decoded field section.
+
+    Returned as a pair from one read so the announcement and the decoder's
+    limit cannot drift apart; §6.5.2 makes the announcement advisory, which
+    is exactly why the two must be the same number.
+    """
+    limit = get_settings().client_h2_max_header_list_size
+    if not limit:
+        return None, _HEADER_LIST_SIZE_UNBOUNDED
+    return limit, limit
+
 
 def _flow_controlled_length(frame) -> int:
     """Octets *frame* charged against the connection window.
@@ -193,7 +210,11 @@ class HTTP2Client:
         self._writer: AbstractWriter | None = None
         self._raw_writer: asyncio.StreamWriter | None = None
 
-        self._factory = FrameFactory()
+        # One setting, both effects: the number we advertise is the number
+        # the decoder refuses at, because they are read together here.
+        self._advertised_header_list_size, enforced = _header_list_size()
+        self._factory = FrameFactory(max_header_list_size=enforced)
+        self._push_permitted: bool = get_settings().client_h2_enable_push
         self._control_sender: HTTP2Sender | None = None
         #: Detached refusal tasks, held so neither the GC nor __aexit__
         #: leaves one running against a closed transport.
@@ -248,6 +269,14 @@ class HTTP2Client:
         # the gap between frames.  See ``_receive_frame``.
         self._frame_read_timeout: float = _FRAME_READ_TIMEOUT
         self._goaway_error_code: int = 0
+        # RFC 9113 §6.5.3 — SETTINGS are acknowledged in order, so counting
+        # what we sent against what the peer acknowledged is what says
+        # whether a parameter we sent is yet in force.  A boolean could not:
+        # it cannot tell our first SETTINGS from a later one.
+        self._settings_sent: int = 0
+        self._settings_acked: int = 0
+        #: Which of our SETTINGS carried ENABLE_PUSH=0; None when none did.
+        self._no_push_generation: int | None = None
 
     # ---- async context manager -------------------------------------------
 
@@ -298,9 +327,18 @@ class HTTP2Client:
         self._raw_writer.write(_HTTP2_PREFACE)
         await self._raw_writer.drain()
 
-        # Initial SETTINGS frame (empty — server defaults are fine).
+        # The only SETTINGS this client sends, hence the only place a
+        # generation is opened.
         self._control_sender = HTTP2Sender(self._writer, self._factory, 0)
-        await self._control_sender(self._factory.settings())
+        self._settings_sent += 1
+        enable_push = None
+        if not self._push_permitted:
+            enable_push = 0
+            self._no_push_generation = self._settings_sent
+        await self._control_sender(self._factory.settings(
+            enable_push=enable_push,
+            max_header_list_size=self._advertised_header_list_size,
+        ))
 
         self._receive_task = asyncio.create_task(self._receive_loop())
 
@@ -958,6 +996,11 @@ class HTTP2Client:
                     continue
                 try:
                     await ResponderFactory.create(frame).respond(self)
+                except _ConnectionFailed:
+                    # A responder that ended the connection on purpose is not
+                    # a responder that crashed: swallowing it leaves the loop
+                    # reading on a connection it has just GOAWAYed.
+                    raise
                 except Exception:
                     logger.exception('responder failed for frame %r', frame)
         except _ConnectionFailed as exc:
@@ -1274,6 +1317,36 @@ class HTTP2Client:
         if delta != 0:
             for sender in self._senders.values():
                 sender.adjust_initial_window(delta)
+
+    def _on_settings_ack(self) -> None:
+        """RFC 9113 §6.5.3 — the ACK is the synchronisation point at which
+        the parameters we sent take effect for the peer."""
+        self._settings_acked += 1
+
+    def _push_forbidden(self) -> bool:
+        """True once ENABLE_PUSH=0 has been both sent and acknowledged.
+
+        §6.5.2 conditions the receiver's MUST on both, so the round-trip in
+        between is a window where a PUSH_PROMISE is conforming traffic.
+        """
+        return (self._no_push_generation is not None
+                and self._settings_acked >= self._no_push_generation)
+
+    async def _on_push_promise(self, frame) -> None:
+        """Refuse a promise we forbade, after its block has been decoded.
+
+        The decode is not optional: §4.3 requires it even for a frame that
+        is discarded, because the HPACK table is connection-wide and a block
+        skipped silently corrupts every later one.  So the refusal happens
+        after the decode, never instead of it.
+        """
+        if not self._push_forbidden():
+            logger.debug('PUSH_PROMISE on stream %d dropped', frame.stream_id)
+            return
+        await self._fail_connection(
+            ErrorCodes.PROTOCOL_ERROR,
+            f'PUSH_PROMISE on stream {frame.stream_id} after '
+            f'SETTINGS_ENABLE_PUSH=0 was acknowledged')
 
     def _on_goaway(self, frame) -> None:
         self._goaway_received = True
