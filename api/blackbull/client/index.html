@@ -7908,10 +7908,15 @@ advertises.</p>
         <p>Walk <code>scenario.steps</code> against the connected socket.</p>
 <p>The HTTP/2 counterpart of
 :meth:<code>blackbull.client.http1.HTTP1Client.execute_scenario</code>, and
-deliberately the same shape: it <strong>never raises</strong>, folding every
-outcome — a frame read, a timeout, a transport failure, a
-hard-abort — into the returned result so callers categorise without
-a try/except per scenario.</p>
+deliberately the same shape: every <em>outcome</em> — a frame read, a
+timeout, a transport failure, a hard-abort — is folded into the
+returned result so callers categorise without a try/except per
+scenario.  What is raised instead is the scenario this connection
+cannot express at all: an unowned step (see
+:meth:<code>_check_scenario_ownership</code>) or a client whose context has
+exited.  Neither is news about the peer, and folding one would make
+a closed client indistinguishable in the result from a silent
+server.</p>
 
 
 <details class="step-dispatch" open>
@@ -7960,6 +7965,9 @@ concurrent loop would race this call for the reader.</p>
 <p>Inherits <code>client_h2_max_frame_size</code>: one rule, not a second path
 around it.  A scenario needing an over-sized frame opts out with
 <code>BB_CLIENT_H2_MAX_FRAME_SIZE=0</code>.</p>
+<p>Refused after the context exits — the wait for a frame to <em>begin</em> is
+deliberately unbounded, so on a closed connection this parks for the
+life of the process.</p>
 
 
     </div>
@@ -8037,6 +8045,9 @@ and values may be <code>str</code> or <code>bytes</code>; they are normalised to
     <div class="doc doc-contents ">
 
         <p>Escape hatch: write a raw frame to the wire (negative-path tests).</p>
+<p>Refused after the context exits: the transport is closed, so the
+write is discarded by asyncio without a word and the caller is told
+its frame reached the peer.</p>
 
 
     </div>
@@ -8055,6 +8066,10 @@ and values may be <code>str</code> or <code>bytes</code>; they are normalised to
     <div class="doc doc-contents ">
 
         <p>Stop routing frames for <em>stream_id</em> into its raw-frame queue.</p>
+<p>The one door a closed client still admits, and deliberately: this is
+teardown, <code>WebSocketH2Session.close</code> calls it from a <code>finally</code>,
+and a cleanup path that raises after close turns an orderly shutdown
+into an error.  Nothing here needs the connection.</p>
 
 
     </div>
