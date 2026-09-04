@@ -98,6 +98,34 @@ so the editable install's metadata catches up.
   task group — takes its deadline with it instead of leaving one to refuse a
   stream nobody is waiting on.
 
+### Docs
+
+- **`BB_CLIENT_BODY_MAX_TOTAL` now publishes what it costs: about twice its
+  value in peak memory.**  The cap counts response-body octets, and an
+  operator sizing it against a container memory limit was sizing it against
+  the wrong number — both the HTTP/1.1 and the HTTP/2 client accumulate the
+  body in slices and then join them, so at the join the slices and the joined
+  result are both live.  `blackbull/env.py` and `docs/reference/env-vars.md`
+  now state the multiplier, that it applies to **both** protocols, and that
+  `stream()` is the ~1x escape — at the cost of the status, the headers and
+  this cap, none of which it exposes.
+
+  **No behaviour changed.**  Nothing is refused that was accepted, no default
+  moved, and the client allocates exactly as it did.  What is new besides the
+  prose is `tests/unit/client/test_client_body_buffer_cost.py`, which drives
+  the real buffering paths under `tracemalloc` and pins the ratio inside
+  `[1.9, 2.2]` so the published number cannot drift from the code.
+
+  Recorded with the number: accumulating into a single `bytearray` and
+  returning `bytes(buf)` measures **2.07** rather than **1**, because
+  `ClientResponse.body` is `bytes` and pure Python cannot freeze a buffer into
+  one in place — so the bytearray's over-allocation is added to the final copy
+  instead of replacing it.  The rewrite is therefore not the fix, and the pin
+  cannot say so on its own: 2.07 is inside any band that tolerates the
+  2.030 a 4 KiB-slice peer produces.  An opt-in way to receive a body into a
+  buffer while keeping status, headers and the cap is tracked as `BLA-325`
+  [private].
+
 ## [0.80.0] — 2026-08-29
 
 ### Changed

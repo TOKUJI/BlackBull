@@ -797,6 +797,36 @@ class Settings:
     #: ``Content-Length`` over the cap is refused before a body octet is read;
     #: a chunked body is refused the moment the running total passes it.
     #:
+    #: **What it counts is body octets; what it costs is 2x that plus about
+    #: 121 bytes per slice.**  Both protocols accumulate the body in slices
+    #: and then join them, so at the join the slices and the joined result are
+    #: both live.  The 121 does not scale with the slice: 41 for the ``bytes``
+    #: object's header and its pointer in the list, 80 for the ``Py_buffer``
+    #: ``bytes.join`` builds one of per item.  What sets the slice count is
+    #: the **peer** — its write, or its DATA frame — bounded above by the
+    #: client's own 64 KiB read.  So 2.002x the cap at 64 KiB writes, 2.030 at
+    #: 4 KiB, 2.238 at 512 B; identical on both protocols and all three
+    #: HTTP/1.1 framings.  Size the knob at half of what one response may
+    #: occupy, and below half if the peer dribbles.
+    #:
+    #: ~2x is a floor, which is why the number is published rather than fixed.
+    #: ``ClientResponse.body`` is ``bytes``, and pure Python cannot freeze a
+    #: buffer into one in place, so the final copy is unavoidable.
+    #: Accumulating into a single ``bytearray`` and returning ``bytes(buf)``
+    #: does not remove it: that trades the per-slice cost for the bytearray's
+    #: over-allocation, measures 2.03 to 2.13, and is **worse** at the write
+    #: size the client actually reads at — 2.072 against 2.002.  Reaching ~1x
+    #: means returning the buffer itself, which changes the public type.
+    #: ``client_head_max_total`` already accumulates exactly the ``bytearray``
+    #: way and is given no multiplier of its own: twice a head is kilobytes.
+    #:
+    #: The escape is ``stream()``, which never accumulates: a caller filling
+    #: its own buffer measures ~1x.  What it costs is everything else —
+    #: ``stream()`` exposes no status, no headers, and is deliberately outside
+    #: this cap, so today it is ~1x *or* status, headers and a bound, never
+    #: both.  Closing that is ``BLA-325``.  The numbers above are pinned by
+    #: ``tests/unit/client/test_client_body_buffer_cost.py``.
+    #:
     #: **Off by default**, unlike the server's ``max_body_size``.  That number
     #: and its peers (Kestrel, nginx, axum) bound what strangers may push into
     #: a process; this bounds what you asked for, and the size distribution of
