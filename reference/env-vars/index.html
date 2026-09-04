@@ -5924,12 +5924,12 @@ without naming itself is not one.  <code>BB_CLIENT_H2_ENABLE_PUSH</code> and
 <tr>
 <td><code>BB_CLIENT_HEAD_TIMEOUT</code></td>
 <td><code>30.0</code></td>
-<td>Seconds the client will wait for a complete response head.  The time column for the read the two caps above bound by size: a peer that sends half a head and stops passes every byte budget forever.  Exceeded → <code>TimeoutError</code>, deliberately not a <code>ClientError</code>, so a caller can tell a peer that stalled from one that answered and refused — the same choice the client's connect deadline makes.  <code>0</code> disables.</td>
+<td>Seconds the client will wait for a complete response head.  The time column for the read the two caps above bound by size: a peer that sends half a head and stops passes every byte budget forever.  Exceeded → <code>TimeoutError</code>, deliberately not a <code>ClientError</code>, so a caller can tell a peer that stalled from one that answered and refused — the same choice the client's connect deadline makes.  One number, <strong>three</strong> waits, because the head is three different things to wait for once the framing changes.  <em>HTTP/1.1</em>: the whole head, from the first read to the <code>CRLFCRLF</code>; a breach abandons the <strong>connection</strong>, since a refusal leaves the reader's position inside a message.  <em>HTTP/2</em>, where both of the following may run over one response, in turn: <strong>the wait for the peer to begin answering</strong>, from the moment the request is fully on the wire until the final (<code>&gt;= 200</code>) HEADERS arrives — a <strong>stream</strong> error, <code>RST_STREAM(CANCEL)</code>, so the connection and every other stream on it survive; and <strong>the wait for an open field block to finish</strong> with END_HEADERS, timed from when the block opened rather than from the last frame, so a stream of zero-length CONTINUATION frames cannot re-arm it forever — a <strong>connection</strong> error of type <code>ENHANCE_YOUR_CALM</code>, because HPACK state is connection-wide and a block the decoder did not walk leaves no later block on the connection readable (RFC 9113 §4.3).  Two phases, two bounds, not one bound applied twice: a response whose field block spans CONTINUATION can legitimately spend this many seconds in each.  What the first of those refuses is traffic that used to be waited for indefinitely — an HTTP/2 peer that defers its response head past the deadline, which is what <strong>long polling</strong> and a server that computes before flushing headers both look like.  HTTP/1.1 has always refused that shape at this number, and a second name for HTTP/2 would let the limit be configured on one path and answered on the other; the asymmetry was the defect, not the bound.  A 1xx interim response does not stop the clock — it announces that the peer is still working, which is the case the deadline is there for — nor does it restart it.  <code>0</code> disables, and disables all three.</td>
 </tr>
 <tr>
 <td><code>BB_CLIENT_BODY_TIMEOUT</code></td>
 <td><code>30.0</code></td>
-<td>Seconds the client will wait for a <strong>single</strong> response-body read.  Per read, not per body: the peer must keep making progress, which is what <code>BB_BODY_TIMEOUT</code> means on the server and <code>client_body_timeout</code> in nginx.  What counts as one read differs by kind, deliberately — a slice of body octets is transport-paced, so the deadline covers <strong>one arrival</strong>; a framing operation (a chunk-size line, a trailer field line, the two-octet chunk terminator) is read whole, so it covers <strong>the operation</strong>.  See the note below.  Operations never share a budget: the deadline is fresh for each, so a response of many chunks may take many deadlines in total.  It abandons a peer that <strong>stops</strong>; a peer that trickles satisfies every individual read, and bounding that is <code>BB_CLIENT_MIN_BODY_RATE</code>.  Exceeded → <code>TimeoutError</code>.  <code>0</code> disables.  Under HTTP/2 the unit is a <strong>frame for that stream</strong>: the gap between frames, not the read inside one.  It is armed by the final response head and re-armed by every DATA frame that delivers body octets — <em>not</em> by an interim (1xx) head, which announces that the peer is still working, and not by a DATA frame that delivers nothing, which is not progress.  Per stream, not per connection — a connection-wide clock is reset by any peer traffic, so a busy stream would shelter a stalled one.</td>
+<td>Seconds the client will wait for a <strong>single</strong> response-body read.  Per read, not per body: the peer must keep making progress, which is what <code>BB_BODY_TIMEOUT</code> means on the server and <code>client_body_timeout</code> in nginx.  What counts as one read differs by kind, deliberately — a slice of body octets is transport-paced, so the deadline covers <strong>one arrival</strong>; a framing operation (a chunk-size line, a trailer field line, the two-octet chunk terminator) is read whole, so it covers <strong>the operation</strong>.  See the note below.  Operations never share a budget: the deadline is fresh for each, so a response of many chunks may take many deadlines in total.  It abandons a peer that <strong>stops</strong>; a peer that trickles satisfies every individual read, and bounding that is <code>BB_CLIENT_MIN_BODY_RATE</code>.  Exceeded → <code>TimeoutError</code>.  <code>0</code> disables.  Under HTTP/2 the unit is a <strong>frame for that stream</strong>: the gap between frames, not the read inside one.  It is armed by the final response head — which is where <code>BB_CLIENT_HEAD_TIMEOUT</code> hands the stream over, the two never running at once — and re-armed by every DATA frame that delivers body octets — <em>not</em> by an interim (1xx) head, which announces that the peer is still working, and not by a DATA frame that delivers nothing, which is not progress.  Per stream, not per connection — a connection-wide clock is reset by any peer traffic, so a busy stream would shelter a stalled one.</td>
 </tr>
 <tr>
 <td><code>BB_CLIENT_BODY_MAX_TOTAL</code></td>
@@ -5979,7 +5979,7 @@ chooses which client you get</strong>.  A limit that existed under one protocol 
 not the other would be escapable by advertising the other, which is why these
 knobs are shared rather than duplicated under <code>BB_CLIENT_H2_*</code> names: you
 configure a limit, not a limit-per-protocol.</p>
-<p><strong>Two and a half knobs are not shared yet</strong>, and until they are, a peer
+<p><strong>Two knobs are not shared yet</strong>, and until they are, a peer
 that negotiates <code>h2</code> does escape them:</p>
 <table>
 <thead>
@@ -5990,10 +5990,6 @@ that negotiates <code>h2</code> does escape them:</p>
 </thead>
 <tbody>
 <tr>
-<td><code>BB_CLIENT_HEAD_TIMEOUT</code></td>
-<td><strong>half shared.</strong>  It bounds the wait for END_HEADERS once a field block is open — the peer has committed to a message and stopped mid-delivery — running from when the block opened rather than from the last frame, so a stream of zero-length CONTINUATION frames cannot re-arm it forever.  It does <strong>not</strong> bound the wait for the <em>first</em> response frame: a peer that completes the handshake and then says nothing still parks the call.</td>
-</tr>
-<tr>
 <td><code>BB_CLIENT_HEAD_MAX_LINE</code></td>
 <td>no per-field-line cap; one field value may approach hpack's 64 KiB section limit.</td>
 </tr>
@@ -6003,7 +5999,7 @@ that negotiates <code>h2</code> does escape them:</p>
 </tr>
 </tbody>
 </table>
-<p>What differs among the three that <em>are</em> shared is the unit each is
+<p>What differs among the four that <em>are</em> shared is the unit each is
 denominated in, because the framings do:</p>
 <table>
 <thead>
@@ -6018,6 +6014,11 @@ denominated in, because the framings do:</p>
 <td><code>BB_CLIENT_HEAD_MAX_TOTAL</code></td>
 <td>the response head</td>
 <td>field lines summed over every HEADERS frame on the stream</td>
+</tr>
+<tr>
+<td><code>BB_CLIENT_HEAD_TIMEOUT</code></td>
+<td>the whole head, one deadline</td>
+<td>the wait for the final head to begin; then, while a field block is open, the wait for END_HEADERS</td>
 </tr>
 <tr>
 <td><code>BB_CLIENT_BODY_MAX_TOTAL</code></td>
@@ -6035,7 +6036,13 @@ denominated in, because the framings do:</p>
 <strong>connection</strong>, because a refusal leaves the reader's position inside a message
 and the next read would parse a body as a response.  HTTP/2 frames are
 self-delimiting, so a breach is refused with <code>RST_STREAM(CANCEL)</code> on that
-stream and the connection — and every other stream on it — survives.</p>
+stream and the connection — and every other stream on it — survives.  The
+exception is the one HPACK forces: a field block refused before the decoder
+walked it ends the connection, because §4.3 leaves no later block on it
+decodable.  That covers <code>BB_CLIENT_H2_MAX_HEADER_LIST_SIZE</code>, the encoded half
+of <code>BB_CLIENT_HEAD_MAX_TOTAL</code>, and <code>BB_CLIENT_HEAD_TIMEOUT</code>'s END_HEADERS
+wait — but not <code>BB_CLIENT_HEAD_TIMEOUT</code>'s wait for the answer to begin, where
+no block is open and one stream is all that is refused.</p>
 <h3 id="why-a-framing-line-gets-one-deadline-and-a-body-slice-gets-one-per-arrival">Why a framing line gets one deadline and a body slice gets one per arrival<a class="headerlink" href="#why-a-framing-line-gets-one-deadline-and-a-body-slice-gets-one-per-arrival" title="Permanent link">&para;</a></h3>
 <p>A payload read had to be paced by arrival because its unit was otherwise a
 whole body: <code>readexactly(declared)</code> is one read to every bound above it, and a

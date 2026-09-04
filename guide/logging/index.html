@@ -6156,7 +6156,7 @@ protocol rather than a row per cap:</p>
 <tr>
 <td><code>BB_CLIENT_HEAD_TIMEOUT</code></td>
 <td>the response head did not arrive in time</td>
-<td>a field block opened and never finished with END_HEADERS</td>
+<td>the peer took the request and never began to answer — that stream is reset; or a field block opened and never finished with END_HEADERS — the connection ends</td>
 </tr>
 <tr>
 <td><code>BB_CLIENT_BODY_TIMEOUT</code></td>
