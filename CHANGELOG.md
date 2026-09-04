@@ -100,6 +100,53 @@ so the editable install's metadata catches up.
 
 ### Docs
 
+- **The client's security posture is published, and the hedge that stood in
+  for it is retired.**  `SECURITY.md` said the client's bounds were "still
+  being put in place", so its paragraph stated what a report *should* hold us
+  to rather than a settled surface.  They are all in place, so every sentence
+  that survives is now a commitment: a peer that **stops** part-way through a
+  response is abandoned with a named failure on **both** protocols at the
+  shipped defaults, and every bound that refuses names itself on
+  `blackbull.caps`.
+
+  One surviving sentence changed because it was not true as written: the
+  refusal sentence was an HTTP/1.1 sentence applied to the client as a whole.
+  HTTP/1.1 abandons the connection because a refusal leaves the reader's
+  position inside a message, while on HTTP/2 the refusal is a **stream** error
+  and the connection deliberately survives — except where a field block refused
+  before the decoder walked it leaves HPACK unusable.
+
+  `docs/about/security-model.md` gains the client's paths in the invariant
+  table and its posture in the existing table, at **`bounded-when-configured`**
+  — ten `BB_CLIENT_*` bounds refuse traffic and two of them,
+  `BB_CLIENT_BODY_MAX_TOTAL` and `BB_CLIENT_MIN_BODY_RATE`, ship off.  The
+  table's `Protocol` column gains a `Role` beside it, because a client is not
+  a protocol: the same HTTP/2 parser bounds a request we were sent and a
+  response we asked for, and only one of those came from a peer who chose us.
+  The 10-of-12 split is the audited one — `_CLIENT_CAPS` and
+  `_CLIENT_NOT_A_CAP` in `tests/unit/test_cap_log_sites.py`, where
+  `test_every_client_env_var_has_a_verdict` fails the day a new variable
+  arrives with neither verdict — and not a count made by hand.
+
+  **What is named as absent, because a page listing ten bounds and omitting
+  the gaps reads as a stronger claim than the truth**: no redirect following
+  and no connection pooling (neither exists, so neither is a bound that
+  failed); the peer's `SETTINGS_MAX_CONCURRENT_STREAMS` never read and
+  `SETTINGS_ENABLE_CONNECT_PROTOCOL` never checked before Extended CONNECT;
+  no rate floor on HTTP/2 at all (`BLA-326` [private]); a send path with no
+  time bound of its own, borrowing the server's `BB_WRITE_TIMEOUT` for the
+  flow-control wait and having none on the socket drain (`BLA-324`
+  [private]); the ~2× peak-memory cost of a buffered body against `stream()`'s
+  ~1× without status, headers or the cap (`BLA-325` [private]); an unmetered
+  count axis (`BLA-272` [private]); and WebSocket sessions bounded by a
+  caller's `timeout` argument rather than by a `BB_CLIENT_*` cap.
+
+  `docs/reference/env-vars.md` records the two places it had gone stale
+  against that: `BB_WRITE_TIMEOUT` is read by the client too, and the HTTP/2
+  rate-floor absence now carries its tracker id.
+
+  **No behaviour changed** — documentation only, no new tests.
+
 - **`BB_CLIENT_BODY_MAX_TOTAL` now publishes what it costs: about twice its
   value in peak memory.**  The cap counts response-body octets, and an
   operator sizing it against a container memory limit was sizing it against
