@@ -37,6 +37,28 @@ case "${1:-}" in
     jq -n --arg text "$3" '{text:$text}' |
       api -X POST "${base}/api/issues/$2/comments" --data-binary @- | jq .
     ;;
+  update)
+    [[ $# -eq 3 ]] || { echo 'usage: just yt-update ISSUE DESCRIPTION_FILE' >&2; exit 2; }
+    [[ -f "$3" ]] || { echo "no such file: $3" >&2; exit 2; }
+    jq -n --rawfile description "$3" '{description:$description}' |
+      api -X POST "${base}/api/issues/$2?fields=idReadable,summary" --data-binary @- | jq .
+    ;;
+  article)
+    # The Knowledge Base is a second namespace, not a second project: articles
+    # are BLA-A-<n> and live under /api/articles, so an article id handed to
+    # the issue endpoint 404s and reads as a typo.  Without an id, list them —
+    # BLA-A-10 says nothing about what it holds, and the tree cites articles by
+    # id alone because this repository is public and the tracker is not.
+    if [[ $# -eq 1 ]]; then
+      api --get "${base}/api/articles" \
+        --data-urlencode 'fields=idReadable,summary' \
+        --data-urlencode '$top=200' | jq .
+    else
+      [[ $# -eq 2 ]] || { echo 'usage: just yt-article [ARTICLE]' >&2; exit 2; }
+      api --get "${base}/api/articles/$2" \
+        --data-urlencode 'fields=idReadable,summary,content,updated,parentArticle(idReadable)' | jq .
+    fi
+    ;;
   command)
     [[ $# -ge 3 ]] || { echo 'usage: just yt-command ISSUE COMMAND...' >&2; exit 2; }
     shift
@@ -50,7 +72,7 @@ case "${1:-}" in
     exec "$0" command "$2" 'State Fixed'
     ;;
   *)
-    echo 'usage: just yt-search [QUERY] | yt-show ISSUE | yt-create SUMMARY DESCRIPTION | yt-comment ISSUE TEXT | yt-command ISSUE COMMAND... | yt-close ISSUE' >&2
+    echo 'usage: just yt-search [QUERY] | yt-show ISSUE | yt-create SUMMARY DESCRIPTION | yt-comment ISSUE TEXT | yt-update ISSUE DESCRIPTION_FILE | yt-article [ARTICLE] | yt-command ISSUE COMMAND... | yt-close ISSUE' >&2
     exit 2
     ;;
 esac

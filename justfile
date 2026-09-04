@@ -34,6 +34,14 @@ yt-create summary description:
 yt-comment issue text:
     scripts/youtrack.sh comment "{{issue}}" "{{text}}"
 
+# Replace an issue's description with the contents of a file
+yt-update issue description_file:
+    scripts/youtrack.sh update "{{issue}}" "{{description_file}}"
+
+# Read a Knowledge Base article (BLA-A-<n>); no id lists them all
+yt-article article='':
+    scripts/youtrack.sh article {{article}}
+
 yt-command issue command:
     scripts/youtrack.sh command "{{issue}}" "{{command}}"
 
