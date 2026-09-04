@@ -85,7 +85,7 @@ column.
 | *Client* response head (HTTP/2) | `BB_CLIENT_H2_MAX_FRAME_SIZE` 16 KiB | `BB_CLIENT_HEAD_MAX_TOTAL` 64 KiB, spent twice — encoded, per field block reassembled across CONTINUATION; and decoded, across every section on the stream — plus `BB_CLIENT_H2_MAX_HEADER_LIST_SIZE` 64 KiB decoded, per section, inside the decoder | `BB_CLIENT_HEAD_TIMEOUT` 30 s |
 | *Client* response body | 64 KiB read (HTTP/1.1); `BB_CLIENT_H2_MAX_FRAME_SIZE` (HTTP/2) | `BB_CLIENT_BODY_MAX_TOTAL` **off** | `BB_CLIENT_BODY_TIMEOUT` 30 s + `BB_CLIENT_MIN_BODY_RATE` **off**, and HTTP/1.1 only |
 | *Client* raw HTTP/2 stream | `BB_CLIENT_H2_MAX_FRAME_SIZE` 16 KiB | `BB_CLIENT_RAW_QUEUE_DEPTH` 1024 frames | — |
-| *Client* send path | — | HTTP/2 flow-control window | `BB_WRITE_TIMEOUT` 30 s on the HTTP/2 flow-control wait — a *server* knob — and **none** on the socket drain |
+| *Client* send path | — | HTTP/2 flow-control window | `BB_WRITE_TIMEOUT` 30 s on the HTTP/2 flow-control wait — the server's knob, read by the client too |
 
 One client bound is not in that grid, because it is not one of the three.
 `BB_CLIENT_MAX_INTERIM_RESPONSES` (8) bounds how many `1xx` heads may precede
@@ -188,12 +188,7 @@ are the difference between the label and the whole truth:
    `_CLIENT_CAPS` and `_CLIENT_NOT_A_CAP` in
    `tests/unit/test_cap_log_sites.py` declare it, and
    `test_every_client_env_var_has_a_verdict` fails on the day a new variable
-   arrives with neither verdict.) What the label is generous about is HTTP/2,
-   in two places, and both are gaps rather than defaults: the rate floor has
-   **no HTTP/2 implementation at all**, so setting it bounds an HTTP/1.1 peer
-   and nothing else (`BLA-326` [private]); and the send path owns no time
-   bound of its own — the flow-control wait borrows the server's
-   `BB_WRITE_TIMEOUT` and the socket drain has none (`BLA-324` [private]).
+   arrives with neither verdict.)
 
 ## Defaults and deployment checklist
 
@@ -281,25 +276,14 @@ contrast is visible:
 - **It does not follow redirects and does not pool connections.** Neither
   exists in `blackbull/client/` — so neither is bounded *or* unbounded, and a
   report that one of them is unsafe is a feature request.
-- **It ignores two HTTP/2 settings it should read.** The peer's
-  `SETTINGS_MAX_CONCURRENT_STREAMS` is never read, and
-  `SETTINGS_ENABLE_CONNECT_PROTOCOL` is documented as required before Extended
-  CONNECT and never checked. Both spend the *peer's* budget rather than ours,
-  which is why they are conformance gaps and not bounds.
-- **The HTTP/2 body has no rate floor, and the send path no time bound of its
-  own.** See qualification 4; tracked as `BLA-326` and `BLA-324` [both
-  private].
 - **A buffered response body costs about twice the cap in peak memory.**
   Reaching ~1× means `stream()`, which exposes no status, no headers and sits
   outside the cap — so today a caller can have ~1× *or* all three, never both.
   Tracked as `BLA-325` [private].
-- **The count axis is unmetered.** No `RateWindow` exists under
-  `blackbull/client/`, so a peer flooding cheap frames is answered by a queue
-  depth and never by a rate. Tracked as `BLA-272` [private].
-- **WebSocket sessions sit outside these bounds.** A client `receive()` is
-  bounded by a `timeout` argument its caller passes, not by a `BB_CLIENT_*`
-  cap, and nothing probes a silent peer the way the server's liveness PING
-  does.
+- **This is an audit result, not a proof.** The client's read paths were
+  enumerated by hand; that method has missed paths on this codebase before,
+  and it will again. No known gaps is not no gaps. What the rows above claim
+  is that each named bound holds — not that the list of rows is complete.
 
 Found something? Please open an issue at
 [github.com/TOKUJI/BlackBull](https://github.com/TOKUJI/BlackBull/issues).

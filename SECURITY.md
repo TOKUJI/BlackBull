@@ -128,15 +128,13 @@ The following are in scope for security reports:
   calling a party you do not control is outside this paragraph; tell us,
   because that is the evidence that would change it.
 
-  Known and written down, so a report on one of these is not new information:
-  `BB_CLIENT_MIN_BODY_RATE` has no HTTP/2 implementation, so a trickling `h2`
-  peer is not refused even with the floor set; and the send path owns no time
-  bound of its own — the HTTP/2 flow-control wait borrows the server's
-  `BB_WRITE_TIMEOUT`, and the socket drain has none.  Absent by design rather
-  than unbounded: redirect following and connection pooling.  Every bound it
-  does have is in `docs/reference/env-vars.md`, and
-  `docs/about/security-model.md` states the posture they add up to and what is
-  missing from it.
+  Absent by design rather than unbounded: the client follows no redirects and
+  pools no connections.  Every bound it does have is in
+  `docs/reference/env-vars.md`, and `docs/about/security-model.md` states the
+  posture they add up to.  That posture is an audit result and not a proof:
+  the paths were enumerated by hand, that method has missed paths here before,
+  and no known gaps is not the same as no gaps.  A read path that is not on
+  those pages is the report we most want.
 - The gRPC layer under `blackbull/grpc/` (message framing,
   compression negotiation and decompression limits, deadline
   enforcement) and the MQTT 5 broker under `blackbull/mqtt/` —
