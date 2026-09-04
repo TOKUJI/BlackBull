@@ -26,6 +26,7 @@ full H/2 connection setup that is impractical at the unit level.
 """
 from __future__ import annotations
 
+import ast
 import asyncio
 import logging
 
@@ -967,6 +968,563 @@ async def test_client_h2_max_frame_size_logs_on_http2(caps_caplog, monkeypatch):
 
 
 # ----------------------------------------------------------------------
+# Async client, HTTP/1.1 — the response bounds that refused in silence
+#
+# Every rejection below already happened before it kept a record; what
+# these tests gate is the record.  All of them drive the real site from a
+# fake reader rather than calling ``log_cap_hit`` — the preference this
+# file's docstring states — because no client bound needs a live
+# connection to reach.
+# ----------------------------------------------------------------------
+
+class _ClientCanned(AbstractReader):
+    """A peer that says its piece and then reports EOF."""
+
+    def __init__(self, payload: bytes) -> None:
+        self._buf, self._pos = payload, 0
+
+    async def read(self, n: int = -1) -> bytes:
+        out = (self._buf[self._pos:] if n < 0
+               else self._buf[self._pos:self._pos + n])
+        self._pos += len(out)
+        return out
+
+
+class _ClientStalling(AbstractReader):
+    """A peer that sends *prefix* and then never sends anything again."""
+
+    def __init__(self, prefix: bytes) -> None:
+        self._prefix, self._pos = prefix, 0
+
+    async def read(self, n: int = -1) -> bytes:
+        if self._pos < len(self._prefix):
+            end = len(self._prefix) if n < 0 else self._pos + n
+            out = self._prefix[self._pos:end]
+            self._pos += len(out)
+            return out
+        await asyncio.Event().wait()
+        raise AssertionError('unreachable')
+
+
+class _ClientRaisesTimeout(AbstractReader):
+    """A reader whose own read raises ``TimeoutError`` promptly.
+
+    Not the deadline expiring — something under the transport answering in
+    the same exception type.  The negative control for both time bounds.
+    """
+
+    def __init__(self, prefix: bytes = b'') -> None:
+        self._buf, self._pos = prefix, 0
+
+    async def read(self, n: int = -1) -> bytes:
+        if self._pos < len(self._buf):
+            end = len(self._buf) if n < 0 else self._pos + n
+            out = self._buf[self._pos:end]
+            self._pos += len(out)
+            return out
+        raise TimeoutError('the transport said so, not the cap')
+
+
+def _h1_response(*fields: bytes) -> bytes:
+    """A 200 head with *fields* already CRLF-terminated."""
+    return b'HTTP/1.1 200 OK\r\n' + b''.join(fields) + b'\r\n'
+
+
+def _h1_chunked(body: bytes) -> bytes:
+    return b'HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n' + body
+
+
+@pytest.mark.asyncio
+async def test_client_head_max_total_logs_on_http1(caps_caplog, monkeypatch):
+    """Forty field lines, each far under the per-line cap.  Only the sum is
+    anomalous, so the total is the only bound that can refuse it."""
+    from blackbull.client.exceptions import ResponseTooLarge
+    from blackbull.client.http1 import HTTP1ResponseRecipient
+
+    monkeypatch.setenv('BB_CLIENT_HEAD_MAX_TOTAL', '512')
+    head = _h1_response(*[b'x-pad-%03d: %s\r\n' % (i, b'v' * 40)
+                          for i in range(40)])
+    with pytest.raises(ResponseTooLarge):
+        await HTTP1ResponseRecipient().receive(_ClientCanned(head))
+
+    records = _records_for(caps_caplog, 'client_head_max_total')
+    assert records and records[0].protocol == 'http1'
+    assert records[0].limit == 512
+    assert records[0].requested > 512
+
+
+@pytest.mark.asyncio
+async def test_client_head_max_total_logs_on_http1_trailers(
+        caps_caplog, monkeypatch):
+    """The second place the head budget is spent: the trailer section is
+    field lines by another name, and it accumulates after the body."""
+    from blackbull.client.exceptions import ResponseTooLarge
+    from blackbull.client.http1 import HTTP1ResponseRecipient
+
+    monkeypatch.setenv('BB_CLIENT_HEAD_MAX_TOTAL', '64')
+    monkeypatch.setenv('BB_CLIENT_HEAD_MAX_LINE', '4096')
+    trailers = b''.join(b'x-t-%03d: %s\r\n' % (i, b'v' * 40) for i in range(8))
+    reader = _ClientCanned(_h1_chunked(b'2\r\nhi\r\n0\r\n' + trailers + b'\r\n'))
+    with pytest.raises(ResponseTooLarge):
+        await HTTP1ResponseRecipient().receive(reader)
+
+    records = _records_for(caps_caplog, 'client_head_max_total')
+    assert records and records[0].protocol == 'http1'
+    assert records[0].limit == 64
+    assert records[0].requested > 64
+
+
+@pytest.mark.asyncio
+async def test_client_head_max_line_logs_on_http1(caps_caplog, monkeypatch):
+    """One field line over the per-line rule inside a head well under the
+    total, so the line cap is the only bound that sees it."""
+    from blackbull.client.exceptions import ResponseTooLarge
+    from blackbull.client.http1 import HTTP1ResponseRecipient
+
+    monkeypatch.setenv('BB_CLIENT_HEAD_MAX_TOTAL', '8192')
+    monkeypatch.setenv('BB_CLIENT_HEAD_MAX_LINE', '64')
+    reader = _ClientCanned(_h1_response(b'x-big: ' + b'v' * 200 + b'\r\n'))
+    with pytest.raises(ResponseTooLarge):
+        await HTTP1ResponseRecipient().receive(reader)
+
+    records = _records_for(caps_caplog, 'client_head_max_line')
+    assert records and records[0].protocol == 'http1'
+    assert records[0].limit == 64
+    assert records[0].requested > 64
+
+
+@pytest.mark.asyncio
+async def test_client_head_max_line_logs_on_http1_framing_line(
+        caps_caplog, monkeypatch):
+    """A chunk-size line padded with extensions.  The same cap bounds it,
+    and it is read during the body rather than during the head.
+
+    The budget is set above every line of the head on purpose: at a value
+    the head itself breaches, the head walk refuses first and this test
+    would pass while the framing site stayed unwired.
+    """
+    from blackbull.client.exceptions import ResponseTooLarge
+    from blackbull.client.http1 import HTTP1ResponseRecipient
+
+    monkeypatch.setenv('BB_CLIENT_HEAD_MAX_LINE', '32')
+    reader = _ClientCanned(
+        _h1_chunked(b'2;' + b'e' * 200 + b'\r\nhi\r\n0\r\n\r\n'))
+    with pytest.raises(ResponseTooLarge):
+        await HTTP1ResponseRecipient().receive(reader)
+
+    records = _records_for(caps_caplog, 'client_head_max_line')
+    assert records and records[0].protocol == 'http1'
+    assert records[0].limit == 32
+    assert records[0].requested > 32
+
+
+@pytest.mark.asyncio
+async def test_client_head_timeout_logs_on_http1(caps_caplog, monkeypatch):
+    """Half a head and then silence: every byte budget is satisfied
+    forever, so only the deadline can end it."""
+    from blackbull.client.http1 import HTTP1ResponseRecipient
+
+    monkeypatch.setenv('BB_CLIENT_HEAD_TIMEOUT', '0.05')
+    reader = _ClientStalling(b'HTTP/1.1 200 OK\r\nx-half: ')
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(HTTP1ResponseRecipient().receive(reader), 3.0)
+
+    records = _records_for(caps_caplog, 'client_head_timeout')
+    assert records and records[0].protocol == 'http1'
+    assert records[0].limit == 0.05
+
+
+@pytest.mark.asyncio
+async def test_client_head_timeout_is_not_logged_for_a_reader_s_own_timeout(
+        caps_caplog, monkeypatch):
+    """A ``TimeoutError`` that reached the client from *inside* the reader
+    is not this cap refusing, and a record naming it would report a refusal
+    that never happened.  The deadline here is long enough that only the
+    reader can have raised."""
+    from blackbull.client.http1 import HTTP1ResponseRecipient
+
+    monkeypatch.setenv('BB_CLIENT_HEAD_TIMEOUT', '30.0')
+    reader = _ClientRaisesTimeout(b'HTTP/1.1 200 OK\r\nx-half: ')
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(HTTP1ResponseRecipient().receive(reader), 3.0)
+
+    assert not _records_for(caps_caplog, 'client_head_timeout')
+
+
+@pytest.mark.asyncio
+async def test_client_body_timeout_logs_on_http1(caps_caplog, monkeypatch):
+    """A complete head, two octets of a ten-octet body, then silence."""
+    from blackbull.client.http1 import HTTP1ResponseRecipient
+
+    monkeypatch.setenv('BB_CLIENT_BODY_TIMEOUT', '0.05')
+    reader = _ClientStalling(_h1_response(b'content-length: 10\r\n') + b'ab')
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(HTTP1ResponseRecipient().receive(reader), 3.0)
+
+    records = _records_for(caps_caplog, 'client_body_timeout')
+    assert records and records[0].protocol == 'http1'
+    assert records[0].limit == 0.05
+
+
+@pytest.mark.asyncio
+async def test_client_body_timeout_is_not_logged_for_a_reader_s_own_timeout(
+        caps_caplog, monkeypatch):
+    """The body half of the control above."""
+    from blackbull.client.http1 import HTTP1ResponseRecipient
+
+    monkeypatch.setenv('BB_CLIENT_BODY_TIMEOUT', '30.0')
+    reader = _ClientRaisesTimeout(
+        _h1_response(b'content-length: 10\r\n') + b'ab')
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(HTTP1ResponseRecipient().receive(reader), 3.0)
+
+    assert not _records_for(caps_caplog, 'client_body_timeout')
+
+
+@pytest.mark.asyncio
+async def test_client_body_max_total_logs_on_http1_declared(
+        caps_caplog, monkeypatch):
+    """Refused on the ``Content-Length`` before an octet is read, so the
+    record is written from the declaration alone."""
+    from blackbull.client.exceptions import ResponseTooLarge
+    from blackbull.client.http1 import HTTP1ResponseRecipient
+
+    monkeypatch.setenv('BB_CLIENT_BODY_MAX_TOTAL', '8')
+    reader = _ClientCanned(_h1_response(b'content-length: 64\r\n') + b'x' * 64)
+    with pytest.raises(ResponseTooLarge):
+        await HTTP1ResponseRecipient().receive(reader)
+
+    records = _records_for(caps_caplog, 'client_body_max_total')
+    assert records and records[0].protocol == 'http1'
+    assert records[0].limit == 8
+    assert records[0].requested == 64
+
+
+@pytest.mark.asyncio
+async def test_client_body_max_total_logs_on_http1_chunked(
+        caps_caplog, monkeypatch):
+    """A chunked body declares nothing up front, so the same cap is spent
+    against the running total instead."""
+    from blackbull.client.exceptions import ResponseTooLarge
+    from blackbull.client.http1 import HTTP1ResponseRecipient
+
+    monkeypatch.setenv('BB_CLIENT_BODY_MAX_TOTAL', '8')
+    reader = _ClientCanned(_h1_chunked(b'40\r\n' + b'x' * 64 + b'\r\n0\r\n\r\n'))
+    with pytest.raises(ResponseTooLarge):
+        await HTTP1ResponseRecipient().receive(reader)
+
+    records = _records_for(caps_caplog, 'client_body_max_total')
+    assert records and records[0].protocol == 'http1'
+    assert records[0].limit == 8
+    assert records[0].requested == 64
+
+
+@pytest.mark.asyncio
+async def test_client_body_max_total_logs_on_http1_close_delimited(
+        caps_caplog, monkeypatch):
+    """The instrument's positive control.
+
+    This site kept a record before this file's other client tests existed,
+    so it is the one row that must pass whether or not the wiring under
+    test is present.  A run where every client assertion here goes green
+    while this one is silent is not evidence about the caps — it is
+    evidence that the harness never reached them.
+    """
+    from blackbull.client.exceptions import ResponseTooLarge
+    from blackbull.client.http1 import HTTP1ResponseRecipient
+
+    monkeypatch.setenv('BB_CLIENT_BODY_MAX_TOTAL', '8')
+    reader = _ClientCanned(
+        b'HTTP/1.1 200 OK\r\nconnection: close\r\n\r\n' + b'x' * 64)
+    with pytest.raises(ResponseTooLarge):
+        await HTTP1ResponseRecipient().receive(reader)
+
+    records = _records_for(caps_caplog, 'client_body_max_total')
+    assert records and records[0].protocol == 'http1'
+    assert records[0].limit == 8
+
+
+# ----------------------------------------------------------------------
+# client_h2_max_header_list_size — the decoded field section
+# ----------------------------------------------------------------------
+
+def _h2_headers_frame(block: bytes, *, stream_id: int = 1) -> bytes:
+    from blackbull.protocol.frame_types import FrameTypes, HeaderFrameFlags
+    flags = int(HeaderFrameFlags.END_HEADERS) | int(HeaderFrameFlags.END_STREAM)
+    return (len(block).to_bytes(3, 'big') + FrameTypes.HEADERS.value
+            + bytes([flags]) + stream_id.to_bytes(4, 'big') + block)
+
+
+class _H2Canned(AbstractReader):
+    """Feeds queued frame bytes, then EOF."""
+
+    def __init__(self, data: bytes) -> None:
+        self._buf = bytearray(data)
+
+    async def readexactly(self, n: int) -> bytes:
+        if len(self._buf) < n:
+            raise asyncio.IncompleteReadError(bytes(self._buf), n)
+        out = bytes(self._buf[:n])
+        del self._buf[:n]
+        return out
+
+    async def read(self, n: int = -1) -> bytes:
+        return await self.readexactly(max(n, 0))
+
+
+async def _h2_client_reading(frame: bytes):
+    """A client whose next frame read is *frame*, with a GOAWAY sink."""
+    from blackbull.client.http2 import HTTP2Client
+    c = HTTP2Client('localhost', 1)
+    c._reader = _H2Canned(frame)
+    sent: list = []
+
+    async def _sink(f):
+        sent.append(f)
+
+    c._control_sender = _sink
+    return c, sent
+
+
+@pytest.mark.asyncio
+async def test_client_h2_max_header_list_size_logs_on_http2(
+        caps_caplog, monkeypatch):
+    """A field section over the advertised decoded total.
+
+    ``requested`` is the block's *encoded* length: hpack reports the limit
+    it refused at and never the decoded total it reached, and compression
+    makes the two independent — which is why this record can carry a
+    ``requested`` below its own ``limit``.
+    """
+    from hpack import Encoder
+    from blackbull.client.http2 import _ConnectionFailed
+    from blackbull.protocol.frame_types import ErrorCodes, FrameTypes
+
+    monkeypatch.setenv('BB_CLIENT_H2_MAX_HEADER_LIST_SIZE', '2048')
+    fields, charged, i = [], 0, 0
+    while charged <= 2048:
+        name, value = f'x-pad-{i}', 'v' * 64
+        fields.append((name, value))
+        charged += len(name) + len(value) + 32
+        i += 1
+    block = Encoder().encode(fields)
+
+    c, sent = await _h2_client_reading(_h2_headers_frame(block))
+    with pytest.raises(_ConnectionFailed):
+        await c._receive_frame()
+
+    goaway = [f for f in sent if f.FrameType() == FrameTypes.GOAWAY]
+    assert goaway and goaway[0].error_code == ErrorCodes.COMPRESSION_ERROR
+    records = _records_for(caps_caplog, 'client_h2_max_header_list_size')
+    assert records and records[0].protocol == 'http2'
+    assert records[0].limit == 2048
+    assert records[0].requested == len(block)
+
+
+@pytest.mark.asyncio
+async def test_client_h2_max_header_list_size_is_not_logged_for_a_bad_block(
+        caps_caplog, monkeypatch):
+    """An HPACK block that is simply invalid ends the connection the same
+    way, and is not this cap.  Index 0 is not a table entry, so the peer's
+    own error must not be filed under our bound."""
+    from blackbull.client.http2 import _ConnectionFailed
+    from blackbull.protocol.frame_types import ErrorCodes, FrameTypes
+
+    monkeypatch.setenv('BB_CLIENT_H2_MAX_HEADER_LIST_SIZE', '2048')
+    c, sent = await _h2_client_reading(_h2_headers_frame(b'\x80'))
+    with pytest.raises(_ConnectionFailed):
+        await c._receive_frame()
+
+    goaway = [f for f in sent if f.FrameType() == FrameTypes.GOAWAY]
+    assert goaway and goaway[0].error_code == ErrorCodes.COMPRESSION_ERROR
+    assert not _records_for(caps_caplog, 'client_h2_max_header_list_size')
+
+
+# ----------------------------------------------------------------------
+# Client wiring audit — the unit is the (cap, protocol) pair
+#
+# By name alone the client looked wired: six caps appeared in some
+# ``log_cap_hit`` call under ``blackbull/`` while every HTTP/1.1 site was
+# silent, because the HTTP/2 sites carried the name.  A cap enforced on
+# two protocols is two rejection sites and needs two records, so the
+# audit's unit is the pair.
+#
+# ``_CLIENT_CAPS`` is checked in both directions against the call sites,
+# and the two declarations together are checked against ``env.py``, so a
+# ``BB_CLIENT_*`` var added without a verdict fails here on the day it
+# lands rather than at the next audit someone happens to run.
+# ----------------------------------------------------------------------
+
+#: Client cap → the protocols whose rejection sites must name it.
+_CLIENT_CAPS: dict[str, frozenset[str]] = {
+    'client_body_max_total':          frozenset({'http1', 'http2'}),
+    'client_body_timeout':            frozenset({'http1', 'http2'}),
+    'client_h2_max_frame_size':       frozenset({'http2'}),
+    'client_h2_max_header_list_size': frozenset({'http2'}),
+    'client_head_max_line':           frozenset({'http1'}),
+    'client_head_max_total':          frozenset({'http1', 'http2'}),
+    'client_head_timeout':            frozenset({'http1', 'http2'}),
+    'client_max_interim_responses':   frozenset({'http1'}),
+    'client_min_body_rate':           frozenset({'http1'}),
+    'client_raw_queue_depth':         frozenset({'http2'}),
+}
+
+#: ``BB_CLIENT_*`` vars that are not caps, and why.  Declared rather than
+#: omitted: silence here is indistinguishable from an oversight, which is
+#: how the header-list-size site shipped unwired.
+_CLIENT_NOT_A_CAP: dict[str, str] = {
+    'client_h2_enable_push':
+        'a conformance switch (RFC 9113 §6.5.2), not a bound — it refuses '
+        'nothing on its own, and a promise costs what a HEADERS frame costs',
+    'client_min_body_rate_grace':
+        'a grace-period modifier of client_min_body_rate, which owns the '
+        'refusal and the record',
+}
+
+#: Protocols an HTTP/1.1-only cap is *not* expected on, and vice versa.
+#: Absences that are deliberate, so the equality above is a decision and
+#: not a snapshot:
+#:
+#: - ``client_max_interim_responses`` has no HTTP/2 site because each
+#:   interim HEADERS block adds to the same ``headers_seen`` total as the
+#:   final one, so ``client_head_max_total`` already owns the aggregate.
+#: - ``client_head_max_line`` has no HTTP/2 site because HTTP/2 has no
+#:   field *line* — the section is the unit, bounded by
+#:   ``client_h2_max_header_list_size``.
+#: - ``client_min_body_rate`` has no HTTP/2 site because HTTP/2 has no
+#:   rate floor at all.  That is a missing bound, not a missing record.
+
+
+def _client_source_paths() -> list:
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[2] / 'blackbull' / 'client'
+    return sorted(p for p in root.glob('*.py'))
+
+
+def _enclosing_function(node, parents):
+    cur = parents.get(node)
+    while cur is not None and not isinstance(
+            cur, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        cur = parents.get(cur)
+    return cur
+
+
+def _forwarded_constants(param: str, func, tree) -> list[str]:
+    """The constants *func*'s own callers pass in *param*.
+
+    One level of forwarding, which is all the client has: the HTTP/2
+    client's three per-stream bounds share ``_refuse_stream`` and pass the
+    cap name to it, so the literal never appears beside ``log_cap_hit``.
+    Refusing to resolve it would make this audit an argument for copying
+    the helper.
+    """
+    positional = [a.arg for a in func.args.posonlyargs + func.args.args]
+    index = None
+    if param in positional:
+        index = positional.index(param)
+        if positional[0] in ('self', 'cls'):
+            index -= 1          # bound calls do not pass the receiver
+    elif param not in [a.arg for a in func.args.kwonlyargs]:
+        return []
+    found = []
+    for call in ast.walk(tree):
+        if not isinstance(call, ast.Call):
+            continue
+        callee = call.func
+        name = (callee.attr if isinstance(callee, ast.Attribute)
+                else callee.id if isinstance(callee, ast.Name) else None)
+        if name != func.name:
+            continue
+        for kw in call.keywords:
+            if kw.arg == param and isinstance(kw.value, ast.Constant):
+                found.append(kw.value.value)
+        if index is not None and 0 <= index < len(call.args):
+            arg = call.args[index]
+            if isinstance(arg, ast.Constant):
+                found.append(arg.value)
+    return found
+
+
+def _observed_client_pairs() -> set:
+    """Every ``(cap, protocol)`` a ``log_cap_hit`` call under
+    ``blackbull/client/`` can produce, read out of the source."""
+    pairs = set()
+    for path in _client_source_paths():
+        tree = ast.parse(path.read_text())
+        parents = {child: node for node in ast.walk(tree)
+                   for child in ast.iter_child_nodes(node)}
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == 'log_cap_hit'):
+                continue
+            protocol = None
+            for kw in node.keywords:
+                if kw.arg == 'protocol' and isinstance(kw.value, ast.Constant):
+                    protocol = kw.value.value
+            first = node.args[0] if node.args else None
+            where = f'{path.name}:{node.lineno}'
+            if isinstance(first, ast.Constant):
+                caps = [first.value]
+            elif isinstance(first, ast.Name):
+                func = _enclosing_function(node, parents)
+                assert func is not None, (
+                    f'{where}: log_cap_hit outside a function')
+                caps = _forwarded_constants(first.id, func, tree)
+                assert caps, (
+                    f'{where}: log_cap_hit({first.id}) forwards a cap name '
+                    f'this audit cannot resolve — no caller of '
+                    f'{func.name}() passes a literal')
+            else:
+                raise AssertionError(
+                    f'{where}: log_cap_hit called with a cap name that is '
+                    f'neither a literal nor a forwarded parameter')
+            for cap in caps:
+                pairs.add((cap, protocol))
+    return pairs
+
+
+def test_client_caps_are_wired_on_every_protocol_that_enforces_them():
+    """Both directions.  A declared pair with no call site is a cap that
+    refuses in silence; a call site with an undeclared pair is a record
+    nobody decided to keep."""
+    declared = {(cap, protocol)
+                for cap, protocols in _CLIENT_CAPS.items()
+                for protocol in protocols}
+    observed = _observed_client_pairs()
+    assert observed == declared, (
+        f'unwired (declared, no call site): {sorted(declared - observed)}; '
+        f'undeclared (call site, no declaration): {sorted(observed - declared)}')
+
+
+def test_every_client_env_var_has_a_verdict():
+    """The check that would have caught the header-list-size site the day
+    it shipped: a new ``BB_CLIENT_*`` var is either a cap with protocols or
+    a declared non-cap, and there is no third answer."""
+    from pathlib import Path
+    env_path = Path(__file__).resolve().parents[2] / 'blackbull' / 'env.py'
+    names = {node.value[len('BB_'):].lower()
+             for node in ast.walk(ast.parse(env_path.read_text()))
+             if isinstance(node, ast.Constant) and isinstance(node.value, str)
+             and node.value.startswith('BB_CLIENT_')}
+    assert names, 'no BB_CLIENT_* vars found — the reader, not the code, broke'
+    declared = set(_CLIENT_CAPS) | set(_CLIENT_NOT_A_CAP)
+    assert names == declared, (
+        f'undeclared env vars: {sorted(names - declared)}; '
+        f'declared but not in env.py: {sorted(declared - names)}')
+
+
+def test_every_declared_client_cap_is_a_settings_field():
+    """The env-var spelling and the ``Settings`` field must agree, or the
+    two audits above pass while naming something no code reads."""
+    from blackbull.env import get_settings
+    settings = get_settings()
+    missing = [name for name in set(_CLIENT_CAPS) | set(_CLIENT_NOT_A_CAP)
+               if not hasattr(settings, name)]
+    assert not missing, f'not Settings fields: {sorted(missing)}'
+
+
+# ----------------------------------------------------------------------
 # Wiring audit — every cap in the inventory appears at >= 1 log_cap_hit()
 # call in the codebase.  Static check; catches "removed wiring without
 # noticing" regressions even when a functional test happens to skip.
@@ -986,26 +1544,10 @@ _INVENTORY = (
     'h2_max_concurrent_streams',
     'h2_ws_max_streams_per_connection',
     'compression_max_inflight',
-    'client_min_body_rate',
-    # HTTP/2 response bounds; the HTTP/1.1 sites for these three
-    # are still unwired — see BLA-302, and note that this static
-    # audit is by *name*, so it cannot see that gap.
-    'client_body_max_total',
-    'client_head_max_total',
-    'client_body_timeout',
-    'client_max_interim_responses',
-    # Wired on the HTTP/2 field-block wait; the HTTP/1.1 site is still
-    # unwired — see BLA-302, and note this audit is by *name*, so it
-    # cannot see that gap.
-    'client_head_timeout',
-    # HTTP/2 only: HTTP/1.1 has no raw-stream escape hatch to bound.
-    'client_raw_queue_depth',
-    # HTTP/2 only: the frame is the unit HTTP/1.1 does not have.
-    'client_h2_max_frame_size',
 )
 
 
-@pytest.mark.parametrize('cap', _INVENTORY)
+@pytest.mark.parametrize('cap', _INVENTORY + tuple(sorted(_CLIENT_CAPS)))
 def test_cap_present_in_codebase(cap):
     """Static audit — every inventory cap must appear in at least one
     ``log_cap_hit('<cap>', ...)`` call under ``blackbull/``.  Cheap and

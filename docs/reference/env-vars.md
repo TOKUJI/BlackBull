@@ -69,6 +69,16 @@ so a bound tight enough to hide such a peer would be a defect.  See
 [SECURITY.md](https://github.com/TOKUJI/BlackBull/blob/master/SECURITY.md) for
 what a report should hold the client to.
 
+Every cap in this section emits one `WARNING` record on the
+`blackbull.caps` logger when it fires, on **each protocol that enforces
+it** — see the client table in
+[Logging](../guide/logging.md#cap-hit-log-blackbullcaps) for what each
+one records and what `requested` means where it is not the obvious
+number.  That record is the point of the bounds: a client picks its
+peer, so what a bound here buys is a diagnosis, and one that refuses
+without naming itself is not one.  `BB_CLIENT_H2_ENABLE_PUSH` and
+`BB_CLIENT_MIN_BODY_RATE_GRACE` are not caps and keep no record.
+
 | Variable | Default | Controls |
 |---|---|---|
 | `BB_CLIENT_HEAD_MAX_TOTAL` | `65536` | Maximum total bytes in a response head the client will read (status line + all field lines + `CRLFCRLF`).  Bounds accumulation *as it reads*, so a peer that opens a header and never closes it cannot grow the client's memory.  Exceeded → `ResponseTooLarge`.  `0` disables.  Under HTTP/2 the same budget is spent at two points, on two different quantities, because the field block is the HTTP/2 spelling of "the head".  *Decoded*: the response's field lines **in aggregate** across every HEADERS frame on the stream — informational responses, the final headers and trailers — because each section is individually legal and only the sum is not; that breach is a **stream** error, since the block was decoded and the connection stays sound.  *Encoded*: the octets accumulated while reassembling a field block across CONTINUATION frames — after a `HEADERS` or a `PUSH_PROMISE`, both of which open one — checked on the opening frame and again on every append, so the cap bounds the memory and not merely the answer; that breach is a **connection** error of type `COMPRESSION_ERROR`, because a block refused before decoding leaves the connection-wide HPACK decoder unable to read any later block (RFC 9113 §4.3).  Same budget, different blast radius, decided by whether the decoder walked the block.  One section is bounded by `BB_CLIENT_H2_MAX_HEADER_LIST_SIZE` and not by this: that one counts *decoded* octets, is advertised to the peer, and is not per-stream — hpack raises during frame parsing, which fails the **whole connection** rather than one response. |

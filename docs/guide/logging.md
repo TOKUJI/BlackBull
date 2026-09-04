@@ -333,6 +333,37 @@ record on `blackbull.caps` when it fires.  Coverage:
 | `BB_H2_WS_MAX_STREAMS_PER_CONNECTION` | RFC 8441 WebSocket stream cap tripped |
 | `BB_COMPRESSION_MAX_INFLIGHT` | Compression middleware bypassed (executor saturated) |
 
+The async client under `blackbull/client/` keeps the same record for its
+own bounds.  The argument for a client having bounds at all is
+diagnostic — a client picks its peer, and
+[fault injection](fault_injection.md) exists to point one at a server
+that misbehaves — so a bound that refused without naming itself would be
+no diagnostic at all.  A cap enforced on both protocols is two rejection
+sites and keeps two records, which is why this table has a column per
+protocol rather than a row per cap:
+
+| Cap (env var) | HTTP/1.1 | HTTP/2 |
+|---|---|---|
+| `BB_CLIENT_HEAD_MAX_TOTAL` | the response head over the budget; the trailer section over the same one | the stream's field lines in aggregate; the encoded block reassembled across CONTINUATION |
+| `BB_CLIENT_HEAD_MAX_LINE` | a status line, response field line, chunk-size line or trailer field line over the per-line rule | — no field *line* exists; the section is the unit |
+| `BB_CLIENT_HEAD_TIMEOUT` | the response head did not arrive in time | a field block opened and never finished with END_HEADERS |
+| `BB_CLIENT_BODY_TIMEOUT` | one body read outlasted its deadline | no frame for that stream inside the deadline |
+| `BB_CLIENT_BODY_MAX_TOTAL` | a declared `Content-Length` over the cap, or the running total of a chunked or close-delimited body | the running total, checked before a DATA payload is held |
+| `BB_CLIENT_MIN_BODY_RATE` | body arriving below the floor past the grace period — `requested` is the observed rate in bytes/second | — no rate floor on HTTP/2 |
+| `BB_CLIENT_MAX_INTERIM_RESPONSES` | too many `1xx` responses before the final one | — `BB_CLIENT_HEAD_MAX_TOTAL` owns that aggregate |
+| `BB_CLIENT_RAW_QUEUE_DEPTH` | — no raw-stream hatch | the raw-stream queue is full |
+| `BB_CLIENT_H2_MAX_FRAME_SIZE` | — no frame | the declared frame length is over the cap |
+| `BB_CLIENT_H2_MAX_HEADER_LIST_SIZE` | — no field section | the decoded field section is over the cap.  `requested` is the block's **encoded** length: hpack reports the limit it refused at and never the decoded total it reached, and compression makes the two independent, so this record can carry a `requested` below its own `limit` |
+
+A time bound records only when **its own** deadline expired.  A
+`TimeoutError` that reached the client from inside the transport is not
+the cap refusing, and is not filed under one.
+
+`BB_CLIENT_H2_ENABLE_PUSH` and `BB_CLIENT_MIN_BODY_RATE_GRACE` keep no
+record because neither is a cap: the first is a conformance switch that
+refuses nothing on its own, and the second is a grace-period modifier of
+`BB_CLIENT_MIN_BODY_RATE`, which owns both the refusal and the record.
+
 `BB_WS_QUEUE_DEPTH` is intentionally **not** logged — when read-ahead
 is enabled at all, the WebSocket event queue applies backpressure
 (blocking `await put()`) rather than dropping events, so a hit is

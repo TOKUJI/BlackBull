@@ -13,7 +13,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from http import HTTPMethod, HTTPStatus
 
-from hpack import HPACKError
+from hpack import HPACKError, OversizedHeaderListError
 
 import logging
 from ..env import get_settings
@@ -211,9 +211,12 @@ class HTTP2Client:
         self._raw_writer: asyncio.StreamWriter | None = None
 
         # One setting, both effects: the number we advertise is the number
-        # the decoder refuses at, because they are read together here.
-        self._advertised_header_list_size, enforced = _header_list_size()
-        self._factory = FrameFactory(max_header_list_size=enforced)
+        # the decoder refuses at, because they are read together here.  The
+        # enforced half is kept because the refusal has to name it.
+        (self._advertised_header_list_size,
+         self._enforced_header_list_size) = _header_list_size()
+        self._factory = FrameFactory(
+            max_header_list_size=self._enforced_header_list_size)
         self._push_permitted: bool = get_settings().client_h2_enable_push
         self._control_sender: HTTP2Sender | None = None
         #: Detached refusal tasks, held so neither the GC nor __aexit__
@@ -829,10 +832,10 @@ class HTTP2Client:
         except _ConnectionFailed:
             raise
         except Exception as exc:
-            await self._fail_parse(exc)
+            await self._fail_parse(exc, max(len(data) - _FRAME_HEADER_BYTES, 0))
             return None  # unreachable: _fail_parse raises
 
-    async def _fail_parse(self, exc: Exception) -> None:
+    async def _fail_parse(self, exc: Exception, encoded: int) -> None:
         """End the connection with the code the failure earned.
 
         COMPRESSION_ERROR for everything told the peer its HPACK state was
@@ -840,9 +843,32 @@ class HTTP2Client:
         Connection-wide in every arm: §6.1, §6.4 and §6.7 say so, and §4.3
         leaves an undecoded block's table unrecoverable.  §4.2's stream-error
         option is ``_receive_frame``'s, not this one's.
+
+        *encoded* is how many octets arrived carrying the block — the frame
+        payload for a block that fitted one frame, the reassembled block for
+        one that did not.  It is the only size this method can attribute to a
+        refusal; see the oversize arm for what that costs.
         """
         if isinstance(exc, FrameFormatError):
             await self._fail_connection(exc.error_code, str(exc))
+        elif isinstance(exc, OversizedHeaderListError):
+            # The one HPACK failure a bound of ours caused, and the only arm
+            # that may name it: an invalid index or a bad table-size update
+            # is the peer's own error, and a cap-hit record for one would be
+            # a record of a refusal that never happened.
+            #
+            # ``requested`` is the *encoded* block length because hpack
+            # reports the limit it refused at and never the decoded total it
+            # reached.  Compression makes the two independent — 3528 encoded
+            # octets decode to 80,740 in this tree's own test — so the number
+            # here is what arrived on the wire and is not the quantity the
+            # cap measures.
+            log_cap_hit('client_h2_max_header_list_size', requested=encoded,
+                        limit=self._enforced_header_list_size,
+                        protocol='http2')
+            await self._fail_connection(
+                ErrorCodes.COMPRESSION_ERROR,
+                f'could not decode the field block: {exc}')
         elif isinstance(exc, HPACKError):
             await self._fail_connection(
                 ErrorCodes.COMPRESSION_ERROR,
@@ -947,7 +973,7 @@ class HTTP2Client:
         except Exception as exc:
             # §4.3.  hpack may have applied part of the block to the dynamic
             # table before raising, so there is no sound way to carry on.
-            await self._fail_parse(exc)
+            await self._fail_parse(exc, len(open_frame.raw_block))
         return open_frame
 
     async def _guard_field_block(self, open_frame) -> None:
