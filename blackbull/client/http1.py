@@ -401,11 +401,25 @@ class HTTP1ResponseRecipient:
         timeout = cfg.client_head_timeout
         try:
             if timeout > 0:
-                async with asyncio.timeout(timeout):
-                    head = await reader.read_head(cfg.client_head_max_total)
+                deadline = asyncio.timeout(timeout)
+                try:
+                    async with deadline:
+                        head = await reader.read_head(cfg.client_head_max_total)
+                except TimeoutError:
+                    # Only an expired deadline is this cap refusing.  A
+                    # TimeoutError raised from inside the reader for its own
+                    # reasons belongs to whatever raised it, and naming the
+                    # cap for it would be a record of something that did not
+                    # happen.
+                    if deadline.expired():
+                        log_cap_hit('client_head_timeout', requested=timeout,
+                                    limit=timeout, protocol='http1')
+                    raise
             else:
                 head = await reader.read_head(cfg.client_head_max_total)
         except ReadLimitExceeded as exc:
+            log_cap_hit('client_head_max_total', requested=len(exc.seen),
+                        limit=cfg.client_head_max_total, protocol='http1')
             raise ResponseTooLarge(
                 f'response head exceeds '
                 f'BB_CLIENT_HEAD_MAX_TOTAL={cfg.client_head_max_total}',
@@ -420,6 +434,8 @@ class HTTP1ResponseRecipient:
         if max_line > 0 and len(head) > max_line:
             for line in head.split(_CRLF):
                 if len(line) > max_line:
+                    log_cap_hit('client_head_max_line', requested=len(line),
+                                limit=max_line, protocol='http1')
                     raise ResponseTooLarge(
                         f'response header line {len(line)} bytes > '
                         f'BB_CLIENT_HEAD_MAX_LINE={max_line}', head[:max_line])
@@ -577,8 +593,19 @@ class HTTP1ResponseRecipient:
         started = _monotonic() if watching else 0.0
         try:
             if timeout > 0:
-                async with asyncio.timeout(timeout):
-                    data = await coro
+                deadline = asyncio.timeout(timeout)
+                try:
+                    async with deadline:
+                        data = await coro
+                except TimeoutError:
+                    # The deadline that expired is the one that refused.  A
+                    # TimeoutError out of the reader itself is somebody
+                    # else's, and the rate floor below raises one of its own
+                    # after this block, under its own cap's name.
+                    if deadline.expired():
+                        log_cap_hit('client_body_timeout', requested=timeout,
+                                    limit=timeout, protocol='http1')
+                    raise
             else:
                 data = await coro
         except IncompleteReadError as exc:
@@ -794,6 +821,8 @@ class HTTP1ResponseRecipient:
             if max_total and declared > max_total:
                 # Refused on the declaration, before an octet is read — the
                 # peer already told us it will not fit.
+                log_cap_hit('client_body_max_total', requested=declared,
+                            limit=max_total, protocol='http1')
                 raise ResponseTooLarge(
                     f'declared body {declared} bytes exceeds '
                     f'BB_CLIENT_BODY_MAX_TOTAL={max_total}')
@@ -913,6 +942,8 @@ class HTTP1ResponseRecipient:
             return await self._body_read(
                 AbstractReader._readuntil_bounded(reader, _CRLF, limit))
         except ReadLimitExceeded as exc:
+            log_cap_hit('client_head_max_line', requested=len(exc.seen),
+                        limit=limit, protocol='http1')
             raise ResponseTooLarge(
                 f'chunk framing line exceeds '
                 f'BB_CLIENT_HEAD_MAX_LINE={limit}', exc.seen) from None
@@ -984,6 +1015,8 @@ class HTTP1ResponseRecipient:
                 return
             total += len(line)
             if total_max and total > total_max:
+                log_cap_hit('client_head_max_total', requested=total,
+                            limit=total_max, protocol='http1')
                 raise ResponseTooLarge(
                     f'trailer section exceeds '
                     f'BB_CLIENT_HEAD_MAX_TOTAL={total_max}')
@@ -1002,6 +1035,8 @@ class HTTP1ResponseRecipient:
                 return
             seen += size
             if max_total and seen > max_total:
+                log_cap_hit('client_body_max_total', requested=seen,
+                            limit=max_total, protocol='http1')
                 raise ResponseTooLarge(
                     f'body exceeds BB_CLIENT_BODY_MAX_TOTAL={max_total}')
             # In slices, so one peer-declared chunk-size is never one

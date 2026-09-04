@@ -13,7 +13,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from http import HTTPMethod, HTTPStatus
 
-from hpack import HPACKError
+from hpack import HPACKError, OversizedHeaderListError
 
 import logging
 from ..env import get_settings
@@ -211,9 +211,12 @@ class HTTP2Client:
         self._raw_writer: asyncio.StreamWriter | None = None
 
         # One setting, both effects: the number we advertise is the number
-        # the decoder refuses at, because they are read together here.
-        self._advertised_header_list_size, enforced = _header_list_size()
-        self._factory = FrameFactory(max_header_list_size=enforced)
+        # the decoder refuses at, because they are read together here.  The
+        # enforced half is kept because the refusal has to name it.
+        (self._advertised_header_list_size,
+         self._enforced_header_list_size) = _header_list_size()
+        self._factory = FrameFactory(
+            max_header_list_size=self._enforced_header_list_size)
         self._push_permitted: bool = get_settings().client_h2_enable_push
         self._control_sender: HTTP2Sender | None = None
         #: Detached refusal tasks, held so neither the GC nor __aexit__
@@ -843,6 +846,28 @@ class HTTP2Client:
         """
         if isinstance(exc, FrameFormatError):
             await self._fail_connection(exc.error_code, str(exc))
+        elif isinstance(exc, OversizedHeaderListError):
+            # The one HPACK failure a bound of ours caused, and the only arm
+            # that may name it: an invalid index or a bad table-size update
+            # is the peer's own error, and a cap-hit record for one would be
+            # a record of a refusal that never happened.
+            #
+            # ``requested`` is the limit plus one because that is the tight
+            # lower bound on the decoded total, and no exact figure exists to
+            # report: hpack charges each entry and compares immediately
+            # (``Decoder.decode``, hpack 4.2.0 at hpack.py:545), so it raises
+            # on the entry that crosses and the section is provably *just*
+            # over.  The encoded length is the number reachable here
+            # instead, and it is the wrong unit: compression makes it
+            # independent of what the cap counts, and low enough to read as a
+            # refusal below its own limit.
+            log_cap_hit('client_h2_max_header_list_size',
+                        requested=self._enforced_header_list_size + 1,
+                        limit=self._enforced_header_list_size,
+                        protocol='http2')
+            await self._fail_connection(
+                ErrorCodes.COMPRESSION_ERROR,
+                f'could not decode the field block: {exc}')
         elif isinstance(exc, HPACKError):
             await self._fail_connection(
                 ErrorCodes.COMPRESSION_ERROR,
