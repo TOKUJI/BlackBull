@@ -21,7 +21,8 @@ from ..env import get_settings
 from ..protocol.frame import FrameFactory, _UnknownFrame
 from ..protocol.frame_types import (DEFAULT_INITIAL_WINDOW_SIZE, ErrorCodes,
                                     FrameBase, FrameFormatError, FrameTypes,
-                                    HeaderFrameFlags, PseudoHeaders)
+                                    HeaderFrameFlags, PseudoHeaders,
+                                    SettingFrameFlags)
 from ..headers import Headers
 from ..server.cap_log import log_cap_hit
 from ..server.recipient import AbstractReader, AsyncioReader
@@ -73,7 +74,29 @@ _FRAME_READ_TIMEOUT: float = 30.0
 #: RFC 9113 §6.10.
 _OPENS_A_FIELD_BLOCK = frozenset({FrameTypes.HEADERS, FrameTypes.PUSH_PROMISE})
 
-_InboundFrame = FrameBase | _UnknownFrame
+class _DiscardedFrame:
+    """Marker for a frame rejected at the stream level before dispatch."""
+
+    __slots__ = ('length', 'stream_id')
+
+    def __init__(self, length: int, stream_id: int) -> None:
+        self.length = length
+        self.stream_id = stream_id
+
+    def FrameType(self):
+        return None
+
+
+_InboundFrame = FrameBase | _UnknownFrame | _DiscardedFrame
+
+
+# (minimum/exact length, connection-wide rule, settings ACK selector).
+_FIXED_LENGTH_RULES = {
+    FrameTypes.WINDOW_UPDATE: (4, True, 'exact'),
+    FrameTypes.PRIORITY: (5, False, 'exact'),
+    FrameTypes.GOAWAY: (8, True, 'minimum'),
+    FrameTypes.SETTINGS: (6, True, 'settings'),
+}
 
 
 class _ConnectionFailed(Exception):
@@ -877,13 +900,98 @@ class HTTP2Client:
     async def _load(self, data: bytes) -> _InboundFrame | None:
         """Parse one frame.  A whole block is decoded in the constructor, so
         this is one of the two places a parse can fail."""
+        rejected = await self._validate_frame(data)
+        if rejected is not None:
+            return rejected
         try:
-            return self._factory.load(data)
+            frame = self._factory.load(data)
         except _ConnectionFailed:
             raise
         except Exception as exc:
             await self._fail_parse(exc)
             return None  # unreachable: _fail_parse raises
+        if (isinstance(frame, FrameBase)
+                and frame.FrameType() is FrameTypes.HEADERS
+                and frame.malformed):
+            await self._reject_stream(
+                frame.stream_id, ErrorCodes.PROTOCOL_ERROR,
+                frame.malformed_reason or 'malformed HEADERS frame')
+            return _DiscardedFrame(frame.length, frame.stream_id)
+        if (isinstance(frame, FrameBase)
+                and frame.FrameType() is FrameTypes.PRIORITY
+                and frame.stream_id == 0):
+            await self._fail_connection(
+                ErrorCodes.PROTOCOL_ERROR,
+                'PRIORITY frame must use a non-zero stream')
+        if (isinstance(frame, FrameBase)
+                and frame.FrameType() is FrameTypes.PRIORITY
+                and frame.dependent_stream == frame.stream_id):
+            return await self._reject_stream_frame(
+                frame.length, frame.stream_id, ErrorCodes.PROTOCOL_ERROR,
+                'PRIORITY frame depends on its own stream')
+        return frame
+
+    async def _validate_frame(self, data: bytes) -> _DiscardedFrame | None:
+        """Apply fixed wire-length and HEADERS shape rules before dispatch."""
+        length = int.from_bytes(data[:3], 'big', signed=False)
+        try:
+            frame_type = FrameTypes(data[3:4])
+        except ValueError:
+            return None
+        stream_id = int.from_bytes(data[5:9], 'big') & 0x7fffffff
+        flags = data[4]
+        if frame_type is FrameTypes.HEADERS:
+            payload = data[9:9 + length]
+            offset = 0
+            if flags & int(HeaderFrameFlags.PADDED):
+                if length < 1 or payload[0] >= length:
+                    await self._fail_connection(
+                        ErrorCodes.PROTOCOL_ERROR, 'malformed HEADERS padding')
+                offset = 1 + payload[0]
+            if flags & int(HeaderFrameFlags.PRIORITY) and length < offset + 5:
+                await self._fail_connection(
+                    ErrorCodes.FRAME_SIZE_ERROR,
+                    'HEADERS priority payload is shorter than 5 bytes')
+            return None
+        rule = _FIXED_LENGTH_RULES.get(frame_type)
+        if rule is None:
+            return None
+        expected, connection_wide, shape = rule
+        valid = (length >= expected if shape == 'minimum'
+                 else length == expected)
+        if shape == 'settings':
+            valid = length == 0 if flags & int(SettingFrameFlags.ACK) \
+                else length % 6 == 0
+        if valid:
+            return None
+        message = f'{frame_type.name} length {length} is invalid'
+        if connection_wide or stream_id == 0:
+            await self._fail_connection(ErrorCodes.FRAME_SIZE_ERROR, message)
+        return await self._reject_stream_frame(
+            length, stream_id, ErrorCodes.FRAME_SIZE_ERROR, message)
+
+    async def _reject_stream_frame(self, length: int, stream_id: int,
+                                   code: ErrorCodes, message: str
+                                   ) -> _DiscardedFrame:
+        await self._reject_stream(stream_id, code, message)
+        return _DiscardedFrame(length, stream_id)
+
+    async def _reject_stream(self, stream_id: int, code: ErrorCodes,
+                             message: str) -> None:
+        pending = self._drop_pending(stream_id)
+        if pending is not None and not pending.future.done():
+            pending.future.set_exception(StreamReset(stream_id, int(code)))
+        queue = self._raw_streams.get(stream_id)
+        displaced = 0
+        if queue is not None:
+            displaced = self._signal_raw_stream(stream_id, queue, code)
+            self.unregister_raw_stream(stream_id)
+        try:
+            await self._send_raw_frame(self._factory.rst_stream(stream_id, code))
+            await self._credit_connection(displaced)
+        except Exception:
+            logger.debug('could not send RST_STREAM for stream %d: %s',
+                         stream_id, message)
 
     async def _fail_parse(self, exc: Exception) -> None:
         """End the connection with the code the failure earned.
@@ -1023,6 +1131,12 @@ class HTTP2Client:
             # §4.3.  hpack may have applied part of the block to the dynamic
             # table before raising, so there is no sound way to carry on.
             await self._fail_parse(exc)
+        if getattr(open_frame, 'malformed', False):
+            await self._reject_stream(
+                open_frame.stream_id, ErrorCodes.PROTOCOL_ERROR,
+                getattr(open_frame, 'malformed_reason', None)
+                or 'malformed HEADERS frame')
+            return _DiscardedFrame(open_frame.length, open_frame.stream_id)
         return open_frame
 
     async def _guard_field_block(self, open_frame) -> None:
@@ -1050,6 +1164,8 @@ class HTTP2Client:
                     break
                 frame = await self._absorb_field_block(frame)
                 if frame is None:
+                    continue
+                if isinstance(frame, _DiscardedFrame):
                     continue
                 # Raw-frame streams (WebSocket-over-H2, etc.) bypass the
                 # request/response dispatcher — the registrant drains
