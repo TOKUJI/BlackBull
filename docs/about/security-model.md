@@ -279,7 +279,6 @@ contrast is visible:
 - **A buffered response body costs about twice the cap in peak memory.**
   Reaching ~1× means `stream()`, which exposes no status, no headers and sits
   outside the cap — so today a caller can have ~1× *or* all three, never both.
-  Tracked as `BLA-325` [private].
 - **This is an audit result, not a proof.** The client's read paths were
   enumerated by hand; that method has missed paths on this codebase before,
   and it will again. No known gaps is not no gaps. What the rows above claim
