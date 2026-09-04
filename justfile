@@ -42,6 +42,10 @@ yt-update issue description_file:
 yt-article article='':
     scripts/youtrack.sh article {{article}}
 
+# Replace a Knowledge Base article's body.  ASK THE USER FIRST — see AGENTS.md
+yt-article-update article content_file:
+    scripts/youtrack.sh article-update "{{article}}" "{{content_file}}"
+
 yt-command issue command:
     scripts/youtrack.sh command "{{issue}}" "{{command}}"
 
