@@ -3958,6 +3958,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.protocol.frame_types.no_hpack_context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        no_hpack_context
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.protocol.frame_types.parse_priority_field" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5759,6 +5770,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.protocol.frame_types.no_hpack_context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        no_hpack_context
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.protocol.frame_types.parse_priority_field" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6535,6 +6557,33 @@ Rejecting these closes a header-injection / request-smuggling vector.</p>
     <div class="doc doc-contents ">
 
         <p>RFC 9113 §8.2.1 — a field value MUST NOT contain NUL, LF, or CR.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.protocol.frame_types.no_hpack_context" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">no_hpack_context</span><span class="p">(</span><span class="n">frame</span><span class="p">,</span> <span class="n">codec</span><span class="p">)</span></code>
+
+<a href="#blackbull.protocol.frame_types.no_hpack_context" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>The refusal for a header frame that cannot name its connection's codec.</p>
+<p>HPACK state is connection-wide and the peer keeps exactly one table for it
+(RFC 7541 §2.3, RFC 9113 §4.3), so a substitute codec is never a weaker
+version of the right one — it is a different table.  Both directions fail
+the same way and silently: a private encoder writes indices the peer
+resolves against entries someone else inserted, and a block that never
+reaches the connection's decoder leaves it behind its peer for good.
+Valid-looking bytes, wrong fields, no exception on either side.</p>
+<p>The message has to send the reader to the connection rather than to the
+signature, because "missing argument" is answered by passing <em>any</em> codec.</p>
 
 
     </div>

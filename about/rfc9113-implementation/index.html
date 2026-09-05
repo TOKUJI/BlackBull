@@ -5709,6 +5709,12 @@ stays consistent only until the two encoders interleave: the peer resolves
 every index against the single table its one decoder built, so a field indexed
 by one encoder is read back as a field the other inserted — one stream's header
 resolved inside another's block, with no error raised on either side.</p>
+<p>The frame classes hold that rule rather than assuming it.  A <code>Headers</code> or
+<code>PushPromise</code> asked to encode without the connection's encoder, or to decode a
+field block without its decoder, refuses and names the factory the codec comes
+from.  The alternative — standing in a fresh context, or skipping the decode —
+is the same divergence arriving by omission instead of by a second factory, and
+it looks like well-formed bytes all the way to the peer.</p>
 <hr />
 <h2 id="5-streams-and-multiplexing">§5 — Streams and Multiplexing<a class="headerlink" href="#5-streams-and-multiplexing" title="Permanent link">&para;</a></h2>
 <p><strong>§5.1 Stream States</strong> ✅
