@@ -5748,7 +5748,7 @@ column.</p>
 <td><em>Client</em> response body</td>
 <td>64 KiB read (HTTP/1.1); <code>BB_CLIENT_H2_MAX_FRAME_SIZE</code> (HTTP/2)</td>
 <td><code>BB_CLIENT_BODY_MAX_TOTAL</code> <strong>off</strong></td>
-<td><code>BB_CLIENT_BODY_TIMEOUT</code> 30 s + <code>BB_CLIENT_MIN_BODY_RATE</code> <strong>off</strong>, and HTTP/1.1 only</td>
+<td><code>BB_CLIENT_BODY_TIMEOUT</code> 30 s + <code>BB_CLIENT_MIN_BODY_RATE</code> <strong>off</strong> (payload bytes; H2 per stream)</td>
 </tr>
 <tr>
 <td><em>Client</em> raw HTTP/2 stream</td>
@@ -5757,10 +5757,22 @@ column.</p>
 <td>—</td>
 </tr>
 <tr>
-<td><em>Client</em> send path</td>
+<td><em>Client</em> WebSocket frame</td>
+<td><code>BB_CLIENT_WS_MAX_FRAME_PAYLOAD</code> 64 MiB</td>
 <td>—</td>
-<td>HTTP/2 flow-control window</td>
-<td><code>BB_WRITE_TIMEOUT</code> 30 s on the HTTP/2 flow-control wait — the server's knob, read by the client too</td>
+<td>—</td>
+</tr>
+<tr>
+<td><em>Client</em> WebSocket message</td>
+<td>per frame</td>
+<td><code>BB_CLIENT_WS_MAX_MESSAGE_SIZE</code> 16 MiB</td>
+<td>—</td>
+</tr>
+<tr>
+<td><em>Client</em> send path</td>
+<td>HTTP/2 peer <code>SETTINGS_MAX_FRAME_SIZE</code></td>
+<td>— deliberately no upload aggregate; the flow-control window is only in-flight credit</td>
+<td><code>BB_CLIENT_WRITE_TIMEOUT</code> 30 s per socket-drain/flow-control wait, not a whole-upload total; one-byte credit can make an upload indefinite</td>
 </tr>
 </tbody>
 </table>
@@ -5894,10 +5906,10 @@ are the difference between the label and the whole truth:</p>
    memory only and do not survive a restart.</p>
 </li>
 <li>
-<p><strong>The client's rung is the generous reading.</strong> Ten <code>BB_CLIENT_*</code>
+<p><strong>The client's rung is the generous reading.</strong> Thirteen <code>BB_CLIENT_*</code>
    bounds refuse traffic, and two — <code>BB_CLIENT_BODY_MAX_TOTAL</code> and
    <code>BB_CLIENT_MIN_BODY_RATE</code> — ship off, which is exactly what
-   <code>bounded-when-configured</code> says. (Twelve <code>BB_CLIENT_*</code> variables exist;
+   <code>bounded-when-configured</code> says. (Fifteen <code>BB_CLIENT_*</code> variables exist;
    <code>BB_CLIENT_H2_ENABLE_PUSH</code> is a conformance switch and
    <code>BB_CLIENT_MIN_BODY_RATE_GRACE</code> a modifier of the floor, and neither
    refuses anything on its own. That split is not an editorial choice:
@@ -6043,8 +6055,12 @@ stream, which an event stream or a long poll is not.</p>
 <td><code>tests/unit/client/test_http1_client_head_bounds.py</code>, <code>tests/unit/client/test_http1_client_desync_and_deadline.py</code>, <code>tests/unit/client/test_http2_client_response_bounds.py</code></td>
 </tr>
 <tr>
-<td>Client rate floor, including that a slow <em>consumer</em> does not trip it</td>
-<td><code>tests/unit/client/test_http1_client_rate_floor.py</code></td>
+<td>Client rate floor, including HTTP/2 stream isolation and DATA payload accounting</td>
+<td><code>tests/unit/client/test_http1_client_rate_floor.py</code>, <code>tests/unit/client/test_http2_client_rate_floor.py</code></td>
+</tr>
+<tr>
+<td>Client-owned transport and WebSocket bounds</td>
+<td><code>tests/unit/client/test_client_owned_bounds.py</code>, <code>tests/unit/test_cap_log_sites.py</code></td>
 </tr>
 <tr>
 <td>Every client bound names itself on <code>blackbull.caps</code>, on every protocol that enforces it</td>

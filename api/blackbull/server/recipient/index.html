@@ -7817,6 +7817,8 @@ and wrap it in <code>AsyncioReader</code> internally.</p>
 
 
         <p>Reads WebSocket frames and emits ASGI <code>websocket.*</code> events.</p>
+<p>Client callers inject the ownership names 'client_ws_max_frame_payload',
+and 'client_ws_max_message_size', at these shared rejection sites.</p>
 <p>First call returns <code>{'type': 'websocket.connect'}</code>.  Subsequent calls
 read the next frame from the transport:
   - Text frame   → <code>{'type': 'websocket.receive', 'text': ..., 'bytes': None}</code>

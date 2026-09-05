@@ -6140,6 +6140,7 @@ protocol rather than a row per cap:</p>
 <th>Cap (env var)</th>
 <th>HTTP/1.1</th>
 <th>HTTP/2</th>
+<th>WebSocket</th>
 </tr>
 </thead>
 <tbody>
@@ -6147,51 +6148,79 @@ protocol rather than a row per cap:</p>
 <td><code>BB_CLIENT_HEAD_MAX_TOTAL</code></td>
 <td>the response head over the budget; the trailer section over the same one</td>
 <td>the stream's field lines in aggregate; the encoded block reassembled across CONTINUATION</td>
+<td>—</td>
 </tr>
 <tr>
 <td><code>BB_CLIENT_HEAD_MAX_LINE</code></td>
 <td>a status line, response field line, chunk-size line or trailer field line over the per-line rule</td>
 <td>— no field <em>line</em> exists; the section is the unit</td>
+<td>—</td>
 </tr>
 <tr>
 <td><code>BB_CLIENT_HEAD_TIMEOUT</code></td>
 <td>the response head did not arrive in time</td>
 <td>the peer took the request and never began to answer — that stream is reset; or a field block opened and never finished with END_HEADERS — the connection ends</td>
+<td>—</td>
 </tr>
 <tr>
 <td><code>BB_CLIENT_BODY_TIMEOUT</code></td>
 <td>one body read outlasted its deadline</td>
 <td>no frame for that stream inside the deadline</td>
+<td>—</td>
 </tr>
 <tr>
 <td><code>BB_CLIENT_BODY_MAX_TOTAL</code></td>
 <td>a declared <code>Content-Length</code> over the cap, or the running total of a chunked or close-delimited body</td>
 <td>the running total, checked before a DATA payload is held</td>
+<td>—</td>
 </tr>
 <tr>
 <td><code>BB_CLIENT_MIN_BODY_RATE</code></td>
 <td>body arriving below the floor past the grace period — <code>requested</code> is the observed rate in bytes/second</td>
-<td>— no rate floor on HTTP/2</td>
+<td>DATA payload arriving below the floor; each stream is reset independently</td>
+<td>—</td>
 </tr>
 <tr>
 <td><code>BB_CLIENT_MAX_INTERIM_RESPONSES</code></td>
 <td>too many <code>1xx</code> responses before the final one</td>
 <td>— <code>BB_CLIENT_HEAD_MAX_TOTAL</code> owns that aggregate</td>
+<td>—</td>
 </tr>
 <tr>
 <td><code>BB_CLIENT_RAW_QUEUE_DEPTH</code></td>
 <td>— no raw-stream hatch</td>
 <td>the raw-stream queue is full</td>
+<td>—</td>
 </tr>
 <tr>
 <td><code>BB_CLIENT_H2_MAX_FRAME_SIZE</code></td>
 <td>— no frame</td>
 <td>the declared frame length is over the cap</td>
+<td>—</td>
 </tr>
 <tr>
 <td><code>BB_CLIENT_H2_MAX_HEADER_LIST_SIZE</code></td>
 <td>— no field section</td>
 <td>the decoded field section is over the cap.  <code>requested</code> is a <strong>lower bound</strong>, not the figure: hpack reports the limit it refused at and never the total it reached.  A tight one — it charges each entry and compares immediately, so it raises on the entry that crosses and the section is provably just over the limit</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>BB_CLIENT_WRITE_TIMEOUT</code></td>
+<td>client socket drain stalled; <code>requested</code> is the per-drain deadline</td>
+<td>client socket drain or flow-control credit wait stalled; <code>requested</code> is the per-wait deadline</td>
+<td>client socket drain stalled; <code>requested</code> is the per-drain deadline</td>
+</tr>
+<tr>
+<td><code>BB_CLIENT_WS_MAX_FRAME_PAYLOAD</code></td>
+<td>—</td>
+<td>—</td>
+<td>the declared inbound WebSocket frame payload is over the cap</td>
+</tr>
+<tr>
+<td><code>BB_CLIENT_WS_MAX_MESSAGE_SIZE</code></td>
+<td>—</td>
+<td>—</td>
+<td>the reassembled/inflated inbound WebSocket message is over the cap</td>
 </tr>
 </tbody>
 </table>
