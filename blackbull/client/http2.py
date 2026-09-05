@@ -8,15 +8,16 @@ The client is intended for **wire-level testing** of BlackBull's
 ``ASGIServer`` rather than as a feature-rich application client.
 """
 import asyncio
+import logging
 import ssl as _ssl
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import Enum
 from http import HTTPMethod, HTTPStatus
+from time import monotonic as _monotonic
 
 from hpack import HPACKError, OversizedHeaderListError
 
-import logging
 from ..env import get_settings
 from ..protocol.frame import FrameFactory, _UnknownFrame
 from ..protocol.frame_types import (DEFAULT_INITIAL_WINDOW_SIZE, ErrorCodes,
@@ -25,6 +26,7 @@ from ..protocol.frame_types import (DEFAULT_INITIAL_WINDOW_SIZE, ErrorCodes,
                                     SettingFrameFlags)
 from ..headers import Headers
 from ..server.cap_log import log_cap_hit
+from ..server.rate_window import ByteRateFloor
 from ..server.recipient import AbstractReader, AsyncioReader
 from ..server.sender import (AbstractWriter, AsyncioWriter, ConnectionWindow,
                              HTTP2Sender)
@@ -190,6 +192,11 @@ class _PendingResponse:
     #: returns credit for every DATA frame, so the window bounds what is in
     #: flight and never what has accumulated.
     body_seen: int = 0
+    #: Per-stream response rate floor.  It opens on the first non-empty DATA
+    #: payload; the wait before that payload is peer think time, not dripping.
+    rate_floor: ByteRateFloor | None = None
+    rate_open: bool = False
+    rate_last_at: float = 0.0
     #: Field-line octets accepted across *every* HEADERS frame on this stream,
     #: against BB_CLIENT_HEAD_MAX_TOTAL.  One field section is hpack's to bound
     #: (``max_header_list_size``); the sum over informational responses, the
@@ -365,7 +372,9 @@ class HTTP2Client:
                                           self._connect_timeout)
             self._raw_writer = w
             self._reader = AsyncioReader(r)
-            self._writer = AsyncioWriter(w)
+            self._writer = AsyncioWriter(
+                w, get_settings().client_write_timeout,
+                cap_name='client_write_timeout', protocol='http2')
         await self._start()
         return self
 
@@ -382,7 +391,9 @@ class HTTP2Client:
         c = cls(host, port, ssl=ssl)
         c._raw_writer = writer
         c._reader = AsyncioReader(reader)
-        c._writer = AsyncioWriter(writer)
+        c._writer = AsyncioWriter(
+            writer, get_settings().client_write_timeout,
+            cap_name='client_write_timeout', protocol='http2')
         return c
 
     async def _start(self) -> None:
@@ -403,12 +414,14 @@ class HTTP2Client:
         assert self._raw_writer is not None and self._writer is not None
 
         # HTTP/2 connection preface (RFC 7540 §3.5).
-        self._raw_writer.write(_HTTP2_PREFACE)
-        await self._raw_writer.drain()
+        await self._writer.write(_HTTP2_PREFACE)
 
         # The only SETTINGS this client sends, hence the only place a
         # generation is opened.
-        self._control_sender = HTTP2Sender(self._writer, self._factory, 0)
+        self._control_sender = HTTP2Sender(
+            self._writer, self._factory, 0,
+            flow_control_timeout=get_settings().client_write_timeout,
+            flow_control_cap='client_write_timeout')
         self._settings_sent += 1
         enable_push = None
         if not self._push_permitted:
@@ -918,7 +931,9 @@ class HTTP2Client:
             self._senders[stream_id] = HTTP2Sender(
                 self._writer, self._factory, stream_id,
                 conn_window=self._conn_window,
-                initial_window=self.initial_window_size)
+                initial_window=self.initial_window_size,
+                flow_control_timeout=get_settings().client_write_timeout,
+                flow_control_cap='client_write_timeout')
         return self._senders[stream_id]
 
     async def _send_raw_frame(self, frame: FrameBase) -> None:
@@ -1512,7 +1527,31 @@ class HTTP2Client:
                 return
             pending.headers.append((name, value))
         if frame.end_stream:
+            if await self._settle_body_rate(frame.stream_id, pending, 0):
+                return
             self._complete(frame.stream_id)
+
+    async def _settle_body_rate(self, stream_id: int,
+                                pending: '_PendingResponse',
+                                nbytes: int) -> bool:
+        """Charge one stream's inter-DATA wait to its response rate floor."""
+        if not pending.rate_open:
+            return False
+        now = _monotonic()
+        floor = pending.rate_floor
+        assert floor is not None
+        short = floor.record(nbytes, now - pending.rate_last_at)
+        pending.rate_last_at = now
+        if not short:
+            return False
+        observed = floor.observed
+        rate = floor.rate
+        await self._refuse_stream(
+            stream_id, 'client_min_body_rate', observed, rate,
+            TimeoutError(
+                f'response body arriving below '
+                f'BB_CLIENT_MIN_BODY_RATE={rate} B/s'))
+        return True
 
     async def _on_response_data(self, frame) -> None:
         pending = self._responses.get(frame.stream_id)
@@ -1549,14 +1588,27 @@ class HTTP2Client:
             await self._credit_connection(frame.length)
             return
         if payload:
-            # Only a frame that delivered body octets is progress, and only
-            # such a frame is held.  A peer sending empty (or all-padding)
-            # DATA re-armed the deadline and appended to body_parts while
-            # body_seen stayed at zero: neither bound could fire, and 200,000
-            # such frames held 1.6 MB against a 1 KiB cap.
+            if not pending.rate_open:
+                pending.rate_floor = ByteRateFloor(
+                    get_settings().client_min_body_rate,
+                    get_settings().client_min_body_rate_grace)
+                pending.rate_open = True
+                pending.rate_last_at = _monotonic()
+            else:
+                if await self._settle_body_rate(
+                        frame.stream_id, pending, len(payload)):
+                    await self._credit_connection(frame.length)
+                    return
             self._arm_deadline(frame.stream_id, _Phase.BODY)
             pending.body_seen += len(payload)
             pending.body_parts.append(payload)
+        elif pending.rate_open:
+            # Empty/all-padding DATA still consumes peer time.  It does not
+            # re-arm the progress deadline, but it must not evade the rate
+            # floor by making the numerator-free frames invisible.
+            if await self._settle_body_rate(frame.stream_id, pending, 0):
+                await self._credit_connection(frame.length)
+                return
         # RFC 9113 §6.9 — the receiver MUST return flow-control credit for
         # consumed DATA via WINDOW_UPDATE.  Without this the server's send
         # window drains and ``HTTP2Sender._write_data`` blocks once a
@@ -1570,6 +1622,8 @@ class HTTP2Client:
                 frame.stream_id, pending, frame.length,
                 end_stream=bool(frame.end_stream))
         if frame.end_stream:
+            if await self._settle_body_rate(frame.stream_id, pending, 0):
+                return
             self._complete(frame.stream_id)
 
     async def _credit_received(self, stream_id: int, pending: '_PendingResponse',

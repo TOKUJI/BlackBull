@@ -28,6 +28,7 @@ from ..headers import Headers
 from ..server.recipient import (_WS_EVENT_QUEUE_DEPTH, AbstractReader,
                                 AsyncioReader, WebSocketRecipient)
 from ..server.sender import AbstractWriter, AsyncioWriter
+from ..env import get_settings
 from ..server.ws_codec import WSOpcode, encode_frame
 from ._connect import DEFAULT_CONNECT_TIMEOUT, open_connection as _open_connection
 from .exceptions import HandshakeError
@@ -60,7 +61,14 @@ class WebSocketSession:
 
     def __init__(self, reader: AbstractReader, writer: AbstractWriter,
                  raw_writer: asyncio.StreamWriter,
-                 subprotocol: bytes | None) -> None:
+                 subprotocol: bytes | None,
+                 *, max_frame_payload: int | None = None,
+                 max_message_size: int | None = None) -> None:
+        settings = get_settings()
+        if max_frame_payload is None:
+            max_frame_payload = settings.client_ws_max_frame_payload
+        if max_message_size is None:
+            max_message_size = settings.client_ws_max_message_size
         self._reader = reader
         self._writer = writer
         self._raw_writer = raw_writer
@@ -72,7 +80,13 @@ class WebSocketSession:
         self._recipient = WebSocketRecipient(reader,
                                              writer,
                                              require_masked=False,
-                                             ws_queue_depth=_WS_EVENT_QUEUE_DEPTH)
+                                             ws_queue_depth=_WS_EVENT_QUEUE_DEPTH,
+                                             max_frame_payload=max_frame_payload,
+                                             max_message_size=max_message_size,
+                                             frame_cap_name=(
+                                                 'client_ws_max_frame_payload'),
+                                             message_cap_name=(
+                                                 'client_ws_max_message_size'))
         # Skip the synthetic 'websocket.connect' first-call event — the
         # handshake (HTTP 101) already established the connection.
         self._recipient._connect_sent = True
@@ -190,7 +204,9 @@ class WebSocketClient:
                                       self._connect_timeout)
         self._raw_writer = w
         self._reader = AsyncioReader(r)
-        self._writer = AsyncioWriter(w)
+        self._writer = AsyncioWriter(
+            w, get_settings().client_write_timeout,
+            cap_name='client_write_timeout', protocol='ws')
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
@@ -263,4 +279,8 @@ class WebSocketClient:
                 f'server selected subprotocol {chosen!r} which the client did not offer')
 
         return WebSocketSession(self._reader, self._writer, self._raw_writer,
-                                subprotocol=chosen)
+                                subprotocol=chosen,
+                                max_frame_payload=(
+                                    get_settings().client_ws_max_frame_payload),
+                                max_message_size=(
+                                    get_settings().client_ws_max_message_size))

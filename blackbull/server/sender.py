@@ -302,7 +302,11 @@ class AsyncioWriter(AbstractWriter):
     is ~1 %.
     """
 
-    def __init__(self, stream_writer, write_timeout: float = 0.0):
+    # Client callers may inject an owner and protocol so the shared
+    # rejection site preserves the caller's diagnostic identity.
+    def __init__(self, stream_writer, write_timeout: float = 0.0,
+                 cap_name: str = 'write_timeout',
+                 protocol: str | None = None):
         if not (hasattr(stream_writer, 'write') and hasattr(stream_writer, 'drain')):
             raise TypeError(
                 f"AsyncioWriter requires an object with write() and drain(), "
@@ -318,6 +322,8 @@ class AsyncioWriter(AbstractWriter):
         _transport = getattr(stream_writer, 'transport', None)
         self._is_closing = getattr(_transport, 'is_closing', None)
         self._write_timeout = write_timeout
+        self._cap_name = cap_name
+        self._protocol = protocol
         self._deadline = (WriteDeadline(write_timeout)
                           if write_timeout > 0 else None)
         # Resolved once, and only for a genuine coroutine function.  A bare
@@ -358,9 +364,16 @@ class AsyncioWriter(AbstractWriter):
         logger.warning(
             'write timeout (%.1fs) exceeded — closing connection',
             self._write_timeout)
-        log_cap_hit('write_timeout',
-                    requested=self._write_timeout,
-                    limit=self._write_timeout)
+        if self._cap_name == 'write_timeout':
+            log_cap_hit('write_timeout',
+                        requested=self._write_timeout,
+                        limit=self._write_timeout,
+                        protocol=self._protocol)
+        else:
+            log_cap_hit(self._cap_name,
+                        requested=self._write_timeout,
+                        limit=self._write_timeout,
+                        protocol=self._protocol)
         try:
             self._sw.close()
         except Exception as close_exc:
@@ -1051,6 +1064,7 @@ class HTTP2Sender(BaseSender):
         '_conn_window', 'stream_window_size',
         'max_frame_size', '_window_open', '_end_stream_sent',
         '_flow_control_timeout',
+        '_flow_control_cap',
         '_buffered_status', '_buffered_headers', '_expect_trailers',
         '_buffered_body', '_auto_flush_task', '_log_record',
     )
@@ -1059,7 +1073,8 @@ class HTTP2Sender(BaseSender):
                  push_callback=None,
                  conn_window: 'ConnectionWindow | None' = None,
                  initial_window: int | None = None,
-                 flow_control_timeout: float | None = None):
+                 flow_control_timeout: float | None = None,
+                 flow_control_cap: str = 'write_timeout'):
         super().__init__(writer)
         self._factory = factory
         self._stream_id = stream_id
@@ -1090,12 +1105,13 @@ class HTTP2Sender(BaseSender):
         # created *per stream*, so resolving this here would put a
         # function-level relative import — resolved through
         # ``importlib._bootstrap`` on every execution — on the per-request
-        # path.  The fallback is for direct instantiation (tests, the
-        # experimental client).
+        # path.  The fallback is for direct instantiation by tests, embedders,
+        # and other callers that do not use a protocol factory.
         if flow_control_timeout is None:
             from ..env import get_settings  # noqa: PLC0415
             flow_control_timeout = get_settings().write_timeout
         self._flow_control_timeout: float = flow_control_timeout
+        self._flow_control_cap = flow_control_cap
         self._end_stream_sent: bool = False
         # Defer HEADERS write until first body event (mirrors HTTP1Sender).
         self._buffered_status: HTTPStatus | None = None
@@ -1119,10 +1135,10 @@ class HTTP2Sender(BaseSender):
     def connection_window_size(self) -> int:
         """The shared connection-level send window.
 
-        Proxies :attr:`ConnectionWindow.size` so existing call sites — the
-        experimental client's per-sender crediting and flow-control tests —
-        keep reading/writing ``sender.connection_window_size`` while the real
-        state lives on the shared object.
+        Proxies :attr:`ConnectionWindow.size` so direct users' per-sender
+        crediting and flow-control tests keep reading/writing
+        ``sender.connection_window_size`` while the real state lives on the
+        shared object.
         """
         return self._conn_window.size
 
@@ -1296,10 +1312,10 @@ class HTTP2Sender(BaseSender):
                     break
                 # A peer that requests a large response and never opens its
                 # window parks this task forever (CVE-2019-9511's shape).
-                # ``BB_WRITE_TIMEOUT`` already bounds a stalled socket drain;
-                # this is the same question one layer up — how long may the
-                # peer take to accept what it asked for — so it is the same
-                # knob at a second enforcement point, not a new one.
+                # The caller supplies the owner for this progress wait:
+                # servers use ``BB_WRITE_TIMEOUT`` and clients inject their
+                # own ``BB_CLIENT_WRITE_TIMEOUT`` without changing this
+                # shared sender.
                 if self._flow_control_timeout <= 0:
                     await self._window_open.wait()
                     continue
@@ -1307,13 +1323,20 @@ class HTTP2Sender(BaseSender):
                     async with asyncio.timeout(self._flow_control_timeout):
                         await self._window_open.wait()
                 except (asyncio.TimeoutError, TimeoutError) as exc:
-                    log_cap_hit('write_timeout',
-                                requested=self._flow_control_timeout,
-                                limit=self._flow_control_timeout,
-                                protocol='http2')
+                    if self._flow_control_cap == 'write_timeout':
+                        log_cap_hit('write_timeout',
+                                    requested=self._flow_control_timeout,
+                                    limit=self._flow_control_timeout,
+                                    protocol='http2')
+                    else:
+                        log_cap_hit(self._flow_control_cap,
+                                    requested=self._flow_control_timeout,
+                                    limit=self._flow_control_timeout,
+                                    protocol='http2')
+                    cap_env = f'BB_{self._flow_control_cap.upper()}'
                     raise FlowControlStalled(
                         f'stream {self._stream_id}: peer sent no WINDOW_UPDATE '
-                        f'in {self._flow_control_timeout}s'
+                        f'within {cap_env}={self._flow_control_timeout}s'
                     ) from exc
 
             chunk_size = min(

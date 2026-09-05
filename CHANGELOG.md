@@ -3,6 +3,11 @@
 All notable changes to BlackBull are recorded here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased
+
+- Added client-owned write and WebSocket size bounds, and applied the
+  response minimum-body-rate floor to HTTP/2 streams.
+
 ## Versioning
 
 BlackBull uses [ZeroVer](https://0ver.org/) prior to a 1.0 commitment:

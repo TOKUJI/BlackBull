@@ -342,18 +342,21 @@ no diagnostic at all.  A cap enforced on both protocols is two rejection
 sites and keeps two records, which is why this table has a column per
 protocol rather than a row per cap:
 
-| Cap (env var) | HTTP/1.1 | HTTP/2 |
-|---|---|---|
-| `BB_CLIENT_HEAD_MAX_TOTAL` | the response head over the budget; the trailer section over the same one | the stream's field lines in aggregate; the encoded block reassembled across CONTINUATION |
-| `BB_CLIENT_HEAD_MAX_LINE` | a status line, response field line, chunk-size line or trailer field line over the per-line rule | — no field *line* exists; the section is the unit |
-| `BB_CLIENT_HEAD_TIMEOUT` | the response head did not arrive in time | the peer took the request and never began to answer — that stream is reset; or a field block opened and never finished with END_HEADERS — the connection ends |
-| `BB_CLIENT_BODY_TIMEOUT` | one body read outlasted its deadline | no frame for that stream inside the deadline |
-| `BB_CLIENT_BODY_MAX_TOTAL` | a declared `Content-Length` over the cap, or the running total of a chunked or close-delimited body | the running total, checked before a DATA payload is held |
-| `BB_CLIENT_MIN_BODY_RATE` | body arriving below the floor past the grace period — `requested` is the observed rate in bytes/second | — no rate floor on HTTP/2 |
-| `BB_CLIENT_MAX_INTERIM_RESPONSES` | too many `1xx` responses before the final one | — `BB_CLIENT_HEAD_MAX_TOTAL` owns that aggregate |
-| `BB_CLIENT_RAW_QUEUE_DEPTH` | — no raw-stream hatch | the raw-stream queue is full |
-| `BB_CLIENT_H2_MAX_FRAME_SIZE` | — no frame | the declared frame length is over the cap |
-| `BB_CLIENT_H2_MAX_HEADER_LIST_SIZE` | — no field section | the decoded field section is over the cap.  `requested` is a **lower bound**, not the figure: hpack reports the limit it refused at and never the total it reached.  A tight one — it charges each entry and compares immediately, so it raises on the entry that crosses and the section is provably just over the limit |
+| Cap (env var) | HTTP/1.1 | HTTP/2 | WebSocket |
+|---|---|---|---|
+| `BB_CLIENT_HEAD_MAX_TOTAL` | the response head over the budget; the trailer section over the same one | the stream's field lines in aggregate; the encoded block reassembled across CONTINUATION | — |
+| `BB_CLIENT_HEAD_MAX_LINE` | a status line, response field line, chunk-size line or trailer field line over the per-line rule | — no field *line* exists; the section is the unit | — |
+| `BB_CLIENT_HEAD_TIMEOUT` | the response head did not arrive in time | the peer took the request and never began to answer — that stream is reset; or a field block opened and never finished with END_HEADERS — the connection ends | — |
+| `BB_CLIENT_BODY_TIMEOUT` | one body read outlasted its deadline | no frame for that stream inside the deadline | — |
+| `BB_CLIENT_BODY_MAX_TOTAL` | a declared `Content-Length` over the cap, or the running total of a chunked or close-delimited body | the running total, checked before a DATA payload is held | — |
+| `BB_CLIENT_MIN_BODY_RATE` | body arriving below the floor past the grace period — `requested` is the observed rate in bytes/second | DATA payload arriving below the floor; each stream is reset independently | — |
+| `BB_CLIENT_MAX_INTERIM_RESPONSES` | too many `1xx` responses before the final one | — `BB_CLIENT_HEAD_MAX_TOTAL` owns that aggregate | — |
+| `BB_CLIENT_RAW_QUEUE_DEPTH` | — no raw-stream hatch | the raw-stream queue is full | — |
+| `BB_CLIENT_H2_MAX_FRAME_SIZE` | — no frame | the declared frame length is over the cap | — |
+| `BB_CLIENT_H2_MAX_HEADER_LIST_SIZE` | — no field section | the decoded field section is over the cap.  `requested` is a **lower bound**, not the figure: hpack reports the limit it refused at and never the total it reached.  A tight one — it charges each entry and compares immediately, so it raises on the entry that crosses and the section is provably just over the limit | — |
+| `BB_CLIENT_WRITE_TIMEOUT` | client socket drain stalled; `requested` is the per-drain deadline | client socket drain or flow-control credit wait stalled; `requested` is the per-wait deadline | client socket drain stalled; `requested` is the per-drain deadline |
+| `BB_CLIENT_WS_MAX_FRAME_PAYLOAD` | — | — | the declared inbound WebSocket frame payload is over the cap |
+| `BB_CLIENT_WS_MAX_MESSAGE_SIZE` | — | — | the reassembled/inflated inbound WebSocket message is over the cap |
 
 A time bound records only when **its own** deadline expired.  A
 `TimeoutError` that reached the client from inside the transport is not

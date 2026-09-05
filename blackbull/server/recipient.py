@@ -1865,6 +1865,9 @@ class HTTP2Recipient(BaseRecipient):
 class WebSocketRecipient(BaseRecipient):
     """Reads WebSocket frames and emits ASGI ``websocket.*`` events.
 
+    Client callers inject the ownership names 'client_ws_max_frame_payload',
+    and 'client_ws_max_message_size', at these shared rejection sites.
+
     First call returns ``{'type': 'websocket.connect'}``.  Subsequent calls
     read the next frame from the transport:
       - Text frame   → ``{'type': 'websocket.receive', 'text': ..., 'bytes': None}``
@@ -1934,9 +1937,13 @@ class WebSocketRecipient(BaseRecipient):
                  on_message: Callable[[dict], Awaitable[None]] | None = None,
                  read_ahead_needed: Callable[[], bool] | None = None,
                  ws_idle_timeout: float | None = None,
-                 ws_pong_timeout: float | None = None):
+                 ws_pong_timeout: float | None = None,
+                 frame_cap_name: str = 'ws_max_frame_payload',
+                 message_cap_name: str = 'ws_max_message_size'):
         super().__init__(reader)
         self._writer = writer
+        self._frame_cap_name = frame_cap_name
+        self._message_cap_name = message_cap_name
         self._connect_sent = False
         # Resolution order for the cap:
         #  1. explicit ``max_frame_payload=`` constructor arg (tests + power users)
@@ -2162,7 +2169,7 @@ class WebSocketRecipient(BaseRecipient):
                 self._reader, h.masked, h.length,
                 max_length=self._max_frame_payload)
         except FramePayloadTooLarge as exc:
-            log_cap_hit('ws_max_frame_payload',
+            log_cap_hit(self._frame_cap_name,
                         requested=exc.declared,
                         limit=self._max_frame_payload,
                         scope_path=self._conn.path if self._conn else None,
@@ -2247,7 +2254,7 @@ class WebSocketRecipient(BaseRecipient):
         single oversized frame — because there are three ways for a
         message to outgrow the bound and only one thing to do about it.
         """
-        log_cap_hit('ws_max_message_size',
+        log_cap_hit(self._message_cap_name,
                     requested=exc.produced,
                     limit=exc.maximum,
                     scope_path=self._conn.path if self._conn else None,

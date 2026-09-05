@@ -1367,8 +1367,14 @@ _CLIENT_CAPS: dict[str, frozenset[str]] = {
     'client_head_max_total':          frozenset({'http1', 'http2'}),
     'client_head_timeout':            frozenset({'http1', 'http2'}),
     'client_max_interim_responses':   frozenset({'http1'}),
-    'client_min_body_rate':           frozenset({'http1'}),
+    'client_min_body_rate':           frozenset({'http1', 'http2'}),
     'client_raw_queue_depth':         frozenset({'http2'}),
+    # These are enforced by the shared transport/recipient primitives after
+    # the client injects their ownership names, so the rejection call lives
+    # under ``server/`` rather than under a client module.
+    'client_write_timeout':            frozenset({'http1', 'http2', 'ws'}),
+    'client_ws_max_frame_payload':     frozenset({'ws'}),
+    'client_ws_max_message_size':      frozenset({'ws'}),
 }
 
 #: ``BB_CLIENT_*`` vars that are not caps, and why.  Declared rather than
@@ -1393,8 +1399,8 @@ _CLIENT_NOT_A_CAP: dict[str, str] = {
 #: - ``client_head_max_line`` has no HTTP/2 site because HTTP/2 has no
 #:   field *line* — the section is the unit, bounded by
 #:   ``client_h2_max_header_list_size``.
-#: - ``client_min_body_rate`` has no HTTP/2 site because HTTP/2 has no
-#:   rate floor at all.  That is a missing bound, not a missing record.
+#: - ``client_min_body_rate`` is implemented per HTTP/2 stream as well as
+#:   HTTP/1.1, with DATA payload bytes as its numerator.
 
 
 def _client_source_paths() -> list:
@@ -1415,7 +1421,7 @@ def _forwarded_constants(param: str, func, tree) -> list[str]:
     """The constants *func*'s own callers pass in *param*.
 
     One level of forwarding, which is all the client has: the HTTP/2
-    client's three per-stream bounds share ``_refuse_stream`` and pass the
+    client's per-stream bounds share ``_refuse_stream`` and pass the
     cap name to it, so the literal never appears beside ``log_cap_hit``.
     Refusing to resolve it would make this audit an argument for copying
     the helper.
@@ -1448,14 +1454,36 @@ def _forwarded_constants(param: str, func, tree) -> list[str]:
 
 
 def _observed_client_pairs() -> set:
-    """Every ``(cap, protocol)`` a ``log_cap_hit`` call under
-    ``blackbull/client/`` can produce, read out of the source."""
+    """Every ``(cap, protocol)`` a client path can produce.
+
+    This includes names injected into shared transport and recipient
+    constructors, whose rejection implementation lives under ``server/``.
+    """
     pairs = set()
     for path in _client_source_paths():
         tree = ast.parse(path.read_text())
         parents = {child: node for node in ast.walk(tree)
                    for child in ast.iter_child_nodes(node)}
         for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                callee = node.func.attr if isinstance(node.func, ast.Attribute) else (
+                    node.func.id if isinstance(node.func, ast.Name) else None)
+                kwargs = {kw.arg: kw.value for kw in node.keywords}
+                if callee == 'AsyncioWriter':
+                    cap = kwargs.get('cap_name')
+                    protocol = kwargs.get('protocol')
+                    if (isinstance(cap, ast.Constant)
+                            and isinstance(protocol, ast.Constant)):
+                        pairs.add((cap.value, protocol.value))
+                elif callee == 'WebSocketRecipient':
+                    for key in ('frame_cap_name', 'message_cap_name'):
+                        cap = kwargs.get(key)
+                        if isinstance(cap, ast.Constant):
+                            pairs.add((cap.value, 'ws'))
+                elif callee == 'HTTP2Sender':
+                    cap = kwargs.get('flow_control_cap')
+                    if isinstance(cap, ast.Constant):
+                        pairs.add((cap.value, 'http2'))
             if not (isinstance(node, ast.Call)
                     and isinstance(node.func, ast.Name)
                     and node.func.id == 'log_cap_hit'):
