@@ -113,6 +113,13 @@ every index against the single table its one decoder built, so a field indexed
 by one encoder is read back as a field the other inserted — one stream's header
 resolved inside another's block, with no error raised on either side.
 
+The frame classes hold that rule rather than assuming it.  A `Headers` or
+`PushPromise` asked to encode without the connection's encoder, or to decode a
+field block without its decoder, refuses and names the factory the codec comes
+from.  The alternative — standing in a fresh context, or skipping the decode —
+is the same divergence arriving by omission instead of by a second factory, and
+it looks like well-formed bytes all the way to the peer.
+
 ---
 
 ## §5 — Streams and Multiplexing

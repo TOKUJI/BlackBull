@@ -171,6 +171,37 @@ so the editable install's metadata catches up.
 
 ### Fixed
 
+- **A HEADERS or PUSH_PROMISE frame built without its connection's HPACK codec
+  no longer invents one.**  `Headers.save()` and `PushPromise.save()`
+  substituted a fresh encoder when the frame had none, and
+  `PushPromise.parse_payload()` returned without decoding when the decoder was
+  missing.  HPACK state is connection-wide and a peer keeps exactly one table
+  for it (RFC 7541 §2.3, RFC 9113 §4.3), so neither substitute is a weaker
+  version of the right codec — each is a *different table*.  A private encoder
+  writes indices the peer resolves against entries some other encoder inserted;
+  a promised block that never reaches the connection's decoder leaves it one
+  set of insertions behind its peer for the rest of the connection.  Both
+  produce well-formed bytes and raise on neither side.
+
+  **No traffic reached either path.**  Every `Headers` and `PushPromise` the
+  framework builds comes from a `FrameFactory`, which passes its own encoder
+  and decoder on every construction, so nothing BlackBull sent or read has been
+  framed by a substitute context.  This is a latent hole in a class other code
+  can reach, closed because the same failure arrived *reachably* one layer up
+  (the WebSocket-over-HTTP/2 entry under **Security** above) — where it was
+  equally latent right until one application used one connection two ways.
+
+  Both classes now refuse instead, with a message that names the connection's
+  `FrameFactory` as where the codec comes from rather than reporting a missing
+  argument.  `Headers.parse_payload()`'s `assert` became the same refusal, so
+  it holds under `python -O` too.  **Code constructing
+  `blackbull.protocol.frame_types.Headers` or `PushPromise` directly now passes
+  the connection's `encoder`, and its `decoder` for a frame carrying an inbound
+  block; going through `FrameFactory.create` already does both.**  A throwaway
+  encoder used for one block on a connection that holds no long-lived encoder
+  remains correct HPACK and is untouched — it never indexes an entry it did not
+  itself insert.
+
 - **A closed `HTTP2Client` refuses every door into it, and says whose close it
   was.**  `__aexit__` closed the transport and left the client's public surface
   open.  `request` and `register_raw_stream` were guarded, but on the *peer's*
