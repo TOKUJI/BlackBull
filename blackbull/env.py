@@ -754,6 +754,12 @@ class Settings:
     #: forever.  0 disables.
     client_head_timeout: float = 30.0
 
+    #: Maximum seconds a client waits for one send-progress operation.  H1 and
+    #: WS use a socket drain; H2 DATA uses the peer's SETTINGS_MAX_FRAME_SIZE
+    #: as its outbound unit and waits for flow-control credit.  There is
+    #: intentionally no whole-upload total owner.  0 disables.
+    client_write_timeout: float = 30.0
+
     #: Seconds the async client will wait for a single response-body read.
     #: Per read, not per body: a peer must keep making progress, which is the
     #: same shape as ``body_timeout`` and as nginx's ``client_body_timeout``.
@@ -876,6 +882,16 @@ class Settings:
     #: period wide and rolls forward whenever it is satisfied, so a burst buys
     #: the window it happened in rather than the whole response.
     client_min_body_rate_grace: float = 5.0
+
+    #: Client WebSocket inbound frame payload cap, in bytes per frame.
+    #: ``client_ws_max_message_size`` owns the aggregate message total; the
+    #: client WebSocket recipient has no environment-owned time bound.
+    client_ws_max_frame_payload: int = 64 * 1024 * 1024
+
+    #: Client WebSocket inbound message cap, in bytes per message.
+    #: ``client_ws_max_frame_payload`` owns each individual frame; the
+    #: client WebSocket recipient has no environment-owned time bound.
+    client_ws_max_message_size: int = 16 * 1024 * 1024
 
     #: Maximum number of interim (``1xx``) responses the async client will read
     #: and discard while waiting for the final one.  RFC 9110 §15.2 makes
@@ -1289,11 +1305,17 @@ def get_settings() -> Settings:
         client_head_max_total=_int_env_nonneg('BB_CLIENT_HEAD_MAX_TOTAL', 65536),
         client_head_max_line=_int_env_nonneg('BB_CLIENT_HEAD_MAX_LINE', 8192),
         client_head_timeout=_float_env_nonneg('BB_CLIENT_HEAD_TIMEOUT', 30.0),
+        client_write_timeout=_float_env_nonneg(
+            'BB_CLIENT_WRITE_TIMEOUT', 30.0),
         client_body_timeout=_float_env_nonneg('BB_CLIENT_BODY_TIMEOUT', 30.0),
         client_body_max_total=_int_env_nonneg('BB_CLIENT_BODY_MAX_TOTAL', 0),
         client_min_body_rate=_float_env_nonneg('BB_CLIENT_MIN_BODY_RATE', 0.0),
         client_min_body_rate_grace=_float_env_nonneg(
             'BB_CLIENT_MIN_BODY_RATE_GRACE', 5.0),
+        client_ws_max_frame_payload=_int_env_nonneg(
+            'BB_CLIENT_WS_MAX_FRAME_PAYLOAD', 64 * 1024 * 1024),
+        client_ws_max_message_size=_int_env_nonneg(
+            'BB_CLIENT_WS_MAX_MESSAGE_SIZE', 16 * 1024 * 1024),
         client_max_interim_responses=_int_env_nonneg(
             'BB_CLIENT_MAX_INTERIM_RESPONSES', 8),
         client_raw_queue_depth=_int_env_nonneg(

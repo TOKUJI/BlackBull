@@ -42,6 +42,7 @@ import ssl as _ssl
 import struct
 
 from ..asgi import ASGIEvent
+from ..env import get_settings
 from ..native import NativeResponse
 from ..protocol.frame import FrameFactory
 from ..protocol.frame_types import (
@@ -162,7 +163,11 @@ class WebSocketH2Session:
             _H2QueueReader(frame_queue, self._credit_returned),
             HTTP2WSWriter(self._sender),
             require_masked=False,
-            ws_queue_depth=_WS_EVENT_QUEUE_DEPTH)
+            ws_queue_depth=_WS_EVENT_QUEUE_DEPTH,
+            max_frame_payload=(get_settings().client_ws_max_frame_payload),
+            max_message_size=(get_settings().client_ws_max_message_size),
+            frame_cap_name='client_ws_max_frame_payload',
+            message_cap_name='client_ws_max_message_size')
         # Skip the synthetic 'websocket.connect' first-call event — the
         # Extended CONNECT handshake already established the session.
         self._recipient._connect_sent = True

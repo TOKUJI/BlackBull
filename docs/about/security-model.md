@@ -83,9 +83,11 @@ column.
 | Connections | — | `BB_MAX_CONNECTIONS` (derived) | detect deadline, keep-alive |
 | *Client* response head (HTTP/1.1) | `BB_CLIENT_HEAD_MAX_LINE` 8 KiB | `BB_CLIENT_HEAD_MAX_TOTAL` 64 KiB | `BB_CLIENT_HEAD_TIMEOUT` 30 s |
 | *Client* response head (HTTP/2) | `BB_CLIENT_H2_MAX_FRAME_SIZE` 16 KiB | `BB_CLIENT_HEAD_MAX_TOTAL` 64 KiB, spent twice — encoded, per field block reassembled across CONTINUATION; and decoded, across every section on the stream — plus `BB_CLIENT_H2_MAX_HEADER_LIST_SIZE` 64 KiB decoded, per section, inside the decoder | `BB_CLIENT_HEAD_TIMEOUT` 30 s |
-| *Client* response body | 64 KiB read (HTTP/1.1); `BB_CLIENT_H2_MAX_FRAME_SIZE` (HTTP/2) | `BB_CLIENT_BODY_MAX_TOTAL` **off** | `BB_CLIENT_BODY_TIMEOUT` 30 s + `BB_CLIENT_MIN_BODY_RATE` **off**, and HTTP/1.1 only |
+| *Client* response body | 64 KiB read (HTTP/1.1); `BB_CLIENT_H2_MAX_FRAME_SIZE` (HTTP/2) | `BB_CLIENT_BODY_MAX_TOTAL` **off** | `BB_CLIENT_BODY_TIMEOUT` 30 s + `BB_CLIENT_MIN_BODY_RATE` **off** (payload bytes; H2 per stream) |
 | *Client* raw HTTP/2 stream | `BB_CLIENT_H2_MAX_FRAME_SIZE` 16 KiB | `BB_CLIENT_RAW_QUEUE_DEPTH` 1024 frames | — |
-| *Client* send path | — | HTTP/2 flow-control window | `BB_WRITE_TIMEOUT` 30 s on the HTTP/2 flow-control wait — the server's knob, read by the client too |
+| *Client* WebSocket frame | `BB_CLIENT_WS_MAX_FRAME_PAYLOAD` 64 MiB | — | — |
+| *Client* WebSocket message | per frame | `BB_CLIENT_WS_MAX_MESSAGE_SIZE` 16 MiB | — |
+| *Client* send path | HTTP/2 peer `SETTINGS_MAX_FRAME_SIZE` | — deliberately no upload aggregate; the flow-control window is only in-flight credit | `BB_CLIENT_WRITE_TIMEOUT` 30 s per socket-drain/flow-control wait, not a whole-upload total; one-byte credit can make an upload indefinite |
 
 One client bound is not in that grid, because it is not one of the three.
 `BB_CLIENT_MAX_INTERIM_RESPONSES` (8) bounds how many `1xx` heads may precede
@@ -178,10 +180,10 @@ are the difference between the label and the whole truth:
    deadline, so they cost nothing while none is pending. Sessions live in
    memory only and do not survive a restart.
 
-4. **The client's rung is the generous reading.** Ten `BB_CLIENT_*`
+4. **The client's rung is the generous reading.** Thirteen `BB_CLIENT_*`
    bounds refuse traffic, and two — `BB_CLIENT_BODY_MAX_TOTAL` and
    `BB_CLIENT_MIN_BODY_RATE` — ship off, which is exactly what
-   `bounded-when-configured` says. (Twelve `BB_CLIENT_*` variables exist;
+   `bounded-when-configured` says. (Fifteen `BB_CLIENT_*` variables exist;
    `BB_CLIENT_H2_ENABLE_PUSH` is a conformance switch and
    `BB_CLIENT_MIN_BODY_RATE_GRACE` a modifier of the floor, and neither
    refuses anything on its own. That split is not an editorial choice:
@@ -246,7 +248,8 @@ Every claim on this page is backed by a test or an external conformance suite.
 | Derived connection cap | `tests/unit/test_max_connections_default.py` |
 | Protocol conformance | h2spec (HTTP/2 + HPACK), Autobahn (WebSocket), http11probe — see [Conformance](conformance.md) |
 | Client response bounds, and that a peer which stops is abandoned rather than waited on | `tests/unit/client/test_http1_client_head_bounds.py`, `tests/unit/client/test_http1_client_desync_and_deadline.py`, `tests/unit/client/test_http2_client_response_bounds.py` |
-| Client rate floor, including that a slow *consumer* does not trip it | `tests/unit/client/test_http1_client_rate_floor.py` |
+| Client rate floor, including HTTP/2 stream isolation and DATA payload accounting | `tests/unit/client/test_http1_client_rate_floor.py`, `tests/unit/client/test_http2_client_rate_floor.py` |
+| Client-owned transport and WebSocket bounds | `tests/unit/client/test_client_owned_bounds.py`, `tests/unit/test_cap_log_sites.py` |
 | Every client bound names itself on `blackbull.caps`, on every protocol that enforces it | `tests/unit/test_cap_log_sites.py` — the per-cap tests, plus `test_client_caps_are_wired_on_every_protocol_that_enforces_them` and `test_every_client_env_var_has_a_verdict` |
 | A buffered client response body costs about twice the cap | `tests/unit/client/test_client_body_buffer_cost.py` |
 

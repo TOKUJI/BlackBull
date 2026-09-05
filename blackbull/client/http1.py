@@ -1186,7 +1186,9 @@ class HTTP1Client:
                                           self._connect_timeout)
             self._raw_writer = w
             self._reader = AsyncioReader(r)
-            self._writer = AsyncioWriter(w)
+            self._writer = AsyncioWriter(
+                w, get_settings().client_write_timeout,
+                cap_name='client_write_timeout', protocol='http1')
         await self._start()
         return self
 
@@ -1202,7 +1204,9 @@ class HTTP1Client:
         c = cls(host, port, ssl=ssl)
         c._raw_writer = writer
         c._reader = AsyncioReader(reader)
-        c._writer = AsyncioWriter(writer)
+        c._writer = AsyncioWriter(
+            writer, get_settings().client_write_timeout,
+            cap_name='client_write_timeout', protocol='http1')
         return c
 
     async def _start(self) -> None:
