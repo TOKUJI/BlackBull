@@ -209,6 +209,10 @@ and expiry notifications are coalesced. ACK traffic can progress as the broker
 consumes its bounded inbox; inability to queue an outbound ACK ends that
 connection instead of parking the broker. Active writes and clean-close flushing
 use `BB_WRITE_TIMEOUT` (zero explicitly disables this time bound).
+Graceful cleanup waits for the sole writer after the broker's `Detach` barrier:
+that barrier acknowledges routing work, not completion of socket writes.
+Normal broker and connection mailbox shutdowns emit DEBUG lifecycle logs under
+`blackbull.mqtt.broker` and `blackbull.mqtt.connection`.
 
 **The packet limit is judged from the header.** MQTT 5 lets a peer declare a
 Remaining Length of 268,435,455 bytes (256 MiB) and then deliver it slowly. The

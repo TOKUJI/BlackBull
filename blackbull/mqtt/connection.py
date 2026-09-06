@@ -283,7 +283,7 @@ class MQTT5Actor(Actor):
                 finally:
                     self._inbox.task_done()
         except MailboxClosed:
-            pass
+            logger.debug('MQTT connection mailbox closed; stopping writer loop.')
         finally:
             self._writer_task = None
             self._stop(abort=True)
@@ -477,6 +477,9 @@ async def serve_connection(reader: AbstractReader, writer: AbstractWriter,
                         async with asyncio.timeout(conn._write_timeout or None):
                             await detached.wait()
                             conn._stop()
+                            # Detach only acknowledges broker processing;
+                            # the sole writer must finish queued packets
+                            # before the cleanup below can cancel it.
                             await writer_task
         finally:
             writer_task.cancel()

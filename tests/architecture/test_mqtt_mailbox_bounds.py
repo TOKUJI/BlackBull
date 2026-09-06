@@ -1,5 +1,6 @@
 """Bounded MQTT actor handoffs, driven with small queues and gated I/O."""
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 import pytest
@@ -530,6 +531,54 @@ async def test_broker_close_interrupts_reader_before_waiting_for_writer():
                 await serving
             assert len(writer.packets) == 1
             assert isinstance(writer.packets[0], MQTTConnack)
+        finally:
+            serving.cancel()
+            await asyncio.gather(serving, return_exceptions=True)
+
+
+async def test_connection_mailbox_shutdown_logs_after_flushing_packets(caplog):
+    caplog.set_level(logging.DEBUG, logger='blackbull.mqtt.connection')
+    broker = BrokerActor()
+    writer = Writer()
+    conn = MQTT5Actor(writer, broker, ctx())
+    await conn.send(Send(packet=MQTTPingresp()))
+    await conn.send(Close())
+    async with asyncio.timeout(1):
+        await conn.run()
+    assert [type(packet) for packet in writer.packets] == [MQTTPingresp]
+    assert 'MQTT connection mailbox closed; stopping writer loop.' in caplog.text
+    broker.close()
+
+
+async def test_serving_waits_for_pending_flush_after_detach():
+    class DetachObservedBroker(BrokerActor):
+        def __init__(self):
+            super().__init__(max_sessions=1)
+            self.detached = asyncio.Event()
+
+        async def _handle(self, msg):
+            await super()._handle(msg)
+            if isinstance(msg, Detach):
+                self.detached.set()
+
+    broker = DetachObservedBroker()
+    await broker._handle(Attach(connect=connect('occupied'), sender=Actor()))
+    writer = Writer()
+    writer.release.clear()
+    reader = Reader(connect('refused'))
+    async with running(broker):
+        serving = asyncio.create_task(serve_connection(reader, writer, ctx(), broker))
+        try:
+            async with asyncio.timeout(1):
+                await writer.entered.wait()
+                await broker.detached.wait()
+            await settled()
+            assert not serving.done(), 'detach is not completion of the pending write'
+            assert not writer.packets
+            writer.release.set()
+            async with asyncio.timeout(1):
+                await serving
+            assert [type(packet) for packet in writer.packets] == [MQTTConnack]
         finally:
             serving.cancel()
             await asyncio.gather(serving, return_exceptions=True)
