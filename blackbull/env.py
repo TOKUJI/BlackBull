@@ -326,6 +326,22 @@ BB_MQTT_MAX_QUEUED_MESSAGES
     silently discarded, and a cap hit is logged.  ``0`` disables the
     bound (unbounded backlog — not recommended on an exposed broker).
     Default: ``1000``.
+BB_MQTT_BROKER_INBOX_MAXSIZE
+    Waiting messages in the worker's MQTT broker inbox. At capacity, readers
+    await admission instead of decoding further packets. Positive integer;
+    default ``1024``. Independent of the per-session QoS backlog.
+BB_MQTT_BROKER_INBOX_MAX_BYTES
+    Wire-size charge for waiting broker messages. Default ``16777216``
+    (16 MiB); positive integer. A packet exceeding this budget cannot wait
+    for admission and its connection is refused. Not a Python heap limit.
+BB_MQTT_CONNECTION_INBOX_MAXSIZE
+    Waiting packets in each MQTT connection writer inbox, including QoS 0
+    and control replies. Default ``1024``; positive integer. After yielding
+    to the writer, a full inbox ends only that connection, with a cap log.
+BB_MQTT_CONNECTION_INBOX_MAX_BYTES
+    Encoded bytes waiting in each MQTT writer inbox. Default ``16777216``
+    (16 MiB); positive integer. The active write is outside the queue budget;
+    its duration is bounded by ``BB_WRITE_TIMEOUT`` when enabled.
 BB_MQTT_MAX_RETAINED
     Maximum number of distinct topics holding a retained message
     (§3.3.1.3).  A retained message is permanent by design, so without a
@@ -1167,6 +1183,12 @@ class Settings:
     #: Maximum window is full.  See BB_MQTT_MAX_QUEUED_MESSAGES above.
     mqtt_max_queued_messages: int = 1000
 
+    #: Independent MQTT actor handoff budgets; zero is not an unlimited mode.
+    mqtt_broker_inbox_maxsize: int = 1024
+    mqtt_broker_inbox_max_bytes: int = 16 * 1024 * 1024
+    mqtt_connection_inbox_maxsize: int = 1024
+    mqtt_connection_inbox_max_bytes: int = 16 * 1024 * 1024
+
     #: Maximum number of topics holding a retained message.  See
     #: BB_MQTT_MAX_RETAINED above.
     mqtt_max_retained: int = 10000
@@ -1356,6 +1378,14 @@ def get_settings() -> Settings:
         mqtt_receive_maximum=_int_env_nonneg('BB_MQTT_RECEIVE_MAXIMUM', 64),
         mqtt_max_queued_messages=_int_env_nonneg(
             'BB_MQTT_MAX_QUEUED_MESSAGES', 1000),
+        mqtt_broker_inbox_maxsize=_int_env(
+            'BB_MQTT_BROKER_INBOX_MAXSIZE', 1024),
+        mqtt_broker_inbox_max_bytes=_int_env(
+            'BB_MQTT_BROKER_INBOX_MAX_BYTES', 16 * 1024 * 1024),
+        mqtt_connection_inbox_maxsize=_int_env(
+            'BB_MQTT_CONNECTION_INBOX_MAXSIZE', 1024),
+        mqtt_connection_inbox_max_bytes=_int_env(
+            'BB_MQTT_CONNECTION_INBOX_MAX_BYTES', 16 * 1024 * 1024),
         mqtt_max_retained=_int_env_nonneg('BB_MQTT_MAX_RETAINED', 10000),
         mqtt_max_subscriptions=_int_env_nonneg(
             'BB_MQTT_MAX_SUBSCRIPTIONS', 1000),

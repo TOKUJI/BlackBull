@@ -1,9 +1,9 @@
 """MQTT 5.0 per-connection actor and its raw-protocol entry point.
 
 :class:`MQTT5Actor` is one per connection. Its **inbox carries only
-outbound packets** (:class:`~blackbull.mqtt.broker.Send` /
-:class:`~blackbull.mqtt.broker.Close` from the broker, plus the two stateless
-replies it generates itself), and its ``run()`` — draining that inbox — is the
+outbound packets** (:class:`~blackbull.mqtt.broker.Send` from the broker, plus
+the stateless replies it generates itself). ``Close`` sets terminal state
+without needing a queue slot. Its ``run()`` — draining that inbox — is the
 *sole writer* to the socket, so there are no cross-task write races.  A sibling
 reader loop decodes the wire (via :class:`PacketFramer`) and ``send``s control
 messages to the broker.  :func:`serve_connection` is the
@@ -33,12 +33,21 @@ from .messages import (
     decode_packet, decode_variable_byte_integer, encode_packet,
 )
 from ..server.cap_log import log_cap_hit
+from .mailbox import Mailbox, MailboxClosed, MailboxTooLarge
 from .tap import Message, TapActor, compile_taps, run_taps
 
 logger = logging.getLogger(__name__)
 
 _READ_CHUNK = 4096
 _IDLE_SLEEP = 0.005
+
+
+def _output_size(msg: ActorMessage) -> int:
+    if isinstance(msg, Send):
+        if msg._encoded is None:
+            msg._encoded = encode_packet(msg.packet)
+        return len(msg._encoded)
+    return 1
 
 
 class PacketTooLarge(Exception):
@@ -180,12 +189,23 @@ class MQTT5Actor(Actor):
     def __init__(self, writer: AbstractWriter, broker: BrokerActor,
                  ctx: ProtocolContext, *, app_handlers=None,
                  tap: TapActor | None = None,
-                 max_packet_size: int | None = None) -> None:
+                 max_packet_size: int | None = None,
+                 inbox_maxsize: int | None = None,
+                 inbox_max_bytes: int | None = None) -> None:
         super().__init__()
         self._writer = writer
+        from ..env import get_settings  # noqa: PLC0415
+        settings = get_settings()
         if max_packet_size is None:
-            from ..env import get_settings  # noqa: PLC0415
-            max_packet_size = get_settings().mqtt_max_packet_size
+            max_packet_size = settings.mqtt_max_packet_size
+        self._mailbox = Mailbox(
+            settings.mqtt_connection_inbox_maxsize if inbox_maxsize is None else inbox_maxsize,
+            settings.mqtt_connection_inbox_max_bytes if inbox_max_bytes is None else inbox_max_bytes,
+            _output_size)
+        self._write_timeout = settings.write_timeout
+        self._writer_task: asyncio.Task | None = None
+        self._close_requested: asyncio.Future[None] | None = None
+        self._aborted = False
         self._max_packet_size = max_packet_size
         self._broker = broker
         self._ctx = ctx
@@ -203,15 +223,83 @@ class MQTT5Actor(Actor):
 
     # -- inbox drain (the only writer) --------------------------------------
 
+    @property
+    def _inbox(self) -> Mailbox:
+        return self._mailbox
+
+    def _stop(self, *, abort: bool = False) -> None:
+        self._done = True
+        self._aborted |= abort
+        self._inbox.close(discard=abort)
+        if self._close_requested is not None and not self._close_requested.done():
+            self._close_requested.set_result(None)
+        if abort and self._writer_task is not None:
+            if self._writer_task is not asyncio.current_task():
+                self._writer_task.cancel()
+
+    async def send(self, msg: ActorMessage) -> None:
+        if isinstance(msg, Close):
+            # Terminal state is coalesced, never queued behind a full inbox.
+            self._stop()
+            return
+        if self._inbox.closed:
+            return
+        try:
+            self._inbox.put_nowait(msg)
+        except asyncio.QueueFull:
+            # A burst in one broker dispatch (e.g. retained replay) must give
+            # a healthy writer an opportunity to consume, but must not await
+            # a slow socket: its reader may itself be awaiting this broker.
+            await asyncio.sleep(0)
+            if self._inbox.closed:
+                return
+            try:
+                self._inbox.put_nowait(msg)
+            except asyncio.QueueFull:
+                self._overloaded(msg)
+        except MailboxTooLarge:
+            self._overloaded(msg)
+
+    def _overloaded(self, msg: ActorMessage) -> None:
+        size = _output_size(msg)
+        byte_cap = self._inbox.queued_bytes + size > self._inbox.max_bytes
+        log_cap_hit(
+            'mqtt_connection_inbox_max_bytes' if byte_cap else 'mqtt_connection_inbox_maxsize',
+            requested=self._inbox.queued_bytes + size if byte_cap else self._inbox.qsize() + 1,
+            limit=self._inbox.max_bytes if byte_cap else self._inbox.maxsize,
+            protocol='mqtt')
+        # A stalled sole writer cannot reliably transmit a refusal. Terminate
+        # the transport through serve_connection; do not start a second writer.
+        self.graceful = False
+        self._stop(abort=True)
+
+    async def run(self) -> None:
+        self._writer_task = asyncio.current_task()
+        try:
+            while True:
+                msg = await self._inbox.get()
+                try:
+                    await self._handle(msg)
+                finally:
+                    self._inbox.task_done()
+        except MailboxClosed:
+            pass
+        finally:
+            self._writer_task = None
+            self._stop(abort=True)
+
     async def _handle(self, msg: ActorMessage) -> None:
         if isinstance(msg, Send):
             try:
-                await self._writer.write(encode_packet(msg.packet))
-            except Exception:  # pragma: no cover - peer vanished mid-write
+                _output_size(msg)
+                async with asyncio.timeout(self._write_timeout or None):
+                    await self._writer.write(msg._encoded)
+            except Exception:
                 logger.debug('MQTT write failed', exc_info=True)
-                self._done = True
+                self.graceful = False
+                self._stop(abort=True)
         elif isinstance(msg, Close):
-            self._done = True
+            self._stop()
 
     # -- reader task --------------------------------------------------------
 
@@ -231,13 +319,11 @@ class MQTT5Actor(Actor):
                     await self._forward(message)
                     if self._done:
                         return
-            except PacketTooLarge as exc:
-                # §3.14.2.1 — 0x95 Packet Too Large.  Written directly rather
-                # than through the inbox: the connection ends on this packet,
-                # and the drain task is about to be cancelled, so an enqueued
-                # reply is a reply that might never reach the wire.
+            except (PacketTooLarge, MailboxTooLarge) as exc:
                 logger.debug('MQTT %s; closing', exc)
-                await self._refuse(ReasonCode.PACKET_TOO_LARGE)
+                reason = (ReasonCode.PACKET_TOO_LARGE if isinstance(exc, PacketTooLarge)
+                          else ReasonCode.QUOTA_EXCEEDED)
+                await self._refuse(reason)
                 return
             data = await self._read_with_keepalive(reader)
             if data:
@@ -265,12 +351,10 @@ class MQTT5Actor(Actor):
         and a client that cannot tell the two apart will reconnect and do
         the same thing again.
         """
-        with contextlib.suppress(Exception):
-            await self._writer.write(encode_packet(
-                MQTTDisconnect(reason_code=reason_code)))
+        await self.send(Send(packet=MQTTDisconnect(reason_code=reason_code)))
+        await self.send(Close(reason_code=reason_code))
         self.graceful = False
         await self._broker.send(Detach(graceful=False, sender=self))
-        self._done = True
 
     async def _read_with_keepalive(self, reader: AbstractReader) -> bytes:
         """Read a chunk, but wake at the keep-alive deadline so a silent peer on
@@ -360,39 +444,40 @@ async def serve_connection(reader: AbstractReader, writer: AbstractWriter,
     Will fires on an abnormal (cancelled) close.  Pass *tap* for decoupled tap
     dispatch or *app_handlers* for inline dispatch (see :mod:`blackbull.mqtt.tap`).
     """
-    conn = MQTT5Actor(writer, broker, ctx,
-                               app_handlers=app_handlers, tap=tap)
+    conn = MQTT5Actor(writer, broker, ctx, app_handlers=app_handlers, tap=tap)
+    conn._close_requested = asyncio.get_running_loop().create_future()
     writer_task = asyncio.create_task(conn.run())
-    graceful = False
+    reader_task = asyncio.create_task(conn.read_loop(reader))
+    clean_read = False
     try:
-        await conn.read_loop(reader)
-        graceful = True
+        done, _ = await asyncio.wait(
+            (reader_task, writer_task, conn._close_requested),
+            return_when=asyncio.FIRST_COMPLETED)
+        if reader_task in done:
+            reader_task.result()
+            clean_read = True
+        elif conn._close_requested in done:
+            clean_read = not conn._aborted
     finally:
-        # Synchronous enqueue: safe even while this task is being cancelled.
-        # Idempotent — a graceful DISCONNECT already sent its own Detach, after
-        # which the broker no longer knows this connection.
-        broker._inbox.put_nowait(Detach(graceful=conn.graceful, sender=conn))
-        # On a clean close, flush every reply the broker still owes this
-        # connection before stopping its writer (an abrupt cancel skips this —
-        # the peer is already gone).
-        if graceful:
-            await _flush_pending(broker, conn)
-        writer_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await asyncio.gather(writer_task)
-
-
-async def _flush_pending(broker, conn, *, max_turns: int = 1000) -> None:
-    """Yield until the broker has drained its inbox (FIFO ⇒ every reply this
-    connection is owed is enqueued) and the connection's writer has drained its
-    own inbox.  Requires two consecutive idle turns so a reply enqueued while the
-    broker was mid-handle is not missed."""
-    idle = 0
-    for _ in range(max_turns):
-        await asyncio.sleep(0)
-        if broker._inbox.empty() and conn._inbox.empty():
-            idle += 1
-            if idle >= 2:
-                return
-        else:
-            idle = 0
+        conn._close_requested.cancel()
+        reader_task.cancel()
+        try:
+            await asyncio.gather(reader_task, return_exceptions=True)
+            # Keep this connection's cleanup owned by its serving task while
+            # it waits for FIFO admission. Broker shutdown wakes this wait;
+            # no detached cleanup task or unbounded side queue is needed.
+            with contextlib.suppress(MailboxClosed):
+                detached = asyncio.Event()
+                await broker.send(Detach(graceful=conn.graceful, sender=conn,
+                                         processed=detached))
+                if clean_read and not writer_task.done():
+                    # A per-connection FIFO barrier: traffic on unrelated
+                    # connections must not prolong this connection's flush.
+                    with contextlib.suppress(TimeoutError):
+                        async with asyncio.timeout(conn._write_timeout or None):
+                            await detached.wait()
+                            conn._stop()
+                            await writer_task
+        finally:
+            writer_task.cancel()
+            await asyncio.gather(reader_task, writer_task, return_exceptions=True)
