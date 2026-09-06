@@ -29,6 +29,7 @@ def _scope(method: str = 'GET', path: str = '/', query: bytes = b'',
     return Connection.from_scope({
         'type': 'http', 'method': method, 'path': path,
         'query_string': query, 'headers': list(headers or []),
+        'server': ('testserver', 80),
     })
 
 
