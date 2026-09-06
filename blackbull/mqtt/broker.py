@@ -333,7 +333,7 @@ class BrokerActor(Actor):
                 # cancellation and expiry callbacks run.
                 await asyncio.sleep(0)
         except MailboxClosed:
-            pass
+            logger.debug("Broker mailbox closed; stopping run loop.")
         finally:
             self.close()
 
