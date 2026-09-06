@@ -5443,7 +5443,7 @@ with <code>Vary: *</code> is passed through and not stored.</p>
 <li>No cross-worker sharing.  The cache is per-process — each worker has
   its own.  Documented limitation.</li>
 </ul>
-<p>The store is keyed by <code>(method, path, query_string)</code> → a per-URL bucket
+<p>The store is keyed by <code>(method, origin, path, query_string)</code> → a per-URL bucket
 that holds the response's <code>Vary</code> field names alongside its variant entries
 (one per distinct set of <code>(field, request-value)</code> pairs named by <code>Vary</code>).
 Keeping the vary fields inside the bucket means they can never be evicted

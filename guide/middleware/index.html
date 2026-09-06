@@ -6076,8 +6076,24 @@ secret resolution, and session-clearing semantics.</p>
 <h3 id="cache"><code>Cache</code><a class="headerlink" href="#cache" title="Permanent link">&para;</a></h3>
 <p>Per-worker in-memory response cache for <code>GET</code> and <code>HEAD</code>.
 Captures the handler's response on the first hit, stores it under
-<code>(method, path, query_string)</code>, and replays it directly on
+<code>(method, origin, path, query_string)</code>, and replays it directly on
 subsequent matching requests until the entry expires.</p>
+<p>The effective <strong>origin</strong> is the request's scheme, host and port, normalized
+according to <a href="https://www.rfc-editor.org/rfc/rfc9110.html#section-4.3.1">RFC 9110 §4.3.1</a>.
+HTTP and HTTPS, different hosts, and different non-default ports have separate
+cache buckets even when path and query match; <code>Vary: Host</code> is not required.
+Host/scheme case, leading zeros in a port and an explicit default port do not
+create a different origin. GET and HEAD remain separate keys.</p>
+<p>Native HTTP/1.1 and external ASGI use <code>Host</code>; the native HTTP/2 parser maps
+<code>:authority</code> to that same header before dispatch. If <code>Host</code> is absent, the
+connection's <code>server</code> tuple supplies the authority. When the origin cannot be
+determined safely (including ambiguous Host fields), the request is handled
+normally but neither reads nor writes the cache.</p>
+<p>Register <code>TrustedProxy</code> or any intentional scheme/host rewrite <strong>before</strong>
+<code>Cache</code>, so cache lookup and the application see the same identity. Cache does
+not interpret <code>Forwarded</code> or <code>X-Forwarded-*</code> itself and does not expand the
+proxy trust boundary. <code>TrustedProxy</code> applies its supported scheme rewrites;
+it does not infer a host rewrite from <code>Forwarded: host</code> or <code>X-Forwarded-Host</code>.</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.middleware.cache</span><span class="w"> </span><span class="kn">import</span> <span class="n">Cache</span>
 
 <span class="n">app</span><span class="o">.</span><span class="n">use</span><span class="p">(</span><span class="n">Cache</span><span class="p">(</span><span class="n">max_age</span><span class="o">=</span><span class="mi">600</span><span class="p">))</span>   <span class="c1"># 10-minute TTL</span>
@@ -6122,7 +6138,7 @@ client.  A response with <code>Vary: *</code> is passed through unstored
 <tr>
 <td><code>max_entries</code></td>
 <td><code>1024</code></td>
-<td>LRU cap on cached responses.</td>
+<td>Shared LRU cap on method/origin/path/query buckets across all origins; each bucket separately bounds its Vary variants.</td>
 </tr>
 <tr>
 <td><code>cacheable_methods</code></td>
