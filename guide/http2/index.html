@@ -6022,6 +6022,21 @@ well: a late push event is logged and dropped without sending a
 (shared across all streams on one connection) and stream-level
 (per-stream budget).  BlackBull handles both internally; no app
 code needs to interact with flow control directly.</p>
+<p>Outgoing DATA consumes both windows before the transport can suspend a write
+or drain. Other streams may send concurrently using the remaining credit, but
+cannot reuse bytes already handed to the writer. Cancellation, stream reset,
+or a failed drain does not return that credit: delivery may already have
+occurred. Peer <code>WINDOW_UPDATE</code> grants more credit; initial-window SETTINGS also
+adjust stream credit. A peer reducing its
+initial stream window can legitimately leave a negative balance; body sending
+then waits for positive credit. Control frames and an empty DATA <code>END_STREAM</code>
+do not need available DATA credit.</p>
+<p>These rules apply to response bodies, deferred gRPC bodies and trailers, client
+uploads, and WebSocket-over-H2 traffic, including the client's close frame.
+The client's close send uses <code>BB_CLIENT_WRITE_TIMEOUT</code>; its subsequent wait for
+the peer's close uses <code>drain_timeout</code>. Cancellation during either wait releases
+the session's reader and raw-stream registration. The explicit <code>send_raw_frame</code>
+fault-injection escape hatch is not a normal flow-controlled send API.</p>
 <p>Configuration knobs that affect flow-control behaviour live in
 the <code>BB_H2_*</code> family of environment variables — see
 <a href="../configuration/">Configuration</a> for the full list.</p>
