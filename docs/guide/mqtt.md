@@ -159,19 +159,60 @@ Semantics worth knowing:
 An MQTT broker holds state on a client's behalf: buffered packet bytes, unacked
 messages, retained messages that outlive the session that published them. Each
 of those is bounded, and each bound is **advertised in CONNACK** where MQTT 5
-has a property for it — so a conforming client stays inside the limits without
-ever meeting the enforcement path.
+has a property for it. Local aggregate quotas can also be reached by legal
+traffic, for example when a subscriber's network slows down.
 
 | Limit | Default | Advertised as | Over the limit |
 |---|---|---|---|
 | `BB_MQTT_MAX_PACKET_SIZE` | 1 MiB | `Maximum Packet Size` (§3.2.2.3.6) | `DISCONNECT` **0x95 Packet Too Large**, connection closed |
 | `BB_MQTT_RECEIVE_MAXIMUM` | 64 | `Receive Maximum` (§3.2.2.3.3) | a conforming client waits — a promise, not a gate (see below) |
 | `BB_MQTT_MAX_QUEUED_MESSAGES` | 1000 | — (a broker-side total) | newest message refused, cap hit logged |
+| `BB_MQTT_BROKER_INBOX_MAXSIZE` / `BB_MQTT_BROKER_INBOX_MAX_BYTES` | 1024 messages / 16 MiB | — (worker input handoff) | readers await admission; a single packet exceeding the byte budget is refused with `0x97` |
+| `BB_MQTT_CONNECTION_INBOX_MAXSIZE` / `BB_MQTT_CONNECTION_INBOX_MAX_BYTES` | 1024 packets / 16 MiB | — (per-connection output handoff) | after giving the writer a scheduling opportunity, terminate only the connection whose queue cannot admit the packet |
 | `BB_MQTT_MAX_RETAINED` | 10000 | — (a broker-side total) | retained publish to a *new* topic refused; `0x97` in the PUBACK/PUBREC at QoS ≥ 1 |
 | `BB_MQTT_MAX_SUBSCRIPTIONS` | 1000 | — (a per-session unit) | a *new* Topic Filter refused with `0x97` in the SUBACK; re-subscribing to one the session holds always works |
 | `BB_MQTT_MAX_SESSIONS` | 10000 | — (a broker-side total) | CONNECT for an *unknown* Client Identifier refused with `0x97` in the CONNACK, connection closed; a resuming client is admitted |
 
-Five properties of these limits are worth knowing before you tune them:
+These properties of the limits are worth knowing before you tune them:
+
+**Actor mailboxes and the QoS backlog are different owners.** The broker inbox
+holds decoded CONNECT, PUBLISH and subscription changes, plus compact ACK and
+lifecycle messages. Each connection's writer inbox holds *all* packet types,
+including QoS 0, retained replay, shared-subscription deliveries and control
+replies. Both inboxes have independent positive count and byte limits; invalid
+environment values (including zero) fall back to the default. Their defaults
+allow a full-size packet accepted by the default packet limit, and a burst
+larger than the count limit can proceed while a healthy consumer drains it.
+If you raise the packet limit, size the mailbox byte budgets for those packets
+too. Reducing a mailbox budget below one accepted packet can refuse that legal
+packet even when the mailbox is empty.
+
+The byte charge is encoded wire size, **not Python heap usage**. The broker
+charges the retained packet's wire size (compact ACK/lifecycle envelopes charge
+one byte and one message slot); output charges the encoded packet bytes and
+also retains its packet object until the write finishes. Each consumer can hold
+one active message outside its inbox; each blocked reader can hold one admission
+candidate and its framer buffer. The server's connection limit bounds the
+number of readers and per-connection inboxes. These budgets do not include
+session pending QoS state, held QoS messages, retained storage or the tap inbox.
+Those retain their own count/packet-size limits and expiry or shutdown owners.
+
+Input backpressure stops further decoding rather than creating background
+admission tasks. Output never waits for a slow socket from inside the broker:
+doing so could block unrelated clients and form a cycle with that socket's
+reader. If output admission fails, a cap hit is logged and the connection ends;
+queued QoS 0 is not guaranteed delivery. Pending QoS state follows the existing
+session expiry/reconnect rules. A stalled writer cannot reliably transmit a
+DISCONNECT reason, so output overload does not promise one on the wire.
+`Close` needs no queue slot; `Detach` remains FIFO and waits for broker admission,
+and expiry notifications are coalesced. ACK traffic can progress as the broker
+consumes its bounded inbox; inability to queue an outbound ACK ends that
+connection instead of parking the broker. Active writes and clean-close flushing
+use `BB_WRITE_TIMEOUT` (zero explicitly disables this time bound).
+Graceful cleanup waits for the sole writer after the broker's `Detach` barrier:
+that barrier acknowledges routing work, not completion of socket writes.
+Normal broker and connection mailbox shutdowns emit DEBUG lifecycle logs under
+`blackbull.mqtt.broker` and `blackbull.mqtt.connection`.
 
 **The packet limit is judged from the header.** MQTT 5 lets a peer declare a
 Remaining Length of 268,435,455 bytes (256 MiB) and then deliver it slowly. The

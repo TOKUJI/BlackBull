@@ -20,13 +20,14 @@ from typing import Any
 
 from ..actor import Actor, Message as ActorMessage
 from ..server.cap_log import log_cap_hit
+from .mailbox import Mailbox, MailboxClosed, MailboxTooLarge
 from .messages import (
     MQTTConnect, MQTTConnack, MQTTDisconnect,
     MQTTPublish, MQTTPuback, MQTTPubrec, MQTTPubrel, MQTTPubcomp,
     MQTTSubscribe, MQTTSuback,
     MQTTUnsubscribe, MQTTUnsuback,
     ProtocolLevel, ReasonCode,
-    topic_matches_filter, validate_topic_name, validate_topic_filter,
+    topic_matches_filter, validate_topic_name, validate_topic_filter, encode_packet,
 )
 
 logger = logging.getLogger(__name__)
@@ -97,6 +98,7 @@ class Detach(ActorMessage):
     graceful: bool = field(default=True, compare=False, repr=False)
     session_expiry_interval: int | None = field(
         default=None, compare=False, repr=False)
+    processed: asyncio.Event | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass
@@ -113,14 +115,36 @@ class _SweepExpired(ActorMessage):
 
 @dataclass
 class Send(ActorMessage):
-    """Tell the connection actor to encode + write *packet* to its socket."""
+    """Offer *packet* to the connection's bounded, sole-writer handoff."""
     packet: Any = field(default=None, compare=False, repr=False)
+    _encoded: bytes | None = field(default=None, init=False, compare=False, repr=False)
 
 
 @dataclass
 class Close(ActorMessage):
     """Tell the connection actor to close (e.g. CONNECT rejected)."""
     reason_code: int | None = field(default=None, compare=False, repr=False)
+
+
+def _input_size(msg: ActorMessage) -> int:
+    """Charge retained packet data; compact lifecycle/ACK messages cost a slot.
+
+    Decoded packets carry their wire size. In-process packets use the same
+    codec to account for topic strings and properties as well as payloads.
+    ACK envelopes retain only an identifier, not the peer's property map.
+    """
+    packet = None
+    if isinstance(msg, Attach):
+        packet = msg.connect
+    elif isinstance(msg, ClientPublish):
+        packet = msg.publish
+    elif isinstance(msg, ClientSubscribe):
+        packet = msg.subscribe
+    elif isinstance(msg, ClientUnsubscribe):
+        packet = msg.unsubscribe
+    if packet is not None:
+        return packet[1] or len(encode_packet(packet))
+    return 1
 
 
 def _valid_filter(topic_filter: str) -> bool:
@@ -213,7 +237,9 @@ class BrokerActor(Actor):
                  receive_maximum: int | None = None,
                  max_packet_size: int | None = None,
                  max_subscriptions: int | None = None,
-                 max_sessions: int | None = None) -> None:
+                 max_sessions: int | None = None,
+                 inbox_maxsize: int | None = None,
+                 inbox_max_bytes: int | None = None) -> None:
         super().__init__()
         # The broker advertises ``maximum_packet_size`` but does not enforce it
         # — the framer does, one layer down, because that is where the bytes
@@ -221,6 +247,11 @@ class BrokerActor(Actor):
         # connection actually applies.
         from ..env import get_settings  # noqa: PLC0415
         settings = get_settings()
+        self._mailbox = Mailbox(
+            settings.mqtt_broker_inbox_maxsize if inbox_maxsize is None else inbox_maxsize,
+            settings.mqtt_broker_inbox_max_bytes if inbox_max_bytes is None else inbox_max_bytes,
+            _input_size)
+        self._sweep_pending = False
         self._max_retained = (settings.mqtt_max_retained
                               if max_retained is None else max_retained)
         self._max_queued = (settings.mqtt_max_queued_messages
@@ -257,16 +288,54 @@ class BrokerActor(Actor):
         self._expiry_timer: asyncio.TimerHandle | None = None
 
     def close(self) -> None:
-        """Release loop resources the actor owns outside its inbox.
-
-        Only the expiry handle qualifies today.  Cancelling the broker task
-        does not cancel it: a ``TimerHandle`` lives in the loop's timer heap
-        and holds a bound method of this object, so an armed one outlives
-        the actor and then posts into an inbox nobody reads.
-        """
+        """Release the timer and wake producers whose consumer has stopped."""
+        while not self._mailbox.empty():
+            msg = self._mailbox.get_nowait()
+            if isinstance(msg, Detach) and msg.processed is not None:
+                msg.processed.set()
+            self._mailbox.task_done()
+        self._mailbox.close(discard=True)
         if self._expiry_timer is not None:
             self._expiry_timer.cancel()
             self._expiry_timer = None
+
+    @property
+    def _inbox(self) -> Mailbox:
+        return self._mailbox
+
+    async def send(self, msg: ActorMessage) -> None:
+        try:
+            self._inbox.put_nowait(msg)
+        except (asyncio.QueueFull, MailboxTooLarge) as exc:
+            size = _input_size(msg)
+            byte_cap = self._inbox.queued_bytes + size > self._inbox.max_bytes
+            log_cap_hit(
+                'mqtt_broker_inbox_max_bytes' if byte_cap else 'mqtt_broker_inbox_maxsize',
+                requested=self._inbox.queued_bytes + size if byte_cap else self._inbox.qsize() + 1,
+                limit=self._inbox.max_bytes if byte_cap else self._inbox.maxsize,
+                protocol='mqtt')
+            if isinstance(exc, MailboxTooLarge):
+                raise
+            await self._inbox.put(msg)
+
+    async def run(self) -> None:
+        try:
+            while True:
+                msg = await self._inbox.get()
+                try:
+                    if self._sweep_pending and not isinstance(msg, _SweepExpired):
+                        self._sweep_pending = False
+                        self._sweep_expired()
+                    await self._handle(msg)
+                finally:
+                    self._inbox.task_done()
+                # A buffered producer/consumer pair must still let admission,
+                # cancellation and expiry callbacks run.
+                await asyncio.sleep(0)
+        except MailboxClosed:
+            logger.debug("Broker mailbox closed; stopping run loop.")
+        finally:
+            self.close()
 
     # -- dispatch -----------------------------------------------------------
 
@@ -290,9 +359,14 @@ class BrokerActor(Actor):
             self._clear_pending(msg.sender, 'pending_qos1_out', msg.packet_id)
             await self._drain_outbound(msg.sender)
         elif isinstance(msg, Detach):
-            await self._on_detach(msg.sender, msg.graceful,
-                                  msg.session_expiry_interval)
+            try:
+                await self._on_detach(msg.sender, msg.graceful,
+                                      msg.session_expiry_interval)
+            finally:
+                if msg.processed is not None:
+                    msg.processed.set()
         elif isinstance(msg, _SweepExpired):
+            self._sweep_pending = False
             self._sweep_expired()
         else:  # pragma: no cover - connection actor sends only the above
             logger.debug('BrokerActor ignoring %s', type(msg).__name__)
@@ -609,13 +683,17 @@ class BrokerActor(Actor):
         self._expiry_timer = loop.call_later(delay, self._post_sweep)
 
     def _post_sweep(self) -> None:
-        """Timer callback — enqueue, never mutate.
-
-        ``put_nowait`` rather than ``send``: a callback is not a coroutine,
-        and the inbox is unbounded, so this cannot block or drop.
-        """
+        """Coalesce expiry work; only the actor loop mutates session state."""
         self._expiry_timer = None
-        self._inbox.put_nowait(_SweepExpired())
+        if self._inbox.closed or self._sweep_pending:
+            return
+        self._sweep_pending = True
+        try:
+            self._inbox.put_nowait(_SweepExpired())
+        except asyncio.QueueFull:
+            # A queued message already guarantees a wakeup. The actor handles
+            # the coalesced deadline before that message, without a spare slot.
+            pass
 
     async def _on_unsubscribe(self, conn, unsubscribe) -> None:
         session = self._session_for(conn)
@@ -803,9 +881,8 @@ class BrokerActor(Actor):
     async def _deliver(self, conn, session, publish, granted_qos, *, retain=False) -> None:
         qos = min(publish.qos, granted_qos)
         if qos == 0:
-            # §4.9 bounds QoS 1 and 2 only.  Throttling QoS 0 would invent a
-            # rule the client never agreed to, and there is nothing to wait
-            # for: an unacknowledged message cannot accumulate.
+            # Receive Maximum governs QoS>0 acknowledgements, not writer
+            # capacity. QoS 0 uses the connection's separate mailbox budget.
             await conn.send(Send(packet=MQTTPublish(
                 topic=publish.topic, payload=publish.payload, qos=0,
                 retain=retain, properties=dict(publish.properties))))

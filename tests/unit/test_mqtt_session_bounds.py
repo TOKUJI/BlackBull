@@ -273,8 +273,9 @@ class TestSessionExpiry:
                                     keep_alive=60,
                                     properties={'session_expiry_interval': 1}),
                 sender=conn))
-            await broker.send(Detach(graceful=True, sender=conn))
-            await asyncio.sleep(0)
+            detached = asyncio.Event()
+            await broker.send(Detach(graceful=True, sender=conn, processed=detached))
+            await detached.wait()
             assert 'c' in broker._sessions
             # Bring the deadline forward and re-arm the way a detach would.
             broker._sessions['c']['_expires_at'] = \

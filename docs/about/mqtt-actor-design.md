@@ -21,7 +21,7 @@ BlackBull's broker is three kinds of actor:
 | Actor | Count | Owns | Inbox carries |
 |-------|-------|------|---------------|
 | `BrokerActor` | one per app/worker | all routing/session/retained state | client control events (`Attach`, `ClientPublish`, …) |
-| `MQTT5Actor` | one per connection | one socket's write side | outbound packets (`Send`, `Close`) |
+| `MQTT5Actor` | one per connection | one socket's write side | outbound packets (`Send`); `Close` sets terminal state without a queue slot |
 | `TapActor` | one per app/worker | nothing (stateless dispatch) | published messages for `on_message` taps |
 
 Each lives in its own module: `BrokerActor` in `blackbull.mqtt.broker`,
@@ -74,6 +74,22 @@ it routes back through its *own* inbox so that `run()` stays the only writer.
 and the writer loop together and guarantees the broker sees a `Detach` when the
 connection ends — including an abnormal (cancelled) close, which is what makes a
 Will fire.
+
+The MQTT data-plane inboxes use `blackbull.mqtt.mailbox.Mailbox`, a FIFO with
+independent count and wire-byte budgets. Broker input applies backpressure to
+the reader. Connection output gives a healthy writer a scheduling opportunity,
+but never awaits queue space from the broker: a slow socket cannot stop routing
+for other peers or form a circular wait with its reader. Overload closes only
+that connection and discards its queued output, with a cap log.
+
+`serve_connection` supervises both child tasks, so a writer failure or a
+broker-originated close wakes a reader blocked on a silent peer. Cleanup awaits
+bounded broker admission for `Detach`; its completion notification is a
+per-connection FIFO barrier for flushing replies. Broker shutdown wakes
+admission and completion waiters. Expiry timers coalesce a pending notification
+when the inbox is full, leaving all session changes to the broker loop. See
+[Resource limits](../guide/mqtt.md#resource-limits) for the unit, aggregate and
+time owners, including state that lives outside these mailboxes.
 
 ### The Will-on-teardown payoff
 
@@ -129,11 +145,11 @@ contract. Historically the **HTTP** actors (`ConnectionActor`, `HTTP1Actor`,
 direct method calls — the inbox is defined but latent on that path.
 
 The MQTT broker is the **first production code that uses the inbox for real**:
-`BrokerActor`, `MQTT5Actor`, and `TapActor` all keep the base `run()`
-loop, override `_handle()`, and communicate exclusively by `await
-other.send(message)`. That is why the broker needs no locks — the "one message
-at a time" guarantee is the base-class `run()` draining the queue, not a
-convention the broker re-implements.
+`BrokerActor`, `MQTT5Actor`, and `TapActor` use the `send` / `run` / `_handle`
+contract. The MQTT data-plane actors specialize the serial drain loop to
+account for completed work and release mailbox waiters on shutdown; the tap
+actor uses the base loop. Each actor handles one message at a time, retaining
+the single-owner guarantee without locks.
 
 So the broker is not a parallel mechanism bolted onto the framework; it is the
 actor model the framework already described, finally exercised end-to-end. If
