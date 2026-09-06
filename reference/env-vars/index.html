@@ -3698,6 +3698,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/mqtt/mailbox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    mailbox
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/mqtt/messages/" class="md-nav__link">
         
   
@@ -6310,6 +6338,26 @@ ever meeting the enforcement path.</p>
 <td><code>BB_MQTT_MAX_PACKET_SIZE</code></td>
 <td><code>1048576</code> (1 MiB)</td>
 <td>Maximum size of one inbound control packet, advertised as <code>Maximum Packet Size</code> (§3.2.2.3.6).  Checked against the declared Remaining Length as soon as the fixed header is readable, so an over-size packet is refused <strong>without buffering its payload</strong> — MQTT 5 lets a peer declare 268,435,455 bytes (256 MiB) and then dribble them.  Over the cap the broker answers <code>DISCONNECT</code> with <strong>0x95 (Packet Too Large)</strong> and closes.  <code>0</code> disables.</td>
+</tr>
+<tr>
+<td><code>BB_MQTT_BROKER_INBOX_MAXSIZE</code></td>
+<td><code>1024</code></td>
+<td>Positive bound on messages waiting in the worker's MQTT broker inbox. Readers await admission at capacity; the broker logs the cap hit. Independent of session QoS backlog. Invalid values, including zero, use the default.</td>
+</tr>
+<tr>
+<td><code>BB_MQTT_BROKER_INBOX_MAX_BYTES</code></td>
+<td><code>16777216</code> (16 MiB)</td>
+<td>Positive wire-size budget for broker inbox contents, alongside the count cap. Compact ACK/lifecycle envelopes charge one byte and one slot. A single packet exceeding the budget is refused with <code>DISCONNECT 0x97</code>. Not a heap budget; active processing and each reader's admission candidate are outside the queue. Invalid values use the default.</td>
+</tr>
+<tr>
+<td><code>BB_MQTT_CONNECTION_INBOX_MAXSIZE</code></td>
+<td><code>1024</code></td>
+<td>Positive bound on all packets waiting for each MQTT writer, including QoS 0 and ACKs. The producer yields to the writer at capacity, then logs and ends only that connection if it cannot admit the packet; it never waits for socket progress inside the broker. Invalid values, including zero, use the default.</td>
+</tr>
+<tr>
+<td><code>BB_MQTT_CONNECTION_INBOX_MAX_BYTES</code></td>
+<td><code>16777216</code> (16 MiB)</td>
+<td>Positive encoded-byte budget for each MQTT writer inbox. The packet object is retained alongside encoded bytes. One active write is outside this queue budget and uses <code>BB_WRITE_TIMEOUT</code>. Tune with the accepted packet size; an individually larger packet cannot fit even in an empty queue. Invalid values use the default.</td>
 </tr>
 <tr>
 <td><code>BB_MQTT_RECEIVE_MAXIMUM</code></td>

@@ -3592,6 +3592,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../mqtt/mailbox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    mailbox
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../mqtt/messages/" class="md-nav__link">
         
   
@@ -5844,6 +5872,22 @@ BB_MQTT_MAX_QUEUED_MESSAGES
     silently discarded, and a cap hit is logged.  <code>0</code> disables the
     bound (unbounded backlog — not recommended on an exposed broker).
     Default: <code>1000</code>.
+BB_MQTT_BROKER_INBOX_MAXSIZE
+    Waiting messages in the worker's MQTT broker inbox. At capacity, readers
+    await admission instead of decoding further packets. Positive integer;
+    default <code>1024</code>. Independent of the per-session QoS backlog.
+BB_MQTT_BROKER_INBOX_MAX_BYTES
+    Wire-size charge for waiting broker messages. Default <code>16777216</code>
+    (16 MiB); positive integer. A packet exceeding this budget cannot wait
+    for admission and its connection is refused. Not a Python heap limit.
+BB_MQTT_CONNECTION_INBOX_MAXSIZE
+    Waiting packets in each MQTT connection writer inbox, including QoS 0
+    and control replies. Default <code>1024</code>; positive integer. After yielding
+    to the writer, a full inbox ends only that connection, with a cap log.
+BB_MQTT_CONNECTION_INBOX_MAX_BYTES
+    Encoded bytes waiting in each MQTT writer inbox. Default <code>16777216</code>
+    (16 MiB); positive integer. The active write is outside the queue budget;
+    its duration is bounded by <code>BB_WRITE_TIMEOUT</code> when enabled.
 BB_MQTT_MAX_RETAINED
     Maximum number of distinct topics holding a retained message
     (§3.3.1.3).  A retained message is permanent by design, so without a

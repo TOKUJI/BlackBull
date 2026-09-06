@@ -3456,6 +3456,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/mqtt/mailbox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    mailbox
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/mqtt/messages/" class="md-nav__link">
         
   
@@ -5556,7 +5584,7 @@ message at a time, so concurrent connections can never interleave inside it.</p>
 <td><code>MQTT5Actor</code></td>
 <td>one per connection</td>
 <td>one socket's write side</td>
-<td>outbound packets (<code>Send</code>, <code>Close</code>)</td>
+<td>outbound packets (<code>Send</code>); <code>Close</code> sets terminal state without a queue slot</td>
 </tr>
 <tr>
 <td><code>TapActor</code></td>
@@ -5606,6 +5634,20 @@ it routes back through its <em>own</em> inbox so that <code>run()</code> stays t
 and the writer loop together and guarantees the broker sees a <code>Detach</code> when the
 connection ends — including an abnormal (cancelled) close, which is what makes a
 Will fire.</p>
+<p>The MQTT data-plane inboxes use <code>blackbull.mqtt.mailbox.Mailbox</code>, a FIFO with
+independent count and wire-byte budgets. Broker input applies backpressure to
+the reader. Connection output gives a healthy writer a scheduling opportunity,
+but never awaits queue space from the broker: a slow socket cannot stop routing
+for other peers or form a circular wait with its reader. Overload closes only
+that connection and discards its queued output, with a cap log.</p>
+<p><code>serve_connection</code> supervises both child tasks, so a writer failure or a
+broker-originated close wakes a reader blocked on a silent peer. Cleanup awaits
+bounded broker admission for <code>Detach</code>; its completion notification is a
+per-connection FIFO barrier for flushing replies. Broker shutdown wakes
+admission and completion waiters. Expiry timers coalesce a pending notification
+when the inbox is full, leaving all session changes to the broker loop. See
+<a href="../../guide/mqtt/#resource-limits">Resource limits</a> for the unit, aggregate and
+time owners, including state that lives outside these mailboxes.</p>
 <h3 id="the-will-on-teardown-payoff">The Will-on-teardown payoff<a class="headerlink" href="#the-will-on-teardown-payoff" title="Permanent link">&para;</a></h3>
 <p>Because <code>BrokerActor</code> outlives every connection actor by construction, a peer's
 Last-Will-and-Testament routes to live subscribers <em>during</em> that peer's
@@ -5653,11 +5695,11 @@ contract. Historically the <strong>HTTP</strong> actors (<code>ConnectionActor</
 <code>HTTP2Actor</code>, <code>StreamActor</code>, …) override <code>run()</code> and call each other through
 direct method calls — the inbox is defined but latent on that path.</p>
 <p>The MQTT broker is the <strong>first production code that uses the inbox for real</strong>:
-<code>BrokerActor</code>, <code>MQTT5Actor</code>, and <code>TapActor</code> all keep the base <code>run()</code>
-loop, override <code>_handle()</code>, and communicate exclusively by <code>await
-other.send(message)</code>. That is why the broker needs no locks — the "one message
-at a time" guarantee is the base-class <code>run()</code> draining the queue, not a
-convention the broker re-implements.</p>
+<code>BrokerActor</code>, <code>MQTT5Actor</code>, and <code>TapActor</code> use the <code>send</code> / <code>run</code> / <code>_handle</code>
+contract. The MQTT data-plane actors specialize the serial drain loop to
+account for completed work and release mailbox waiters on shutdown; the tap
+actor uses the base loop. Each actor handles one message at a time, retaining
+the single-owner guarantee without locks.</p>
 <p>So the broker is not a parallel mechanism bolted onto the framework; it is the
 actor model the framework already described, finally exercised end-to-end. If
 you are looking for a worked example of BlackBull's actor inbox, this is it.</p>

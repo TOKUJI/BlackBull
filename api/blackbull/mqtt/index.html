@@ -3778,6 +3778,34 @@
   
   
     <li class="md-nav__item">
+      <a href="mailbox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    mailbox
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="messages/" class="md-nav__link">
         
   
@@ -6059,11 +6087,7 @@ state — the design goal of the actor split.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Release loop resources the actor owns outside its inbox.</p>
-<p>Only the expiry handle qualifies today.  Cancelling the broker task
-does not cancel it: a <code>TimerHandle</code> lives in the loop's timer heap
-and holds a bound method of this object, so an armed one outlives
-the actor and then posts into an inbox nobody reads.</p>
+        <p>Release the timer and wake producers whose consumer has stopped.</p>
 
 
     </div>

@@ -3615,6 +3615,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/mqtt/mailbox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    mailbox
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/mqtt/messages/" class="md-nav__link">
         
   
@@ -5742,8 +5770,8 @@ mosquitto_pub<span class="w"> </span>-t<span class="w"> </span><span class="s1">
 <p>An MQTT broker holds state on a client's behalf: buffered packet bytes, unacked
 messages, retained messages that outlive the session that published them. Each
 of those is bounded, and each bound is <strong>advertised in CONNACK</strong> where MQTT 5
-has a property for it — so a conforming client stays inside the limits without
-ever meeting the enforcement path.</p>
+has a property for it. Local aggregate quotas can also be reached by legal
+traffic, for example when a subscriber's network slows down.</p>
 <table>
 <thead>
 <tr>
@@ -5773,6 +5801,18 @@ ever meeting the enforcement path.</p>
 <td>newest message refused, cap hit logged</td>
 </tr>
 <tr>
+<td><code>BB_MQTT_BROKER_INBOX_MAXSIZE</code> / <code>BB_MQTT_BROKER_INBOX_MAX_BYTES</code></td>
+<td>1024 messages / 16 MiB</td>
+<td>— (worker input handoff)</td>
+<td>readers await admission; a single packet exceeding the byte budget is refused with <code>0x97</code></td>
+</tr>
+<tr>
+<td><code>BB_MQTT_CONNECTION_INBOX_MAXSIZE</code> / <code>BB_MQTT_CONNECTION_INBOX_MAX_BYTES</code></td>
+<td>1024 packets / 16 MiB</td>
+<td>— (per-connection output handoff)</td>
+<td>after giving the writer a scheduling opportunity, terminate only the connection whose queue cannot admit the packet</td>
+</tr>
+<tr>
 <td><code>BB_MQTT_MAX_RETAINED</code></td>
 <td>10000</td>
 <td>— (a broker-side total)</td>
@@ -5792,7 +5832,43 @@ ever meeting the enforcement path.</p>
 </tr>
 </tbody>
 </table>
-<p>Five properties of these limits are worth knowing before you tune them:</p>
+<p>These properties of the limits are worth knowing before you tune them:</p>
+<p><strong>Actor mailboxes and the QoS backlog are different owners.</strong> The broker inbox
+holds decoded CONNECT, PUBLISH and subscription changes, plus compact ACK and
+lifecycle messages. Each connection's writer inbox holds <em>all</em> packet types,
+including QoS 0, retained replay, shared-subscription deliveries and control
+replies. Both inboxes have independent positive count and byte limits; invalid
+environment values (including zero) fall back to the default. Their defaults
+allow a full-size packet accepted by the default packet limit, and a burst
+larger than the count limit can proceed while a healthy consumer drains it.
+If you raise the packet limit, size the mailbox byte budgets for those packets
+too. Reducing a mailbox budget below one accepted packet can refuse that legal
+packet even when the mailbox is empty.</p>
+<p>The byte charge is encoded wire size, <strong>not Python heap usage</strong>. The broker
+charges the retained packet's wire size (compact ACK/lifecycle envelopes charge
+one byte and one message slot); output charges the encoded packet bytes and
+also retains its packet object until the write finishes. Each consumer can hold
+one active message outside its inbox; each blocked reader can hold one admission
+candidate and its framer buffer. The server's connection limit bounds the
+number of readers and per-connection inboxes. These budgets do not include
+session pending QoS state, held QoS messages, retained storage or the tap inbox.
+Those retain their own count/packet-size limits and expiry or shutdown owners.</p>
+<p>Input backpressure stops further decoding rather than creating background
+admission tasks. Output never waits for a slow socket from inside the broker:
+doing so could block unrelated clients and form a cycle with that socket's
+reader. If output admission fails, a cap hit is logged and the connection ends;
+queued QoS 0 is not guaranteed delivery. Pending QoS state follows the existing
+session expiry/reconnect rules. A stalled writer cannot reliably transmit a
+DISCONNECT reason, so output overload does not promise one on the wire.
+<code>Close</code> needs no queue slot; <code>Detach</code> remains FIFO and waits for broker admission,
+and expiry notifications are coalesced. ACK traffic can progress as the broker
+consumes its bounded inbox; inability to queue an outbound ACK ends that
+connection instead of parking the broker. Active writes and clean-close flushing
+use <code>BB_WRITE_TIMEOUT</code> (zero explicitly disables this time bound).
+Graceful cleanup waits for the sole writer after the broker's <code>Detach</code> barrier:
+that barrier acknowledges routing work, not completion of socket writes.
+Normal broker and connection mailbox shutdowns emit DEBUG lifecycle logs under
+<code>blackbull.mqtt.broker</code> and <code>blackbull.mqtt.connection</code>.</p>
 <p><strong>The packet limit is judged from the header.</strong> MQTT 5 lets a peer declare a
 Remaining Length of 268,435,455 bytes (256 MiB) and then deliver it slowly. The
 check runs as soon as the fixed header is readable, so the payload is never
