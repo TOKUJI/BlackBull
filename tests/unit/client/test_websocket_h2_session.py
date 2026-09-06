@@ -158,15 +158,16 @@ class TestSharedCodecReceive:
 class TestCloseDiscipline:
     @pytest.mark.asyncio
     async def test_close_completes_when_peer_echoes_close(self):
-        session, queue, factory, writer, sent_raw = _make_session()
+        session, queue, factory, writer, _ = _make_session()
         queue.put_nowait(_data_frame(
             factory,
             encode_frame((1000).to_bytes(2, 'big'), opcode=WSOpcode.CLOSE)))
         await asyncio.wait_for(session.close(), 2)
         # The outgoing CLOSE rode a DATA frame with END_STREAM.
-        assert any(
-            f.FrameType() == FrameTypes.DATA and f.end_stream
-            for f in sent_raw)
+        outgoing = bytes(writer.data)
+        frame = factory.load(outgoing)
+        assert frame.FrameType() == FrameTypes.DATA and frame.end_stream
+        assert _sent_ws_bytes(writer)[0] & 0x0F == WSOpcode.CLOSE
         task = session._recipient._reader_task
         assert task is None or task.done()
 
@@ -179,11 +180,11 @@ class TestCloseDiscipline:
 
     @pytest.mark.asyncio
     async def test_close_is_idempotent(self):
-        session, queue, factory, writer, sent_raw = _make_session()
+        session, queue, factory, writer, _ = _make_session()
         await asyncio.wait_for(session.close(drain_timeout=0.1), 2)
-        n = len(sent_raw)
+        first_close = bytes(writer.data)
         await asyncio.wait_for(session.close(drain_timeout=0.1), 2)
-        assert len(sent_raw) == n
+        assert bytes(writer.data) == first_close
 
     @pytest.mark.asyncio
     async def test_close_skips_drain_after_disconnect_seen(self):
