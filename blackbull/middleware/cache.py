@@ -32,7 +32,7 @@ What it doesn't do (yet):
 * No cross-worker sharing.  The cache is per-process — each worker has
   its own.  Documented limitation.
 
-The store is keyed by ``(method, path, query_string)`` → a per-URL bucket
+The store is keyed by ``(method, origin, path, query_string)`` → a per-URL bucket
 that holds the response's ``Vary`` field names alongside its variant entries
 (one per distinct set of ``(field, request-value)`` pairs named by ``Vary``).
 Keeping the vary fields inside the bucket means they can never be evicted
@@ -55,6 +55,7 @@ import hashlib
 import logging
 import time
 from collections import OrderedDict
+from urllib.parse import urlsplit
 
 from ..connection import Connection
 from ..native import NativeResponse
@@ -106,7 +107,7 @@ _MAX_VARIANTS_PER_KEY = 16
 
 
 class _Bucket:
-    """All cached variants for one base key ``(method, path, query_string)``.
+    """All cached variants for one method, origin, path and query string.
 
     The response ``Vary`` field names live *inside* the bucket, beside the
     per-variant entries — not in a separate LRU.  That is the fix for 1.21g:
@@ -180,7 +181,13 @@ class Cache:
             await call_next(conn, receive, send)
             return
 
-        base_key = (method, conn.path, conn.query_string)
+        origin = _request_origin(conn)
+        if origin is None:
+            # An unresolved/ambiguous origin must not share an anonymous
+            # cache bucket. Bypass caching without rejecting the request.
+            await call_next(conn, receive, send)
+            return
+        base_key = (method, origin, conn.path, conn.query_string)
         # Look up the bucket for this URL, then the specific variant inside it
         # using the Vary fields recorded on the bucket (empty tuple ⇒ the single
         # non-varying entry keyed by ``()``).
@@ -372,6 +379,59 @@ class Cache:
 # Header inspection helpers (kept module-level so the middleware class stays
 # focused on the orchestration logic).
 # ---------------------------------------------------------------------------
+
+def _request_origin(conn: Connection) -> tuple[str, str, int] | None:
+    """Effective HTTP origin, after trusted middleware has applied rewrites.
+
+    Native HTTP/2 maps :authority into Host before dispatch, as does the ASGI
+    boundary. Forwarded headers are not authority here: only the configured
+    trusted-proxy layer may change what the application sees.
+    """
+    scheme = conn.scheme.lower()
+    default_port = {'http': 80, 'https': 443}.get(scheme)
+    if default_port is None:
+        return None
+    hosts = [value for name, value in conn.headers if name.lower() == b'host']
+    if len(hosts) > 1:
+        return None
+    try:
+        if hosts:
+            authority = hosts[0].strip(b' \t').decode('ascii')
+        elif conn.server is not None:
+            host, port = conn.server
+            # ASGI server tuples use an unbracketed IPv6 address; URI
+            # authority syntax needs brackets to distinguish it from a port.
+            authority = f'[{host}]' if ':' in host and not host.startswith('[') else host
+            if port is not None:
+                authority += f':{port}'
+        else:
+            return None
+        # urlsplit removes some control characters and interprets delimiters.
+        # Do not let those transformations alias an ambiguous value to a
+        # cacheable origin. Request validation belongs to the protocol layer.
+        if not authority or any(ord(c) <= 32 or ord(c) == 127 or c in '/?#@\\'
+                                for c in authority):
+            return None
+        literal = authority.startswith('[')
+        if literal:
+            end = authority.find(']')
+            suffix = authority[end + 1:]
+            if end < 0 or (suffix and not suffix.startswith(':')):
+                return None
+        parts = urlsplit('//' + authority)
+        host = parts.hostname
+        port = parts.port
+        if not host:
+            return None
+    except (UnicodeError, ValueError):
+        return None
+    # RFC 9110 §4.3.1: host/scheme case and explicit default ports do not
+    # identify different origins. Integer conversion normalizes leading zeros.
+    # Preserve IP-literal syntax: [v1.example] (IPvFuture) is not the
+    # registered name v1.example. urlsplit lowercases the hostname while
+    # preserving the case-sensitive zone identifier of a scoped address.
+    return scheme, f'[{host}]' if literal else host, default_port if port is None else port
+
 
 def _request_headers(conn) -> dict[bytes, bytes]:
     """Index the request headers by lowercase name → value (first occurrence)."""

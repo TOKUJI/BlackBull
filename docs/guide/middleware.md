@@ -338,8 +338,27 @@ secret resolution, and session-clearing semantics.
 
 Per-worker in-memory response cache for `GET` and `HEAD`.
 Captures the handler's response on the first hit, stores it under
-`(method, path, query_string)`, and replays it directly on
+`(method, origin, path, query_string)`, and replays it directly on
 subsequent matching requests until the entry expires.
+
+The effective **origin** is the request's scheme, host and port, normalized
+according to [RFC 9110 §4.3.1](https://www.rfc-editor.org/rfc/rfc9110.html#section-4.3.1).
+HTTP and HTTPS, different hosts, and different non-default ports have separate
+cache buckets even when path and query match; `Vary: Host` is not required.
+Host/scheme case, leading zeros in a port and an explicit default port do not
+create a different origin. GET and HEAD remain separate keys.
+
+Native HTTP/1.1 and external ASGI use `Host`; the native HTTP/2 parser maps
+`:authority` to that same header before dispatch. If `Host` is absent, the
+connection's `server` tuple supplies the authority. When the origin cannot be
+determined safely (including ambiguous Host fields), the request is handled
+normally but neither reads nor writes the cache.
+
+Register `TrustedProxy` or any intentional scheme/host rewrite **before**
+`Cache`, so cache lookup and the application see the same identity. Cache does
+not interpret `Forwarded` or `X-Forwarded-*` itself and does not expand the
+proxy trust boundary. `TrustedProxy` applies its supported scheme rewrites;
+it does not infer a host rewrite from `Forwarded: host` or `X-Forwarded-Host`.
 
 ```python
 from blackbull.middleware.cache import Cache
@@ -377,7 +396,7 @@ Constructor arguments:
 | Argument               | Default                | Notes                                                                  |
 |------------------------|------------------------|------------------------------------------------------------------------|
 | `max_age`              | `300`                  | TTL in seconds when the response does not specify its own.            |
-| `max_entries`          | `1024`                 | LRU cap on cached responses.                                           |
+| `max_entries`          | `1024`                 | Shared LRU cap on method/origin/path/query buckets across all origins; each bucket separately bounds its Vary variants. |
 | `cacheable_methods`    | `{'GET', 'HEAD'}`      | Methods eligible for caching.                                          |
 | `cacheable_statuses`   | `{200, 203, 300, 301, 308, 404, 410, 414, 451}` | Status codes eligible for caching. |
 | `cache_authenticated`  | `False`                | When `False`, requests with `Authorization` bypass the cache (RFC 9111 §3.5). |

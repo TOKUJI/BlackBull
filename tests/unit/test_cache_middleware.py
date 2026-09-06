@@ -41,6 +41,7 @@ def _scope(method: str = 'GET', path: str = '/', query: bytes = b'',
         'path': path,
         'query_string': query,
         'headers': list(headers or []),
+        'server': ('testserver', 80),
     })
 
 
@@ -524,7 +525,6 @@ class TestVaryBucketEviction:
         for p in ('/a', '/b'):                         # evict /v (cap=2)
             h, _ = _make_handler()
             await _run(mw, _scope(path=p), h)
-        assert ('GET', '/v', b'') not in mw._store     # bucket gone as a unit
         _, _, body = _split_response(await _run(mw, vscope, cn))  # clean miss
         assert body == b'ENC:br'
         assert counter['n'] == 2, 'handler re-ran; no orphaned stale entry'
@@ -533,28 +533,35 @@ class TestVaryBucketEviction:
 
     async def test_vary_change_drops_stale_variants(self):
         mw = Cache()
-        cn1, _ = _vary_handler(vary_value=b'Accept-Encoding')
+        cn1, first_calls = _vary_handler(vary_value=b'Accept-Encoding')
         await _run(mw, _scope(path='/x', headers=[(b'accept-encoding', b'br')]), cn1)
-        bucket = mw._store[('GET', '/x', b'')]
-        assert bucket.vary_fields == (b'accept-encoding',)
-        assert len(bucket.entries) == 1
+        assert first_calls['n'] == 1
         # Same URL now varies by a different header → adopt it, drop the stale
         # variant keyed on the old fields.
-        cn2, _ = _vary_handler(vary_value=b'Accept-Language')
+        cn2, second_calls = _vary_handler(vary_value=b'Accept-Language')
         await _run(mw, _scope(path='/x', headers=[(b'accept-language', b'en')]), cn2)
-        bucket = mw._store[('GET', '/x', b'')]
-        assert bucket.vary_fields == (b'accept-language',)
-        assert len(bucket.entries) == 1
+        assert second_calls['n'] == 1
+        # The new language variant hits even when the old varied header changes.
+        await _run(mw, _scope(path='/x', headers=[
+            (b'accept-language', b'en'), (b'accept-encoding', b'gzip')]), cn2)
+        assert second_calls['n'] == 1
+        # A request matching only the discarded encoding variant must miss.
+        await _run(mw, _scope(path='/x', headers=[(b'accept-encoding', b'br')]), cn2)
+        assert second_calls['n'] == 2
 
     async def test_per_bucket_variant_cap(self):
         from blackbull.middleware.cache import _MAX_VARIANTS_PER_KEY
         mw = Cache()
-        cn, _ = _vary_handler()
+        cn, counter = _vary_handler()
         for i in range(_MAX_VARIANTS_PER_KEY + 5):
             await _run(mw, _scope(path='/p',
                                   headers=[(b'accept-encoding', f'enc{i}'.encode())]), cn)
-        bucket = mw._store[('GET', '/p', b'')]
-        assert len(bucket.entries) <= _MAX_VARIANTS_PER_KEY
+        admitted = counter['n']
+        await _run(mw, _scope(path='/p', headers=[
+            (b'accept-encoding', f'enc{_MAX_VARIANTS_PER_KEY + 4}'.encode())]), cn)
+        assert counter['n'] == admitted
+        await _run(mw, _scope(path='/p', headers=[(b'accept-encoding', b'enc0')]), cn)
+        assert counter['n'] == admitted + 1
 
 
 @pytest.mark.asyncio
