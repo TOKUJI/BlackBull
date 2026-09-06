@@ -263,6 +263,23 @@ HTTP/2 has two independent flow-control windows — connection-level
 (per-stream budget).  BlackBull handles both internally; no app
 code needs to interact with flow control directly.
 
+Outgoing DATA consumes both windows before the transport can suspend a write
+or drain. Other streams may send concurrently using the remaining credit, but
+cannot reuse bytes already handed to the writer. Cancellation, stream reset,
+or a failed drain does not return that credit: delivery may already have
+occurred. Peer `WINDOW_UPDATE` grants more credit; initial-window SETTINGS also
+adjust stream credit. A peer reducing its
+initial stream window can legitimately leave a negative balance; body sending
+then waits for positive credit. Control frames and an empty DATA `END_STREAM`
+do not need available DATA credit.
+
+These rules apply to response bodies, deferred gRPC bodies and trailers, client
+uploads, and WebSocket-over-H2 traffic, including the client's close frame.
+The client's close send uses `BB_CLIENT_WRITE_TIMEOUT`; its subsequent wait for
+the peer's close uses `drain_timeout`. Cancellation during either wait releases
+the session's reader and raw-stream registration. The explicit `send_raw_frame`
+fault-injection escape hatch is not a normal flow-controlled send API.
+
 Configuration knobs that affect flow-control behaviour live in
 the `BB_H2_*` family of environment variables — see
 [Configuration](configuration.md) for the full list.

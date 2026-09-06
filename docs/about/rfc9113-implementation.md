@@ -205,6 +205,17 @@ once — a bound on how much the receiver has to buffer.  You need both:
 per-stream fairness alone can't bound total memory, and a total bound alone
 can't stop one stream from starving the rest.
 
+Send credit is committed synchronously before the first writer suspension,
+including coalesced HEADERS/DATA/trailer writes. Transport drain completion
+is not a credit grant, and cancellation or write failure does not
+refund a possibly delivered frame. Deferred bodies are taken out of their
+buffer before awaiting a write, so automatic flushing cannot send them twice.
+When a trailer must wait for body credit, its HPACK block is encoded only at
+the final write, preserving connection-wide header order across other streams.
+The unit bound remains the peer's maximum DATA frame payload; the total is the
+peer's connection/stream credit, and the wait bound belongs to the existing
+server or client write timeout.
+
 **§5.3 Prioritization** ✅ (as deprecation)
 RFC 9113 **§5.3.2** deprecated the priority *tree* (dependencies and weights)
 that **RFC 7540** had originally defined.

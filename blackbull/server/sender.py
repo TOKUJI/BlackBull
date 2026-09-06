@@ -1189,9 +1189,7 @@ class HTTP2Sender(BaseSender):
             else:
                 d_bytes = (total.to_bytes(3, 'big') + b'\x00'
                            + end_flag.to_bytes(1, 'big') + sid_bytes + body)
-            await super()._write(h_bytes + d_bytes)
-            self._conn_window.size -= total
-            self.stream_window_size -= total
+            await self._write_flow_controlled((h_bytes, d_bytes), total)
         else:
             await super()._write(h_bytes)
             await self._write_data(body, end_stream=set_end_stream)
@@ -1296,6 +1294,8 @@ class HTTP2Sender(BaseSender):
 
         offset = 0
         while offset < total:
+            if self._closed or self._writer.peer_gone:
+                return
             while (self._conn_window.size <= 0 or
                    self.stream_window_size <= 0):
                 if self._window_open is None:
@@ -1349,12 +1349,29 @@ class HTTP2Sender(BaseSender):
             is_last = (offset + chunk_size >= total)
             flags = DataFrameFlags.END_STREAM if (is_last and end_stream) else 0
             chunk = body[offset:offset + chunk_size]
-            await super()._write(
-                chunk_size.to_bytes(3, 'big') + b'\x00' + flags.to_bytes(1, 'big') + sid_bytes + chunk
-            )
-            self._conn_window.size -= chunk_size
-            self.stream_window_size -= chunk_size
+            frame_header = (chunk_size.to_bytes(3, 'big') + b'\x00'
+                            + flags.to_bytes(1, 'big') + sid_bytes)
+            await self._write_flow_controlled((frame_header, chunk), chunk_size)
             offset += chunk_size
+
+    async def _write_flow_controlled(
+        self, parts: tuple[bytes, ...], payload_size: int,
+    ) -> None:
+        """Commit DATA credit before a writer can suspend in write/drain.
+
+        Callers select a payload fitting both windows and enter this method
+        without an intervening await. Debit both windows in that same event
+        loop turn so parallel streams cannot spend an in-flight write's
+        credit. The frame header and any coalesced HEADERS consume no credit.
+
+        Never refund on cancellation or failure: a writer may have delivered
+        bytes before raising. Peer WINDOW_UPDATE replenishes credit, and
+        INITIAL_WINDOW_SIZE deltas adjust stream credit; transport/stream
+        teardown owns stopping failed producers.
+        """
+        self._conn_window.size -= payload_size
+        self.stream_window_size -= payload_size
+        await self._write_many(parts)
 
     def window_update(self, increment: int) -> None:
         self.stream_window_size += increment
@@ -1414,12 +1431,16 @@ class HTTP2Sender(BaseSender):
                 # flush any deferred first chunk with the HEADERS, then
                 # write this chunk normally.
                 if self._buffered_body is not None:
-                    await self._write_response_start_and_body(
-                        self._buffered_body, False, self._buffered_status,
-                        self._buffered_headers, self._expect_trailers)
+                    buffered_body = self._buffered_body
+                    buffered_status = self._buffered_status
+                    buffered_headers = self._buffered_headers
+                    # Take ownership before drain can yield to auto-flush.
                     self._buffered_status = None
                     self._buffered_headers = None
                     self._buffered_body = None
+                    await self._write_response_start_and_body(
+                        buffered_body, False, buffered_status,
+                        buffered_headers, self._expect_trailers)
                     # Review M2: withhold END_STREAM from a terminal chunk
                     # while trailers are pending — the trailing HEADERS
                     # carries it.
@@ -1457,39 +1478,40 @@ class HTTP2Sender(BaseSender):
         if self._buffered_status is not None:
             # Start (and possibly one deferred body chunk) never flushed:
             # emit HEADERS [+ DATA] + trailing HEADERS in a single write.
+            buffered_body = self._buffered_body
+            self._buffered_body = None
             h_bytes = build_response_headers(
                 self._factory.encoder, self._stream_id,
                 self._buffered_status, self._buffered_headers or [],
                 end_stream=False)
-            trailer_bytes = build_trailers(
-                self._factory.encoder, self._stream_id, headers)
-            if self._buffered_body is not None:
-                # Review M3: the deferred chunk was validated against the
-                # flow-control windows at *buffer* time, but the connection
-                # window is shared across streams and may have drained since.
-                # When it still fits, coalesce HEADERS + DATA + trailers into
-                # one write; when it no longer fits, write HEADERS, then the
-                # flow-controlled DATA (waits on WINDOW_UPDATE), then the
-                # trailers — preserving wire order, HPACK order, and RFC 9113
-                # §6.9.1 (DATA beyond the peer's connection window is a
-                # connection-level FLOW_CONTROL_ERROR).
-                if (len(self._buffered_body) <= self._conn_window.size
-                        and len(self._buffered_body) <= self.stream_window_size):
-                    total = len(self._buffered_body)
+            if buffered_body is not None:
+                # Buffering reserves no credit: another stream can spend it
+                # before these trailers arrive. Recheck at handoff so the
+                # combined DATA cannot exceed either peer window.
+                if (len(buffered_body) <= self._conn_window.size
+                        and len(buffered_body) <= self.stream_window_size
+                        and len(buffered_body) <= self.max_frame_size):
+                    total = len(buffered_body)
+                    trailer_bytes = build_trailers(
+                        self._factory.encoder, self._stream_id, headers)
                     d_bytes = (total.to_bytes(3, 'big') + b'\x00'
                                + b'\x00'  # DATA flags: no END_STREAM (trailers carry it)
                                + self._stream_id.to_bytes(4, 'big')
-                               + self._buffered_body)
-                    await self._write(h_bytes + d_bytes + trailer_bytes)
-                    self._conn_window.size -= total
-                    self.stream_window_size -= total
+                               + buffered_body)
+                    await self._write_flow_controlled(
+                        (h_bytes, d_bytes, trailer_bytes), total)
                 else:
                     await self._write(h_bytes)
-                    await self._write_data(self._buffered_body, end_stream=False)
-                    await self._write(trailer_bytes)
-                self._buffered_body = None
+                    await self._write_data(buffered_body, end_stream=False)
+                    # Encoding mutates the connection-wide HPACK table.
+                    # A credit wait can let another stream send HEADERS, so
+                    # encode these trailers only when they can be written.
+                    await self._write(build_trailers(
+                        self._factory.encoder, self._stream_id, headers))
             else:
-                await self._write(h_bytes + trailer_bytes)
+                trailer_bytes = build_trailers(
+                    self._factory.encoder, self._stream_id, headers)
+                await self._write_many((h_bytes, trailer_bytes))
             self._buffered_status = None
             self._buffered_headers = None
         else:
@@ -1541,9 +1563,7 @@ class HTTP2Sender(BaseSender):
                     d_bytes = b'\x00\x00\x00\x00' + end_flag + sid_bytes
                 else:
                     d_bytes = total.to_bytes(3, 'big') + b'\x00' + end_flag + sid_bytes + body
-                await super()._write(h_bytes + d_bytes)
-                self._conn_window.size -= total
-                self.stream_window_size -= total
+                await self._write_flow_controlled((h_bytes, d_bytes), total)
             else:
                 await super()._write(h_bytes)
                 await self._write_data(body, end_stream=True)

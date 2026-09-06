@@ -45,9 +45,7 @@ from ..asgi import ASGIEvent
 from ..env import get_settings
 from ..native import NativeResponse
 from ..protocol.frame import FrameFactory
-from ..protocol.frame_types import (
-    DataFrameFlags, FrameTypes, HeaderFrameFlags, PseudoHeaders,
-)
+from ..protocol.frame_types import FrameTypes, HeaderFrameFlags, PseudoHeaders
 from ..server.http2_ws import HTTP2WSWriter
 from ..server.recipient import (_WS_EVENT_QUEUE_DEPTH, AbstractReader,
                                 IncompleteReadError, WebSocketRecipient)
@@ -219,15 +217,14 @@ class WebSocketH2Session:
         self._closed = True
         payload = struct.pack('>H', code)
         ws_bytes = encode_frame(payload, opcode=WSOpcode.CLOSE, mask=True)
-        d_frame = self._factory.create(
-            FrameTypes.DATA, DataFrameFlags.END_STREAM,
-            self._stream_id, data=ws_bytes,
-        )
         try:
-            await self._client.send_raw_frame(d_frame)
-        except Exception:
-            pass  # best-effort close frame; the connection may be gone.
-        try:
+            try:
+                # CLOSE is WebSocket control but HTTP/2 DATA: it consumes
+                # both send windows, just like every other WS payload.
+                await self._sender(NativeResponse(body=ws_bytes))
+            except Exception:
+                logger.debug('could not send WebSocket close on stream %d',
+                             self._stream_id)
             if not self._disconnect_seen:
                 async with asyncio.timeout(drain_timeout):
                     while True:
