@@ -2,7 +2,7 @@
 
 :class:`MQTT5Actor` is one per connection. Its **inbox carries only
 outbound packets** (:class:`~blackbull.mqtt.broker.Send` from the broker, plus
-the stateless replies it generates itself). ``Close`` sets terminal state
+local transport refusals). ``Close`` sets terminal state
 without needing a queue slot. Its ``run()`` — draining that inbox — is the
 *sole writer* to the socket, so there are no cross-task write races.  A sibling
 reader loop decodes the wire (via :class:`PacketFramer`) and ``send``s control
@@ -23,11 +23,12 @@ from ..server.recipient import AbstractReader
 from ..server.sender import AbstractWriter
 from .broker import (
     BrokerActor, Attach, ClientSubscribe, ClientUnsubscribe, ClientPublish,
-    ClientPuback, ClientPubrec, ClientPubrel, ClientPubcomp, Detach, Send, Close,
+    ClientPuback, ClientPubrec, ClientPubrel, ClientPubcomp, ClientPing, ClientAuth,
+    ClientProtocolError, Detach, Send, Close,
 )
 from .messages import (
     MQTTConnect, MQTTPublish, MQTTPuback, MQTTPubrec, MQTTPubrel, MQTTPubcomp,
-    MQTTSubscribe, MQTTUnsubscribe, MQTTPingreq, MQTTPingresp,
+    MQTTSubscribe, MQTTUnsubscribe, MQTTPingreq,
     MQTTDisconnect, MQTTAuth, MQTTMessage,
     IncompletePacket, MQTTDecodeError, ReasonCode,
     decode_packet, decode_variable_byte_integer, encode_packet,
@@ -378,13 +379,21 @@ class MQTT5Actor(Actor):
             return b''
 
     async def _forward(self, message: MQTTMessage) -> None:
+        if self._done:
+            return
         broker = self._broker
         if isinstance(message, MQTTConnect):
             self._keep_alive = message.keep_alive
             await broker.send(Attach(connect=message, sender=self))
         elif isinstance(message, MQTTPublish):
-            await broker.send(ClientPublish(publish=message, sender=self))
-            await self._dispatch_taps(message)
+            # The reader may pipeline before CONNACK. Only the broker knows
+            # whether this packet precedes or follows rejection/retirement.
+            admitted = (asyncio.get_running_loop().create_future()
+                        if self._tap is not None or self._inline_taps else None)
+            await broker.send(ClientPublish(publish=message, sender=self,
+                                            admitted=admitted))
+            if admitted is not None and await admitted:
+                await self._dispatch_taps(message)
         elif isinstance(message, MQTTSubscribe):
             await broker.send(ClientSubscribe(subscribe=message, sender=self))
         elif isinstance(message, MQTTUnsubscribe):
@@ -398,10 +407,9 @@ class MQTT5Actor(Actor):
         elif isinstance(message, MQTTPubcomp):
             await broker.send(ClientPubcomp(packet_id=message.packet_id, sender=self))
         elif isinstance(message, MQTTPingreq):
-            # Stateless: reply through our own inbox so run() stays the only writer.
-            await self.send(Send(packet=MQTTPingresp()))
+            await broker.send(ClientPing(sender=self))
         elif isinstance(message, MQTTAuth):
-            await self.send(Send(packet=MQTTAuth(reason_code=ReasonCode.SUCCESS)))
+            await broker.send(ClientAuth(sender=self))
         elif isinstance(message, MQTTDisconnect):
             # "Disconnect with Will Message" keeps the Will; anything else is graceful.
             self.graceful = message.reason_code != ReasonCode.DISCONNECT_WITH_WILL
@@ -412,8 +420,10 @@ class MQTT5Actor(Actor):
                 session_expiry_interval=(message.properties or {}).get(
                     'session_expiry_interval')))
             self._done = True
-        else:  # pragma: no cover - decode_packet yields only known types
-            logger.debug('MQTT connection ignoring %s', type(message).__name__)
+        else:
+            # A valid codec result can still be a server-only packet. Its
+            # retirement must precede any subsequent pipelined command.
+            await broker.send(ClientProtocolError(sender=self))
 
     async def _dispatch_taps(self, publish: MQTTPublish) -> None:
         """Route an inbound PUBLISH to the application taps.
@@ -463,6 +473,7 @@ async def serve_connection(reader: AbstractReader, writer: AbstractWriter,
         reader_task.cancel()
         try:
             await asyncio.gather(reader_task, return_exceptions=True)
+            conn._done = True
             # Keep this connection's cleanup owned by its serving task while
             # it waits for FIFO admission. Broker shutdown wakes this wait;
             # no detached cleanup task or unbounded side queue is needed.

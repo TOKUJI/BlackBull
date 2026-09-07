@@ -220,6 +220,8 @@ async def test_cancelled_connection_detaches_when_broker_is_full():
 @pytest.mark.parametrize('shared', [False, True])
 async def test_live_routing_uses_bounded_writer_for_every_qos(qos, shared):
     broker = BrokerActor(max_queued=1)
+    publisher = Actor()
+    await broker._handle(Attach(connect=connect('publisher'), sender=publisher))
     writer = Writer()
     conn = MQTT5Actor(writer, broker, ctx(), inbox_maxsize=2)
     async with running(conn):
@@ -228,7 +230,7 @@ async def test_live_routing_uses_bounded_writer_for_every_qos(qos, shared):
         await broker._handle(ClientSubscribe(sender=conn, subscribe=MQTTSubscribe(
             packet_id=1, subscriptions=[(topic_filter, qos)])))
         for i in range(4):
-            await broker._handle(ClientPublish(sender=Actor(), publish=MQTTPublish(
+            await broker._handle(ClientPublish(sender=publisher, publish=MQTTPublish(
                 topic='t', payload=str(i).encode(), qos=qos, packet_id=i + 1 if qos else None)))
         await conn.send(Close())
         await settled()
@@ -240,8 +242,10 @@ async def test_live_routing_uses_bounded_writer_for_every_qos(qos, shared):
 
 async def test_retained_replay_larger_than_mailbox_reaches_healthy_writer():
     broker = BrokerActor()
+    publisher = Actor()
+    await broker._handle(Attach(connect=connect('publisher'), sender=publisher))
     for i in range(5):
-        await broker._handle(ClientPublish(sender=Actor(), publish=MQTTPublish(
+        await broker._handle(ClientPublish(sender=publisher, publish=MQTTPublish(
             topic=f't/{i}', payload=b'normal', retain=True)))
     writer = Writer()
     conn = MQTT5Actor(writer, broker, ctx(), inbox_maxsize=2)
@@ -348,14 +352,16 @@ async def test_writer_failure_wakes_silent_reader_and_detaches():
 @pytest.mark.parametrize('qos', [1, 2])
 async def test_ack_drains_qos_backlog_without_waiting_on_connection_mailbox(qos):
     broker = BrokerActor(inbox_maxsize=1, max_queued=1)
+    publisher = Actor()
     writer = Writer()
     conn = MQTT5Actor(writer, broker, ctx(), inbox_maxsize=1)
     async with running(broker, conn):
+        await broker.send(Attach(connect=connect('publisher'), sender=publisher))
         await broker.send(Attach(connect=connect(receive_maximum=1), sender=conn))
         await broker.send(ClientSubscribe(sender=conn, subscribe=MQTTSubscribe(
             packet_id=1, subscriptions=[('t', qos)])))
         for pid in [1, 2]:
-            await broker.send(ClientPublish(sender=Actor(), publish=MQTTPublish(
+            await broker.send(ClientPublish(sender=publisher, publish=MQTTPublish(
                 topic='t', payload=str(pid).encode(), qos=qos, packet_id=pid)))
         await broker._inbox.join()
         await settled()
@@ -471,6 +477,8 @@ async def test_single_output_packet_larger_than_budget_closes_and_logs(caplog):
 @pytest.mark.parametrize('qos', [1, 2])
 async def test_output_overload_keeps_persistent_pending_qos_for_reconnect(qos):
     broker = BrokerActor()
+    publisher = Actor()
+    await broker._handle(Attach(connect=connect('publisher'), sender=publisher))
     writer = Writer()
     conn = MQTT5Actor(writer, broker, ctx(), inbox_maxsize=1)
     async with running(conn):
@@ -483,7 +491,7 @@ async def test_output_overload_keeps_persistent_pending_qos_for_reconnect(qos):
         await conn.send(Send(packet=MQTTPingresp()))
         await writer.entered.wait()
         for i in [1, 2]:
-            await broker._handle(ClientPublish(sender=Actor(), publish=MQTTPublish(
+            await broker._handle(ClientPublish(sender=publisher, publish=MQTTPublish(
                 topic='t', payload=str(i).encode(), qos=qos, packet_id=i)))
         await broker._handle(Detach(sender=conn, graceful=False))
     # A resumed persistent session must retransmit the unacknowledged packets,

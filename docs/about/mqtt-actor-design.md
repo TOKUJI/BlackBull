@@ -57,6 +57,16 @@ connections are handled one after another, never concurrently — so the routing
 table and session dicts are plain Python objects with **no locks and no shared
 mutable state**. This is the property the actor model buys.
 
+Connection admission belongs to this same FIFO. A successful CONNECT admits
+one actor identity; rejection, takeover and retirement make subsequent commands
+from that actor inert. A second CONNECT cannot reuse the transport or change
+its Client Identifier. Weak connection references remember attempted admission
+without retaining a permanent client history. Session lookup also checks the
+current live actor, not just its Client Identifier. Broker-originated protocol
+closure retires admission before the next command; transport teardown uses the
+FIFO `Detach` boundary. Commands before that boundary retain their normal
+semantics. See [Connection admission and retirement](../guide/mqtt.md#connection-admission-and-retirement).
+
 ### `MQTT5Actor` — the sole socket writer
 
 Each connection has one `MQTT5Actor`. Its inbox carries *only outbound
@@ -67,8 +77,10 @@ reader can all originate outbound traffic.
 
 A sibling **reader task** (`read_loop`) does the opposite direction: it decodes
 the wire and `send`s control messages (`ClientPublish`, `ClientSubscribe`, …) to
-the broker. Stateless replies the connection can answer itself — PINGRESP, AUTH —
-it routes back through its *own* inbox so that `run()` stays the only writer.
+the broker. PINGREQ and AUTH also go through broker admission, so normal replies
+cannot precede the successful CONNACK or follow rejection. They return as `Send`
+messages through the same sole-writer inbox. Wrong-direction control packets
+request protocol-error retirement instead of being ignored.
 
 `serve_connection` is the raw-protocol handler body that wires the reader task
 and the writer loop together and guarantees the broker sees a `Detach` when the
@@ -104,6 +116,14 @@ the crutch unnecessary.
 `on_message` handlers are **application-level taps** on top of routing — the
 broker delivers to subscribers whether or not any tap is registered. Taps have
 their own dispatch plane so a slow tap can never stall the data plane.
+
+Before either dispatch mode, the reader awaits the publishing connection's
+admission result at that command's broker position. The optional result travels
+with `ClientPublish`; it adds no background task and at most one pending result
+per reader. Broker shutdown releases queued waiters with refusal, and cancelled
+waiters cannot disrupt the broker. A positive result reports connection
+admission, not PUBLISH validation, storage or delivery success. The broker never
+awaits a tap callback.
 
 - **actor mode (default).** The connection *offers* each published `Message` to
   the shared `TapActor` with a non-blocking call and returns immediately. The
