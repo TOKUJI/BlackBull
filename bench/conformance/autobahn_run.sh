@@ -25,7 +25,7 @@
 #
 # Reports land in bench/conformance/results/autobahn_<timestamp>/.
 
-set -e
+set -euo pipefail
 
 PORT="${PORT:-9001}"
 
@@ -40,8 +40,35 @@ AUTOBAHN_IMAGE="${AUTOBAHN_IMAGE:-crossbario/autobahn-testsuite@sha256:519915fb5
 RESULT_BASE="bench/conformance/results"
 mkdir -p "$RESULT_BASE"
 TS="$(date +%Y%m%d-%H%M%S)"
-OUT="$RESULT_BASE/autobahn_${TS}"
-mkdir -p "$OUT"
+# A retry must not inherit a report even when both starts share a timestamp.
+OUT="$(mktemp -d "$RESULT_BASE/autobahn_${TS}.XXXXXX")"
+CIDFILE="$OUT/container.cid"
+
+cleanup() {
+    local status=$?
+    trap - EXIT
+    set +e
+    printf '%s\n' "$status" > "$OUT/exit-code.txt"
+    echo "Autobahn runner exit code: $status"
+    if [ -s "$CIDFILE" ]; then
+        local cid
+        read -r cid < "$CIDFILE"
+        # Preserve only State, not the container's environment or config.
+        # --rm would discard the OOM/exit evidence before we could inspect it.
+        if timeout 10 docker inspect --format '{{json .State}}' "$cid" \
+            > "$OUT/container-state.json"; then
+            cat "$OUT/container-state.json"
+        else
+            echo "WARNING: could not inspect Autobahn container $cid" >&2
+        fi
+        timeout 10 docker rm -f "$cid" >/dev/null || \
+            echo "WARNING: could not remove Autobahn container $cid" >&2
+    fi
+    exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 if ! command -v docker >/dev/null 2>&1; then
     echo "ERROR: docker not on PATH" >&2
@@ -91,12 +118,13 @@ echo "Cases:   ${CASES:-*}"
 echo "Results: $OUT"
 echo ""
 
-docker run --rm \
+docker run --cidfile "$CIDFILE" \
+    -e PYTHONUNBUFFERED=1 \
     --add-host=host.docker.internal:host-gateway \
     -v "$(realpath "$OUT/fuzzingclient.json"):/config/fuzzingclient.json:ro" \
     -v "$(realpath "$OUT"):/results" \
     "$AUTOBAHN_IMAGE" \
-    wstest -m fuzzingclient -s /config/fuzzingclient.json
+    wstest -m fuzzingclient -s /config/fuzzingclient.json 2>&1 | tee "$OUT/tester.log"
 
 echo ""
 echo "Index report: $OUT/index.html"

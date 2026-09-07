@@ -18,8 +18,11 @@ if [ -z "$INDEX" ]; then
     exit 1
 fi
 echo "Parsing $INDEX"
-# behavior + behaviorClose must both be OK or NON-STRICT; anything else
-# (FAILED, UNCLEAN, INFORMATIONAL) is a regression.
+if ! jq -e '.BlackBull | type == "object" and length > 0' "$INDEX" >/dev/null; then
+    echo "ERROR: Autobahn report has no BlackBull cases" >&2
+    exit 1
+fi
+# NON-STRICT is accepted for behavior, but not for an unclean close.
 BAD=$(jq -r '
     ."BlackBull" | to_entries
     | map(select(

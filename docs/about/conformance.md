@@ -121,9 +121,23 @@ Lower either for stricter exposure on untrusted-peer deployments;
 that is a deviation from the configuration this suite was run
 under.
 
-Reports land in `bench/conformance/results/autobahn_<timestamp>/`
+Reports land in `bench/conformance/results/autobahn_<timestamp>.<unique>/`
 with an HTML index — open `index.html` in a browser for the
 case-by-case breakdown.
+
+Each run also preserves unbuffered tester output in `tester.log`, the harness
+status in `exit-code.txt`, and Docker's exit/OOM state in `container-state.json`
+before removing its container. The state file is unavailable if container
+creation fails. Cleanup bounds each Docker operation to 10 seconds; case
+budgets belong to Autobahn and the total run budget belongs to the CI step.
+These diagnostics are included in the CI artifacts even if no index is
+produced. An interrupted tester can lose buffered progress and its end-of-run
+reports, so the last printed case alone does not identify the cause of death.
+
+The heavy lane retries once. Success requires both a successful process exit
+and a nonempty passing report from that attempt; a crash with a partial report
+is not a pass. A timeout, OOM kill, and protocol failure require different
+diagnoses and must not be classified as runner contention without evidence.
 
 ## WebSocket over HTTP/2 (RFC 8441)
 
