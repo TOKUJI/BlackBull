@@ -5846,9 +5846,34 @@ configured — <code>BB_WS_MAX_FRAME_PAYLOAD</code> at 64 MiB and
 Lower either for stricter exposure on untrusted-peer deployments;
 that is a deviation from the configuration this suite was run
 under.</p>
-<p>Reports land in <code>bench/conformance/results/autobahn_&lt;timestamp&gt;/</code>
+<p>Reports land in <code>bench/conformance/results/autobahn_&lt;timestamp&gt;.&lt;unique&gt;/</code>
 with an HTML index — open <code>index.html</code> in a browser for the
 case-by-case breakdown.</p>
+<p>Each run also preserves unbuffered tester output in <code>tester.log</code>, the harness
+status in <code>exit-code.txt</code>, and Docker's exit/OOM state in <code>container-state.json</code>
+before removing its container. The state file is unavailable if container
+creation fails. Cleanup bounds each Docker operation to 10 seconds; case
+budgets belong to Autobahn and the total run budget belongs to the CI step.
+These diagnostics are included in the CI artifacts even if no index is
+produced. An interrupted tester can lose buffered progress and its end-of-run
+reports, so the last printed case alone does not identify the cause of death.
+Failure to inspect or remove an owned tester container turns an otherwise
+successful run into a failure. If the tester already failed, its original exit
+code remains the primary diagnosis while cleanup warnings record the secondary
+failure.</p>
+<p>The heavy lane asks the pinned tester's own <code>CaseSet</code> to resolve its selectors,
+then partitions those concrete IDs by their first two components. Every
+subgroup runs in a fresh tester container, so memory retained by a completed
+subgroup cannot accumulate into the next one. The manifest must contain all
+156 expected IDs exactly once, and each report must contain exactly its
+subgroup's IDs with accepted verdicts.</p>
+<p>The heavy lane retries the complete sequence once. A retry creates a fresh
+result group and starts again at the first subgroup; it never combines reports
+from different attempts. Success requires every subgroup process to exit
+successfully and every report to pass both the exact-ID and verdict checks. A
+crash with a partial or otherwise passing report is not a pass. A timeout, OOM
+kill, and protocol failure require different diagnoses and must not be
+classified as runner contention without evidence.</p>
 <h2 id="websocket-over-http2-rfc-8441">WebSocket over HTTP/2 (RFC 8441)<a class="headerlink" href="#websocket-over-http2-rfc-8441" title="Permanent link">&para;</a></h2>
 <p>There is no external h2spec-style harness for RFC 8441 yet.
 The in-tree pytest tests under

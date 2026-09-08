@@ -846,6 +846,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Wiring and the handler API">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#connection-admission-and-retirement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connection admission and retirement
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -5461,6 +5478,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Wiring and the handler API">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#connection-admission-and-retirement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connection admission and retirement
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -5648,6 +5682,36 @@ mainly so the <code>bench/mqtt/tap_throughput.py</code> comparison stays reprodu
 <p>The broker also runs without any handler at all: <code>on_message</code> is just how an
 application observes traffic. <code>app.add_extension(MQTTExtension())</code> on its own
 gives you a fully functional broker with no tap.</p>
+<p>Tap dispatch waits for the broker to confirm that the publishing connection
+is admitted at that command's position in its inbox. Rejected or retired
+connections cannot trigger taps through queued PUBLISH packets. This confirms
+<strong>connection admission</strong>, not successful routing, retained storage, validation
+of the PUBLISH, or a subscriber's acknowledgement. Actor-mode callbacks remain
+decoupled; inline callbacks run on the reader, never inside the broker or the
+sole writer. Cancellation and broker shutdown can omit a pending observation.</p>
+<h3 id="connection-admission-and-retirement">Connection admission and retirement<a class="headerlink" href="#connection-admission-and-retirement" title="Permanent link">&para;</a></h3>
+<p>CONNECT is allowed once per network connection. Clients may pipeline control
+packets immediately after it without waiting for CONNACK; the broker processes
+that FIFO in order and sends a successful CONNACK before other normal replies,
+including PINGRESP. A rejected CONNECT does not authorize later PUBLISH,
+subscription changes or QoS acknowledgements. AUTH's exception in MQTT 5
+§3.1.4 does not grant admission or reopen a rejected connection; this broker
+does not implement an enhanced-authentication negotiation.</p>
+<p>A duplicate CONNECT on an admitted connection is a Protocol Error (<code>0x82</code>).
+Server-only packet types received from the client also end admission instead
+of being skipped; a non-CONNECT first command cannot establish a connection.
+Reconnecting requires a <strong>new</strong> network connection, which can resume an existing
+session. Session takeover invalidates the old actor, so its delayed commands
+cannot publish or alter the replacement session, even while its writer flushes.
+Broker-initiated protocol-error closure retires admission before processing the
+next command. Client DISCONNECT and transport failures use the FIFO <code>Detach</code>
+boundary: commands ordered before it were admitted while the connection was
+active; commands after it cannot mutate broker state. Will and session-expiry
+processing belong to that retirement, not to a delayed second teardown.</p>
+<p>Admission history uses weak references tied to connection-actor lifetime, not
+a permanent table of past clients. Client identifiers alone are not admission
+credentials. This protocol sequencing is not application authentication or
+topic authorization.</p>
 <h2 id="what-the-broker-implements">What the broker implements<a class="headerlink" href="#what-the-broker-implements" title="Permanent link">&para;</a></h2>
 <p>The broker targets the MQTT 5.0 OASIS feature set exercised by BlackBull's
 conformance matrix:</p>

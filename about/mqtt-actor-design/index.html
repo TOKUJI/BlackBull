@@ -5620,6 +5620,15 @@ connection actor and moves on.</p>
 connections are handled one after another, never concurrently — so the routing
 table and session dicts are plain Python objects with <strong>no locks and no shared
 mutable state</strong>. This is the property the actor model buys.</p>
+<p>Connection admission belongs to this same FIFO. A successful CONNECT admits
+one actor identity; rejection, takeover and retirement make subsequent commands
+from that actor inert. A second CONNECT cannot reuse the transport or change
+its Client Identifier. Weak connection references remember attempted admission
+without retaining a permanent client history. Session lookup also checks the
+current live actor, not just its Client Identifier. Broker-originated protocol
+closure retires admission before the next command; transport teardown uses the
+FIFO <code>Detach</code> boundary. Commands before that boundary retain their normal
+semantics. See <a href="../../guide/mqtt/#connection-admission-and-retirement">Connection admission and retirement</a>.</p>
 <h3 id="mqtt5actor-the-sole-socket-writer"><code>MQTT5Actor</code> — the sole socket writer<a class="headerlink" href="#mqtt5actor-the-sole-socket-writer" title="Permanent link">&para;</a></h3>
 <p>Each connection has one <code>MQTT5Actor</code>. Its inbox carries <em>only outbound
 packets</em>, and its <code>run()</code> loop — draining that inbox — is the <strong>only</strong> code that
@@ -5628,8 +5637,10 @@ cross-task write races, even though the broker, the keep-alive path, and the
 reader can all originate outbound traffic.</p>
 <p>A sibling <strong>reader task</strong> (<code>read_loop</code>) does the opposite direction: it decodes
 the wire and <code>send</code>s control messages (<code>ClientPublish</code>, <code>ClientSubscribe</code>, …) to
-the broker. Stateless replies the connection can answer itself — PINGRESP, AUTH —
-it routes back through its <em>own</em> inbox so that <code>run()</code> stays the only writer.</p>
+the broker. PINGREQ and AUTH also go through broker admission, so normal replies
+cannot precede the successful CONNACK or follow rejection. They return as <code>Send</code>
+messages through the same sole-writer inbox. Wrong-direction control packets
+request protocol-error retirement instead of being ignored.</p>
 <p><code>serve_connection</code> is the raw-protocol handler body that wires the reader task
 and the writer loop together and guarantees the broker sees a <code>Detach</code> when the
 connection ends — including an abnormal (cancelled) close, which is what makes a
@@ -5658,6 +5669,13 @@ the crutch unnecessary.</p>
 <p><code>on_message</code> handlers are <strong>application-level taps</strong> on top of routing — the
 broker delivers to subscribers whether or not any tap is registered. Taps have
 their own dispatch plane so a slow tap can never stall the data plane.</p>
+<p>Before either dispatch mode, the reader awaits the publishing connection's
+admission result at that command's broker position. The optional result travels
+with <code>ClientPublish</code>; it adds no background task and at most one pending result
+per reader. Broker shutdown releases queued waiters with refusal, and cancelled
+waiters cannot disrupt the broker. A positive result reports connection
+admission, not PUBLISH validation, storage or delivery success. The broker never
+awaits a tap callback.</p>
 <ul>
 <li><strong>actor mode (default).</strong> The connection <em>offers</em> each published <code>Message</code> to
   the shared <code>TapActor</code> with a non-blocking call and returns immediately. The

@@ -3491,6 +3491,39 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.mqtt.broker.ClientAuth" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ClientAuth
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.broker.ClientPing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ClientPing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.broker.ClientProtocolError" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ClientProtocolError
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.mqtt.broker.Close" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5489,6 +5522,39 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.mqtt.broker.ClientAuth" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ClientAuth
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.broker.ClientPing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ClientPing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.broker.ClientProtocolError" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ClientProtocolError
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.mqtt.broker.Close" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5707,6 +5773,177 @@ state — the design goal of the actor split.</p>
     </div>
 
 </div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.mqtt.broker.ClientAuth" class="doc doc-heading">
+            <code>ClientAuth</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#blackbull.mqtt.broker.ClientAuth" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="Message
+
+
+  
+      dataclass
+   (blackbull.actor.Message)" href="../../actor/#blackbull.actor.Message">Message</a></code></p>
+
+
+
+        <p>An AUTH packet; it does not grant or renew connection admission.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.mqtt.broker.ClientPing" class="doc doc-heading">
+            <code>ClientPing</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#blackbull.mqtt.broker.ClientPing" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="Message
+
+
+  
+      dataclass
+   (blackbull.actor.Message)" href="../../actor/#blackbull.actor.Message">Message</a></code></p>
+
+
+
+        <p>A PINGREQ whose reply must follow CONNECT admission.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.mqtt.broker.ClientProtocolError" class="doc doc-heading">
+            <code>ClientProtocolError</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#blackbull.mqtt.broker.ClientProtocolError" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="Message
+
+
+  
+      dataclass
+   (blackbull.actor.Message)" href="../../actor/#blackbull.actor.Message">Message</a></code></p>
+
+
+
+        <p>A decoded packet that is not permitted in the client-to-server direction.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
 
 
 

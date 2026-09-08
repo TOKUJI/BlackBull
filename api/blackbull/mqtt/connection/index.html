@@ -5576,7 +5576,7 @@
         <p>MQTT 5.0 per-connection actor and its raw-protocol entry point.</p>
 <p>:class:<code>MQTT5Actor</code> is one per connection. Its <strong>inbox carries only
 outbound packets</strong> (:class:<code>~blackbull.mqtt.broker.Send</code> from the broker, plus
-the stateless replies it generates itself). <code>Close</code> sets terminal state
+local transport refusals). <code>Close</code> sets terminal state
 without needing a queue slot. Its <code>run()</code> — draining that inbox — is the
 <em>sole writer</em> to the socket, so there are no cross-task write races.  A sibling
 reader loop decodes the wire (via :class:<code>PacketFramer</code>) and <code>send</code>s control
