@@ -27,12 +27,13 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import ast
-import io
+import os
 import re
 import subprocess
 import sys
-import tokenize
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _pysource import comment_lines, docstring_lines  # noqa: E402
 
 
 def _added(diff_args: list[str]) -> dict[str, set[int]]:
@@ -52,41 +53,6 @@ def _added(diff_args: list[str]) -> dict[str, set[int]]:
             out.setdefault(path, set()).add(lineno)
             lineno += 1
     return out
-
-
-def _comment_lines(src: str) -> set[int]:
-    lines: set[int] = set()
-    try:
-        for tok in tokenize.generate_tokens(io.StringIO(src).readline):
-            if tok.type == tokenize.COMMENT:
-                lines.add(tok.start[0])
-    except (tokenize.TokenError, IndentationError, SyntaxError):
-        # A file the tokenizer cannot finish has no comment positions to
-        # report.  Returning the empty set classifies its added lines as
-        # code, which understates the review scope rather than inventing it.
-        pass
-    return lines
-
-
-def _docstring_lines(src: str) -> set[int]:
-    lines: set[int] = set()
-    try:
-        tree = ast.parse(src)
-    except SyntaxError:
-        return lines
-    holders = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
-    for node in ast.walk(tree):
-        if not isinstance(node, holders):
-            continue
-        body = getattr(node, 'body', None)
-        if not body:
-            continue
-        first = body[0]
-        if (isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant)
-                and isinstance(first.value.value, str)):
-            lines.update(range(first.lineno,
-                               (first.end_lineno or first.lineno) + 1))
-    return lines
 
 
 def main() -> int:
@@ -117,7 +83,7 @@ def main() -> int:
         except OSError:
             report.append(f'{path}: gone from the working tree, skipped')
             continue
-        comments, docs = _comment_lines(src), _docstring_lines(src)
+        comments, docs = comment_lines(src), docstring_lines(src)
         body = src.splitlines()
         for ln in sorted(added[path]):
             if ln > len(body):
