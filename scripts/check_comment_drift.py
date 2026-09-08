@@ -130,9 +130,12 @@ def _whole_files(paths: list[str]) -> list[tuple[str, int, str]]:
     out: list[tuple[str, int, str]] = []
     for p in paths:
         try:
-            for i, line in enumerate(open(p, encoding='utf-8'), 1):
-                out.append((p, i, line.rstrip('\n')))
+            with open(p, encoding='utf-8') as fh:
+                for i, line in enumerate(fh, 1):
+                    out.append((p, i, line.rstrip('\n')))
         except (OSError, UnicodeDecodeError):
+            # Unreadable or not text: nothing here to judge, and a path the
+            # caller passed by glob may simply not exist any more.
             continue
     return out
 
@@ -151,7 +154,10 @@ def main() -> int:
     elif ns.paths:
         lines = _whole_files(ns.paths)
     else:
+        # ``ap.error`` exits, but nothing in the signature says so; returning
+        # here keeps that true for a reader and for static analysis alike.
         ap.error('one of --staged, --range, or PATH is required')
+        return 2
 
     findings = []
     for path, lineno, text in lines:

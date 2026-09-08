@@ -61,6 +61,9 @@ def _comment_lines(src: str) -> set[int]:
             if tok.type == tokenize.COMMENT:
                 lines.add(tok.start[0])
     except (tokenize.TokenError, IndentationError, SyntaxError):
+        # A file the tokenizer cannot finish has no comment positions to
+        # report.  Returning the empty set classifies its added lines as
+        # code, which understates the review scope rather than inventing it.
         pass
     return lines
 
@@ -109,7 +112,8 @@ def main() -> int:
         if not path.endswith('.py'):
             continue
         try:
-            src = open(path, encoding='utf-8').read()
+            with open(path, encoding='utf-8') as fh:
+                src = fh.read()
         except OSError:
             report.append(f'{path}: gone from the working tree, skipped')
             continue
