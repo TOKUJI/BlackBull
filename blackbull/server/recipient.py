@@ -1725,8 +1725,9 @@ class WebSocketRecipient(BaseRecipient):
     The one thing that *can* tell the modes apart is the ``websocket_message``
     Level B event, which fires when the server reads a message rather than when
     the app consumes it — a handler that never calls ``receive()`` must still
-    produce it.  A registered listener therefore forces eager mode; see
-    :meth:`_read_ahead_observed`.
+    produce it.  A registered listener does not force read-ahead on, though:
+    a consuming handler is already reading, so the reader is only marked
+    *deferred* and the idle watchdog starts it if the handler goes quiet.
     """
 
     # Fallback for ``BB_WS_MAX_FRAME_PAYLOAD`` (env-vars.md, which carries the
