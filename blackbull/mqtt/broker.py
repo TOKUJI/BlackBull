@@ -17,6 +17,7 @@ import logging
 from collections import deque
 from dataclasses import dataclass, field, replace
 from typing import Any
+from weakref import WeakSet
 
 from ..actor import Actor, Message as ActorMessage
 from ..server.cap_log import log_cap_hit
@@ -25,7 +26,7 @@ from .messages import (
     MQTTConnect, MQTTConnack, MQTTDisconnect,
     MQTTPublish, MQTTPuback, MQTTPubrec, MQTTPubrel, MQTTPubcomp,
     MQTTSubscribe, MQTTSuback,
-    MQTTUnsubscribe, MQTTUnsuback,
+    MQTTUnsubscribe, MQTTUnsuback, MQTTPingresp, MQTTAuth,
     ProtocolLevel, ReasonCode,
     topic_matches_filter, validate_topic_name, validate_topic_filter, encode_packet,
 )
@@ -64,6 +65,22 @@ class ClientUnsubscribe(ActorMessage):
 @dataclass
 class ClientPublish(ActorMessage):
     publish: MQTTPublish | None = field(default=None, compare=False, repr=False)
+    admitted: asyncio.Future[bool] | None = field(default=None, compare=False, repr=False)
+
+
+@dataclass
+class ClientPing(ActorMessage):
+    """A PINGREQ whose reply must follow CONNECT admission."""
+
+
+@dataclass
+class ClientAuth(ActorMessage):
+    """An AUTH packet; it does not grant or renew connection admission."""
+
+
+@dataclass
+class ClientProtocolError(ActorMessage):
+    """A decoded packet that is not permitted in the client-to-server direction."""
 
 
 @dataclass
@@ -286,6 +303,10 @@ class BrokerActor(Actor):
         # armed at all while no detached session can expire — an app that
         # loads the MQTT extension but sees no traffic pays no wakeup.
         self._expiry_timer: asyncio.TimerHandle | None = None
+        # CONNECT is allowed once per transport, including failed attempts.
+        # Weak references retain that fact while queued messages can name the
+        # actor, without retaining a history of disconnected clients.
+        self._seen_connections: WeakSet[Actor] = WeakSet()
 
     def close(self) -> None:
         """Release the timer and wake producers whose consumer has stopped."""
@@ -293,6 +314,7 @@ class BrokerActor(Actor):
             msg = self._mailbox.get_nowait()
             if isinstance(msg, Detach) and msg.processed is not None:
                 msg.processed.set()
+            self._publish_admission(msg, False)
             self._mailbox.task_done()
         self._mailbox.close(discard=True)
         if self._expiry_timer is not None:
@@ -342,7 +364,32 @@ class BrokerActor(Actor):
     async def _handle(self, msg: ActorMessage) -> None:
         if isinstance(msg, Attach):
             await self._on_attach(msg.sender, msg.connect)
-        elif isinstance(msg, ClientPublish):
+            return
+        if isinstance(msg, Detach):
+            try:
+                await self._on_detach(msg.sender, msg.graceful,
+                                      msg.session_expiry_interval)
+            finally:
+                if msg.processed is not None:
+                    msg.processed.set()
+            return
+        if isinstance(msg, _SweepExpired):
+            self._sweep_pending = False
+            self._sweep_expired()
+            return
+
+        # Admission belongs to the broker's FIFO, not to the reader that
+        # queued the packet. A CONNECT rejection or takeover may precede a
+        # packet already in this inbox while the old writer is closing.
+        admitted = self._session_for(msg.sender) is not None
+        self._publish_admission(msg, admitted)
+        if not admitted:
+            if msg.sender is not None and msg.sender not in self._seen_connections:
+                self._seen_connections.add(msg.sender)
+                await msg.sender.send(Close(reason_code=ReasonCode.PROTOCOL_ERROR))
+            return
+
+        if isinstance(msg, ClientPublish):
             await self._on_publish(msg.sender, msg.publish)
         elif isinstance(msg, ClientSubscribe):
             await self._on_subscribe(msg.sender, msg.subscribe)
@@ -358,24 +405,35 @@ class BrokerActor(Actor):
         elif isinstance(msg, ClientPuback):
             self._clear_pending(msg.sender, 'pending_qos1_out', msg.packet_id)
             await self._drain_outbound(msg.sender)
-        elif isinstance(msg, Detach):
-            try:
-                await self._on_detach(msg.sender, msg.graceful,
-                                      msg.session_expiry_interval)
-            finally:
-                if msg.processed is not None:
-                    msg.processed.set()
-        elif isinstance(msg, _SweepExpired):
-            self._sweep_pending = False
-            self._sweep_expired()
+        elif isinstance(msg, ClientPing):
+            await msg.sender.send(Send(packet=MQTTPingresp()))
+        elif isinstance(msg, ClientAuth):
+            await msg.sender.send(Send(packet=MQTTAuth(reason_code=ReasonCode.SUCCESS)))
+        elif isinstance(msg, ClientProtocolError):
+            await self._disconnect(msg.sender, ReasonCode.PROTOCOL_ERROR)
         else:  # pragma: no cover - connection actor sends only the above
             logger.debug('BrokerActor ignoring %s', type(msg).__name__)
 
     # -- helpers ------------------------------------------------------------
 
+    @staticmethod
+    def _publish_admission(msg: ActorMessage, admitted: bool) -> None:
+        if isinstance(msg, ClientPublish) and msg.admitted is not None:
+            if not msg.admitted.done():
+                msg.admitted.set_result(admitted)
+
     def _session_for(self, conn):
         client_id = self._client_by_conn.get(id(conn))
-        return self._sessions.get(client_id) if client_id is not None else None
+        if client_id is None or self._clients.get(client_id) is not conn:
+            return None
+        return self._sessions.get(client_id)
+
+    async def _disconnect(self, conn, reason_code) -> None:
+        # Retire before the next inbox command, independently of how long the
+        # sole writer needs to flush DISCONNECT and its preceding packets.
+        await self._on_detach(conn, graceful=False)
+        await conn.send(Send(packet=MQTTDisconnect(reason_code=reason_code)))
+        await conn.send(Close(reason_code=reason_code))
 
     @staticmethod
     def _alloc_pid(session) -> int:
@@ -432,6 +490,13 @@ class BrokerActor(Actor):
     # -- handlers -----------------------------------------------------------
 
     async def _on_attach(self, conn, connect) -> None:
+        if conn is None:
+            return
+        if conn in self._seen_connections:
+            if self._session_for(conn) is not None:
+                await self._disconnect(conn, ReasonCode.PROTOCOL_ERROR)
+            return
+        self._seen_connections.add(conn)
         if connect.proto_level != ProtocolLevel.V5_0:
             await conn.send(Send(packet=MQTTConnack(
                 session_present=False,
@@ -586,9 +651,7 @@ class BrokerActor(Actor):
             # Protocol Error: per §4.13 the server sends DISCONNECT 0x82 and
             # closes the connection (no SUBACK).
             if share is not None and opts.get('no_local'):
-                await conn.send(Send(packet=MQTTDisconnect(
-                    reason_code=ReasonCode.PROTOCOL_ERROR)))
-                await conn.send(Close(reason_code=ReasonCode.PROTOCOL_ERROR))
+                await self._disconnect(conn, ReasonCode.PROTOCOL_ERROR)
                 return
             opts['qos'] = qos
             # §3.8.4 — a SUBSCRIBE for an existing Topic Filter replaces its
@@ -714,9 +777,7 @@ class BrokerActor(Actor):
         # the broker is the thing that would route it and the rule belongs
         # where the routing decision is.  §4.13: DISCONNECT then close.
         if publish.qos > 2:
-            await conn.send(Send(packet=MQTTDisconnect(
-                reason_code=ReasonCode.MALFORMED_PACKET)))
-            await conn.send(Close(reason_code=ReasonCode.MALFORMED_PACKET))
+            await self._disconnect(conn, ReasonCode.MALFORMED_PACKET)
             return
         # §3.3.2.1 — a Topic Name is literal: non-empty, no wildcards, no null.
         # An invalid one is rejected (0x90) and neither routed nor retained.
@@ -782,8 +843,7 @@ class BrokerActor(Actor):
             await conn.send(Send(packet=MQTTPubrec(
                 packet_id=publish.packet_id, reason_code=reason)))
         else:
-            await conn.send(Send(packet=MQTTDisconnect(reason_code=reason)))
-            await conn.send(Close(reason_code=reason))
+            await self._disconnect(conn, reason)
 
     async def _route(self, publish, source_conn=None) -> None:
         """Deliver *publish* to every live client with a matching subscription.
@@ -967,6 +1027,8 @@ class BrokerActor(Actor):
                     'state': _QOS2_OUT_PUBREL_SENT}
 
     async def _on_detach(self, conn, graceful, session_expiry_interval=None) -> None:
+        if conn is not None:
+            self._seen_connections.add(conn)
         client_id = self._client_by_conn.pop(id(conn), None)
         if client_id is None:
             return

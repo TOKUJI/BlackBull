@@ -264,7 +264,10 @@ class TestSharedNoLocal:
         assert disconnects and disconnects[0].reason_code == ReasonCode.PROTOCOL_ERROR
         assert [m for m in conn.outbox if isinstance(m, Close)]
         assert not [p for p in conn.packets() if isinstance(p, MQTTSuback)]
-        assert broker._sessions['c1']['subscriptions'] == []
+        # Protocol-error closure retires the connection and its zero-expiry
+        # session before another queued command can use either one.
+        assert 'c1' not in broker._sessions
+        assert 'c1' not in broker._clients
 
     async def test_no_local_on_plain_filter_still_fine(self):
         broker, conn = BrokerActor(), RecordingConn()

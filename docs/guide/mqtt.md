@@ -81,6 +81,41 @@ The broker also runs without any handler at all: `on_message` is just how an
 application observes traffic. `app.add_extension(MQTTExtension())` on its own
 gives you a fully functional broker with no tap.
 
+Tap dispatch waits for the broker to confirm that the publishing connection
+is admitted at that command's position in its inbox. Rejected or retired
+connections cannot trigger taps through queued PUBLISH packets. This confirms
+**connection admission**, not successful routing, retained storage, validation
+of the PUBLISH, or a subscriber's acknowledgement. Actor-mode callbacks remain
+decoupled; inline callbacks run on the reader, never inside the broker or the
+sole writer. Cancellation and broker shutdown can omit a pending observation.
+
+### Connection admission and retirement
+
+CONNECT is allowed once per network connection. Clients may pipeline control
+packets immediately after it without waiting for CONNACK; the broker processes
+that FIFO in order and sends a successful CONNACK before other normal replies,
+including PINGRESP. A rejected CONNECT does not authorize later PUBLISH,
+subscription changes or QoS acknowledgements. AUTH's exception in MQTT 5
+§3.1.4 does not grant admission or reopen a rejected connection; this broker
+does not implement an enhanced-authentication negotiation.
+
+A duplicate CONNECT on an admitted connection is a Protocol Error (`0x82`).
+Server-only packet types received from the client also end admission instead
+of being skipped; a non-CONNECT first command cannot establish a connection.
+Reconnecting requires a **new** network connection, which can resume an existing
+session. Session takeover invalidates the old actor, so its delayed commands
+cannot publish or alter the replacement session, even while its writer flushes.
+Broker-initiated protocol-error closure retires admission before processing the
+next command. Client DISCONNECT and transport failures use the FIFO `Detach`
+boundary: commands ordered before it were admitted while the connection was
+active; commands after it cannot mutate broker state. Will and session-expiry
+processing belong to that retirement, not to a delayed second teardown.
+
+Admission history uses weak references tied to connection-actor lifetime, not
+a permanent table of past clients. Client identifiers alone are not admission
+credentials. This protocol sequencing is not application authentication or
+topic authorization.
+
 ## What the broker implements
 
 The broker targets the MQTT 5.0 OASIS feature set exercised by BlackBull's

@@ -121,9 +121,37 @@ Lower either for stricter exposure on untrusted-peer deployments;
 that is a deviation from the configuration this suite was run
 under.
 
-Reports land in `bench/conformance/results/autobahn_<timestamp>/`
+Reports land in `bench/conformance/results/autobahn_<timestamp>.<unique>/`
 with an HTML index — open `index.html` in a browser for the
 case-by-case breakdown.
+
+Each run also preserves unbuffered tester output in `tester.log`, the harness
+status in `exit-code.txt`, and Docker's exit/OOM state in `container-state.json`
+before removing its container. The state file is unavailable if container
+creation fails. Cleanup bounds each Docker operation to 10 seconds; case
+budgets belong to Autobahn and the total run budget belongs to the CI step.
+These diagnostics are included in the CI artifacts even if no index is
+produced. An interrupted tester can lose buffered progress and its end-of-run
+reports, so the last printed case alone does not identify the cause of death.
+Failure to inspect or remove an owned tester container turns an otherwise
+successful run into a failure. If the tester already failed, its original exit
+code remains the primary diagnosis while cleanup warnings record the secondary
+failure.
+
+The heavy lane asks the pinned tester's own `CaseSet` to resolve its selectors,
+then partitions those concrete IDs by their first two components. Every
+subgroup runs in a fresh tester container, so memory retained by a completed
+subgroup cannot accumulate into the next one. The manifest must contain all
+156 expected IDs exactly once, and each report must contain exactly its
+subgroup's IDs with accepted verdicts.
+
+The heavy lane retries the complete sequence once. A retry creates a fresh
+result group and starts again at the first subgroup; it never combines reports
+from different attempts. Success requires every subgroup process to exit
+successfully and every report to pass both the exact-ID and verdict checks. A
+crash with a partial or otherwise passing report is not a pass. A timeout, OOM
+kill, and protocol failure require different diagnoses and must not be
+classified as runner contention without evidence.
 
 ## WebSocket over HTTP/2 (RFC 8441)
 
