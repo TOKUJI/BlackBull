@@ -6419,13 +6419,13 @@ connection is dead (an <code>IncompleteReadError</code> that escaped the body
 reader), so the response it may still be mid-way through writing dies
 quietly rather than as a broken-pipe traceback.</p>
 <p>This is a <em>control signal between the actor and its sender</em>, which is
-why it is a method and not an event.  It used to travel as an
-<code>http.disconnect</code> dict down the send channel — the one place the
-server pushed a receive-side event the wrong way through the pipe,
-purely because that pipe was already there.  The cost was not the dict
-but the type: every sender's public event union had to widen to admit
-a message no application or middleware may ever legally send, and
-anyone reading the signature learned the wrong contract.</p>
+why it is a method and not an event.  As an <code>http.disconnect</code> dict
+down the send channel it would be the one place the server pushes a
+receive-side event the wrong way through the pipe, purely because that
+pipe is already there.  The cost is not the dict but the type: every
+sender's public event union would have to widen to admit a message no
+application or middleware may ever legally send, and anyone reading
+the signature would learn the wrong contract.</p>
 <p><code>http.disconnect</code> remains the app-facing spelling on <code>receive()</code>,
 which is the direction ASGI defines it in.</p>
 
@@ -6652,7 +6652,7 @@ bodies raise <code>TypeError</code>.</p>
 <p><strong>High-level</strong> (bytes body + status):
   <code>await sender(body_bytes, HTTPStatus.OK, headers=[...])</code>
   Sends a HEADERS frame followed by a DATA frame.</p>
-<p><strong>Native</strong> (:class:<code>~blackbull.native.NativeResponse</code>, Sprint 93):
+<p><strong>Native</strong> (:class:<code>~blackbull.native.NativeResponse</code>):
   <code>await sender(NativeResponse(status=..., header=..., body=...))</code>
   One object may carry header, body, and/or trailers; the sender buffers
   the header arm exactly like the dict start and delegates body/trailers

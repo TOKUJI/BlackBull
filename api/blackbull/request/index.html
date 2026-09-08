@@ -5580,10 +5580,10 @@
 <li><code>parse_cookies</code>: the ASGI-scope-shaped wrapper of the above, for external
   callers that hold a scope dict.</li>
 </ul>
-<p>The opt-in HTTP context object formerly named <code>Request</code> moved to
-:class:<code>blackbull.connection.Connection</code>; <code>Request</code> is now
-a deprecated alias of <code>Connection</code> (see <code>blackbull.__getattr__</code>). This
-module holds only the transport-agnostic free functions, which
+<p>The opt-in HTTP context object is :class:<code>blackbull.connection.Connection</code>;
+<code>Request</code> is a <strong>deprecated</strong> alias of it, resolved through
+<code>blackbull.__getattr__</code>, and will be removed no earlier than 2027-08-01.
+This module holds only the transport-agnostic free functions, which
 :class:<code>Connection</code> builds on.</p>
 
 

@@ -5635,8 +5635,7 @@ BlackBull's HTTP/2 sender already emits trailers via the
 <code>http.response.trailers</code> ASGI event, and <code>HTTP2Recipient</code> already delivers
 request DATA as incremental <code>http.request</code> events, so all four RPC kinds —
 unary, server-, client-, and bidirectional-streaming — map cleanly onto the
-existing (scope, receive, send) bridge; no new protocol Actor is needed
-(see <code>BLA-161</code> [private]).</p>
+existing (scope, receive, send) bridge; no new protocol Actor is needed.</p>
 <p><code>serve_grpc</code> is dispatched from :meth:<code>BlackBull._dispatch</code> when the request
 content-type is <code>application/grpc</code> and a registry was installed via
 <code>app.enable_grpc(...)</code>.</p>

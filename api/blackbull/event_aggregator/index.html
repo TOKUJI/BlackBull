@@ -6139,8 +6139,7 @@ self-hosted path, or an ASGI scope dict only on the <code>BB_FORCE_ASGI_SCOPE</c
 
         <p>Fire Level B <code>websocket_message</code> (<code>conn</code> is a Connection).</p>
 <p>Canonical detail shape <code>{'conn', 'text', 'bytes'}</code> — the shape the
-direct-recipient path and docs/guide/events.md use.  (It was briefly
-<code>{'conn', 'message'}</code> on the server path; unified in Sprint 90.)</p>
+direct-recipient path and docs/guide/events.md use.</p>
 <p>Guarded like the other <code>on_*</code> methods: with no <code>websocket_message</code>
 listener, the <code>Event</code> + detail-dict allocation and the <code>emit</code>
 indirection are skipped (the cached predicate is the receive path's

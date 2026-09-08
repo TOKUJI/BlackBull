@@ -5824,10 +5824,10 @@ opened and abandoned, a Rapid Reset burst, a window never opened.</p>
 vocabulary one protocol over, and this module takes that twin's names
 wherever the two mean the same thing: :class:<code>SendRawBytes</code>,
 :class:<code>ReadResponse</code>, :class:<code>Sleep</code>, :class:<code>Abort</code>, and the fields of
-:class:<code>ScenarioH2ClientResult</code>.  Sprint 107 learned why that matters the
-expensive way — a vocabulary written from the <em>protocol</em> rather than from
-its twin drifted three times in one sprint, and every drift was found by
-someone asking rather than by reading the code.</p>
+:class:<code>ScenarioH2ClientResult</code>.  That matters more than it looks: a
+vocabulary written from the <em>protocol</em> rather than from its twin drifts
+away from it, and the drift is found by someone asking rather than by
+reading the code.</p>
 <p>Two steps have no HTTP/1.1 counterpart, and both earn it:</p>
 <ul>
 <li>:class:<code>SendPreface</code> — HTTP/1.1 has no connection preface.</li>

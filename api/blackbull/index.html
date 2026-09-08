@@ -7747,11 +7747,15 @@ and authoritative list; the notes below cover the ones worth a sentence:</p>
 <li><code>as_middleware</code>: decorator that marks an async function or class as middleware; normalises <code>send</code> so inner wrappers see only ASGI event dicts.</li>
 <li><code>TrustedProxy</code>: rewrites <code>scope['client']</code> / <code>scope['scheme']</code> from proxy headers.</li>
 </ul>
-<p>Importing this package does <strong>not</strong> load the server stack
-(<code>blackbull.server.*</code>).  Use <code>ASGIServer</code> from <code>blackbull.server</code>
-when you want to embed BlackBull's own server; otherwise pass the
-<code>BlackBull</code> instance to any external ASGI server (uvicorn, hypercorn,
-granian, …) since <code>BlackBull.__call__</code> is ASGI 3.0 compliant.</p>
+<p>Importing this package loads the server stack (<code>blackbull.server.*</code>) as a
+side effect: <code>blackbull.app</code> imports <code>RawBinding</code> from
+<code>blackbull.server.protocol_registry</code>, and <code>blackbull/server/__init__.py</code>
+re-exports <code>ASGIServer</code>, so the whole of it is resolved before <code>BlackBull</code>
+itself is bound.  Use <code>ASGIServer</code> from <code>blackbull.server</code> to embed
+BlackBull's own server;
+otherwise pass the <code>BlackBull</code> instance to any external ASGI server
+(uvicorn, hypercorn, granian, …) since <code>BlackBull.__call__</code> is ASGI 3.0
+compliant.</p>
 
 
 
@@ -9307,8 +9311,8 @@ middleware, and handlers. The ASGI <code>scope</code> dict is a <em>derived</em>
     <div class="doc doc-contents ">
 
         <p>True once the client dropped mid-request.</p>
-<p>The named form of what used to be readable only as a private field or
-through the module-level :func:<code>disconnected</code> helper.  A long-running
+<p>The named form of the state the module-level :func:<code>disconnected</code>
+helper also reports.  A long-running
 handler polls this to abandon work whose answer nobody is waiting for::</p>
 <pre><code>for row in rows:
     if conn.disconnected:
@@ -9624,8 +9628,8 @@ partial or empty body.  A mid-body disconnect raises
         <p>Materialize the ASGI scope the dispatch pipeline consumes, with this
 typed :class:<code>Connection</code> stashed on it for zero-reconversion reads.</p>
 <p>The single canonical <em>Connection → dispatch-ready scope</em> bridge shared
-by the H/1.1 <code>run()</code> and H/2 <code>_conn_to_scope</code> seams —
-they used to hand-roll the same five steps:</p>
+by the H/1.1 <code>run()</code> and H/2 <code>_conn_to_scope</code> seams, which would
+otherwise each hand-roll the same five steps:</p>
 <ol>
 <li>derive the ASGI scope via :meth:<code>as_scope</code> (the one native→ASGI point);</li>
 <li>when <code>force_asgi</code> (the §4.3 <code>BB_FORCE_ASGI_SCOPE</code> dual-path lane),

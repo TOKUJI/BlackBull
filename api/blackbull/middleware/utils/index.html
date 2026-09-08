@@ -5443,8 +5443,8 @@
 <p>Public API:
 - <code>as_middleware</code>: decorator that normalises the <code>send</code> callable so inner
   send wrappers defined by the middleware always receive a single native
-  representation — <code>NativeResponse</code> on the HTTP path (H1 + H2 since Sprint
-  93), plain ASGI event dicts only at the external-host edge — never raw
+  representation — <code>NativeResponse</code> on the HTTP path (H1 and H2), plain
+  ASGI event dicts only at the external-host edge — never raw
   <code>Response</code> objects.  Works on both async middleware functions and
   middleware classes (decorates <code>__call__</code>).</p>
 

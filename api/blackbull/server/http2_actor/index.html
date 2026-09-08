@@ -5582,8 +5582,8 @@ StreamActor owns the lifetime of a single HTTP/2 stream.</p>
         <p>Drives the HTTP/2 connection state machine for one connection.</p>
 <p>Supervisor strategy: propagate — framing errors send GOAWAY and raise,
 surfacing to the caller.</p>
-<p>If <em>aggregator</em> is <code>None</code> the actor uses the legacy direct-dispatcher
-path (same behaviour as the pre-Actor HTTP2Handler).</p>
+<p>If <em>aggregator</em> is <code>None</code> the actor dispatches events directly through
+<code>app._dispatcher</code> instead.</p>
 
 
 

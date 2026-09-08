@@ -5974,12 +5974,11 @@ closure. Body-level disconnect detection (<code>conn.body()</code> →
     <div class="doc doc-contents ">
 
         <p>Emit <em>record</em> on the access logger if INFO is enabled.</p>
-<p>The isEnabledFor gate matters: <code>record.as_extra()</code> and (formerly)
-<code>record.format()</code> are evaluated before <code>logger.info</code> decides to
-discard the call.  Profiling at -R 5000 with BB_ACCESS_LOG=0 showed
-these calls still costing ~1.2% of CPU.  Peers (uvicorn / granian /
-daphne) skip the work entirely when access logging is disabled; gating
-here matches that behaviour.</p>
+<p>The isEnabledFor gate matters: <code>record.as_extra()</code> is evaluated
+before <code>logger.info</code> decides to discard the call.  Profiling at
+-R 5000 with BB_ACCESS_LOG=0 showed these calls still costing ~1.2%
+of CPU.  Peers (uvicorn / granian / daphne) skip the work entirely
+when access logging is disabled; gating here matches that behaviour.</p>
 <p>The <em>record itself</em> is the message (it is self-formatting via <code>__str__</code>),
 so the expensive <code>format()</code> string build is deferred to the logging
 listener thread instead of running on the event loop.  <code>finalize()</code>

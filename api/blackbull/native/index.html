@@ -5593,7 +5593,7 @@
 
     <div class="doc doc-contents first">
 
-        <p>Native response message for the H1 send path (native-ization, Sprint 92).</p>
+        <p>Native response message for the H1 send path.</p>
 <p>The unified response message BlackBull's own server carries on the native
 path.  One class replaces the ASGI start/body/trailers dicts: a response
 object may carry any combination of <code>header</code> (status line + headers),
@@ -5779,10 +5779,11 @@ either way (RFC 9113 §8.1).</p>
 
         <p>One message on the native WebSocket send channel.</p>
 <p>The WS counterpart of :class:<code>NativeResponse</code>, and it exists for the same
-reason.  HTTP got a native send message in Sprint 92/93 and the sender a
-native arm; WebSocket was carried along as "conn is native, no scope" while
-its <em>event channel</em> stayed ASGI-shaped — so <code>websocket.*</code> dicts still
-travelled object → middleware → actor → sender on BlackBull's own path.
+reason.  HTTP has a native send message and the sender a native arm;
+WebSocket would otherwise be native only in the sense that "conn is
+native, no scope" while its <em>event channel</em> stayed ASGI-shaped — so
+<code>websocket.*</code> dicts would travel object → middleware → actor → sender
+on BlackBull's own path.
 The handler never saw them (that is the :class:<code>~blackbull.websocket.WebSocket</code>
 object's whole point), but everything under it did.</p>
 <p>Three kinds, discriminated by :attr:<code>kind</code> rather than by which of seven

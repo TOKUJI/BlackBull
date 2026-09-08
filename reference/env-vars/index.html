@@ -5783,6 +5783,11 @@ on busy production deployments, see
 <td>Install <code>uvloop</code>'s asyncio policy at startup.  Requires <code>pip install 'blackbull[speed]'</code>; falls back to the standard loop with a warning when uvloop is missing.</td>
 </tr>
 <tr>
+<td><code>BB_FORCE_ASGI_SCOPE</code></td>
+<td><code>0</code></td>
+<td>Dual-path conformance lane.  When set, every request round-trips the native <code>Connection</code> through <code>as_scope()</code> + <code>from_scope()</code> before dispatch, so the ASGI compatibility conversion is exercised on the self-hosted path and cannot silently bitrot.  Enabled in CI; leave it off in normal operation, where the native path skips the extra round-trip.</td>
+</tr>
+<tr>
 <td><code>BB_CPU_PINNING</code></td>
 <td><code>auto</code></td>
 <td>Per-worker CPU pinning, applied after fork.  <code>auto</code> gives worker <em>i</em> the <em>i</em>-th CPU of the mask the process already has, so <code>taskset</code> / <code>numactl</code> / a cpuset are honoured rather than overridden; <code>off</code> pins nothing; an explicit <code>taskset</code>-style list (<code>2,4,6-9</code>; <code>0</code> is CPU 0, not the off switch) confines workers to those CPUs, intersected with the mask granted to the process.  Only the event loop is pinned — the thread pool behind <code>run_in_executor</code> compression and <code>asyncio.to_thread</code> file reads keeps the full mask, since offloading exists to get off the loop's core.  Multi-worker and Linux only; a single-worker server is never pinned.  Set <code>off</code> on a shared or externally-orchestrated host.</td>
@@ -6408,8 +6413,8 @@ ever meeting the enforcement path.</p>
 </tr>
 <tr>
 <td><code>BB_COMPRESSION_MAX_INFLIGHT</code></td>
-<td><code>os.cpu_count() * 2</code></td>
-<td>Maximum concurrent compression offloads to the asyncio default thread pool.  When at or above this cap, additional eligible responses are served <strong>uncompressed</strong> rather than queued — bounded fall-back rather than unbounded queue growth.  <code>0</code> disables the cap (unbounded queue, pre-0.29 behaviour).</td>
+<td><code>max((os.cpu_count() or 1) * 2, 4)</code></td>
+<td>Maximum concurrent compression offloads to the asyncio default thread pool.  When at or above this cap, additional eligible responses are served <strong>uncompressed</strong> rather than queued — bounded fall-back rather than unbounded queue growth.  The floor of 4 keeps a one- or two-CPU host overlapping a few offloads instead of serialising them.  <code>0</code> removes the cap, leaving an unbounded executor queue that saturates under burst load.</td>
 </tr>
 <tr>
 <td><code>BB_BROTLI_QUALITY</code></td>
