@@ -641,19 +641,11 @@ import resource
 from enum import StrEnum
 
 
-# ---------------------------------------------------------------------------
-# Environment enum (unchanged public API)
-# ---------------------------------------------------------------------------
-
 class Environment(StrEnum):
     PRODUCTION  = 'production'
     DEVELOPMENT = 'development'
     TEST        = 'test'
 
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
 
 def _str_env(name: str, default: str) -> str:
     return os.environ.get(name, default)
@@ -682,22 +674,12 @@ def _int_env_nonneg(name: str, default: int) -> int:
     return value if value >= 0 else default
 
 
-#: File descriptors held back from the connection budget when
-#: ``BB_MAX_CONNECTIONS`` derives its value: the listening sockets, the
-#: event loop's own selector, log files, and whatever the application
-#: keeps open (a database pool being the usual case).  Handing every
-#: descriptor to connections would move the failure from "a connection is
-#: refused" — which the peer can retry — to "a request already accepted
-#: cannot open its database connection", which it cannot.
+#: Reserved so that running out of descriptors refuses a *new* connection,
+#: which the peer can retry, instead of stranding a request already
+#: accepted that can no longer open its database connection.
 FD_RESERVE = 64
 
 
-#: Compression offloads allowed to run concurrently in the asyncio default
-#: thread pool; past it, eligible responses are served uncompressed rather
-#: than queued.  The floor keeps a one- or two-CPU host overlapping a few
-#: offloads instead of serialising them.  A name rather than a literal
-#: because the :class:`Settings` field default and :func:`get_settings` both
-#: state it, and two copies of a number drift the first time one is tuned.
 DEFAULT_COMPRESSION_MAX_INFLIGHT = max((os.cpu_count() or 1) * 2, 4)
 
 
@@ -765,10 +747,6 @@ def _bool_env(name: str, default: bool) -> bool:
     return raw.strip().lower() not in ('0', 'false', 'no', 'off')
 
 
-# ---------------------------------------------------------------------------
-# Settings dataclass
-# ---------------------------------------------------------------------------
-
 @dataclasses.dataclass(frozen=True)
 class Settings:
     """Immutable snapshot of all runtime settings.
@@ -778,698 +756,104 @@ class Settings:
     """
 
     env: Environment = Environment.DEVELOPMENT
-
-    #: Number of worker processes (0 → resolved to ``os.cpu_count()`` by the
-    #: caller; stored as-is here).
     workers: int = 1
 
-    #: Maximum simultaneous TCP connections per worker.  When the cap
-    #: is reached, new connections receive HTTP/1.1 ``503 Service
-    #: Unavailable`` with ``Retry-After: 1`` before close (well-formed
-    #: response so load-balancers / health-checks can interpret it
-    #: correctly).  ``0`` disables the cap entirely — relies on the OS
-    #: file-descriptor limit instead.
-    #:
-    #: Capped rather than unbounded, for event-loop integrity:
-    #: unbounded per-worker concurrency lets a single
-    #: client (or burst, or slowloris-class workload) park thousands of
-    #: suspended-readuntil tasks on the event loop, amplifying drain
-    #: time on burst-close and inflating worst-case latency.  Set
-    #: ``BB_MAX_CONNECTIONS`` to a finite ceiling on untrusted hosts;
-    #: 1024 is a typical single-asyncio-loop ceiling, and multi-worker
-    #: deployments multiply (so ``workers=8`` × ``BB_MAX_CONNECTIONS=1024``
-    #: → 8K connections per process).
-    #:
-    #: Resolved by :func:`resolve_max_connections` — the default is
-    #: ``auto``, derived from ``RLIMIT_NOFILE``.  The dataclass default
-    #: below is only the fallback for a directly-constructed ``Settings``
-    #: (tests); ``0`` there keeps such a construction unbounded rather
-    #: than silently capped by whatever host the test happens to run on.
+    #: ``auto`` is what ships: :func:`resolve_max_connections` derives
+    #: the cap from ``RLIMIT_NOFILE``.  This literal reaches only a
+    #: directly-constructed ``Settings``, and leaves it uncapped rather
+    #: than derived so it is not capped by whichever host it runs on.
     max_connections: int = 0
-
-    #: asyncio.Queue depth for HTTP/2 per-stream request-body events.
     stream_queue_depth: int = 64
-
-    #: WebSocket inbound read-ahead depth.  0 (default) reads inline in the
-    #: app's own task — no reader task, no per-message queue hop.  A positive
-    #: value restores the background reader with a queue of that depth, which
-    #: buys control-frame servicing between the app's receive() calls.
     ws_queue_depth: int = 0
-
-    #: Install QueueHandler on the blackbull logger so event-loop log calls are non-blocking.
     async_logging: bool = True
-
-    #: Emit one access log record per completed request on blackbull.access.
     access_log: bool = True
-
-    #: Async-logging sink format: '' → plain text (default), 'json' → one
-    #: structured JSON object per line (approach 3).
     log_format: str = ''
-
-    #: host:port of a syslog/UDP collector (approach 6).  '' keeps the stderr
-    #: sink.  When set, records ship via a UDP SysLogHandler.
     log_syslog_addr: str = ''
-
-    #: Coalescing width of the async-logging sink (approach 4 / O2): up to N
-    #: formatted records are joined into a single write+flush.  Async logging is
-    #: batch logging — the sink always coalesces (min 2); the per-record flush of
-    #: a plain StreamHandler is the dominant access-log cost, so it is not an
-    #: async option.  Default 64.  To force per-record flush, disable async
-    #: logging (the synchronous path) instead.
     log_batch_size: int = 64
-
-    #: Max milliseconds a partial log batch waits before flush — bounds the
-    #: visibility latency of the async sink at low request rates.
     log_batch_timeout_ms: int = 5
-
-    #: Path for the async-logging sink to write to (append mode, approach 2).
-    #: '' (default) keeps the stderr sink.  Composes with log_format/batch; each
-    #: worker opens its own append stream post-fork.  Ignored for the syslog sink.
     log_file: str = ''
-
-    #: listen() backlog depth for the server socket.  1024 is a sane
-    #: default for servers facing connection bursts — 128 (the traditional
-    #: ``SOMAXCONN``) is shallow next to peers like nginx (511) and Node
-    #: (511).  The kernel still caps the effective queue at
-    #: ``net.core.somaxconn``, so raise that too for very high fan-in.
-    #: See docs/reference/env-vars.md "Performance recommendations".
     socket_backlog: int = 1024
-
-    #: SO_SNDBUF for accepted sockets (0 = leave kernel default).
     socket_sndbuf: int = 0
-
-    #: SO_RCVBUF for accepted sockets (0 = leave kernel default).
     socket_rcvbuf: int = 0
 
-    #: Use SO_REUSEPORT to give each worker its own kernel accept queue.
-    #: Off by default — only meaningful under ``workers > 1``.  Production
-    #: multi-worker deployments should enable it; see
-    #: docs/reference/env-vars.md "Performance recommendations".
-    #:
-    #: NOTE: for the cold-start connection-burst workload SO_REUSEPORT is a
-    #: *pessimization* — it does not prevent accept-starvation (at cold start
-    #: every worker is equally cold, so N per-worker queues starve at once) and
-    #: it removes the shared queue's cross-worker load-balancing.
+    #: No help for a cold-start connection burst, and measurably a
+    #: pessimization there: at cold start every worker is equally cold,
+    #: so N per-worker queues starve at once, and the shared queue's
+    #: cross-worker load-balancing is given up as well.
     socket_reuseport: bool = False
 
-    #: Idle timeout (seconds) on a keep-alive connection that is awaiting
-    #: the *next* request.  Replaces per-accept ``SO_KEEPALIVE`` syscalls
-    #: with an application-level timer — same ghost-eviction guarantee,
-    #: zero syscall cost per accept (which was a measurable contributor
-    #: to wrk c=1024-burst connect-RST errors).  Combined with
-    #: ``TCP_USER_TIMEOUT`` on the listening socket (inherits to accepted)
-    #: which handles the *active-but-stuck* case.  0 disables the timer.
-    #:
-    #: Kept short for event-loop integrity: a conventional 60 s
-    #: parks ghost / idle connections in the loop's
-    #: ``readuntil`` for far longer than necessary, inflating the
-    #: suspended-task count and amplifying burst-close drain time.
-    #: 5 s is a common short-idle value for request-pipeline keep-alive.
-    #: Long-lived clients on slow links should set
-    #: ``BB_KEEP_ALIVE_TIMEOUT`` explicitly to a higher value.
+    #: 5 s, not the conventional 60: a connection parked in
+    #: ``readuntil`` inflates the suspended-task count and amplifies
+    #: burst-close drain time.  The timer also replaces a per-accept
+    #: ``SO_KEEPALIVE`` syscall, measured as a contributor to wrk
+    #: c=1024-burst connect-RST errors.
     keep_alive_timeout: float = 5.0
-
-    #: ``TCP_USER_TIMEOUT`` value in **milliseconds** for accepted sockets.
-    #: Linux-only; set on the listening socket and inherited by accepted.
-    #: Forces a connection-level error if a peer fails to ACK in this
-    #: window — protects against dead-mid-write peers that ``SO_KEEPALIVE``
-    #: misses.  0 leaves the kernel default unchanged.
     tcp_user_timeout_ms: int = 0
-
-    #: Per-request timeout in seconds for HTTP/2 streams (0 = disabled).
     request_timeout: float = 0.0
-
-    #: Maximum seconds an HTTP/1.1 client has to send the complete header
-    #: block (request-line + headers + CRLFCRLF).  When the deadline
-    #: elapses, the server answers with 408 Request Timeout and closes.
-    #: Primary defence against slowloris — an attacker can otherwise hold
-    #: a connection open indefinitely by dripping bytes.  0 = disabled
-    #: (only sound for trusted local clients).
     header_timeout: float = 10.0
-
-    #: Maximum seconds an HTTP/1.1 client has to deliver the complete
-    #: request body once headers are parsed.  Mirrors ``header_timeout``
-    #: for the body half — slowloris attackers can otherwise hold a
-    #: ``Content-Length: N`` connection open by dripping body bytes after
-    #: the headers have arrived.  When the deadline elapses the recipient
-    #: returns ``http.disconnect`` and the server tears the connection
-    #: down.  0 = disabled.
     body_timeout: float = 30.0
-
-    #: Maximum seconds the server will wait for a single write to be
-    #: flushed to the peer (via ``StreamWriter.drain()``).  Defends
-    #: against the *slow-read* shape of slowloris: a client that reads
-    #: the response 1 byte/sec eventually fills the kernel send buffer
-    #: and our ``drain()`` blocks indefinitely waiting for the peer's
-    #: TCP window to reopen.  Without this timeout the server's write
-    #: coroutine — and the connection slot it holds — is parked
-    #: forever.  When the deadline elapses we close the transport;
-    #: the sender treats the failure the same as a peer-side
-    #: ``ConnectionResetError``.  0 = disabled.
     write_timeout: float = 30.0
-
-    #: Maximum bytes in a single HTTP/1.1 request-line or header line.
-    #: A pathological 1 GB ``X-foo: ...`` header would otherwise live in
-    #: ``readuntil``'s internal buffer.  Enforced before parsing so an
-    #: attacker cannot exhaust memory.  Default 8 KiB matches Apache
-    #: ``LimitRequestLine`` / nginx ``large_client_header_buffers``.
     header_max_line: int = 8192
-
-    #: Maximum total bytes in the entire request header block
-    #: (request-line + all headers + CRLFCRLF).  Default 64 KiB matches
-    #: typical reverse-proxy defaults.
     header_max_total: int = 65536
-
-    #: Maximum total bytes in a response head the async client will read
-    #: (status line + all field lines + CRLFCRLF).  Bounds accumulation as it
-    #: reads, so an endless header cannot grow the client's memory.  Held
-    #: apart from ``header_max_total`` because the roles are not symmetric: a
-    #: server is addressed by anyone, a client picks its peer, and pointing
-    #: one at a deliberately hostile server is what
-    #: ``blackbull.fault_injection`` exists for.  0 disables.
-    #:
-    #: Under HTTP/2 this bounds the response's field lines **in aggregate**
-    #: across every HEADERS frame on the stream, since a single field section
-    #: is already bounded by hpack's ``max_header_list_size``.
     client_head_max_total: int = 65536
-
-    #: Maximum bytes in a single status line or response field line.  Checked
-    #: over the lines of an already-bounded head rather than during the read:
-    #: no line can be longer than the block containing it, so this is a policy
-    #: rule, not a second memory guard — the same division the server makes
-    #: between ``header_max_total`` and ``header_max_line``.  0 disables.
     client_head_max_line: int = 8192
-
-    #: Seconds the async client will wait for a complete response head.  The
-    #: time column for the read that ``client_head_max_total`` bounds by size:
-    #: a peer that sends half a head and stops passes every byte budget
-    #: forever.  0 disables.
     client_head_timeout: float = 30.0
-
-    #: Maximum seconds a client waits for one send-progress operation.  H1 and
-    #: WS use a socket drain; H2 DATA uses the peer's SETTINGS_MAX_FRAME_SIZE
-    #: as its outbound unit and waits for flow-control credit.  There is
-    #: intentionally no whole-upload total owner.  0 disables.
     client_write_timeout: float = 30.0
-
-    #: Seconds the async client will wait for a single response-body read.
-    #: Per read, not per body: a peer must keep making progress, which is the
-    #: same shape as ``body_timeout`` and as nginx's ``client_body_timeout``.
-    #:
-    #: Under HTTP/2 the unit is a **frame for that stream**, so what it bounds
-    #: there is the gap *between* frames — which
-    #: ``_FRAME_READ_TIMEOUT`` does not, since that bounds the remainder of a
-    #: frame whose header has already arrived.  Per stream rather than per
-    #: connection: a connection-wide clock is reset by any peer traffic, so a
-    #: busy stream would shelter a stalled one indefinitely.  Armed by the
-    #: *final* response head, not by the request and not by an interim (1xx)
-    #: one, for the reason the rate floor exempts the wait before the first
-    #: body octet — a peer that has not answered yet is working, not stalling;
-    #: ``103 Early Hints`` followed by real work is that peer.  Re-armed only
-    #: by a DATA frame that delivers body octets, since an empty one is not
-    #: progress and re-arming on it let a peer hold a stream open forever.
-    #:
-    #: What counts as one read differs between payload and framing, and the
-    #: difference is deliberate.  A payload read is transport-paced, so the
-    #: deadline covers **one arrival**: its unit would otherwise be a whole
-    #: body, and a deadline over unbounded work is not a bound.  A framing
-    #: operation — a chunk-size line, a trailer field line, the two-octet
-    #: chunk terminator — is read whole, so the deadline covers **the
-    #: operation**.  Each is bounded by ``client_head_max_line`` and is
-    #: normally a handful of octets, so a deadline can afford to own its total;
-    #: pacing them by arrival would leave that total unowned whenever
-    #: ``client_min_body_rate`` is off, which is its default.  The response
-    #: head is bounded the same way — one ``client_head_timeout`` for the whole
-    #: block, not one per line.
-    #:
-    #: Operations do not share a budget: the deadline is fresh for each, so a
-    #: response of many chunks may take many deadlines in total.  It stops a
-    #: peer that **stops**; a peer that trickles satisfies every individual
-    #: read, and that is ``client_min_body_rate``'s job.  0 disables.
     client_body_timeout: float = 30.0
-
-    #: Maximum total response-body octets the async client will buffer for
-    #: one response.  Bounds ``receive()`` only: ``stream()`` exists so a large
-    #: response need not fit in memory, and a cap on the shared reader would
-    #: cap the path that asked not to be capped.  A declared
-    #: ``Content-Length`` over the cap is refused before a body octet is read;
-    #: a chunked body is refused the moment the running total passes it.
-    #:
-    #: **What it counts is body octets; what it costs is 2x that plus about
-    #: 121 bytes per slice.**  Both protocols accumulate the body in slices
-    #: and then join them, so at the join the slices and the joined result are
-    #: both live.  The 121 does not scale with the slice: 41 for the ``bytes``
-    #: object's header and its pointer in the list, 80 for the ``Py_buffer``
-    #: ``bytes.join`` builds one of per item.  What sets the slice count is
-    #: the **peer** — its write, or its DATA frame — bounded above by the
-    #: client's own 64 KiB read.  So 2.002x the cap at 64 KiB writes, 2.030 at
-    #: 4 KiB, 2.238 at 512 B; identical on both protocols and all three
-    #: HTTP/1.1 framings.  Size the knob at half of what one response may
-    #: occupy, and below half if the peer dribbles.
-    #:
-    #: ~2x is a floor, which is why the number is published rather than fixed.
-    #: ``ClientResponse.body`` is ``bytes``, and pure Python cannot freeze a
-    #: buffer into one in place, so the final copy is unavoidable.
-    #: Accumulating into a single ``bytearray`` and returning ``bytes(buf)``
-    #: does not remove it: that trades the per-slice cost for the bytearray's
-    #: over-allocation, measures 2.03 to 2.13, and is **worse** at the write
-    #: size the client actually reads at — 2.072 against 2.002.  Reaching ~1x
-    #: means returning the buffer itself, which changes the public type.
-    #: ``client_head_max_total`` already accumulates exactly the ``bytearray``
-    #: way and is given no multiplier of its own: twice a head is kilobytes.
-    #:
-    #: The escape is ``stream()``, which never accumulates: a caller filling
-    #: its own buffer measures ~1x.  What it costs is everything else —
-    #: ``stream()`` exposes no status, no headers, and is deliberately outside
-    #: this cap, so it is ~1x *or* status, headers and a bound, never both.
-    #: The numbers above are pinned by
-    #: ``tests/unit/client/test_client_body_buffer_cost.py``.
-    #:
-    #: **Off by default**, unlike the server's ``max_body_size``.  That number
-    #: and its peers (Kestrel, nginx, axum) bound what strangers may push into
-    #: a process; this bounds what you asked for, and the size distribution of
-    #: a wheel, a container layer or a dataset is not the distribution of a
-    #: form post.  No widely used Python client caps a response by default
-    #: either.  Set it when you know what your peer should be returning — that
-    #: is the shape of a client-side bound, which is a diagnostic rather than
-    #: a defence.
     client_body_max_total: int = 0
-
-    #: Minimum sustained rate, in octets per second, at which the async client
-    #: requires a response **body** to arrive.  ``client_body_timeout`` returns
-    #: on any arrival, so it degrades from "deliver a slice in N seconds" to
-    #: "send something every N seconds", which a one-byte drip always
-    #: satisfies; a rate is what a drip cannot fake.
-    #:
-    #: What it measures, exactly, because the answer is a policy and not just a
-    #: number.  The numerator is response-body payload only: chunk-size lines,
-    #: chunk extensions, terminators and trailers are discarded on receipt, so
-    #: octets a peer may pad at will buy no credit.  The denominator is every
-    #: second spent waiting on the transport, framing reads included, so a peer
-    #: cannot stall in front of the parts that are not counted.  Time a caller
-    #: spends between ``stream()`` yields is not in it, because the clock runs
-    #: only inside a read.  And the wait before the *first* body octet is
-    #: outside the window entirely: a peer that flushes its head and then
-    #: thinks — a slow query, a report built while it is streamed, an LLM's
-    #: time to first token — is working, not dripping.
-    #:
-    #: **Off by default**, unlike the server's ``min_body_rate``.  After the
-    #: first octet a long gap that eventually produces a body and one that
-    #: never does are the same observation, so no threshold can separate an
-    #: event stream or a long poll from a drip.  Setting this is the operator
-    #: stating that their peer is neither.  No widely used Python client
-    #: (requests, httpx, aiohttp, urllib3) enables a response rate floor by
-    #: default, and Kestrel's 240/5 — the numbers the server's default comes
-    #: from — is ``MinRequestBodyDataRate``, a *request* knob: a request body
-    #: is pushed by a peer already holding the bytes, so a gap is anomalous,
-    #: while a response body is generated as it is sent, so a gap is the
-    #: normal signature of work.  Same constant, different distribution.
-    #:
-    #: A peer that stops entirely is ``client_body_timeout``'s, whatever this
-    #: is set to.  0 disables.
     client_min_body_rate: float = 0.0
-
-    #: Seconds of body-read waiting, after the first body octet, before
-    #: ``client_min_body_rate`` starts being enforced.  The window is one grace
-    #: period wide and rolls forward whenever it is satisfied, so a burst buys
-    #: the window it happened in rather than the whole response.
     client_min_body_rate_grace: float = 5.0
-
-    #: Client WebSocket inbound frame payload cap, in bytes per frame.
-    #: ``client_ws_max_message_size`` owns the aggregate message total; the
-    #: client WebSocket recipient has no environment-owned time bound.
     client_ws_max_frame_payload: int = 64 * 1024 * 1024
-
-    #: Client WebSocket inbound message cap, in bytes per message.
-    #: ``client_ws_max_frame_payload`` owns each individual frame; the
-    #: client WebSocket recipient has no environment-owned time bound.
     client_ws_max_message_size: int = 16 * 1024 * 1024
-
-    #: Maximum number of interim (``1xx``) responses the async client will read
-    #: and discard while waiting for the final one.  RFC 9110 §15.2 makes
-    #: parsing past them a MUST, which turns "read one response" into a loop,
-    #: and a loop over peer-supplied messages needs a count.
-    #:
-    #: Count is a fourth axis the size/total/time triad does not contain — and
-    #: here it is also what owns the triad's aggregates.  ``client_head_max_-
-    #: total`` and ``client_head_timeout`` are both **per head**, and each
-    #: interim is a head, so neither one grows: what grows is how many times
-    #: they are spent.  The deadline must stay per head, because a ``103 Early
-    #: Hints`` is exactly a peer saying "still working" before it answers, and
-    #: judging that wait would refuse a slow query for being slow — the
-    #: exemption the body's progress deadline makes for the same reason.  So
-    #: this number, not those two, is what bounds one ``receive()``: at most
-    #: ``limit + 1`` heads, hence at most ``(limit + 1)`` head deadlines and
-    #: ``(limit + 1)`` head budgets.  0 disables the cap, and with it the only
-    #: owner those aggregates have.
-    #:
-    #: 8 because interim responses are used a handful at a time — a
-    #: ``100 Continue`` for an ``Expect``, one or two ``103 Early Hints`` link
-    #: sets — and no deployed pattern needs more.  ``101`` is not counted: it
-    #: is 1xx by number and final by meaning, so it ends the loop rather than
-    #: extending it.
     client_max_interim_responses: int = 8
-
-    #: Frames the async client will hold for one **raw** HTTP/2 stream — the
-    #: escape hatch where the receive loop hands frames to a registrant
-    #: (``WebSocketH2Client``) instead of routing them through the
-    #: request/response machine.  Full → that stream alone is reset with
-    #: ``ENHANCE_YOUR_CALM`` and its consumer woken with the same terminal
-    #: frame a disconnect delivers; the connection, and every other stream on
-    #: it, survives.  0 disables (unbounded).
-    #:
-    #: This is the triad's **total**, and it is denominated in frames, not
-    #: bytes.  Flow control cannot stand in for it: the queue takes every
-    #: frame type on that stream but WINDOW_UPDATE and SETTINGS, most of which
-    #: are not flow-controlled at all, and RFC 9113 §6.9.1 charges only a DATA
-    #: frame's payload — so a zero-length DATA frame buys depth for free.
-    #: DATA bytes are held to the window regardless, being credited on drain;
-    #: every other frame type here is bounded by the **unit**,
-    #: ``client_h2_max_frame_size``, so depth times that size is the ceiling.
-    #: The **count** axis proper, a sustained flood of such frames, wants the
-    #: ``RateWindow`` the server already meters empty frames with; the client
-    #: has none.
-    #:
-    #: 1024 is the server's own number for this shape — its consume-credited
-    #: queue caps the frame count at ``stream_queue_depth`` x 16 — because a
-    #: peer may legally burst its whole 65535-byte window as small frames, and
-    #: a depth that refuses that resets a conformant stream.  The server can
-    #: afford a tighter one: it drops the frame and continues, where a raw
-    #: stream carrying WebSocket bytes cannot be dropped without corrupting
-    #: it, so this cap resets and must not fire on legal traffic.
     client_raw_queue_depth: int = 1024
-
-    #: Maximum octets in one inbound HTTP/2 frame payload the async client
-    #: will read.  Judged from the 3-byte length in the frame header, so an
-    #: over-sized frame is refused *before* its payload is read and a
-    #: peer-declared number never sizes an allocation.  0 disables.
-    #:
-    #: This is the triad's **unit** for the HTTP/2 client.  The **total**
-    #: belongs to ``client_head_max_total`` (field blocks),
-    #: ``client_body_max_total`` (bodies) and ``client_raw_queue_depth`` (the
-    #: raw-stream queue); the **time** to ``client_head_timeout``,
-    #: ``client_body_timeout`` and the frame-read deadline.
-    #:
-    #: A receive-side check, not an announcement.  RFC 9113 §6.5.2 makes
-    #: 16384 the *initial* SETTINGS_MAX_FRAME_SIZE, in force from connection
-    #: start, and the client advertises no MAX_FRAME_SIZE of its own — so
-    #: the default is the one value that neither refuses a conforming peer
-    #: (below it) nor accepts what was never advertised (above it).  Move it
-    #: only to give a fault-injection scenario the peer it needs.
-    #:
-    #: Breach is a **connection** error of type FRAME_SIZE_ERROR even on a
-    #: non-zero stream, which RFC 9113 §4.2 would let us refuse per stream:
-    #: refusing before the read leaves the payload in the socket, so the next
-    #: frame header would be read from the middle of it.  Draining first to
-    #: keep the stream option open would make the refusal cost whatever the
-    #: peer declared.
     client_h2_max_frame_size: int = 16384
-
-    #: Maximum octets in one **decoded** field section the async client will
-    #: accept.  One number, two effects: it is advertised as
-    #: SETTINGS_MAX_HEADER_LIST_SIZE and installed as the HPACK decoder's
-    #: ``max_header_list_size``.  RFC 9113 §6.5.2 calls the announcement
-    #: *advisory* — advice to the peer, while the decoder is the defence — so
-    #: the two must be the same number.
-    #:
-    #: The triad's **total** for a field section, and the only bound counted
-    #: in decoded octets: compression decouples the two sizes, so a measured
-    #: 3528-octet block decoding to 80,740 clears every bound denominated in
-    #: wire octets.  **Unit**: ``client_h2_max_frame_size``.  **Time**: the
-    #: frame-read deadline, then ``client_head_timeout`` across CONTINUATION.
-    #:
-    #: Breach is a **connection** error of type COMPRESSION_ERROR, never a
-    #: stream error: hpack may have applied part of the block to the
-    #: connection-wide table before raising (§4.3).
-    #:
-    #: 65536 is what hpack enforces unasked, so the default changes what the
-    #: peer is *told*, not what is accepted.  0 disables: nothing advertised
-    #: (§6.5.2 makes the initial value unlimited) and the decoder opened to
-    #: the largest value the 32-bit setting can express, hpack having no off.
     client_h2_max_header_list_size: int = 65536
-
-    #: Whether the async client permits the peer to push (RFC 9113 §6.5.2).
-    #: A conformance switch, not a bound: it occupies no triad column.
-    #:
-    #: True advertises nothing — 1 is the parameter's initial value — and a
-    #: PUSH_PROMISE is decoded and dropped.  False advertises
-    #: SETTINGS_ENABLE_PUSH=0 **and** refuses a PUSH_PROMISE that arrives
-    #: after the ACK with a connection error of type PROTOCOL_ERROR.  One
-    #: setting for both halves: §6.5.2 makes the refusal a MUST for whoever
-    #: sends the 0, so advertising without refusing is worse than silence.
-    #:
-    #: Default True follows the parameter's RFC initial value, so the client
-    #: stays silent about push and remains compatible with peers that support
-    #: the default.  False is the explicit conformance setting and lets a
-    #: fault-injection scenario ask a server "I told you not to push — did you
-    #: push anyway?".
     client_h2_enable_push: bool = True
-
-    #: Dual-path conformance lane.  When true, every request
-    #: round-trips the native :class:`~blackbull.connection.Connection` through
-    #: ``as_scope()`` + ``from_scope()`` before dispatch, so the ASGI compat
-    #: conversion is exercised on the self-hosted path and cannot silently
-    #: bitrot.  Off by default (the native path skips the extra round-trip);
-    #: turned on in CI via ``BB_FORCE_ASGI_SCOPE=1``.
     force_asgi_scope: bool = False
-
-    #: Slice size (bytes) for a ``Transfer-Encoding: chunked`` request body:
-    #: each chunk in progress is delivered in reads of at most this many
-    #: bytes, so a peer-declared ``chunk-size`` never sets the read size.
-    #: 64 KiB sits below the backpressure high-water mark, which is what lets
-    #: the pause work.  The ``Content-Length`` path is transport-paced instead
-    #: — its per-read bound is ``body_chunk_max``.  Must be > 0.
     body_chunk_size: int = 65536
-
-    #: Per-read bound (bytes) for a ``Content-Length`` request body.  Reads
-    #: are up-to-n and transport-paced: each returns whatever the peer has
-    #: delivered so far, up to this cap, and never blocks waiting to fill it.
-    #: A slow peer therefore yields small slices (no read is ever a latency
-    #: commitment ``body_timeout`` might not deliver) while a fast one earns
-    #: fewer, larger ones — a large upload costs proportionally fewer receive
-    #: round-trips (8.5 MB: ~130 reads at 64 KiB → ~17 capped at 512 KiB).
-    #:
-    #: The cap is a memory bound, not a latency one: it limits how much a
-    #: single read may materialise per connection.  Raise it for large uploads
-    #: over fast links.  ``0`` is raised to ``1``: an up-to-zero read returns
-    #: ``b''``, which the read loop cannot tell from EOF.  No other floor
-    #: applies — this bounds the ``Content-Length`` path and
-    #: ``body_chunk_size`` the ``chunked`` one, so the two never meet.
     body_chunk_max: int = 524288
-
-    #: Maximum total request-body octets accepted for one request.  Over the
-    #: cap the server answers **413 Content Too Large** and closes: a declared
-    #: ``Content-Length`` is refused at head time, before a body byte is read,
-    #: and a ``chunked`` body is refused the moment the running total passes
-    #: the cap.  Without it a peer chooses how much memory the server spends —
-    #: ``conn.body()`` accumulates whatever arrives, and the per-read bound
-    #: (``body_chunk_max``) limits one read, not the sum of them.
-    #:
-    #: The connection always closes on a refusal, on both framings: the
-    #: unread octets are attacker-chosen, so parsing whatever follows them as
-    #: the next request is the request-smuggling shape.
-    #:
-    #: 30 MiB is the same class as Kestrel's ``MaxRequestBodySize`` (30,000,000
-    #: bytes = 28.6 MiB — near, not equal: this one is a round binary value);
-    #: nginx defaults to 1 MB, axum to 2 MB.  Raise it for an upload endpoint,
-    #: or set ``0`` to
-    #: disable the cap entirely (uvicorn's behaviour — the app then owns the
-    #: 413 decision).
     max_body_size: int = 31457280
-
-    #: Minimum sustained request-body delivery rate in **bytes per second**.
-    #: Below it, past the grace period, the connection is abandoned the same
-    #: way ``body_timeout`` abandons a silent one.  The rate is averaged over a
-    #: sliding window one grace period wide (``min_body_rate_grace``): a peer
-    #: that delivered early and then stalled is judged on the stalled window,
-    #: not on the lifetime average, so a burst cannot shelter a subsequent
-    #: drip.
-    #:
-    #: This is the anti-trickle half of the body defence, and it exists
-    #: because a transport-paced read cannot be one: each read returns
-    #: whatever has arrived, so ``body_timeout`` degrades from "fill a slice
-    #: in 30 s" to "send *something* every 30 s" — which a one-byte drip
-    #: always satisfies, holding a connection open indefinitely.  A rate is
-    #: the thing a drip cannot fake.
-    #:
-    #: 240 B/s over a 5 s grace matches Kestrel's ``MinRequestBodyDataRate``
-    #: defaults.  ``0`` disables the detector.
     min_body_rate: float = 240.0
-
-    #: Seconds of body-read waiting before ``min_body_rate`` starts being
-    #: enforced — the slow-start allowance, so a connection is never judged
-    #: on its first few packets.
-    #:
-    #: Only time spent *waiting on the transport* counts, never time the
-    #: handler spent between reads: the rate is evidence about the peer, and
-    #: a handler that writes each chunk to a slow disk must not be mistaken
-    #: for one.
     min_body_rate_grace: float = 5.0
-
-    #: Per-stream HTTP/2 flow-control window advertised in the server's SETTINGS.
-    #: 65535 is the RFC 9113 §6.9.2 default.  Production deployments serving
-    #: large responses should raise this — see
-    #: docs/reference/env-vars.md "Performance recommendations".
     h2_initial_window_size: int = 65535
-
-    #: Connection-level HTTP/2 flow-control window advertised via WINDOW_UPDATE(stream_id=0).
-    #: 65535 is the RFC 9113 §6.9.2 connection-window minimum.  Production
-    #: deployments should raise this — see env-vars.md recommendations.
     h2_connection_window_size: int = 65535
-
-    #: Maximum concurrent HTTP/2 streams per connection (SETTINGS_MAX_CONCURRENT_STREAMS).
     h2_max_concurrent_streams: int = 100
-
-    #: Advertise SETTINGS_ENABLE_CONNECT_PROTOCOL=1 (RFC 8441 §3) so peers may
-    #: bootstrap WebSocket over HTTP/2 via Extended CONNECT.  Off by default —
-    #: this path has fewer conformance tests than the HTTP/1.1 upgrade path,
-    #: and few clients use it in practice (Cloudflare's edge stack is the
-    #: main consumer).  Set ``BB_H2_ENABLE_WEBSOCKET=1`` to turn it on.
     h2_enable_websocket: bool = False
-
-    #: Maximum concurrent WebSocket (RFC 8441 Extended CONNECT) streams per
-    #: HTTP/2 connection.  Limits the per-connection blast radius of WS-over-H2
-    #: stream-exhaustion attacks — without this cap, an attacker can hold
-    #: ``h2_max_concurrent_streams`` (default 100) WS streams open per
-    #: connection across ``max_connections`` (default 0 = unbounded)
-    #: connections.  ``0`` disables the per-connection cap.  Only meaningful
-    #: when ``h2_enable_websocket=True``.
     h2_ws_max_streams_per_connection: int = 5
-
-    #: Negotiate ``permessage-deflate`` (RFC 7692) on incoming WebSocket
-    #: handshakes when the peer offers it.  On by default — matches modern
-    #: browsers and the major library defaults (`ws` for Node, Python
-    #: `websockets`, aiohttp).  Set ``BB_WS_PERMESSAGE_DEFLATE=0`` to disable.
     ws_permessage_deflate: bool = True
-
-    #: Maximum declared payload length (bytes) for a single inbound
-    #: WebSocket frame.  See BB_WS_MAX_FRAME_PAYLOAD docstring above for
-    #: the security rationale.  Default 64 MiB.
     ws_max_frame_payload: int = 64 * 1024 * 1024
-
-    #: Per-type, per-connection budget for metered control frames.  See
-    #: BB_FRAME_RATE_LIMIT above; ``0`` disables all frame-rate metering.
     frame_rate_limit: int = 20
-
-    #: Width in seconds of the frame-rate window.  See BB_FRAME_RATE_WINDOW.
     frame_rate_window: float = 1.0
-
-    #: Seconds of silence on an HTTP/2 connection before probing the peer
-    #: with a PING; ``0`` disables the probe.  See BB_H2_IDLE_TIMEOUT above.
     h2_idle_timeout: float = 300.0
-
-    #: Seconds to wait for any frame after a liveness PING before closing
-    #: with GOAWAY(NO_ERROR).  See BB_H2_PING_TIMEOUT above.
     h2_ping_timeout: float = 30.0
-
-    #: Seconds of silence on a WebSocket connection before probing the peer
-    #: with a PING.  See BB_WS_IDLE_TIMEOUT above.
     ws_idle_timeout: float = 300.0
-
-    #: Seconds to wait for any inbound frame after a WebSocket liveness PING
-    #: before closing with 1001.  See BB_WS_PONG_TIMEOUT above.
     ws_pong_timeout: float = 30.0
-
-    #: Maximum size (bytes) of one inbound MQTT control packet, checked on
-    #: the declared Remaining Length before the payload is buffered and
-    #: advertised in CONNACK.  See BB_MQTT_MAX_PACKET_SIZE above.
     mqtt_max_packet_size: int = 1024 * 1024
-
-    #: The broker's own Receive Maximum (§3.2.2.3.3), advertised in CONNACK.
     mqtt_receive_maximum: int = 64
-
-    #: Per-session bound on QoS>0 messages held while the client's Receive
-    #: Maximum window is full.  See BB_MQTT_MAX_QUEUED_MESSAGES above.
     mqtt_max_queued_messages: int = 1000
-
-    #: Independent MQTT actor handoff budgets; zero is not an unlimited mode.
     mqtt_broker_inbox_maxsize: int = 1024
     mqtt_broker_inbox_max_bytes: int = 16 * 1024 * 1024
     mqtt_connection_inbox_maxsize: int = 1024
     mqtt_connection_inbox_max_bytes: int = 16 * 1024 * 1024
-
-    #: Maximum number of topics holding a retained message.  See
-    #: BB_MQTT_MAX_RETAINED above.
     mqtt_max_retained: int = 10000
-
-    #: Per-session bound on the number of Topic Filters a session holds.
-    #: See BB_MQTT_MAX_SUBSCRIPTIONS above.
     mqtt_max_subscriptions: int = 1000
-
-    #: Total bound on the number of sessions the broker retains.  See
-    #: BB_MQTT_MAX_SESSIONS above.
     mqtt_max_sessions: int = 10000
-
-    #: Maximum size (bytes) of a message as the *application* receives it —
-    #: post-reassembly, post-inflation.  The frame cap above bounds one
-    #: compressed frame on the wire; this bounds what that frame becomes.
-    #: See BB_WS_MAX_MESSAGE_SIZE above.  Default 16 MiB, ``0`` disables.
     ws_max_message_size: int = 16 * 1024 * 1024
-
-    #: Seconds a worker spends letting already-accepted connections finish
-    #: after SIGTERM, before cancelling what is left.  Sits inside the
-    #: supervisor's own wait so the drain ends here rather than in a SIGKILL;
-    #: raising it past that wait only moves the deadline, it does not extend
-    #: it.  ``0`` drops in-flight requests immediately, which is what the
-    #: server did before this existed.
     worker_drain_timeout: float = 8.0
 
-    #: Per-connection asyncio.Semaphore cap on running stream handlers when
-    #: running with a single worker (0 = disabled).  Defaults to 20 so that
-    #: high-mux connections (e.g. -m 50) do not saturate the single event loop
-    #: with too many concurrent tasks — benchmarks show mux-10 outperforms mux-50
-    #: on a single worker without this cap.
+    #: 20 on both paths, because past it concurrency costs more than it
+    #: buys on one event loop: uncapped, mux-10 out-throughputs mux-50
+    #: on a single worker, and a multi-worker box reaches the same point
+    #: at roughly 4 connections x mux-50 per worker.
     h2_active_streams_1w: int = 20
-
-    #: Per-connection asyncio.Semaphore cap on running stream handlers when
-    #: running with multiple workers (0 = disabled).  SO_REUSEPORT distributes
-    #: connections across workers, but each worker still runs a single event loop.
-    #: At mux-50 with ~4 connections per worker the uncapped task count (4×50=200)
-    #: exceeds the optimum and causes scheduler overhead similar to single-worker.
-    #: Default 20 matches BB_H2_ACTIVE_STREAMS_1W so both paths behave consistently.
     h2_active_streams: int = 20
-
-    #: Use uvloop as the asyncio event loop (requires ``pip install blackbull[speed]``).
-    #: When True the uvloop EventLoopPolicy is installed before each ``asyncio.run()``
-    #: call.  Falls back to the standard asyncio loop with a warning if uvloop is not
-    #: installed.
     use_uvloop: bool = False
-
-    #: Minimum body size (bytes) for CompressionMiddleware to bother compressing.
     compression_min_size: int = 100
-
-    #: Body size threshold (bytes) above which compression runs in a thread-pool
-    #: executor so the event loop stays responsive.  0 = always on event loop (disable offloading).
-    compression_executor_threshold: int = 65536  # 64 KiB
-
-    #: Max concurrent compression offloads to the asyncio executor.  When at
-    #: this cap, eligible responses are served **uncompressed** rather than
-    #: queued.  0 removes the cap, leaving an unbounded executor queue that
-    #: saturates under burst load.
+    compression_executor_threshold: int = 64 * 1024
     compression_max_inflight: int = DEFAULT_COMPRESSION_MAX_INFLIGHT
-
-    #: Brotli quality level (0–11) for dynamic-response compression.  The
-    #: brotli library's own default is 11 (max compression, designed for
-    #: build-time / static pre-compression) — too expensive on the request
-    #: path for tiny dynamic payloads.  4 matches Google's and Cloudflare's
-    #: recommendation for dynamic content; 5 matches Apache mod_brotli's
-    #: default; 6 matches nginx ngx_brotli's default.  Raise to 11 only when
-    #: producing pre-compressed sibling assets out-of-band, not on live
-    #: responses.
     brotli_quality: int = 4
-
-    #: Per-worker CPU pinning policy.  ``auto`` (default) gives worker *i* the
-    #: *i*-th CPU of the mask the process already carries; ``off`` leaves
-    #: placement to the operator; an explicit ``taskset``-style list
-    #: (``2,4,6-9`` — ``0`` is CPU 0, not the off switch) confines workers to
-    #: those CPUs.  Multi-worker only — a single-worker server is never
-    #: pinned.  See blackbull/server/affinity.py.
     cpu_pinning: str = 'auto'
-
-    #: Cooperative yield interval for the HTTP/2 frame loop.  After this many
-    #: stream tasks are spawned without a natural yield, ``asyncio.sleep(0)``
-    #: is inserted so the event loop can dispatch queued tasks.
-    #: 0 = disabled.
     frame_yield_every: int = 8
 
 
@@ -1507,9 +891,6 @@ def get_settings() -> Settings:
         log_batch_size=_int_env('BB_LOG_BATCH_SIZE', 64),
         log_batch_timeout_ms=_int_env('BB_LOG_BATCH_TIMEOUT_MS', 5),
         log_file=_str_env('BB_LOG_FILE', ''),
-        # Defaults match the Linux kernel baseline.  See
-        # docs/reference/env-vars.md "Performance recommendations"
-        # for the values to override these with on a tuned deployment.
         socket_backlog=_int_env('BB_SOCKET_BACKLOG', 1024),
         socket_sndbuf=_int_env_nonneg('BB_SOCKET_SNDBUF', 0),
         socket_rcvbuf=_int_env_nonneg('BB_SOCKET_RCVBUF', 0),
@@ -1551,9 +932,6 @@ def get_settings() -> Settings:
         max_body_size=_int_env_nonneg('BB_MAX_BODY_SIZE', 31457280),
         min_body_rate=_float_env_nonneg('BB_MIN_BODY_RATE', 240.0),
         min_body_rate_grace=_float_env_nonneg('BB_MIN_BODY_RATE_GRACE', 5.0),
-        # RFC 9113 §6.9.2 default initial window size.  See
-        # docs/reference/env-vars.md "Performance recommendations" for the
-        # values commonly used on tuned production deployments.
         h2_initial_window_size=_int_env('BB_H2_INITIAL_WINDOW_SIZE', 65535),
         h2_connection_window_size=_int_env('BB_H2_CONNECTION_WINDOW_SIZE', 65535),
         h2_max_concurrent_streams=_int_env('BB_H2_MAX_CONCURRENT_STREAMS', 100),
