@@ -11,6 +11,9 @@ differences come from the framework, not the handler:
 * ``GET /``        — replies "ok" (text)
 * ``POST /echo``   — replies with the request body verbatim
 * ``GET /chunked`` — returns a streaming response (triggers chunked TE)
+* ``GET /framing-known-stream`` — streams a declared two-byte response
+* ``GET /framing-204`` — attempts to attach framing and content to 204
+* ``GET /framing-205`` — attempts to attach nonzero framing and content to 205
 * ``QUERY /query`` — replies with the request body verbatim (RFC 10008;
   registered with QUERY only, so any other method on the path draws a 405
   whose Allow header must advertise QUERY)
@@ -85,6 +88,29 @@ def _make_app() -> BlackBull:
             for ch in (b'a', b'b', b'c'):
                 yield ch
         await StreamingResponse(events())(scope, receive, send)
+
+    @app.route(path='/framing-known-stream')
+    async def framing_known_stream(scope, receive, send):
+        await send({'type': 'http.response.start', 'status': 200,
+                    'headers': [(b'content-length', b'2'),
+                                (b'transfer-encoding', b'gzip')]})
+        await send({'type': 'http.response.body', 'body': b'a',
+                    'more_body': True})
+        await send({'type': 'http.response.body', 'body': b'b'})
+
+    @app.route(path='/framing-204')
+    async def framing_no_content(scope, receive, send):
+        await send({'type': 'http.response.start', 'status': 204,
+                    'headers': [(b'content-length', b'2'),
+                                (b'transfer-encoding', b'chunked')]})
+        await send({'type': 'http.response.body', 'body': b'ok'})
+
+    @app.route(path='/framing-205')
+    async def framing_reset_content(scope, receive, send):
+        await send({'type': 'http.response.start', 'status': 205,
+                    'headers': [(b'content-length', b'2'),
+                                (b'transfer-encoding', b'chunked')]})
+        await send({'type': 'http.response.body', 'body': b'ok'})
 
     return app
 

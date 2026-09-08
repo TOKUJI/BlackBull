@@ -33,22 +33,26 @@ class _SendfileBytesWriter(BytesWriter):
     so tests can assert on the on-the-wire byte stream.
 
     *raises_notimplemented* (default False) makes ``sendfile`` raise
-    NotImplementedError to exercise the chunked fallback the sender
+    NotImplementedError to exercise the buffered fallback the sender
     falls back to on TLS transports.
     """
 
-    def __init__(self, raises_notimplemented: bool = False):
+    def __init__(self, raises_notimplemented: bool = False,
+                 sendfile_limit: int | None = None):
         super().__init__()
         self.sendfile_calls: list[tuple[int, int]] = []
         self.raises_notimplemented = raises_notimplemented
+        self.sendfile_limit = sendfile_limit
 
     async def sendfile(self, file, offset: int, count: int) -> int:
         if self.raises_notimplemented:
             raise NotImplementedError('TLS transport not supported')
         self.sendfile_calls.append((offset, count))
         file.seek(offset)
-        self.data += file.read(count)
-        return count
+        sent = count if self.sendfile_limit is None else min(
+            count, self.sendfile_limit)
+        self.data += file.read(sent)
+        return sent
 
 
 def _make_scope(type_: str = 'http'):
@@ -174,7 +178,89 @@ class TestHTTP1SenderPathsend:
         assert b'content-length: 99' in head
 
     @pytest.mark.asyncio
-    async def test_falls_back_to_chunked_read_on_tls(self, tmp_path):
+    async def test_ignores_application_transfer_encoding(self, tmp_path):
+        path = self._write_tmp(tmp_path, 'body.bin', b'body')
+        w = _SendfileBytesWriter()
+        s = HTTP1Sender(w)
+        await s({'type': 'http.response.start', 'status': 200,
+                 'headers': [(b'transfer-encoding', b'gzip')]})
+        await s({'type': 'http.response.pathsend', 'path': path})
+
+        head, body = w.data.split(b'\r\n\r\n', 1)
+        assert b'transfer-encoding' not in head.lower()
+        assert b'content-length: 4' in head.lower()
+        assert body == b'body'
+
+    @pytest.mark.asyncio
+    async def test_rejects_mismatched_content_length_before_wire(self, tmp_path):
+        path = self._write_tmp(tmp_path, 'body.bin', b'body')
+        w = _SendfileBytesWriter()
+        s = HTTP1Sender(w)
+        await s({'type': 'http.response.start', 'status': 200,
+                 'headers': [(b'content-length', b'5')]})
+
+        with pytest.raises(ValueError, match='Content-Length'):
+            await s({'type': 'http.response.pathsend', 'path': path})
+        assert w.data == b''
+        assert w.sendfile_calls == []
+
+    @pytest.mark.asyncio
+    async def test_rejects_trailers_before_pathsend_writes_headers(self, tmp_path):
+        path = self._write_tmp(tmp_path, 'body.bin', b'body')
+        w = _SendfileBytesWriter()
+        s = HTTP1Sender(w)
+        await s({'type': 'http.response.start', 'status': 200,
+                 'headers': [], 'trailers': True})
+
+        with pytest.raises(ValueError, match='pathsend.*trailers'):
+            await s({'type': 'http.response.pathsend', 'path': path})
+        assert w.data == b''
+        assert w.sendfile_calls == []
+        assert s._started is False
+        assert s._completed is False
+
+    @pytest.mark.asyncio
+    async def test_partial_sendfile_is_retried_to_completion(self, tmp_path):
+        path = self._write_tmp(tmp_path, 'body.bin', b'body')
+        w = _SendfileBytesWriter(sendfile_limit=2)
+        s = HTTP1Sender(w)
+        await s({'type': 'http.response.start', 'status': 200, 'headers': []})
+
+        await s({'type': 'http.response.pathsend', 'path': path})
+
+        assert w.sendfile_calls == [(0, 4), (2, 2)]
+        assert w.data.endswith(b'body')
+        assert s._completed is True
+
+    @pytest.mark.asyncio
+    async def test_stalled_sendfile_is_not_reported_as_complete(self, tmp_path):
+        path = self._write_tmp(tmp_path, 'body.bin', b'body')
+        w = _SendfileBytesWriter(sendfile_limit=0)
+        s = HTTP1Sender(w)
+        await s({'type': 'http.response.start', 'status': 200, 'headers': []})
+
+        with pytest.raises(ConnectionResetError, match='sendfile'):
+            await s({'type': 'http.response.pathsend', 'path': path})
+        assert s._completed is False
+        assert s._poisoned is True
+
+    @pytest.mark.asyncio
+    async def test_short_fallback_read_is_not_reported_as_complete(
+            self, tmp_path, monkeypatch):
+        path = self._write_tmp(tmp_path, 'body.bin', b'body')
+        w = _SendfileBytesWriter(raises_notimplemented=True)
+        s = HTTP1Sender(w)
+        await s({'type': 'http.response.start', 'status': 200, 'headers': []})
+        monkeypatch.setattr('blackbull.server.sender.os.path.getsize',
+                            lambda _path: 5)
+
+        with pytest.raises(ConnectionResetError, match='pathsend'):
+            await s({'type': 'http.response.pathsend', 'path': path})
+        assert s._completed is False
+        assert s._poisoned is True
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_buffered_read_on_tls(self, tmp_path):
         """When ``writer.sendfile`` raises NotImplementedError (SSL
         transport, mocked test) the sender reads the file in chunks
         via ``asyncio.to_thread`` and writes them through the normal
@@ -202,7 +288,8 @@ class TestHTTP1SenderPathsend:
         s = HTTP1Sender(w)
         s._head_mode = True   # the actor sets this for HEAD requests
         await s({'type': 'http.response.start', 'status': 200,
-                 'headers': [(b'content-length', b'1234')]})
+                 'headers': [(b'content-length', b'1234')],
+                 'trailers': True})
         await s({'type': 'http.response.pathsend', 'path': path})
 
         assert w.sendfile_calls == []
@@ -220,6 +307,7 @@ class TestHTTP1SenderPathsend:
         with caplog.at_level('WARNING', logger='blackbull.server.sender'):
             await s({'type': 'http.response.pathsend', 'path': path})
         assert w.data == b''
+        assert s._completed is False
         assert any('pathsend without buffered start' in r.message
                    for r in caplog.records)
 
@@ -453,6 +541,12 @@ class TestHTTP1SenderRenderStart:
         s._buffered_headers = Headers([(b'a', b'b')])
         s._expect_trailers = True
         s._head_mode = True
+        s._content_length = 3
+        s._body_bytes = 1
+        s._suppress_body = True
+        s._informational = True
+        s._response_started = True
+        s._poisoned = True
         s._log_record = object()
         s.reset_per_request_state()
         assert s._started is False
@@ -461,4 +555,10 @@ class TestHTTP1SenderRenderStart:
         assert s._buffered_headers is None
         assert s._expect_trailers is False
         assert s._head_mode is False
+        assert s._content_length is None
+        assert s._body_bytes == 0
+        assert s._suppress_body is False
+        assert s._informational is False
+        assert s._response_started is False
+        assert s._poisoned is False
         assert s._log_record is None
