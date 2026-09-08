@@ -6610,9 +6610,10 @@ that Content-Length can be injected when the app omits it.</p>
   buffered start, flush the start (adding <code>Content-Length</code> for
   single-body responses or <code>Transfer-Encoding: chunked</code> when
   <code>more_body=True</code>); subsequent calls write chunk-framed body bytes
-  and the terminal <code>0\r\n\r\n</code> when streaming completes.</li>
-<li><code>{'type': 'http.response.trailers', ...}</code> — write the terminal
-  <code>0\r\n</code> followed by the trailer headers (chunked encoding).</li>
+  and the terminal <code>0\r\n\r\n</code> when streaming completes without
+  declared trailers.</li>
+<li><code>{'type': 'http.response.trailers', ...}</code> — write <code>0\r\n</code> once,
+  followed by trailer fields; the final event adds the empty line.</li>
 </ul>
 <p>Unknown event types are logged and dropped; non-dict / non-bytes
 bodies raise <code>TypeError</code>.</p>

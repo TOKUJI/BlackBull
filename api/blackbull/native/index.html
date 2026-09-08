@@ -5656,6 +5656,7 @@ and one <code>send</code></strong>, while streaming is header-object then body-c
 <p><code>header</code> is <code>None</code> when absent (never <code>[]</code> — presence is decided by
 <code>is not None</code>).  <code>body</code> is <code>None</code> when absent; <code>b''</code> is a real
 empty body.  <code>more_body</code> marks a non-terminal body chunk (streaming).
+<code>more_trailers</code> marks a non-terminal trailer event.
 <code>expects_trailers</code> preserves the ASGI <code>http.response.start</code>
 <code>trailers: True</code> flag so the sender withholds the terminal chunk until
 the trailers event (lossless full-form compat — a terminal body before

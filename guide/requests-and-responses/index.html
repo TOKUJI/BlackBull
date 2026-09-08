@@ -6331,7 +6331,9 @@ converted to the native message at the handler boundary.  A complete
 is a header object then body-chunk objects.  Under an external ASGI host
 (<code>BlackBull(asgi=True)</code> + <code>to_asgi()</code>) the same handler code runs with
 plain ASGI dicts on the wire.  The <code>http.response.start</code> <code>trailers</code>
-flag is preserved losslessly via <code>NativeResponse.expects_trailers</code>.</p>
+flag is preserved losslessly via <code>NativeResponse.expects_trailers</code>, and
+<code>http.response.trailers</code> <code>more_trailers</code> is preserved via
+<code>NativeResponse.more_trailers</code>.</p>
 <p>On the native path a <code>Response</code> (or subclass) is serialised via
 <code>Response.to_native()</code>.  A subclass that overrides <code>__call__</code> to emit a
 custom event sequence is honoured on the WebSocket / external-host
@@ -6409,20 +6411,31 @@ body.  Use the <code>http.response.trailers</code> event after the last
         <span class="s1">'status'</span><span class="p">:</span> <span class="mi">200</span><span class="p">,</span>
         <span class="s1">'headers'</span><span class="p">:</span> <span class="p">[</span>
             <span class="p">(</span><span class="sa">b</span><span class="s1">'content-type'</span><span class="p">,</span>      <span class="sa">b</span><span class="s1">'text/plain'</span><span class="p">),</span>
-            <span class="p">(</span><span class="sa">b</span><span class="s1">'transfer-encoding'</span><span class="p">,</span> <span class="sa">b</span><span class="s1">'chunked'</span><span class="p">),</span>
             <span class="p">(</span><span class="sa">b</span><span class="s1">'trailer'</span><span class="p">,</span>           <span class="sa">b</span><span class="s1">'x-checksum'</span><span class="p">),</span>
         <span class="p">],</span>
+        <span class="s1">'trailers'</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
     <span class="p">})</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">({</span>
         <span class="s1">'type'</span><span class="p">:</span> <span class="s1">'http.response.body'</span><span class="p">,</span>
         <span class="s1">'body'</span><span class="p">:</span> <span class="sa">b</span><span class="s1">'chunk data here'</span><span class="p">,</span>
-        <span class="s1">'more_body'</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+        <span class="s1">'more_body'</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
     <span class="p">})</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">({</span>
         <span class="s1">'type'</span><span class="p">:</span> <span class="s1">'http.response.trailers'</span><span class="p">,</span>
         <span class="s1">'headers'</span><span class="p">:</span> <span class="p">[(</span><span class="sa">b</span><span class="s1">'x-checksum'</span><span class="p">,</span> <span class="sa">b</span><span class="s1">'abc123'</span><span class="p">)],</span>
+        <span class="s1">'more_trailers'</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
     <span class="p">})</span>
 </code></pre></div>
+<p><code>trailers=True</code> transfers response-completion ownership from the last body
+event to the last trailer event.  BlackBull selects HTTP/1.1 chunked framing,
+ignores a supplied <code>Content-Length</code>, and writes the zero chunk only when the
+trailer section begins.  To split a trailer section across events, set
+<code>more_trailers=True</code> on every event except the last.  HTTP/2 collects those
+parts into one trailing HEADERS block carrying <code>END_STREAM</code>.</p>
+<p>HEAD responses never carry content or a trailer section.  The response is
+complete after its header section even if the application declared trailers;
+later trailer events are ignored so they cannot become bytes in the next
+keep-alive response.</p>
 <h2 id="websocket-frames">WebSocket frames<a class="headerlink" href="#websocket-frames" title="Permanent link">&para;</a></h2>
 <p>For WebSocket routes (<code>scheme=Scheme.websocket</code>), use
 <code>WebSocketResponse</code> to dispatch on payload type automatically:</p>
@@ -6498,11 +6511,13 @@ world\r\n
 \r\n
 </code></pre></div>
 <p>The terminal <code>0\r\n\r\n</code> is written automatically when
-<code>more_body=False</code> arrives (unless <code>trailers=True</code> was set in
-<code>http.response.start</code>, in which case the
-<code>http.response.trailers</code> handler writes it).</p>
-<p>HTTP/2 is unaffected — DATA frames carry explicit length and
-<code>END_STREAM</code> maps to <code>more_body=False</code>.</p>
+<code>more_body=False</code> arrives.  When <code>trailers=True</code> was set in
+<code>http.response.start</code>, the final body event remains unterminated and the last
+<code>http.response.trailers</code> event writes <code>0\r\n</code>, the trailer fields, and the
+final blank line.</p>
+<p>HTTP/2 uses explicitly sized DATA frames instead of chunk syntax.  Without
+trailers, <code>END_STREAM</code> maps to <code>more_body=False</code>; with declared trailers it
+belongs to the trailing HEADERS block.</p>
 <h3 id="writing-streaming-safe-middleware">Writing streaming-safe middleware<a class="headerlink" href="#writing-streaming-safe-middleware" title="Permanent link">&para;</a></h3>
 <p>Any middleware that wraps the <code>send</code> callable and collects body
 parts will silently buffer a streaming response, defeating
