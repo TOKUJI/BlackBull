@@ -581,16 +581,16 @@ class TestHTTPResponseTrailers:
     async def test_trailers_event_does_not_raise(self):
         send, _writer = _make_sender_and_writer()
         await send({'type': 'http.response.start', 'status': 200,
-                    'headers': [(b'transfer-encoding', b'chunked')]})
-        await send({'type': 'http.response.body', 'body': b'hello', 'more_body': True})
+                    'headers': [], 'trailers': True})
+        await send({'type': 'http.response.body', 'body': b'hello', 'more_body': False})
         await send({'type': 'http.response.trailers',
                     'headers': [(b'x-checksum', b'abc123')], 'more_trailers': False})
 
     async def test_trailer_header_appears_in_wire_output(self):
         send, writer = _make_sender_and_writer()
         await send({'type': 'http.response.start', 'status': 200,
-                    'headers': [(b'transfer-encoding', b'chunked')]})
-        await send({'type': 'http.response.body', 'body': b'hello', 'more_body': True})
+                    'headers': [], 'trailers': True})
+        await send({'type': 'http.response.body', 'body': b'hello', 'more_body': False})
         await send({'type': 'http.response.trailers',
                     'headers': [(b'x-checksum', b'abc123')], 'more_trailers': False})
         assert b'x-checksum: abc123' in bytes(writer.written).lower()
@@ -599,8 +599,8 @@ class TestHTTPResponseTrailers:
         send, writer = _make_sender_and_writer()
         body = b'response-body'
         await send({'type': 'http.response.start', 'status': 200,
-                    'headers': [(b'transfer-encoding', b'chunked')]})
-        await send({'type': 'http.response.body', 'body': body, 'more_body': True})
+                    'headers': [], 'trailers': True})
+        await send({'type': 'http.response.body', 'body': body, 'more_body': False})
         await send({'type': 'http.response.trailers',
                     'headers': [(b'x-trailer', b'value')], 'more_trailers': False})
         wire = bytes(writer.written)
@@ -608,6 +608,161 @@ class TestHTTPResponseTrailers:
         trailer_pos = wire.lower().find(b'x-trailer')
         assert body_pos != -1 and trailer_pos != -1
         assert trailer_pos > body_pos
+
+    async def test_terminal_body_defers_completion_to_trailers(self):
+        send, writer = _make_sender_and_writer()
+        await send({'type': 'http.response.start', 'status': 200,
+                    'headers': [(b'content-length', b'5')], 'trailers': True})
+        await send({'type': 'http.response.body', 'body': b'hello',
+                    'more_body': False})
+
+        before_trailers = bytes(writer.written).lower()
+        assert b'transfer-encoding: chunked\r\n' in before_trailers
+        assert b'content-length:' not in before_trailers
+        assert before_trailers.endswith(b'5\r\nhello\r\n')
+
+        await send({'type': 'http.response.trailers',
+                    'headers': [(b'x-checksum', b'abc123')],
+                    'more_trailers': False})
+        completed = bytes(writer.written).lower()
+        assert completed.endswith(b'5\r\nhello\r\n0\r\nx-checksum: abc123\r\n\r\n')
+
+        await send({'type': 'http.response.body', 'body': b'extra'})
+        assert bytes(writer.written).lower() == completed
+
+    async def test_empty_body_still_gets_chunk_terminator_and_trailers(self):
+        send, writer = _make_sender_and_writer()
+        await send({'type': 'http.response.start', 'status': 200,
+                    'headers': [], 'trailers': True})
+        await send({'type': 'http.response.body', 'body': b'',
+                    'more_body': False})
+        assert not bytes(writer.written).endswith(b'0\r\n\r\n')
+
+        await send({'type': 'http.response.trailers',
+                    'headers': [(b'x-empty', b'yes')],
+                    'more_trailers': False})
+        assert bytes(writer.written).endswith(b'0\r\nx-empty: yes\r\n\r\n')
+
+    async def test_streaming_body_uses_one_terminal_chunk(self):
+        send, writer = _make_sender_and_writer()
+        await send({'type': 'http.response.start', 'status': 200,
+                    'headers': [], 'trailers': True})
+        await send({'type': 'http.response.body', 'body': b'a',
+                    'more_body': True})
+        await send({'type': 'http.response.body', 'body': b'b',
+                    'more_body': False})
+        await send({'type': 'http.response.trailers',
+                    'headers': [(b'x-stream', b'done')],
+                    'more_trailers': False})
+
+        body = bytes(writer.written).split(b'\r\n\r\n', 1)[1]
+        assert body == b'1\r\na\r\n1\r\nb\r\n0\r\nx-stream: done\r\n\r\n'
+        assert body.count(b'0\r\n') == 1
+
+    async def test_multiple_trailer_events_share_one_trailer_section(self):
+        send, writer = _make_sender_and_writer()
+        await send({'type': 'http.response.start', 'status': 200,
+                    'headers': [], 'trailers': True})
+        await send({'type': 'http.response.body', 'body': b'ok',
+                    'more_body': False})
+        await send({'type': 'http.response.trailers',
+                    'headers': [(b'x-first', b'1')],
+                    'more_trailers': True})
+        first = bytes(writer.written)
+        assert first.endswith(b'0\r\nx-first: 1\r\n')
+
+        await send({'type': 'http.response.trailers',
+                    'headers': [(b'x-second', b'2')],
+                    'more_trailers': False})
+        body = bytes(writer.written).split(b'\r\n\r\n', 1)[1]
+        assert body == b'2\r\nok\r\n0\r\nx-first: 1\r\nx-second: 2\r\n\r\n'
+
+    async def test_head_does_not_emit_a_trailer_section(self):
+        send, writer = _make_sender_and_writer()
+        send._head_mode = True
+        await send({'type': 'http.response.start', 'status': 200,
+                    'headers': [(b'content-length', b'5')], 'trailers': True})
+        await send({'type': 'http.response.body', 'body': b'hello',
+                    'more_body': False})
+        complete_head = bytes(writer.written)
+
+        await send({'type': 'http.response.trailers',
+                    'headers': [(b'x-checksum', b'abc123')],
+                    'more_trailers': False})
+        assert bytes(writer.written) == complete_head
+        assert complete_head.endswith(b'\r\n\r\n')
+        assert b'hello' not in complete_head
+        assert b'x-checksum' not in complete_head.lower()
+
+
+@pytest.mark.asyncio
+class TestHTTPResponseTrailerLifecycle:
+    async def test_unfinished_trailers_do_not_advance_keep_alive(self):
+        first = _http_request(
+            path='/one', headers={'Host': 'localhost', 'Connection': 'keep-alive'})
+        second = _http_request(
+            path='/two', headers={'Host': 'localhost', 'Connection': 'close'})
+        first_line, first_rest = first.split(b'\r\n', 1)
+        calls = []
+
+        async def app(conn, receive, send):
+            calls.append(conn.path)
+            await send({'type': 'http.response.start', 'status': 200,
+                        'headers': [], 'trailers': True})
+            await send({'type': 'http.response.body', 'body': b'ok',
+                        'more_body': False})
+
+        actor = HTTP1Actor(_FakeReader(first_rest + second), _FakeWriter(),
+                           app, None, request=first_line + b'\r\n')
+        await actor.run()
+        assert calls == ['/one']
+
+    async def test_exception_with_pending_trailers_closes_connection(self):
+        first = _http_request(
+            path='/one', headers={'Host': 'localhost', 'Connection': 'keep-alive'})
+        second = _http_request(
+            path='/two', headers={'Host': 'localhost', 'Connection': 'close'})
+        first_line, first_rest = first.split(b'\r\n', 1)
+        calls = []
+
+        async def app(conn, receive, send):
+            calls.append(conn.path)
+            await send({'type': 'http.response.start', 'status': 200,
+                        'headers': [], 'trailers': True})
+            await send({'type': 'http.response.body', 'body': b'ok',
+                        'more_body': False})
+            raise RuntimeError('application failed before trailers')
+
+        actor = HTTP1Actor(_FakeReader(first_rest + second), _FakeWriter(),
+                           app, None, request=first_line + b'\r\n')
+        await actor.run()
+        assert calls == ['/one']
+
+    async def test_cancellation_with_pending_trailers_closes_connection(
+            self, monkeypatch):
+        from blackbull.env import reset_settings_cache
+
+        monkeypatch.setenv('BB_REQUEST_TIMEOUT', '0.01')
+        reset_settings_cache()
+        cancelled = False
+
+        async def app(conn, receive, send):
+            nonlocal cancelled
+            await send({'type': 'http.response.start', 'status': 200,
+                        'headers': [], 'trailers': True})
+            await send({'type': 'http.response.body', 'body': b'ok',
+                        'more_body': False})
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled = True
+
+        actor, _writer = _make_actor(_http_request(), app)
+        try:
+            await actor.run()
+        finally:
+            reset_settings_cache()
+        assert cancelled
 
 
 # ---------------------------------------------------------------------------

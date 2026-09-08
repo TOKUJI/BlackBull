@@ -400,7 +400,8 @@ def wrap_native_send(raw_send):
                     more_body=event.get('more_body', False)))
             elif ev_type == 'http.response.trailers':
                 await raw_send(NativeResponse(
-                    trailers=list(event.get('headers') or [])))
+                    trailers=list(event.get('headers') or []),
+                    more_trailers=bool(event.get('more_trailers', False))))
             else:
                 # push / pathsend / disconnect / unknown — pass through.
                 await raw_send(event)
