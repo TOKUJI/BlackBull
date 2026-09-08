@@ -36,65 +36,38 @@ from .cap_log import log_cap_hit
 
 logger = logging.getLogger(__name__)
 
-#: End of the message head.  Owned by the reader contract (``read_head`` is what
-#: searches for it); aliased here because the loop still names it.
-_REQ_END = _HEAD_END
 _WS_GUID = b'258EAFA5-E914-47DA-95CA-C5AB0DC85B11'  # RFC 6455 §1.3
-# Methods advertised in the Allow header of a server-wide ``OPTIONS *``
-# response (RFC 9112 §3.2.4).  The origin implements the standard set; route
-# dispatch is bypassed for asterisk-form, so this is a server-level answer.
+# RFC 9112 §3.2.4 — the methods a server-wide ``OPTIONS *`` advertises.
 _SERVER_WIDE_ALLOW = b'GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS'
 _HTTP_PORT  = 80
 _HTTPS_PORT = 443
 
-# Upper bound on request-body bytes drained to recover keep-alive framing
-# when a handler leaves the body unread.  A larger unread body
-# closes the connection rather than spending bandwidth draining it — nginx's
-# lingering-close does the same.
 _MAX_KEEPALIVE_DRAIN = 64 * 1024
 
-# Extensions advertised in scope['extensions'] for cleartext HTTP/1.1.
-# ``http.response.pathsend`` lets middleware (notably the static-file
-# serve path) hand a file path to the sender so the body bytes go
-# through ``loop.sendfile`` — zero-copy on Linux, no per-chunk
-# event-loop dispatch overhead.  TLS connections do NOT advertise it
-# because ``loop.sendfile`` raises NotImplementedError on SSL
-# transports (the kernel can't see the plaintext to copy).
+# TLS connections do NOT advertise pathsend: ``loop.sendfile`` raises
+# NotImplementedError on SSL transports (the kernel can't see the plaintext).
 _H1_PATHSEND_EXTENSIONS = {'http.response.pathsend': {}}
 
-# RFC 9110 §5.6.2 — token = 1*tchar
-# RFC 9110 §5.5  — field-value disallows CTLs (0x00-0x1F, 0x7F) except HTAB
-# RFC 9112 §4   — method = token, HTTP-version = "HTTP/" DIGIT "." DIGIT
+# RFC 9112 §4 — HTTP-version = "HTTP/" DIGIT "." DIGIT
 _HTTP_VERSION_RE = re.compile(rb'^HTTP/\d\.\d$')
 
-# Compiled-regex validators rather than per-byte membership scans.  The
-# character classes below are the exact negation of the RFC
-# 9110 §5.6.2 tchar set and the RFC 9110 §5.5 CTL-except-HTAB allow-list
-# respectively; `re.search` returns a Match on the first invalid byte (3–4×
-# faster than the equivalent Python loop per pyperf).
+# The exact negation of the RFC 9110 §5.6.2 tchar set and the §5.5
+# CTL-except-HTAB allow-list.  Regexes rather than per-byte membership scans:
+# 3–4× faster than the equivalent Python loop per pyperf.
 #
-# `_FIELD_NAME_INVALID_RE` has no call site in this module — `_TCHAR_OCTETS`
-# below is what `_parse` uses — but it is **not** dead: it is the reference
-# `tests/unit/test_parse_octet_tables.py` validates that table against, octet
-# for octet, so the fast form cannot drift from the RFC without a test failing.
+# `_FIELD_NAME_INVALID_RE` has no call site here — `_TCHAR_OCTETS` is what
+# `_parse` uses — and is **not** dead: `tests/unit/test_parse_octet_tables.py`
+# validates that table against it octet for octet, so the fast form cannot
+# drift from the RFC without a test failing.
 _FIELD_NAME_INVALID_RE = re.compile(rb"[^!#$%&'*+\-.^_`|~0-9A-Za-z]")
 _FIELD_VALUE_INVALID_RE = re.compile(rb"[\x00-\x08\x0a-\x1f\x7f]")
 
-# RFC 9110 §5.6.2 tchar, spelled out.  Deleting every allowed octet leaves
-# the empty string for a valid token, so a non-empty result is the rejection
-# — the same trick as `_TARGET_ALLOWED_OCTETS`, and measurably cheaper than
-# `_FIELD_NAME_INVALID_RE` (which stays as the source of truth this table is
-# tested against, octet for octet).
+# RFC 9110 §5.6.2 tchar, spelled out.
 _TCHAR_OCTETS = (b"!#$%&'*+-.^_`|~"
                  b'0123456789'
                  b'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
                  b'abcdefghijklmnopqrstuvwxyz')
 
-# Everything a header *block* may contain, so that deleting it leaves only
-# CR, LF, and the CTLs a field value may not carry (`_FIELD_VALUE_INVALID_RE`).
-# A clean block therefore reduces to a run of CRLFs — which is what
-# `_block_values_are_clean` checks, in one C-level pass for the whole request
-# instead of one regex per header.
 _BLOCK_ALLOWED_OCTETS = bytes(
     c for c in range(256)
     if not (c < 0x09 or 0x0B <= c <= 0x0C or 0x0E <= c <= 0x1F or c == 0x7F)
@@ -105,71 +78,39 @@ _BLOCK_ALLOWED_OCTETS = bytes(
 def _block_values_are_clean(data: bytes) -> bool:
     """True when no field value in *data* can contain a forbidden octet.
 
-    Deleting every permitted octet leaves only CR, LF and forbidden CTLs.
-    If what remains tiles exactly into CRLF pairs, then every CR and LF in
-    the block is a line terminator and no forbidden CTL appears anywhere —
-    so the per-header field-value check cannot fire, and is skipped.
-
-    A ``False`` result proves nothing about *which* line is at fault (it can
-    even be the request line, which has its own checks), so it only turns the
-    per-header regex back on.  The caller's error messages are unchanged.
+    A ``False`` result never rejects and says nothing about *which* line is at
+    fault — it only turns the per-header regex back on, so error messages are
+    unchanged.
     """
     residue = data.translate(None, _BLOCK_ALLOWED_OCTETS)
     return residue.count(b'\r\n') * 2 == len(residue)
 
 
-# Bounds on one connection's validated header-line cache.  A keep-alive peer
-# resends byte-identical lines (``User-Agent``, ``Accept``, ``Cookie`` — real
-# browsers do this), so the split/lower/validate work for each is done once per
-# connection instead of once per request.
-#
-# All three bounds exist because **the cache key is attacker-controlled**, and
-# the resource a peer can force us to spend is *bytes*, not entries.  A captured
-# Chromium page load needs 26 distinct lines totalling 988 B, longest 145 B —
-# so these leave real traffic entirely uncapped while denying the adversarial
-# shape (7 x 8 KiB never-repeating lines per request, which an entry-count-only
-# bound would let grow to ~1 MiB per connection, held for as long as the peer
-# keeps the connection alive).
+# The cache key is attacker-controlled, and the resource a peer can force us to
+# spend is **bytes**, not entries: an entry-count-only bound would let 7 x 8 KiB
+# never-repeating lines per request grow to ~1 MiB per connection, held for as
+# long as the peer keeps it alive.  A captured Chromium page load needs 26
+# distinct lines totalling 988 B, longest 145 B, so real traffic stays uncapped.
 
-#: Entries.  Bounds the dict itself.
+#: Entries.
 _LINE_CACHE_MAX = 64
 
-#: Longest line admitted.  A line above this skips the cache **entirely** — no
-#: lookup either, so a huge line never pays a hash it cannot benefit from.
-#: 1 KiB clears the largest thing a browser really repeats (a ~145 B
-#: ``User-Agent``, a session ``Cookie``) by a wide margin.
+#: Longest line admitted.  1 KiB clears the largest thing a browser really
+#: repeats (a ~145 B ``User-Agent``, a session ``Cookie``) by a wide margin.
 _LINE_CACHE_MAX_LINE = 1024
 
-#: Total key bytes admitted per connection.  The binding constraint, and the
-#: one that multiplies by concurrent connections: ~8 KiB/conn worst case
-#: (~16 KiB counting the retained name/value slices) against 988 B of real
-#: need.
+#: Total key bytes per connection — the binding constraint, and the one that
+#: multiplies by concurrent connections: ~8 KiB/conn worst case (~16 KiB
+#: counting the retained name/value slices) against 988 B of real need.
 _LINE_CACHE_MAX_BYTES = 8192
 
 
 # ---------------------------------------------------------------------------
 # Shared default line table
 # ---------------------------------------------------------------------------
-# The per-connection cache cannot help the *first* request on a connection —
-# there is nothing in it yet — which is the whole of the interaction for a
-# ``Connection: close`` client.  This table closes that gap: header lines whose
-# value set is fixed by a specification are the same bytes for every client on
-# every deployment, so they can be validated once at import and shared.
-#
-# **The admission rule is what keeps this honest**: a line belongs here only if
-# its value set is enumerated by a spec — Fetch Metadata's ``Sec-Fetch-*``,
-# the UA client hints' boolean/platform forms, and the fixed tokens of RFC 9110
-# — plus a handful of genuinely universal idioms.  Values *observed in a packet
-# capture* do not qualify, however frequent: seeding the table from a capture
-# would be tuning the server to the browser that happened to be measured.
-# That is why no ``User-Agent``, ``Accept-Language``, ``sec-ch-ua``, ``Host``,
-# ``Referer`` or ``Cookie`` line appears below, though all are frequent.
-#
-# Framing-relevant names (``Content-Length``, ``Transfer-Encoding``, ``Host``,
-# ``Connection`` values that change framing semantics beyond the two tokens
-# below) are deliberately absent: a shared table is the last place a framing
-# decision should come from.  ``tests/unit/test_default_line_table.py`` pins
-# both rules.
+# The admission rule — spec-enumerated values only, and never a framing header
+# — is in ``docs/about/internals.md`` §The shared spec table, and pinned by
+# ``tests/unit/test_default_line_table.py``.
 _SPEC_ENUMERATED_LINES: tuple[bytes, ...] = (
     # Fetch Metadata Request Headers (W3C) — closed value sets.
     *(b'Sec-Fetch-Site: ' + v for v in
@@ -199,9 +140,8 @@ _SPEC_ENUMERATED_LINES: tuple[bytes, ...] = (
     b'Connection: close',
     *(b'Cache-Control: ' + v for v in
       (b'no-cache', b'no-store', b'max-age=0')),
-    # Universal idioms rather than spec enums, and few on purpose: ``*/*`` is
-    # what every non-browser client sends, and the gzip/deflate/br/zstd
-    # progression is the content-coding registry in the order it grew.
+    # Universal idioms, not spec enums — the one exception to the rule above,
+    # and few on purpose.
     b'Accept: */*',
     b'Accept-Encoding: gzip',
     b'Accept-Encoding: gzip, deflate',
@@ -214,10 +154,9 @@ _SPEC_ENUMERATED_LINES: tuple[bytes, ...] = (
 def _build_default_lines() -> dict[bytes, tuple[bytes, bytes]]:
     """Validate every default line and map it to the pair ``_parse`` produces.
 
-    The pair is derived with the *same* expressions the parse loop uses and
-    checked with the *same* rules, so a hand-written entry cannot disagree with
-    what parsing that line would have yielded.  A violation raises at import
-    rather than serving a wrong pair at runtime.
+    Same expressions, same rules, so a hand-written entry cannot disagree with
+    what parsing that line would yield.  A violation raises at import rather
+    than serving a wrong pair at runtime.
     """
     table: dict[bytes, tuple[bytes, bytes]] = {}
     for line in _SPEC_ENUMERATED_LINES:
@@ -240,23 +179,19 @@ def _build_default_lines() -> dict[bytes, tuple[bytes, bytes]]:
     return table
 
 
-#: Names a shared table must never carry, because they decide message framing
-#: or routing and must be read from the request every time.
+#: Names a shared table must never carry — a framing decision is read from the
+#: request every time.
 _FRAMING_NAMES = frozenset({
     b'content-length', b'transfer-encoding', b'host', b'expect', b'upgrade',
     b'trailer', b'te-framing',
 })
 
-# Built at the bottom of this constant block: ``_build_default_lines`` runs the
-# real validation rules, and ``_UNDERSCORE_FRAMING_NAMES`` is defined below.
-
-# RFC 9110 §8.6 — strict Content-Length: at most one canonical leading SP
-# (the byte after the colon), then ``0`` or a no-leading-zero decimal.
-# Matched against the *raw* post-colon bytes, before the generic OWS strip
-# discards the evidence: leading zeros, doubled/tab OWS, and trailing OWS
-# are all parser-disagreement smuggling vectors (SMUG-CL-LEADING-ZEROS /
-# -DOUBLE-ZERO / -TRAILING-SPACE / -EXTRA-LEADING-SP,
-# MAL-CL-TAB-BEFORE-VALUE) that a lenient ``int()`` would silently accept.
+# RFC 9110 §8.6 — at most one canonical leading SP (the byte after the colon),
+# then ``0`` or a no-leading-zero decimal.  Matched against the *raw*
+# post-colon bytes, before the generic OWS strip discards the evidence: leading
+# zeros, doubled/tab OWS and trailing OWS are all parser-disagreement smuggling
+# vectors (SMUG-CL-LEADING-ZEROS / -DOUBLE-ZERO / -TRAILING-SPACE /
+# -EXTRA-LEADING-SP, MAL-CL-TAB-BEFORE-VALUE) a lenient ``int()`` would accept.
 _CL_STRICT_RE = re.compile(rb'\A ?(?:0|[1-9][0-9]*)\Z')
 
 # NORM-UNDERSCORE-CL / -TE — header names that differ from a framing
@@ -266,10 +201,6 @@ _CL_STRICT_RE = re.compile(rb'\A ?(?:0|[1-9][0-9]*)\Z')
 _UNDERSCORE_FRAMING_NAMES = frozenset((
     b'content_length', b'transfer_encoding'))
 
-#: Built here rather than beside its literals because validating an entry needs
-#: every rule above, ``_UNDERSCORE_FRAMING_NAMES`` included.  An invalid or
-#: framing-relevant entry raises at import — the table can never be wrong at
-#: runtime, only absent.
 _DEFAULT_LINES = _build_default_lines()
 
 
@@ -309,13 +240,10 @@ class UnsupportedVersionError(Exception):
 def _reject_oversized_head(head: bytes, max_total: int) -> None:
     """Raise the right rejection for a head that overran the total budget.
 
-    Two RFC rules can be broken by the same overrun, and they get different
-    answers.  If the *first* CRLF lands beyond the budget the start-line never
-    ended: that is a malformed request-line (RFC 9112 §3) and the answer is
-    **400** — a 100 KiB method token is not "too many header fields".  When the
-    lines are well-formed and merely numerous, it is **431** (RFC 6585 §5).
-
-    Always raises.
+    Always raises: **400** when the first CRLF lands beyond the budget, because
+    the start-line never ended (RFC 9112 §3) and a 100 KiB method token is not
+    "too many header fields"; **431** when the lines are well-formed and merely
+    numerous (RFC 6585 §5).
     """
     first_eol = head.find(b'\r\n')
     if first_eol < 0 or first_eol >= max_total:
@@ -341,8 +269,8 @@ def _declares_content(headers: 'Headers') -> bool:
     if headers.getlist(b'transfer-encoding'):
         return True
     cl = headers.get(b'content-length', b'').strip()
-    # ``Content-Length: 0`` declares an empty body: no octets, nothing to
-    # frame two ways.  ``lstrip(b'0')`` because "000" is also zero.
+    # ``Content-Length: 0`` — and ``000`` — declares no octets, so there is
+    # nothing that could be framed two ways.
     return bool(cl) and bool(cl.lstrip(b'0'))
 
 
@@ -362,19 +290,15 @@ def _validate_message_framing(headers: 'Headers') -> int:
     * §6.1 — unknown ``Transfer-Encoding`` codings → 501 Not Implemented.
       We accept exactly ``chunked``; anything else (``gzip``, the
       ``identity, chunked`` multi-coding form, etc.) raises
-      :class:`NotImplementedFramingError`.  Without this check the
-      recipient layer raised ``NotImplementedError`` later and the
-      connection dropped silently.
+      :class:`NotImplementedFramingError`.
 
     Returns the declared body length — the validated ``Content-Length``, or 0
     when the message declares none (``chunked`` included: that framing
-    announces no total, so its body is counted as it arrives instead).  The
-    value is returned rather than looked up again by whoever wants it because
-    this function has already parsed it and proved it well-formed; asking the
-    header store a second time would repeat both, and on the common request —
-    which carries no ``Content-Length`` at all — that repeat is a guaranteed
-    index miss plus the ``bytes.lower()`` allocation of the fallback probe, on
-    the per-request path.
+    announces no total, so its body is counted as it arrives instead).
+    Returned rather than looked up again because the common request carries no
+    ``Content-Length`` at all, making a second lookup a guaranteed index miss
+    plus the fallback probe's ``bytes.lower()`` allocation, on the per-request
+    path.
     """
     cls = headers.getlist(b'content-length')
     tes = headers.getlist(b'transfer-encoding')
@@ -386,7 +310,6 @@ def _validate_message_framing(headers: 'Headers') -> int:
 
     declared = 0
     if cls:
-        # Collapse comma-combined and multi-header into a single set of values.
         values: set[bytes] = set()
         for _, value in cls:
             for v in value.split(b','):
@@ -400,30 +323,20 @@ def _validate_message_framing(headers: 'Headers') -> int:
                 f'conflicting Content-Length values: {sorted(values)!r}')
         declared = int(next(iter(values)))
 
-    # Transfer-Encoding validation.
-    #
-    # RFC 9112 §6.1 distinguishes two failure modes:
-    #   * ``chunked`` present but NOT the final coding (``chunked, gzip``,
-    #     ``chunked, chunked``) ⇒ the message length is undeterminable ⇒
-    #     **400 Bad Request** (SMUG-TE-NOT-FINAL-CHUNKED).  A server MUST NOT
-    #     process such a message.
-    #   * a coding we don't implement where chunked is absent (``gzip``,
-    #     ``deflate``) ⇒ **501 Not Implemented** (nginx parity).
-    # We accept exactly a single bare ``chunked`` token.
     if tes:
-        # Flatten comma-combined + multi-header codings, in order.
         codings = [c.strip().lower()
                    for _, raw_value in tes for c in raw_value.split(b',')]
         if codings == [b'chunked']:
-            pass  # the one accepted form
+            pass  # RFC 9112 §6.1 — the one accepted form
         elif b'chunked' not in codings:
-            # No chunked at all (``gzip``, ``deflate``) ⇒ a coding we don't
-            # implement ⇒ 501 (nginx parity).
+            # A coding we don't implement, chunked absent (``gzip``,
+            # ``deflate``) ⇒ 501 (nginx parity).
             raise NotImplementedFramingError(
                 f'Transfer-Encoding {codings!r} is not implemented')
         elif codings[-1] != b'chunked' or codings.count(b'chunked') > 1:
             # chunked present but not the sole final coding (``chunked, gzip``,
-            # ``chunked, chunked``) ⇒ message length undeterminable ⇒ 400.
+            # ``chunked, chunked``) ⇒ the message length is undeterminable, and
+            # a server MUST NOT process it (SMUG-TE-NOT-FINAL-CHUNKED).
             raise BadRequestError(
                 f'Transfer-Encoding with chunked not the sole final coding: '
                 f'{codings!r}')
@@ -437,42 +350,28 @@ def _validate_message_framing(headers: 'Headers') -> int:
     return declared
 
 
-# RFC 3986 §3.2 — authority = [userinfo "@"] host [":" port].  None of
-# these delimiter octets belong in a Host header value; their presence
-# (or an empty value) is a smuggling / SSRF vector that nginx rejects
-# with 400 and a lenient parser accepts silently.  ``@`` is
-# included: the deprecated userinfo
-# component has no place in a Host header and enables credential-spoofing.
+# RFC 3986 §3.2 — authority = [userinfo "@"] host [":" port].  None of these
+# delimiters belong in a Host value; their presence (or an empty value) is a
+# smuggling / SSRF vector nginx rejects with 400 and a lenient parser accepts
+# silently.  ``@`` is included: the deprecated userinfo component has no place
+# in a Host header and enables credential-spoofing.
 _HOST_FORBIDDEN_BYTES = frozenset(b'/?# \t@')
-# Derived from the set above so the two cannot drift.  A small forbidden
-# class scans faster as a regex than as a `translate` delete table (the
-# opposite of the request-target case below, where the allowed set is large).
 _HOST_FORBIDDEN_RE = re.compile(
     b'[' + re.escape(bytes(sorted(_HOST_FORBIDDEN_BYTES))) + b']')
 
 # RFC 9112 §2.1 / RFC 3986 — a request-target may carry only visible ASCII.
-# Deleting every allowed octet leaves the empty string for a valid target, so
-# a non-empty result *is* the rejection: one C-level pass instead of a Python
-# generator over each byte, and no allocation in the accept case (CPython
-# returns the shared empty bytes).
 _TARGET_ALLOWED_OCTETS = bytes(range(0x21, 0x7F))
 
 
 def _parse_host_header(value: bytes, default_port: int) -> tuple[str, int]:
     """Split a Host header value into ``(host, port)``.
 
-    Handles the RFC 3986 §3.2.2 IPv6 bracket form ``[::1]:8100`` — a
-    naive ``value.split(b':')`` yields ``int(b'')`` → ``ValueError`` on
-    those (``b'[::1]:8100'.split(b':')`` == ``[b'[', b'', b'1]', b'8100']``).
-    Pre-fix that exception bubbled past ``HTTP1Actor.run`` and closed the
-    transport with no response bytes — every IPv6 request saw an "empty
-    reply from server".
-
-    A missing or non-numeric port falls back to *default_port*.
+    Handles the RFC 3986 §3.2.2 IPv6 bracket form ``[::1]:8100``, where a naive
+    ``value.split(b':')`` yields ``int(b'')`` → ``ValueError``.  A missing or
+    non-numeric port falls back to *default_port*.
     """
-    # ``_validate_host`` rejects non-ASCII before this runs on the request
-    # path.  ``errors='replace'`` keeps the function total for every other
-    # caller rather than leaving a bare ``decode`` to repeat the defect.
+    # ``_validate_host`` rejects non-ASCII on the request path; ``replace``
+    # keeps this total for every other caller.
     def _dec(b: bytes) -> str:
         return b.decode('utf-8', errors='replace')
 
@@ -497,22 +396,14 @@ def _validate_host(headers: 'Headers') -> None:
     URI-authority component.  Inputs such as ``host: 0/0`` and an empty
     host are accepted by a lenient parser and rejected with 400 by nginx;
     this check keeps BlackBull on the RFC side of that split.
-
-    Rules enforced:
-      * at most one Host header (§7.2; multiple is a smuggling vector);
-      * non-empty value after OWS-stripping;
-      * no ``/`` / ``?`` / ``#`` / whitespace in the authority
-        (RFC 3986 §3.2 delimiters).
     """
     hosts = headers.getlist(b'host')
     if len(hosts) > 1:
         raise BadRequestError(
             f'multiple Host headers ({len(hosts)} — smuggling vector)')
     if not hosts:
-        # HTTP/1.1 §3.2 requires Host but HTTP/1.0 doesn't.  The
-        # version-aware presence check lives in ``_parse`` (which knows
-        # the request version); this helper only validates the value's
-        # grammar when a Host is present.
+        # The version-aware presence rule lives in ``_parse``, which knows the
+        # request version; this helper only grades a value that is present.
         return
     value = hosts[0][1].strip(b' \t')
     if not value:
@@ -521,15 +412,11 @@ def _validate_host(headers: 'Headers') -> None:
         raise BadRequestError(
             f'invalid Host authority {value!r}: contains '
             f'delimiter / whitespace forbidden by RFC 3986 §3.2')
-    # RFC 3986 §3.2 authorities are ASCII; an internationalised name reaches
-    # the wire as punycode, which is too.  Neither check above excludes a
-    # high byte — the delimiter set is `/ ? #` plus whitespace, and the CTL
-    # check covers \x00-\x08\x0a-\x1f\x7f — so without the decode below one
-    # reaches ``_parse_host_header``'s bare ``decode('utf-8')`` and raises
-    # UnicodeDecodeError past every handler in ``run()``, closing the
-    # connection with no response at all.  Answering 400 is what nginx does,
-    # and *some* answer is the point: a caller cannot tell a silent drop
-    # from a crash.
+    # RFC 3986 §3.2 authorities are ASCII — an internationalised name reaches
+    # the wire as punycode, which is too.  Neither check above excludes a high
+    # byte: the delimiter set is `/ ? #` plus whitespace, and the CTL check
+    # covers \x00-\x08\x0a-\x1f\x7f.  nginx answers 400, and *some* answer is
+    # the point — a caller cannot tell a silent drop from a crash.
     try:
         value.decode('ascii')
     except UnicodeDecodeError:
@@ -564,9 +451,8 @@ class RequestActor(Actor):
         recipient: ASGIReceiveCallable,
         send: ASGISendCallable,
         app: Callable[..., Awaitable[None]],
-        # ``None`` for a foreign ASGI app: no dispatcher means no
-        # aggregator, and the actor skips event emission rather than
-        # the caller forking to a second dispatch path.
+        # ``None`` for a foreign ASGI app: the actor skips event emission
+        # rather than the caller forking to a second dispatch path.
         aggregator: EventAggregator | None,
         force_asgi: bool,
     ) -> None:
@@ -597,28 +483,19 @@ class RequestActor(Actor):
         return self
 
     async def run(self) -> None:  # override: single-shot, no inbox loop
-        # What the app is called with: the native Connection, or — on the
-        # ``BB_FORCE_ASGI_SCOPE=1`` compat lane — a materialized ASGI scope.
-        # The one place a scope can come into existence on either protocol's
-        # path; the snapshot is taken here at the call boundary, so every
-        # pre-dispatch mutation of *conn* — H/1's HEAD→GET rewrite, H/2's
-        # priority/extensions — has already landed (COMP-HEAD-NO-BODY).
-        # Inlined rather than a helper call: this is the per-request hot path
-        # and an extra call frame measured ~0.1-0.2 % here.
+        # Inlined rather than a helper call: the per-request hot path, where an
+        # extra call frame measured ~0.1-0.2 %.
         if self._force_asgi:
             target = self._conn.to_asgi_scope(force_asgi=True)
         else:
             target = self._conn
-        # Bind the *raw* recipient onto the target for lazy ``target.body()``
-        # before any disconnect-detecting wrapper is built.  Binding the
-        # wrapper instead would close a per-request reference cycle
+        # Bind the *raw* recipient, before any disconnect-detecting wrapper
+        # exists: binding the wrapper closes a per-request reference cycle
         # (target._receive → wrapper → target) reclaimable only by the cyclic
-        # GC — the v0.60.0 tail-latency regression.  Idempotent.
+        # GC, and cost tail latency.  Idempotent.
         bind_receive_channel(target, self._recipient)
-        # Wrap receive for disconnect detection only when a listener observes
-        # it (request_disconnected, or request_completed via
-        # mark_disconnected); otherwise dispatch the raw recipient and save
-        # the per-request closure.  Body-level disconnect (``target.body()`` →
+        # Only when a listener observes it — otherwise the raw recipient, and
+        # no per-request closure.  Body-level disconnect (``target.body()`` →
         # ClientDisconnected) is independent of this wrapper.
         if (self._aggregator is not None
                 and _disconnect_events_observed(self._aggregator)):
@@ -629,9 +506,6 @@ class RequestActor(Actor):
         try:
             await self._app(target, receive, self._send)
         except BaseException as e:
-            # None-tolerant: a foreign ASGI app has no dispatcher, so there is
-            # no aggregator and nowhere to publish the ``error`` event.  The
-            # exception still propagates — containment is the caller's job.
             if self._aggregator is not None:
                 await self._aggregator.on_error(target, e)
             raise
@@ -655,26 +529,16 @@ class HTTP1Actor(Actor):
     BlackBull apps without a full EventAggregator still receive lifecycle events.
     """
 
-    # Class-level default so tests that instantiate via ``object.__new__``
-    # without calling ``__init__`` (test_parser.py uses this pattern to
-    # exercise ``_parse`` in isolation) see a cleartext scope by default.
-    _ssl: bool = False
-
-    # Both are per-connection state that ``_parse`` memoises on first use.
-    # They are declared here as immutable ``None`` rather than initialised in
-    # ``__init__`` for two reasons: the ``__new__`` test doubles above never
-    # run ``__init__``, and a mutable class-level default would be *shared by
-    # every connection* — which for the line cache is precisely the
+    # Class-level defaults, because test doubles built with ``object.__new__``
+    # never run ``__init__``.  Immutable ones only: a mutable class default is
+    # shared by *every* connection, which for the line cache is precisely the
     # cross-connection bleed its design forbids.
+    _ssl: bool = False
     _line_cache: 'dict[bytes, tuple[bytes, bytes]] | None' = None
     _line_cache_bytes: int = 0
     _max_line: int | None = None
-
-    #: The body length the current request declares, as validated by
-    #: :func:`_validate_message_framing` in ``_parse``; 0 when it declares none.
-    #: Immutable class default for the same ``__new__`` reason as above, and so
-    #: a test double that never parsed a head reads "no declared body" rather
-    #: than raising.
+    #: Body length the current request declares, as validated by
+    #: :func:`_validate_message_framing`; 0 when it declares none.
     _declared_body_len: int = 0
 
     def __init__(
@@ -693,11 +557,9 @@ class HTTP1Actor(Actor):
         connection_id: str = '',
     ) -> None:
         super().__init__()
-        # *request* is bytes that already arrived on this connection, so they
-        # go back in front of the stream rather than into a parsed-head slot.
-        # The actor then has exactly one way to obtain a head — read it — and
-        # a caller that hands over a partial one (a first line, say) gets the
-        # budget check and the framing rules that a wire read would give it.
+        # Bytes that already arrived go back in front of the stream, not into a
+        # parsed-head slot: the actor then has exactly one way to obtain a head,
+        # and a partial one still gets the budget check and the framing rules.
         if request:
             from .recipient import PrefixReader  # noqa: PLC0415
             reader = PrefixReader(request, reader)
@@ -705,26 +567,13 @@ class HTTP1Actor(Actor):
         self._writer = writer
         self._app = app
         self._aggregator = aggregator
-        #: The head of the request being served, set by ``_read_headers`` on
-        #: every exit path — including the failing ones, which report it.
         self._request = b''
         self._peername = peername
         self._sockname = sockname
         self._ssl = ssl
         self._ws_queue_depth = ws_queue_depth
-        # Built on the first request, rebound on every later one — see
-        # ``RequestActor.bind``.
         self._request_actor: RequestActor | None = None
-        # Accept-time connection id (ConnectionActor's) — the one id for the
-        # whole connection.  The WS upgrade path reuses it in the scope
-        # instead of minting a second one; empty when the actor is
-        # constructed directly (tests), in which case the upgrade path
-        # falls back to generating a fresh id.
         self._connection_id = connection_id
-        # When the actor is constructed without a deadline (test
-        # fixtures that drive the actor directly), one is lazily
-        # created on entry to ``run()`` so the production hot path and
-        # the test path share the same code.
         self._deadline = deadline
 
     async def run(self) -> None:
@@ -733,29 +582,19 @@ class HTTP1Actor(Actor):
         import time as _time  # noqa: PLC0415
         from ..env import get_settings as _get_settings  # noqa: PLC0415
         cfg = _get_settings()
-        # One rescheduled TimerHandle per connection drives
-        # all phase deadlines (headers / body / keep-alive).  Created
-        # lazily so tests that instantiate HTTP1Actor without a wrapping
-        # ConnectionActor still work — same task either way.
+        # One rescheduled TimerHandle per connection drives every phase
+        # deadline (headers / body / keep-alive); lazy so an actor driven
+        # directly, without a wrapping ConnectionActor, takes the same path.
         if self._deadline is None:
             self._deadline = ConnectionDeadline()
         dl = self._deadline
-        # Hoisted out of the per-request loop below: the cap is process-wide
-        # configuration, so re-reading the attribute once per request bought
-        # nothing.
         max_body_size = cfg.max_body_size
         send = SenderFactory.http1(self._writer)
-        # Capture loop_start at the very top
-        # of each iteration so we can quantify the between-request gap
-        # (dispatch_done(N) → loop_start(N+1)) on a keep-alive
-        # connection.  Plain locals — assigned to log_record.phases
-        # below once the record exists.
+        # Quantifies the between-request gap (dispatch_done(N) →
+        # loop_start(N+1)) on a keep-alive connection.
         _loop_start_perf: float = 0.0
         _loop_start_cpu: float = 0.0
-        # Built on the first request that needs one, rebound thereafter.
         inner_receive: HTTP1Recipient | None = None
-        # False for the first request on the connection, True for every one
-        # after it — set by the keep-alive tail at the bottom of the loop.
         keep_alive = False
         try:
             while True:
@@ -763,11 +602,8 @@ class HTTP1Actor(Actor):
                     _loop_start_perf = _time.perf_counter()
                     _loop_start_cpu = _time.process_time()
                 # Slowloris defence (RFC 9110 §15.5.9 — 408 Request Timeout).
-                # The peer has a bounded window to send the complete header
-                # block; if it elapses we close the connection with 408 so a
-                # well-behaved monitoring client can tell us apart from a
-                # peer-side disconnect.  ``header_timeout=0`` disables the
-                # deadline — only sound for trusted local clients.
+                # ``header_timeout=0`` disables the deadline — only sound for
+                # trusted local clients.
                 idle_window = (cfg.keep_alive_timeout if keep_alive
                                else cfg.header_timeout)
                 try:
@@ -777,15 +613,9 @@ class HTTP1Actor(Actor):
                     else:
                         await self._read_headers(cfg.header_max_total)
                 except IncompleteReadError:
-                    # Distinguish idle EOF from
-                    # mid-headers EOF.  ``self._request`` is empty in
-                    # the idle case (just-after keep-alive reset or
-                    # fresh connection with no preamble); peer closed
-                    # without sending anything ⇒ silent close.
-                    # Non-empty buffer ⇒ peer sent partial bytes then
-                    # disconnected ⇒ 400 Bad Request before close, so
-                    # differential tests can categorise this as a
-                    # protocol violation rather than a transport reset.
+                    # Empty buffer ⇒ an idle peer closed ⇒ silent close.
+                    # Partial bytes then EOF ⇒ 400 before close, so the
+                    # differential tests read a protocol violation, not a reset.
                     if self._request:
                         logger.info(
                             '400 Bad Request — peer EOF mid-headers '
@@ -796,9 +626,8 @@ class HTTP1Actor(Actor):
                             send, b'400 Bad Request', HTTPStatus.BAD_REQUEST)
                     return
                 except HeaderTooLargeError as exc:
-                    # RFC 6585 §5 — 431 Request Header Fields Too Large.
-                    # The buffer is over the configured budget; close so an
-                    # attacker can't keep feeding us bytes after the reply.
+                    # RFC 6585 §5.  Close so an attacker cannot keep feeding us
+                    # bytes after the reply.
                     logger.warning('431 Request Header Fields Too Large: %s', exc)
                     log_cap_hit('header_max_total',
                                 requested=len(self._request),
@@ -809,22 +638,19 @@ class HTTP1Actor(Actor):
                         HTTPStatus.REQUEST_HEADER_FIELDS_TOO_LARGE)
                     return
                 except BadRequestError as exc:
-                    # The other half of the budget verdict: over the limit with
-                    # no line terminator in sight is a start-line that never
-                    # ended (RFC 9112 §3), not a header block with too many
-                    # fields.  Answered here rather than only around ``_parse``
-                    # — the head read is the first place that can reach it, and
-                    # a peer that gets no answer at all cannot tell a rejection
-                    # from a crash.
+                    # The other half of the budget verdict (RFC 9112 §3), and
+                    # caught here as well as around ``_parse`` because the head
+                    # read is the first place that can reach it.
                     logger.warning('400 Bad Request: %s', exc)
                     await self._send_error_and_close(
                         send, b'400 Bad Request', HTTPStatus.BAD_REQUEST)
                     return
                 except (asyncio.TimeoutError, TimeoutError):
                     if keep_alive:
-                        # Idle too long between requests — drop it silently.
-                        # A 408 here would arrive on a connection the peer has
-                        # most likely already abandoned.
+                        # No status: the previous response already shipped, and
+                        # either side may close a persistent connection at any
+                        # time (RFC 9112 §9.3).  A 408 would arrive on a
+                        # connection the peer has most likely abandoned.
                         return
                     logger.warning(
                         '408 Request Timeout (slowloris defence) — peer=%r '
@@ -838,19 +664,16 @@ class HTTP1Actor(Actor):
                         send, b'408 Request Timeout', HTTPStatus.REQUEST_TIMEOUT)
                     return
 
-                if keep_alive and self._request == _REQ_END:
-                    # Nothing but the terminator after a completed response:
-                    # trailing CRLFs from a client that appends them to a body
-                    # (RFC 9112 §2.2 tells us to tolerate empty lines before a
-                    # request-line, and there is no request-line coming).  Not
-                    # an error — just the end of the connection.
+                if keep_alive and self._request == _HEAD_END:
+                    # Trailing CRLFs from a client that appends them to a body.
+                    # RFC 9112 §2.2 says tolerate empty lines before a
+                    # request-line — and none is coming.  Not an error.
                     return
 
                 try:
                     conn = self._parse(self._request)
                 except HeaderTooLargeError as exc:
-                    # Per-line limit hit during parse.  Same response as the
-                    # total-block check in _read_headers.
+                    # The per-line limit, hit during parse.
                     logger.warning('431 Request Header Fields Too Large: %s', exc)
                     log_cap_hit('header_max_line',
                                 requested=len(self._request),
@@ -861,28 +684,20 @@ class HTTP1Actor(Actor):
                         HTTPStatus.REQUEST_HEADER_FIELDS_TOO_LARGE)
                     return
                 except BadRequestError as exc:
-                    # RFC 9112 §3 / §5 violation — answer with 400 and close.
-                    # A malformed request is a smuggling vector candidate, so
-                    # we always terminate the connection rather than try to
-                    # find the next message boundary.
+                    # RFC 9112 §3 / §5.  A malformed request is a smuggling
+                    # vector candidate, so the connection always terminates
+                    # rather than hunting for the next message boundary.
                     logger.warning('400 Bad Request: %s', exc)
                     await self._send_error_and_close(
                         send, b'400 Bad Request', HTTPStatus.BAD_REQUEST)
                     return
                 except NotImplementedFramingError as exc:
-                    # RFC 9112 §6.1: server received a
-                    # Transfer-Encoding it does not implement.  A lenient
-                    # this raised inside HTTP1Recipient and the connection
-                    # dropped silently (Finding C in user-corpus).  Match
-                    # nginx and answer with 501 then close.
+                    # RFC 9112 §6.1 — nginx parity: 501, then close.
                     logger.warning('501 Not Implemented: %s', exc)
                     await self._send_error_and_close(
                         send, b'501 Not Implemented', HTTPStatus.NOT_IMPLEMENTED)
                     return
                 except UnsupportedVersionError as exc:
-                    # RFC 9110 §15.6.6 — well-formed request-line, but a
-                    # major HTTP version this server does not speak
-                    # (RFC9112-2.3-INVALID-VERSION).  505 then close.
                     logger.warning('505 HTTP Version Not Supported: %s', exc)
                     await self._send_error_and_close(
                         send, b'505 HTTP Version Not Supported',
@@ -890,40 +705,19 @@ class HTTP1Actor(Actor):
                     return
                 self._fill_connection_info(conn)
 
-                # Native-Connection entry: BlackBull's own
-                # server dispatches the typed ``Connection`` directly — the app
-                # is ``app(conn, receive, send)``, no ASGI scope object at all.
-                # Only ``BB_FORCE_ASGI_SCOPE=1`` takes the compat lane: the server
-                # converts ``Connection → scope`` (a pure ASGI dict, no stash) and
-                # the app converts it back with ``from_scope`` at dispatch — so
-                # ``app(scope, …)`` is used *iff* the flag is set. The actor's own
-                # plumbing (RecipientFactory, access log, keep-alive) always reads
-                # ``conn``.
                 if conn.type == 'websocket':
-                    # WebSocket is native too: the upgrade path
-                    # threads the typed Connection — the WS-only extras
-                    # (subprotocols, the deferred 101 responder, deflate params)
-                    # live on it (``conn.subprotocols`` / ``conn._ws``), so there
-                    # is no scope dict here.
                     await self._handle_upgrade(conn)
                     return
 
-                # RFC 9110 §15.5.14 — 413 Content Too Large.  A declared body
-                # over the cap is refused here, before a single octet of it is
-                # read: the per-read bound (``body_chunk_max``) limits what one
-                # read materialises, never the sum, so without this the peer
-                # picks how much memory the request costs.  Answered ahead of
-                # any ``Expect: 100-continue`` for the same reason a 413 exists
-                # at all (RFC 9110 §10.1.1: a final status instead of the
-                # interim one tells the peer not to send the body), and the
-                # connection closes because the octets we refused are still
-                # coming — reading the next request out of them is the
-                # smuggling shape.
-                #
-                # The length was validated during the head parse and carried
-                # here, so a request that declares no body — every GET on a
-                # keep-alive connection — spends one integer compare on this,
-                # not a header lookup.
+                # RFC 9110 §15.5.14 — refused before a single octet is read.
+                # The per-read bound (``body_chunk_max``) caps what one read
+                # materialises, never the sum, so without this the peer picks
+                # how much memory the request costs.  Answered ahead of any
+                # ``Expect: 100-continue`` for the reason the status exists
+                # (RFC 9110 §10.1.1 — a final status tells the peer not to send
+                # the body), and the connection closes because the refused
+                # octets are still coming: reading the next request out of them
+                # is the smuggling shape.
                 oversized = self._declared_body_len
                 if max_body_size and oversized > max_body_size:
                     logger.warning(
@@ -941,12 +735,9 @@ class HTTP1Actor(Actor):
                         HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
                     return
 
-                # BB_REQUEST_TIMEOUT parity with the
-                # HTTP/2 path.  ``HTTP2Actor._spawn_stream_task`` wraps each
-                # stream coroutine with ``asyncio.wait_for``; the HTTP/1.1
-                # path mirrors that here.  On expiry: synthesise 408 if
-                # headers haven't shipped yet, then close the connection
-                # (no keep-alive across a timed-out request).
+                # BB_REQUEST_TIMEOUT, parity with ``HTTP2Actor``'s per-stream
+                # ``asyncio.wait_for``.  No keep-alive across a timed-out
+                # request.
                 try:
                     if cfg.request_timeout > 0:
                         ok, inner_receive = await asyncio.wait_for(
@@ -979,25 +770,12 @@ class HTTP1Actor(Actor):
                 if not ok:
                     break  # unhandled error — close connection
 
-                # Drain any request body left unread — by a handler that
-                # ignores ``receive`` (a POST that 404s), or by a path that
-                # answers before routing at all (the server-wide ``OPTIONS *``).
-                # Without this the leftover body bytes are parsed as the next
-                # pipelined request line — a classic keep-alive framing desync,
-                # and behind a connection-pooling reverse proxy the standard
-                # request-smuggling shape.  The predicate belongs to the loop
-                # tail, not to any one answer path: a per-path exemption is how
-                # the ``OPTIONS *`` gap existed, and the next path added would
-                # reintroduce it.  A body larger than the drain bound closes the
-                # connection instead, so an unbounded read is never the price of
-                # keep-alive.  The WebSocket upgrade leaves ``run()`` above and
-                # never arrives here, which is why it refuses a bodied handshake
-                # outright instead — see ``_do_ws_handshake``.
-                # One question: whether the message boundary survived, and so
-                # what this connection may do next, is the recipient's
-                # judgement.  Asking ``must_close`` and then ``needs_drain()``
-                # put that verdict together here instead, and left the two
-                # predicates free to drift apart.
+                # Loop tail, and no per-path exemption — see
+                # ``docs/about/internals.md`` §Keep-alive drain invariant.
+                # One verdict rather than two predicates: whether the message
+                # boundary survived, and so what this connection may do next, is
+                # the recipient's judgement, and asking ``must_close`` and then
+                # ``needs_drain()`` left the two free to drift apart.
                 verdict = inner_receive.after_dispatch()
                 if verdict is CONNECTION_MUST_CLOSE:
                     break
@@ -1005,29 +783,18 @@ class HTTP1Actor(Actor):
                         and not await inner_receive.drain(_MAX_KEEPALIVE_DRAIN)):
                     break
 
-                # RFC 9112 §9.1 — honour Connection: close.  HTTP/1.0
-                # connections without ``Connection: keep-alive`` likewise
-                # default to non-persistent.
+                # RFC 9112 §9.1 — honour Connection: close.
                 if not self._should_keep_alive(conn):
                     break
 
                 self._request = b''
-                # Every later request re-enters the loop and reads its head the
-                # same way the first one did.  Only two things differ, and both
-                # are policy rather than mechanism: the idle window is
-                # ``keep_alive_timeout`` (a peer that vanished silently — crash,
-                # NAT drop, network change — must not hold a ghost connection),
-                # and neither a timeout nor an EOF gets a status, because the
-                # previous response already shipped and either side may close a
-                # persistent connection at any time (RFC 9112 §9.3).
                 keep_alive = True
 
         except IncompleteReadError:
-            # Safety net: any IncompleteReadError that escapes the
-            # explicit catches above (e.g. body-read EOF that wasn't
-            # absorbed by HTTP1Recipient).  The peer is gone, so tell the
-            # sender directly and let the connection close; anything still
-            # in flight is dropped rather than raising on a dead pipe.
+            # Safety net for an IncompleteReadError that escaped the explicit
+            # catches above (a body-read EOF ``HTTP1Recipient`` did not
+            # absorb).  The peer is gone: drop what is in flight rather than
+            # raise on a dead pipe.
             send.mark_client_gone()
 
     # ------------------------------------------------------------------
@@ -1036,12 +803,7 @@ class HTTP1Actor(Actor):
 
     @staticmethod
     async def _send_error_and_close(send, body: bytes, status: HTTPStatus) -> None:
-        """Send a plain-text error response with ``Connection: close``.
-
-        Every framing/timeout guard in ``run()`` answers the same way: a
-        short body, the status line, and ``connection: close`` +
-        ``content-type: text/plain`` headers.
-        """
+        """Send a plain-text error response with ``Connection: close``."""
         await send(
             body, status,
             [(b'connection', b'close'), (b'content-type', b'text/plain')],
@@ -1050,30 +812,15 @@ class HTTP1Actor(Actor):
     def _parse(self, data: bytes) -> Connection:
         """Parse raw HTTP/1.1 request bytes into a native :class:`Connection`.
 
-        The parser produces the typed native model; the ASGI scope is a
-        derived view obtained via ``conn.as_scope()`` at the dispatch
-        boundary.
-
-        Raises :class:`BadRequestError` on any RFC 9112 framing violation
-        the caller should answer with 400.  Validation rules:
-
-        * request-line: exactly ``method SP request-target SP HTTP-version``;
-          method/version are validated against the token / HTTP-version
-          grammar (§4, RFC 9110 §5.6.2).
-        * field-line: ``name ':' OWS value OWS``; no whitespace between
-          name and colon (§5.1); no obs-fold (§5.2); no CTLs in value
-          except HTAB (RFC 9110 §5.5); name must be a valid token.
-
-        Raises :class:`HeaderTooLargeError` when any request-line or
-        header line exceeds ``BB_HEADER_MAX_LINE`` (default 8 KiB).  The
-        whole-block limit (``BB_HEADER_MAX_TOTAL``) is enforced in
-        ``run()`` because it sees the accumulating buffer; per-line is
-        cheaper to check here, post-split.
+        Raises :class:`BadRequestError` on an RFC 9112 framing violation the
+        caller should answer with 400, and :class:`HeaderTooLargeError` when a
+        single line exceeds ``BB_HEADER_MAX_LINE``.  The whole-block limit
+        (``BB_HEADER_MAX_TOTAL``) is enforced in ``run()``, which sees the
+        accumulating buffer; per-line is cheaper here, post-split.
         """
-        # Connection-scoped, so it is read once per connection rather than
-        # once per request.  The cost being removed is not ``get_settings()``
-        # itself (it is ``functools.cache``d) but the ``from ..env import``
-        # statement that has to run ahead of it on every single parse.
+        # Memoised per connection.  The cost removed is not ``get_settings()``
+        # (it is ``functools.cache``d) but the ``from ..env import`` statement
+        # that would run ahead of it on every single parse.
         max_line = self._max_line
         if max_line is None:
             from ..env import get_settings as _get_settings  # noqa: PLC0415
@@ -1111,12 +858,11 @@ class HTTP1Actor(Actor):
         # HTTP-version (§2.5) — exactly ``HTTP/d.d``.
         if not _HTTP_VERSION_RE.match(version):
             raise BadRequestError(f'invalid HTTP-version {version!r}')
-        # RFC 9110 §2.5 / §15.6.6 — only major version 1 is served here
-        # (RFC9112-2.3-INVALID-VERSION: ``HTTP/9.9`` was answered 200).
-        # A higher 1.x minor (``HTTP/1.2``) is 1.x-compatible and served
-        # as 1.1; any other major → 505.  The HTTP/2 preface never reaches
-        # this parser — ``protocol_registry`` sniffs ``PRI * HTTP/2.0``
-        # off the socket before the HTTP/1.1 binding is selected.
+        # RFC 9110 §2.5 / §15.6.6 (RFC9112-2.3-INVALID-VERSION) — a higher 1.x
+        # minor (``HTTP/1.2``) is 1.x-compatible and served as 1.1; any other
+        # major → 505.  The HTTP/2 preface never reaches this parser:
+        # ``protocol_registry`` sniffs ``PRI * HTTP/2.0`` off the socket before
+        # the HTTP/1.1 binding is selected.
         if version[5:6] != b'1':
             raise UnsupportedVersionError(
                 f'HTTP version {version!r} is not supported')
@@ -1133,8 +879,7 @@ class HTTP1Actor(Actor):
                 f'CONNECT (tunneling) is not implemented: {path!r}')
         if path == b'*':
             # asterisk-form (§3.2.4) — a server-wide request, valid only for
-            # OPTIONS.  Flag it so the dispatcher answers at the server level
-            # rather than routing ``*`` to a 404.
+            # OPTIONS.
             if method != b'OPTIONS':
                 raise BadRequestError(
                     f'asterisk-form request-target is valid only for OPTIONS, '
@@ -1166,50 +911,30 @@ class HTTP1Actor(Actor):
         if asterisk_form:
             _raw_path_b, _query_string = b'*', b''
         else:
-            # Split the bytes request-target with C-level
-            # partition calls (~12× faster than urlparse): strip #fragment,
-            # then split ?query.  ';' is NOT split off: RFC 3986
-            # treats it as an ordinary path sub-delimiter (the ;params grammar
-            # is obsolete RFC 2396), so it stays in the path component.  The
-            # path component (raw_path) and its decoded form (path) are now
-            # the same bytes at two decode stages — uvicorn parity.
+            # C-level partition calls (~12× faster than urlparse): strip
+            # #fragment, then split ?query.  ';' is NOT split off — RFC 3986
+            # makes it an ordinary path sub-delimiter (the ;params grammar is
+            # obsolete RFC 2396), so it stays in the path component.
             _no_frag, _, _ = path.partition(b'#')
             _raw_path_b, _, _query_string = _no_frag.partition(b'?')
 
-        # ASGI: scope['path'] is the percent-decoded (UTF-8)
-        # path component.  The b'%' guard keeps the no-escape common case on
-        # the plain-decode fast path; the target was already rejected above
-        # if it contains bytes >= 0x80, so .decode('ascii') cannot fail.
-        # unquote semantics match uvicorn: '+' stays literal, malformed
-        # escapes pass through, errors='replace' can never raise.
+        # The b'%' guard keeps the no-escape case on the plain-decode path;
+        # the target was already rejected above if it holds a byte >= 0x80, so
+        # ``decode('ascii')`` cannot fail.  unquote semantics match uvicorn:
+        # '+' stays literal, malformed escapes pass through, never raises.
         if b'%' in _raw_path_b:
             _decoded_path = unquote(_raw_path_b.decode('ascii'),
                                   encoding='utf-8', errors='replace')
         else:
             _decoded_path = _raw_path_b.decode('utf-8')
 
-        # One C-level pass decides whether any field value *could* hold a
-        # forbidden octet.  When it says no, the per-header regex below is
-        # dead weight and is skipped; when it says yes, that regex still runs
-        # and still raises, so the diagnostic never changes.
         values_need_checking = not _block_values_are_clean(data)
 
-        # Per-connection cache of lines that have already passed every check
-        # below.  The key is the *exact* line bytes, so any changed byte is a
-        # miss and gets validated from scratch; only a line that reached the
-        # bottom of the loop without raising is ever admitted.  Both facts
-        # together are what make this a replay of validated work rather than a
-        # way to skip validation.  Created per instance on first use — see the
-        # class-level ``None`` for why it is not a class attribute.
         cache = self._line_cache
         if cache is None:
             cache = self._line_cache = {}
-        # Hashing a line to probe a cache that is known to be empty buys
-        # nothing, and on the first request of a connection that is every
-        # probe.  Skipping them is what keeps the connection-per-request shape
-        # (``Connection: close``, HTTP/1.0, health checks) close to the cost of
-        # not having a cache at all: that client pays for admissions it never
-        # reads, but not for lookups that cannot hit.  Decided once per
+        # A probe into a cache known to be empty buys nothing, and on a
+        # connection's first request that is every probe.  Decided once per
         # request, not once per line.
         do_lookup = len(cache) > 0
 
@@ -1219,31 +944,24 @@ class HTTP1Actor(Actor):
                 # Empty line = end of headers; anything after is body (already
                 # split off upstream because we read until CRLFCRLF).
                 continue
-            # A line too long to ever be admitted skips the cache completely —
-            # including the lookup, because hashing 8 KiB to answer a question
-            # whose answer is always "no" is the adversary's cheapest way to
-            # spend our CPU.  ``len`` on bytes is O(1).
+            # Too long to be admitted ⇒ skip the cache entirely, the lookup
+            # included: hashing 8 KiB for an answer that is always "no" is the
+            # adversary's cheapest way to spend our CPU.
             cacheable = len(line) <= _LINE_CACHE_MAX_LINE
             if cacheable:
-                # The per-connection cache first — it holds this peer's long,
-                # expensive lines — then the shared spec table, which is the
-                # only thing that can help the *first* request on a connection.
+                # This peer's own lines first, then the shared spec table.
                 hit = cache.get(line) if do_lookup else None
                 if hit is None:
                     hit = _DEFAULT_LINES.get(line)
                 if hit is not None:
-                    # Identical bytes, already validated — on this connection
-                    # when it came from ``cache``, at import when it came from
-                    # ``_DEFAULT_LINES``.  Safe even when
-                    # ``values_need_checking`` is True for *this* block: the
-                    # hit was proved clean when it was admitted and its bytes
-                    # have not changed since.
+                    # Safe even when ``values_need_checking`` is True for
+                    # *this* block: the hit was proved clean when it was
+                    # admitted, and its bytes have not changed since.
                     raw.append(hit)
                     continue
-            # RFC 9112 §5.2 — obs-fold (leading SP/HTAB on a header line)
-            # MUST be rejected in requests.  Indexing yields an int and skips
-            # the one-byte slice a `line[:1]` comparison would allocate; the
-            # empty-line case is retired by the `continue` above.
+            # RFC 9112 §5.2 — obs-fold MUST be rejected in requests.  Indexing
+            # skips the one-byte slice a `line[:1]` comparison would allocate;
+            # the empty-line case is retired by the `continue` above.
             if line[0] in (0x20, 0x09):
                 raise BadRequestError(
                     f'obsolete line folding rejected: {line!r}')
@@ -1252,12 +970,10 @@ class HTTP1Actor(Actor):
                 raise BadRequestError(f'malformed header line: {line!r}')
             key = line[:colon]
             value = line[colon + 1:]
-            # field-name must be a valid token (§5.1 / RFC 9110 §5.6.2).
-            # SP and HTAB are not tchar, so this one test also decides §5.1
-            # (no whitespace between field-name and ':') — a well-formed name
-            # answers both questions at once, and only a rejected name pays
-            # for telling the two apart.  `colon < 1` above guarantees a
-            # non-empty key, so indexing is safe.
+            # field-name must be a valid token (§5.1 / RFC 9110 §5.6.2).  SP
+            # and HTAB are not tchar, so this one test also decides §5.1 (no
+            # whitespace between field-name and ':'), and only a rejected name
+            # pays to tell the two apart.  `colon < 1` makes `key[-1]` safe.
             if key.translate(None, _TCHAR_OCTETS):
                 if key[-1] in (0x20, 0x09):
                     raise BadRequestError(
@@ -1268,35 +984,28 @@ class HTTP1Actor(Actor):
                 raise BadRequestError(
                     f'framing-confusable header name {key!r} '
                     f'(NORM-UNDERSCORE)')
-            # Strict Content-Length — checked against the raw post-colon
-            # bytes, before the OWS strip below erases the evidence.
             if lkey == b'content-length' and not _CL_STRICT_RE.match(value):
                 raise BadRequestError(
                     f'ambiguous Content-Length value {value!r} '
                     f'(RFC 9110 §8.6)')
             # Strip the OWS surrounding the value (§5).
             value = value.strip(b' \t')
-            # field-value MUST NOT contain CTLs except HTAB.
             if values_need_checking and _FIELD_VALUE_INVALID_RE.search(value):
                 raise BadRequestError(
                     f'CTL in header value (smuggling / log-injection): '
                     f'{key!r}: {value!r}')
             pair = (lkey, value)
             raw.append(pair)
-            # Admission is the last statement in the loop body on purpose:
-            # every ``raise`` above is a line that never enters the cache.
-            # Bytes are the bound that matters — see the constants above.
-            # Tested against the *resulting* size, not the current one, so the
-            # budget is a real ceiling rather than one a final line can step over.
+            # Admission last, and tested against the *resulting* byte total, so
+            # the budget is a ceiling no final line can step over.
             if (cacheable
                     and len(cache) < _LINE_CACHE_MAX
                     and self._line_cache_bytes + len(line) <= _LINE_CACHE_MAX_BYTES):
                 cache[line] = pair
                 self._line_cache_bytes += len(line)
 
-        # RFC 9112 §3.2.2 — for an absolute-form target the request's own
-        # authority is definitive; replace any client Host so a mismatched or
-        # spoofed Host cannot influence routing / host validation
+        # RFC 9112 §3.2.2 — the request's own authority is definitive, so a
+        # spoofed Host cannot influence routing or host validation
         # (SMUG-ABSOLUTE-URI-HOST-MISMATCH).
         if authority_override is not None:
             raw = [(k, v) for k, v in raw if k != b'host']
@@ -1310,19 +1019,13 @@ class HTTP1Actor(Actor):
         if len(headers.getlist(b'content-type')) > 1:
             raise BadRequestError('multiple Content-Type headers')
 
-        # RFC 9112 §6 — message framing validation.  Done here so a bad
-        # framing header is rejected before any body bytes are read.
-        # Also validates Host (§3.2 / §7.2) and the
-        # transfer-coding registry (§6.1 → 501 on unknown coding).
-        # It returns the declared body length it just validated; ``run`` weighs
-        # that against ``BB_MAX_BODY_SIZE`` without asking the headers again.
+        # RFC 9112 §6 — framing rejected before any body byte is read.  ``run``
+        # weighs the returned length against ``BB_MAX_BODY_SIZE``.
         self._declared_body_len = _validate_message_framing(headers)
         _validate_host(headers)
-        # RFC 9112 §3.2 / §7.2 — every HTTP/1.1 (and later 1.x) request
-        # MUST carry a Host header (RFC9112-7.1-MISSING-HOST); only
-        # HTTP/1.0, which predates Host, may omit it (COMP-HTTP10-NO-HOST).
-        # ``_validate_host`` checks the value's grammar when present; the
-        # presence rule is version-aware, so it lives here.
+        # RFC 9112 §3.2 / §7.2 — every HTTP/1.1 (and later 1.x) request MUST
+        # carry a Host header (RFC9112-7.1-MISSING-HOST); only HTTP/1.0, which
+        # predates Host, may omit it (COMP-HTTP10-NO-HOST).
         if version != b'HTTP/1.0' and not headers.getlist(b'host'):
             raise BadRequestError(
                 f'missing Host header on {version.decode("ascii")} request '
@@ -1338,10 +1041,9 @@ class HTTP1Actor(Actor):
             # query string is carried in query_string, never here.
             raw_path=_raw_path_b,
             query_string=_query_string,
-            # RFC-safe default.  ``root_path`` (mount prefix) is NOT taken
-            # from the client-controlled ``X-Forwarded-Prefix`` here (bug
-            # 1.16 — a client could spoof the mount point); only the
-            # ``TrustedProxy`` middleware sets it, after verifying the peer.
+            # NOT taken from the client-controlled ``X-Forwarded-Prefix`` — a
+            # client could spoof the mount point.  Only the ``TrustedProxy``
+            # middleware sets it, after verifying the peer.
             root_path='',
             headers=headers,
             client=None,
@@ -1350,8 +1052,6 @@ class HTTP1Actor(Actor):
         )
 
         if asterisk_form:
-            # Server-wide OPTIONS (§3.2.4): mark it so the dispatcher answers
-            # at the server level (200 with Allow) rather than routing ``*``.
             conn._asterisk_form = True
 
         if headers.getlist(b'host'):
@@ -1361,12 +1061,11 @@ class HTTP1Actor(Actor):
 
         if headers.getlist(b'upgrade'):
             # RFC 9110 §7.8 — a server MAY ignore an Upgrade it does not
-            # support; it MUST NOT fail the request over it.  Only WebSocket
-            # switches the connection type.  Any other token (notably curl's
-            # default ``Upgrade: h2c`` probe on ``--http2``) is ignored and
-            # the request is served as ordinary HTTP/1.1.  An unknown token
-            # must never reach ``conn.type``: dispatch has no route for it,
-            # and the connection would close with no reply.
+            # support and MUST NOT fail the request over it.  Only WebSocket
+            # may switch ``conn.type``; any other token (notably curl's default
+            # ``Upgrade: h2c`` probe on ``--http2``) is served as ordinary
+            # HTTP/1.1, because dispatch has no route for it and the connection
+            # would close with no reply.
             if headers.get(b'upgrade').strip().lower() == b'websocket':
                 conn.type = 'websocket'
                 conn.scheme = 'ws'
@@ -1396,10 +1095,10 @@ class HTTP1Actor(Actor):
             aggregator = EventAggregator(EventDispatcher())
 
         log_record = _start_record(conn)
-        log_record.status = 101  # HTTP 101 Switching Protocols
+        log_record.status = 101
 
         if not await self._do_ws_handshake(conn):
-            return  # version check failed; 400 already sent
+            return  # 400 already sent
         # One id per TCP connection: reuse the accept-time id; mint one only
         # when the actor was constructed without it (direct test drives).
         conn.connection_id = self._connection_id or new_connection_id()
@@ -1427,20 +1126,8 @@ class HTTP1Actor(Actor):
         """
         send = SenderFactory.http1(self._writer)
         headers = conn.headers
-        # Content on the handshake is refused before anything switches.  Those
-        # octets are request content per ``Content-Length``/``Transfer-Encoding``
-        # *and* the first frames per the 101 — two framings over the same bytes,
-        # which is what a front end and this server would disagree about.  The
-        # upgrade leaves ``run()`` before the keep-alive drain, so left alone
-        # they are read back as frames and handed to the application as a
-        # message.  Refusing beats draining here: RFC 9110 §9.3.1 gives content
-        # on GET no defined semantics (unlike §9.3.7 for OPTIONS, where the
-        # drain is the only correct answer), so nothing legitimate is lost, and
-        # a refusal resolves the ambiguity instead of picking a side of it.
-        # ``Content-Length: 0`` declares no content and so is not ambiguous —
-        # clients and proxies do attach it to GET requests.  CL/TE conflicts and
-        # malformed values are already 400/501 at parse, so a well-formed single
-        # value is all that can reach here.
+        # RFC 9110 §9.3.1 — refuse rather than drain; see
+        # ``docs/about/internals.md`` §Keep-alive drain invariant.
         if _declares_content(headers):
             logger.warning(
                 '400 Bad Request — WebSocket handshake declares content; '
@@ -1468,13 +1155,9 @@ class HTTP1Actor(Actor):
                        [(b'sec-websocket-version', b'13')])
             return False
 
-        # The client-offered subprotocols (ASGI websocket scope's
-        # ``subprotocols``) are derived from the request header by the
-        # ``conn.subprotocols`` property — no need to stash them.
         client_protos = conn.subprotocols
 
-        # Auto-negotiate from app.available_ws_protocols (backward-compat fallback).
-        # This is used when the handler calls websocket.accept without a subprotocol.
+        # Used when the handler calls websocket.accept without a subprotocol.
         available_raw = getattr(self._app, 'available_ws_protocols', [])
         available = {(p.decode('utf-8', errors='replace') if isinstance(p, bytes) else p)
                      for p in available_raw}
@@ -1525,10 +1208,8 @@ class HTTP1Actor(Actor):
 
         Protocol-side preparation only: the access-log record, the sender's
         per-request reset, the Expect/100-continue answer, the HEAD→GET
-        rewrite, and the recipient.  Everything app-facing — what the app is
-        called with (native Connection or ASGI scope), the raw-recipient
-        binding, the disconnect-detecting wrapper, and the call itself — is
-        delegated to :class:`RequestActor`, the shared app boundary.
+        rewrite, and the recipient.  Everything app-facing is delegated to
+        :class:`RequestActor`, the shared app boundary.
 
         The HEAD→GET rewrite must run before :class:`RequestActor` snapshots
         the app argument; reversed, the compat lane freezes ``method='HEAD'``,
@@ -1538,13 +1219,10 @@ class HTTP1Actor(Actor):
         """
         import asyncio  # noqa: PLC0415
 
-        # Build the access-log record only when something consumes it
-        # (access log / phase trace / request_completed listener).  On the
-        # baseline hot path — no logging, no listeners — it stays ``None``,
-        # skipping a per-request allocation and the ``conn.state`` dict it
-        # forces (the Connection graph's per-request objects are what the
-        # cyclic GC scans under concurrency).  ``_request_record_needed``
-        # takes ``None`` and answers correctly for it.
+        # Only when something consumes it (access log / phase trace /
+        # request_completed listener).  Otherwise ``None``, skipping a
+        # per-request allocation and the ``conn.state`` dict it forces — the
+        # Connection graph's per-request objects are what the cyclic GC scans.
         if _request_record_needed(self._aggregator):
             log_record = _AccessLogRecord.from_conn(conn)
             if _PHASE_TRACE:
@@ -1555,46 +1233,41 @@ class HTTP1Actor(Actor):
         else:
             log_record = None
 
-        # Reset per-request sender state before anything writes through it.
-        # The HTTP1Sender instance is shared across keep-alive requests on
-        # this connection; without the reset ``_started`` stays True after the
-        # first response and the timeout branch's ``if not send._started``
-        # check skips the synthetic 408 on a second-or-later request.
-        # ``_chunked`` / ``_buffered_status`` similarly outlive their request.
+        # The sender is shared across keep-alive requests: without the reset
+        # ``_started`` stays True after the first response, and the timeout
+        # branch's ``if not send._started`` then skips the synthetic 408 on a
+        # second-or-later request.  ``_chunked`` / ``_buffered_status``
+        # likewise outlive their request.
         send.reset_per_request_state()
 
-        # RFC 9110 §10.1.1 / §15.2 — a server MUST NOT send a 1xx response to
-        # an HTTP/1.0 client (COMP-NO-1XX-HTTP10); the Expect header is
-        # ignored and the body read normally.
+        # RFC 9110 §10.1.1 / §15.2 — MUST NOT send a 1xx to an HTTP/1.0 client
+        # (COMP-NO-1XX-HTTP10); the Expect header is ignored.
         #
-        # After the reset, because the sender's "response already complete"
-        # guard is set from the previous response until the reset clears it —
-        # written before it, the interim response is dropped from request two
-        # onward and the peer stalls until its own Expect timeout.  Before the
-        # sender capture below attaches the record, so the interim status
-        # never lands in the one the real response owns.
+        # Placed after the reset and before the sender capture below.  Written
+        # before the reset, the previous response's "already complete" guard
+        # drops the interim response from request two onward and the peer
+        # stalls until its own Expect timeout; written after the capture, the
+        # interim status lands in the record the real response owns.
         if (conn.http_version != '1.0'
                 and conn.headers.get(b'expect').lower() == b'100-continue'):
             await send(b'', HTTPStatus.CONTINUE)
 
-        # Inline access-log capture into the sender itself — avoids the
-        # per-event coroutine dispatch through a wrapper (7% of CPU in the
-        # py-spy profile).  RFC 9110 §9.3.2 — a HEAD response must be
-        # identical to the GET response except for the absence of the body,
-        # synthesised by dispatching to the GET handler and stripping body
-        # bytes.  The rewrite lands on the Connection only: a materialized
-        # scope reads ``method`` back from it, so writing ``scope['method']``
-        # too would force materialization for nothing.  The access log keeps
-        # the original HEAD, which it took from the request line.
+        # Inline access-log capture into the sender — avoids the per-event
+        # coroutine dispatch through a wrapper (7% of CPU in the py-spy
+        # profile).  RFC 9110 §9.3.2 — a HEAD response is the GET response
+        # without the body, synthesised by dispatching to the GET handler and
+        # stripping body bytes.  The rewrite lands on the Connection only: a
+        # materialized scope reads ``method`` back from it, so writing
+        # ``scope['method']`` too would force materialization for nothing.
+        # The access log keeps the original HEAD, from the request line.
         send._log_record = log_record
         send._head_mode = (conn.method == 'HEAD')
         if send._head_mode:
             conn.method = 'GET'
 
-        # One recipient per connection, rebound per request — the same trade
-        # as ``send.reset_per_request_state()``: the reader, body timeout, and
-        # deadline are connection properties, so rebuilding them per request
-        # bought nothing.  ``bind`` re-derives the framing from the new head.
+        # One recipient per connection, rebound per request: the reader, body
+        # timeout and deadline are all connection properties.  ``bind``
+        # re-derives the framing from the new head.
         if inner_receive is None:
             inner_receive = RecipientFactory.http1(
                 self._reader, conn, body_timeout=cfg.body_timeout, deadline=dl)
@@ -1603,16 +1276,11 @@ class HTTP1Actor(Actor):
 
         if conn._asterisk_form:
             # RFC 9112 §3.2.4 — ``OPTIONS *`` targets the origin, not a
-            # resource, so it never routes.  Answered at the server level with
-            # 204 plus an Allow header advertising the methods the origin
-            # implements.
+            # resource, so it never routes.
             await send(b'', HTTPStatus.NO_CONTENT,
                        [(b'allow', _SERVER_WIDE_ALLOW)])
             return True, inner_receive
 
-        # Hand the native Connection and the raw recipient to the shared app
-        # boundary; it decides what the app is called with and owns the
-        # binding, the wrapper, and the call.
         request_actor = self._request_actor
         if request_actor is None:
             request_actor = self._request_actor = RequestActor(
@@ -1644,10 +1312,6 @@ class HTTP1Actor(Actor):
     async def _read_headers(self, max_total: int) -> None:
         """Read the next message head into ``self._request``.
 
-        One call, one head, whatever reader is underneath — the reader decides
-        whether that is a single scan of its own buffer or a ``readuntil`` per
-        line, and the actor does not ask which.
-
         ``self._request`` is set on every exit path, including the failing
         ones: ``run()`` reads it to tell an idle close from a truncated
         request, and to report how many bytes an over-budget peer sent.
@@ -1655,11 +1319,9 @@ class HTTP1Actor(Actor):
         try:
             head = await self._reader.read_head(max_total)
         except ReadLimitExceeded as exc:
-            # Over budget with nothing that looks like a head is a peer talking
-            # some other protocol at us, not a request with too many fields —
-            # 400, not 431.  Testing for "no CRLF at all" would not do: the
-            # whole request usually arrives in one burst, terminator included,
-            # so the question is whether the *first* CRLF is inside the budget.
+            # "No CRLF at all" would not do as the test: the whole request
+            # usually arrives in one burst, terminator included, so the
+            # question is whether the *first* CRLF is inside the budget.
             self._request = exc.seen
             _reject_oversized_head(exc.seen, max_total)
             raise   # unreachable: _reject_oversized_head always raises
@@ -1668,17 +1330,13 @@ class HTTP1Actor(Actor):
             raise
         if not head:
             # Clean EOF with nothing sent — an idle peer closing, not a
-            # truncated request.  ``run()`` distinguishes them by this being
-            # empty.
+            # truncated request.
             self._request = b''
             raise IncompleteReadError(b'')
         self._request = head
 
     def _should_keep_alive(self, conn) -> bool:
-        """Return True if the connection should persist after this request.
-
-        Reads the :class:`Connection` directly so the
-        per-request keep-alive decision never materializes the lazy scope."""
+        """Return True if the connection should persist after this request."""
         http_version = conn.http_version
         connection = conn.headers.get(b'connection', b'').lower()
         if http_version == '1.1':
