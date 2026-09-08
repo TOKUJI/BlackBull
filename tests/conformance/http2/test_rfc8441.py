@@ -70,6 +70,30 @@ def _make_extended_connect_frame(
     return _make_raw_frame(FrameTypes.HEADERS, flags, stream_id, block)
 
 
+def _make_split_extended_connect_frames(
+    path: str = '/ws',
+    stream_id: int = 1,
+) -> tuple[bytes, bytes]:
+    """RFC 8441 Extended CONNECT split across HEADERS and CONTINUATION."""
+    block = Encoder().encode([
+        (b':method', b'CONNECT'),
+        (b':protocol', b'websocket'),
+        (b':scheme', b'https'),
+        (b':path', path.encode()),
+        (b':authority', b'localhost'),
+    ])
+    split = len(block) // 2
+    return (
+        _make_raw_frame(FrameTypes.HEADERS, 0, stream_id, block[:split]),
+        _make_raw_frame(
+            FrameTypes.CONTINUATION,
+            HeaderFrameFlags.END_HEADERS,
+            stream_id,
+            block[split:],
+        ),
+    )
+
+
 def _make_normal_connect_frame(stream_id: int = 1) -> bytes:
     """Standard CONNECT (no :protocol) — should NOT trigger WebSocket path."""
     encoder = Encoder()
@@ -191,6 +215,27 @@ class TestExtendedConnectHandshake:
 
         await self._run_with_app(app)
         assert captured['type'] == 'websocket'
+
+    async def test_split_headers_use_the_same_websocket_lifecycle(self):
+        captured = {}
+
+        async def app(conn, receive, send):
+            captured['type'] = conn.type
+            captured['first_event'] = await receive()
+            await send({'type': 'websocket.accept'})
+            captured['last_event'] = await receive()
+
+        handler, _, _ = _make_h2_actor(app)
+        headers, continuation = _make_split_extended_connect_frames()
+        handler.receive = AsyncMock(side_effect=[
+            _client_settings(), headers, continuation, None,
+        ])
+
+        await handler.run()
+
+        assert captured['type'] == 'websocket'
+        assert captured['first_event'] == {'type': 'websocket.connect'}
+        assert captured['last_event']['type'] == 'websocket.disconnect'
 
     async def test_scope_http_version_is_2(self):
         captured = {}

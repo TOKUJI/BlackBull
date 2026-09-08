@@ -191,9 +191,8 @@ def _make_split_get_frames(stream_id: int = 1) -> bytes:
     a follow-up: the single-frame test above only exercises
     ``_on_headers_frame``'s complete-in-one-frame branch, but
     ``_apply_priority_and_extensions`` (the thing that makes the shared
-    sentinel safe) is called independently from ``_on_continuation_frame``
-    too — separate code that has diverged from its HEADERS-path twin before
-    (the P2/P3 access-log gating had to be applied to each individually)."""
+    sentinel safe) is reached through the shared completed-field-section path,
+    regardless of which frame carries END_HEADERS."""
     block = Encoder().encode([
         (b':method', b'GET'), (b':path', b'/'), (b':scheme', b'https'),
         (b':authority', b'example.com'),
@@ -211,7 +210,7 @@ def _make_split_get_frames(stream_id: int = 1) -> bytes:
 @pytest.mark.asyncio
 async def test_extensions_sentinel_replaced_before_app_sees_connection_via_continuation():
     """Same guarantee as the test above, but the header block completes via
-    CONTINUATION (``_on_continuation_frame``), not a single HEADERS frame."""
+    CONTINUATION, not a single HEADERS frame."""
     seen = {}
 
     async def capturing_app(conn, receive, send):
@@ -230,8 +229,8 @@ async def test_extensions_sentinel_replaced_before_app_sees_connection_via_conti
     assert method == 'GET' and path == '/'  # sanity: real request, not a stub
     assert _dispatched_extensions(seen['conn']) is not parser_mod._EMPTY_H2_EXTENSIONS, (
         'the shared empty-extensions sentinel reached application code via '
-        'the CONTINUATION completion path — _apply_priority_and_extensions '
-        'must replace it there too, independently of the HEADERS path')
+        'the shared completed-field-section path must replace it after '
+        'CONTINUATION reassembly too')
 
 
 # ---------------------------------------------------------------------------

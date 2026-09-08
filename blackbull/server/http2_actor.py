@@ -1220,37 +1220,20 @@ class HTTP2Actor(Actor):
             spawned = False
             match frame.FrameType():
                 case FrameTypes.HEADERS:
-                    if stream.conn is not None and frame.end_headers:
-                        # RFC 9113 §8.1 — a second (single-frame) HEADERS on an
-                        # already-open request stream is *trailers*, not a new
-                        # request.  Previously _validate_stream_state permitted
-                        # HEADERS in OPEN and this respawned a second request
-                        # over the live recipient/task.  We don't
-                        # surface request trailers to the ASGI app, so we mark a
-                        # clean end-of-stream instead.  Trailers MUST carry
-                        # END_STREAM; without it the request is malformed.
-                        if not frame.end_stream:
-                            await self.send_frame(self.factory.rst_stream(
-                                stream.stream_id, ErrorCodes.PROTOCOL_ERROR))
-                        else:
-                            stream.on_data_received(end_stream=True)
-                            recipient = self._recipients.get(stream.stream_id)
-                            if recipient is not None:
-                                recipient.put_end_of_stream()
-                    else:
-                        send = self.make_sender(stream.stream_id)
-                        spawned = await self._on_headers_frame(frame, stream, send, tg)
-                        if not spawned:
-                            waiting_continuation = True
-                            header_frame = frame
-                            # The peer now owes CONTINUATION; start its clock.
-                            self._header_block_since = _loop.time()
+                    send = self.make_sender(stream.stream_id)
+                    spawned = await self._on_headers_frame(frame, stream, send, tg)
+                    if not spawned:
+                        waiting_continuation = True
+                        header_frame = frame
+                        # The peer now owes CONTINUATION; start its clock.
+                        self._header_block_since = _loop.time()
                 case FrameTypes.CONTINUATION:
                     send = self.make_sender(stream.stream_id)
                     spawned = await self._on_continuation_frame(
                         frame, stream, send, tg, header_frame, waiting_continuation)
                     if spawned:
                         waiting_continuation = False
+                        header_frame = None
                         self._header_block_since = None
                 case FrameTypes.DATA:
                     await self._on_data_frame(frame, stream)
@@ -1370,39 +1353,62 @@ class HTTP2Actor(Actor):
         send,
         tg: asyncio.TaskGroup,
     ) -> bool:
-        """Handle a HEADERS frame; return True if stream task spawned, False if awaiting CONTINUATION."""
+        """Handle HEADERS; return False only while awaiting CONTINUATION."""
+        if not frame.end_headers:
+            return False
+
+        return await self._complete_header_block(frame, stream, send, tg)
+
+    async def _complete_header_block(
+        self,
+        header_frame,
+        stream: 'Stream',
+        send,
+        tg: asyncio.TaskGroup,
+    ) -> bool:
+        """Apply one completed request field section, independent of framing.
+
+        ``header_frame`` is always the opening HEADERS frame.  Its END_STREAM
+        bit owns the request-body transition even when END_HEADERS arrives on
+        a later CONTINUATION frame.
+        """
+        if stream.conn is not None:
+            # RFC 9113 §8.1 — a second field section on an open request is
+            # trailers, not a new request.  Request trailers are not surfaced
+            # to the app, so only their END_STREAM transition is observable.
+            # Keeping this here makes single-frame and fragmented trailers use
+            # the same recipient and prevents a second handler from starting.
+            if not header_frame.end_stream:
+                await self.send_frame(self.factory.rst_stream(
+                    stream.stream_id, ErrorCodes.PROTOCOL_ERROR))
+            else:
+                stream.on_data_received(end_stream=True)
+                recipient = self._recipients.get(stream.stream_id)
+                if recipient is not None:
+                    recipient.put_end_of_stream()
+            return True
+
         if self._active_stream_count >= self.max_concurrent_streams:
-            if not frame.end_headers:
-                # The header block legally continues in
-                # CONTINUATION frames (RFC 9113 §6.10); refusing here would
-                # leave run() not expecting them and escalate the peer's
-                # legal CONTINUATION into a bogus connection error.  Keep
-                # accumulating the block (the flood cap still bounds it);
-                # ``_on_continuation_frame`` re-checks capacity at
-                # END_HEADERS and refuses there — after the HPACK decode,
-                # which must happen regardless to keep the dynamic table
-                # in sync (§4.3).
-                return False
+            # HPACK decoding has already happened for a complete single-frame
+            # block and for a block completed by CONTINUATION.  Refusing only
+            # now therefore preserves the connection-wide decoder state.
             log_cap_hit('h2_max_concurrent_streams',
                         requested=self._active_stream_count + 1,
                         limit=self.max_concurrent_streams,
                         protocol='http2')
             await self.send_frame(
                 self.factory.rst_stream(stream.stream_id, ErrorCodes.REFUSED_STREAM))
-            return True  # refused — do not queue as waiting for CONTINUATION
+            return True
 
-        if not frame.end_headers:
-            return False
-
-        conn = parse_headers(frame)
+        conn = parse_headers(header_frame)
         # RFC 9113 §8.1.1 / §8.2.1 — malformed HEADERS must be rejected with
         # a stream error of type PROTOCOL_ERROR rather than dispatched.
         # parse_payload sets the flag for field-level violations; parse_headers
         # sets it for missing/empty required pseudo-headers.
-        if getattr(frame, 'malformed', False):
+        if getattr(header_frame, 'malformed', False):
             if _DEBUG:
                 logger.debug('Stream %d malformed HEADERS — %s',
-                             stream.stream_id, frame.malformed_reason)
+                             stream.stream_id, header_frame.malformed_reason)
             await self.send_frame(
                 self.factory.rst_stream(stream.stream_id, ErrorCodes.PROTOCOL_ERROR))
             return True
@@ -1452,8 +1458,8 @@ class HTTP2Actor(Actor):
         self._apply_priority_and_extensions(stream, conn)
         stream_recipient = self._make_stream_recipient(stream.stream_id)
         self._recipients[stream.stream_id] = stream_recipient
-        stream.on_headers_received(end_stream=bool(frame.end_stream))
-        if frame.end_stream:
+        stream.on_headers_received(end_stream=bool(header_frame.end_stream))
+        if header_frame.end_stream:
             # No body to deliver — skip queue allocation; recipient synthesizes
             # the empty http.request event on first receive() call if needed.
             stream_recipient.mark_end_of_stream_on_headers()
@@ -1481,7 +1487,7 @@ class HTTP2Actor(Actor):
         header_frame,
         waiting_continuation: bool,
     ) -> bool:
-        """Handle a CONTINUATION frame; return True if stream task spawned, False if still accumulating."""
+        """Handle CONTINUATION; return False only while still accumulating."""
         # RFC 9113 §6.10 — CONTINUATION outside an unterminated header block
         # (i.e. not preceded by HEADERS/CONTINUATION without END_HEADERS) is a
         # connection error of type PROTOCOL_ERROR.
@@ -1489,6 +1495,13 @@ class HTTP2Actor(Actor):
             await self._connection_error(
                 ErrorCodes.PROTOCOL_ERROR,
                 'unexpected CONTINUATION without preceding HEADERS')
+            return True
+
+        if frame.stream_id != header_frame.stream_id:
+            await self._connection_error(
+                ErrorCodes.PROTOCOL_ERROR,
+                f'CONTINUATION stream {frame.stream_id} does not match '
+                f'opening HEADERS stream {header_frame.stream_id}')
             return True
 
         # Accumulate into a bytearray so each
@@ -1524,58 +1537,8 @@ class HTTP2Actor(Actor):
             return False
 
         header_frame.parse_payload()
-
-        conn = parse_headers(header_frame)
-        # RFC 9113 §8.1.1 / §8.2.1 — same malformed-HEADERS check as the direct
-        # HEADERS path; reject with RST_STREAM PROTOCOL_ERROR.
-        if getattr(header_frame, 'malformed', False):
-            if _DEBUG:
-                logger.debug('Stream %d malformed HEADERS (via CONTINUATION) — %s',
-                             stream.stream_id, header_frame.malformed_reason)
-            await self.send_frame(
-                self.factory.rst_stream(stream.stream_id, ErrorCodes.PROTOCOL_ERROR))
-            return True
-
-        assert conn is not None  # not malformed → parse_headers built a Connection
-        self._fill_scope_connection(conn)
-        # Native dispatch (Connection); ASGI scope only for the force_asgi compat
-        # lane. The CONTINUATION path has no dedicated WS handler, so a WS request
-        # split across CONTINUATION frames threads its Connection through the
-        # generic dispatch (``__call__`` routes it by ``conn.type == 'websocket'``)
-        # rather than through ``_handle_h2_websocket``.
-        stream.expected_content_length = _extract_content_length(conn)
-
-        if self._active_stream_count >= self.max_concurrent_streams:
-            log_cap_hit('h2_max_concurrent_streams',
-                        requested=self._active_stream_count + 1,
-                        limit=self.max_concurrent_streams,
-                        scope_path=conn.path,
-                        protocol='http2')
-            await self.send_frame(
-                self.factory.rst_stream(stream.stream_id, ErrorCodes.REFUSED_STREAM))
-            return True
-
-        stream.conn = conn
-        # Guard inline rather than through a predicate: a stream is a request,
-        # and a method call to answer "no" cost 21 executed instructions per
-        # request where the comparison costs seven.  ``declared > cap > 0``
-        # chains the two facts the refusal needs — a length was declared, and
-        # a cap is in force.  The refusal re-checks; it, not this, is the
-        # authority.
-        declared = stream.expected_content_length
-        if (declared is not None and declared > self._max_body_size > 0
-                and await self._refuse_oversized_declared_body(
-                    stream, conn, send)):
-            return True
-
-        self._apply_priority_and_extensions(stream, conn)
-        stream_recipient = self._make_stream_recipient(stream.stream_id)
-        self._recipients[stream.stream_id] = stream_recipient
-        # Same consumer gate and the same inline capture as the HEADERS path.
-        log_record = _open_record(conn, self._aggregator)
-        send._log_record = log_record
-        self._spawn_stream_task(tg, stream.stream_id, conn, stream_recipient, send, log_record)
-        return True
+        return await self._complete_header_block(
+            header_frame, stream, send, tg)
 
     async def _refuse_oversized_declared_body(self, stream, conn, send) -> bool:
         """413 the stream whose head declared more body than the cap allows.

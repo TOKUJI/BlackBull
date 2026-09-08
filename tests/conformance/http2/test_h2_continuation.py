@@ -11,9 +11,7 @@ CONTINUATION frame without the END_HEADERS flag set.
 
 The server must:
 
-1. Accept CONTINUATION frames as a valid frame type (currently causes
-   ``KeyError`` in ``FrameFactory`` because no ``Continuation`` class is
-   registered).
+1. Accept CONTINUATION frames as a valid frame type.
 
 2. When a HEADERS frame arrives *without* END_HEADERS (flag 0x4 absent),
    keep reading subsequent CONTINUATION frames on the same stream.
@@ -23,14 +21,6 @@ The server must:
 
 4. Call the ASGI application only after the full header block has been
    assembled (END_HEADERS seen on a CONTINUATION frame).
-
-P1 bug
-------
-``FrameFactory._factory`` is populated from ``FrameBase.__subclasses__()`` at
-construction time.  Because no ``Continuation`` class exists, ``factory.load()``
-raises ``KeyError`` for type ``0x09``.  Even if the class existed,
-``HTTP2Handler.run()`` has no accumulation logic and would call the ASGI app
-prematurely — after only the HEADERS fragment — with an incomplete scope.
 """
 
 import pytest
@@ -105,12 +95,7 @@ class TestHeadersFrameFlags:
 # ---------------------------------------------------------------------------
 
 class TestContinuationFrameParsing:
-    """``FrameFactory`` must recognise and parse CONTINUATION frames.
-
-    P1 bug: ``FrameFactory._factory`` is built from ``FrameBase.__subclasses__()``.
-    No ``Continuation`` subclass exists, so ``factory.load()`` raises ``KeyError``
-    for any frame whose type byte is ``0x09``.
-    """
+    """``FrameFactory`` must recognise and parse CONTINUATION frames."""
 
     def test_continuation_type_is_defined_in_enum(self):
         """``FrameTypes.CONTINUATION`` must exist and equal ``b'\\x09'``."""
@@ -119,11 +104,10 @@ class TestContinuationFrameParsing:
     def test_factory_load_continuation_without_end_headers_does_not_raise(self):
         """``FrameFactory.load()`` must parse a CONTINUATION frame (no END_HEADERS).
 
-        Currently raises ``KeyError`` because no handler class is registered for type 0x09.
         """
         factory = FrameFactory()
         raw = _make_h2_frame(FrameTypes.CONTINUATION, SettingFrameFlags.INIT, 1, b'\x00')
-        frame = factory.load(raw)              # P1 bug: KeyError here
+        frame = factory.load(raw)
         assert frame.FrameType() == FrameTypes.CONTINUATION
 
     def test_factory_load_continuation_with_end_headers_does_not_raise(self):
@@ -174,8 +158,8 @@ class TestContinuationHandling:
     """``HTTP2Handler.run()`` must accumulate header block fragments until
     END_HEADERS and call the ASGI app once with the fully assembled scope.
 
-    These tests document the desired behaviour; they currently fail because
-    the accumulation logic does not exist.
+    Lifecycle parity with single-frame HEADERS is covered by the architecture
+    tests; these tests pin field-block accumulation and dispatch timing.
     """
 
     async def test_headers_with_end_headers_calls_app_once(self):
@@ -202,9 +186,6 @@ class TestContinuationHandling:
         """HEADERS (no END_HEADERS) + CONTINUATION (END_HEADERS) must yield one app call
         with the fully decoded scope.
 
-        P1 bug: ``factory.load()`` raises ``KeyError`` on the CONTINUATION frame;
-        even if it didn't, ``run()`` would have called the app early (after HEADERS only)
-        with a scope built from only the first HPACK fragment.
         """
         encoder = Encoder()
         full_block = encoder.encode([

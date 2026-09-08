@@ -86,6 +86,14 @@ Extended CONNECT, CONTINUATION boundary cases, server-response
 shapes, and the `BB_MAX_BODY_SIZE` / `BB_MIN_BODY_RATE` refusals in
 `test_rfc9113_body_cap.py`), and run in normal `pytest` runs.
 
+Inbound request field sections use one completion path whether END_HEADERS is
+carried by HEADERS or a later CONTINUATION.  The opening HEADERS frame owns the
+stream's END_STREAM transition, so an empty request, a DATA-bearing request,
+request trailers, and RFC 8441 Extended CONNECT keep the same lifecycle at
+every legal field-block split.  A CONTINUATION on a different stream from its
+opening HEADERS is a connection-level PROTOCOL_ERROR, as required by RFC 9113
+§6.10.
+
 The in-tree client tests also exercise negative validation for malformed
 response HEADERS and fixed-length control frames before response or raw-stream
 dispatch, including the RFC-required connection-versus-stream error scope.
