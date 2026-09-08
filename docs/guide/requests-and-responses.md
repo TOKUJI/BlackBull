@@ -367,6 +367,13 @@ package to parse the body manually.
     `http.response.trailers` `more_trailers` is preserved via
     `NativeResponse.more_trailers`.
 
+    HTTP/1.1 framing is owned by the server.  An application-supplied
+    `Transfer-Encoding` is ignored.  A single-body response gets one
+    `Content-Length`; if the application supplied a length, it must match the
+    body before any response bytes are written.  Repeated or comma-joined
+    lengths are accepted only when every numeric value is equal, then emitted
+    as one canonical field.
+
     On the native path a `Response` (or subclass) is serialised via
     `Response.to_native()`.  A subclass that overrides `__call__` to emit a
     custom event sequence is honoured on the WebSocket / external-host
@@ -496,6 +503,13 @@ complete after its header section even if the application declared trailers;
 later trailer events are ignored so they cannot become bytes in the next
 keep-alive response.
 
+Informational responses and status `204` carry neither content nor framing
+fields.  A `205` carries no content and is emitted with `Content-Length: 0` so
+its boundary remains explicit on a persistent connection.  A `304` also
+carries no content; an explicit, valid `Content-Length` is retained as
+selected-representation metadata, but one is not generated from an attempted
+response body.  Application body events for these statuses are discarded.
+
 ## WebSocket frames
 
 For WebSocket routes (`scheme=Scheme.websocket`), use
@@ -547,10 +561,9 @@ async def handler(conn, receive, send):
 
 ### How HTTP/1.1 delivers streaming responses
 
-When `more_body=True` appears on the first `http.response.body`
-event, the HTTP/1.1 sender adds `Transfer-Encoding: chunked` to
-the response headers and formats each body event as a hex-length
-chunk:
+When `more_body=True` appears on the first `http.response.body` event without
+a declared length, the HTTP/1.1 sender adds `Transfer-Encoding: chunked` and
+formats each body event as a hex-length chunk:
 
 ```
 5\r\n
@@ -566,6 +579,13 @@ The terminal `0\r\n\r\n` is written automatically when
 `http.response.start`, the final body event remains unterminated and the last
 `http.response.trailers` event writes `0\r\n`, the trailer fields, and the
 final blank line.
+
+A stream with a valid `Content-Length` keeps that single field and sends raw
+body bytes rather than chunk syntax.  BlackBull checks the accumulated body
+size: crossing the declared boundary or ending short raises an error and the
+connection is not reused.  Returning from an application after a non-terminal
+body event likewise leaves the response incomplete and closes that
+keep-alive connection.
 
 HTTP/2 uses explicitly sized DATA frames instead of chunk syntax.  Without
 trailers, `END_STREAM` maps to `more_body=False`; with declared trailers it

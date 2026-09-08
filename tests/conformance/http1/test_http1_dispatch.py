@@ -151,7 +151,7 @@ class TestMakeSender:
             'type': 'http.response.start', 'status': 200,
             'headers': [(b'content-type', b'text/plain'), (b'content-length', b'5')],
         })
-        await send({'type': 'http.response.body', 'body': b''})
+        await send({'type': 'http.response.body', 'body': b'hello'})
         written = bytes(writer.written)
         assert b'content-type: text/plain\r\n' in written
         assert b'content-length: 5\r\n' in written
@@ -299,6 +299,92 @@ class TestHTTP11KeepAlive:
                            capturing_app, None, request=req1_first_line + b'\r\n')
         await actor.run()
         assert '/alpha' in paths and '/beta' in paths
+
+    @pytest.mark.parametrize('headers', [
+        [],
+        [(b'content-length', b'2')],
+    ])
+    async def test_incomplete_response_prevents_keep_alive_reuse(self, headers):
+        req1 = _http_request(
+            method='GET', path='/one',
+            headers={'Host': 'localhost:8000', 'Connection': 'keep-alive'})
+        req2 = _http_request(
+            method='GET', path='/two',
+            headers={'Host': 'localhost:8000', 'Connection': 'close'})
+        first_line, rest = req1.split(b'\r\n', 1)
+        call_count = 0
+
+        async def incomplete_app(scope, receive, send):
+            nonlocal call_count
+            call_count += 1
+            await send({'type': 'http.response.start', 'status': 200,
+                        'headers': headers})
+            await send({'type': 'http.response.body', 'body': b'a',
+                        'more_body': True})
+
+        writer = _FakeWriter()
+        actor = HTTP1Actor(_FakeReader(rest + req2), writer, incomplete_app,
+                           None, request=first_line + b'\r\n')
+        await actor.run()
+
+        assert call_count == 1
+
+    @pytest.mark.parametrize('events', [
+        [{'type': 'http.response.start', 'status': 200, 'headers': []}],
+        [
+            {'type': 'http.response.start', 'status': 103, 'headers': []},
+            {'type': 'http.response.body', 'body': b''},
+        ],
+    ])
+    async def test_response_without_a_final_boundary_prevents_reuse(
+            self, events):
+        req1 = _http_request(
+            method='GET', path='/one',
+            headers={'Host': 'localhost:8000', 'Connection': 'keep-alive'})
+        req2 = _http_request(
+            method='GET', path='/two',
+            headers={'Host': 'localhost:8000', 'Connection': 'close'})
+        first_line, rest = req1.split(b'\r\n', 1)
+        call_count = 0
+
+        async def incomplete_app(scope, receive, send):
+            nonlocal call_count
+            call_count += 1
+            for event in events:
+                await send(event)
+
+        actor = HTTP1Actor(
+            _FakeReader(rest + req2), _FakeWriter(), incomplete_app, None,
+            request=first_line + b'\r\n')
+        await actor.run()
+
+        assert call_count == 1
+
+    @pytest.mark.parametrize('failure', ['short-body', 'handler-error'])
+    async def test_failure_after_response_start_cannot_append_an_error_response(
+            self, failure):
+        from blackbull import BlackBull
+
+        app = BlackBull()
+
+        @app.route(path='/')
+        async def partial_response(conn, receive, send):
+            await send({'type': 'http.response.start', 'status': 200,
+                        'headers': [(b'content-length', b'2')]})
+            await send({'type': 'http.response.body', 'body': b'a',
+                        'more_body': True})
+            if failure == 'short-body':
+                await send({'type': 'http.response.body', 'body': b''})
+            else:
+                raise RuntimeError('handler failed after response start')
+
+        actor, writer = _make_actor(_http_request(), app)
+        await actor.run()
+
+        wire = bytes(writer.written)
+        assert wire.count(b'HTTP/1.1 ') == 1
+        assert wire.startswith(b'HTTP/1.1 200 OK\r\n')
+        assert b'500 Internal Server Error' not in wire
 
     async def test_incomplete_read_on_first_request_closes_silently(self):
         req = _http_request(method='GET', path='/', headers={'Host': 'localhost:8000'})

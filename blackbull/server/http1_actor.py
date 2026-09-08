@@ -1634,10 +1634,9 @@ class HTTP1Actor(Actor):
             if log_record is not None:
                 log_record.mark('dispatch_done')
                 _emit_access_log(log_record)
-        if send._expect_trailers and not send._completed:
-            # ASGI assigns completion to a declared trailer section.
-            # Reusing the connection here would parse the next request while
-            # the peer still waits for this response's chunk terminator.
+        if send._response_started and not send._completed:
+            # A response with an open body or trailer section has not reached
+            # its declared wire boundary, so the next request cannot reuse it.
             return False, inner_receive
         return True, inner_receive
 

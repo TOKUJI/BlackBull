@@ -128,6 +128,22 @@ def _is_informational(status) -> bool:
     return int(status) < 200
 
 
+def _parse_content_length(headers: Headers) -> int | None:
+    """Return one unambiguous Content-Length value from response headers."""
+    values: list[int] = []
+    for _name, raw in headers.getlist(b'content-length'):
+        for member in raw.split(b','):
+            value = member.strip(b' \t')
+            if not value or not value.isdigit():
+                raise ValueError('invalid Content-Length response header')
+            values.append(int(value))
+    if not values:
+        return None
+    if any(value != values[0] for value in values[1:]):
+        raise ValueError('conflicting Content-Length response headers')
+    return values[0]
+
+
 def _has_header(items, name: bytes) -> bool:
     """Case-insensitive membership check over ``(key, value)`` tuples.
 
@@ -647,7 +663,9 @@ class HTTP1Sender(BaseSender):
     __slots__ = (
         '_buffered_status', '_buffered_headers', '_chunked',
         '_expect_trailers', '_head_mode', '_log_record', '_started',
-        '_completed', '_trailers_started',
+        '_completed', '_trailers_started', '_content_length',
+        '_body_bytes', '_suppress_body', '_informational',
+        '_response_started', '_poisoned',
     )
 
     def __init__(self, writer: AbstractWriter):
@@ -670,6 +688,15 @@ class HTTP1Sender(BaseSender):
         # mirrors the H2 sender's post-END_STREAM drop.
         self._completed: bool = False
         self._trailers_started: bool = False
+        self._content_length: int | None = None
+        self._body_bytes: int = 0
+        self._suppress_body: bool = False
+        self._informational: bool = False
+        # Tracks application response activity independently of ``_started``.
+        # The latter means final headers reached the wire and is intentionally
+        # false for buffered starts and informational responses.
+        self._response_started: bool = False
+        self._poisoned: bool = False
         # RFC 9110 §9.3.2 — when the request was HEAD, the response must
         # have the same headers (including Content-Length) as a GET would
         # but no body.  HTTP1Actor sets this before dispatch.
@@ -704,15 +731,26 @@ class HTTP1Sender(BaseSender):
         Unknown event types are logged and dropped; non-dict / non-bytes
         bodies raise ``TypeError``.
         """
-        if self._completed:
-            # A complete response has already gone out for this
-            # request; drop any further response events so a handler that
-            # raises after completing (→ the error handler emits a second
-            # response) can't splice two responses onto one connection.
+        if self._completed or self._poisoned:
+            # A completed response or a response whose boundary failed cannot
+            # accept another event on this connection.
+            return
+
+        begins_response = (
+            isinstance(body, bytes)
+            or (isinstance(body, NativeResponse) and body._header is not None)
+            or (isinstance(body, dict)
+                and body.get('type') == ASGIEvent.HTTP_RESPONSE_START)
+        )
+        if self._started and begins_response:
+            # Once final headers are on the wire, another response head would
+            # splice a second status line into the unfinished message.
+            self._poisoned = True
             return
 
         match body:
             case bytes():
+                self._response_started = True
                 h = headers if isinstance(headers, Headers) else Headers(headers)
                 if self._log_record is not None:
                     self._log_record.status = int(status)
@@ -733,17 +771,13 @@ class HTTP1Sender(BaseSender):
                 # arm (body completes the flush); body/trailers delegate to
                 # the shared helpers the dict arms use.
                 if body._header is not None:
+                    self._response_started = True
                     self._buffered_status = HTTPStatus(body.status)
                     # Preserve the ASGI start `trailers: True` flag so a
                     # terminal body before the trailers event withholds the
                     # terminal chunk (lossless full-form compat).
                     self._expect_trailers = body.expects_trailers
                     header_pairs = list(body._header)
-                    if self._expect_trailers and not self._head_mode:
-                        header_pairs = [
-                            pair for pair in header_pairs
-                            if pair[0].lower() != b'content-length'
-                        ]
                     self._buffered_headers = Headers(header_pairs)
                     if self._log_record is not None:
                         self._log_record.status = body.status
@@ -760,24 +794,22 @@ class HTTP1Sender(BaseSender):
                     # Sendfile form: the header arm was just buffered, which
                     # is exactly what ``_pathsend`` needs — it flushes those
                     # headers and hands the file to ``loop.sendfile``.
-                    await self._pathsend(body.file_path)
-                    self._completed = True
+                    if await self._pathsend(body.file_path):
+                        self._completed = True
                     return
                 if body.body is not None:
+                    self._response_started = True
                     await self._handle_body_content(body._body, body.more_body)
                 if body.trailers is not None and not self._completed:
+                    self._response_started = True
                     await self._handle_trailers(
                         body.trailers, body.more_trailers)
 
             case {'type': ASGIEvent.HTTP_RESPONSE_START}:
+                self._response_started = True
                 self._buffered_status = HTTPStatus(body.get('status', HTTPStatus.OK))
                 self._expect_trailers = bool(body.get('trailers', False))
                 header_pairs = list(body.get('headers', []))
-                if self._expect_trailers and not self._head_mode:
-                    header_pairs = [
-                        pair for pair in header_pairs
-                        if pair[0].lower() != b'content-length'
-                    ]
                 self._buffered_headers = Headers(header_pairs)
                 if self._log_record is not None:
                     self._log_record.status = body.get('status', '-')
@@ -799,17 +831,20 @@ class HTTP1Sender(BaseSender):
                     self._log_record.mark('start_arm_out')
 
             case {'type': ASGIEvent.HTTP_RESPONSE_BODY}:
+                self._response_started = True
                 await self._handle_body_content(body.get('body', b''),
                                                 body.get('more_body', False))
 
             case {'type': ASGIEvent.HTTP_RESPONSE_TRAILERS}:
+                self._response_started = True
                 await self._handle_trailers(
                     body.get('headers', []),
                     bool(body.get('more_trailers', False)))
 
             case {'type': ASGIEvent.HTTP_RESPONSE_PATHSEND}:
-                await self._pathsend(body['path'])
-                self._completed = True
+                self._response_started = True
+                if await self._pathsend(body['path']):
+                    self._completed = True
 
             case {'type': str() as event_type}:
                 logger.warning('HTTP1Sender: unknown event type %r', event_type)
@@ -819,8 +854,6 @@ class HTTP1Sender(BaseSender):
 
     async def _handle_body_content(self, content: bytes, more_body: bool) -> None:
         """Write one body chunk — shared by the dict and native paths."""
-        if self._log_record is not None and content:
-            self._log_record.response_bytes += len(content)
         # Bracket the actual transport
         # write for the last body event so we can see whether the
         # 30-60 ms woff2 tail lives in middleware/handler work
@@ -834,14 +867,8 @@ class HTTP1Sender(BaseSender):
             self._buffered_status = None
             self._buffered_headers = None
         else:
-            if self._head_mode:
-                # already wrote headers; HEAD response carries no body
-                if self._log_record is not None and not more_body:
-                    self._log_record.mark('body_arm_out')
-                if not more_body:
-                    self._completed = True
-                return
-            if self._chunked:
+            self._track_content_length(len(content), more_body)
+            if self._chunked and not self._suppress_body:
                 if content:
                     chunk = f'{len(content):x}\r\n'.encode() + content + b'\r\n'
                     if not more_body and not self._expect_trailers:
@@ -849,8 +876,20 @@ class HTTP1Sender(BaseSender):
                     await self._write(chunk)
                 elif not more_body and not self._expect_trailers:
                     await self._write(b'0\r\n\r\n')
-            elif content:
+            elif content and not self._suppress_body:
                 await self._write(content)
+        if self._log_record is not None and content:
+            self._log_record.response_bytes += len(content)
+        if self._suppress_body:
+            if self._log_record is not None and not more_body:
+                self._log_record.mark('body_arm_out')
+            if not more_body:
+                if self._informational:
+                    self._informational = False
+                    self._suppress_body = False
+                else:
+                    self._completed = True
+            return
         if self._log_record is not None and not more_body:
             self._log_record.mark('body_arm_out')
         if (not more_body
@@ -860,6 +899,8 @@ class HTTP1Sender(BaseSender):
     async def _handle_trailers(self, headers: HeaderList,
                                more_trailers: bool = False) -> None:
         """Write one part of the trailer section for dict and native paths."""
+        if not (self._expect_trailers or self._chunked):
+            return
         if not self._trailers_started:
             await self._write(b'0\r\n')
             self._trailers_started = True
@@ -882,23 +923,86 @@ class HTTP1Sender(BaseSender):
         self._started = False
         self._completed = False
         self._trailers_started = False
+        self._content_length = None
+        self._body_bytes = 0
+        self._suppress_body = False
+        self._informational = False
+        self._response_started = False
+        self._poisoned = False
         self._head_mode = False
         self._log_record = None
 
     def _ensure_framing_headers(self, status: HTTPStatus, headers: Headers,
-                                body_len: int, more_body: bool) -> None:
-        # RFC 9110 §8.6 / RFC 9112 §6.1 — an informational response MUST NOT
-        # carry Content-Length or Transfer-Encoding.  It has no body, and a
-        # length a proxy believes bounds one desyncs the connection that the
-        # real response still has to use.
-        if _is_informational(status):
-            return
-        if more_body or (self._expect_trailers and not self._head_mode):
-            if b'transfer-encoding' not in headers:
-                headers.append(b'transfer-encoding', b'chunked')
+                                body_len: int, more_body: bool) -> Headers:
+        """Derive the sole legal framing from status and body mode.
+
+        Transfer-Encoding belongs to the server because it describes bytes on
+        the transport, not the application payload.  Content-Length is parsed
+        before rebuilding the field list so duplicate values cannot create two
+        competing message boundaries.
+        """
+        code = int(status)
+        self._chunked = False
+        self._content_length = None
+        self._body_bytes = 0
+        self._informational = _is_informational(status)
+        content_forbidden = self._informational or code in (204, 205, 304)
+        self._suppress_body = self._head_mode or content_forbidden
+
+        keep_length = (not self._informational and code not in (204, 205)
+                       and not (self._expect_trailers and not self._head_mode))
+        app_length = _parse_content_length(headers) if keep_length else None
+        pairs = [
+            (name, value) for name, value in headers
+            if name.lower() not in (b'content-length', b'transfer-encoding')
+        ]
+
+        if self._informational or code == 204:
+            self._expect_trailers = False
+        elif code == 205:
+            self._expect_trailers = False
+            pairs.append((b'content-length', b'0'))
+        elif code == 304:
+            self._expect_trailers = False
+            if app_length is not None:
+                pairs.append((b'content-length',
+                              _content_length_bytes(app_length)))
+        elif self._expect_trailers and not self._head_mode:
+            pairs.append((b'transfer-encoding', b'chunked'))
             self._chunked = True
-        elif b'content-length' not in headers:
-            headers.append(b'content-length', _content_length_bytes(body_len))
+        elif more_body:
+            if app_length is None:
+                pairs.append((b'transfer-encoding', b'chunked'))
+                self._chunked = True
+            else:
+                pairs.append((b'content-length',
+                              _content_length_bytes(app_length)))
+                self._content_length = app_length
+        else:
+            expected = body_len
+            if app_length is not None and app_length != expected:
+                raise ValueError(
+                    'Content-Length does not match the response body')
+            pairs.append((b'content-length',
+                          _content_length_bytes(expected)))
+            self._content_length = expected
+
+        return Headers(pairs)
+
+    def _track_content_length(self, content_len: int, more_body: bool) -> None:
+        """Reject a declared-length stream that crosses its wire boundary."""
+        if self._content_length is None:
+            return
+        total = self._body_bytes + content_len
+        if total > self._content_length:
+            if self._started:
+                self._poisoned = True
+            raise ValueError('response body exceeds Content-Length')
+        if not more_body and total != self._content_length:
+            if self._started:
+                self._poisoned = True
+            raise ValueError('response body is shorter than Content-Length')
+        self._body_bytes = total
 
     @staticmethod
     def _ensure_date_header(headers: Headers) -> None:
@@ -915,9 +1019,11 @@ class HTTP1Sender(BaseSender):
         # what the actor's 408 synthesis consults.  An interim response does
         # not commit a status, so a request that later times out can still be
         # answered with 408 (RFC 9110 §15.2 — 1xx is provisional).
+        headers = self._ensure_framing_headers(
+            status, headers, len(body), more_body)
+        self._track_content_length(len(body), more_body)
         if not _is_informational(status):
             self._started = True
-        self._ensure_framing_headers(status, headers, len(body), more_body)
         self._ensure_date_header(headers)
 
         # Coalesce status line + headers + body into a single write so the
@@ -931,7 +1037,7 @@ class HTTP1Sender(BaseSender):
         # RFC 9110 §9.3.2 — HEAD response carries no body.  Headers (and
         # the Content-Length we just computed from the GET body) still go
         # out so caches and proxies remain accurate.
-        if self._head_mode:
+        if self._suppress_body:
             await self._write(head)
             return
 
@@ -963,57 +1069,75 @@ class HTTP1Sender(BaseSender):
         parts.append(_CRLF)
         return b''.join(parts)
 
-    async def _pathsend(self, path: str) -> None:
+    async def _pathsend(self, path: str) -> bool:
         """Handle ``http.response.pathsend`` — write headers, then sendfile.
 
-        Per the ASGI ``http.response.pathsend`` extension the caller
-        already sent ``http.response.start`` with Content-Length set
-        from the file size; we just need to flush those headers (no
-        body bytes) and stream the file via ``writer.sendfile``.
+        The file size supplies the known representation length.  A caller's
+        Content-Length must agree with it before the headers are written.
 
-        Falls back to a chunked read+write loop if the underlying
+        Falls back to a buffered read+write loop if the underlying
         transport does not support sendfile (TLS, mocked tests).
         HEAD requests get headers only.
         """
         if self._buffered_status is None or self._buffered_headers is None:
             logger.warning('HTTP1Sender: pathsend without buffered start; dropping')
-            return
+            return False
+        if self._expect_trailers and not self._head_mode:
+            raise ValueError('pathsend cannot be combined with response trailers')
 
-        self._started = True
         size = os.path.getsize(path)
         headers = self._buffered_headers
-        self._ensure_framing_headers(self._buffered_status, headers, size,
-                                     more_body=False)
+        status = self._buffered_status
+        headers = self._ensure_framing_headers(
+            status, headers, size, more_body=False)
+        self._track_content_length(size, more_body=False)
+        if not _is_informational(status):
+            self._started = True
         self._ensure_date_header(headers)
 
-        head = self._render_start(self._buffered_status, headers)
+        head = self._render_start(status, headers)
         self._buffered_status = None
         self._buffered_headers = None
 
         if self._log_record is not None:
             self._log_record.response_bytes += size
 
-        if self._head_mode:
+        if self._suppress_body:
             await self._write(head)
-            return
+            return not _is_informational(status)
 
         await self._write(head)
 
-        with open(path, 'rb') as f:
-            try:
-                await self._writer.sendfile(f, 0, size)
-                return
-            except NotImplementedError:
-                # TLS / unsupported transport — fall back to read+write.
-                f.seek(0)
-                remaining = size
-                while remaining > 0:
-                    chunk = await asyncio.to_thread(
-                        f.read, min(_PATHSEND_FALLBACK_CHUNK, remaining))
-                    if not chunk:
-                        break
-                    remaining -= len(chunk)
-                    await self._write(chunk)
+        try:
+            with open(path, 'rb') as f:
+                offset = 0
+                try:
+                    while offset < size:
+                        sent = await self._writer.sendfile(
+                            f, offset, size - offset)
+                        if sent <= 0 or sent > size - offset:
+                            raise ConnectionResetError(
+                                'sendfile made no valid forward progress')
+                        offset += sent
+                    return not _is_informational(status)
+                except NotImplementedError:
+                    # TLS / unsupported transport — fall back to read+write.
+                    f.seek(offset)
+                    remaining = size - offset
+                    while remaining > 0:
+                        chunk = await asyncio.to_thread(
+                            f.read, min(_PATHSEND_FALLBACK_CHUNK, remaining))
+                        if not chunk:
+                            raise ConnectionResetError(
+                                'pathsend file ended before Content-Length')
+                        remaining -= len(chunk)
+                        await self._write(chunk)
+        except BaseException:
+            # The response head is already committed, so no error handler can
+            # safely replace this response on the same connection.
+            self._poisoned = True
+            raise
+        return not _is_informational(status)
 
 
 class FlowControlStalled(Exception):
