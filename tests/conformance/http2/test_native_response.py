@@ -149,6 +149,36 @@ class TestWireEquivalence:
         assert frames[2].end_stream
         assert s2._end_stream_sent is True
 
+    async def test_multiple_trailer_events_form_one_terminal_header_section(self):
+        s1, w1, f1, _ = _make_sender()
+        await s1({'type': ASGIEvent.HTTP_RESPONSE_START, 'status': 200,
+                  'headers': [], 'trailers': True})
+        await s1({'type': ASGIEvent.HTTP_RESPONSE_BODY, 'body': b'Hi'})
+        await s1({'type': ASGIEvent.HTTP_RESPONSE_TRAILERS,
+                  'headers': [(b'x-first', b'1')], 'more_trailers': True})
+
+        pending = _collect_frames(w1, f1)
+        assert len(pending) == 2
+        assert not any(frame.end_stream for frame in pending)
+
+        await s1({'type': ASGIEvent.HTTP_RESPONSE_TRAILERS,
+                  'headers': [(b'x-second', b'2')], 'more_trailers': False})
+
+        s2, w2, f2, _ = _make_sender()
+        await s2(NativeResponse(status=200, header=[], expects_trailers=True))
+        await s2(NativeResponse(body=b'Hi'))
+        await s2(NativeResponse(trailers=[(b'x-first', b'1')],
+                                more_trailers=True))
+        await s2(NativeResponse(trailers=[(b'x-second', b'2')]))
+        assert bytes(w2) == bytes(w1)
+
+        frames = _collect_frames(w2, f2)
+        assert len(frames) == 3
+        assert not frames[1].end_stream
+        assert frames[2].end_stream
+        assert frames[2].headers == [
+            (b'x-first', b'1'), (b'x-second', b'2')]
+
 
 # ---------------------------------------------------------------------------
 # Single-object presence-driven path (H2)

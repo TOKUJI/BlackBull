@@ -154,11 +154,8 @@ class TestNativeResponsePath:
         assert s2._completed is True
 
     async def test_terminal_body_then_trailers_matches_dict_path(self):
-        # start(trailers=True) → body(more_body=False) → trailers: on H1 the
-        # completed guard drops a post-terminal trailers event today (both the
-        # content-length framing and the drop are pre-existing H1 behaviour —
-        # the H2 sender's END_STREAM deferral is the next-sprint concern).
-        # The native path mirrors the dict path byte-for-byte (lossless compat).
+        # The start declaration assigns completion to the trailers event, so
+        # the terminal body cannot select fixed Content-Length framing.
         s1, w1 = _sender()
         await s1({'type': ASGIEvent.HTTP_RESPONSE_START, 'status': 200,
                   'headers': [(b'content-type', b'text/plain')], 'trailers': True})
@@ -174,15 +171,34 @@ class TestNativeResponsePath:
         await s2(NativeResponse(body=b'Hi'))
         await s2(NativeResponse(trailers=[(b'x-t', b'v')]))
         assert w2.data == w1.data
-        assert b'content-length: 2\r\n' in w2.data
-        assert b'x-t: v' not in w2.data      # dropped — existing H1 behaviour
+        assert b'transfer-encoding: chunked\r\n' in w2.data
+        assert b'content-length:' not in w2.data
+        assert w2.data.endswith(b'2\r\nHi\r\n0\r\nx-t: v\r\n\r\n')
+        assert s2._completed is True
+
+    async def test_multiple_native_trailer_objects_match_dict_path(self):
+        s1, w1 = _sender()
+        await s1({'type': ASGIEvent.HTTP_RESPONSE_START, 'status': 200,
+                  'headers': [], 'trailers': True})
+        await s1({'type': ASGIEvent.HTTP_RESPONSE_BODY, 'body': b'Hi'})
+        await s1({'type': ASGIEvent.HTTP_RESPONSE_TRAILERS,
+                  'headers': [(b'x-first', b'1')], 'more_trailers': True})
+        await s1({'type': ASGIEvent.HTTP_RESPONSE_TRAILERS,
+                  'headers': [(b'x-second', b'2')], 'more_trailers': False})
+
+        s2, w2 = _sender()
+        await s2(NativeResponse(status=200, header=[], expects_trailers=True))
+        await s2(NativeResponse(body=b'Hi'))
+        await s2(NativeResponse(trailers=[(b'x-first', b'1')],
+                                more_trailers=True))
+        await s2(NativeResponse(trailers=[(b'x-second', b'2')]))
+        assert w2.data == w1.data
+        assert w2.data.endswith(
+            b'2\r\nHi\r\n0\r\nx-first: 1\r\nx-second: 2\r\n\r\n')
 
     async def test_single_object_terminal_body_trailers_drop(self):
-        # Review M1: one object carrying header + terminal body + trailers
-        # must NOT splice chunked trailers framing after a content-length
-        # body.  The native arm drops the trailers once the body completed
-        # the response — the same post-terminal drop as the dict lane's
-        # entry guard.
+        # Trailers not declared at the response start cannot change framing
+        # after a terminal body has selected Content-Length.
         s, w = _sender()
         await s(NativeResponse(status=200,
                                header=[(b'content-type', b'text/plain')],
@@ -192,6 +208,18 @@ class TestNativeResponsePath:
         assert w.data.endswith(b'\r\n\r\nHi')
         assert b'x-t: v' not in w.data
         assert b'0\r\n' not in w.data
+        assert s._completed is True
+
+    async def test_single_object_declared_terminal_body_trailers(self):
+        s, w = _sender()
+        await s(NativeResponse(status=200,
+                               header=[(b'content-type', b'text/plain')],
+                               body=b'Hi',
+                               trailers=[(b'x-t', b'v')],
+                               expects_trailers=True))
+        assert b'transfer-encoding: chunked\r\n' in w.data
+        assert b'content-length:' not in w.data
+        assert w.data.endswith(b'2\r\nHi\r\n0\r\nx-t: v\r\n\r\n')
         assert s._completed is True
 
     async def test_single_object_nonterminal_body_trailers(self):

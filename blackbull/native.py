@@ -179,6 +179,7 @@ class NativeResponse:
     ``header`` is ``None`` when absent (never ``[]`` — presence is decided by
     ``is not None``).  ``body`` is ``None`` when absent; ``b''`` is a real
     empty body.  ``more_body`` marks a non-terminal body chunk (streaming).
+    ``more_trailers`` marks a non-terminal trailer event.
     ``expects_trailers`` preserves the ASGI ``http.response.start``
     ``trailers: True`` flag so the sender withholds the terminal chunk until
     the trailers event (lossless full-form compat — a terminal body before
@@ -191,6 +192,7 @@ class NativeResponse:
         'expects_trailers',
         'file_path',
         'more_body',
+        'more_trailers',
         'status',
         'trailers',
     )
@@ -200,6 +202,7 @@ class NativeResponse:
                  body: bytes | None = None,
                  more_body: bool = False,
                  trailers: list[tuple[bytes, bytes]] | None = None,
+                 more_trailers: bool = False,
                  expects_trailers: bool = False,
                  file_path: str | None = None) -> None:
         self.status = status
@@ -213,6 +216,7 @@ class NativeResponse:
         self._body = body
         self.more_body = more_body
         self.trailers = trailers
+        self.more_trailers = more_trailers
         self.expects_trailers = expects_trailers
         # Sendfile form: the response body *is* this file, and the sender is
         # free to hand it to ``loop.sendfile`` rather than read it into a
@@ -228,16 +232,15 @@ class NativeResponse:
     # request by a generated dataclass ``__init__`` taking positional
     # arguments.  The response side had no equivalent: every emission went
     # through the keyword-only ``__init__`` above, and keyword dispatch with
-    # seven defaulted parameters is where the cost is.  Measured on the same
+    # several defaulted parameters is where the cost is.  Measured on the same
     # slots: positional 105.9 ns, ``__new__`` + direct writes 102.9 ns,
     # keyword 245.4 ns.  Bypassing ``__init__`` buys nothing on its own; the
     # calling convention is the whole difference.
     #
-    # These are deliberately *shape-specific* rather than one seven-argument
-    # ``_make``.  In slot order ``more_body`` and ``expects_trailers`` are two
-    # bools separated only by ``trailers``, so a positional catch-all would be
-    # a standing misordering trap for a saving of ~140 ns.  Each constructor
-    # below names the shape it builds and takes only what that shape varies.
+    # These are deliberately *shape-specific* rather than one positional
+    # ``_make``.  The adjacent body/trailer completion flags make a positional
+    # catch-all a standing misordering trap.  Each constructor below names the
+    # shape it builds and takes only what that shape varies.
     #
     # The public keyword ``__init__`` is unchanged and remains the form for
     # application code and for any shape not covered here.
@@ -252,6 +255,7 @@ class NativeResponse:
         self._body = body
         self.more_body = False
         self.trailers = None
+        self.more_trailers = False
         self.expects_trailers = False
         self.file_path = None
         return self
@@ -274,6 +278,7 @@ class NativeResponse:
         self._body = body
         self.more_body = True
         self.trailers = trailers
+        self.more_trailers = False
         self.expects_trailers = True
         self.file_path = None
         return self
@@ -346,8 +351,13 @@ class NativeResponse:
                            'body': self._body,
                            'more_body': self.more_body})
         if self.trailers is not None:
-            events.append({'type': 'http.response.trailers',
-                           'headers': list(self.trailers)})
+            trailer_event: dict = {
+                'type': 'http.response.trailers',
+                'headers': list(self.trailers),
+            }
+            if self.more_trailers:
+                trailer_event['more_trailers'] = True
+            events.append(trailer_event)
         return events
 
 

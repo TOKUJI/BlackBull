@@ -1634,6 +1634,11 @@ class HTTP1Actor(Actor):
             if log_record is not None:
                 log_record.mark('dispatch_done')
                 _emit_access_log(log_record)
+        if send._expect_trailers and not send._completed:
+            # ASGI assigns completion to a declared trailer section.
+            # Reusing the connection here would parse the next request while
+            # the peer still waits for this response's chunk terminator.
+            return False, inner_receive
         return True, inner_receive
 
     async def _read_headers(self, max_total: int) -> None:

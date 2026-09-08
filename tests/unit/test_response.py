@@ -340,6 +340,24 @@ async def test_wrap_native_send_converts_dict_to_native():
 
 
 @pytest.mark.asyncio
+async def test_wrap_native_send_preserves_more_trailers():
+    calls = []
+
+    async def raw(event):
+        calls.append(event)
+
+    await _wrap_send_native(raw)({
+        'type': 'http.response.trailers',
+        'headers': [(b'x-first', b'1')],
+        'more_trailers': True,
+    })
+    n = calls[0]
+    assert isinstance(n, NativeResponse)
+    assert n.trailers == [(b'x-first', b'1')]
+    assert n.more_trailers is True
+
+
+@pytest.mark.asyncio
 async def test_wrap_native_send_bytes_to_single_native():
     """Bytes become a single NativeResponse (one send), not a start+body pair."""
     calls = []

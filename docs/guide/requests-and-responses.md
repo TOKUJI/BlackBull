@@ -363,7 +363,9 @@ package to parse the body manually.
     is a header object then body-chunk objects.  Under an external ASGI host
     (`BlackBull(asgi=True)` + `to_asgi()`) the same handler code runs with
     plain ASGI dicts on the wire.  The `http.response.start` `trailers`
-    flag is preserved losslessly via `NativeResponse.expects_trailers`.
+    flag is preserved losslessly via `NativeResponse.expects_trailers`, and
+    `http.response.trailers` `more_trailers` is preserved via
+    `NativeResponse.more_trailers`.
 
     On the native path a `Response` (or subclass) is serialised via
     `Response.to_native()`.  A subclass that overrides `__call__` to emit a
@@ -466,20 +468,33 @@ async def chunked(conn, receive, send):
         'status': 200,
         'headers': [
             (b'content-type',      b'text/plain'),
-            (b'transfer-encoding', b'chunked'),
             (b'trailer',           b'x-checksum'),
         ],
+        'trailers': True,
     })
     await send({
         'type': 'http.response.body',
         'body': b'chunk data here',
-        'more_body': True,
+        'more_body': False,
     })
     await send({
         'type': 'http.response.trailers',
         'headers': [(b'x-checksum', b'abc123')],
+        'more_trailers': False,
     })
 ```
+
+`trailers=True` transfers response-completion ownership from the last body
+event to the last trailer event.  BlackBull selects HTTP/1.1 chunked framing,
+ignores a supplied `Content-Length`, and writes the zero chunk only when the
+trailer section begins.  To split a trailer section across events, set
+`more_trailers=True` on every event except the last.  HTTP/2 collects those
+parts into one trailing HEADERS block carrying `END_STREAM`.
+
+HEAD responses never carry content or a trailer section.  The response is
+complete after its header section even if the application declared trailers;
+later trailer events are ignored so they cannot become bytes in the next
+keep-alive response.
 
 ## WebSocket frames
 
@@ -547,12 +562,14 @@ world\r\n
 ```
 
 The terminal `0\r\n\r\n` is written automatically when
-`more_body=False` arrives (unless `trailers=True` was set in
-`http.response.start`, in which case the
-`http.response.trailers` handler writes it).
+`more_body=False` arrives.  When `trailers=True` was set in
+`http.response.start`, the final body event remains unterminated and the last
+`http.response.trailers` event writes `0\r\n`, the trailer fields, and the
+final blank line.
 
-HTTP/2 is unaffected — DATA frames carry explicit length and
-`END_STREAM` maps to `more_body=False`.
+HTTP/2 uses explicitly sized DATA frames instead of chunk syntax.  Without
+trailers, `END_STREAM` maps to `more_body=False`; with declared trailers it
+belongs to the trailing HEADERS block.
 
 ### Writing streaming-safe middleware
 

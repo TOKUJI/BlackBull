@@ -20,6 +20,7 @@ class TestConstruction:
         assert r.header is None
         assert r.body is None
         assert r.more_body is False
+        assert r.more_trailers is False
         assert r.trailers is None
         assert r.expects_trailers is False
 
@@ -165,6 +166,15 @@ class TestToASGI:
         r = NativeResponse(trailers=[(b'x-trailer', b'v')])
         assert r.to_asgi() == [
             {'type': 'http.response.trailers', 'headers': [(b'x-trailer', b'v')]},
+        ]
+
+    def test_nonterminal_trailers_preserve_more_flag(self):
+        r = NativeResponse(trailers=[(b'x-trailer', b'v')],
+                           more_trailers=True)
+        assert r.to_asgi() == [
+            {'type': 'http.response.trailers',
+             'headers': [(b'x-trailer', b'v')],
+             'more_trailers': True},
         ]
 
     def test_expects_trailers_flag_on_start(self):
