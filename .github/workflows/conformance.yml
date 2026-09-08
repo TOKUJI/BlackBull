@@ -241,9 +241,9 @@ jobs:
     # status, OOM state and case reports before classifying it. The fast lane
     # is the required gate; heavy failures and artifacts remain visible.
     #
-    # C2 — the lane retries itself once (autobahn_heavy.sh) because a
-    # transient contention spike usually clears on a fresh attempt; only the
-    # small heavy lane is re-run, never the whole suite.
+    # The pinned tester resolves this lane's selectors, then the harness runs
+    # each first-two-ID subgroup in a fresh container. A retry starts the
+    # complete subgroup sequence again and cannot reuse an earlier report.
     needs: [skip-check, autobahn]
     if: needs.skip-check.outputs.skip == 'false' && needs.autobahn.result == 'success'
     continue-on-error: true
@@ -276,8 +276,9 @@ jobs:
           done
 
       - name: Run Autobahn heavy lane (one retry)
-        # Two attempts of the lane fit under the job's 35 min cap; the step
-        # cap is below the job's so a hang leaves time for the upload below.
+        # The step cap is below the job's so a hang leaves time for the upload
+        # below. Case budgets and the retry count remain tester-policy inputs;
+        # subgroup isolation only bounds retained tester state.
         timeout-minutes: 30
         run: |
           CASES='12.*.10,12.*.14,12.*.15,12.*.16,12.*.17,12.*.18,13.*' \

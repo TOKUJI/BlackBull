@@ -28,6 +28,8 @@
 set -euo pipefail
 
 PORT="${PORT:-9001}"
+CONFIG_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$CONFIG_DIR/autobahn_common.sh"
 
 # Pinned by digest, not by :latest.  A conformance suite that can change
 # under us turns "the wire behaviour regressed" and "the tester changed" into
@@ -35,7 +37,6 @@ PORT="${PORT:-9001}"
 # anyone can repeat.  Bump this deliberately, in its own commit, with the
 # before/after case counts in the message.
 #   digest of crossbario/autobahn-testsuite:latest as of 2026-08-10
-AUTOBAHN_IMAGE="${AUTOBAHN_IMAGE:-crossbario/autobahn-testsuite@sha256:519915fb568b04c9383f70a1c405ae3ff44ab9e35835b085239c258b6fac3074}"
 
 RESULT_BASE="bench/conformance/results"
 mkdir -p "$RESULT_BASE"
@@ -45,26 +46,47 @@ OUT="$(mktemp -d "$RESULT_BASE/autobahn_${TS}.XXXXXX")"
 CIDFILE="$OUT/container.cid"
 
 cleanup() {
-    local status=$?
+    local original_status=$?
+    local final_status=$original_status
+    local cleanup_failed=0
     trap - EXIT
     set +e
-    printf '%s\n' "$status" > "$OUT/exit-code.txt"
-    echo "Autobahn runner exit code: $status"
-    if [ -s "$CIDFILE" ]; then
-        local cid
-        read -r cid < "$CIDFILE"
-        # Preserve only State, not the container's environment or config.
-        # --rm would discard the OOM/exit evidence before we could inspect it.
-        if timeout 10 docker inspect --format '{{json .State}}' "$cid" \
-            > "$OUT/container-state.json"; then
-            cat "$OUT/container-state.json"
+    if [ -e "$CIDFILE" ]; then
+        local cid=''
+        # Docker writes --cidfile without a trailing newline. `read` assigns
+        # the ID but returns non-zero at EOF, so validity is the nonempty
+        # value rather than read's status.
+        IFS= read -r cid < "$CIDFILE" || true
+        if [ -n "$cid" ]; then
+            # Preserve only State, not the container's environment or config.
+            # --rm would discard the OOM/exit evidence before inspection.
+            if timeout 10 docker inspect --format '{{json .State}}' "$cid" \
+                > "$OUT/container-state.json"; then
+                cat "$OUT/container-state.json"
+            else
+                echo "WARNING: could not inspect Autobahn container $cid" >&2
+                cleanup_failed=1
+            fi
+            if ! timeout 10 docker rm -f "$cid" >/dev/null; then
+                echo "WARNING: could not remove Autobahn container $cid" >&2
+                cleanup_failed=1
+            fi
         else
-            echo "WARNING: could not inspect Autobahn container $cid" >&2
+            echo 'WARNING: could not read Autobahn container ID' >&2
+            cleanup_failed=1
         fi
-        timeout 10 docker rm -f "$cid" >/dev/null || \
-            echo "WARNING: could not remove Autobahn container $cid" >&2
+    else
+        echo 'WARNING: Autobahn runner produced no container ID file' >&2
+        cleanup_failed=1
     fi
-    exit "$status"
+    # Preserve the tester's diagnostic exit (including TERM/OOM). Cleanup
+    # failures only turn an otherwise successful run into a failure.
+    if [ "$original_status" -eq 0 ] && [ "$cleanup_failed" -ne 0 ]; then
+        final_status=1
+    fi
+    printf '%s\n' "$final_status" > "$OUT/exit-code.txt"
+    echo "Autobahn runner exit code: $final_status"
+    exit "$final_status"
 }
 trap cleanup EXIT
 trap 'exit 130' INT
@@ -91,8 +113,6 @@ s.close()
     echo "  python bench/conformance/autobahn_app.py --port $PORT" >&2
     exit 1
 fi
-
-CONFIG_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Render the per-run config: the checked-in JSON is the template, only
 # "cases" is replaced.  With CASES unset the rendered "cases" is ["*"] —
