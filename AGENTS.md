@@ -70,6 +70,18 @@ that only make sense inside BlackBull.
   left to the reviewer: a check that cries wolf gets `--no-verify`'d, and then
   it protects nothing.
 
+- **A `BLA-<n>` never appears in shipped source or a public document.**  It is
+  the same defect as a sprint number wearing a different hat: `Closing that is
+  BLA-325` is a TODO that goes stale the day it lands, `the defect BLA-269
+  fixed` is the timeline, and `Design: BLA-A-17 [private]` sends the reader of
+  a pure-Python library somewhere they cannot go.  **State the invariant here,
+  and cite the test that holds it** — a test is a pointer every reader can
+  follow.  Both namespaces count: `BLA-<n>` and `BLA-A-<n>`.  The check covers
+  `blackbull/**/*.py` (what the wheel ships) plus `README.md`, `SECURITY.md`,
+  `CHANGELOG.md`, `KNOWN_LIMITATIONS.md` and `docs/`.  `tests/` and the
+  agent-facing files are exempt: neither ships, and the tracker is their
+  subject.
+
 - **Type-check before committing.** `just typecheck` catches contract
   violations statically.  → `.claude/skills/type-check/SKILL.md` [private]
 

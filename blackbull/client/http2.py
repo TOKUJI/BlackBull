@@ -1344,9 +1344,8 @@ class HTTP2Client:
         and its sender are then left alone: a server may answer with
         END_STREAM while the request body is still going up (an early 401 or
         413), and releasing the sender there parks ``_write_data`` on a window
-        event nothing will set again.  That is the defect BLA-269 fixed, and
-        this helper re-introduced until ``test_an_early_response_does_not_
-        strand_the_upload`` caught it.
+        event nothing will set again.  Held by
+        ``test_an_early_response_does_not_strand_the_upload``.
         """
         pending = self._responses.pop(stream_id, None)
         if pending is None:

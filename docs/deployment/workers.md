@@ -101,7 +101,7 @@ When connections are short-lived — every request opens a new
 connection (`Connection: close`), or the workload rotates them
 every few requests — raising `BB_WORKERS` above the core count
 costs real throughput.  Measured on a 16-core cpuset, `/`
-endpoint, best-of-3 (BLA-5):
+endpoint, best-of-3:
 
 | workload | W=16 | W=32 | W=64 | loss 16→64 |
 |---|---:|---:|---:|---:|

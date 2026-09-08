@@ -1041,8 +1041,8 @@ class Settings:
     #: The escape is ``stream()``, which never accumulates: a caller filling
     #: its own buffer measures ~1x.  What it costs is everything else —
     #: ``stream()`` exposes no status, no headers, and is deliberately outside
-    #: this cap, so today it is ~1x *or* status, headers and a bound, never
-    #: both.  Closing that is ``BLA-325``.  The numbers above are pinned by
+    #: this cap, so it is ~1x *or* status, headers and a bound, never both.
+    #: The numbers above are pinned by
     #: ``tests/unit/client/test_client_body_buffer_cost.py``.
     #:
     #: **Off by default**, unlike the server's ``max_body_size``.  That number

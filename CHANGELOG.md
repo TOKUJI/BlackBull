@@ -15,9 +15,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `--max-connections` as defaulting to unlimited; the default is `auto`, a
   finite cap derived from `RLIMIT_NOFILE`, and the numeric defaults it quotes
   are now read from `Settings` rather than typed out.  Importing `blackbull` does load
-  the server stack, and the package docstring now says so.  Three new
-  architecture tests fail the build when a stated default and the shipped one
-  disagree again.
+  the server stack, and the package docstring now says so.  Docstrings no
+  longer refer the reader to a private issue tracker for a design note or a
+  defect history; the invariant is stated where it applies, and where a test
+  holds it, that test is named.  Three new architecture tests fail the build
+  when a stated default and the shipped one disagree again.
 
 ## Versioning
 
@@ -1450,7 +1452,6 @@ per-request attribution run) and the measurement harness that named them.
 - **Benchmark attribution harness.**  The per-seam timing instruments, null
   seam, gate stamps, and EC2 driver used to attribute the read-path deficit
   land under `bench/` (harness only; nothing runs in a stock launch).
-  Full Sprint 100 record: `BLA-8` [private].
 
 ### Docs
 
@@ -3501,7 +3502,7 @@ that resolves the long-standing v0.33.1 → v0.51.0 HttpArena regression.
   keep expressing *what* they have via `_write_many((head, body))`.  Breakeven
   measured at 16–64 KiB (join wins below, vectored wins above); local A/B
   recovers the full HTTP/1.1 baseline regression (−10 % CPU/request vs
-  v0.51.0).  See `BLA-194` [private].
+  v0.51.0).
 - **HTTP/2 bidi stream state: client END_STREAM now half-closes, not
   closes** (RFC 9113 §5.1). `Stream.on_data_received(end_stream=True)`
   transitioned straight to CLOSED, so a legitimate `WINDOW_UPDATE` sent by
@@ -5902,7 +5903,7 @@ README used GitHub-relative paths (`docs/guide.md`, `CHANGELOG.md`,
 on 2026-06-04 and predates Sprint 33's static-middleware work; the
 three landed PRs below were on master but never made it into a
 published wheel.  Sprint 34's release-management audit surfaced
-the gap (see `BLA-36` [private]).  No new code in
+the gap.  No new code in
 this release — just the cut from the correct git revision.
 
 ### Changed

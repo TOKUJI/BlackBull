@@ -208,8 +208,7 @@ def bind_receive_channel(target, receive) -> None:
     reference cycle: ``conn._receive`` → wrapper → (closure captures) ``conn``.
     The refcount of a cyclic group never reaches zero when the request's local
     refs drop, so reclamation is deferred to the generational cyclic GC — whose
-    periodic pauses were the v0.60.0 tail-latency regression (see
-    ``BLA-234`` [private] §6). The raw
+    periodic pauses are a measured tail-latency cost on this path. The raw
     recipient does **not** reference ``conn`` (HTTP/1.1 keeps only the path
     string; HTTP/2 keeps none), so ``conn`` → recipient is an acyclic chain that
     refcounting frees the instant the request ends.

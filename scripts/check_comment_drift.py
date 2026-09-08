@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
-"""Refuse source comments that date a change instead of explaining one.
+"""Refuse source prose that dates a change, or points at a record nobody has.
 
-``git log`` owns the timeline.  A comment that says *when* something changed
-stops being true the moment the next change lands, and nothing in the build
-notices — which is how a docstring came to state three defaults the code had
-not shipped for several releases.
+``git log`` owns the timeline, and the tracker owns the deliberation.  A
+comment that says *when* something changed stops being true the moment the
+next change lands; a comment that says *which issue* changed it sends a reader
+somewhere they cannot go.  Neither survives contact with the next reader, and
+nothing in the build notices — which is how a module docstring came to state
+three defaults the code had not shipped for several releases.
 
-Only the vocabulary with a **measured zero false-positive rate** is refused.
-That restraint is the point: a check that fires on legitimate prose gets
-``--no-verify``'d, and then it protects nothing.  Measured over
-``blackbull/**/*.py``:
+Two rule families, each with its own scope:
+
+**Timeline vocabulary** — ``.py`` only, and only the spellings with a
+*measured* zero false-positive rate.  That restraint is the point: a check
+that fires on legitimate prose gets ``--no-verify``'d, and then it protects
+nothing.  Measured over ``blackbull/**/*.py``:
 
 ===================  =====  ==================================================
 pattern              hits   verdict
@@ -27,6 +31,15 @@ pattern              hits   verdict
 The four unchecked classes need a reader, not a regex.  They are what the
 comment review at the end of an implementation is for.
 
+**Private tracker ids** — the shipped package and every public document.
+``BLA-<n>`` names an issue in a tracker the reader of a pure-Python library
+cannot open, so in shipped source it is at best noise and at worst a promise:
+"Closing that is BLA-325" is a TODO that goes stale the day BLA-325 lands, and
+"the defect BLA-269 fixed" is the timeline again wearing an id.  State the
+invariant, and cite the *test* that holds it — a test is a pointer every
+reader can follow.  Agent-facing files (``AGENTS.md``, ``.claude/``) and the
+test suite are exempt: the tracker is their subject, and neither ships.
+
 Usage::
 
     check_comment_drift.py --staged        # added lines in the staged diff
@@ -39,26 +52,60 @@ import argparse
 import re
 import subprocess
 import sys
+from dataclasses import dataclass
 
-#: Each entry is (compiled pattern, what to write instead).  A pattern earns
-#: its place by having no legitimate use in a source comment, not by being
-#: suggestive — see the table above.
-RULES: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r'\bSprint\s*\d+', re.I),
-     'a sprint number dates the change; state the invariant it established'),
-    (re.compile(r'\bpre-\d+\.\d+'),
-     'a version boundary dates the change; name the condition instead '
-     '(e.g. "0 disables the cap", not "pre-0.29 behaviour")'),
-    (re.compile(r'\bas of version\b', re.I),
-     'git log owns the version timeline'),
-    (re.compile(r'\b(?:Refactor|Review)\s+\d+\.\d+|\bbugs?\s+\d+\.\d+[a-z]?'),
-     'an internal tracker id no reader outside the project can resolve'),
+#: Public documents, in which a private tracker id is a dangling reference.
+#: Kept as a prefix list rather than "everything not exempt" so that adding a
+#: document is a deliberate act, not an accident of where a file landed.
+PUBLIC_DOCS = ('README.md', 'SECURITY.md', 'CHANGELOG.md',
+               'KNOWN_LIMITATIONS.md', 'CONTRIBUTING.md', 'docs/')
+
+
+def _is_shipped_source(path: str) -> bool:
+    """In the wheel: ``blackbull*`` only (pyproject excludes tests, bench, …)."""
+    return path.startswith('blackbull/') and path.endswith('.py')
+
+
+def _is_public_doc(path: str) -> bool:
+    return path.startswith(PUBLIC_DOCS)
+
+
+def _is_timeline_scope(path: str) -> bool:
+    """Any Python we ship or test with — but not a file whose job is history.
+
+    ``CHANGELOG`` and ``docs/about/`` are records of what changed and when;
+    refusing a date there would be refusing their content.  This file has to
+    spell the refused vocabulary in order to refuse it.
+    """
+    if not path.endswith('.py'):
+        return False
+    return not re.search(r'(^|/)(conftest\.py$|check_comment_drift\.py$)', path)
+
+
+@dataclass(frozen=True)
+class Rule:
+    pattern: re.Pattern[str]
+    scope: object            # callable: path -> bool
+    why: str
+
+
+RULES: list[Rule] = [
+    Rule(re.compile(r'\bSprint\s*\d+', re.I), _is_timeline_scope,
+         'a sprint number dates the change; state the invariant it established'),
+    Rule(re.compile(r'\bpre-\d+\.\d+'), _is_timeline_scope,
+         'a version boundary dates the change; name the condition instead '
+         '(e.g. "0 disables the cap", not "pre-0.29 behaviour")'),
+    Rule(re.compile(r'\bas of version\b', re.I), _is_timeline_scope,
+         'git log owns the version timeline'),
+    Rule(re.compile(r'\b(?:Refactor|Review)\s+\d+\.\d+|\bbugs?\s+\d+\.\d+[a-z]?'),
+         _is_timeline_scope,
+         'an internal tracker id no reader outside the project can resolve'),
+    Rule(re.compile(r'\bBLA-(?:A-)?\d+'),
+         lambda p: _is_shipped_source(p) or _is_public_doc(p),
+         'a private tracker id in shipped source or a public document.  State '
+         'the invariant here and cite the test that holds it; the tracker is '
+         'not a reference the reader can follow'),
 ]
-
-#: Files whose whole job is to record history — plus this one, which has to
-#: spell the refused vocabulary in order to refuse it.
-EXEMPT = re.compile(r'(^|/)(CHANGELOG|docs/about/|tests?/.*conftest'
-                    r'|scripts/check_comment_drift\.py$)')
 
 
 def _added_lines(args: list[str]) -> list[tuple[str, int, str]]:
@@ -108,25 +155,25 @@ def main() -> int:
 
     findings = []
     for path, lineno, text in lines:
-        if not path.endswith('.py') or EXEMPT.search(path):
-            continue
-        for pattern, why in RULES:
-            m = pattern.search(text)
+        for rule in RULES:
+            if not rule.scope(path):
+                continue
+            m = rule.pattern.search(text)
             if m:
-                findings.append((path, lineno, m.group(0), why, text.strip()))
+                findings.append((path, lineno, m.group(0), rule.why, text.strip()))
 
     if not findings:
         return 0
 
-    print('Comments that date a change rather than explain one:\n',
+    print('Prose that dates a change, or points where the reader cannot go:\n',
           file=sys.stderr)
     for path, lineno, hit, why, text in findings:
         print(f'  {path}:{lineno}: {hit!r} — {why}', file=sys.stderr)
         print(f'      {text[:100]}', file=sys.stderr)
-    print(f'\n{len(findings)} to fix.  Keep the reason, drop the date.  If a '
-          'line here is genuinely\na deprecation contract or a cited '
-          'measurement, say so in the comment and\nrewrite it so the date is '
-          'the evidence, not the timeline.', file=sys.stderr)
+    print(f'\n{len(findings)} to fix.  Keep the reason, drop the date and the '
+          'id.  If a line here is\ngenuinely a deprecation contract or a cited '
+          'measurement, rewrite it so the date\nis the evidence rather than the '
+          'timeline.', file=sys.stderr)
     return 1
 
 
