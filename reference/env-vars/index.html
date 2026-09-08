@@ -1572,17 +1572,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#http11-internals" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        HTTP/1.1 internals
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#logging" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5630,17 +5619,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#http11-internals" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        HTTP/1.1 internals
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#logging" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5887,7 +5865,7 @@ first-hit-then-summary rate-limit model.</p>
 <tr>
 <td><code>BB_BODY_CHUNK_MAX</code></td>
 <td><code>524288</code></td>
-<td>Per-read bound (bytes) for a <code>Content-Length</code> request body.  Reads are up-to-n and transport-paced: each returns whatever the peer has delivered so far, up to this cap, and never blocks waiting to fill it — so a slow peer yields small slices (no read is a latency commitment <code>BB_BODY_TIMEOUT</code> might not deliver) while a fast one earns fewer, larger ones.  The cap is a memory bound, not a latency one: it limits how much a single read may materialise per connection.  Values below <code>BB_BODY_CHUNK_SIZE</code> are raised to it.</td>
+<td>Per-read bound (bytes) for a <code>Content-Length</code> request body.  Reads are up-to-n and transport-paced: each returns whatever the peer has delivered so far, up to this cap, and never blocks waiting to fill it — so a slow peer yields small slices (no read is a latency commitment <code>BB_BODY_TIMEOUT</code> might not deliver) while a fast one earns fewer, larger ones.  The cap is a memory bound, not a latency one: it limits how much a single read may materialise per connection.  It bounds the <code>Content-Length</code> framing only — <code>BB_BODY_CHUNK_SIZE</code> is the <code>chunked</code> path's slice, and the two are never compared against each other.  <code>0</code> is raised to <code>1</code>, since an up-to-zero read returns an empty result the read loop cannot tell from EOF.</td>
 </tr>
 <tr>
 <td><code>BB_MAX_BODY_SIZE</code></td>
@@ -6141,23 +6119,6 @@ entirely.</p>
 <td><code>BB_SOCKET_RCVBUF</code></td>
 <td><code>0</code> (kernel default)</td>
 <td><code>SO_RCVBUF</code> (bytes) on each accepted socket.  <code>0</code> leaves the kernel default unchanged.  Same doubling rule as <code>BB_SOCKET_SNDBUF</code>.</td>
-</tr>
-</tbody>
-</table>
-<h2 id="http11-internals">HTTP/1.1 internals<a class="headerlink" href="#http11-internals" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Variable</th>
-<th>Default</th>
-<th>Controls</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td></td>
-<td></td>
-<td></td>
 </tr>
 </tbody>
 </table>
