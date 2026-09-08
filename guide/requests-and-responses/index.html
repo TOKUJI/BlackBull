@@ -6334,6 +6334,12 @@ plain ASGI dicts on the wire.  The <code>http.response.start</code> <code>traile
 flag is preserved losslessly via <code>NativeResponse.expects_trailers</code>, and
 <code>http.response.trailers</code> <code>more_trailers</code> is preserved via
 <code>NativeResponse.more_trailers</code>.</p>
+<p>HTTP/1.1 framing is owned by the server.  An application-supplied
+<code>Transfer-Encoding</code> is ignored.  A single-body response gets one
+<code>Content-Length</code>; if the application supplied a length, it must match the
+body before any response bytes are written.  Repeated or comma-joined
+lengths are accepted only when every numeric value is equal, then emitted
+as one canonical field.</p>
 <p>On the native path a <code>Response</code> (or subclass) is serialised via
 <code>Response.to_native()</code>.  A subclass that overrides <code>__call__</code> to emit a
 custom event sequence is honoured on the WebSocket / external-host
@@ -6436,6 +6442,12 @@ parts into one trailing HEADERS block carrying <code>END_STREAM</code>.</p>
 complete after its header section even if the application declared trailers;
 later trailer events are ignored so they cannot become bytes in the next
 keep-alive response.</p>
+<p>Informational responses and status <code>204</code> carry neither content nor framing
+fields.  A <code>205</code> carries no content and is emitted with <code>Content-Length: 0</code> so
+its boundary remains explicit on a persistent connection.  A <code>304</code> also
+carries no content; an explicit, valid <code>Content-Length</code> is retained as
+selected-representation metadata, but one is not generated from an attempted
+response body.  Application body events for these statuses are discarded.</p>
 <h2 id="websocket-frames">WebSocket frames<a class="headerlink" href="#websocket-frames" title="Permanent link">&para;</a></h2>
 <p>For WebSocket routes (<code>scheme=Scheme.websocket</code>), use
 <code>WebSocketResponse</code> to dispatch on payload type automatically:</p>
@@ -6499,10 +6511,9 @@ without buffering the whole body in memory.  The class calls
 </table>
 <p><code>str</code> chunks are encoded to UTF-8 automatically.</p>
 <h3 id="how-http11-delivers-streaming-responses">How HTTP/1.1 delivers streaming responses<a class="headerlink" href="#how-http11-delivers-streaming-responses" title="Permanent link">&para;</a></h3>
-<p>When <code>more_body=True</code> appears on the first <code>http.response.body</code>
-event, the HTTP/1.1 sender adds <code>Transfer-Encoding: chunked</code> to
-the response headers and formats each body event as a hex-length
-chunk:</p>
+<p>When <code>more_body=True</code> appears on the first <code>http.response.body</code> event without
+a declared length, the HTTP/1.1 sender adds <code>Transfer-Encoding: chunked</code> and
+formats each body event as a hex-length chunk:</p>
 <div class="highlight"><pre><span></span><code>5\r\n
 hello\r\n
 5\r\n
@@ -6515,6 +6526,12 @@ world\r\n
 <code>http.response.start</code>, the final body event remains unterminated and the last
 <code>http.response.trailers</code> event writes <code>0\r\n</code>, the trailer fields, and the
 final blank line.</p>
+<p>A stream with a valid <code>Content-Length</code> keeps that single field and sends raw
+body bytes rather than chunk syntax.  BlackBull checks the accumulated body
+size: crossing the declared boundary or ending short raises an error and the
+connection is not reused.  Returning from an application after a non-terminal
+body event likewise leaves the response incomplete and closes that
+keep-alive connection.</p>
 <p>HTTP/2 uses explicitly sized DATA frames instead of chunk syntax.  Without
 trailers, <code>END_STREAM</code> maps to <code>more_body=False</code>; with declared trailers it
 belongs to the trailing HEADERS block.</p>
