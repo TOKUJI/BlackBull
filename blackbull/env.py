@@ -7,10 +7,18 @@ once and returns an immutable snapshot.
 Environment variables
 ---------------------
 BLACKBULL_ENV
-    ``production`` | ``development`` (default) | ``test``
+    ``production`` | ``development`` | ``test``.  An unrecognised value falls
+    back to ``development``.
+    Default: ``development``.
 BB_WORKERS
     Number of worker processes.  ``0`` resolves to ``os.cpu_count()``.
     Default: ``1``.
+BB_WORKER_DRAIN_TIMEOUT
+    Seconds a worker lets already-accepted connections finish after SIGTERM
+    before cancelling what is left.  Sits inside the supervisor's own wait,
+    so raising it past that wait moves the deadline without extending it.
+    ``0`` drops in-flight requests immediately.
+    Default: ``8.0``.
 BB_MAX_CONNECTIONS
     Maximum simultaneous TCP connections accepted per worker.  When the
     cap is reached, new connections receive HTTP/1.1 ``503 Service
@@ -35,13 +43,18 @@ BB_MAX_CONNECTIONS
     number that depends on the workload — set it explicitly; 1024 is a
     typical single-loop value.  Multi-worker deployments multiply (so
     ``workers=8`` × ``BB_MAX_CONNECTIONS=1024`` → 8K per process).
+    Default: ``auto``.
 BB_STREAM_QUEUE_DEPTH
     ``asyncio.Queue`` depth for HTTP/2 per-stream request-body events.
     Limits memory growth when an ASGI handler is slower than the client.
     Default: ``64``.
 BB_WS_QUEUE_DEPTH
-    ``asyncio.Queue`` depth for WebSocket inbound events per connection.
-    Default: ``256``.
+    WebSocket inbound read-ahead depth.  ``0`` reads frames inline in the
+    handler's own task — no reader task and no per-message queue hop.  A
+    positive value runs a background reader that reads *ahead* of the
+    handler into an ``asyncio.Queue`` of that depth, which buys
+    control-frame servicing between the handler's ``receive()`` calls.
+    Default: ``0``.
 BB_ASYNC_LOGGING
     ``1`` | ``true`` | ``yes`` to enable; ``0`` | ``false`` | ``no`` to disable.
     When enabled, a ``QueueHandler`` is installed on the ``blackbull`` logger
@@ -63,11 +76,22 @@ BB_SYSLOG_ADDR
     the async-logging sink ships records via a UDP ``SysLogHandler`` instead of
     ``stderr``.  Composes with ``BB_LOG_FORMAT=json``.
     Default: `` `` (stderr sink).
+BB_LOG_FILE
+    Path the async-logging sink appends to instead of ``stderr``.  Each
+    worker opens its own append stream post-fork, so no writer thread is
+    inherited across ``fork()``.  Composes with ``BB_LOG_FORMAT`` and
+    ``BB_LOG_BATCH_SIZE``; ignored for the syslog sink.  An unopenable path
+    falls back to ``stderr`` with a warning.
+    Default: `` `` (stderr sink).
 BB_LOG_BATCH_SIZE
-    When > 1, the ``stderr`` async-logging sink coalesces up to this many
-    formatted lines into a single ``write()``.  ``1`` (default) is one write per
-    record.  Ignored for the syslog sink.
-    Default: ``1``.
+    Coalescing width of the ``stderr``/file async-logging sink: up to this
+    many formatted lines are joined into a single ``write()``.  Async
+    logging *is* batch logging — the sink always coalesces (floored at 2),
+    because a per-record flush is the dominant access-log cost.  To get one
+    write per record, disable async logging (``BB_ASYNC_LOGGING=0``, the
+    synchronous path) rather than lowering this.  Ignored for the syslog
+    sink.
+    Default: ``64``.
 BB_LOG_BATCH_TIMEOUT_MS
     Max milliseconds a partial log batch waits before flush.  Only meaningful
     when ``BB_LOG_BATCH_SIZE`` > 1.
@@ -76,8 +100,9 @@ BB_SOCKET_BACKLOG
     ``listen()`` backlog depth for the server socket.  Increasing this reduces
     silent connection drops during burst traffic when the accept loop falls
     behind.  Capped by ``net.core.somaxconn`` on Linux.
-    Default: ``128`` (matches the Linux ``net.core.somaxconn`` traditional
-    default).  Bump to 4096 for production traffic — see
+    Default: ``1024`` — sized for servers facing connection bursts, since
+    128 (the traditional ``SOMAXCONN``) is shallow next to nginx's and
+    Node's 511.  Bump to 4096 for production traffic — see
     docs/reference/env-vars.md "Performance recommendations".
 BB_SOCKET_SNDBUF
     Kernel send-buffer size (bytes) set on each accepted TCP socket via
@@ -150,6 +175,39 @@ BB_BODY_CHUNK_SIZE
     body to the ASGI app as successive ``http.request`` events instead of one
     giant allocation.  Default: ``65536`` (asyncio's ``StreamReader`` buffer).
     Must be ``> 0``.
+BB_BODY_CHUNK_MAX
+    Upper bound (bytes) on one such read.  Reads are up-to-n and
+    transport-paced, so a slow peer yields small slices while a fast one
+    earns fewer, larger ones; this caps what a single read may materialise
+    per connection.  Bounds the ``Content-Length`` framing only —
+    ``BB_BODY_CHUNK_SIZE`` is the ``chunked`` path's slice, and the two are
+    never compared against each other.  ``0`` is raised to ``1``, since an
+    up-to-zero read returns ``b''`` and would be indistinguishable from EOF.
+    Default: ``524288`` (512 KiB).
+BB_MAX_BODY_SIZE
+    Maximum total request-body octets accepted for one request — the total
+    that ``BB_BODY_CHUNK_MAX``, a per-read bound, does not own.  Over the cap
+    the server answers ``413 Content Too Large`` and closes: a declared
+    ``Content-Length`` is refused at head time, a ``chunked`` body the moment
+    the running total passes it.  The connection always closes on a refusal,
+    since parsing attacker-chosen unread octets as the next request is the
+    request-smuggling shape.  ``0`` disables the cap.
+    Default: ``31457280`` (30 MiB) — the same class as Kestrel's
+    ``MaxRequestBodySize``; nginx defaults to 1 MB, axum to 2 MB.
+BB_MIN_BODY_RATE
+    Minimum sustained request-body delivery rate in **bytes per second**,
+    averaged over a sliding window one grace period wide.  A transport-paced
+    read cannot be the anti-trickle bound: ``BB_BODY_TIMEOUT`` degrades to
+    "send *something* every N seconds", which a one-byte drip satisfies, and
+    a rate is what a drip cannot fake.  ``0`` disables the detector.
+    Default: ``240.0`` (with the 5 s grace, Kestrel's
+    ``MinRequestBodyDataRate`` defaults).
+BB_MIN_BODY_RATE_GRACE
+    Seconds of body-read waiting before ``BB_MIN_BODY_RATE`` is enforced, so
+    a connection is never judged on its first few packets.  Only time spent
+    waiting on the transport counts, never time the handler spent between
+    reads.
+    Default: ``5.0``.
 BB_H2_INITIAL_WINDOW_SIZE
     Per-stream flow-control window size (bytes) advertised to HTTP/2 peers in the
     server's initial SETTINGS frame.  Larger values allow peers to send more data
@@ -196,8 +254,8 @@ BB_H2_WS_MAX_STREAMS_PER_CONNECTION
     WS-over-H2 streams are accepted at all.  Defends against
     stream-exhaustion DoS: without a per-connection cap, an attacker
     can hold ``BB_H2_MAX_CONCURRENT_STREAMS`` idle WS streams open
-    per connection, multiplied by ``BB_MAX_CONNECTIONS`` (default 0 =
-    unbounded).  Default: ``5``.
+    per connection, multiplied by ``BB_MAX_CONNECTIONS``.
+    Default: ``5``.
 BB_WS_PERMESSAGE_DEFLATE
     Negotiate ``permessage-deflate`` (RFC 7692) on incoming WebSocket
     handshakes when the peer offers it.  Matches modern browsers and
@@ -291,8 +349,9 @@ BB_WS_IDLE_TIMEOUT
 BB_WS_PONG_TIMEOUT
     Seconds to wait for any inbound frame after a liveness PING before
     concluding the peer is gone and closing with ``1001``.  Only
-    meaningful when ``BB_WS_IDLE_TIMEOUT`` is non-zero.  Default:
-    ``30.0`` — as ``BB_H2_PING_TIMEOUT``, and for the same reason.
+    meaningful when ``BB_WS_IDLE_TIMEOUT`` is non-zero — as
+    ``BB_H2_PING_TIMEOUT``, and for the same reason.
+    Default: ``30.0``.
 BB_MQTT_MAX_PACKET_SIZE
     Maximum size (bytes) of a single inbound MQTT control packet,
     advertised to clients as the ``Maximum Packet Size`` property in
@@ -302,9 +361,9 @@ BB_MQTT_MAX_PACKET_SIZE
     buffering its payload** — MQTT 5 permits a peer to declare
     268,435,455 bytes (256 MiB) and dribble them.  Over the cap the
     broker answers ``DISCONNECT`` with reason code **0x95 (Packet Too
-    Large)** and closes.  ``0`` disables the cap.  Default:
-    ``1048576`` (1 MiB) — MQTT payloads are overwhelmingly small, so a
-    limit that admits a megabyte still admits every realistic message
+    Large)** and closes.  ``0`` disables the cap.
+    Default: ``1048576`` (1 MiB) — MQTT payloads are overwhelmingly small,
+    so a limit that admits a megabyte still admits every realistic message
     while refusing the spec ceiling.
 BB_MQTT_RECEIVE_MAXIMUM
     The broker's own ``Receive Maximum`` (§3.2.2.3.3), advertised in
@@ -328,20 +387,24 @@ BB_MQTT_MAX_QUEUED_MESSAGES
     Default: ``1000``.
 BB_MQTT_BROKER_INBOX_MAXSIZE
     Waiting messages in the worker's MQTT broker inbox. At capacity, readers
-    await admission instead of decoding further packets. Positive integer;
-    default ``1024``. Independent of the per-session QoS backlog.
+    await admission instead of decoding further packets. Positive integer,
+    independent of the per-session QoS backlog.
+    Default: ``1024``.
 BB_MQTT_BROKER_INBOX_MAX_BYTES
-    Wire-size charge for waiting broker messages. Default ``16777216``
-    (16 MiB); positive integer. A packet exceeding this budget cannot wait
-    for admission and its connection is refused. Not a Python heap limit.
+    Wire-size charge for waiting broker messages; positive integer. A packet
+    exceeding this budget cannot wait for admission and its connection is
+    refused. Not a Python heap limit.
+    Default: ``16777216`` (16 MiB).
 BB_MQTT_CONNECTION_INBOX_MAXSIZE
     Waiting packets in each MQTT connection writer inbox, including QoS 0
-    and control replies. Default ``1024``; positive integer. After yielding
-    to the writer, a full inbox ends only that connection, with a cap log.
+    and control replies; positive integer. After yielding to the writer, a
+    full inbox ends only that connection, with a cap log.
+    Default: ``1024``.
 BB_MQTT_CONNECTION_INBOX_MAX_BYTES
-    Encoded bytes waiting in each MQTT writer inbox. Default ``16777216``
-    (16 MiB); positive integer. The active write is outside the queue budget;
-    its duration is bounded by ``BB_WRITE_TIMEOUT`` when enabled.
+    Encoded bytes waiting in each MQTT writer inbox; positive integer. The
+    active write is outside the queue budget; its duration is bounded by
+    ``BB_WRITE_TIMEOUT`` when enabled.
+    Default: ``16777216`` (16 MiB).
 BB_MQTT_MAX_RETAINED
     Maximum number of distinct topics holding a retained message
     (§3.3.1.3).  A retained message is permanent by design, so without a
@@ -359,8 +422,8 @@ BB_MQTT_MAX_RETAINED
     disproportionate and would also destroy a live delivery that
     succeeded.  A publisher that needs to know its retained state was
     stored must use QoS ≥ 1.  The operator sees every refusal in the
-    ``blackbull.caps`` log regardless.  ``0`` disables the cap.  Default:
-    ``10000``.
+    ``blackbull.caps`` log regardless.  ``0`` disables the cap.
+    Default: ``10000``.
 BB_MQTT_MAX_SUBSCRIPTIONS
     Maximum Topic Filters one session may hold — the *unit* bound on
     session state, whose total is ``BB_MQTT_MAX_SESSIONS`` and whose time
@@ -405,8 +468,11 @@ BB_COMPRESSION_MAX_INFLIGHT
     ``ThreadPoolExecutor`` ``max_workers`` provides no benefit.  That
     default is ``min(32, os.cpu_count() + 4)`` on Python ≤ 3.12 and
     ``min(128, os.cpu_count() * 5)`` on Python ≥ 3.13.
-    ``0`` disables backpressure (unbounded queue, pre-0.29 behaviour).
-    Default: ``os.cpu_count() * 2``.
+    ``0`` removes the cap, leaving an unbounded executor queue that
+    saturates under burst load.
+    Default: ``max((os.cpu_count() or 1) * 2, 4)`` — the floor keeps a
+    one- or two-CPU host overlapping a few offloads instead of
+    serialising them.
 BB_BROTLI_QUALITY
     Brotli quality level (0–11) for dynamic-response compression.  The
     brotli library's own default is 11 — designed for build-time/static
@@ -422,13 +488,20 @@ BB_FRAME_YIELD_EVERY
     the frame loop can process many HEADERS frames without yielding, which
     stalls all waiting tasks and inflates p99 latency.  Yielding every N
     spawns caps the maximum synchronous run to N × ~50 µs regardless of
-    burst size.  ``0`` disables cooperative yielding (legacy behaviour).
+    burst size.  ``0`` disables cooperative yielding.
     Default: ``8``.
 BB_UVLOOP
     Install the ``uvloop`` event loop policy before each
     ``asyncio.run()`` when the optional ``[speed]`` extra is installed.
     Falls back to the standard asyncio loop with a warning if uvloop is
     not importable.  Default: ``false``.
+BB_FORCE_ASGI_SCOPE
+    Dual-path conformance lane.  When enabled, every request round-trips the
+    native :class:`~blackbull.connection.Connection` through ``as_scope()`` +
+    ``from_scope()`` before dispatch, so the ASGI compat conversion is
+    exercised on the self-hosted path and cannot silently bitrot.  Enabled in
+    CI; off in normal operation, where the native path skips the round-trip.
+    Default: ``false``.
 BB_DEADLINE_TICK_MS
     Polling interval (milliseconds) for the per-process deadline scanner
     that enforces connection timeouts (``BB_HEADER_TIMEOUT``,
@@ -446,6 +519,120 @@ BB_CPU_PINNING
     serves ``run_in_executor`` compression and ``asyncio.to_thread`` file
     reads keeps the full mask.  Multi-worker and Linux only; a single-worker
     server is never pinned.  Default: ``auto``.
+
+The ``BB_CLIENT_*`` block below bounds the **async client**, not the server.
+The two are held apart deliberately: a server is addressed by anyone, while a
+client picks its peer, so the same shape of limit gets a different default on
+each side.  Each entry states what it bounds; the trade-off behind each number
+lives on the matching :class:`Settings` field.
+
+BB_CLIENT_HEAD_MAX_TOTAL
+    Maximum total bytes in a response head the client will read (status line
+    + all field lines + CRLFCRLF), bounded as it accumulates so an endless
+    header cannot grow the client's memory.  Under HTTP/2 this bounds the
+    field lines in aggregate across every HEADERS frame on the stream.
+    ``0`` disables.
+    Default: ``65536``.
+BB_CLIENT_HEAD_MAX_LINE
+    Maximum bytes in a single status line or response field line.  A policy
+    rule rather than a second memory guard — no line can be longer than the
+    already-bounded block containing it.  ``0`` disables.
+    Default: ``8192``.
+BB_CLIENT_HEAD_TIMEOUT
+    Seconds the client waits for a complete response head — the time column
+    for the read ``BB_CLIENT_HEAD_MAX_TOTAL`` bounds by size, since a peer
+    that sends half a head and stops passes every byte budget forever.
+    ``0`` disables.
+    Default: ``30.0``.
+BB_CLIENT_WRITE_TIMEOUT
+    Maximum seconds the client waits for one send-progress operation: a
+    socket drain on HTTP/1.1 and WebSocket, one ``SETTINGS_MAX_FRAME_SIZE``
+    unit of DATA plus its flow-control credit on HTTP/2.  There is
+    intentionally no whole-upload total owner.  ``0`` disables.
+    Default: ``30.0``.
+BB_CLIENT_BODY_TIMEOUT
+    Seconds the client waits for a single response-body read — per read, not
+    per body, so a peer must keep making progress.  Armed by the final
+    response head rather than the request, and re-armed only by octets that
+    are body payload.  ``0`` disables.
+    Default: ``30.0``.
+BB_CLIENT_BODY_MAX_TOTAL
+    Maximum total response-body octets the client will buffer for one
+    response.  Bounds ``receive()`` only — ``stream()`` exists so a large
+    response need not fit in memory.  What it counts is body octets; what it
+    costs is about 2× that at the join.  **Off by default**, unlike the
+    server's ``BB_MAX_BODY_SIZE``: that number bounds what strangers push
+    into a process, this one bounds what you asked for.
+    Default: ``0`` (disabled).
+BB_CLIENT_MIN_BODY_RATE
+    Minimum sustained rate, in octets per second, at which the client
+    requires a response **body** to arrive — what ``BB_CLIENT_BODY_TIMEOUT``
+    cannot express, since it returns on any arrival.  The numerator is
+    payload only, so framing octets a peer may pad buy no credit, and the
+    wait before the first body octet is outside the window.  **Off by
+    default**: after the first octet, an event stream and a drip are the
+    same observation.  ``0`` disables.
+    Default: ``0.0`` (disabled).
+BB_CLIENT_MIN_BODY_RATE_GRACE
+    Seconds of body-read waiting, after the first body octet, before
+    ``BB_CLIENT_MIN_BODY_RATE`` is enforced.  The window rolls forward
+    whenever it is satisfied, so a burst buys the window it happened in
+    rather than the whole response.
+    Default: ``5.0``.
+BB_CLIENT_MAX_INTERIM_RESPONSES
+    Maximum interim (``1xx``) responses the client reads and discards while
+    waiting for the final one.  RFC 9110 §15.2 makes parsing past them a
+    MUST, which turns "read one response" into a loop, and a loop over
+    peer-supplied messages needs a count — this one, since the head budget
+    and head deadline are both *per head*.  ``101`` is not counted: 1xx by
+    number, final by meaning.  ``0`` disables the cap.
+    Default: ``8``.
+BB_CLIENT_RAW_QUEUE_DEPTH
+    Frames the client holds for one **raw** HTTP/2 stream — the escape hatch
+    where the receive loop hands frames to a registrant instead of the
+    request/response machine.  Full resets that stream alone with
+    ``ENHANCE_YOUR_CALM``; the connection survives.  Denominated in frames,
+    because flow control charges only a DATA payload and a zero-length DATA
+    frame would buy depth for free.  ``0`` disables (unbounded).
+    Default: ``1024`` — a peer may legally burst its whole 65535-byte window
+    as small frames, and a raw stream cannot be dropped without corrupting
+    it, so this must not fire on legal traffic.
+BB_CLIENT_H2_MAX_FRAME_SIZE
+    Maximum octets in one inbound HTTP/2 frame payload the client will read,
+    judged from the frame header so a peer-declared number never sizes an
+    allocation.  Breach is a connection error of type FRAME_SIZE_ERROR:
+    refusing before the read leaves the payload in the socket.  ``0``
+    disables.
+    Default: ``16384`` — RFC 9113 §6.5.2's initial ``SETTINGS_MAX_FRAME_SIZE``,
+    the one value that neither refuses a conforming peer nor accepts what was
+    never advertised.
+BB_CLIENT_H2_MAX_HEADER_LIST_SIZE
+    Maximum octets in one **decoded** field section the client accepts.  One
+    number, two effects: advertised as ``SETTINGS_MAX_HEADER_LIST_SIZE`` and
+    installed as the HPACK decoder's ``max_header_list_size``, which must
+    agree because §6.5.2 makes the announcement advisory and the decoder the
+    defence.  The only bound counted in decoded octets, since compression
+    decouples the two sizes.  Breach is a connection error of type
+    COMPRESSION_ERROR.  ``0`` disables.
+    Default: ``65536`` — what hpack enforces unasked, so the default changes
+    what the peer is *told*, not what is accepted.
+BB_CLIENT_H2_ENABLE_PUSH
+    Whether the client permits the peer to push (RFC 9113 §6.5.2).  A
+    conformance switch, not a bound.  Enabled advertises nothing (1 is the
+    parameter's initial value) and a PUSH_PROMISE is decoded and dropped;
+    disabled advertises ``SETTINGS_ENABLE_PUSH=0`` **and** refuses a later
+    PUSH_PROMISE with a connection error of type PROTOCOL_ERROR, §6.5.2
+    making that refusal a MUST for whoever sends the 0.
+    Default: ``true``.
+BB_CLIENT_WS_MAX_FRAME_PAYLOAD
+    Client WebSocket inbound frame payload cap, in bytes per frame.
+    ``BB_CLIENT_WS_MAX_MESSAGE_SIZE`` owns the aggregate message total; the
+    client WebSocket recipient has no environment-owned time bound.
+    Default: ``67108864`` (64 MiB).
+BB_CLIENT_WS_MAX_MESSAGE_SIZE
+    Client WebSocket inbound message cap, in bytes per message — the total
+    for which ``BB_CLIENT_WS_MAX_FRAME_PAYLOAD`` is the unit.
+    Default: ``16777216`` (16 MiB).
 """
 import dataclasses
 import functools as _functools
@@ -503,6 +690,15 @@ def _int_env_nonneg(name: str, default: int) -> int:
 #: refused" — which the peer can retry — to "a request already accepted
 #: cannot open its database connection", which it cannot.
 FD_RESERVE = 64
+
+
+#: Compression offloads allowed to run concurrently in the asyncio default
+#: thread pool; past it, eligible responses are served uncompressed rather
+#: than queued.  The floor keeps a one- or two-CPU host overlapping a few
+#: offloads instead of serialising them.  A name rather than a literal
+#: because the :class:`Settings` field default and :func:`get_settings` both
+#: state it, and two copies of a number drift the first time one is tuned.
+DEFAULT_COMPRESSION_MAX_INFLIGHT = max((os.cpu_count() or 1) * 2, 4)
 
 
 def resolve_max_connections(raw: str | None) -> int:
@@ -708,7 +904,7 @@ class Settings:
     #: elapses, the server answers with 408 Request Timeout and closes.
     #: Primary defence against slowloris — an attacker can otherwise hold
     #: a connection open indefinitely by dripping bytes.  0 = disabled
-    #: (legacy behaviour; only recommended for trusted local clients).
+    #: (only sound for trusted local clients).
     header_timeout: float = 10.0
 
     #: Maximum seconds an HTTP/1.1 client has to deliver the complete
@@ -717,7 +913,7 @@ class Settings:
     #: ``Content-Length: N`` connection open by dripping body bytes after
     #: the headers have arrived.  When the deadline elapses the recipient
     #: returns ``http.disconnect`` and the server tears the connection
-    #: down.  0 = disabled (legacy behaviour).
+    #: down.  0 = disabled.
     body_timeout: float = 30.0
 
     #: Maximum seconds the server will wait for a single write to be
@@ -845,8 +1041,8 @@ class Settings:
     #: The escape is ``stream()``, which never accumulates: a caller filling
     #: its own buffer measures ~1x.  What it costs is everything else —
     #: ``stream()`` exposes no status, no headers, and is deliberately outside
-    #: this cap, so today it is ~1x *or* status, headers and a bound, never
-    #: both.  Closing that is ``BLA-325``.  The numbers above are pinned by
+    #: this cap, so it is ~1x *or* status, headers and a bound, never both.
+    #: The numbers above are pinned by
     #: ``tests/unit/client/test_client_body_buffer_cost.py``.
     #:
     #: **Off by default**, unlike the server's ``max_body_size``.  That number
@@ -1055,7 +1251,10 @@ class Settings:
     #:
     #: The cap is a memory bound, not a latency one: it limits how much a
     #: single read may materialise per connection.  Raise it for large uploads
-    #: over fast links.  Values below ``body_chunk_size`` are raised to it.
+    #: over fast links.  ``0`` is raised to ``1``: an up-to-zero read returns
+    #: ``b''``, which the read loop cannot tell from EOF.  No other floor
+    #: applies — this bounds the ``Content-Length`` path and
+    #: ``body_chunk_size`` the ``chunked`` one, so the two never meet.
     body_chunk_max: int = 524288
 
     #: Maximum total request-body octets accepted for one request.  Over the
@@ -1245,10 +1444,9 @@ class Settings:
 
     #: Max concurrent compression offloads to the asyncio executor.  When at
     #: this cap, eligible responses are served **uncompressed** rather than
-    #: queued.  0 disables the cap (unbounded queue — pre-0.29 behaviour;
-    #: vulnerable to executor saturation under burst load).
-    #: Default is set in get_settings() to ``os.cpu_count() * 2``.
-    compression_max_inflight: int = 0
+    #: queued.  0 removes the cap, leaving an unbounded executor queue that
+    #: saturates under burst load.
+    compression_max_inflight: int = DEFAULT_COMPRESSION_MAX_INFLIGHT
 
     #: Brotli quality level (0–11) for dynamic-response compression.  The
     #: brotli library's own default is 11 (max compression, designed for
@@ -1271,7 +1469,7 @@ class Settings:
     #: Cooperative yield interval for the HTTP/2 frame loop.  After this many
     #: stream tasks are spawned without a natural yield, ``asyncio.sleep(0)``
     #: is inserted so the event loop can dispatch queued tasks.
-    #: 0 = disabled (legacy behaviour).
+    #: 0 = disabled.
     frame_yield_every: int = 8
 
 
@@ -1397,7 +1595,7 @@ def get_settings() -> Settings:
         compression_min_size=_int_env('BB_COMPRESSION_MIN_SIZE', 100),
         compression_executor_threshold=_int_env_nonneg('BB_COMPRESSION_EXECUTOR_THRESHOLD', 65536),
         compression_max_inflight=_int_env_nonneg(
-            'BB_COMPRESSION_MAX_INFLIGHT', max((os.cpu_count() or 1) * 2, 4)),
+            'BB_COMPRESSION_MAX_INFLIGHT', DEFAULT_COMPRESSION_MAX_INFLIGHT),
         brotli_quality=_int_env_nonneg('BB_BROTLI_QUALITY', 4),
         frame_yield_every=_int_env_nonneg('BB_FRAME_YIELD_EVERY', 8),
         cpu_pinning=_str_env('BB_CPU_PINNING', 'auto'),

@@ -208,8 +208,7 @@ def bind_receive_channel(target, receive) -> None:
     reference cycle: ``conn._receive`` → wrapper → (closure captures) ``conn``.
     The refcount of a cyclic group never reaches zero when the request's local
     refs drop, so reclamation is deferred to the generational cyclic GC — whose
-    periodic pauses were the v0.60.0 tail-latency regression (see
-    ``BLA-234`` [private] §6). The raw
+    periodic pauses are a measured tail-latency cost on this path. The raw
     recipient does **not** reference ``conn`` (HTTP/1.1 keeps only the path
     string; HTTP/2 keeps none), so ``conn`` → recipient is an acyclic chain that
     refcounting frees the instant the request ends.
@@ -309,8 +308,8 @@ class Connection:
     def disconnected(self) -> bool:
         """True once the client dropped mid-request.
 
-        The named form of what used to be readable only as a private field or
-        through the module-level :func:`disconnected` helper.  A long-running
+        The named form of the state the module-level :func:`disconnected`
+        helper also reports.  A long-running
         handler polls this to abandon work whose answer nobody is waiting for::
 
             for row in rows:
@@ -397,8 +396,8 @@ class Connection:
         typed :class:`Connection` stashed on it for zero-reconversion reads.
 
         The single canonical *Connection → dispatch-ready scope* bridge shared
-        by the H/1.1 ``run()`` and H/2 ``_conn_to_scope`` seams —
-        they used to hand-roll the same five steps:
+        by the H/1.1 ``run()`` and H/2 ``_conn_to_scope`` seams, which would
+        otherwise each hand-roll the same five steps:
 
         1. derive the ASGI scope via :meth:`as_scope` (the one native→ASGI point);
         2. when ``force_asgi`` (the §4.3 ``BB_FORCE_ASGI_SCOPE`` dual-path lane),

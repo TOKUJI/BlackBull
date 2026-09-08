@@ -213,7 +213,7 @@ async def request(
 
     # Same dual-form signature as the protocol senders: a handler may emit ASGI
     # dicts, the ``send(body, status, headers)`` convenience form that the
-    # actor's sender also accepts, or — on the H1 native seam (Sprint 92) — a
+    # actor's sender also accepts, or — on the H1 native seam — a
     # NativeTestResponse.  Tier 1 has to accept all of them or it would reject code
     # the real server runs.  The NativeTestResponse expansion iterates through the
     # sibling ``_record`` — never a self-referential closure.

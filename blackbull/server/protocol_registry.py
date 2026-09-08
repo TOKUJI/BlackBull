@@ -255,13 +255,10 @@ class Http1Binding(ProtocolBinding):
 
     async def serve(self, conn: ConnectionView) -> None:
         from .http1_actor import HTTP1Actor  # noqa: PLC0415
-        # Nothing is pre-read.  The binding used to pull the request line here
-        # because detection had consumed and replayed a prefix, and someone had
-        # to re-establish where the message started.  Detection no longer
-        # consumes, so the actor reads the whole head in one scan — pulling the
-        # first line here would split that scan in two and, worse, hand the
-        # actor a head it must then treat as already-read, skipping the budget
-        # check that guards it.
+        # Nothing is pre-read.  Detection does not consume, so the actor reads
+        # the whole head in one scan — pulling the first line here would split
+        # that scan in two and, worse, hand the actor a head it must then
+        # treat as already-read, skipping the budget check that guards it.
         actor = HTTP1Actor(
             conn.reader, conn.writer, conn.app, conn.aggregator,
             request=b'',
@@ -346,8 +343,8 @@ class RawBinding(ProtocolBinding):
         # The handler owns the connection for its whole lifetime (long-lived,
         # stateful protocols decide when to close).  Connection timing, error
         # isolation, and the ``connection_closed`` event are provided uniformly
-        # by ``ConnectionActor.run()`` for every protocol — there is no longer a
-        # separate L2 Actor wrapper (decouple-connection-detection, Stage 4).
+        # by ``ConnectionActor.run()`` for every protocol, so a binding needs
+        # no Actor wrapper of its own.
         ctx = ProtocolContext(
             peername=conn.peername, sockname=conn.sockname, ssl=conn.ssl,
             aggregator=conn.aggregator, connection_id=conn.connection_id,

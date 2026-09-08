@@ -333,9 +333,9 @@ class HTTP2Client:
         self._goaway_received: bool = False
         # Set when the receive loop ends for any reason.  ``_goaway_received``
         # only covers the polite departure; a peer that simply vanishes leaves
-        # no frame behind, and without this ``request()`` awaited a future
-        # nobody was left to resolve.  ``HTTP1Client`` raises here, so the two
-        # clients used to disagree about the same event.
+        # no frame behind, and without this ``request()`` awaits a future
+        # nobody is left to resolve.  ``HTTP1Client`` raises here, so without
+        # it the two clients disagree about the same event.
         self._connection_lost: bool = False
         # Set by ``__aexit__``: the close this process performed, which is a
         # different event from the peer's departure above and owes the caller
@@ -1344,9 +1344,8 @@ class HTTP2Client:
         and its sender are then left alone: a server may answer with
         END_STREAM while the request body is still going up (an early 401 or
         413), and releasing the sender there parks ``_write_data`` on a window
-        event nothing will set again.  That is the defect BLA-269 fixed, and
-        this helper re-introduced until ``test_an_early_response_does_not_
-        strand_the_upload`` caught it.
+        event nothing will set again.  Held by
+        ``test_an_early_response_does_not_strand_the_upload``.
         """
         pending = self._responses.pop(stream_id, None)
         if pending is None:

@@ -173,8 +173,8 @@ class Scenario:
         """Wrap a complete raw HTTP/1.1 request as a one-shot scenario.
 
         Equivalent to "send these bytes, then read one response".
-        Used by the legacy ``diff_*.txt`` corpus loader and by the
-        Hypothesis ``well_formed_scenario_strategy``.
+        Used by the Hypothesis ``well_formed_scenario_strategy`` in the
+        HTTP/1.1 differential suite.
         """
         return cls(steps=(SendRawBytes(data=raw_request),
                           ReadResponse(timeout=response_timeout)))

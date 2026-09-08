@@ -3,9 +3,9 @@
 The scenario *vocabularies* are per-protocol and per-role; the socket
 operations underneath them are neither.  A half-close is the same system
 call whether it is a broken HTTP/1.1 client or a broken HTTP/2 server
-issuing it, so it lives here rather than four times over — the Sprint 108
-lesson was that four copies of one idea drift, and the drift is invisible
-until something outside the project reads the bytes.
+issuing it, so it lives here rather than four times over — four copies of
+one idea drift, and the drift is invisible until something outside the
+project reads the bytes.
 """
 from __future__ import annotations
 

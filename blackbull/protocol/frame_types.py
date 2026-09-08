@@ -446,9 +446,8 @@ class Headers(FrameBase):
                 # defined fields (rejects unknown ":foo").  The
                 # request-vs-response check (e.g. ":status" not on requests)
                 # is enforced one layer up.
-                # One bytes-keyed lookup does the membership check and the
-                # value lookup that were previously two steps over two
-                # representations of the same six names.
+                # One bytes-keyed lookup does both the membership check and
+                # the value lookup, over one representation of the six names.
                 pseudo_key = _PSEUDO_BY_BYTES.get(kb)
                 if pseudo_key is None:
                     self._mark_malformed(f'unknown pseudo-header: {kb!r}')

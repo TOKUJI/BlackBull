@@ -50,9 +50,8 @@ CATALOGUE_H1_SERVER = CATALOGUE_H1
 #: HTTP/2 cases.  ``CATALOGUE`` keeps its original name and contents so
 #: existing ``parametrize`` over it is untouched; ``CATALOGUE_H2`` is the
 #: symmetric alias, and ``CATALOGUE_H1`` the HTTP/1.1 set.  Two protocols,
-#: two dicts, reachable the same way — the H1 set was previously only
-#: importable from its own module, which is how a reader would have
-#: concluded there was one catalogue.
+#: two dicts, reachable the same way — an H1 set importable only from its
+#: own module is how a reader concludes there is one catalogue.
 CATALOGUE = {
     'half_closed_after_headers': h2_half_closed_after_headers,
     'half_closed_stream_no_data': half_closed_stream_no_data,

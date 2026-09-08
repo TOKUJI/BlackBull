@@ -739,8 +739,8 @@ class PrefixReader(AbstractReader):
     the *still-complete* stream to the protocol that claims it — the peeked bytes
     are served back first, then reads fall through to the underlying reader.
 
-    Used by the decouple-connection-detection refactor so the dispatcher no
-    longer consumes protocol-specific bytes on the connection's behalf.  The
+    This is what keeps the dispatcher from consuming protocol-specific bytes
+    on the connection's behalf.  The
     fast native ``readuntil`` / ``readexactly`` of the underlying reader are
     used once the prefix is drained, including the seam case where the separator
     straddles the prefix/underlying boundary.
@@ -1140,11 +1140,11 @@ class HTTP1Recipient(BaseRecipient):
     def after_dispatch(self) -> int:
         """What the connection should do now the handler has answered.
 
-        One question, because it is one judgement.  The actor used to ask
-        ``must_close`` and then ``needs_drain()`` and combine the two, which
-        put the verdict in the caller and left the two predicates free to
-        drift apart — the recipient is the object that knows whether the
-        message boundary survived, so it should say what follows from that.
+        One question, because it is one judgement.  Asking ``must_close`` and
+        ``needs_drain()`` separately and combining them puts the verdict in
+        the caller and leaves the two predicates free to drift apart — the
+        recipient is the object that knows whether the message boundary
+        survived, so it should say what follows from that.
 
         Also one call per request instead of two on the keep-alive path.
         """
@@ -1419,7 +1419,7 @@ class HTTP1Recipient(BaseRecipient):
                     n = min(self._content_length, self._chunk_max)
                     body = await self._read_with_timeout(self._reader.read(n))
                     # Gate on the *length*, not truthiness.  Forward progress
-                    # is now the reader's return value rather than a constant
+                    # is the reader's return value rather than a constant
                     # ``n``, so "zero bytes came back" is the only thing that
                     # ends the loop — and a zero-length result that is somehow
                     # truthy would decrement by nothing and spin forever.  For
@@ -1502,8 +1502,8 @@ class HTTP2Recipient(BaseRecipient):
     conformant peer cannot exceed it) plus a generous frame-count abuse cap;
     ``put_DATAFrame`` returning ``False`` therefore means the peer overran the
     closed window or dribbled degenerate frames, and the RST is a true abuse
-    backstop.  Without a callback the historical bounded-queue,
-    credit-at-enqueue behaviour is preserved (push streams, direct test use).
+    backstop.  Without a callback the queue is bounded and credit is issued
+    at enqueue instead (push streams, direct test use).
     """
 
     def __init__(self, frame: FrameBase | None = None,
@@ -1532,7 +1532,7 @@ class HTTP2Recipient(BaseRecipient):
         # Native-channel end marker.  Read by ``next_chunk`` only: ``__call__``
         # deliberately does not consult it, so a full-form handler calling
         # ``receive()`` past END_STREAM still blocks for the disconnect event
-        # exactly as it did before, rather than being handed a synthetic one.
+        # rather than being handed a synthetic one.
         self._done: bool = False
         if max_body is None or min_rate is None or min_rate_grace is None:
             # Fallback for a directly-instantiated recipient (tests, and any
@@ -1589,8 +1589,8 @@ class HTTP2Recipient(BaseRecipient):
         if self._queue is None:
             # Consume-crediting mode enforces its own bounds (byte budget +
             # frame-count abuse cap) in put_DATAFrame, so the queue itself is
-            # unbounded — put_disconnect can then always deliver.  Legacy mode
-            # keeps the historical frame-count maxsize.
+            # unbounded — put_disconnect can then always deliver.  Without a
+            # credit callback the queue keeps its frame-count maxsize.
             maxsize = 0 if self._credit_cb is not None else self._queue_depth
             self._queue = asyncio.Queue(maxsize=maxsize)
         return self._queue
@@ -1677,9 +1677,10 @@ class HTTP2Recipient(BaseRecipient):
 
     def put_DATAFrame(self, frame: Data) -> bool:
         """Enqueue a DATA frame event.  Returns False when the frame must be
-        refused (the caller answers RST_STREAM): queue full in legacy mode;
-        inbound-window overrun, a tiny-frame flood, or a body limit
-        (``BB_MAX_BODY_SIZE`` / ``BB_MIN_BODY_RATE``) in consume-crediting mode.
+        refused (the caller answers RST_STREAM): queue full when no credit
+        callback is installed; inbound-window overrun, a tiny-frame flood, or
+        a body limit (``BB_MAX_BODY_SIZE`` / ``BB_MIN_BODY_RATE``) in
+        consume-crediting mode.
         """
         if self._body_limits_refuse(len(frame.payload)):
             return False
@@ -1728,9 +1729,9 @@ class HTTP2Recipient(BaseRecipient):
         """Enqueue a clean, empty end-of-body.
 
         The trailers case (RFC 9113 §8.1): a second HEADERS on an open request
-        stream ends the body without carrying any.  Enqueues the native pair —
+        stream ends the body without carrying any.  Enqueues the native pair:
         building an ``http.request`` dict here only to translate it back one
-        line later was the last request-dict producer on the native path.
+        line later would put a request-dict producer back on the native path.
         """
         return self._put_item((b'', True))
 
@@ -1797,7 +1798,7 @@ class HTTP2Recipient(BaseRecipient):
             return {'type': ASGIEvent.HTTP_DISCONNECT}
         payload, end_stream = item
         # Set, never read, on this channel: ``__call__`` past END_STREAM keeps
-        # waiting for the disconnect event exactly as it did before, but the
+        # waiting for the disconnect event, but the
         # end marker has to be shared or a later ``next_chunk`` would block on
         # a queue nothing will feed again.
         if end_stream:
@@ -2061,9 +2062,9 @@ class WebSocketRecipient(BaseRecipient):
         self._ws_idle_timeout: float = ws_idle_timeout or 0.0
         self._ws_pong_timeout: float = ws_pong_timeout or 30.0
         # Inbound arrival is recorded as a **counter**, not a timestamp: the
-        # receive path is the hot path, and Sprint 104 was spent taking
-        # per-message clock reads out of it.  The tick callback — once per
-        # idle connection per scanner tick — turns the counter into a time.
+        # receive path is the hot path, and a per-message clock read does not
+        # belong on it.  The tick callback — once per idle connection per
+        # scanner tick — turns the counter into a time.
         self._inbound_seq: int = 0
         self._seq_at_last_check: int = 0
         self._last_inbound_at: float = 0.0
@@ -2073,9 +2074,10 @@ class WebSocketRecipient(BaseRecipient):
     def terminal_code(self) -> int | None:
         """The RFC 6455 §7.4 close code, once the read side has finished.
 
-        The single record of how this connection ended: the actor used to keep
-        its own copy by intercepting every event to look for a disconnect, and
-        two records of one fact is one place for them to disagree.
+        The single record of how this connection ended.  The actor keeps no
+        copy of its own: that would mean intercepting every event to look for
+        a disconnect, and two records of one fact is one place for them to
+        disagree.
         """
         return self._terminal_code
 
@@ -2224,9 +2226,9 @@ class WebSocketRecipient(BaseRecipient):
             except Exception:
                 pass  # best-effort CLOSE frame; the socket may already be gone.
             await self._emit_disconnected(exc.close_code)
-            # Surface the violation on the next app-side receive() (matches
-            # the legacy contract that any exception in the read loop is
-            # raised back to the app); the close frame has already gone out.
+            # Surface the violation on the next app-side receive() — the
+            # contract is that any exception in the read loop is raised back
+            # to the app; the close frame has already gone out.
             await self._emit(exc)
             return True
         except Exception as exc:
@@ -2380,10 +2382,10 @@ class WebSocketRecipient(BaseRecipient):
     async def _close_channel(self, code: int) -> None:
         """Fire ``websocket_disconnected`` and end the channel with *code*.
 
-        The close code used to be passed twice — once to the Level B event and
-        again inside the disconnect envelope — which is one place for the two
-        to disagree.  It is recorded once here, on ``_terminal_code``, and both
-        channels read it from there.
+        The close code is recorded once here, on ``_terminal_code``, and both
+        channels read it from there.  Passing it twice — once to the Level B
+        event and again inside the disconnect envelope — is one place for the
+        two to disagree.
         """
         await self._emit_disconnected(code)
         self._terminal_code = code
@@ -2671,9 +2673,9 @@ class WebSocketRecipient(BaseRecipient):
         touches); this only keeps the deadline fresh once control frames
         matter or a listener needs the deferred reader.  ``touch()`` itself
         re-arms a missing watchdog, so a send before the connect receive is
-        still safe.  The send-time servicing fast path was removed — the
-        watchdog alone bounds PONG latency to ~one scanner tick (the
-        documented contract).
+        still safe.  There is deliberately no send-time servicing fast path:
+        the watchdog alone bounds PONG latency to ~one scanner tick, which is
+        the documented contract.
         """
         if self._deferred_pending or self._saw_control_frame:
             self.touch()
