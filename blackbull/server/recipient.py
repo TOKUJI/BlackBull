@@ -24,39 +24,29 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Per-stream and per-connection event queue depth limits.
-# These cap memory growth under overload; see bench/README.md.
+# Defaults behind BB_STREAM_QUEUE_DEPTH / BB_WS_QUEUE_DEPTH (see
+# docs/reference/env-vars.md); ``WebSocketRecipient`` documents the two modes.
 _HTTP2_STREAM_QUEUE_DEPTH = 64
-# Depth used when WebSocket read-ahead is switched on.  It is *not* the
-# default: read-ahead costs a background task plus a queue hop per message
-# (one future + one call_soon), which is the whole of WebSocket's loop-touch
-# excess over HTTP/1.1.  See ``WebSocketRecipient`` for the two modes.
-_WS_EVENT_QUEUE_DEPTH = 256
-# Read inline, in the app's own task — no reader task, no per-message handoff.
+_WS_EVENT_QUEUE_DEPTH = 256     # a deferred reader's depth when the knob is 0
 _WS_READ_INLINE = 0
 
-# What :meth:`HTTP1Recipient.after_dispatch` answers.  Three states because
-# there are three things a connection can do next, and the recipient is the
-# object that knows which: the message boundary is its business.  Plain ints,
-# compared with ``is`` on small values the interpreter interns — this is read
-# once per request on every keep-alive connection.
+# What :meth:`HTTP1Recipient.after_dispatch` answers.  Plain ints rather than an
+# Enum: read once per request on every keep-alive connection, and compared with
+# ``is`` on small values the interpreter interns.
 CONNECTION_REUSABLE = 0
 CONNECTION_NEEDS_DRAIN = 1
 CONNECTION_MUST_CLOSE = 2
 
-# Consume-crediting mode bounds the HTTP/2 stream queue by BYTES (the
-# advertised inbound window), not frame count — a conformant peer sending
-# 65535 bytes as 1-byte frames must not be RST'd.  This multiplier bounds the
-# frame COUNT against zero/tiny-frame floods (CVE-2019-9518-style abuse) that
-# the byte budget cannot see: queue_depth × 16 (1024 by default) is far above
-# any conformant burst yet keeps per-stream event-dict overhead bounded.
+# Frame-COUNT total for a consume-credited stream queue, whose byte total is the
+# advertised inbound window.  A conformant peer may legally burst that window as
+# 1-byte frames, so the count sits far above it; what it refuses is the
+# zero/tiny-frame flood (CVE-2019-9518) no byte budget can see.
 _EVENT_CAP_MULTIPLIER = 16
 
-# Queue marker for "the WebSocket peer is gone".  The WS channel carries the
-# message *values* — ``str`` for text, ``bytes`` for binary — so the end of the
-# connection needs a value outside that domain rather than a tagged envelope
-# every reader would have to unwrap.  The close code rides ``_terminal_code``,
-# which the recipient already tracked.
+# End-of-channel marker.  Both native channels carry bare values — ``str`` /
+# ``bytes`` here, ``(chunk, end_of_stream)`` for H2 — so the end needs a sentinel
+# outside that domain rather than a tagged envelope every reader would unwrap.
+# The WS close code rides ``_terminal_code``.
 _WS_CLOSED = object()
 
 
@@ -69,20 +59,14 @@ def _ws_disconnect(code: int | None):
     from ..websocket import WebSocketDisconnect  # noqa: PLC0415
     return WebSocketDisconnect(code or WSCloseCode.ABNORMAL)
 
-# Queue marker for "the peer is gone".  The H2 queue carries native
-# ``(chunk, end_of_stream)`` pairs, and a disconnect is not a chunk — it is the
-# absence of any further one — so it needs a value outside that domain rather
-# than a third tuple field every reader would have to check.
-_H2_DISCONNECT = object()
+_H2_DISCONNECT = object()       # as ``_WS_CLOSED``, for the H2 queue
 
-# RFC 6455 §5.5 control opcodes — used by the non-blocking control-frame
-# servicing (``WebSocketRecipient.service_available_control_frames``), which
-# must never consume a data frame ahead of the app.
+# RFC 6455 §5.5 control opcodes.
 _WS_CONTROL_OPS = (WSOpcode.CLOSE, WSOpcode.PING, WSOpcode.PONG)
 
 
 # ---------------------------------------------------------------------------
-# Reader abstraction — swap asyncio for trio/curio by implementing this ABC
+# Reader abstraction
 # ---------------------------------------------------------------------------
 
 class IncompleteReadError(EOFError):
@@ -125,9 +109,8 @@ class ReadLimitExceeded(Exception):
 def _accepts_read_limit(readuntil) -> bool:
     """Whether a bound ``readuntil`` method accepts the budget argument.
 
-    Compatibility is decided before the read, never by catching a TypeError
-    raised from inside reader code.  Old implementations take the bounded
-    byte-wise path below rather than being retried without a limit.
+    Compatibility is decided before the read, never by catching a ``TypeError``
+    raised from inside reader code.
     """
     try:
         signature(readuntil).bind(b'\n', 1)
@@ -136,8 +119,7 @@ def _accepts_read_limit(readuntil) -> bool:
     return True
 
 
-#: End of an HTTP message head.  Lives here because :meth:`AbstractReader.read_head`
-#: is what looks for it; the H/1.1 actor imports it rather than keeping a copy.
+#: End of an HTTP message head; the H/1.1 actor imports it rather than copying it.
 _HEAD_END = b'\r\n\r\n'
 
 
@@ -153,13 +135,12 @@ _TCHAR_SET = frozenset(
 
 
 def _bad_request(detail: str):
-    """Build the framework's status-carrying 400 exception.
+    """The framework's status-carrying 400.
 
-    Imported lazily so ``recipient`` (loaded early via the server) never
-    depends on ``router`` at module-import time.  ``HTTPException`` is the
-    dispatcher's typed-error seam — raising it from the body reader makes a
-    malformed chunked frame surface as ``400 Bad Request`` instead of a
-    fabricated 500.
+    Lazy import so ``recipient`` (loaded early via the server) never depends on
+    ``router`` at module-import time.  ``HTTPException`` is the dispatcher's
+    typed-error seam, so a malformed chunked frame surfaces as 400 rather than
+    as a fabricated 500.
     """
     from http import HTTPStatus  # noqa: PLC0415
     from ..router import HTTPException  # noqa: PLC0415
@@ -167,14 +148,12 @@ def _bad_request(detail: str):
 
 
 def _content_too_large(detail: str):
-    """Build the 413 for a body that outgrew the cap mid-stream.
+    """The 413 for a body that outgrew ``BB_MAX_BODY_SIZE`` mid-stream.
 
-    Only ``chunked`` can reach here: a ``Content-Length`` declares the whole
-    body in the head, so the actor refuses that one before reading any of it.
-    A chunked body announces nothing, so the verdict has to arrive during the
-    read — which is why it travels as the dispatcher's typed error rather than
-    as a status the actor chose: the handler is already running, and this is
-    the same seam a malformed chunk uses to become a 400.
+    Only a body that declared nothing reaches here; a declared one is refused at
+    head time (docs/reference/env-vars.md, ``BB_MAX_BODY_SIZE``).  The verdict
+    travels as the dispatcher's typed error because the handler is already
+    running — the same seam a malformed chunk uses to become a 400.
 
     ``REQUEST_ENTITY_TOO_LARGE`` rather than ``CONTENT_TOO_LARGE``: the same
     member under both names, but the RFC 9110 spelling only exists from
@@ -192,11 +171,11 @@ def _validate_chunk_ext(ext: bytes) -> None:
         chunk-ext-name = token
         chunk-ext-val  = token / quoted-string
 
-    *ext* is the chunk line **from the first ``;``** onward.  Reject a bare
-    ``;`` (empty ext-name), a non-token ext-name/val, and control characters
-    — all silent-acceptance smuggling vectors before this guard.  A
-    quoted-string ext-val is accepted leniently (matched quotes, no bare
-    CTLs) since chunk extensions are ignored on receipt.
+    *ext* is the chunk line **from the first ``;``** onward.  A bare ``;`` (empty
+    ext-name), a non-token ext-name/val, and control characters are all
+    silent-acceptance smuggling vectors, so each is rejected.  A quoted-string
+    ext-val is accepted leniently (matched quotes, no bare CTLs) since chunk
+    extensions are ignored on receipt.
     """
     for element in ext.split(b';')[1:]:
         element = element.strip(b' \t')          # BWS around the element
@@ -214,10 +193,10 @@ def _validate_chunk_ext(ext: bytes) -> None:
                 raise _bad_request(f'invalid chunk-ext-val {val!r}')
 
 
-# MAL-CHUNK-EXT-64K (CVE-2023-39326 class) — hard bound on any
-# single chunk-framing line (chunk-size + chunk-ext, or one trailer field
-# line).  Mirrors the BB_HEADER_MAX_LINE default: extensions and trailers
-# are ignored on receipt, so nothing legitimate needs more.
+# MAL-CHUNK-EXT-64K (CVE-2023-39326 class) — the unit bound on one chunk-framing
+# line (chunk-size + chunk-ext, or one trailer field line).  Mirrors the
+# BB_HEADER_MAX_LINE default: extensions and trailers are ignored on receipt, so
+# nothing legitimate needs more.
 _CHUNK_LINE_MAX = 8192
 
 # RFC 9110 §6.5.1 — fields controlling message framing, routing, request
@@ -242,8 +221,7 @@ def _parse_chunk_size(line: bytes) -> int:
 
     The line must be CRLF-terminated: a bare-LF terminator (``5\\n``) is a
     framing violation, so we require the trailing CRLF rather than stripping
-    either.  Raises :class:`HTTPException` (400) on any violation; the caller
-    marks the body unframeable and closes the connection.
+    either.
     """
     if not line.endswith(b'\r\n') or line.count(b'\n') != 1:
         raise _bad_request(f'chunk-size line not CRLF-terminated: {line!r}')
@@ -254,8 +232,7 @@ def _parse_chunk_size(line: bytes) -> int:
         size_part = size_part.rstrip(b' \t')
         _validate_chunk_ext(line[len(size_part):])
     else:
-        # No chunk-ext — the whole line is the size; NO trailing OWS allowed
-        # (a bare ``5 \r\n`` is a smuggling vector, not a valid chunk-size).
+        # No chunk-ext, and no trailing OWS: a bare ``5 \r\n`` smuggles.
         size_part = line
     if not size_part or any(c not in _HEXDIG_SET for c in size_part):
         raise _bad_request(f'invalid chunk-size {size_part!r}')
@@ -302,8 +279,6 @@ def _parse_close_payload(payload: bytes) -> tuple[int, bool]:
     if not payload:
         return 1000, True
     if len(payload) == 1:
-        # RFC §5.5.1: when a Close frame contains a status code, the code
-        # MUST be 2 octets; a 1-octet payload is malformed.
         return 1002, False
     code = int.from_bytes(payload[:2], 'big', signed=False)
     if not _is_valid_close_code(code):
@@ -368,11 +343,9 @@ class AbstractReader(ABC):
         ahead = self._ahead
         if len(ahead) >= n:
             return True
-        # One read, not a loop to exactly *n*.  A plain reader returns whatever
-        # has arrived, and asking again for the remainder would block a peer
-        # that sent a complete short frame — the shared-port MQTT hang this
-        # detection path exists to avoid.  The caller re-peeks and calls again,
-        # so it converges without ever waiting for bytes that may not come.
+        # One read, not a loop to exactly *n*: asking again for the remainder
+        # would block a peer that sent a complete short frame (the shared-port
+        # MQTT hang).  The caller re-peeks and calls again, so it converges.
         chunk = await self.read(n - len(ahead))
         if not chunk:
             return False
@@ -381,9 +354,8 @@ class AbstractReader(ABC):
 
     @property
     def _ahead(self) -> bytearray:
-        # Lazily attached so subclasses need no cooperating __init__ — several
-        # are test doubles, and one that forgot to call super() would fail
-        # only during detection.
+        # Lazily attached so subclasses need no cooperating ``__init__``: a test
+        # double that forgot ``super()`` would fail only during detection.
         buf = self.__dict__.get('_ahead_buf')
         if buf is None:
             buf = self.__dict__['_ahead_buf'] = bytearray()
@@ -417,7 +389,6 @@ class AbstractReader(ABC):
         return await self._readuntil_bounded(sep, limit)
 
     async def _readuntil_unbounded(self, sep: bytes) -> bytes:
-        """Default unbounded implementation: read one byte at a time."""
         buf = bytearray()
         while sep not in buf:
             chunk = await self.read(1)
@@ -427,7 +398,6 @@ class AbstractReader(ABC):
         return bytes(buf)
 
     async def _readuntil_bounded(self, sep: bytes, limit: int) -> bytes:
-        """Default bounded implementation; *limit* is known to be positive."""
         buf = bytearray()
         while sep not in buf:
             chunk = await self.read(1)
@@ -477,7 +447,6 @@ class AbstractReader(ABC):
         return await self._read_head_bounded(limit)
 
     async def _read_head_unbounded(self) -> bytes:
-        """Line-wise head read with no application byte budget."""
         buf = bytearray()
         while not buf.endswith(_HEAD_END):
             try:
@@ -499,7 +468,6 @@ class AbstractReader(ABC):
         return bytes(buf)
 
     async def _read_head_bounded(self, limit: int) -> bytes:
-        """Line-wise head read with a positive whole-head byte budget."""
         buf = bytearray()
         native_limit = self.__dict__.get('_readuntil_accepts_limit')
         if native_limit is None:
@@ -513,26 +481,22 @@ class AbstractReader(ABC):
                     line = await AbstractReader._readuntil_bounded(
                         self, b'\r\n', limit)
             except ReadLimitExceeded as exc:
-                # ``readuntil`` reports only the current line.  Classification
-                # belongs to the whole head: without the prior request line a
-                # large header field looks like an unterminated request line
-                # and one reader answers 400 where another answers 431.
+                # Evidence from earlier lines is prepended: classification is a
+                # whole-head question (internals.md §One breach, two verdicts).
                 seen = bytes(buf) + exc.seen
                 raise ReadLimitExceeded(str(exc), seen) from exc
             except asyncio.LimitOverrunError as exc:
-                # ``asyncio.StreamReader`` enforces a buffer limit of its own
-                # and gets there first for a single enormous line.  Same
-                # condition, same exception out.  Its buffer is not reachable
-                # from here, so ``seen`` is what we accumulated — enough to
-                # classify, because a line that long has no CRLF in it.
+                # ``asyncio.StreamReader``'s own buffer limit gets there first
+                # for one enormous line.  Its buffer is unreachable from here, so
+                # ``seen`` is only what we accumulated — enough to classify,
+                # because a line that long has no CRLF in it.
                 raise ReadLimitExceeded(
                     f'stream buffer overflow ({exc.consumed} bytes) '
                     f'while reading the head', bytes(buf)) from exc
             except IncompleteReadError as exc:
-                # The budget is checked before the truncation is reported: a
-                # peer that overran it and *then* went away overran it, and a
-                # reader that let EOF mask the breach would answer differently
-                # from one that scans its own buffer.
+                # Budget before truncation: a peer that overran and *then* went
+                # away overran, and letting EOF mask the breach would make the
+                # two reader kinds answer differently.
                 self._raise_if_head_over_budget(
                     bytes(buf) + exc.partial, limit)
                 partial = bytes(buf) + exc.partial
@@ -540,8 +504,7 @@ class AbstractReader(ABC):
                     return b''
                 raise IncompleteReadError(partial) from None
             if not line:
-                # A reader that reports EOF by returning empty rather than by
-                # raising — the default ``readuntil`` above does exactly that.
+                # A reader that reports EOF by returning empty rather than raising.
                 self._raise_if_head_over_budget(bytes(buf), limit)
                 if not buf:
                     return b''
@@ -552,7 +515,6 @@ class AbstractReader(ABC):
 
     @staticmethod
     def _raise_if_head_over_budget(seen: bytes, limit: int) -> None:
-        """Raise when *seen* passes the known-positive head *limit*."""
         if len(seen) > limit:
             raise ReadLimitExceeded(f'head exceeds {limit} bytes', seen)
 
@@ -579,10 +541,9 @@ class AsyncioReader(AbstractReader):
                 f"got {type(stream_reader)}"
             )
         self._sr = stream_reader
-        # A native stream read normally consumes only on success.  Keep the
-        # same property when adapting a stream-like test double which lacks
-        # asyncio's resident ``_buffer``/``_limit`` machinery: bytes consumed
-        # before this adapter detects an overrun are replayed here.
+        # A native stream read consumes only on success.  A stream-like double
+        # lacking asyncio's ``_buffer``/``_limit`` gets the same property here:
+        # bytes consumed before an overrun is detected are replayed.
         self._replay = bytearray()
 
     async def read(self, n: int) -> bytes:
@@ -627,10 +588,10 @@ class AsyncioReader(AbstractReader):
                     self._replay[:0] = replay._buf
         old_limit = getattr(self._sr, '_limit', None)
         if old_limit is not None:
-            # StreamReader's limit excludes the separator.  Using the total
-            # budget here still caps separator-free accumulation at the right
-            # boundary; the inclusive contract is checked below before a
-            # successful native result is allowed to remain consumed.
+            # ``StreamReader``'s limit excludes the separator; the total budget
+            # still caps separator-free accumulation at the right boundary, and
+            # the inclusive contract is checked below before a native result is
+            # allowed to remain consumed.
             self._sr._limit = limit
         try:
             out = await self._sr.readuntil(sep)
@@ -670,10 +631,8 @@ class AsyncioReader(AbstractReader):
             raise IncompleteReadError(exc.partial) from exc
 
     def has_buffered(self) -> bool:
-        # asyncio.StreamReader keeps every byte the transport has delivered
-        # in ``_buffer`` until a read consumes it, so "buffer non-empty" is
-        # the honest "a read won't block" probe.  A buffer-owning reader
-        # exposes ``buffered_len()`` instead.
+        # ``StreamReader`` holds every delivered byte in ``_buffer`` until a read
+        # consumes it, so "buffer non-empty" is the honest "won't block" probe.
         if self._replay or self.__dict__.get('_ahead_buf'):
             return True
         buf = getattr(self._sr, '_buffer', None)
@@ -690,8 +649,7 @@ class AsyncioReader(AbstractReader):
         return ahead + getattr(self._sr, 'buffered', 0)
 
     def peek(self, n: int) -> bytes:
-        # Anything detection parked sits in front of what the stream still
-        # holds — same order the bytes arrived in.
+        # What detection parked sits in front of what the stream still holds.
         replay = bytes(self._replay)
         ahead = self.__dict__.get('_ahead_buf')
         if replay:
@@ -768,9 +726,6 @@ class PrefixReader(AbstractReader):
         return head + await self._reader.readexactly(n - len(head))
 
     async def _readuntil_unbounded(self, sep: bytes) -> bytes:
-        # Short-circuit: once the prefix is drained (the common keep-alive
-        # case), delegate directly to the underlying reader's native,
-        # buffered readuntil without any per-call overhead.
         if not self._buf:
             return await self._reader.readuntil(sep)
         idx = self._buf.find(sep)
@@ -779,9 +734,7 @@ class PrefixReader(AbstractReader):
             chunk = bytes(self._buf[:end])
             del self._buf[:end]
             return chunk
-        # Not wholly in the prefix: pull the rest with the underlying reader's
-        # native readuntil, then re-resolve against the seam so a separator that
-        # straddles the boundary is honoured and any over-read is pushed back.
+        # Re-resolve against the seam so a straddling separator is honoured.
         head = bytes(self._buf)
         self._buf.clear()
         combined = head + await self._reader.readuntil(sep)
@@ -814,10 +767,9 @@ class PrefixReader(AbstractReader):
                 f'readuntil exceeds {limit} bytes',
                 prefix[:limit + len(sep)])
 
-        # The underlying reader cannot see separator candidates beginning in
-        # the prefix.  Resolve the seam incrementally; searching only from the
-        # previous overlap keeps the scan linear and handles candidates that
-        # overlap one another (for example ``...\r`` + ``\r\n``).
+        # The underlying reader cannot see separator candidates beginning in the
+        # prefix.  Searching only from the previous overlap keeps the seam scan
+        # linear and handles overlapping candidates (``...\r`` + ``\r\n``).
         combined = bytearray(prefix)
         scan_from = max(0, len(combined) - len(sep) + 1)
         while True:
@@ -834,8 +786,8 @@ class PrefixReader(AbstractReader):
                     self._buf[:0] = combined[end:]
                     return bytes(combined[:end])
             if len(combined) > limit:
-                # Prefix bytes were never removed and seam bytes consumed from
-                # the underlying stream are moved into the replay buffer.
+                # Nothing is consumed on the error path: seam bytes join the
+                # prefix, which was never removed.
                 self._buf[:] = combined
                 raise ReadLimitExceeded(
                     f'readuntil exceeds {limit} bytes',
@@ -884,10 +836,8 @@ class FragmentAssembler:
         self._max_total = max_total
         self._opcode: int | None = None
         self._buf: bytearray | None = None
-        # Tracks the RSV1 bit of the message-opener frame (RFC 7692: only the
-        # first frame of a compressed message carries RSV1=1; continuation
-        # frames keep it clear).  Reported back from ``feed()`` so the caller
-        # knows whether the assembled bytes need decompression.
+        # RSV1 of the message-opener frame (RFC 7692: only the first frame of a
+        # compressed message carries RSV1=1; continuations keep it clear).
         self._compressed: bool = False
 
     @property
@@ -921,18 +871,15 @@ class FragmentAssembler:
                 return result
             return None
         else:
-            # TEXT or BINARY opener
             if self.in_progress:
                 raise ProtocolError(
                     'New data frame received while a fragmented message is in progress'
                 )
             if fin:
-                return (opcode, payload, rsv1)  # unfragmented — pass through immediately
-            # The opening fragment is bounded too.  It is not covered by the
-            # continuation check below — that runs on the *next* frame — so
-            # without this an over-cap opener would be held until a second
-            # frame arrived, and the only thing bounding it would be the frame
-            # cap, which is the very substitution this limit exists to stop.
+                return (opcode, payload, rsv1)
+            # The opener is bounded too — the continuation check runs on the
+            # *next* frame, so without this the frame cap would stand in for the
+            # message total (security-model.md §The invariant).
             if self._max_total and len(payload) > self._max_total:
                 raise MessageTooLarge(len(payload), self._max_total)
             self._opcode = opcode
@@ -984,14 +931,9 @@ class HTTP1Recipient(BaseRecipient):
                  min_rate: float | None = None,
                  min_rate_grace: float | None = None):
         super().__init__(reader)
-        # Deliver a Content-Length body in slices instead of one giant
-        # ``readexactly(content_length)`` allocation.  Reads are up-to-n and
-        # transport-paced: each returns whatever the peer has delivered, up to
-        # ``chunk_max``, so the slice follows the transport (small for a slow
-        # peer, large for a fast one) and no read is ever a latency
-        # commitment.  ``chunk_size`` is the fixed slice for the chunked-
-        # transfer path.  Both fall back to settings when not injected
-        # (direct-instantiation tests pass them explicitly).
+        # ``chunk_size`` slices a chunked body, ``chunk_max`` bounds one
+        # transport-paced Content-Length read; see docs/reference/env-vars.md.
+        # All five fall back to settings when a caller does not inject them.
         if (chunk_size is None or chunk_max is None or max_body is None
                 or min_rate is None or min_rate_grace is None):
             from ..env import get_settings as _get_settings  # noqa: PLC0415
@@ -1007,39 +949,19 @@ class HTTP1Recipient(BaseRecipient):
             if min_rate_grace is None:
                 min_rate_grace = _s.min_body_rate_grace
         self._chunk_size = chunk_size
-        # Total-body cap, 0 = uncapped.  Enforced on the octets themselves
-        # rather than on the declaration, so it holds for a chunked body (which
-        # declares nothing) and for a peer that under-declares.  The actor
-        # refuses an over-cap ``Content-Length`` at head time; this is what
-        # makes the guarantee true without it — a directly-driven recipient, or
-        # an external ASGI host, gets the same ceiling.
+        # ``BB_MAX_BODY_SIZE``, counted on the octets rather than on the
+        # declaration, so a directly-driven recipient or an external ASGI host
+        # gets the same ceiling the actor applies at head time.
         self._max_body = max_body
-        # Anti-trickle floor, 0 = disabled.  A transport-paced read cannot
-        # carry a deadline the way a fixed-size one did — it returns on any
-        # arrival, so ``body_timeout`` degrades from "fill a slice in 30 s" to
-        # "send *something* every 30 s", which a one-byte drip always meets.
-        # A minimum *rate* is what a drip cannot fake (Kestrel's
-        # ``MinRequestBodyDataRate``); the grace period is the slow-start
-        # allowance so nothing is judged on its first packets.
+        # ``BB_MIN_BODY_RATE`` / ``BB_MIN_BODY_RATE_GRACE`` — the anti-trickle
+        # floor a per-read deadline cannot express; see env-vars.md.
         self._min_rate = min_rate
         self._min_rate_grace = min_rate_grace
-        # A cap of 0 would turn every up-to-n read into b'' (which reads as
-        # EOF), so a misconfigured zero falls back to a single usable byte.
         self._chunk_max = max(chunk_max, 1)
-        # Body-read deadline.  0 = disabled.  Applied per
-        # ``_read_with_timeout`` call — which is per *slice* on both framings,
-        # since a chunk larger than ``chunk_size`` is delivered in several.
-        # Mirrors nginx ``client_body_timeout`` semantics: each read has the
-        # same bound, so a peer must keep making progress, not merely finish.
-        #
-        # The deadline is rescheduled on the shared
-        # :class:`ConnectionDeadline` rather than allocating a fresh
-        # ``asyncio.wait_for`` Timeout per chunk.  Per-chunk semantics
-        # preserved.
+        # ``BB_BODY_TIMEOUT``, applied per ``_read_with_timeout`` call — which is
+        # per *slice* on both framings; see env-vars.md.
         self._body_timeout = body_timeout
         self._deadline = deadline
-        # Everything above belongs to the connection; everything ``bind`` sets
-        # belongs to the request.
         self.bind(conn)
 
     def bind(self, conn: Connection) -> 'HTTP1Recipient':
@@ -1056,12 +978,10 @@ class HTTP1Recipient(BaseRecipient):
         method would leak from request N into request N+1, so new state belongs
         here, not in ``__init__``.
         """
-        # We deliberately do **not** retain the Connection: the actor binds this
-        # recipient as ``conn._receive`` for lazy ``conn.body()``, so a
-        # back-reference here would close a per-request cycle (conn → recipient →
-        # conn) reclaimable only by the cyclic GC — the v0.60.0 tail-latency
-        # regression. Only the request path is kept (a plain ``str``), purely for
-        # the log-cap-hit diagnostics below.
+        # Deliberately no back-reference to the Connection: the actor binds this
+        # recipient as ``conn._receive``, so holding it would close a per-request
+        # cycle reclaimable only by the cyclic GC — the v0.60.0 tail-latency
+        # regression.  Only the path is kept, for the cap-hit diagnostics.
         headers = conn.headers
         self._req_path: str | None = conn.path
         te = headers.get(b'transfer-encoding', b'').strip().lower()
@@ -1071,38 +991,23 @@ class HTTP1Recipient(BaseRecipient):
                 f'Transfer-Encoding "{te.decode()}" is not supported.'
             )
         self._chunked = (te == b'chunked')
-        # Remaining Content-Length bytes; counts down as the body streams.
         self._content_length = int(cl) if cl else None
-        # Octets still owed by the chunk currently being delivered.  Per
-        # request, not per connection: a rebound recipient that inherited a
+        # Per request, not per connection: a rebound recipient that inherited a
         # half-read chunk would splice request N's body into request N+1.
         self._chunk_remaining = 0
         self._done = False
-        # Body octets delivered for *this* request, against ``_max_body``.
         self._body_seen = 0
-        # Seconds this request spent *waiting on the transport* for body
-        # octets — the denominator of the delivery rate.  Only the waiting
-        # counts: the rate is evidence about the peer, so time the handler
-        # spent between reads (writing a chunk to disk, awaiting a database)
-        # must never be charged to it.
+        # Transport-wait seconds only, never the handler's own — the delivery
+        # rate's denominator (env-vars.md, ``BB_MIN_BODY_RATE_GRACE``).
         self._body_wait = 0.0
-        # Rate-window state: the slow-drip judge averages over one
-        # grace-period window of waiting time, not the request's whole life.
-        # A peer that ran ahead and then stalled must be judged on the stalled
-        # window, not on the burst that paid for it (the burst-then-drip shape
-        # a cumulative average cannot see).  ``_rate_window_wait`` is the
-        # accumulated wait when the current window opened; ``_rate_window_seen``
-        # the octets delivered inside it.
+        # ``_rate_window_wait`` is the accumulated wait when the current window
+        # opened, ``_rate_window_seen`` the octets delivered inside it; the
+        # window's width and purpose are ``BB_MIN_BODY_RATE`` in env-vars.md.
         self._rate_window_wait = 0.0
         self._rate_window_seen = 0
-        # Set once this body was given up on — over the size cap, or below the
-        # minimum rate.  Like a framing violation it ends the connection, for a
-        # different reason: the stream is still perfectly framed, but the
-        # octets we stopped reading are still arriving.
+        # Over the size cap or below the rate floor; see :attr:`must_close`.
         self._body_refused = False
-        # Set once a chunked-framing violation is detected: the byte stream is
-        # now desynced, so the connection MUST close rather than keep-alive
-        # (draining would parse smuggled bytes as the next request).
+        # A chunked-framing violation; see :attr:`must_close`.
         self.framing_broken = False
         return self
 
@@ -1131,9 +1036,8 @@ class HTTP1Recipient(BaseRecipient):
         this and ``must_close`` in one call.
         """
         if self.framing_broken or self._body_refused:
-            # Nothing to preserve: the connection is going away, and draining a
-            # refused body would read the very octets the refusal declined
-            # (and, for a cap breach, re-raise the 413 on the way).
+            # Draining a refused body would read the very octets the refusal
+            # declined, and re-raise the 413 on the way.
             return False
         return not self._done and (self._chunked or bool(self._content_length))
 
@@ -1149,10 +1053,6 @@ class HTTP1Recipient(BaseRecipient):
         Also one call per request instead of two on the keep-alive path.
         """
         if self.framing_broken or self._body_refused:
-            # The bytes after a desync or a refusal are the peer's to choose,
-            # and parsing them as the next request line is the smuggling
-            # shape.  Answered before the drain, which is exactly what must
-            # not happen to them.
             return CONNECTION_MUST_CLOSE
         if not self._done and (self._chunked or bool(self._content_length)):
             return CONNECTION_NEEDS_DRAIN
@@ -1172,18 +1072,14 @@ class HTTP1Recipient(BaseRecipient):
             try:
                 chunk = await self.next_chunk()
             except ClientDisconnected:
-                # EOF / body_timeout mid-drain: nothing left to desync, and
-                # ``_done`` is now set so the loop would exit anyway.
+                # EOF or body_timeout mid-drain: nothing left to desync.
                 return True
             except HTTPException:
-                # A body limit tripped while draining.  Reachable when the
-                # handler never read an *undeclared* over-cap body (a declared
-                # one is refused at the head, before dispatch): the drain reads
-                # it instead and ``_account`` raises the 413 here, where there
-                # is no request left to answer with it.  Report "could not
-                # drain" — the caller closes, which is the same thing a refused
-                # body asks for — rather than let the exception reach the
-                # connection's generic handler and be logged as a server error.
+                # A body limit tripped while draining: reachable only for an
+                # *undeclared* over-cap body the handler never read.  Report
+                # "could not drain" — the caller closes, which is what a refused
+                # body asks for — rather than let a 413 with no request left to
+                # answer reach the connection's generic error handler.
                 self._body_refused = True
                 return False
             if chunk is None:
@@ -1206,27 +1102,21 @@ class HTTP1Recipient(BaseRecipient):
     async def _read_chunk_slice(self) -> bytes:
         """Read at most ``_chunk_size`` octets of the chunk in progress.
 
-        ``chunk-size`` is written by the peer, so reading a whole chunk in one
-        ``readexactly`` would let the peer choose how much the server buffers.
-        It also defeats backpressure outright rather than merely straining it:
-        a read larger than the high-water mark has to reopen the transport the
-        mark just paused, because otherwise it would be waiting for bytes its
-        own pause is refusing to accept.  Slicing keeps every read under the
-        mark, so the pause does its job.  (The Content-Length path is
-        transport-paced instead — an up-to-n read never parks on bytes the
-        pause is refusing to read, so it needs no such bound.)
+        The slice, not the whole chunk, because a peer-declared ``chunk-size``
+        must not choose how much the server buffers or reopen the pause the
+        high-water mark just applied — internals.md §Backpressure pauses for a
+        handler that is behind, not one that is waiting.
 
-        The exact-bytes contract is unchanged: ``readexactly`` (not the up-to-n
-        ``read``) still backs every slice, so a chunk split across TCP segments
-        cannot return short and silently corrupt the body.
+        ``readexactly`` (not the up-to-n ``read``) still backs every slice, so a
+        chunk split across TCP segments cannot return short and silently corrupt
+        the body.
         """
         n = min(self._chunk_remaining, self._chunk_size)
         data = await self._read_with_timeout(self._reader.readexactly(n))
         self._chunk_remaining -= n
         if self._chunk_remaining == 0:
-            # RFC 9112 §7.1 — chunk-data is followed by exactly CRLF.  Read
-            # those two octets and verify: reading *until* CRLF would swallow
-            # trailing spill (SMUG-CHUNK-SPILL) up to the next CRLF, and would
+            # RFC 9112 §7.1 — chunk-data is followed by exactly CRLF.  Reading
+            # *until* CRLF would swallow trailing spill (SMUG-CHUNK-SPILL) and
             # tolerate a bare CR/LF terminator.
             term = await self._read_with_timeout(self._reader.readexactly(2))
             if term != b'\r\n':
@@ -1271,24 +1161,20 @@ class HTTP1Recipient(BaseRecipient):
         return line
 
     async def _readuntil_chunk_line(self) -> bytes:
-        """Read a chunk line with the framing unit cap applied at the reader."""
         return await self._reader.readuntil(b'\n', limit=_CHUNK_LINE_MAX)
 
     def _account(self, chunk: bytes) -> bytes:
         """Weigh *chunk* against the two body limits, giving up if it fails one.
 
-        Every delivered octet passes through here, on both framings, so the
-        limits are properties of the recipient rather than of whichever caller
-        is driving it.  Both verdicts are permanent for the connection
-        (:attr:`must_close`): the peer is still sending a body we have stopped
-        reading, so there is no message boundary left to resynchronise on.
+        Every delivered octet passes through here on both framings, so the
+        limits belong to the recipient rather than to whichever caller drives it.
+        Both verdicts are permanent for the connection (:attr:`must_close`).
 
-        The two failures are different in kind and answer differently.  Too
-        large is a *judgement about the request*, which the peer is entitled to
-        hear: 413.  Too slow is a judgement about the *peer*, and answering it
-        politely would be answering the attack — a trickle is cheap to send and
-        expensive to hold, so the connection is abandoned exactly as
-        ``body_timeout`` abandons a silent one.
+        They answer differently, and that is the point: too large is a judgement
+        about the *request*, which the peer is entitled to hear — 413.  Too slow
+        is a judgement about the *peer*, and answering it politely would be
+        answering the attack, so the connection is abandoned as ``body_timeout``
+        abandons a silent one.
         """
         self._body_seen += len(chunk)
         self._rate_window_seen += len(chunk)
@@ -1300,13 +1186,6 @@ class HTTP1Recipient(BaseRecipient):
                         scope_path=self._req_path, protocol='http1')
             raise _content_too_large(
                 f'request body exceeds {self._max_body} bytes')
-        # Judged on a grace-period window of waiting time, not the request's
-        # whole life: once a window's worth of waiting has passed, the octets
-        # delivered inside it must earn their keep at ``min_body_rate``, and
-        # the window rolls so the next judgement starts from a clean slate.
-        # A peer that kept us waiting with little to show is the slow-drip
-        # shape whatever its framing; a burst that ran ahead buys one window,
-        # not the whole request.
         if self._min_rate:
             window_wait = self._body_wait - self._rate_window_wait
             if window_wait > self._min_rate_grace:
@@ -1319,8 +1198,7 @@ class HTTP1Recipient(BaseRecipient):
                         limit=self._min_rate,
                         scope_path=self._req_path, protocol='http1')
                     raise ClientDisconnected()
-                # The window earned its keep: roll it forward so the next
-                # judgement looks at the next grace period only.
+                # Earned its keep: roll the window forward.
                 self._rate_window_wait = self._body_wait
                 self._rate_window_seen = 0
         return chunk
@@ -1340,9 +1218,8 @@ class HTTP1Recipient(BaseRecipient):
                 with self._deadline.guard(self._body_timeout):
                     return await coro
             if self._body_timeout > 0:
-                # Fallback for direct-instantiation tests that don't pass a
-                # ConnectionDeadline.  Preserves per-call semantics; the
-                # production hot path takes the deadline-guard branch above.
+                # Fallback for a caller with no ConnectionDeadline; same
+                # per-call semantics, but a fresh Timeout per chunk.
                 return await asyncio.wait_for(coro, timeout=self._body_timeout)
             return await coro
         finally:
@@ -1379,12 +1256,10 @@ class HTTP1Recipient(BaseRecipient):
                 size_line = await self._read_chunk_line()
                 chunk_size = self._parse_chunk_size_or_400(size_line)
                 if chunk_size == 0:
-                    # RFC 9112 §7.1.2 — last-chunk is followed by an
-                    # optional trailer-part and then a final CRLF.  Read
-                    # lines until we hit the terminator.  Each line must be
-                    # CRLF-terminated (a bare-LF terminator is the same
-                    # framing violation as on the chunk-size line), and
-                    # RFC 9110 §6.5.1-prohibited fields are rejected.
+                    # RFC 9112 §7.1.2 — last-chunk, an optional trailer-part,
+                    # then a final CRLF.  Each line must be CRLF-terminated (a
+                    # bare LF is the same violation as on the chunk-size line),
+                    # and RFC 9110 §6.5.1-prohibited fields are rejected.
                     while True:
                         line = await self._read_chunk_line()
                         if line == b'\r\n':
@@ -1405,27 +1280,17 @@ class HTTP1Recipient(BaseRecipient):
                 self._chunk_remaining = chunk_size
                 return self._account(await self._read_chunk_slice())
             else:
-                # Stream the Content-Length body in up-to-n slices so a large
-                # upload is delivered as several ``http.request`` events
-                # (``more_body: True`` until exhausted) rather than one giant
-                # allocation.  Each read returns whatever the peer has
-                # delivered, up to ``_chunk_max``, and never parks on bytes
-                # the transport has not produced — no read is a latency
-                # commitment ``body_timeout`` might not deliver.  ``b''`` from
-                # the reader means the peer is gone (a reader parks rather
-                # than returning short when more may come), so a body that is
-                # not yet spent is a truncated upload, never a complete one.
+                # Transport-paced up-to-n slices (env-vars.md,
+                # ``BB_BODY_CHUNK_MAX``).  ``b''`` means the peer is gone — a
+                # reader parks rather than returning short when more may come —
+                # so an unspent Content-Length is a truncated upload.
                 if self._content_length:
                     n = min(self._content_length, self._chunk_max)
                     body = await self._read_with_timeout(self._reader.read(n))
-                    # Gate on the *length*, not truthiness.  Forward progress
-                    # is the reader's return value rather than a constant
-                    # ``n``, so "zero bytes came back" is the only thing that
-                    # ends the loop — and a zero-length result that is somehow
-                    # truthy would decrement by nothing and spin forever.  For
-                    # ``bytes`` the two tests are identical; the difference is
-                    # that this one cannot be defeated by a reader whose reads
-                    # do not return ``bytes``.
+                    # Gate on the *length*, not truthiness: forward progress is
+                    # the reader's return value, so "zero bytes came back" is
+                    # what ends the loop.  Identical for ``bytes``; the
+                    # difference is a reader whose reads do not return ``bytes``.
                     if not len(body):
                         raise IncompleteReadError(b'')
                     self._content_length -= len(body)
@@ -1436,9 +1301,8 @@ class HTTP1Recipient(BaseRecipient):
                 return None
 
         except (asyncio.TimeoutError, TimeoutError):
-            # body_timeout exceeded — distinguish from EOF mid-body so
-            # operators see the cap hit recorded (the request still
-            # surfaces as HTTP_DISCONNECT to the ASGI app).
+            # Distinguished from EOF mid-body only so operators see the cap hit;
+            # the app sees the same HTTP_DISCONNECT either way.
             log_cap_hit('body_timeout',
                         requested=self._body_timeout,
                         limit=self._body_timeout,
@@ -1447,9 +1311,7 @@ class HTTP1Recipient(BaseRecipient):
             self._done = True
             raise ClientDisconnected() from None
         except IncompleteReadError:
-            # EOF mid-body — not a cap hit (peer disappeared).  The handler
-            # must not read a truncated upload as a whole one; server closes
-            # on return; no synthetic 408.
+            # EOF mid-body — not a cap hit, and no synthetic 408.
             self._done = True
             raise ClientDisconnected() from None
 
@@ -1519,29 +1381,18 @@ class HTTP2Recipient(BaseRecipient):
         self._queue_depth = queue_depth
         self._credit_cb = credit_callback
         self._credit_budget = credit_budget
-        # Bytes enqueued but not yet consumed — and therefore not yet credited
-        # back to the peer.  For a conformant peer this can never exceed
-        # ``credit_budget``: the un-credited bytes ARE the closed part of the
-        # window the peer must respect.
+        # Bytes enqueued but not yet consumed, and therefore not yet credited
+        # back.  For a conformant peer this can never exceed ``credit_budget``:
+        # the un-credited bytes ARE the closed part of the window it must respect.
         self._uncredited: int = 0
-        # When True, HEADERS carried END_STREAM — request has no body.
-        # __call__() returns one empty http.request event without allocating a queue.
         self._end_of_stream_on_headers: bool = False
-        # Set once the synthetic empty event has been delivered.
         self._initial_consumed: bool = False
-        # Native-channel end marker.  Read by ``next_chunk`` only: ``__call__``
-        # deliberately does not consult it, so a full-form handler calling
-        # ``receive()`` past END_STREAM still blocks for the disconnect event
-        # rather than being handed a synthetic one.
         self._done: bool = False
         if max_body is None or min_rate is None or min_rate_grace is None:
-            # Fallback for a directly-instantiated recipient (tests, and any
-            # caller that is not the actor).  One recipient is built *per
-            # stream*, so the production path must never take this branch: a
-            # function-level relative import is resolved through
-            # ``importlib._bootstrap`` on every execution, and at one stream
-            # per request that is per-request work.  ``HTTP2Actor`` reads these
-            # once per connection and passes them in.
+            # Fallback for a directly-instantiated recipient (tests).  One
+            # recipient is built *per stream*, so the production path must not
+            # take it: a function-level relative import resolves through
+            # ``importlib._bootstrap`` on every execution.
             from ..env import get_settings as _get_settings  # noqa: PLC0415
             _s = _get_settings()
             if max_body is None:
@@ -1550,28 +1401,18 @@ class HTTP2Recipient(BaseRecipient):
                 min_rate = _s.min_body_rate
             if min_rate_grace is None:
                 min_rate_grace = _s.min_body_rate_grace
-        # The two body limits, shared with HTTP/1.1.  The actor answers a
-        # *declared* over-cap body with 413 at HEADERS; these cover what a
-        # declaration cannot — a body sent without ``content-length``, and a
-        # stream that dribbles.  Both are refusals of the frame, which the
-        # actor answers with RST_STREAM.
+        # The two body limits, shared with HTTP/1.1; what each refuses and how
+        # HTTP/2 answers it is env-vars.md, ``BB_MAX_BODY_SIZE``.
         self._max_body = max_body
         self._min_rate = min_rate
         self._min_rate_grace = min_rate_grace
         self._body_seen = 0
-        #: Wall-clock time the current rate window opened, or ``None`` before
-        #: the first DATA frame.  Wall clock is the honest denominator here,
-        #: unlike HTTP/1.1: DATA arrives whether or not the handler is reading,
-        #: so elapsed time is the peer's alone.  ``None`` rather than 0.0 — a
-        #: clock reading is a value, and 0.0 is one a monotonic clock may
-        #: legitimately return.
+        #: Wall clock, unlike HTTP/1.1's transport-wait denominator: DATA arrives
+        #: whether or not the handler reads, so elapsed time is the peer's alone.
         self._rate_window_start: float | None = None
-        #: Octets delivered inside the current grace-period window; the rate
-        #: judge averages over this window, not the stream's whole life, so a
-        #: burst that ran ahead cannot shelter a subsequent stall.
         self._rate_window_seen = 0
-        #: The peer was ever blocked by our own closed inbound window — its
-        #: delivery rate is then partly our doing, so it is not judged.
+        #: Exempts the peer from the rate judgement: it was blocked by our own
+        #: closed inbound window, so its pace is partly our doing.
         self._was_window_stalled = False
         if isinstance(frame, Data):
             self.put_DATAFrame(frame)
@@ -1587,9 +1428,8 @@ class HTTP2Recipient(BaseRecipient):
 
     def _ensure_queue(self) -> asyncio.Queue:
         if self._queue is None:
-            # Consume-crediting mode enforces its own bounds (byte budget +
-            # frame-count abuse cap) in put_DATAFrame, so the queue itself is
-            # unbounded — put_disconnect can then always deliver.  Without a
+            # Consume-crediting mode bounds itself in put_DATAFrame, so the queue
+            # is unbounded and ``put_disconnect`` can always deliver.  Without a
             # credit callback the queue keeps its frame-count maxsize.
             maxsize = 0 if self._credit_cb is not None else self._queue_depth
             self._queue = asyncio.Queue(maxsize=maxsize)
@@ -1622,16 +1462,14 @@ class HTTP2Recipient(BaseRecipient):
     def _body_limits_refuse(self, nbytes: int) -> bool:
         """True when this arrival breaks a body limit and must be refused.
 
-        The HTTP/2 half of the two body defences.  Both are judged on arrival
-        rather than on consumption because DATA lands whether or not the
-        handler is reading — the queue grows either way, so the memory this
-        bounds is spent before anyone asks for it.
+        Judged on arrival rather than on consumption: DATA lands whether or not
+        the handler is reading, so the memory this bounds is spent before anyone
+        asks for it.
 
-        The rate judgement is skipped once the peer has been back-pressured by
-        our own inbound window: below-rate delivery is then a consequence of
-        our flow control, and blaming the peer for obeying it would turn a slow
-        *handler* into a reset stream.  A trickle never fills the window, which
-        is exactly why the exemption does not shelter one.
+        The rate judgement is skipped once our own inbound window has
+        back-pressured the peer — blaming it for obeying our flow control would
+        turn a slow *handler* into a reset stream.  A trickle never fills the
+        window, which is why the exemption cannot shelter one.
         """
         self._body_seen += nbytes
         if self._max_body and self._body_seen > self._max_body:
@@ -1651,12 +1489,9 @@ class HTTP2Recipient(BaseRecipient):
             self._rate_window_seen += nbytes
             if (self._credit_cb is not None
                     and self._uncredited + nbytes >= self._credit_budget):
-                # This arrival exhausts the peer's inbound window: from here on
-                # it sends only what we credit back, so its pace is ours to
-                # answer for.  Observed as the window *closes*, not while it is
-                # closed — the peer's next frame can only arrive after a replay
-                # has reopened it, by which point the balance no longer shows
-                # the stall.
+                # Observed as the window *closes*, not while it is closed: the
+                # peer's next frame can only arrive after a replay has reopened
+                # it, by which point the balance no longer shows the stall.
                 self._was_window_stalled = True
             elapsed = now - self._rate_window_start
             if elapsed > self._min_rate_grace:
@@ -1669,8 +1504,7 @@ class HTTP2Recipient(BaseRecipient):
                                 requested=self._rate_window_seen / elapsed,
                                 limit=self._min_rate, protocol='http2')
                     return True
-                # The window earned its keep: roll it forward so the next
-                # judgement looks at the next grace period only.
+                # Earned its keep: roll the window forward.
                 self._rate_window_start = now
                 self._rate_window_seen = 0
         return False
@@ -1689,9 +1523,8 @@ class HTTP2Recipient(BaseRecipient):
             # (RFC 9113 §6.9.1) — credit must mirror it exactly.
             fc_len = frame.length
             if self._uncredited + fc_len > self._credit_budget:
-                # The peer kept sending past the advertised inbound window it
-                # was never credited for — abuse, since a conformant peer is
-                # back-pressured by the closing window well before this.
+                # Past the advertised inbound window it was never credited for:
+                # a conformant peer is back-pressured well before this.
                 logger.warning(
                     'HTTP2Recipient inbound window overrun — refusing DATA frame')
                 log_cap_hit('h2_inbound_window_budget',
@@ -1702,8 +1535,7 @@ class HTTP2Recipient(BaseRecipient):
             queue = self._ensure_queue()
             event_cap = self._queue_depth * _EVENT_CAP_MULTIPLIER
             if queue.qsize() >= event_cap:
-                # Zero/tiny-frame flood — invisible to the byte budget; see
-                # _EVENT_CAP_MULTIPLIER.
+                # Zero/tiny-frame flood; see ``_EVENT_CAP_MULTIPLIER``.
                 logger.warning(
                     'HTTP2Recipient event-count cap hit — dropping DATA frame')
                 log_cap_hit('stream_queue_depth',
@@ -1761,9 +1593,8 @@ class HTTP2Recipient(BaseRecipient):
         try:
             self._ensure_queue().put_nowait((_H2_DISCONNECT, 0))
         except asyncio.QueueFull:
-            # If the queue is completely full the app task is hopelessly behind;
-            # TaskGroup cancellation will clean up the stream regardless.
-            # (Unreachable in consume-crediting mode — that queue is unbounded.)
+            # The app task is hopelessly behind; TaskGroup cancellation cleans up
+            # the stream regardless.  Unreachable in consume-crediting mode.
             logger.warning('HTTP2Recipient: could not deliver http.disconnect — queue full')
 
     def take_uncredited(self) -> int:
@@ -1780,14 +1611,11 @@ class HTTP2Recipient(BaseRecipient):
         return n
 
     async def __call__(self) -> dict:
-        # Fast path: END_STREAM on HEADERS and no body — synthesize the empty
-        # http.request event without allocating a queue.  Checked even when a
-        # queue exists: put_disconnect() may have raced ahead of the app's
-        # first read (connection closed right after the request), and the
-        # stream still ended cleanly at HEADERS — the complete (empty) body
-        # must be delivered before any disconnect event, otherwise a
-        # body-reading handler on a body-less request (QUERY, POST with
-        # END_STREAM on HEADERS) sees a spurious client disconnect.
+        # Checked even when a queue exists: ``put_disconnect`` may have raced
+        # ahead of the app's first read while the stream still ended cleanly at
+        # HEADERS, and the complete (empty) body must precede any disconnect —
+        # otherwise a body-reading handler on a body-less request sees a
+        # spurious client disconnect.
         if self._end_of_stream_on_headers and not self._initial_consumed:
             self._initial_consumed = True
             self._done = True
@@ -1797,10 +1625,7 @@ class HTTP2Recipient(BaseRecipient):
             self._done = True
             return {'type': ASGIEvent.HTTP_DISCONNECT}
         payload, end_stream = item
-        # Set, never read, on this channel: ``__call__`` past END_STREAM keeps
-        # waiting for the disconnect event, but the
-        # end marker has to be shared or a later ``next_chunk`` would block on
-        # a queue nothing will feed again.
+        # Set here, never read here — internals.md §Receive-path invariant.
         if end_stream:
             self._done = True
         return {'type': ASGIEvent.HTTP_REQUEST, 'body': payload,
@@ -1821,13 +1646,11 @@ class HTTP2Recipient(BaseRecipient):
             self._uncredited -= credit
             if (self._was_window_stalled
                     and self._uncredited < self._credit_budget):
-                # The window is open again, so the peer's pace is its own once
-                # more.  The exemption has to end here: it marks an *interval*
-                # we back-pressured, and a flag that only ever turns on retires
-                # the rate detector for the rest of the stream — one
-                # window-filling burst would buy a peer an unlimited drip.
-                # The rate window restarts rather than resumes, so the
-                # exempted interval is not averaged into the next judgement.
+                # The exemption marks an *interval* we back-pressured, so it has
+                # to end when the window reopens: a flag that only ever turns on
+                # would let one window-filling burst buy an unlimited drip.  The
+                # window restarts rather than resumes, so the exempted interval
+                # is not averaged into the next judgement.
                 self._was_window_stalled = False
                 self._rate_window_start = None
                 self._rate_window_seen = 0
@@ -1902,29 +1725,18 @@ class WebSocketRecipient(BaseRecipient):
     The one thing that *can* tell the modes apart is the ``websocket_message``
     Level B event, which fires when the server reads a message rather than when
     the app consumes it — a handler that never calls ``receive()`` must still
-    produce it.  A registered listener therefore forces eager mode; see
-    :meth:`_read_ahead_observed`.
+    produce it.  A registered listener does not force read-ahead on, though:
+    a consuming handler is already reading, so the reader is only marked
+    *deferred* and the idle watchdog starts it if the handler goes quiet.
     """
 
-    # Hard cap on the declared payload length of a single inbound
-    # WebSocket frame.  RFC 6455 §5.2 allows up to 2**63 - 1, which an
-    # adversary post-handshake can use to OOM the server before any
-    # body bytes arrive (``read_payload`` would attempt to buffer the
-    # full declared length).  ``MESSAGE_TOO_BIG`` (1009) is the
-    # RFC 6455 §7.4.1 close code.
-    #
-    # Default: 64 MiB — comfortably above the largest frame the
-    # Autobahn|Testsuite sends (16 MiB, case 9.1.6) while still bounding
-    # per-connection memory.  A 1 MiB cap regresses the Autobahn 9.x
-    # cases, which is why the default is this high.
-    # Override per-deployment via ``BB_WS_MAX_FRAME_PAYLOAD`` for
-    # stricter (or looser) exposure than the default.
+    # Fallback for ``BB_WS_MAX_FRAME_PAYLOAD`` (env-vars.md, which carries the
+    # rationale).  64 MiB because a 1 MiB cap regresses the Autobahn 9.x cases,
+    # whose largest frame is 16 MiB (case 9.1.6).
     _MAX_FRAME_PAYLOAD: int = 64 * 1024 * 1024
 
-    # Fallback for the message bound, mirroring ``_MAX_FRAME_PAYLOAD``.
-    # 16 MiB is the largest message the Autobahn|Testsuite sends (9.1.6
-    # text / 9.2.6 binary), so the suite passes on shipped defaults.
-    # ``BB_WS_MAX_MESSAGE_SIZE`` carries the full rationale.
+    # Fallback for ``BB_WS_MAX_MESSAGE_SIZE``, likewise.  16 MiB is the Autobahn
+    # suite's largest message (9.1.6 text / 9.2.6 binary).
     _MAX_MESSAGE_SIZE: int = 16 * 1024 * 1024
 
     def __init__(self, reader: AbstractReader, writer: AbstractWriter, *,
@@ -1946,13 +1758,8 @@ class WebSocketRecipient(BaseRecipient):
         self._frame_cap_name = frame_cap_name
         self._message_cap_name = message_cap_name
         self._connect_sent = False
-        # Resolution order for the cap:
-        #  1. explicit ``max_frame_payload=`` constructor arg (tests + power users)
-        #  2. ``BB_WS_MAX_FRAME_PAYLOAD`` env var via Settings
-        #  3. class default (``_MAX_FRAME_PAYLOAD``)
-        # Late import keeps ``recipient`` importable without bringing in the
-        # full settings stack — useful for tests that drive the recipient
-        # directly without a Settings populated.
+        # Late import keeps ``recipient`` importable without the settings stack,
+        # for callers that drive a recipient with no Settings populated.
         if max_frame_payload is not None:
             self._max_frame_payload: int = max_frame_payload
         else:
@@ -1961,7 +1768,6 @@ class WebSocketRecipient(BaseRecipient):
                 self._max_frame_payload = get_settings().ws_max_frame_payload
             except Exception:
                 self._max_frame_payload = self._MAX_FRAME_PAYLOAD
-        # Same three-step resolution for the message bound.
         if max_message_size is not None:
             self._max_message_size: int = max_message_size
         else:
@@ -1971,8 +1777,7 @@ class WebSocketRecipient(BaseRecipient):
             except Exception:
                 self._max_message_size = self._MAX_MESSAGE_SIZE
         self._assembler = FragmentAssembler(max_total=self._max_message_size)
-        # Per-connection control-frame meter (see _read_step).  Built here
-        # rather than shared, because the budget is what one peer may spend.
+        # Per connection, not shared: the budget is what *one* peer may spend.
         try:
             from ..env import get_settings  # noqa: PLC0415
             _s = get_settings()
@@ -1980,91 +1785,59 @@ class WebSocketRecipient(BaseRecipient):
                                              _s.frame_rate_window)
         except Exception:
             self._control_meter = RateWindow(20, 1.0)
-        # Server-side: client frames MUST be masked (RFC 6455 §5.1).  Client-side:
-        # server frames MUST NOT be masked, so the recipient must not raise when
-        # they aren't.  When ``require_masked`` is False, outgoing PONG frames
-        # generated by this recipient also need masking, since masking is
-        # symmetric: whoever requires masking *in* must not mask *out*.
+        # RFC 6455 §5.1 — a client MUST mask, a server MUST NOT.  Masking is
+        # therefore symmetric in one flag: whoever requires it *in* must not mask
+        # *out*, so this also decides the recipient's own PONG and CLOSE frames.
         self._require_masked = require_masked
         self._dispatcher = dispatcher
         self._conn = conn
         self._ws_queue_depth = ws_queue_depth
         self._event_queue: asyncio.Queue | None = None
         self._reader_task: asyncio.Task | None = None
-        # Inline mode's buffer.  Holds at most one item: the inline driver
-        # stops as soon as a frame produces something to deliver, so this is a
-        # handoff slot rather than a queue — the bounded read-ahead the depth
-        # knob describes only exists in eager mode.
+        # Inline mode's handoff slot, not a queue: it holds at most one item,
+        # because the inline driver stops as soon as a frame produces something.
+        # The bounded read-ahead the depth knob describes is eager mode only.
         self._pending: deque = deque()
-        # Set once the read side is finished (CLOSE, unknown opcode, EOF, or a
-        # protocol error).  Stops the inline driver from touching a dead
-        # transport after the terminal event has been handed to the app.
+        # Stops the inline driver from touching a dead transport.
         self._read_finished = False
-        # Canonical post-terminal behaviour, identical in both modes: once the
-        # terminal event has been handed to the app, receive() keeps answering
-        # a disconnect (with the last terminal close code) instead of blocking
-        # forever.  ``_terminal_code`` is that code; ``_terminal_delivered``
-        # marks the handoff.
+        # Post-terminal behaviour, identical in both modes: once the terminal
+        # event is handed to the app, receive() keeps answering a disconnect with
+        # this code instead of blocking forever.
         self._terminal_code: int | None = None
         self._terminal_delivered = False
-        # When permessage-deflate is negotiated, an
-        # :class:`InboundDecompressor` is supplied here.  None means
-        # compression is disabled for this connection and any inbound RSV1=1
-        # frame is treated as a protocol violation (handled by the read loop).
+        # ``None`` disables permessage-deflate, which makes any inbound RSV1=1
+        # frame a protocol violation.
         self._decompressor = decompressor
-        # Read-time emit adapter for the ``websocket_message`` Level B event
-        # (server path — the actor wires this to its aggregator).  The
-        # dispatcher/conn pair is the equivalent for direct-recipient drives;
-        # the event fires when the message is READ, in every mode.
+        # Read-time emit adapter for ``websocket_message`` (server path); the
+        # dispatcher/conn pair below is the equivalent for a direct drive.
         self._on_message = on_message
         self._read_ahead_needed = read_ahead_needed
-        # Wire-ownership coordination (design A'): exactly one of {inline
-        # receive, reader task, watchdog servicing} drives the wire at a
-        # time.  ``_reading`` is set while the app's own receive() drives it;
-        # ``_servicing`` while control-frame servicing reads fully-buffered
-        # frames.  The reader task and the watchdog both yield on these.
+        # Wire ownership: exactly one of {inline receive, reader task, watchdog
+        # servicing} drives the wire at a time.  The reader task and the watchdog
+        # both yield on these two flags.
         self._reading = False
         self._servicing = False
-        # True once a control frame (CLOSE/PING/PONG) has been observed on
-        # this connection — either read or peeked.  Gates the per-message
-        # send/receive watchdog work: before any control frame (and with no
-        # ``websocket_message`` listener) that work is pure overhead, so an
-        # echo workload pays one bool check per message instead.
+        # A control frame has been read or peeked on this connection.  Gates the
+        # per-message watchdog work, which before the first one is pure overhead
+        # — an echo workload pays one bool check per message instead.
         self._saw_control_frame = False
-        # Refreshed once per receive cycle from ``read_ahead_needed`` — the
-        # hot path reads this plain attr instead of calling the predicate
-        # per frame (it only changes when listeners are registered, which the
-        # aggregator gen-caches).  ``(ra is None) or ra()``: the direct path
-        # has no predicate, so "listeners present" is vacuously True there.
         self._listeners = False
-        # Design A' (deferred reader): a listener is registered (read-ahead
-        # "needed") but the reader task has not been started yet.  Set at
-        # connect; cleared when the idle watchdog starts the reader.
+        # A listener needs read-ahead but the reader task has not started; the
+        # idle watchdog starts it if the app goes quiet.
         self._deferred_pending = False
-        # Idle watchdog — created lazily on the first touch() so constructing
-        # a recipient never requires a running loop.
+        # Created lazily on the first touch(), so constructing a recipient never
+        # requires a running loop.
         self._watchdog: WsIdleWatchdog | None = None
         self._closed = False
-        # -- liveness (RFC 6455 §5.5.2) -----------------------------------
-        # The *time* column for a WebSocket connection.  An idle WebSocket is
-        # normal — a subscription channel pushes nothing until something
-        # happens — so idleness alone cannot end it; the peer is asked.  Same
-        # purpose, same axis and same defaults as HTTP/2's probe.
-        #
-        # **Off unless a caller asks for it**, rather than read from Settings
-        # here.  This class is the read side of *both* roles: the server
-        # binding and the two bundled clients construct it.  Defaulting it on
-        # would silently make a client probe the server it connected to —
-        # traffic nobody asked for, on the surface the attack-surface audit
-        # records as unaudited (§9).  ``RecipientFactory.websocket`` is the
-        # server's entry point and is where the Settings values are read, so
-        # the policy has exactly one owner.
+        # The *time* column for a WebSocket connection (env-vars.md,
+        # ``BB_WS_IDLE_TIMEOUT``).  Off unless a caller asks: this class is the
+        # read side of both roles, and ``RecipientFactory.websocket`` — the
+        # server's entry point — is the one place the Settings value is read.
         self._ws_idle_timeout: float = ws_idle_timeout or 0.0
         self._ws_pong_timeout: float = ws_pong_timeout or 30.0
-        # Inbound arrival is recorded as a **counter**, not a timestamp: the
-        # receive path is the hot path, and a per-message clock read does not
-        # belong on it.  The tick callback — once per idle connection per
-        # scanner tick — turns the counter into a time.
+        # A **counter**, not a timestamp: the receive path is the hot path, and a
+        # per-message clock read does not belong on it.  The tick callback turns
+        # the counter into a time, once per idle connection per scanner tick.
         self._inbound_seq: int = 0
         self._seq_at_last_check: int = 0
         self._last_inbound_at: float = 0.0
@@ -2084,14 +1857,13 @@ class WebSocketRecipient(BaseRecipient):
     async def _emit(self, item) -> None:
         """Hand one ASGI event (or an exception to re-raise app-side) to the app.
 
-        The only place the two read modes diverge.  Eager mode pushes through
-        the bounded queue, which is what applies backpressure to a fast peer;
-        inline mode drops it in the handoff slot, where the caller one frame up
-        the stack is already waiting for it.
+        The only place the two read modes diverge: eager mode pushes through the
+        bounded queue, which is what applies backpressure to a fast peer; inline
+        mode drops it in the handoff slot, where the caller one frame up the
+        stack is already waiting for it.
 
-        The terminal code is recorded here — from a disconnect event, a
-        :class:`ProtocolError`, or any other exception — so a receive() past
-        the terminal event can keep answering a disconnect with the same code.
+        The terminal code is recorded here so a receive() past the terminal event
+        keeps answering a disconnect with the same code.
         """
         if isinstance(item, ProtocolError):
             self._terminal_code = item.close_code
@@ -2105,17 +1877,14 @@ class WebSocketRecipient(BaseRecipient):
     async def _read_step(self) -> bool:
         """Read and process exactly one frame.  True ⇒ the read side is done.
 
-        Anything to be delivered goes through :meth:`_emit`; a frame that
-        produces nothing (an incomplete fragment, a PING, an unsolicited PONG)
-        emits nothing and returns False, so whichever driver is running simply
-        reads again.  Keeping every RFC decision here means the two modes
-        cannot drift apart.
+        A frame that produces nothing (an incomplete fragment, a PING, an
+        unsolicited PONG) emits nothing and returns False, so whichever driver
+        is running simply reads again.  Keeping every RFC decision here is what
+        stops the two modes drifting apart.
         """
         _CONTROL_OPS = (WSOpcode.CLOSE, WSOpcode.PING, WSOpcode.PONG)
         h = await read_frame_header(self._reader)
-        # Liveness, at the cost of one integer add: the peer sent something,
-        # so it is alive.  Deliberately not a ``loop.time()`` — see the
-        # counter's comment in ``__init__``.
+        # Liveness at the cost of one integer add; not a ``loop.time()``.
         self._inbound_seq += 1
         self._probe_sent_at = None
 
@@ -2127,12 +1896,9 @@ class WebSocketRecipient(BaseRecipient):
             if h.length > 125:
                 raise ProtocolError(
                     f'control frame payload {h.length} > 125')
-            # A control frame is at most 125 bytes and obliges an answer —
-            # a PING costs a PONG write.  No byte budget can see a flood of
-            # them, so the count is metered instead (the same mechanism
-            # HTTP/2 uses for PING and SETTINGS).  Checked before the
-            # payload is read: the answer to too many is to stop, not to
-            # keep reading them faster.
+            # Metered by count (env-vars.md, ``BB_FRAME_RATE_LIMIT``), and
+            # checked before the payload is read: the answer to too many is to
+            # stop, not to keep reading them faster.
             if self._control_meter.hit():
                 log_cap_hit('frame_rate',
                             requested=self._control_meter.count,
@@ -2145,12 +1911,10 @@ class WebSocketRecipient(BaseRecipient):
                     f'{self._control_meter.window}s)',
                     close_code=WSCloseCode.POLICY_VIOLATION)
 
-        # RFC 6455 §5.2 — reserved RSV bits MUST be 0 unless an
-        # extension defining them was negotiated in the handshake.
-        # RSV1 is owned by permessage-deflate (RFC 7692); RSV2 / RSV3
-        # are not defined by any extension we negotiate, so they are
-        # always a protocol error.  RSV1 on a control frame is
-        # likewise always a violation per RFC 7692 §6.
+        # RFC 6455 §5.2 — RSV bits MUST be 0 unless an extension defining them
+        # was negotiated.  RSV1 is permessage-deflate's (RFC 7692); RSV2/RSV3
+        # belong to no extension we negotiate, and RSV1 on a control frame is
+        # always a violation per RFC 7692 §6.
         if h.rsv2 or h.rsv3:
             raise ProtocolError(
                 f'RSV2/RSV3 set without negotiated extension '
@@ -2160,12 +1924,9 @@ class WebSocketRecipient(BaseRecipient):
                 f'RSV1 set on frame (opcode={h.opcode}) without '
                 f'negotiated permessage-deflate')
 
-        # Hard cap on declared payload length.  ``h.length`` is
-        # the wire indicator (0–125, 126, or 127); the resolved
-        # extended length is read inside read_payload, which
-        # raises FramePayloadTooLarge before any body bytes are
-        # read off the wire.  Defends against post-handshake
-        # OOM where the peer advertises a 2**63 - 1 payload.
+        # ``h.length`` is the wire indicator (0–125, 126 or 127); the resolved
+        # extended length is judged inside ``read_payload``, which raises before
+        # any body byte is read off the wire.
         try:
             payload = await read_payload(
                 self._reader, h.masked, h.length,
@@ -2186,10 +1947,7 @@ class WebSocketRecipient(BaseRecipient):
 
         match h.opcode:
             case WSOpcode.TEXT | WSOpcode.BINARY | WSOpcode.CONTINUATION:
-                # A data frame is never terminal.  A complete message is
-                # emitted via _emit — inline mode's driver then exits on the
-                # non-empty _pending — and an incomplete fragment emits
-                # nothing; either way the driver reads on.
+                # A data frame is never terminal.
                 await self._handle_data_frame(h.opcode, payload, h.fin, h.rsv1)
                 return False
             case WSOpcode.CLOSE | WSOpcode.PING | WSOpcode.PONG:
@@ -2197,9 +1955,8 @@ class WebSocketRecipient(BaseRecipient):
             case _:
                 await self._handle_unknown_opcode()
                 return True
-        # Exhaustiveness fallback: the wildcard arm above covers every
-        # opcode, so this line is unreachable — it exists so every path has
-        # an explicit ``bool`` return (the CodeQL mixed-returns rule).
+        # Unreachable — the wildcard arm covers every opcode.  Present so every
+        # path has an explicit ``bool`` return (the CodeQL mixed-returns rule).
         return False
 
     async def _drive_once(self) -> bool:
@@ -2226,9 +1983,8 @@ class WebSocketRecipient(BaseRecipient):
             except Exception:
                 pass  # best-effort CLOSE frame; the socket may already be gone.
             await self._emit_disconnected(exc.close_code)
-            # Surface the violation on the next app-side receive() — the
-            # contract is that any exception in the read loop is raised back
-            # to the app; the close frame has already gone out.
+            # Any exception in the read loop is raised back to the app on its
+            # next receive(); the close frame has already gone out.
             await self._emit(exc)
             return True
         except Exception as exc:
@@ -2252,9 +2008,8 @@ class WebSocketRecipient(BaseRecipient):
     def _refuse_oversized_message(self, exc: MessageTooLarge) -> NoReturn:
         """Log the cap hit and raise the 1009 that closes the connection.
 
-        Three call sites reach it — fragment total, inflate output, and a
-        single oversized frame — because there are three ways for a
-        message to outgrow the bound and only one thing to do about it.
+        Three ways to outgrow the bound — fragment total, inflate output, a
+        single oversized frame — and one thing to do about it.
         """
         log_cap_hit(self._message_cap_name,
                     requested=exc.produced,
@@ -2267,13 +2022,9 @@ class WebSocketRecipient(BaseRecipient):
                                  rsv1: bool = False) -> None:
         """Handle TEXT/BINARY/CONTINUATION frame.
 
-        Emits a complete message via :meth:`_emit` when the assembler has one
-        (after a ``websocket_message`` event, when a dispatcher is wired).
-        Returns nothing — whether a message was emitted is not a signal the
-        drivers need: inline mode stops via ``_pending`` non-empty, eager mode
-        keeps reading until the read side terminates.  Keeping the return off
-        the method prevents a future reader from mistaking "a message was
-        emitted" for "the read side is done".
+        Returns nothing deliberately: whether a message was emitted is not a
+        signal either driver needs, and a ``bool`` here would invite a reader to
+        mistake "a message was emitted" for "the read side is done".
         """
         try:
             result = self._assembler.feed(opcode, payload, fin, rsv1)
@@ -2299,10 +2050,10 @@ class WebSocketRecipient(BaseRecipient):
                     close_code=1002,
                 ) from exc
         elif self._max_message_size and len(full_payload) > self._max_message_size:
-            # An unfragmented, uncompressed frame reaches neither of the two
-            # bounds above: the assembler passes it straight through and there
-            # is no inflate step.  Without this, the message bound would be
-            # weaker than the frame cap for the simplest message there is.
+            # An unfragmented, uncompressed frame reaches neither bound above:
+            # the assembler passes it straight through and there is no inflate
+            # step.  Without this the message total would be weaker than the
+            # frame cap for the simplest message there is.
             self._refuse_oversized_message(
                 MessageTooLarge(len(full_payload), self._max_message_size))
         if msg_opcode == WSOpcode.TEXT:
@@ -2316,14 +2067,10 @@ class WebSocketRecipient(BaseRecipient):
             message: str | bytes = text
         else:
             message = full_payload
-        # The read-time emit adapter (server path) or the dispatcher (direct
-        # path) fires ``websocket_message`` HERE, when the message is read —
-        # before delivery to the app, in every mode.  The guard must be
-        # re-evaluated per message, not read from the receive-cycle cache:
-        # a listener registered while the app's ``receive()`` was blocked on
-        # the wire is only visible to a fresh check.  With none, the
-        # zero-listener hot path pays one int compare (the aggregator
-        # gen-caches the lookup) instead of creating a coroutine per message.
+        # ``websocket_message`` fires HERE, when the message is read, in every
+        # mode.  The guard is re-evaluated per message rather than read from the
+        # receive-cycle cache: a listener registered while the app's
+        # ``receive()`` was blocked on the wire is only visible to a fresh check.
         if (self._on_message is not None
                 and (self._read_ahead_needed is None
                      or self._read_ahead_needed())):
@@ -2343,10 +2090,9 @@ class WebSocketRecipient(BaseRecipient):
     async def _handle_control_frame(self, opcode, payload: bytes) -> bool:
         """Handle CLOSE/PING/PONG frame; returns True if the connection should close."""
         if opcode == WSOpcode.CLOSE:
-            # RFC 6455 §5.5.1 — when an endpoint receives a Close frame and
-            # has not yet sent one, it MUST send a Close frame in response,
-            # echoing the peer's status code if present.  Validate the code
-            # and the reason text first; on any violation, send 1002 instead.
+            # RFC 6455 §5.5.1 — an endpoint that has not sent one MUST answer a
+            # Close frame, echoing the peer's status code if present; on any
+            # violation of the code or the reason text, send 1002 instead.
             code, reason_ok = _parse_close_payload(payload)
             echo_code = code if reason_ok else WSCloseCode.PROTOCOL_ERROR
             event_code = code if reason_ok else WSCloseCode.PROTOCOL_ERROR
@@ -2362,8 +2108,6 @@ class WebSocketRecipient(BaseRecipient):
             await self._close_channel(event_code)
             return True
         if opcode == WSOpcode.PING:
-            # RFC 6455 §5.5 — control-frame payload MUST be ≤125 bytes; the
-            # frame-header reader catches that case before we get here.
             pong = encode_frame(payload, opcode=WSOpcode.PONG, mask=not self._require_masked)
             await self._writer.write(pong)
         # PONG: unsolicited pong — silently drop
@@ -2382,10 +2126,8 @@ class WebSocketRecipient(BaseRecipient):
     async def _close_channel(self, code: int) -> None:
         """Fire ``websocket_disconnected`` and end the channel with *code*.
 
-        The close code is recorded once here, on ``_terminal_code``, and both
-        channels read it from there.  Passing it twice — once to the Level B
-        event and again inside the disconnect envelope — is one place for the
-        two to disagree.
+        The close code is recorded once here and both channels read it from
+        there; passing it twice would be one place for the two to disagree.
         """
         await self._emit_disconnected(code)
         self._terminal_code = code
@@ -2418,20 +2160,12 @@ class WebSocketRecipient(BaseRecipient):
     def _read_ahead_observed(self) -> bool:
         """Whether anything can tell the difference between the two modes.
 
-        ``websocket_message`` is contractually emitted **when the server reads
-        the message, not when the handler calls receive()** — a handler that
-        never consumes must still produce the event.  Only a reader task
-        running ahead of the app can do that, so a registered listener forces
-        eager mode no matter what the depth says.  With no listener nothing
-        observes the difference and the handoff is pure cost.
+        With no ``websocket_message`` listener nothing observes it and the
+        handoff is pure cost.  Mirrors ``disconnect_events_observed`` on the HTTP
+        path: pay for the machinery exactly when someone is watching it.
 
-        Mirrors ``disconnect_events_observed`` on the HTTP path: pay for the
-        machinery exactly when someone is watching it.
-
-        The server path (actor) supplies a ``read_ahead_needed`` predicate
-        instead of a dispatcher — its ``websocket_message`` events go through
-        the read-time emit adapter, not the dispatcher — so the cached
-        ``_listeners`` (refreshed once per receive cycle) answers for it.
+        The server path supplies a ``read_ahead_needed`` predicate rather than a
+        dispatcher, so the cached ``_listeners`` answers for it.
         """
         if self._read_ahead_needed is not None:
             return self._listeners
@@ -2441,12 +2175,9 @@ class WebSocketRecipient(BaseRecipient):
     def _start_reader(self, depth: int) -> None:
         """Create the read-ahead queue and its task, carrying over the handoff.
 
-        Anything the inline driver (or watchdog servicing) already left in
-        ``_pending`` moves into the queue first: once the queue exists the app
-        reads from it alone, so an event left behind in the deque would never
-        be delivered.  ``_pending`` holds at most one item — the inline driver
-        stops as soon as a frame produces something — so the bounded queue
-        cannot overflow here.
+        Once the queue exists the app reads from it alone, so anything left in
+        ``_pending`` must move across or it is never delivered.  It holds at most
+        one item, so the bounded queue cannot overflow here.
         """
         queue: asyncio.Queue = asyncio.Queue(maxsize=depth)
         while self._pending:
@@ -2458,15 +2189,10 @@ class WebSocketRecipient(BaseRecipient):
     def _ensure_reader_started(self) -> None:
         """Start the read-ahead task, or mark it deferred.
 
-        Inline mode has no background reader at all, so this is where the
-        per-message task handoff stops existing rather than being made cheaper.
-        A positive ``ws_queue_depth`` is an explicit opt-in and starts the
-        reader now; a listener that merely *needs* read-ahead does not, because
-        the contract it depends on is that the message is read, not that it is
-        read ahead.  A consuming handler drives the wire itself and keeps the
-        inline path; only when the app goes quiet does the idle watchdog start
-        the deferred reader, so nothing observes the difference and no
-        consuming handler pays the handoff.
+        A positive ``ws_queue_depth`` is an explicit opt-in and starts the reader
+        now.  A listener that merely *needs* read-ahead does not: the contract it
+        depends on is that the message is read, not that it is read ahead, and a
+        consuming handler is already reading (env-vars.md, ``BB_WS_QUEUE_DEPTH``).
         """
         if self._event_queue is not None or self._read_finished:
             return
@@ -2495,10 +2221,9 @@ class WebSocketRecipient(BaseRecipient):
         self._start_reader(self._ws_queue_depth or _WS_EVENT_QUEUE_DEPTH)
 
     def _frame_bytes_needed(self) -> int | None:
-        """Bytes required for the next *complete* frame, or None when it is
-        not fully buffered yet.  Drives the non-blocking guarantee of
-        :meth:`service_available_control_frames`: a partial frame is never
-        read (which would block) — it is left for the next read or tick."""
+        """Bytes required for the next *complete* frame, or None when it is not
+        fully buffered.  The non-blocking guarantee of
+        :meth:`service_available_control_frames` rests on this."""
         buffered = self._reader.buffered_len()
         if buffered < 2:
             return None
@@ -2551,17 +2276,15 @@ class WebSocketRecipient(BaseRecipient):
     def _on_idle_tick(self) -> None:
         """Watchdog callback: the connection has been quiet for a tick.
 
-        Runs from the scanner's timer context — cheap checks only, then a
-        task for any actual work.  A reader already owns the wire (eager /
-        deferred started) and services control frames itself; only a pure
-        inline connection needs the watchdog's help.
+        Runs from the scanner's timer context — cheap checks only, then a task
+        for any actual work.  Only a pure inline connection needs the servicing
+        help; a reader that owns the wire does it itself.
 
-        The liveness decision runs **first and unconditionally**, because it
-        asks a different question from the servicing below: servicing is
-        about a connection whose handler has gone quiet, liveness is about a
-        connection whose *peer* has.  A connection with a reader parked on the
-        wire is the normal shape of a silent peer, so the guards below would
-        exempt exactly the case the probe exists for.
+        Liveness runs **first and unconditionally**, because it asks a different
+        question: servicing is about a connection whose handler has gone quiet,
+        liveness about one whose *peer* has.  A reader parked on the wire is the
+        normal shape of a silent peer, so the guards below would exempt exactly
+        the case the probe exists for.
         """
         self._check_liveness()
         if self._read_finished or self._reading or self._closed:
@@ -2586,16 +2309,15 @@ class WebSocketRecipient(BaseRecipient):
         loop = asyncio.get_running_loop()
         now = loop.time()
         if self._inbound_seq != self._seq_at_last_check:
-            # Frames arrived since the last tick — the peer is alive, and the
-            # read path has already cleared any outstanding probe.
+            # Frames arrived since the last tick; the read path has already
+            # cleared any outstanding probe.
             self._seq_at_last_check = self._inbound_seq
             self._last_inbound_at = now
             return
         if self._last_inbound_at == 0.0:
-            # First quiet tick of the connection's life: start the clock here
-            # rather than at construction, so a connection that was busy
-            # before the watchdog armed is not judged on time it never spent
-            # idle.
+            # First quiet tick: the clock starts here rather than at
+            # construction, so a connection that was busy before the watchdog
+            # armed is not judged on time it never spent idle.
             self._last_inbound_at = now
             return
         if self._probe_sent_at is not None:
@@ -2621,12 +2343,9 @@ class WebSocketRecipient(BaseRecipient):
     async def _end_for_unresponsive_peer(self) -> None:
         """The probe went unanswered: the peer is gone, not merely quiet.
 
-        ``1001 (Going Away)`` rather than a policy code, for the reason
-        HTTP/2 answers its own unanswered probe with ``NO_ERROR``: nothing
-        was violated.  We asked a question and got no reply, which is a fact
-        about the network, not a complaint about the peer.  The CLOSE is
-        best-effort — if the peer really is gone the write fails, and the
-        channel is ended either way.
+        ``1001 (Going Away)`` rather than a policy code, for the reason HTTP/2
+        answers its own unanswered probe with ``NO_ERROR``: nothing was violated.
+        No reply is a fact about the network, not a complaint about the peer.
         """
         if self._closed or self._read_finished:
             return
@@ -2687,10 +2406,9 @@ class WebSocketRecipient(BaseRecipient):
     def _ensure_watchdog_armed(self) -> None:
         """Create + register the watchdog once (requires a running loop).
 
-        Arming must not depend on a touch: the zero-listener echo never
-        touches, yet an idle connection with a buffered control frame must
-        still be serviced.  The ``_watchdog is None`` check is the only
-        per-message cost after the first call.
+        Arming must not depend on a touch: the zero-listener echo never touches,
+        yet an idle connection with a buffered control frame must still be
+        serviced.
         """
         if self._watchdog is None:
             self._watchdog = WsIdleWatchdog(self._on_idle_tick)
@@ -2733,10 +2451,8 @@ class WebSocketRecipient(BaseRecipient):
     def _mark_connect_sent(self) -> None:
         """Claim the handshake read and arm the connection's timers.
 
-        Shared by both channels.  Arming the idle watchdog once here (not per
-        message) keeps the zero-listener echo free of a per-message arm call
-        while an idle connection with a buffered control frame is still
-        serviced.
+        Shared by both channels.  Arming once here rather than per message keeps
+        the zero-listener echo free of a per-message arm call.
         """
         self._connect_sent = True
         self._ensure_watchdog_armed()
@@ -2759,22 +2475,18 @@ class WebSocketRecipient(BaseRecipient):
             self.touch()
         self._ensure_reader_started()
         if self._terminal_delivered:
-            # Canonical across both modes: once the terminal event has been
-            # handed to the app, reading again keeps answering the close so a
-            # handler that reads past it can never block on a dead connection.
             return _WS_CLOSED
         if self._event_queue is not None:
             return await self._event_queue.get()
         # Inline: drive the wire in the app's own task until this read has
-        # something to hand back.  Frames that produce nothing (fragments,
-        # PING, unsolicited PONG) simply loop, so control frames are still
-        # serviced — just at the app's read cadence rather than ahead of it.
+        # something to hand back.  Frames that produce nothing (fragments, PING,
+        # unsolicited PONG) simply loop, so control frames are still serviced —
+        # at the app's read cadence rather than ahead of it.
         #
-        # ``_reading`` claims the transport for the whole drive.  The
-        # watchdog's servicing path and the deferred-reader start both yield
-        # on it, because a second reader entering here would resume at
-        # whatever offset this one is parked at — mid-frame, the buffer front
-        # is payload, and peeking it as a frame header desyncs the stream.
+        # ``_reading`` claims the transport for the whole drive: a second reader
+        # entering here would resume at whatever offset this one is parked at,
+        # and mid-frame the buffer front is payload, so peeking it as a frame
+        # header desyncs the stream.
         self._reading = True
         try:
             while not self._pending and not self._read_finished:
@@ -2885,9 +2597,8 @@ class RecipientFactory:
               max_body: int | None = None,
               min_rate: float | None = None,
               min_rate_grace: float | None = None) -> HTTP2Recipient:
-        # The body limits are forwarded rather than left to the recipient's own
-        # fallback: this runs once per stream, and resolving them there costs a
-        # function-level import per request.  See ``HTTP2Recipient.__init__``.
+        # Forwarded rather than left to the recipient's own per-stream fallback;
+        # see ``HTTP2Recipient.__init__``.
         return HTTP2Recipient(frame, queue_depth=queue_depth,
                               credit_callback=credit_callback,
                               credit_budget=credit_budget,
@@ -2906,10 +2617,9 @@ class RecipientFactory:
             reader = AsyncioReader(reader)
         if not isinstance(writer, AbstractWriter):
             writer = AsyncioWriter(writer)
-        # The liveness probe is read here, not in the recipient: this factory
-        # is the *server's* entry point, and the probe answers a question only
-        # the server has — how long an untrusted peer may hold a connection.
-        # The bundled clients build a recipient directly and are unaffected.
+        # The liveness probe is read here, not in the recipient: this factory is
+        # the *server's* entry point, and the probe answers a question only the
+        # server has — how long an untrusted peer may hold a connection.
         from ..env import get_settings  # noqa: PLC0415
         _cfg = get_settings()
         return WebSocketRecipient(reader, writer, dispatcher=dispatcher, conn=conn,
