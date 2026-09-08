@@ -7875,8 +7875,9 @@ PONG, which is what makes inline mode conformant.</p>
 <p>The one thing that <em>can</em> tell the modes apart is the <code>websocket_message</code>
 Level B event, which fires when the server reads a message rather than when
 the app consumes it — a handler that never calls <code>receive()</code> must still
-produce it.  A registered listener therefore forces eager mode; see
-:meth:<code>_read_ahead_observed</code>.</p>
+produce it.  A registered listener does not force read-ahead on, though:
+a consuming handler is already reading, so the reader is only marked
+<em>deferred</em> and the idle watchdog starts it if the handler goes quiet.</p>
 
 
 
