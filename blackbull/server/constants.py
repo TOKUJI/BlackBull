@@ -1,9 +1,10 @@
 """Server-protocol constants.
 
 ``WSCloseCode`` is an ``IntEnum`` for the WebSocket close codes used on the
-wire (RFC 6455 §7.4).  ASGI event-type strings used to live here too; they
-moved to ``blackbull.asgi.ASGIEvent`` so importing the framework doesn't
-drag in the server stack.
+wire (RFC 6455 §7.4).  ASGI event-type strings belong to
+``blackbull.asgi.ASGIEvent``, not here: they are part of the protocol
+vocabulary the framework and any external ASGI host share, while this module
+is the server's own.
 """
 from enum import IntEnum
 

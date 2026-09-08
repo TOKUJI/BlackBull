@@ -104,12 +104,11 @@ def close_ws_record(record: 'AccessLogRecord | None', close_code) -> None:
 def emit_access_log(record: 'AccessLogRecord') -> None:
     """Emit *record* on the access logger if INFO is enabled.
 
-    The isEnabledFor gate matters: ``record.as_extra()`` and (formerly)
-    ``record.format()`` are evaluated before ``logger.info`` decides to
-    discard the call.  Profiling at -R 5000 with BB_ACCESS_LOG=0 showed
-    these calls still costing ~1.2% of CPU.  Peers (uvicorn / granian /
-    daphne) skip the work entirely when access logging is disabled; gating
-    here matches that behaviour.
+    The isEnabledFor gate matters: ``record.as_extra()`` is evaluated
+    before ``logger.info`` decides to discard the call.  Profiling at
+    -R 5000 with BB_ACCESS_LOG=0 showed these calls still costing ~1.2%
+    of CPU.  Peers (uvicorn / granian / daphne) skip the work entirely
+    when access logging is disabled; gating here matches that behaviour.
 
     The *record itself* is the message (it is self-formatting via ``__str__``),
     so the expensive ``format()`` string build is deferred to the logging

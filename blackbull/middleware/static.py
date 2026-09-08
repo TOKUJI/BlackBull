@@ -177,9 +177,9 @@ class StaticFiles:
         if resolved is None:
             raise ValueError('directory or root_dir is required')
         # Internal hot path uses ``str`` + ``os.path`` rather than
-        # ``pathlib.Path``: each request previously allocated several
-        # PurePath / Path objects for the same traversal-safety check
-        # showed up under ``mw_static_in → static_pre_send`` in profiles.
+        # ``pathlib.Path``: the traversal-safety check runs per request, and
+        # the several PurePath / Path objects one ``Path`` form allocates for
+        # it show up under ``mw_static_in → static_pre_send`` in profiles.
         # ``os.path`` is a thin C wrapper.
         self._root_str: str = os.path.realpath(os.fspath(resolved))
         # Pre-computed prefix for the traversal check — accept
@@ -264,7 +264,7 @@ class StaticFiles:
 
         decoded = unquote(raw_path)
         # ``realpath`` follows symlinks the same way ``Path.resolve()``
-        # used to.  The traversal check is then a single string-prefix
+        # does.  The traversal check is then a single string-prefix
         # comparison against the pre-computed ``<root>/`` form — no
         # ``PurePath.relative_to`` allocation per request.
         target = os.path.realpath(os.path.join(self._root_str, decoded.lstrip('/')))

@@ -173,8 +173,7 @@ class EventAggregator:
         """Fire Level B ``websocket_message`` (``conn`` is a Connection).
 
         Canonical detail shape ``{'conn', 'text', 'bytes'}`` — the shape the
-        direct-recipient path and docs/guide/events.md use.  (It was briefly
-        ``{'conn', 'message'}`` on the server path; unified in Sprint 90.)
+        direct-recipient path and docs/guide/events.md use.
 
         Guarded like the other ``on_*`` methods: with no ``websocket_message``
         listener, the ``Event`` + detail-dict allocation and the ``emit``

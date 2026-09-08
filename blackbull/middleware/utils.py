@@ -3,8 +3,8 @@
 Public API:
 - ``as_middleware``: decorator that normalises the ``send`` callable so inner
   send wrappers defined by the middleware always receive a single native
-  representation — ``NativeResponse`` on the HTTP path (H1 + H2 since Sprint
-  93), plain ASGI event dicts only at the external-host edge — never raw
+  representation — ``NativeResponse`` on the HTTP path (H1 and H2), plain
+  ASGI event dicts only at the external-host edge — never raw
   ``Response`` objects.  Works on both async middleware functions and
   middleware classes (decorates ``__call__``).
 """
@@ -84,8 +84,7 @@ def _normalize_send(inner_send: ASGISendCallable | None):
     ``StreamingResponse`` / 3-arg / ASGI dict / NativeResponse all become a
     single native representation before reaching ``inner_send``, so middleware
     observes one contract on the HTTP path.  The H2 sender has a native arm
-    since Sprint 93, so no dict fallback is needed (the Sprint 92 H2 gate
-    dropped with it).
+    of its own, so no dict fallback is needed.
     """
     # ``inner_send`` is Optional because a middleware may be driven with no
     # send channel at all on pass-through paths (a websocket or lifespan

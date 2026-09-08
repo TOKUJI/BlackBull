@@ -67,8 +67,8 @@ _H1_PATHSEND_EXTENSIONS = {'http.response.pathsend': {}}
 # RFC 9112 §4   — method = token, HTTP-version = "HTTP/" DIGIT "." DIGIT
 _HTTP_VERSION_RE = re.compile(rb'^HTTP/\d\.\d$')
 
-# Compiled-regex validators replace the per-byte membership scans this parser
-# used to run.  The character classes below are the exact negation of the RFC
+# Compiled-regex validators rather than per-byte membership scans.  The
+# character classes below are the exact negation of the RFC
 # 9110 §5.6.2 tchar set and the RFC 9110 §5.5 CTL-except-HTAB allow-list
 # respectively; `re.search` returns a Match on the first invalid byte (3–4×
 # faster than the equivalent Python loop per pyperf).
@@ -524,8 +524,8 @@ def _validate_host(headers: 'Headers') -> None:
     # RFC 3986 §3.2 authorities are ASCII; an internationalised name reaches
     # the wire as punycode, which is too.  Neither check above excludes a
     # high byte — the delimiter set is `/ ? #` plus whitespace, and the CTL
-    # check covers \x00-\x08\x0a-\x1f\x7f — so one used to reach
-    # ``_parse_host_header``'s bare ``decode('utf-8')`` and raise
+    # check covers \x00-\x08\x0a-\x1f\x7f — so without the decode below one
+    # reaches ``_parse_host_header``'s bare ``decode('utf-8')`` and raises
     # UnicodeDecodeError past every handler in ``run()``, closing the
     # connection with no response at all.  Answering 400 is what nginx does,
     # and *some* answer is the point: a caller cannot tell a silent drop
@@ -767,7 +767,7 @@ class HTTP1Actor(Actor):
                 # block; if it elapses we close the connection with 408 so a
                 # well-behaved monitoring client can tell us apart from a
                 # peer-side disconnect.  ``header_timeout=0`` disables the
-                # deadline (legacy behaviour for trusted local use).
+                # deadline — only sound for trusted local clients.
                 idle_window = (cfg.keep_alive_timeout if keep_alive
                                else cfg.header_timeout)
                 try:
@@ -1364,9 +1364,9 @@ class HTTP1Actor(Actor):
             # support; it MUST NOT fail the request over it.  Only WebSocket
             # switches the connection type.  Any other token (notably curl's
             # default ``Upgrade: h2c`` probe on ``--http2``) is ignored and
-            # the request is served as ordinary HTTP/1.1 — previously any
-            # unknown token became ``scope['type']`` and crashed dispatch,
-            # closing the connection with no reply.
+            # the request is served as ordinary HTTP/1.1.  An unknown token
+            # must never reach ``conn.type``: dispatch has no route for it,
+            # and the connection would close with no reply.
             if headers.get(b'upgrade').strip().lower() == b'websocket':
                 conn.type = 'websocket'
                 conn.scheme = 'ws'

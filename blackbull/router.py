@@ -126,9 +126,9 @@ class _RouteTrie:
                 _, converter = _CONVERTERS.get(spec, (None, str))
                 if spec == 'path':
                     # {name:path} consumes all remaining segments, so it must be
-                    # the final segment.  A route like ``/a/{p:path}/b`` used to
-                    # silently register as ``/a/{p:path}`` — dropping ``/b`` — so
-                    # reject it at registration.
+                    # the final segment.  Unrejected, a route like
+                    # ``/a/{p:path}/b`` registers as ``/a/{p:path}`` — silently
+                    # dropping ``/b`` — so refuse it at registration.
                     if i != len(segments) - 1:
                         raise ConfigurationError(
                             f"path converter {seg!r} must be the last segment of "

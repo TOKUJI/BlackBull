@@ -7,6 +7,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Added client-owned write and WebSocket size bounds, and applied the
   response minimum-body-rate floor to HTTP/2 streams.
+- Corrected the defaults stated in `blackbull/env.py`'s environment-variable
+  reference, which had drifted from the values `get_settings()` selects for
+  `BB_WS_QUEUE_DEPTH`, `BB_LOG_BATCH_SIZE` and `BB_SOCKET_BACKLOG`, and
+  documented the twenty-two variables it read but never listed — the whole
+  `BB_CLIENT_*` block among them.  `blackbull --help` no longer reports
+  `--max-connections` as defaulting to unlimited; the default is `auto`, a
+  finite cap derived from `RLIMIT_NOFILE`.  Importing `blackbull` does load
+  the server stack, and the package docstring now says so.  Three new
+  architecture tests fail the build when a stated default and the shipped one
+  disagree again.
 
 ## Versioning
 

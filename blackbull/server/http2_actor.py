@@ -254,8 +254,8 @@ class HTTP2Actor(Actor):
     Supervisor strategy: propagate — framing errors send GOAWAY and raise,
     surfacing to the caller.
 
-    If *aggregator* is ``None`` the actor uses the legacy direct-dispatcher
-    path (same behaviour as the pre-Actor HTTP2Handler).
+    If *aggregator* is ``None`` the actor dispatches events directly through
+    ``app._dispatcher`` instead.
     """
 
     # Frame types whose payload size violation is a connection error
@@ -280,9 +280,9 @@ class HTTP2Actor(Actor):
     # SETTINGS/PING/GOAWAY MUST be on stream 0 (inverse requirement);
     # WINDOW_UPDATE may be on stream 0 or non-zero (no restriction).
     #
-    # Consolidates six independent checks in _frame_loop into one lookup.
-    # Previously RST_STREAM (§6.4) and PUSH_PROMISE (§6.6) were missing
-    # from the individual checks — now included for full RFC 9113 coverage.
+    # One lookup in _frame_loop rather than a check per frame type: a
+    # per-type check is a list to keep complete, and RST_STREAM (§6.4) and
+    # PUSH_PROMISE (§6.6) are the two that fall off it.
     _STREAM_ONLY_FRAME_TYPES: frozenset[FrameTypes] = frozenset({
         FrameTypes.DATA,          # RFC 9113 §6.1
         FrameTypes.HEADERS,       # RFC 9113 §6.2
@@ -847,8 +847,8 @@ class HTTP2Actor(Actor):
         The Rapid Reset meter watched inbound resets only, so a peer could
         get the same stream-slot churn for free by provoking ours —
         protocol violations, window overruns, and the body-size and
-        body-rate refusals added in Sprint 103 are all reachable on
-        demand.  A stream reset is a stream reset whoever sent it.
+        body-rate refusals are all reachable on demand.  A stream reset
+        is a stream reset whoever sent it.
 
         The consequence is deliberate and worth stating plainly: a client
         that repeatedly trips a *legitimate* limit — an upload loop over
@@ -1096,9 +1096,9 @@ class HTTP2Actor(Actor):
             # SETTINGS/PING/GOAWAY MUST be on stream 0 (inverse requirement);
             # WINDOW_UPDATE may be on stream 0 or non-zero.
             #
-            # Consolidated from six independent checks into one frozenset
-            # lookup.  RST_STREAM (§6.4) and PUSH_PROMISE (§6.6) were
-            # previously missing from the individual checks; now covered.
+            # One frozenset lookup rather than a check per frame type: a
+            # per-type check is a list to keep complete, and RST_STREAM
+            # (§6.4) and PUSH_PROMISE (§6.6) are the two that fall off it.
             if frame.stream_id == 0 and frame_type in self._STREAM_ONLY_FRAME_TYPES:
                 await self._connection_error(
                     ErrorCodes.PROTOCOL_ERROR,
@@ -1697,7 +1697,7 @@ class HTTP2Actor(Actor):
 
         # RFC 8441 stream-exhaustion guard — without a per-connection cap
         # an attacker can hold up to ``max_concurrent_streams`` idle WS
-        # streams per connection.  ``0`` disables (legacy / opt-out).
+        # streams per connection.  ``0`` disables the cap.
         cfg = _get_settings()
         ws_cap = cfg.h2_ws_max_streams_per_connection
         if ws_cap > 0 and self._ws_stream_count >= ws_cap:
@@ -1805,14 +1805,14 @@ class HTTP2Actor(Actor):
         parent_stream = self.root_stream.find_child(parent_stream_id)
         parent = parent_stream.conn if parent_stream is not None else None
         # ``stream.conn`` is the native Connection on every lane, so the push
-        # parent's fields are plain attribute reads.  The dict branch this
-        # replaced called ``.get()`` on a scope's header *list* and raised
-        # AttributeError for every push under BB_FORCE_ASGI_SCOPE.
+        # parent's fields are plain attribute reads — never ``.get()`` on a
+        # scope, which under BB_FORCE_ASGI_SCOPE reaches a header *list* and
+        # raises AttributeError for every push.
         #
-        # A missing parent is still possible — a push requested against a
-        # stream that has already been evicted — and it inherits the same
-        # defaults the empty-dict sentinel used to supply, minus the sentinel's
-        # habit of turning a typo into a silent empty value.
+        # A missing parent is possible — a push requested against a stream
+        # that has already been evicted — so the defaults are spelled out
+        # below rather than left to an empty-dict sentinel, which would turn
+        # a typo into a silent empty value.
         if parent is not None:
             parent_headers = parent.headers
             parent_scheme = parent.scheme
@@ -1880,7 +1880,7 @@ class HTTP2Actor(Actor):
             conn_window=self._conn_window,
             flow_control_timeout=self._write_timeout)
         log_record = _start_record(pushed_conn)
-        # Inline capture (Sprint 93 M1), same as the request path.
+        # Inline capture, same as the request path.
         push_sender._log_record = log_record
         capturing_send = push_sender
 

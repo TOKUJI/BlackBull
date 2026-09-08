@@ -11,10 +11,10 @@ Its twin is :mod:`blackbull.fault_injection.scenario_h1`, the client-side
 vocabulary one protocol over, and this module takes that twin's names
 wherever the two mean the same thing: :class:`SendRawBytes`,
 :class:`ReadResponse`, :class:`Sleep`, :class:`Abort`, and the fields of
-:class:`ScenarioH2ClientResult`.  Sprint 107 learned why that matters the
-expensive way — a vocabulary written from the *protocol* rather than from
-its twin drifted three times in one sprint, and every drift was found by
-someone asking rather than by reading the code.
+:class:`ScenarioH2ClientResult`.  That matters more than it looks: a
+vocabulary written from the *protocol* rather than from its twin drifts
+away from it, and the drift is found by someone asking rather than by
+reading the code.
 
 Two steps have no HTTP/1.1 counterpart, and both earn it:
 

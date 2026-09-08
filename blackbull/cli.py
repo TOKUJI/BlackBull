@@ -273,8 +273,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         '--max-connections', type=int, default=None, metavar='N',
-        help='Per-worker connection cap.  0 = unlimited.  '
-             'Defaults to BB_MAX_CONNECTIONS (=0).',
+        help='Per-worker connection cap.  0 = unlimited.  Defaults to '
+             'BB_MAX_CONNECTIONS (=auto: derived from RLIMIT_NOFILE).',
     )
     p.add_argument(
         '--stream-queue-depth', type=int, default=None, metavar='N',

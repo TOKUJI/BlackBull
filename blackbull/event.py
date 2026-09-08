@@ -194,11 +194,11 @@ class EventDispatcher:
         logged in that case either, because the overrun warning below only
         covers tasks that were in the set being awaited.
 
-        The cost is that a pathological observer chain can now hold shutdown
-        for the full budget where it used to return early.  That is the
-        correct direction — the early return was the defect — and
-        ``shutdown_timeout`` remains the ceiling, so an observer chain that
-        never quiesces is a bounded latency cost at shutdown.
+        The cost is that a pathological observer chain can hold shutdown for
+        the full budget rather than returning early.  Returning early is the
+        wrong answer, not a cheaper one, and ``shutdown_timeout`` is the
+        ceiling — so an observer chain that never quiesces is a bounded
+        latency cost at shutdown.
         """
         if not self._pending_tasks:
             return

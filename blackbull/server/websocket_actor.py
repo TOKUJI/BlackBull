@@ -93,10 +93,10 @@ class WebSocketActor(Actor):
         """How this connection ended (RFC 6455 §7.4), for the access log.
 
         Derived, not mirrored: the recipient records the terminal code for
-        both encodings, and the actor used to keep a second copy by
-        intercepting every event to look for a disconnect.  Two records of one
-        fact is one place for them to disagree — and the interception was a
-        per-message coroutine hop on the WebSocket hot path.
+        both encodings.  A second copy in the actor would mean intercepting
+        every event to look for a disconnect — two records of one fact is one
+        place for them to disagree, and the interception is a per-message
+        coroutine hop on the WebSocket hot path.
         """
         return self._ws_receive.terminal_code or WSCloseCode.ABNORMAL
 

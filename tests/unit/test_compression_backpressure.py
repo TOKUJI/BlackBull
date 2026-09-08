@@ -113,9 +113,9 @@ async def test_backpressure_serves_uncompressed_when_inflight_at_cap():
 
 @pytest.mark.asyncio
 async def test_max_inflight_zero_disables_backpressure():
-    """`executor_max_inflight=0` reverts to the pre-0.29 behaviour:
-    unbounded queueing.  Even with a huge inflight counter, the offload
-    still runs and the response is compressed."""
+    """`executor_max_inflight=0` removes the cap: unbounded queueing.
+    Even with a huge inflight counter, the offload still runs and the
+    response is compressed."""
     mw = Compression(executor_max_inflight=0)
     mw._executor_inflight = 9999      # arbitrarily large
     res = await _run_through(mw, _BIG_BODY, accept=b'gzip')

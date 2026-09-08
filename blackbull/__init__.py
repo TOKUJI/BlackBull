@@ -28,11 +28,15 @@ and authoritative list; the notes below cover the ones worth a sentence:
 - `as_middleware`: decorator that marks an async function or class as middleware; normalises ``send`` so inner wrappers see only ASGI event dicts.
 - `TrustedProxy`: rewrites ``scope['client']`` / ``scope['scheme']`` from proxy headers.
 
-Importing this package does **not** load the server stack
-(``blackbull.server.*``).  Use ``ASGIServer`` from ``blackbull.server``
-when you want to embed BlackBull's own server; otherwise pass the
-``BlackBull`` instance to any external ASGI server (uvicorn, hypercorn,
-granian, …) since ``BlackBull.__call__`` is ASGI 3.0 compliant.
+Importing this package loads the server stack (``blackbull.server.*``) as a
+side effect: ``blackbull.app`` imports ``RawBinding`` from
+``blackbull.server.protocol_registry``, and ``blackbull/server/__init__.py``
+re-exports ``ASGIServer``, so the whole of it is resolved before ``BlackBull``
+itself is bound.  Use ``ASGIServer`` from ``blackbull.server`` to embed
+BlackBull's own server;
+otherwise pass the ``BlackBull`` instance to any external ASGI server
+(uvicorn, hypercorn, granian, …) since ``BlackBull.__call__`` is ASGI 3.0
+compliant.
 """
 # Bound privately, all of it.  A bare ``import logging`` here publishes
 # ``blackbull.logging`` — resolving to the *standard library* module, next
@@ -82,11 +86,11 @@ from .middleware.proxy import TrustedProxy
 
 #: The public surface, and — because this package ships ``py.typed`` — the
 #: thing that makes these names re-exports rather than private imports for a
-#: strict type checker.  Submodules are deliberately absent: ``blackbull.server``
-#: and friends are imported by path, not pulled in by ``import *``, and the
-#: server stack in particular must stay unloaded until asked for.  ``Request``
-#: is absent because it is a deprecated alias resolved through ``__getattr__``;
-#: listing it would make ``import *`` warn at code that never asked for it.
+#: strict type checker.  Submodule names are deliberately absent from
+#: ``__all__``: ``blackbull.server`` and friends are reached by path, not bound
+#: as attributes by ``import *``.  ``Request`` is absent because it is a
+#: deprecated alias resolved through ``__getattr__``; listing it would make
+#: ``import *`` warn at code that never asked for it.
 from .server.listener import InheritedFd, Listener, Tcp, Unix
 
 __all__ = [

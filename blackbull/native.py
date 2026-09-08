@@ -1,4 +1,4 @@
-"""Native response message for the H1 send path (native-ization, Sprint 92).
+"""Native response message for the H1 send path.
 
 The unified response message BlackBull's own server carries on the native
 path.  One class replaces the ASGI start/body/trailers dicts: a response
@@ -82,10 +82,11 @@ class NativeWSMessage:
     """One message on the native WebSocket send channel.
 
     The WS counterpart of :class:`NativeResponse`, and it exists for the same
-    reason.  HTTP got a native send message in Sprint 92/93 and the sender a
-    native arm; WebSocket was carried along as "conn is native, no scope" while
-    its *event channel* stayed ASGI-shaped — so ``websocket.*`` dicts still
-    travelled object → middleware → actor → sender on BlackBull's own path.
+    reason.  HTTP has a native send message and the sender a native arm;
+    WebSocket would otherwise be native only in the sense that "conn is
+    native, no scope" while its *event channel* stayed ASGI-shaped — so
+    ``websocket.*`` dicts would travel object → middleware → actor → sender
+    on BlackBull's own path.
     The handler never saw them (that is the :class:`~blackbull.websocket.WebSocket`
     object's whole point), but everything under it did.
 

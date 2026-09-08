@@ -101,8 +101,8 @@ def _bind_socket(family, host, port,
         # SO_SNDBUF / SO_RCVBUF and TCP_USER_TIMEOUT are inherited by
         # accepted sockets on Linux, so set them once on the listening
         # socket and skip per-accept.  SO_KEEPALIVE is NOT inherited
-        # (verified) — and we replaced it with an application-level
-        # idle timer in HTTP1Actor (see ``keep_alive_timeout``).
+        # (verified); the application-level idle timer in HTTP1Actor
+        # (``keep_alive_timeout``) covers that ground instead.
         if sndbuf:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, sndbuf)
         if rcvbuf:
@@ -113,7 +113,7 @@ def _bind_socket(family, host, port,
         if user_timeout_ms and hasattr(socket, 'TCP_USER_TIMEOUT'):
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_USER_TIMEOUT, user_timeout_ms)
         # The *keepalive* parameter is accepted for forward-compatibility
-        # but no longer applied here; see callers.
+        # but is not applied here; see callers.
 
         sock.bind((host, port))
         sock.listen(backlog)

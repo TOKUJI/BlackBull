@@ -411,7 +411,7 @@ class AsyncioWriter(AbstractWriter):
         check = self._is_closing
         if check is None:
             # No transport yet (or a stand-in without one): fall back to the
-            # exception path, which is what this class did before.
+            # exception path.
             return False
         try:
             return check() is True
@@ -500,8 +500,8 @@ class AsyncioWriter(AbstractWriter):
 # Keeping the public alias honestly ASGI-shaped is the point: an app or
 # middleware author holding an ``ASGISendCallable`` should not be told that
 # sending a bare byte string is legal, because through the app-facing channel
-# it is not.  Disconnect used to widen this too, until the actor→sender signal
-# it existed for became :meth:`BaseSender.mark_client_gone`.
+# it is not.  The actor→sender disconnect signal is a method,
+# :meth:`BaseSender.mark_client_gone`, so it needs no widening here.
 _SenderEvent = ASGISendEvent
 _SenderBody = _SenderEvent | bytes | NativeResponse
 _WSSenderEvent = WebSocketSendEvent | WebSocketCloseEvent | WebSocketAcceptEvent
@@ -542,13 +542,13 @@ class BaseSender(ABC):
         quietly rather than as a broken-pipe traceback.
 
         This is a *control signal between the actor and its sender*, which is
-        why it is a method and not an event.  It used to travel as an
-        ``http.disconnect`` dict down the send channel — the one place the
-        server pushed a receive-side event the wrong way through the pipe,
-        purely because that pipe was already there.  The cost was not the dict
-        but the type: every sender's public event union had to widen to admit
-        a message no application or middleware may ever legally send, and
-        anyone reading the signature learned the wrong contract.
+        why it is a method and not an event.  As an ``http.disconnect`` dict
+        down the send channel it would be the one place the server pushes a
+        receive-side event the wrong way through the pipe, purely because that
+        pipe is already there.  The cost is not the dict but the type: every
+        sender's public event union would have to widen to admit a message no
+        application or middleware may ever legally send, and anyone reading
+        the signature would learn the wrong contract.
 
         ``http.disconnect`` remains the app-facing spelling on ``receive()``,
         which is the direction ASGI defines it in.
@@ -565,13 +565,13 @@ class BaseSender(ABC):
 
         Once a write hits ``ConnectionResetError`` / ``BrokenPipeError`` /
         SSL EOF, the sender marks itself closed and subsequent writes
-        silently drop.  These exceptions used to propagate out as
+        silently drop.  Unguarded, these exceptions propagate out as
         tracebacks under wrk c=1024 sustained load — 22 per 30 s in the
         141848 run.
 
         ``_closed`` is bound in ``__init__`` for every sender, so a direct
-        attribute read is safe (and cheaper than the old ``getattr`` guard)
-        on this per-write hot path.
+        attribute read is safe — and cheaper than a ``getattr`` guard — on
+        this per-write hot path.
 
         The discovery is published to :attr:`AbstractWriter.peer_gone`, which
         every sender on the connection shares.  A sender that has not written
@@ -722,8 +722,8 @@ class HTTP1Sender(BaseSender):
                     self._completed = True
 
             case NativeResponse():
-                # Unified native response (native-ization, Sprint 92): one
-                # object may carry header, body, and/or trailers; presence is
+                # Unified native response: one object may carry header,
+                # body, and/or trailers; presence is
                 # `is not None`.  A complete response is one object, one
                 # dispatch; streaming is header-object then body-chunk
                 # objects.  Header is buffered exactly like the dict start
@@ -905,10 +905,10 @@ class HTTP1Sender(BaseSender):
         self._ensure_date_header(headers)
 
         # Coalesce status line + headers + body into a single write so the
-        # response is emitted as one TLS record / one drain.  Before this,
-        # each header line was a separate `_write` (= a separate
-        # `await drain()` yield); a 3-header response did ~6 yields per
-        # request and showed in py-spy as ~33% of HTTP/1.1 CPU spread
+        # response is emitted as one TLS record / one drain.  Uncoalesced,
+        # each header line is a separate `_write` (= a separate
+        # `await drain()` yield); a 3-header response then costs ~6 yields
+        # per request, measured in py-spy at ~33% of HTTP/1.1 CPU spread
         # across `_write_start` / `_write` / `streams.write`.
         head = self._render_start(status, headers)
 
@@ -928,10 +928,10 @@ class HTTP1Sender(BaseSender):
                 chunk += b'0\r\n\r\n'
             await self._write(chunk)
         elif body:
-            # Vectored write: avoids the full-body memcpy that ``head + body``
-            # forced.  At static-file rates of ~5k req/s × ~17 KB on average,
-            # that allocation was ~88 MB/s of pure user-space copy before the
-            # bytes even reached the transport.
+            # Vectored write: avoids the full-body memcpy a ``head + body``
+            # concatenation forces.  At static-file rates of ~5k req/s ×
+            # ~17 KB on average that allocation is ~88 MB/s of pure
+            # user-space copy before the bytes even reach the transport.
             await self._write_many((head, body))
         else:
             await self._write(head)
@@ -1044,7 +1044,7 @@ class HTTP2Sender(BaseSender):
       ``await sender(body_bytes, HTTPStatus.OK, headers=[...])``
       Sends a HEADERS frame followed by a DATA frame.
 
-    **Native** (:class:`~blackbull.native.NativeResponse`, Sprint 93):
+    **Native** (:class:`~blackbull.native.NativeResponse`):
       ``await sender(NativeResponse(status=..., header=..., body=...))``
       One object may carry header, body, and/or trailers; the sender buffers
       the header arm exactly like the dict start and delegates body/trailers
@@ -1085,11 +1085,10 @@ class HTTP2Sender(BaseSender):
         # private window, which is correct only for a lone stream — see the
         # class docstring for what N private copies cost.
         self._conn_window = conn_window if conn_window is not None else ConnectionWindow()
-        # Per-stream send window.  Refactor 2.5 — a plain int (this was a
-        # dict-of-one keyed on the sender's own stream id, which obscured that
-        # it is scalar and invited readers to hunt for multi-stream semantics
-        # that never existed).  Seeded at construction from the peer's
-        # SETTINGS_INITIAL_WINDOW_SIZE when known (bugs 1.20a + 2.11): both
+        # Per-stream send window — a plain int, since one sender serves one
+        # stream; keying it by stream id would invite a reader to hunt for
+        # multi-stream semantics that do not exist.  Seeded at construction
+        # from the peer's SETTINGS_INITIAL_WINDOW_SIZE when known: both
         # server and client pass ``initial_window`` so a sender created after
         # the SETTINGS exchange starts at the peer's announced window, not
         # the RFC 9113 §6.9.2 default.
@@ -1125,7 +1124,7 @@ class HTTP2Sender(BaseSender):
         # The deferred auto-flush task (retained so a non-connection failure
         # inside it is surfaced, not lost as an un-retrieved task exception).
         self._auto_flush_task: asyncio.Future | None = None
-        # Optional access-log record (Sprint 93 M1): the actor sets this so
+        # Optional access-log record: the actor sets this so
         # the sender can capture status / response_bytes inline in its arms —
         # no per-event coroutine-dispatch wrapper (the H2 native seam would
         # otherwise never match the dict-shaped capturing wrapper).
@@ -1166,12 +1165,12 @@ class HTTP2Sender(BaseSender):
         """Write the deferred response HEADERS + first DATA body chunk together.
 
         Called on every first body event (buffered or not), not only for the
-        auto-flush of a held chunk — hence the ``_write_response_start_and_body``
-        name rather than the former ``_flush_buffered_start``.
+        auto-flush of a held chunk — which is what the name says and a
+        "flush the buffered start" name would not.
         """
         headers = headers or []
         # HEADERS never carries END_STREAM here — an empty DATA frame does
-        # (mirrors the object path this replaced).
+        # (mirrors the object path).
         h_bytes = build_response_headers(
             self._factory.encoder, self._stream_id, status, headers,
             end_stream=False)
@@ -1199,8 +1198,8 @@ class HTTP2Sender(BaseSender):
     def _schedule_auto_flush(self) -> None:
         """Schedule a deferred flush of the just-buffered first body chunk.
 
-        A single ``ensure_future`` hop (not the former ``call_soon`` →
-        ``ensure_future`` two-hop): the task's first step runs at the next
+        A single ``ensure_future`` hop, not a ``call_soon`` →
+        ``ensure_future`` two-hop: the task's first step runs at the next
         event-loop iteration, *after* any synchronous ASGI events emitted in the
         same coroutine burst — so trailers (or a second body chunk) still get a
         chance to consume the buffer and coalesce before the task fires.  The
@@ -1570,8 +1569,8 @@ class HTTP2Sender(BaseSender):
             self._end_stream_sent = True
 
         elif isinstance(body, NativeResponse):
-            # Unified native response (native-ization, Sprint 93 — the H2 arm
-            # of the H1 seam): one object may carry header, body, and/or
+            # Unified native response (the H2 arm of the H1 seam): one
+            # object may carry header, body, and/or
             # trailers; presence is `is not None`.  Header is buffered exactly
             # like the dict start arm (the first body object completes the
             # flush); body/trailers delegate to the shared helpers the dict
@@ -1593,8 +1592,8 @@ class HTTP2Sender(BaseSender):
                 self._buffered_status = HTTPStatus(body.status)
                 self._buffered_headers = list(body._header)
                 self._expect_trailers = body.expects_trailers
-                # Inline access-log capture (Sprint 93 M1 — mirrors the H1
-                # native arm; no per-event capturing wrapper on this lane).
+                # Inline access-log capture (mirrors the H1 native arm; no
+                # per-event capturing wrapper on this lane).
                 if self._log_record is not None:
                     self._log_record.status = body.status
                     self._log_record.mark('start_arm_in')
@@ -1632,8 +1631,7 @@ class HTTP2Sender(BaseSender):
                 self._buffered_status = HTTPStatus(body.get('status', 200))
                 self._buffered_headers = list(body.get('headers', []))
                 self._expect_trailers = bool(body.get('trailers', False))
-                # Inline access-log capture (Sprint 93 M1 — mirrors the H1
-                # dict start arm).
+                # Inline access-log capture (mirrors the H1 dict start arm).
                 if self._log_record is not None:
                     self._log_record.status = body.get('status', '-')
                     self._log_record.mark('start_arm_in')
@@ -1718,9 +1716,9 @@ class WebSocketSender(BaseSender):
         # Dict arm first.  A dict is the one shape here that nothing cheaper
         # than ``isinstance`` can recognise, and it is what the external-host
         # edge and the raw (conn, receive, send) compat form emit.  Testing it
-        # first means the compat path pays one check; the native arm below
-        # pays the same one on its way past, where it used to pay one and the
-        # compat path two — the second being a pure type guard.
+        # first means the compat path pays one check, and the native arm
+        # below pays that same one on its way past — no second type guard
+        # on either lane.
         if isinstance(body, dict):
             event_type = body.get('type', '')
 

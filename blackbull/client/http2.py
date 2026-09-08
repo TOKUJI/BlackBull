@@ -333,9 +333,9 @@ class HTTP2Client:
         self._goaway_received: bool = False
         # Set when the receive loop ends for any reason.  ``_goaway_received``
         # only covers the polite departure; a peer that simply vanishes leaves
-        # no frame behind, and without this ``request()`` awaited a future
-        # nobody was left to resolve.  ``HTTP1Client`` raises here, so the two
-        # clients used to disagree about the same event.
+        # no frame behind, and without this ``request()`` awaits a future
+        # nobody is left to resolve.  ``HTTP1Client`` raises here, so without
+        # it the two clients disagree about the same event.
         self._connection_lost: bool = False
         # Set by ``__aexit__``: the close this process performed, which is a
         # different event from the peer's departure above and owes the caller

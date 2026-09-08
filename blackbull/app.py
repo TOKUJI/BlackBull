@@ -281,10 +281,10 @@ class BlackBull:
         # docs/guide/extensions.md.
         self.extensions: dict[str, object] = {}
 
-        # Non-ASGI protocol registry — lazily built on the first
-        # raw_handler / register_protocol_handler so importing BlackBull does
-        # not drag in the server package.  None means "HTTP-only" (the bridge
-        # is fully dormant).
+        # Non-ASGI protocol registry — built on the first raw_handler /
+        # register_protocol_handler call, so an HTTP-only app allocates no
+        # registry and binds no extra listener.  None means "HTTP-only"
+        # (the bridge is fully dormant).
         self._protocol_registry = None
 
         # gRPC service registry — None until ``enable_grpc`` is called.  gRPC
@@ -689,13 +689,12 @@ class BlackBull:
                 await serve_grpc(self._grpc_registry, conn, receive, send)
                 return
 
-        # Normalise send for the HTTP path (Sprint 92 H1 seam + Sprint 93 H2
-        # arm): the handler-boundary adapter converts every accepted shape —
-        # Response, the (bytes, status, headers) 3-arg form, ASGI dicts
-        # (full-form compat), NativeResponse — to NativeResponse, so
-        # middleware and the sender observe a single native representation on
-        # both H1 and H2 (the Sprint 92 H2 gate dropped with the H2 native
-        # arm).  ``raw_send`` is retained so an RFC 10008 ``Accept-Query``
+        # Normalise send for the HTTP path: the handler-boundary adapter
+        # converts every accepted shape — Response, the (bytes, status,
+        # headers) 3-arg form, ASGI dicts (full-form compat), NativeResponse —
+        # to NativeResponse, so middleware and the sender observe a single
+        # native representation on both H1 and H2.  ``raw_send`` is retained
+        # so an RFC 10008 ``Accept-Query``
         # route can re-wrap with the header injector *below* the adapter.
         raw_send = send
         send = _wrap_send_native(send)
@@ -790,10 +789,11 @@ class BlackBull:
             #
             # ``ConnectionResetError`` is the same event arriving unwrapped:
             # the read path surfaces the OS error when the reset lands while a
-            # handler is mid-``stream()``.  It reached the generic handler
-            # below and printed a full traceback per occurrence — 307 of them
-            # in one sixteen-profile run, for something that is a client's
-            # ordinary prerogative rather than a server fault.
+            # handler is mid-``stream()``.  Uncaught here it reaches the
+            # generic handler below and prints a full traceback per
+            # occurrence — 307 of them in one sixteen-profile run, for
+            # something that is a client's ordinary prerogative rather than
+            # a server fault.
             exc_caught = e
             if _DEBUG:
                 self._logger.debug('client disconnected before request body completed')
@@ -836,11 +836,11 @@ class BlackBull:
     def _build_chain(self):
         chain = self._dispatch
         for mw in reversed(self._global_middlewares):
-            # No per-middleware conversion adapter.  It existed only because
-            # framework producers (``StaticFiles``' start/body/pathsend,
+            # No per-middleware conversion adapter.  One would only be needed
+            # if a framework producer (``StaticFiles``' start/body/pathsend,
             # ``CORS``' preflight) emitted ASGI dicts that bypassed the
-            # handler-boundary adapter; those producers are native now, so
-            # there is nothing left for a second altitude to catch.
+            # handler-boundary adapter; all of them are native, so a second
+            # altitude has nothing to catch.
             chain = functools.partial(mw, call_next=chain)
         self._chain = chain
 
@@ -1479,12 +1479,11 @@ def serve(app, *,
     # Stateful non-ASGI protocols (MQTT, …) must have a single owner, but HTTP
     # is stateless and should scale.  The master binds the protocol port once
     # and hands it to worker 0 only (see MultiWorkerServer), so multi-worker +
-    # MQTT now works: HTTP uses every worker, the broker lives on worker 0.
+    # MQTT works: HTTP uses every worker, the broker lives on worker 0.
     #
     # The one exception is auto-reload: it carries listening sockets across an
-    # exec via fd inheritance, and that handoff does not yet include the
-    # protocol listeners.  Keep reload + stateful protocols single-worker until
-    # that is wired up.
+    # exec via fd inheritance, and that handoff does not cover the protocol
+    # listeners — so reload + stateful protocols stays single-worker.
     if (isinstance(app, BlackBull) and app._protocol_registry is not None
             and app._protocol_registry.has_port_bindings() and workers > 1
             and reload):

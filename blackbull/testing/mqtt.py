@@ -1,7 +1,7 @@
 """In-process MQTT test environment — drive ``on_message`` taps with no socket.
 
-An application developer testing a ``@mqtt.on_message`` tap used to have to
-stand up a real broker and a real MQTT client (``mosquitto_pub``).  This
+Testing a ``@mqtt.on_message`` tap otherwise means standing up a real broker
+and a real MQTT client (``mosquitto_pub``).  This
 module feeds PUBLISHes into the app's registered taps directly — topic
 matching and ``{name}`` captures included — with no TCP socket, no CONNECT,
 and no MQTT client::
