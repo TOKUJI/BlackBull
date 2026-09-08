@@ -619,12 +619,7 @@ async def test_request_timeout_logs(caps_caplog, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_h2_max_concurrent_streams_logs(caps_caplog):
-    """When active streams reach max_concurrent_streams, _on_headers_frame
-    logs the cap-hit and sends RST_STREAM REFUSED_STREAM.
-
-    The guard is the very first check in _on_headers_frame, so we can
-    drive it with minimal mocks — the frame/tg/send args are only
-    accessed after the cap check returns early."""
+    """A completed new field section over the stream cap is refused and logged."""
     from unittest.mock import MagicMock, AsyncMock
     from blackbull.server.sender import AsyncioWriter
     from blackbull.server.http2_actor import HTTP2Actor
@@ -641,7 +636,9 @@ async def test_h2_max_concurrent_streams_logs(caps_caplog):
     # mocks satisfy beartype's signature checks on _on_headers_frame.
     stream = MagicMock(spec=Stream)
     stream.stream_id = 1
+    stream.conn = None
     frame = MagicMock()
+    frame.end_headers = True
     tg = MagicMock(spec=asyncio.TaskGroup)
 
     result = await actor._on_headers_frame(frame, stream, AsyncMock(), tg)
