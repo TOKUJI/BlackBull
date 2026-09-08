@@ -49,10 +49,14 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
 from dataclasses import dataclass
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _pysource import prose_lines  # noqa: E402
 
 #: Public documents, in which a private tracker id is a dangling reference.
 #: Kept as a prefix list rather than "everything not exempt" so that adding a
@@ -108,6 +112,18 @@ RULES: list[Rule] = [
 ]
 
 
+def _new_side(path: str, rev: str | None) -> str | None:
+    """The content of *path* on the side the diff added to, or None.
+
+    ``--staged`` compares against the index, a commit range against its tip;
+    either way the added lines belong to that version of the file, not to
+    whatever the working tree happens to hold.
+    """
+    spec = f'{rev}:{path}' if rev else f':{path}'
+    r = subprocess.run(['git', 'show', spec], capture_output=True, text=True)
+    return r.stdout if r.returncode == 0 else None
+
+
 def _added_lines(args: list[str]) -> list[tuple[str, int, str]]:
     """(path, line number in the new file, text) for every added line."""
     diff = subprocess.run(['git', 'diff', '--unified=0', '--no-color', *args],
@@ -140,6 +156,14 @@ def _whole_files(paths: list[str]) -> list[tuple[str, int, str]]:
     return out
 
 
+def _read(path: str) -> str | None:
+    try:
+        with open(path, encoding='utf-8') as fh:
+            return fh.read()
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--staged', action='store_true')
@@ -147,17 +171,38 @@ def main() -> int:
     ap.add_argument('paths', nargs='*')
     ns = ap.parse_args()
 
+    sources: dict[str, str | None] = {}
     if ns.staged:
         lines = _added_lines(['--cached'])
+        fetch = lambda p: _new_side(p, None)          # noqa: E731
     elif ns.rng:
         lines = _added_lines([ns.rng])
+        fetch = lambda p: _new_side(p, ns.rng.split('..')[-1] or 'HEAD')  # noqa: E731
     elif ns.paths:
         lines = _whole_files(ns.paths)
+        fetch = _read                                  # noqa: E731
     else:
         # ``ap.error`` exits, but nothing in the signature says so; returning
         # here keeps that true for a reader and for static analysis alike.
         ap.error('one of --staged, --range, or PATH is required')
         return 2
+
+    def _is_prose(path: str, lineno: int) -> bool:
+        """Is this line prose, per the language's own grammar?
+
+        Only Python needs asking: in Markdown every line is prose.  A source
+        we cannot fetch or parse is judged as written, which over-reports
+        rather than letting a real one through — a gate that guesses in the
+        permissive direction is not a gate.
+        """
+        if not path.endswith('.py'):
+            return True
+        if path not in sources:
+            sources[path] = fetch(path)
+        src = sources[path]
+        if src is None:
+            return True
+        return lineno in prose_lines(src)
 
     findings = []
     for path, lineno, text in lines:
@@ -165,7 +210,7 @@ def main() -> int:
             if not rule.scope(path):
                 continue
             m = rule.pattern.search(text)
-            if m:
+            if m and _is_prose(path, lineno):
                 findings.append((path, lineno, m.group(0), rule.why, text.strip()))
 
     if not findings:
