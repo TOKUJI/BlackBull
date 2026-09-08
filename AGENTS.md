@@ -50,6 +50,26 @@ that only make sense inside BlackBull.
   block cannot be abandoned per-stream, since HPACK state is connection-wide.
   → `BLA-A-1` [private]
 
+- **Comments are reviewed by whoever did not write them.**  An implementation
+  is not finished when the tests pass; it is finished when an agent that did
+  not author the prose has read it against the code.  Judging your own
+  comments is the same judgement twice, and it is the judgement that fails:
+  BLA-384 found a module docstring stating three defaults the code had not
+  shipped for releases, a `--help` line calling a finite cap unlimited, and a
+  package docstring asserting the exact opposite of what importing it does.
+  Two enforcement points hold this without anyone remembering to ask:
+  `scripts/check_comment_drift.py --staged` runs first in the pre-commit hook
+  and refuses dated commentary; a `Stop` hook
+  (`.claude/hooks/require-comment-review.sh` [private]) blocks the end of a
+  turn that changed comments until an independent subagent has reviewed
+  exactly those lines.  `scripts/changed_comments.py` is what defines "exactly
+  those lines" — hand the reviewer that command, never a file list.
+  **Only unambiguous vocabulary is machine-refused** (sprint numbers, version
+  boundaries, internal tracker ids).  `used to`, `legacy`, `still` and
+  `no longer` are measured to be mostly present-tense and are deliberately
+  left to the reviewer: a check that cries wolf gets `--no-verify`'d, and then
+  it protects nothing.
+
 - **Type-check before committing.** `just typecheck` catches contract
   violations statically.  → `.claude/skills/type-check/SKILL.md` [private]
 

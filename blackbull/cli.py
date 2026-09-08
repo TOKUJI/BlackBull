@@ -28,6 +28,12 @@ import tomllib
 from typing import Any
 
 from .app import serve as _serve
+#: Read for its *field defaults*, never for a live value: ``--help`` states
+#: what the env var ships with, not what this shell happens to export.  The
+#: field default is that number, and tests/architecture/test_documented_defaults
+#: holds it to what ``get_settings()`` selects — so interpolating here removes
+#: the copy rather than adding a fourth one to keep in step.
+from .env import Settings
 
 
 # ---------------------------------------------------------------------------
@@ -269,7 +275,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         '--workers', type=int, default=None, metavar='N',
         help='Number of worker processes.  0 = os.cpu_count().  '
-             'Defaults to BB_WORKERS (=1).',
+             f'Defaults to BB_WORKERS (={Settings.workers}).',
     )
     p.add_argument(
         '--max-connections', type=int, default=None, metavar='N',
@@ -279,13 +285,15 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         '--stream-queue-depth', type=int, default=None, metavar='N',
         help='asyncio.Queue depth for HTTP/2 per-stream events.  '
-             'Defaults to BB_STREAM_QUEUE_DEPTH (=64).',
+             'Defaults to BB_STREAM_QUEUE_DEPTH '
+             f'(={Settings.stream_queue_depth}).',
     )
     p.add_argument(
         '--ws-queue-depth', type=int, default=None, metavar='N',
         help='WebSocket inbound read-ahead depth.  0 (the default) reads '
              'inline in the handler task; >0 runs a background reader with a '
-             'queue of that depth.  Defaults to BB_WS_QUEUE_DEPTH (=0).',
+             'queue of that depth.  Defaults to BB_WS_QUEUE_DEPTH '
+             f'(={Settings.ws_queue_depth}).',
     )
     p.add_argument(
         '--reload', action='store_true',

@@ -13,7 +13,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   documented the twenty-two variables it read but never listed — the whole
   `BB_CLIENT_*` block among them.  `blackbull --help` no longer reports
   `--max-connections` as defaulting to unlimited; the default is `auto`, a
-  finite cap derived from `RLIMIT_NOFILE`.  Importing `blackbull` does load
+  finite cap derived from `RLIMIT_NOFILE`, and the numeric defaults it quotes
+  are now read from `Settings` rather than typed out.  Importing `blackbull` does load
   the server stack, and the package docstring now says so.  Three new
   architecture tests fail the build when a stated default and the shipped one
   disagree again.
