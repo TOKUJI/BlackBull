@@ -50,6 +50,32 @@ that only make sense inside BlackBull.
   block cannot be abandoned per-stream, since HPACK state is connection-wide.
   → `BLA-A-1` [private]
 
+- **Comment drift has two causes, and only one of them is a detection
+  problem.**  Prose that *was* true and stopped being true is caught, crudely,
+  by tooling (→ `BLA-389` [private]).  Prose that never kept up with the code
+  beside it is a **volume** problem: every line of prose is a line that can go
+  stale, so the drift surface *is* the prose count.  Measured, it only grows —
+  `v0.31.0` shipped 0.56 prose lines per code line, `v0.80.0` shipped 0.82,
+  and it rose at every release in between; code grew 2.65× over that span
+  while prose grew 3.88×.  Nearly half of every non-blank line in the package
+  is now prose, and 39 of 109 files carry more prose than code.
+  `scripts/prose_census.py` is the number — quote it before and after when you
+  claim a reduction.  → `BLA-390` [private]
+
+- **Reduction is a separate agent's only job, because the objectives differ.**
+  An agent asked *"is this comment true?"* grades its own writing and grades
+  toward accuracy: it defends the sentence and keeps it.  Ask instead *"can
+  this comment be deleted?"*, in a different head, judged on **how much of the
+  change is carried by names alone with the fewest comments left standing**.
+  True is not a reason to keep a line — true was never the question.  Renaming
+  is the instrument and is not a behaviour change; `just test` passing with no
+  test file modified is the proof, since a rename moves the AST.  A minimising
+  pass destroys five things unless they are named up front, and losing one is
+  a failure of the pass rather than a saving: **deprecation contracts with
+  their removal dates, RFC citations, a measured number and why it is that
+  number, an invariant the reader would otherwise reverse-engineer, and a
+  trade-off decided against.**
+
 - **Comments are reviewed by whoever did not write them.**  An implementation
   is not finished when the tests pass; it is finished when an agent that did
   not author the prose has read it against the code.  Judging your own
