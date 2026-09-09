@@ -25,7 +25,6 @@ import asyncio
 import re
 import traceback
 
-# import from this package
 import logging
 from .event import Event, EventDispatcher, EventHandler
 from .utils import Scheme, is_client_error, is_server_error
@@ -40,24 +39,17 @@ from .logger import debug_gate  # noqa: E402
 from .server.protocol_registry import RawBinding
 
 logger = logging.getLogger(__name__)
-#: Read once at import: a disabled ``logger.debug`` on a per-request path
-#: costs 24 executed instructions to emit nothing.  Same bargain as
-#: ``@log`` — see :func:`blackbull.logger.debug_gate`.
+#: Import-time gate; the cost it buys back is measured in
+#: :func:`blackbull.logger.debug_gate`.
 _DEBUG = debug_gate(logger)
 
 
 
 def _wrap_send_native(raw_send: ASGISendCallable):
-    """Handler-boundary adapter for the native H1 path: all shapes → native.
-
-    Thin wrapper over :func:`blackbull.response.wrap_native_send` — the
-    shared conversion (with ``as_middleware``) so global and per-route
-    middleware observe the same native contract.  Installed at the same
-    altitude as :func:`_wrap_send` (the handler boundary, innermost), so on
-    H1 everything above the route handler sees only
-    :class:`~blackbull.native.NativeResponse`.  See ``wrap_native_send`` for
-    the accepted shapes (full-form ``send(dict)`` compat held until
-    2027-07-29).
+    """Install :func:`blackbull.response.wrap_native_send` at the handler
+    boundary (innermost), so everything above the route handler sees only
+    :class:`~blackbull.native.NativeResponse`.  That function owns the
+    accepted shapes and the compat contract.
     """
     return wrap_native_send(raw_send)
 
@@ -65,13 +57,11 @@ def _wrap_send_native(raw_send: ASGISendCallable):
 def _to_asgi_boundary(send: ASGISendCallable):
     """Wrap an external ASGI host's ``send`` with native→ASGI conversion.
 
-    The app is native internally in **both** modes (decision 7): the router
-    converts handler sends to ``NativeResponse`` on the H1 path, and the
-    object-form :class:`~blackbull.websocket.WebSocket` emits
-    ``NativeWSMessage``.  At the external-host edge (scope-dict entry /
-    ``asgi=True``) both are expanded back to ASGI dicts, so uvicorn / httpx /
-    TestClient receive standard ``http.response.*`` / ``websocket.*`` events.
-    Lifespan and already-ASGI events pass straight through.
+    Expands both native shapes — ``NativeResponse`` from the router,
+    ``NativeWSMessage`` from the object-form
+    :class:`~blackbull.websocket.WebSocket` — back into standard
+    ``http.response.*`` / ``websocket.*`` dicts; lifespan and already-ASGI
+    events pass straight through.  ``__call__`` decides when to install it.
     """
     from .native import asgi_send_boundary  # noqa: PLC0415
 
@@ -83,17 +73,11 @@ def _inject_response_headers(raw_send, extra_headers):
 
     A route may declare headers (via the ``_bb_response_headers`` hook) that
     must appear on all of its responses — success and the centrally-rendered
-    error alike.  Installed **below** the handler-boundary adapter, so the
-    seam is native and only the header arm needs handling.  Every other event
-    passes straight through.
+    error alike.  Every event but the header arm passes straight through.
     """
-    # Unannotated for the same per-request-closure reason as _wrap_send;
-    # ``event`` is a NativeResponse.
+    # ``event`` is a NativeResponse.  Nested defs in a per-request factory
+    # stay unannotated — tests/architecture/test_per_request_closure_annotations.py.
     async def _send(event):
-        # Native header arm — presence is `is not None`, never truthiness (an
-        # empty header list is a real header).  Read the raw slot for the
-        # presence check (no discarded _HeaderView on the hot path); the
-        # append still goes through the view's footgun guard.
         if isinstance(event, NativeResponse):
             view = event.header
             if view is not None:
@@ -141,25 +125,12 @@ def _render_error_html(status, exc, tb_text: str | None, conn) -> bytes:
 
 
 async def _default_error_handler(conn, receive, send):  # noqa: ARG001
-    """Comprehensive fallback error handler registered at BlackBull construction.
+    """Fallback error handler registered on every status at construction.
 
-    Reads from conn.state:
-      - 'error_status'    : HTTPStatus  (default: INTERNAL_SERVER_ERROR)
-      - 'error_exception' : exception instance (optional)
-      - 'allowed_methods' : iterable of method names (for 405 Allow header)
-
-    Output adapts to ``BLACKBULL_ENV`` and the request ``Accept`` header:
-
-    * ``development`` — include the full Python traceback when an exception
-      is present, so users debugging locally see the failure inline.
-      Exception: a **4xx** :class:`HTTPException` is a *diagnosed client
-      fault* (missing query param, malformed body, …) — the page keeps the
-      status + detail line but drops the traceback, mirroring the quiet-log
-      rule the dispatcher applies to the same errors.  ``Accept: text/html``
-      returns a styled HTML page; everything else gets text/plain.
-    * ``production`` — terse: status code + phrase only.  No exception
-      class or message is leaked.  Browsers get a minimal HTML page;
-      curl-style clients get text/plain.
+    Reads ``error_status`` / ``error_exception`` / ``allowed_methods`` off
+    ``conn.state`` and renders per ``BLACKBULL_ENV`` and ``Accept``.  The
+    dev/prod matrix, and why a 4xx :class:`HTTPException` keeps its detail
+    line but not its traceback, are in ``docs/guide/error-handling.md``.
     """
     # Imported here to avoid a circular import at module load (env -> app).
     from .env import get_settings, Environment
@@ -178,10 +149,6 @@ async def _default_error_handler(conn, receive, send):  # noqa: ARG001
 
     tb_text = None
     if is_dev and exc is not None:
-        # 4xx HTTPExceptions are client faults the framework already
-        # diagnosed — the detail line below is the actionable part, and the
-        # server-side frames are noise.  5xx and unexpected exceptions keep
-        # the full traceback.
         if not (isinstance(exc, HTTPException) and is_client_error(exc.status)):
             tb_text = ''.join(
                 traceback.format_exception(type(exc), exc, exc.__traceback__))
@@ -247,20 +214,13 @@ class BlackBull:
                  cache_max: int | None = None,
                  asgi: bool = False,
                  ):
-        # ``asgi`` marks the app as external-host-oriented (decision 2026-08-03):
-        # the app is native internally in BOTH modes, and the native→ASGI
-        # boundary conversion applies at the external edge.  asgi=True applies
-        # it unconditionally in ``__call__``; the flag-less app still gets it
-        # automatically when entered with an ASGI scope dict (uvicorn / httpx /
-        # TestClient).  ``to_asgi()`` requires the flag.
+        # Marks the app external-host-oriented; ``__call__`` owns what the
+        # flag decides.
         self._asgi = asgi
         self._config = config
-        # ``cache_max`` bounds the per-worker route lookup cache (0 disables
-        # it); ``None`` keeps the Router default (2048).  See the routing guide.
+        # ``None`` keeps the Router's own default; see the routing guide.
         self._router = Router() if cache_max is None else Router(cache_max=cache_max)
         self._logger = logger
-        # Miss-fallback covers every error status and unhandled exception
-        # class; only user-registered handlers live in the registries.
         self._error_router = ErrorRouter(default=_default_error_handler)
 
         self._dispatcher = EventDispatcher(shutdown_timeout=observer_shutdown_timeout)
@@ -270,26 +230,19 @@ class BlackBull:
         self._wsprotocols = None
         self._global_middlewares: list = []
         self._static_roots: list[tuple[str, Path]] = []
-        self._chain = None  # cached global middleware chain; rebuilt on first request
+        self._chain = None
 
-        # Pre-fork warm-up hooks (see on_warmup).  Run once in the master
-        # before it binds/forks; empty means warm-up is a no-op.
+        # See on_warmup.
         self._warmup_hooks: list = []
 
-        # Extension namespace — name→object registry used by third-party
-        # integrations following the ``init_app(app)`` convention.  See
-        # docs/guide/extensions.md.
+        # Name→object registry; see docs/guide/extensions.md.
         self.extensions: dict[str, object] = {}
 
-        # Non-ASGI protocol registry — built on the first raw_handler /
-        # register_protocol_handler call, so an HTTP-only app allocates no
-        # registry and binds no extra listener.  None means "HTTP-only"
-        # (the bridge is fully dormant).
+        # Built on the first registration, so an HTTP-only app allocates no
+        # registry and binds no extra listener.
         self._protocol_registry = None
 
-        # gRPC service registry — None until ``enable_grpc`` is called.  gRPC
-        # is HTTP/2 with ``content-type: application/grpc``; requests are
-        # multiplexed onto the same port and dispatched in ``_dispatch``.
+        # See enable_grpc.
         self._grpc_registry = None
 
         if trusted_proxies is not None:
@@ -302,10 +255,9 @@ class BlackBull:
             try:
                 self._loop = asyncio.get_running_loop()
             except RuntimeError:
-                # No event loop is running yet (e.g. called from synchronous
-                # setup code).  Return None so callers that don't need the
-                # loop won't crash; asyncio will provide the loop later when
-                # the coroutines actually run.
+                # Called from synchronous setup code.  None rather than a
+                # raise, so a caller that does not need the loop still works;
+                # asyncio supplies one once the coroutines run.
                 return None
         return self._loop
 
@@ -354,9 +306,7 @@ class BlackBull:
 
     def _on_lifecycle_event(self, event_name: str,
                             fn: Callable[[], Awaitable[None]]) -> Callable[[], Awaitable[None]]:
-        """Wrap a zero-argument coroutine and register it as an interceptor
-        for *event_name*.  Shared by :meth:`on_startup` / :meth:`on_shutdown`;
-        the two differ only in the lifespan event they hook."""
+        """Register *fn* as a zero-argument interceptor for *event_name*."""
         async def _adapter(_event: Event) -> None:
             await fn()
         self._dispatcher.intercept(event_name, _adapter)
@@ -455,8 +405,6 @@ class BlackBull:
                             'more_body': False}
                 return {'type': 'http.request', 'body': b'', 'more_body': False}
 
-            # A fresh Connection per iteration — copy the request identity, leave
-            # the per-request caches (_body / _receive / state) at their defaults.
             fresh = Connection(
                 method=conn.method, path=conn.path, raw_path=conn.raw_path,
                 headers=conn.headers, query_string=conn.query_string,
@@ -550,9 +498,8 @@ class BlackBull:
         return decorator
 
     async def _handle_lifespan(self, receive, send):
-        # Lifespan carries an ASGI ``{'type': 'lifespan'}`` scope, but this
-        # handler is driven entirely by ``receive``/``send`` events — the scope
-        # itself is unused, so ``__call__`` does not pass it.
+        # Driven entirely by ``receive``/``send``: the lifespan scope itself is
+        # unused, so ``__call__`` does not pass it.
         while True:
             event = await receive()
             if event['type'] == 'lifespan.startup':
@@ -577,12 +524,10 @@ class BlackBull:
                 try:
                     await self._dispatcher.emit(Event('app_startup'))
                 except Exception as exc:
-                    # A raising @app.on_startup / @app.intercept('app_startup')
-                    # hook must fail startup, not kill the lifespan task before
-                    # it acks — otherwise LifespanManager.__aenter__ blocks
-                    # forever and the server never starts.  Sending
-                    # lifespan.startup.failed is also the ASGI-correct signal
-                    # under external servers (uvicorn/hypercorn).
+                    # A raising hook must answer with lifespan.*.failed rather
+                    # than unwind the task: an unacked startup leaves
+                    # LifespanManager.__aenter__ blocked forever, and .failed
+                    # is the signal external hosts act on.
                     self._logger.error('app_startup hook failed:\n%s',
                                        traceback.format_exc())
                     await send({'type': 'lifespan.startup.failed', 'message': str(exc)})
@@ -595,11 +540,7 @@ class BlackBull:
                     await self._dispatcher.emit(Event('app_shutdown'))
                     await self._dispatcher.aclose()
                 except Exception as exc:
-                    # ASGI lifespan spec — a raising @app.on_shutdown /
-                    # @app.intercept('app_shutdown') hook must answer with
-                    # lifespan.shutdown.failed, not unwind the lifespan task
-                    # silently; external servers (uvicorn,
-                    # hypercorn) log the failure and exit non-zero.
+                    # Answer, don't unwind — see the startup arm above.
                     self._logger.error('app_shutdown hook failed:\n%s',
                                        traceback.format_exc())
                     await send({'type': 'lifespan.shutdown.failed',
@@ -612,31 +553,18 @@ class BlackBull:
                         send: ASGISendCallable):
         """Route and dispatch a single non-lifespan request.
 
-        Single emission point for the in-request Level B lifecycle events
-        (``request_received`` / ``before_handler`` / ``after_handler``) —
-        this is the one choke point every
-        transport passes (BlackBull's own HTTP/1.1 and HTTP/2 actors,
-        uvicorn/hypercorn, TestClient), so each fires exactly once per
-        request regardless of how the app is served.  ``request_completed``
-        is emitted from ``__call__`` instead: a *global* middleware
-        (``app.use``) wraps outside ``_dispatch`` and may buffer the whole
-        response (e.g. ``Compression``), so its wire fields (status /
-        response_bytes) are only final after the full chain returns
-        (issue #145).  The protocol actors emit only wire-level events
-        (``request_disconnected``, ``error``, websocket/connection
-        lifecycle).
+        The single emission point for ``request_received`` / ``before_handler``
+        / ``after_handler``.  Why they are emitted here, and why
+        ``request_completed`` is not, is in ``docs/about/internals.md``.
 
-        Each emission is guarded by ``has_listeners`` so a request with no
-        registered handlers pays only a dict lookup, not an ``Event`` +
-        detail-dict construction.
+        Each emit is guarded by ``has_listeners`` so a request with no
+        registered handler pays a dict lookup rather than an ``Event`` and its
+        detail dict.
         """
         if _DEBUG:
             self._logger.debug((conn, receive, send))
 
-        # WebSocket is native too: ``conn`` is a Connection here as
-        # well. Route it by its ``path`` to the registered WS handler, which
-        # receives ``(conn, receive, send)``. WS has its own lifecycle events
-        # (websocket_connected/message/disconnected), so it skips the HTTP
+        # WebSocket has its own lifecycle events, so it returns before the HTTP
         # request_received emit and _dispatch_http below.
         if conn.type == 'websocket':
             path = conn.path
@@ -669,19 +597,8 @@ class BlackBull:
 
     async def _dispatch_http(self, conn, receive: ASGIReceiveCallable | None,
                              send: ASGISendCallable, scheme):
-        """Route and run one HTTP request (the non-WebSocket half of _dispatch).
-
-        BlackBull is a native-Connection framework — the dispatch
-        pipeline threads the typed :class:`Connection` end to end (routing,
-        handler, error handlers, gRPC, and events all read ``conn.*``). The ASGI
-        ``scope`` dict exists only at the external/``BB_FORCE_ASGI_SCOPE`` boundary,
-        where ``__call__`` converts it to a Connection before this is reached.
-        """
-        # gRPC — HTTP/2 with ``content-type: application/grpc``.  When a
-        # registry is installed, such requests bypass the HTTP router and are
-        # served as unary gRPC calls (grpc-status reported in trailers).  The
-        # check is a single header read on the HTTP path and is skipped
-        # entirely when ``enable_grpc`` was never called.
+        """Route and run one HTTP request (the non-WebSocket half of _dispatch)."""
+        # gRPC rides the HTTP/2 path; see enable_grpc.
         if self._grpc_registry is not None and scheme == Scheme.http:
             content_type = conn.headers.get(b'content-type', b'')
             if content_type.strip().startswith(b'application/grpc'):
@@ -689,25 +606,18 @@ class BlackBull:
                 await serve_grpc(self._grpc_registry, conn, receive, send)
                 return
 
-        # Normalise send for the HTTP path: the handler-boundary adapter
-        # converts every accepted shape — Response, the (bytes, status,
-        # headers) 3-arg form, ASGI dicts (full-form compat), NativeResponse —
-        # to NativeResponse, so middleware and the sender observe a single
-        # native representation on both H1 and H2.  ``raw_send`` is retained
-        # so an RFC 10008 ``Accept-Query``
-        # route can re-wrap with the header injector *below* the adapter.
+        # ``raw_send`` is retained so a route with declared response headers can
+        # re-wrap with the injector *below* the adapter (see the hook block).
         raw_send = send
         send = _wrap_send_native(send)
 
         try:
             # RFC 9110 §9.1 — methods are case-sensitive tokens.  Prefer the
-            # HTTPMethod enum when it has a member; for methods outside the
-            # enum — whether IANA-registered ones it hasn't caught up with
-            # (QUERY, RFC 10008; no member before 3.16) or extension tokens
-            # (BREW, PROPFIND, WHEN, …) — keep the raw str so the router can
-            # still match a registered route and return the correct Allow
-            # header.  StrEnum equality makes the two forms interchangeable
-            # as router keys.
+            # HTTPMethod enum; for anything outside it — IANA registrations it
+            # hasn't caught up with (QUERY, RFC 10008; no member before 3.16)
+            # or extension tokens — keep the raw str so the router still
+            # matches and returns the correct Allow header.  StrEnum equality
+            # makes the two interchangeable as router keys.
             method = HTTPMethod(conn.method)
         except ValueError:
             method = conn.method
@@ -739,16 +649,12 @@ class BlackBull:
                 await handler(conn, receive, send)
             return
 
-        # Per-route hooks (method-agnostic): a route may declare response
-        # headers to add to every response, and a request guard that rejects
-        # the request before dispatch.  The dispatcher applies both uniformly —
-        # it names no method and no feature.  ``accept_query`` (RFC 10008) is
-        # currently the only producer; its QUERY-specific logic lives inside
-        # the guard, not here.
+        # Per-route hooks, applied uniformly: this block names no method and no
+        # feature.  ``accept_query`` (RFC 10008) is the only producer, and its
+        # QUERY-specific logic lives inside the guard, not here.
         resp_headers = getattr(function, '_bb_response_headers', None)
         if resp_headers is not None:
-            # Installed below the adapter (sees native on the HTTP path), and
-            # around raw_send so the header also lands on the
+            # Wrapped around raw_send, so the header also lands on the
             # centrally-rendered error response (e.g. a guard's 415).
             send = _wrap_send_native(_inject_response_headers(raw_send, resp_headers))
         guard = getattr(function, '_bb_request_guard', None)
@@ -756,9 +662,9 @@ class BlackBull:
             try:
                 guard(conn)
             except HTTPException as e:
-                # Rejected before dispatch — routed like a 404/405: by status
-                # (so an @app.on_error(status) handler is honoured, exactly as
-                # for those), no handler body and no lifecycle events.
+                # Rejected before dispatch — routed by status like a 404/405, so
+                # @app.on_error(status) is honoured; no handler, no lifecycle
+                # events.
                 self._logger.info('%s on %s %s: %s', int(e.status),
                                   conn.method, path, e.detail or e)
                 conn.state.update({
@@ -784,23 +690,16 @@ class BlackBull:
                 }))
             await function(conn, receive, send)
         except (ClientDisconnected, ConnectionResetError) as e:
-            # Peer vanished mid-body — there is no one to answer.  Record it
-            # for the after_handler event but log quietly and send nothing.
-            #
-            # ``ConnectionResetError`` is the same event arriving unwrapped:
-            # the read path surfaces the OS error when the reset lands while a
-            # handler is mid-``stream()``.  Uncaught here it reaches the
-            # generic handler below and prints a full traceback per
-            # occurrence — 307 of them in one sixteen-profile run, for
-            # something that is a client's ordinary prerogative rather than
-            # a server fault.
+            # Peer vanished mid-body — there is no one to answer.
+            # ``ConnectionResetError`` is the same event unwrapped: the read
+            # path surfaces the OS error when the reset lands while a handler is
+            # mid-``stream()``.  Uncaught it falls to the generic arm below and
+            # prints a traceback per occurrence — 307 in one sixteen-profile
+            # run, for a client's ordinary prerogative.
             exc_caught = e
             if _DEBUG:
                 self._logger.debug('client disconnected before request body completed')
         except HTTPException as e:
-            # A status-carrying error (e.g. a malformed request body → 400).
-            # 4xx are client faults: log quietly, no traceback.  5xx still
-            # get the full traceback below.
             exc_caught = e
             if is_server_error(e.status):
                 self._logger.error(traceback.format_exc())
@@ -846,32 +745,22 @@ class BlackBull:
 
     async def __call__(self, conn, receive: ASGIReceiveCallable | None,
                        send: ASGISendCallable):
+        # The one boundary (decision 2026-08-03).  The app is native internally
+        # in BOTH modes, so everything below this function threads a
+        # ``Connection``: an ASGI scope dict arrives only from an external host
+        # (uvicorn, ``httpx.ASGITransport``) or ``BB_FORCE_ASGI_SCOPE=1``, and is
+        # converted here, once.  The same edge wraps the host's ``send`` with
+        # the native→ASGI conversion; BlackBull's own server (native entry,
+        # asgi=False) passes a native-capable send through untouched.  Lifespan
+        # is the one scope that is not a request and never becomes a Connection.
+        #
         # ``receive`` is Optional because a handler that never reads a body
         # never touches it: the router guards on ``conn._receive is None`` and
         # dispatch completes normally.  A conforming ASGI host always passes a
         # real callable, but the tolerance is load-bearing for direct drives,
         # so the annotation states it rather than quietly outlawing it.
         #
-        # Native entry: BlackBull's own server calls ``app(conn, receive, send)``
-        # with a typed :class:`Connection` — BlackBull is a native-Connection
-        # framework, not an ASGI one, so the whole dispatch pipeline (middleware
-        # chain, router, handlers, error handlers, events) threads the Connection
-        # end to end. The ASGI ``app(scope, receive, send)`` form is used *iff*
-        # the caller is an external ASGI server (uvicorn, ``httpx.ASGITransport``)
-        # or ``BB_FORCE_ASGI_SCOPE=1``; there ``conn`` arrives as an ASGI scope
-        # dict and we convert it to a Connection once, here at the boundary, and
-        # thread the Connection from then on. (Lifespan is the one scope that is
-        # not a request and never becomes a Connection.)
-        #
-        # External edge (decision 2026-08-03): the app is native internally in
-        # BOTH modes, so when entered with an ASGI scope dict (uvicorn / httpx /
-        # TestClient) — or when built with ``asgi=True`` — the host's ``send``
-        # is wrapped with the native→ASGI boundary conversion: the router emits
-        # NativeResponse, this wrapper converts them back to ``http.response.*``
-        # dicts for the host.  BlackBull's own server (native Connection entry,
-        # asgi=False) passes a native-capable send through untouched.
-        #
-        # ``target`` is the object the actor's disconnect-detecting receive wrapper
+        # ``target`` is what the actor's disconnect-detecting receive wrapper
         # shares with us (the Connection natively, the scope dict in the compat
         # lanes); ``disconnected(target)`` reads the flag off whichever it is.
         if self._asgi or not isinstance(conn, Connection):
@@ -883,27 +772,20 @@ class BlackBull:
             await self._handle_lifespan(receive, send)
             return
         elif conn.get('type') == 'websocket':
-            # External ASGI host (uvicorn) delivered a websocket scope dict.
-            # WebSocket is native too: convert it to a Connection at
-            # the boundary — the WS extras are derived (``conn.subprotocols``
-            # reads the request header) or actor-set (``conn._ws``), so no scope
-            # dict is threaded past here. BlackBull's own server already hands us
-            # a Connection (it hits the first branch).
+            # The WS extras are derived (``conn.subprotocols`` reads the request
+            # header) or actor-set (``conn._ws``), so none of them needs the
+            # scope dict past this point.
             request = conn.get(CONNECTION_STASH_KEY)
             if request is None:
                 request = Connection.from_scope(conn, receive)
         else:
-            # HTTP dispatched as a scope dict. BlackBull's own HTTP/2 actor
-            # stashes the Connection it already built (``parse_headers`` →
-            # ``Connection``, ``bind_receive_channel`` → its raw receive) under
-            # ``CONNECTION_STASH_KEY``; reuse it. ``from_scope`` would otherwise
-            # rebuild a byte-identical Connection — measured ~1.8 µs/req, the
-            # dominant HTTP/2 per-stream cost (v0.60.0 regression, §9 Step 2a).
-            # Do NOT rebind ``_receive``: the stash already holds the *raw*
-            # recipient (the disconnect-detecting wrapper is passed separately as
-            # ``receive``), keeping the per-request graph acyclic (Step 1).
-            # Only true external ASGI hosts / the ``force_asgi`` lane carry no
-            # stash → the single ASGI→native ``from_scope`` conversion point.
+            # HTTP as a scope dict.  BlackBull's own HTTP/2 actor stashes the
+            # Connection it already built under ``CONNECTION_STASH_KEY``; reuse
+            # it, because ``from_scope`` would rebuild a byte-identical one —
+            # measured ~1.8 µs/req, the dominant HTTP/2 per-stream cost.
+            # Do NOT rebind ``_receive``: the stash holds the *raw* recipient
+            # (the disconnect-detecting wrapper arrives separately as
+            # ``receive``), which is what keeps the per-request graph acyclic.
             request = conn.get(CONNECTION_STASH_KEY)
             if request is None:
                 request = Connection.from_scope(conn, receive)
@@ -911,28 +793,15 @@ class BlackBull:
         if self._chain is None:
             self._build_chain()
 
-        # Terminal events, emitted here — after the *global* middleware chain —
-        # because an ``app.use`` middleware wraps outside ``_dispatch`` and may
-        # buffer/transform the response (e.g. ``Compression``), so the wire
-        # data is only final once the full chain returns (issue #145):
+        # The terminal events are emitted here rather than in ``_dispatch``
+        # because an ``app.use`` middleware wraps outside it and may buffer the
+        # response (``Compression``), so the wire data is only final once the
+        # whole chain returns (issue #145).  What each one guarantees is in
+        # docs/guide/events.md.
         #
-        # - ``request_completed`` — every finished HTTP exchange (including
-        #   404/405, error-router responses, and responses short-circuited by
-        #   a global middleware) unless the client disconnected mid-request.
-        #   Wire fields come from the AccessLogRecord BlackBull's own server
-        #   publishes in scope['state']['access_log']; under external ASGI
-        #   hosts they fall back to placeholders ('-'/0).
-        # - ``scope_completed`` — the guaranteed, cross-protocol terminal event
-        #   for every scope (HTTP request, WebSocket connection, gRPC call),
-        #   under *any* server (BlackBull's own actors, uvicorn, TestClient).
-        #   Register cleanup with ``@app.on('scope_completed', blocking=True)``.
-        #
-        # Both are guarded by ``has_listeners`` so a request with no such
-        # listener pays only a dict lookup.
-        # ``request`` is always a Connection here: the native branch keeps it,
-        # and every ASGI-boundary branch (http/websocket) converted it via
-        # ``from_scope`` above. Only lifespan is not a request, and it returned
-        # early. So the terminal-event reads are unconditionally native.
+        # ``request`` is always a Connection here — the native branch keeps it
+        # and both scope branches converted it, while lifespan returned early —
+        # so the reads below need no ASGI fallback.
         dispatcher = self._dispatcher
         want_request_completed = (request.type == 'http'
                                   and dispatcher.has_listeners('request_completed'))
@@ -962,11 +831,6 @@ class BlackBull:
                     'duration_ms':    log.duration_ms() if log else 0.0,
                 }))
             if dispatcher.has_listeners('scope_completed'):
-                # ``exception`` reflects whether the scope encountered an
-                # error: either one that propagated out of the chain (exc), or
-                # a handler error that ``_dispatch`` already turned into a 500
-                # and recorded in the state grab-bag. ``None`` for a clean
-                # request (including a 404, which is not an exception).
                 st, rtype = request.state, request.type
                 client, rpath = request.client, request.path
                 err = exc or st.get('error_exception')
@@ -1086,12 +950,10 @@ class BlackBull:
     def _static_miss(self):
         """Terminal handler for a static route whose target is not a file.
 
-        Routes the miss through the app's own 404 path so a static miss is
-        answered exactly as any unmatched path is, including a user's
-        ``@app.on_error(HTTPStatus.NOT_FOUND)`` override.  A static route
-        must end in a real handler: ``_register_chain`` binds the last
-        function's ``call_next`` to ``do_nothing``, which sends no response
-        at all.
+        A static route must end in a real handler — ``_register_chain`` binds
+        the last function's ``call_next`` to ``do_nothing``, which sends
+        nothing — and routing the miss through the app's own 404 path is what
+        makes a user's ``@app.on_error`` override apply to it.
         """
         async def _static_not_found(conn, receive, send):
             conn.state['error_status'] = HTTPStatus.NOT_FOUND
@@ -1138,15 +1000,10 @@ class BlackBull:
         self._router.route(methods=methods,
                            path=f'{prefix}/{{filepath:path}}',
                            functions=list(chain))
-        # The ``path`` converter is ``r'.+'`` — it needs at least one
-        # character, so neither ``/assets`` nor ``/assets/`` matches the
-        # route above.  Both must resolve for ``index=`` to serve the mount
-        # root (and ``blackbull serve``, which mounts at ``/``, depends on
-        # it), so each gets its own exact-match entry.
-        #
-        # Registering the same path twice silently replaces the first entry,
-        # so an explicit route always wins: a mount at ``/`` must not quietly
-        # eat the app's own root handler.
+        # The ``path`` converter is ``r'.+'``, so neither ``/assets`` nor
+        # ``/assets/`` matches the route above — yet both must resolve for
+        # ``index=`` to serve the mount root (``blackbull serve`` mounts at
+        # ``/`` and depends on it).  Each gets its own exact-match entry.
         for bare in ((prefix, f'{prefix}/') if prefix else ('/',)):
             if self._is_route_free(bare, methods):
                 self._router.route(methods=methods, path=bare,
@@ -1406,9 +1263,6 @@ class BlackBull:
         """
         from .config import resolve_run_config, log_config_sources  # noqa: PLC0415
 
-        # Resolve each setting through: explicit arg → BLACKBULL_* env var →
-        # .env → AppConfig → default (see resolve_run_config), then surface the
-        # provenance of any non-default deploy setting at startup.
         resolved, sources = resolve_run_config(
             {
                 'certfile': certfile, 'keyfile': keyfile, 'port': port,
@@ -1422,9 +1276,8 @@ class BlackBull:
         )
         log_config_sources(resolved, sources)
         if listeners:
-            # A listener list is a Python object, not something an env var or
-            # a config file resolves; and it states the socket itself, so the
-            # resolved port/path/fd would contradict it rather than default it.
+            # No env var or config file resolves a listener list, so a resolved
+            # port/path/fd would contradict it rather than default it.
             for said_another_way in ('port', 'unix_path', 'inherited_fd'):
                 resolved.pop(said_another_way, None)
             resolved['listeners'] = listeners
@@ -1476,14 +1329,8 @@ def serve(app, *,
     workers = workers if workers is not None else _cfg.workers
     workers = workers or (_os.cpu_count() or 1)
 
-    # Stateful non-ASGI protocols (MQTT, …) must have a single owner, but HTTP
-    # is stateless and should scale.  The master binds the protocol port once
-    # and hands it to worker 0 only (see MultiWorkerServer), so multi-worker +
-    # MQTT works: HTTP uses every worker, the broker lives on worker 0.
-    #
-    # The one exception is auto-reload: it carries listening sockets across an
-    # exec via fd inheritance, and that handoff does not cover the protocol
-    # listeners — so reload + stateful protocols stays single-worker.
+    # Reload is the exception to "protocol on worker 0, HTTP on every worker";
+    # see docs/deployment/workers.md.  The warning below states the rest.
     if (isinstance(app, BlackBull) and app._protocol_registry is not None
             and app._protocol_registry.has_port_bindings() and workers > 1
             and reload):
@@ -1497,17 +1344,12 @@ def serve(app, *,
                           else _cfg.stream_queue_depth)
     ws_queue_depth = ws_queue_depth if ws_queue_depth is not None else _cfg.ws_queue_depth
 
-    # BlackBull instances expose a router whose configuration is worth
-    # validating up-front (catches routes that reference unbound names
-    # before workers fork).  Plain ASGI callables skip this — their
-    # validity is the app author's problem.
+    # Validate before the workers fork, so a bad route fails once and loudly.
     if isinstance(app, BlackBull):
         app._router.validate()
 
-    # Reload requires the master+worker structure so a long-lived
-    # supervisor can hold the listening sockets across worker recycles.
-    # Single-worker reload is supported by promoting to workers=1
-    # under the multi-worker path.
+    # Reload needs the master+worker structure: a long-lived supervisor has to
+    # hold the listening sockets across worker recycles.
     if workers == 1 and not reload:
         _serve_single_worker(
             app,
@@ -1527,18 +1369,15 @@ def serve(app, *,
     from .server import ASGIServer  # noqa: PLC0415
     from .server.multiworker import MultiWorkerServer  # noqa: PLC0415
 
-    # Bind sockets in the master process; workers inherit them via fork.
-    # When a reload re-execed us, ASGIServer.open_socket adopts the
-    # inherited fds instead of binding.
+    # Workers inherit these sockets via fork.  After a reload re-exec,
+    # open_socket adopts the inherited fds instead of binding.
     master_server = ASGIServer(app, certfile=certfile, keyfile=keyfile,
                                max_connections=max_connections,
                                stream_queue_depth=stream_queue_depth,
                                ws_queue_depth=ws_queue_depth,
                                listeners=listeners)
 
-    # Warm up ONCE in the master, before the listening socket exists and before
-    # workers are forked, so every worker inherits the warmed heap via COW.
-    # No-op unless the app registered @on_warmup hooks.
+    # Before open_socket and before the fork — see on_warmup.
     from .server.warmup import run_warmup  # noqa: PLC0415
     run_warmup(app, master_server.ssl_context)
 
@@ -1628,9 +1467,7 @@ async def _run_single(app, *, certfile, keyfile, port, unix_path, inherited_fd,
                         ws_queue_depth=ws_queue_depth,
                         listeners=listeners)
 
-    # Warm up before binding.  No fork here, so no COW benefit, but the one
-    # process is still warm before it accepts its first connection.  Runs on
-    # the serving loop (no temporary loop needed).  No-op without @on_warmup.
+    # Before binding, on the serving loop — no temporary loop needed.
     from .server.warmup import warmup_inline  # noqa: PLC0415
     await warmup_inline(app, server.ssl_context)
 
