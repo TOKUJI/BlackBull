@@ -165,9 +165,8 @@ class ClientResponse:
 class _Phase(Enum):
     """The phase of a response whose clock is running, and the cap that owns it.
 
-    ``HEAD`` is the wait for the peer to begin answering; ``BODY`` is the gap
-    between frames once it has.  They are consecutive and never concurrent, so
-    one timer serves both and the handover is a disarm and a re-arm.
+    See ``docs/guide/client.md`` §What the client waits for for what each
+    phase measures.
 
     The member's value is the cap's name, which is also its ``Settings`` field
     and — upper-cased under ``BB_`` — its environment variable.  Both
@@ -204,9 +203,7 @@ class _PendingResponse:
     #: (``_arm_deadline`` schedules it).  One field and not two, so that every
     #: path which ends a response — completion, refusal, GOAWAY, a lost
     #: connection, ``__aexit__`` — inherits the disarm by going through
-    #: ``_drop_pending`` as it already does.  Per stream and not per
-    #: connection: a connection-wide clock is reset by any peer traffic, so a
-    #: busy stream shelters a stalled one indefinitely.
+    #: ``_drop_pending`` as it already does.
     deadline: asyncio.TimerHandle | None = None
     #: Which phase :attr:`deadline` is timing, so a handover re-stamps
     #: :attr:`opened_at` and a re-arm within one phase does not.
@@ -389,12 +386,8 @@ class HTTP2Client:
         Idempotent — calling more than once is a no-op so ``Client`` can adopt
         a connection and then enter the inner client's ``async with`` cleanly.
 
-        Under ``scenario_mode`` this is a no-op, which makes it the twin of
-        :meth:`blackbull.client.http1.HTTP1Client._start`: the scenario owns
-        the wire from byte zero.  That is not a convenience — a fault
-        scenario exists to assemble its own bytes, and it cannot express a
-        preface fault (delayed, split, absent, repeated) on a connection
-        that has already sent a correct one.
+        Under ``scenario_mode`` this is a no-op so the scenario owns the wire
+        from byte zero — ``docs/guide/fault_injection.md`` says why.
         """
         if self._scenario_mode or self._receive_task is not None:
             return
@@ -917,19 +910,10 @@ class HTTP2Client:
     async def _receive_frame(self) -> _InboundFrame | None:
         """Read one frame, or ``None`` when the peer is finished with us.
 
-        The wait for a frame to *begin* is deliberately unbounded: an
-        HTTP/2 client that stops listening after a quiet interval breaks
-        server streaming and long-polling, both of which are the peer
-        behaving correctly.
-
-        The wait for a frame to *finish* is bounded.  Once nine header
-        bytes have arrived the peer has committed to a payload length, so
-        a peer that sends the header and stops is not idle — it has
-        abandoned a frame mid-delivery.  Without a bound that parks every
-        pending future for the life of the process.  This is the
-        client-side twin of the server's ``BB_HEADER_TIMEOUT``, and it
-        ends the read the same way EOF does: ``None``, which the receive
-        loop already treats as the connection being over.
+        Unbounded to begin and bounded to finish — see
+        ``docs/guide/client.md`` §What the client waits for.  An abandoned
+        frame ends the read the way EOF does, returning ``None``, which the
+        receive loop already treats as the connection being over.
 
         The declared length is checked before either payload read, so no
         peer-declared number ever sizes an allocation.  Over it is
@@ -1114,9 +1098,8 @@ class HTTP2Client:
     async def _next_frame(self) -> _InboundFrame | None:
         """The next frame — deadlined only while a field block is open.
 
-        ``_receive_frame`` waits for a frame to *begin* without a bound, and
-        must: server streaming and long polling are a peer behaving correctly.
-        A peer that owes CONTINUATION has instead stopped mid-message.
+        ``_receive_frame`` waits for a frame to begin without a bound; a peer
+        that owes CONTINUATION has instead stopped mid-message.
         """
         opened_at = self._field_block_opened_at
         if opened_at is None:
@@ -1342,13 +1325,8 @@ class HTTP2Client:
         """Put the stream on *phase*'s clock, starting or restarting it.
 
         The single arming point for both, since ``_Phase`` makes them
-        consecutive.  ``HEAD`` runs from the moment the request is fully on
-        the wire — before that the peer owes nothing and a send parked on our
-        own flow-control window would be charged to it — until the final
-        response head arrives.  ``BODY`` takes over there and is re-armed by
-        every DATA frame that delivers payload, which is progress rather than
-        duration: a response of many frames may outlast the deadline many
-        times over so long as no single gap does.
+        consecutive; what each phase measures is ``docs/guide/client.md``
+        §What the client waits for.
 
         A 1xx is not the handover, and there is deliberately no branch here
         saying so: it falls out of ``_on_response_headers`` arming only at
@@ -1465,14 +1443,10 @@ class HTTP2Client:
                     ProtocolError(f'invalid :status pseudo-header: {status_str!r}'))
                 self._drop_pending(frame.stream_id)
                 return
-        # An interim response is not the response.  Arming on a 1xx would
-        # start the progress clock while the peer is still working — a 103
-        # Early Hints ahead of a second of real work was refused, exactly the
-        # "has not answered yet" case the deadline is meant to exempt.  This
-        # one test is also what keeps the head clock running across the 1xx,
-        # since only the handover disarms it, so a peer that sends 103 and
+        # This one comparison is also what keeps the head clock running across
+        # a 1xx, since only the handover disarms it: a peer that sends 103 and
         # then goes quiet stays bounded by the phase it never left.  Field
-        # lines count either way: they accumulate whatever they announce.
+        # lines count either way — they accumulate whatever they announce.
         if pending.status >= 200:
             self._arm_deadline(frame.stream_id, _Phase.BODY)
         max_headers = get_settings().client_head_max_total
