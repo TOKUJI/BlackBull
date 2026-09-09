@@ -63,11 +63,6 @@ logger = logging.getLogger(__name__)
 # Number of bytes in the fixed HTTP/2 frame header (RFC 7540 §4.1).
 _FRAME_HEADER_BYTES = 9
 
-# Emit WINDOW_UPDATE once this many received-but-unacked DATA bytes have
-# accumulated (stream- and connection-level, tracked separately).  Mirrors
-# ``WebSocketH2Session._credit_returned``: batching avoids a WINDOW_UPDATE
-# per DATA frame while still reopening the peer's send window long before
-# the 65535-byte initial window is exhausted (RFC 9113 §6.9).
 #: Seconds to wait for the remainder of a frame whose 9-byte header has
 #: already arrived.  Not a bound on waiting for the next frame — see
 #: ``HTTP2Client._receive_frame``.
@@ -120,6 +115,10 @@ class _ConnectionFailed(Exception):
     """
 
 
+# Batching keeps this off the per-DATA-frame path while still reopening the
+# peer's window long before the 65535-byte initial one is spent (RFC 9113
+# §6.9).  ``WebSocketH2Session`` keeps its own copy of this number; the two
+# have to move together.
 _WINDOW_UPDATE_THRESHOLD = 32768
 
 #: Largest value SETTINGS_MAX_HEADER_LIST_SIZE can express (RFC 9113 §6.5.2,
@@ -185,7 +184,6 @@ class _PendingResponse:
     status: int = 0
     headers: list[tuple[bytes, bytes]] = field(default_factory=list)
     body_parts: list[bytes] = field(default_factory=list)
-    # Stream-level received-but-unacked DATA bytes (see _credit_received).
     unacked: int = 0
     #: Response-body octets accepted so far, against BB_CLIENT_BODY_MAX_TOTAL.
     #: The flow-control window cannot serve as this: ``_credit_received``
@@ -202,15 +200,13 @@ class _PendingResponse:
     #: (``max_header_list_size``); the sum over informational responses, the
     #: final headers and trailers is nobody's until here.
     headers_seen: int = 0
-    #: The one timer this stream ever has, whichever phase is running: armed
-    #: for the head once the request is on the wire, handed over to the body
-    #: by the final response head, re-armed by every DATA frame that delivers
-    #: payload.  One field and not two, so that every path which ends a
-    #: response — completion, refusal, GOAWAY, a lost connection, ``__aexit__``
-    #: — inherits the disarm by going through ``_drop_pending`` as it already
-    #: does.  Per stream and not per connection: a connection-wide clock is
-    #: reset by any peer traffic, so a busy stream shelters a stalled one
-    #: indefinitely.
+    #: The one timer this stream ever has, whichever phase is running
+    #: (``_arm_deadline`` schedules it).  One field and not two, so that every
+    #: path which ends a response — completion, refusal, GOAWAY, a lost
+    #: connection, ``__aexit__`` — inherits the disarm by going through
+    #: ``_drop_pending`` as it already does.  Per stream and not per
+    #: connection: a connection-wide clock is reset by any peer traffic, so a
+    #: busy stream shelters a stalled one indefinitely.
     deadline: asyncio.TimerHandle | None = None
     #: Which phase :attr:`deadline` is timing, so a handover re-stamps
     #: :attr:`opened_at` and a re-arm within one phase does not.
@@ -288,15 +284,13 @@ class HTTP2Client:
             max_header_list_size=self._enforced_header_list_size)
         self._push_permitted: bool = get_settings().client_h2_enable_push
         self._control_sender: HTTP2Sender | None = None
-        #: Detached refusal tasks, held so neither the GC nor __aexit__
-        #: leaves one running against a closed transport.
+        #: Detached refusal tasks; ``_spawn`` says what holding them buys.
         self._detached: set[asyncio.Future] = set()
         self._senders: dict[int, HTTP2Sender] = {}
 
         # Client-initiated streams use odd IDs starting at 1 (RFC 7540 §5.1.1).
         self._next_stream_id = 1
 
-        # In-flight responses keyed by stream_id.
         self._responses: dict[int, _PendingResponse] = {}
 
         # Streams that bypass ResponderFactory dispatch — used by the
@@ -305,12 +299,11 @@ class HTTP2Client:
         # being routed through the request/response state machine.
         self._raw_streams: dict[int, asyncio.Queue] = {}
 
-        # Receive loop task; created in __aenter__, cancelled in __aexit__.
         self._receive_task: asyncio.Task | None = None
 
-        # The peer's announced SETTINGS_INITIAL_WINDOW_SIZE.  Seeded into
-        # each sender at construction; the per-stream windows live there,
-        # because the sender is what waits on them.
+        # The peer's announced SETTINGS_INITIAL_WINDOW_SIZE.  Only the seed
+        # is kept here; the per-stream windows live in the senders, because
+        # the sender is what waits on them.
         self.initial_window_size: int = DEFAULT_INITIAL_WINDOW_SIZE
 
         # The connection-level send window (RFC 9113 §6.9.1) is one budget
@@ -320,16 +313,12 @@ class HTTP2Client:
         # needing credit, but the credit it spent is still gone.
         self._conn_window = ConnectionWindow(DEFAULT_INITIAL_WINDOW_SIZE)
 
-        # Connection-level received-but-unacked DATA bytes (see
-        # _credit_received).  Stream-level credit is tracked per
-        # _PendingResponse.
         self._unacked_conn: int = 0
 
         # While these are set the peer owes CONTINUATION (RFC 9113 §6.10).
         self._open_field_block = None
         self._field_block_opened_at: float | None = None
         self._failure: str | None = None
-        # Set when the peer sends GOAWAY; subsequent request() calls raise.
         self._goaway_received: bool = False
         # Set when the receive loop ends for any reason.  ``_goaway_received``
         # only covers the polite departure; a peer that simply vanishes leaves
@@ -345,8 +334,6 @@ class HTTP2Client:
         # ``HTTP1Client._closed`` is, so the two clients answer the same
         # question with the same word.
         self._closed: bool = False
-        # Bounds the *rest* of a frame the peer has already begun — never
-        # the gap between frames.  See ``_receive_frame``.
         self._frame_read_timeout: float = _FRAME_READ_TIMEOUT
         self._goaway_error_code: int = 0
         # RFC 9113 §6.5.3 — SETTINGS are acknowledged in order, so counting
@@ -446,7 +433,6 @@ class HTTP2Client:
             except (asyncio.CancelledError, Exception):
                 pass  # teardown: the receive task was just cancelled; ignore its unwind.
 
-        # Fail any still-pending responses so awaiters don't hang.
         for sid in list(self._responses):
             pending = self._drop_pending(sid)
             if pending is not None and not pending.future.done():
@@ -527,8 +513,8 @@ class HTTP2Client:
         future: asyncio.Future[ClientResponse] = loop.create_future()
         self._responses[stream_id] = _PendingResponse(future=future)
 
-        # Build the HEADERS frame.  END_STREAM is set immediately when the
-        # caller has no body to send; otherwise it goes on the trailing DATA.
+        # END_STREAM rides the HEADERS only when there is no body; with one
+        # it goes on the trailing DATA instead.
         flags = int(HeaderFrameFlags.END_HEADERS)
         if not body:
             flags |= int(HeaderFrameFlags.END_STREAM)
@@ -546,20 +532,11 @@ class HTTP2Client:
             await sender(h_frame)
 
             if body:
-                # Use the sender's flow-controlled DATA path rather than a
-                # single raw DATA frame: it splits the body across
-                # SETTINGS_MAX_FRAME_SIZE chunks and blocks on flow-control
-                # credit, so bodies larger than one frame (e.g. >16 KiB gRPC
-                # messages) are sent correctly.  WINDOW_UPDATE frames are
-                # routed to this sender in ``_on_window_update``, keeping its
-                # send window in sync.
-                #
-                # Run as a task the refusal can reach.  This await happens
-                # before the one on ``future``, and RST_STREAM is precisely
-                # what makes a peer stop crediting the stream window — so a
-                # response refused mid-upload left the caller parked here on
-                # a window that would never reopen, holding an answer it
-                # could not deliver.
+                # Splitting and flow control are ``_write_data``'s; the
+                # credit it waits on arrives via ``_on_window_update``.  Run
+                # as a task so the refusal can reach it — ``upload`` on
+                # :class:`_PendingResponse` says why that matters, and this
+                # await is the one it would otherwise park on.
                 upload = asyncio.ensure_future(
                     sender._write_data(body, end_stream=True))
                 pending = self._responses.get(stream_id)
@@ -585,13 +562,11 @@ class HTTP2Client:
             self._drop_pending(stream_id)
             raise
         finally:
-            # Released on the last *send*, never on the last receive.  A server
-            # may answer with END_STREAM while this body is still going up (an
-            # early 401 or 413), so a sender dropped when the response
-            # completes would leave ``_write_data`` parked on a window event
-            # nothing will set again.  Nothing sends on this stream past this
-            # point, so the sweeps in ``_on_window_update`` and
-            # ``_on_initial_window_size`` have no reason to keep reaching it.
+            # Released on the last *send*, never on the last receive — the
+            # early-401 hazard is ``_drop_pending``'s to explain.  Nothing
+            # sends on this stream past this point, so the sweeps in
+            # ``_on_window_update`` and ``_on_initial_window_size`` have no
+            # reason to keep reaching it.
             self._senders.pop(stream_id, None)
 
         # The question is asked, so from here the peer owes an answer and the
@@ -902,9 +877,9 @@ class HTTP2Client:
         try:
             await self._send_raw_frame(self._factory.rst_stream(
                 stream_id, ErrorCodes.ENHANCE_YOUR_CALM))
-            # The payload is dropped; the credit is not — the shared-window
-            # rule ``_on_response_data`` explains.  A raw stream's DATA is
-            # credited on drain, so the backlog still holds window.
+            # Credited under the shared-window rule ``_on_response_data``
+            # explains, and the backlog counts too: a raw stream's DATA is
+            # credited on drain, so what was queued still holds window.
             await self._credit_connection(
                 displaced + _flow_controlled_length(frame))
         except Exception:
@@ -922,12 +897,11 @@ class HTTP2Client:
     def _make_sender(self, stream_id: int) -> HTTP2Sender:
         if stream_id not in self._senders:
             assert self._writer is not None
-            # Seed the per-stream send window from the server's
-            # announced SETTINGS_INITIAL_WINDOW_SIZE: a sender created after
-            # the SETTINGS exchange must not start at the RFC default
-            # (``_on_initial_window_size`` only delta-adjusts *existing*
-            # senders).  Same construction-time seeding as the server's
-            # ``make_sender`` (refactor 2.11).
+            # Seeded here and not left at the RFC default because
+            # ``_on_initial_window_size`` only delta-adjusts senders that
+            # already exist: one created after the SETTINGS exchange would
+            # never learn the value.  The server's ``make_sender`` seeds at
+            # construction for the same reason.
             self._senders[stream_id] = HTTP2Sender(
                 self._writer, self._factory, stream_id,
                 conn_window=self._conn_window,
@@ -1270,10 +1244,8 @@ class HTTP2Client:
                     continue
                 # Raw-frame streams (WebSocket-over-H2, etc.) bypass the
                 # request/response dispatcher for the frames their registrant
-                # reads — ``_RAW_STREAM_FRAME_TYPES`` names them.  Every other
-                # type keeps the destination it has on any other stream,
-                # because a queue slot is spent by whoever sent the frame and
-                # the consumer would only discard it:
+                # reads — ``_RAW_STREAM_FRAME_TYPES`` names them and says why
+                # it is a whitelist.  Where each excluded type goes instead:
                 #   WINDOW_UPDATE, SETTINGS — connection-level bookkeeping; a
                 #     per-stream sender parked on its window wakes here.
                 #   PUSH_PROMISE — ``_on_push_promise`` is what refuses a
@@ -1318,13 +1290,11 @@ class HTTP2Client:
             # point must be refused rather than parked on a future with no
             # remaining resolver.
             self._connection_lost = True
-            # Connection ended; fail any still-pending responses.
             for sid in list(self._responses):
                 pending = self._drop_pending(sid)
                 if pending is not None and not pending.future.done():
                     pending.future.set_exception(ConnectionError(
                         self._failure or 'connection closed before response'))
-            # The other half of who is waiting on this connection.
             self._end_raw_streams()
 
     # ---- internal: callbacks invoked by Responders -----------------------
@@ -1371,19 +1341,18 @@ class HTTP2Client:
     def _arm_deadline(self, stream_id: int, phase: _Phase) -> None:
         """Put the stream on *phase*'s clock, starting or restarting it.
 
-        The single arming point for both phases, because they share one timer
-        field and a stream is only ever in one of them.  ``HEAD`` runs from
-        the moment the request is fully on the wire — before that the peer
-        owes nothing and a send parked on our own flow-control window would be
-        charged to it — until the final response head arrives.  ``BODY`` takes
-        over there and is re-armed by every DATA frame that delivers payload,
-        which is progress rather than duration: a response of many frames may
-        outlast the deadline many times over so long as no single gap does.
+        The single arming point for both, since ``_Phase`` makes them
+        consecutive.  ``HEAD`` runs from the moment the request is fully on
+        the wire — before that the peer owes nothing and a send parked on our
+        own flow-control window would be charged to it — until the final
+        response head arrives.  ``BODY`` takes over there and is re-armed by
+        every DATA frame that delivers payload, which is progress rather than
+        duration: a response of many frames may outlast the deadline many
+        times over so long as no single gap does.
 
-        A 1xx is not the handover.  It announces that the peer is still
-        working, so it neither starts the body clock nor stops the head one —
-        which falls out of ``_on_response_headers`` arming only at
-        ``status >= 200`` rather than out of a branch here.
+        A 1xx is not the handover, and there is deliberately no branch here
+        saying so: it falls out of ``_on_response_headers`` arming only at
+        ``status >= 200``, which is where the reasoning lives.
 
         ``_FRAME_READ_TIMEOUT`` does not cover either phase.  It bounds the
         remainder of a frame whose 9-byte header has arrived, so a peer
@@ -1411,11 +1380,9 @@ class HTTP2Client:
     def _on_stream_stalled(self, stream_id: int, timeout: float) -> None:
         """No frame for this stream within the deadline.
 
-        The verdict is taken again inside :meth:`_refuse_stream`, not here.
-        A timer callback cannot await, so this hands off to a task, and in
-        that gap the receive loop can finish the response — checking only
-        here reset a stream that had already succeeded and logged a cap hit
-        against it.
+        A timer callback cannot await, so this hands off to a task; the
+        re-check that the resulting gap needs is :meth:`_refuse_stream`'s,
+        and checking only here reset streams that had already succeeded.
 
         The phase is read from the pending rather than passed: a timer that
         survives to fire is the current phase's, since a handover disarms the
@@ -1498,17 +1465,14 @@ class HTTP2Client:
                     ProtocolError(f'invalid :status pseudo-header: {status_str!r}'))
                 self._drop_pending(frame.stream_id)
                 return
-        # An interim response is not the response.  Arming on a 1xx starts the
-        # progress clock while the peer is still working — 103 Early Hints
-        # followed by a second of real work was refused, which is exactly the
-        # "a peer that has not answered yet is working" case the deadline is
-        # supposed to be exempt from.  Its field lines still count: they are
-        # accumulation whatever they announce.
-        #
-        # The same line is what keeps the head deadline running across a 1xx,
-        # since the handover is the only thing that disarms it: a peer that
-        # sends 103 Early Hints and then goes quiet is bounded by the phase it
-        # never left, with no branch here to say so.
+        # An interim response is not the response.  Arming on a 1xx would
+        # start the progress clock while the peer is still working — a 103
+        # Early Hints ahead of a second of real work was refused, exactly the
+        # "has not answered yet" case the deadline is meant to exempt.  This
+        # one test is also what keeps the head clock running across the 1xx,
+        # since only the handover disarms it, so a peer that sends 103 and
+        # then goes quiet stays bounded by the phase it never left.  Field
+        # lines count either way: they accumulate whatever they announce.
         if pending.status >= 200:
             self._arm_deadline(frame.stream_id, _Phase.BODY)
         max_headers = get_settings().client_head_max_total
