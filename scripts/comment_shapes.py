@@ -27,6 +27,14 @@ Only the third shape is worth a pass, so only it is classified here:
 ``CANDIDATE``
     neither.  A name may be able to carry it -- a reader still decides.
 
+The DO-NOT-EXTRACT test reads as a performance decision, and a decision made
+on other grounds slips through it.  ``client/http2.py``'s cap-naming block
+records that forwarding the name from ``phase`` was rejected because it would
+hide the refusing site from a reader and from the cap-record audit -- a
+diagnosability argument, so it classifies as CANDIDATE and only a reader
+catches it.  Widening the pattern to reach it would cost more in false
+positives than it saves, so this is a known limit rather than a bug.
+
 Two heuristics were wrong before they were right, and both cost a pass:
 
 * **loop depth.** A site inside a loop is not per-request but per-iteration;
@@ -116,8 +124,18 @@ def repeated_topics(src, lines):
         for i in range(len(words) - 3):
             g = ' '.join(words[i:i + 4])
             grams.setdefault(g, set()).add(start)
-    return ({k: sorted(v) for k, v in topics.items() if len(v) >= 3},
-            {k: sorted(v) for k, v in grams.items() if len(v) >= 2})
+    # Intersect the two signals rather than reporting them side by side.  A
+    # symbol named in six blocks is usually a *referent*, not a topic:
+    # ``__aexit__`` was reported six times on client/http2.py where the six
+    # blocks state six unrelated facts, and the reader has to discard it by
+    # hand.  Every cluster that turned out to be real duplication scored on
+    # both signals, so a topic counts only where its blocks also share a
+    # phrase.
+    grams = {k: sorted(v) for k, v in grams.items() if len(v) >= 2}
+    shared = {ln for v in grams.values() for ln in v}
+    topics = {k: sorted(v & shared) for k, v in topics.items()
+              if len(v & shared) >= 3}
+    return topics, grams
 
 
 for path in sys.argv[1:]:

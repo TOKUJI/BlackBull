@@ -101,10 +101,12 @@ RULES: list[Rule] = [
          '(e.g. "0 disables the cap", not "pre-0.29 behaviour")'),
     Rule(re.compile(r'\bas of version\b', re.I), _is_timeline_scope,
          'git log owns the version timeline'),
-    # ``Review M2`` slipped past a digits-only pattern and had to be removed by
-    # hand, so a milestone letter counts as an id too.
-    Rule(re.compile(r'\b(?:Refactor|Review)\s+[A-Z]?\d+(?:\.\d+)?\b'
-                    r'|\bbugs?\s+\d+\.\d+[a-z]?'),
+    # Two spellings got past this in turn: ``Review M2`` needed the milestone
+    # letter, and ``refactor 2.11`` needed the case fold.  A bare number is
+    # deliberately NOT an id -- "review 3 files" is prose -- so an id is either
+    # dotted or letter-prefixed.
+    Rule(re.compile(r'\b(?:Refactor|Review)\s+(?:[A-Za-z]\d+|\d+\.\d+)\b'
+                    r'|\bbugs?\s+\d+\.\d+[a-z]?', re.I),
          _is_timeline_scope,
          'an internal tracker id no reader outside the project can resolve'),
     Rule(re.compile(r'\bBLA-(?:A-)?\d+'),
