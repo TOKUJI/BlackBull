@@ -31,8 +31,7 @@ from .di import Depends, _resolve_depends
 from .connection import stashed_connection
 from .utils import Scheme, do_nothing, is_client_error, is_server_error
 
-# RouteGroup is defined in app.py to avoid a circular import;
-# re-export here so tests can import it from either location.
+# See the module docstring for why RouteGroup is re-exported rather than defined.
 def __getattr__(name):
     if name == 'RouteGroup':
         from .app import RouteGroup
@@ -106,11 +105,10 @@ class _RouteTrie:
 
     def __init__(self) -> None:
         self.root = _TrieNode()
-        # Fully-static registered paths → terminal node, keyed on both the
-        # raw registered path and its normalized ('/'-joined segments) form.
-        # Lets a canonical request path resolve with one dict probe instead
-        # of a segment walk; non-canonical forms (dup/trailing slashes) fall
-        # through to the walk, which drops empty segments.
+        # Fully-static registered paths → terminal node, keyed on both the raw
+        # registered path and its normalized ('/'-joined segments) form, so a
+        # canonical request path resolves in one dict probe.  Non-canonical
+        # forms (dup/trailing slashes) fall through to the segment walk.
         self._static_full: dict[str, _TrieNode] = {}
 
     def insert(self, path: str, methods: tuple, scheme_key: Any, handler: Any) -> None:
@@ -125,17 +123,14 @@ class _RouteTrie:
                 spec = spec or 'str'
                 _, converter = _CONVERTERS.get(spec, (None, str))
                 if spec == 'path':
-                    # {name:path} consumes all remaining segments, so it must be
-                    # the final segment.  Unrejected, a route like
-                    # ``/a/{p:path}/b`` registers as ``/a/{p:path}`` — silently
-                    # dropping ``/b`` — so refuse it at registration.
+                    # Unrejected, ``/a/{p:path}/b`` would register as
+                    # ``/a/{p:path}``, silently dropping ``/b``.
                     if i != len(segments) - 1:
                         raise ConfigurationError(
                             f"path converter {seg!r} must be the last segment of "
                             f"route {path!r}: a '{{name:path}}' wildcard consumes "
                             f"all remaining segments, so nothing may follow it."
                         )
-                    # {name:path} consumes all remaining segments
                     param_specs.append((name, converter, True))
                     if node.wildcard_child is None:
                         node.wildcard_child = _TrieNode()
@@ -163,20 +158,16 @@ class _RouteTrie:
         handler is None on miss; allowed_methods is non-empty when the path
         matched but the method was not registered (enables MethodNotApplicable).
         """
-        # Fast path 0: fully-static route + canonical request path — one dict
-        # probe replaces the whole segment walk.  A probe hit whose entries
-        # don't match (method/scheme) still falls through: a param branch may
-        # serve the same path with a different method.
+        # A probe hit whose entries don't match (method/scheme) still falls
+        # through: a param branch may serve the same path with another method.
         node = self._static_full.get(path)
         if node is not None:
             hit = self._match_entries(node.entries, (), method, scheme)
             if hit is not None:
                 return (hit[0], hit[1], _NO_METHODS)
 
-        # Canonical paths ('/a/b': leading slash, no duplicate or trailing
-        # slashes — the overwhelmingly common case) skip the filtering
-        # listcomp: split()'s only empty segment is the leading one, stepped
-        # over via *start*.  Non-canonical forms take the filtered build.
+        # For a canonical path, split()'s only empty segment is the leading
+        # one, stepped over via *start* — so the filtering listcomp is skipped.
         if not path or path.endswith('/') or '//' in path:
             segments = [s for s in path.split('/') if s]
             start = 0
@@ -185,11 +176,10 @@ class _RouteTrie:
             start = 1 if path[0] == '/' else 0
         n = len(segments)
 
-        # Fast path 1: iterative depth-first walk for the hit case.  Same
-        # priority order as _lookup (static > param > wildcard at every node,
-        # with cross-level backtracking via an explicit stack) but with no
-        # recursion frames and no per-level set allocations.  The stack is
-        # created lazily — an unambiguous walk allocates nothing.  A miss
+        # Iterative depth-first walk for the hit case: the priority order of
+        # :meth:`_lookup`, with cross-level backtracking on an explicit stack
+        # instead of recursion frames and per-level set allocations.  The stack
+        # is created lazily — an unambiguous walk allocates nothing.  A miss
         # falls through to the recursive walk, whose remaining job is
         # collecting the allowed-methods set for MethodNotApplicable.
         node = self.root
@@ -208,8 +198,8 @@ class _RouteTrie:
                 pc = node.param_child
                 wc = node.wildcard_child
                 if child is not None:
-                    # Record the lower-priority alternatives before
-                    # descending, so a dead end below can backtrack to them.
+                    # Record the lower-priority alternatives before descending,
+                    # so a dead end below can backtrack to them.
                     if wc is not None:
                         if stack is None:
                             stack = []
@@ -266,6 +256,7 @@ class _RouteTrie:
 
     def _lookup(self, node: _TrieNode, segments: list, idx: int,
                 raw_caps: list, method: Any, scheme: Any) -> tuple:
+        """Recursive walk, most specific child first: static > param > wildcard."""
         if idx == len(segments):
             allowed: set = set()
             for (ms, ss, handler, param_specs) in node.entries:
@@ -284,7 +275,6 @@ class _RouteTrie:
         seg = segments[idx]
         allowed_all: set = set()
 
-        # 1. Static child (most specific — checked first)
         if seg in node.children:
             h, p, a = self._lookup(
                 node.children[seg], segments, idx + 1, raw_caps, method, scheme
@@ -293,7 +283,6 @@ class _RouteTrie:
                 return (h, p, set())
             allowed_all.update(a)
 
-        # 2. Param child (single-segment wildcard)
         if node.param_child is not None:
             h, p, a = self._lookup(
                 node.param_child, segments, idx + 1, raw_caps + [seg], method, scheme
@@ -302,7 +291,6 @@ class _RouteTrie:
                 return (h, p, set())
             allowed_all.update(a)
 
-        # 3. Wildcard child ({name:path} — matches rest of path)
         if node.wildcard_child is not None:
             rest = '/'.join(segments[idx:])
             h, p, a = self._lookup(
@@ -358,13 +346,12 @@ class _RouteInfo:
     methods: tuple = ()            # tuple of HTTPMethod values
     scheme: Any = None             # Scheme | tuple[Scheme, ...] | _AnyScheme | None
     name: str | None = None
-    # {param_name} written with an explicit ``:converter`` in the template
-    # (e.g. {task_id:int}), as opposed to defaulted to 'str'. validate()'s
-    # converter/annotation type-match check only applies to these: a bare
-    # {task_id} is matched as 'str' by the router but re-coerced to the
-    # handler's own annotation at call time by _adapt_handler, so the
-    # router-level 'str' spec and the handler annotation are expected to
-    # differ and that's not an error.
+    # {param_name} written with an explicit ``:converter`` (e.g. {task_id:int}),
+    # as opposed to defaulted to 'str'.  Only an explicit spec promises the
+    # router itself produces that type, so only these carry a converter →
+    # annotation contract for validate() to check: a bare {task_id} is matched
+    # as 'str' and re-coerced to the handler's annotation by _adapt_handler, so
+    # spec and annotation are *expected* to differ there.
     explicit_param_specs: frozenset = field(default_factory=frozenset)
 
 
@@ -385,9 +372,11 @@ class RouteInfo(NamedTuple):
     name: str = ""
 
 
-# Sentinel used when scheme is omitted, matching any scheme at lookup time
 class _AnyScheme:
-    """Typed sentinel — enables isinstance() narrowing in pyright."""
+    """Sentinel stored when scheme is omitted; matches any scheme at lookup.
+
+    A class rather than a bare object so ``isinstance`` narrows it in pyright.
+    """
 
 _ANY_SCHEME = _AnyScheme()
 
@@ -423,12 +412,10 @@ def has_middleware_param(fn) -> bool:
 has_inner = has_middleware_param  # backward-compat alias
 
 
-#: A full-form handler is identified by carrying **both** transport channels
-#: (``receive`` and ``send``); its first positional param is the request context
-#: — the native ``conn``/``connection``, the deprecated ``scope``
-#: alias, or a WS handler's ``websocket``. The context name is not part of the
-#: test: a simplified handler never takes ``receive``/``send`` (those are the
-#: framework's channels, not request data), so their presence alone is decisive.
+#: The presence of both channels alone decides full form vs simplified; the
+#: name of the leading context param is not part of the test, because a
+#: simplified handler never takes ``receive``/``send`` (those are the
+#: framework's channels, not request data).
 _CHANNEL_PARAMS = frozenset({'receive', 'send'})
 
 
@@ -441,7 +428,6 @@ def _is_simplified_handler(fn) -> bool:
     if _middleware_param(fn) is not None:
         return False
     params = inspect.signature(fn).parameters
-    # *args / **kwargs handlers are variadic — leave them untouched
     for p in params.values():
         if p.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
             return False
@@ -493,7 +479,6 @@ def _coerce_value(ann: Any, value: Any) -> Any:
     origin = get_origin(ann)
     args = get_args(ann)
 
-    # T | None / Optional[T]
     if origin is Union or origin is types.UnionType:
         non_none = [a for a in args if a is not type(None)]
         if len(non_none) == 1:
@@ -630,15 +615,10 @@ async def _send_native(result, conn, receive, send) -> bool:
     if result is None:
         return True
     if isinstance(result, _StreamingResponse):
-        # Existing StreamingResponse / EventSourceResponse instance — let it
-        # drive scope/receive/send directly so subclasses keep control over
-        # the start event.
         await result(conn, receive, send)
     elif inspect.isasyncgen(result):
-        # ``async def stream(): yield ...`` shape — wrap in a default-typed
-        # StreamingResponse.  Backpressure flows naturally because each
-        # ``await send()`` on a body event blocks on flow-control credit
-        # (HTTP/2) or drain (HTTP/1).
+        # Backpressure flows naturally: each ``await send()`` on a body event
+        # blocks on flow-control credit (HTTP/2) or drain (HTTP/1).
         await _StreamingResponse(result)(conn, receive, send)
     elif isinstance(result, _Response):
         await send(result)
@@ -695,7 +675,6 @@ async def _finish_result(result, conn, receive, send, converters, fn_name: str) 
 # Simplified-handler parameter classification
 # ---------------------------------------------------------------------------
 
-# RFC-agnostic textual boolean forms accepted for ``param: bool`` query params.
 _QUERY_BOOL_STRINGS: dict[str, bool] = {
     '1': True, 'true': True, 'yes': True, 'on': True,
     '0': False, 'false': False, 'no': False, 'off': False,
@@ -713,9 +692,8 @@ def _identity_str(raw: str) -> str:
     return raw
 
 
-# Scalar annotation → coercer for query params.  Mirrors the path-param
-# converter idea (annotation drives the coercion) with ``bool`` added —
-# ``bool('false')`` would be truthy, so it needs the textual-form table.
+# Scalar annotation → coercer for query params.  ``bool`` is the one that
+# cannot be the type itself: ``bool('false')`` is truthy, hence the table above.
 _QUERY_COERCERS: dict[type, Callable[[str], Any]] = {
     str: _identity_str,
     int: int,
@@ -751,10 +729,9 @@ class _ParamKind(Enum):
     """Classification of one simplified-handler parameter (registration-time).
 
     Emitted by :func:`_handler_param_plan` (HTTP) and
-    :func:`_websocket_param_plan` (WS).  Purely internal — derived from the
-    handler's signature, never from request data — so a plain ``Enum`` (not
-    StrEnum) is used: string comparisons like ``kind == 'query'`` must fail
-    loudly rather than silently pass.
+    :func:`_websocket_param_plan` (WS).  A plain ``Enum``, not a ``StrEnum``,
+    so that a stringly-typed comparison like ``kind == 'query'`` fails loudly
+    rather than silently passing.
     """
     PATH = 'path'
     CONN = 'conn'
@@ -771,19 +748,15 @@ def _handler_param_plan(fn, path_param_names: set) -> tuple:
     registration time.
 
     Returns ``(params, annotations, categories)`` where *categories* maps
-    parameter name → ``(kind, payload)`` with kind one of ``'path'``,
-    ``'conn'``, ``'body'``, ``'request'``, ``'dataclass'``, ``'depends'``
-    (payload: the :class:`~blackbull.di.Depends` instance), or ``'query'``
-    (payload: :class:`_QuerySpec`).  Precedence: path params first, then the
-    rejected name ``scope``, then the reserved names ``body``/``conn``
-    (``connection`` alias), then a ``Depends`` default, then
-    ``Connection`` recognition, then a dataclass body annotation; anything left
-    is a query param — the fallback category.
+    parameter name → ``(kind, payload)``: a :class:`_ParamKind` plus, for
+    ``DEPENDS``, the :class:`~blackbull.di.Depends` instance and, for
+    ``QUERY``, the :class:`_QuerySpec`.  The ``elif`` chain below *is* the
+    precedence, in order; ``QUERY`` is the fallback category, so every branch
+    ahead of it claims its names before a leftover becomes a query param.
 
-    Raises ``TypeError`` (fail fast, at registration) for a parameter named
-    ``scope``, a ``Depends`` default on a reserved/path name, a second
-    body-consuming parameter, or a leftover parameter whose annotation is not a
-    supported query scalar.
+    Everything unresolvable raises ``TypeError`` here, at registration, rather
+    than on the first request.  The user-facing forms are in
+    ``docs/getting-started/first-app.md``.
     """
     from .connection import Connection as _Conn  # ``Request`` is an alias of it
 
@@ -814,17 +787,9 @@ def _handler_param_plan(fn, path_param_names: set) -> tuple:
                     f"cannot carry a Depends default.")
             categories[name] = (_ParamKind.PATH, None)
         elif name == 'scope':
-            # Rejected, not merely unsupported. ``scope`` was once an alias
-            # injecting the Connection, which is backwards: the word means a
-            # genuine ASGI scope dict everywhere else, so the alias handed back
-            # an object that answered to the wrong name and invited
-            # ``scope['headers']`` — a request-time AttributeError.
-            #
-            # This branch must precede the query-param fallback below. Deleting
-            # the alias without it would let an unannotated ``scope`` resolve as
-            # a *query parameter* named "scope", silently rebinding the argument
-            # instead of failing. A path param named ``scope`` is explicit, so
-            # the ``path`` branch above still wins.
+            # This branch must precede the query-param fallback: without it an
+            # unannotated ``scope`` resolves as a *query parameter* named
+            # "scope", silently rebinding the argument instead of failing.
             raise TypeError(
                 f"Simplified handler {fn.__name__!r}: parameter 'scope' is not "
                 f"supported — BlackBull threads a Connection, not an ASGI scope "
@@ -839,19 +804,16 @@ def _handler_param_plan(fn, path_param_names: set) -> tuple:
                     f"Simplified handler {fn.__name__!r}: parameter {name!r} "
                     f"is reserved for the request {name} and cannot carry a "
                     f"Depends default — rename the parameter.")
-            # ``conn`` / ``connection`` inject the native Connection.
             categories[name] = (_ParamKind.BODY if name == 'body' else _ParamKind.CONN, None)
         elif is_dep:
             categories[name] = (_ParamKind.DEPENDS, default)
         elif ann is _Conn or (name == 'request' and ann is inspect.Parameter.empty):
-            # ``conn: Connection`` (preferred) or the legacy ``request: Request``
-            # (``Request`` is a deprecated alias of ``Connection``, so both
-            # annotations are the same object here), or the bare name ``request``.
+            # ``Request`` is an alias of ``Connection``, so ``request: Request``
+            # and ``conn: Connection`` reach this branch as the same annotation.
             categories[name] = (_ParamKind.REQUEST, None)
         elif _is_body_dataclass_annotation(ann):
             categories[name] = (_ParamKind.DATACLASS, None)
         else:
-            # Fallback category: resolve from the query string.
             target = str if ann is inspect.Parameter.empty else _unwrap_optional(ann)
             coercer = _QUERY_COERCERS.get(target) if isinstance(target, type) else None
             if coercer is None:
@@ -869,11 +831,9 @@ def _handler_param_plan(fn, path_param_names: set) -> tuple:
                 name=name, type=target, coercer=coercer, required=required,
                 default=None if required else default))
 
-    # A handler may have **at most one** body parameter — either a literal
-    # name ``body`` or a dataclass-typed parameter (or both, if they're the
-    # same parameter).  Trying to consume the body twice would hang the
+    # At most one body parameter: consuming the body twice would hang the
     # second ``read_body`` call indefinitely.  A ``Request`` param does not
-    # count: it drains lazily through the same cache the wrappers use.
+    # count — it drains lazily through the same cache the wrappers use.
     body_param_count = sum(
         1 for kind, _ in categories.values() if kind in (_ParamKind.BODY, _ParamKind.DATACLASS))
     if body_param_count > 1:
@@ -890,36 +850,28 @@ def _conn_of(target, receive):
     """Return the :class:`Connection` for this request.
 
     *target* is the threaded dispatch object: a :class:`Connection` on the
-    self-hosted and external paths alike (``BlackBull.__call__`` converts an
-    inbound ASGI scope via :meth:`Connection.from_scope` before dispatch), or a
-    hand-built ASGI scope dict on a direct unit-test drive of a wrapper.
+    self-hosted and external paths alike, or a hand-built ASGI scope dict on a
+    direct unit-test drive of a wrapper.  The self-hosted path reuses the
+    ``Connection`` the protocol actor stashed on the scope envelope under
+    :data:`~blackbull.connection.CONNECTION_STASH_KEY` with **no**
+    re-conversion; under an external ASGI server (uvicorn,
+    ``httpx.ASGITransport``) there is no stash, so one is built via
+    :meth:`Connection.from_scope` — the single ASGI→native conversion point.
 
-    The protocol actor builds the
-    ``Connection`` in its parser and stashes it on the ASGI scope envelope
-    under :data:`~blackbull.connection.CONNECTION_STASH_KEY`, so the self-hosted
-    path reuses that object with
-    **no** re-conversion (the B1/B3 hot path is unchanged). When the app runs
-    under an external ASGI server (uvicorn, ``httpx.ASGITransport``) there is
-    no stash, so we build one via :meth:`Connection.from_scope` — the single
-    ASGI→native conversion point.
-
-    ``_receive`` is bound to the caller's channel **only when unset**. On the
-    self-hosted path the actor has already bound the *raw* recipient via
-    :func:`~blackbull.connection.bind_receive_channel`; the ``receive`` threaded
-    to the router here is the disconnect-detecting *wrapper*, which captures
-    ``conn`` — overwriting the raw binding with it would re-form the per-request
-    reference cycle the actor binding exists to avoid (v0.60.0 regression). The
-    external-ASGI path arrives with ``_receive`` already set by ``from_scope``,
-    so it, too, is left untouched; only a hand-built scope that reached the
-    router with no channel bound (some unit drives) falls through to this bind.
+    ``_receive`` is bound to the caller's channel **only when unset**, because
+    on the self-hosted path the actor has already bound the *raw* recipient via
+    :func:`~blackbull.connection.bind_receive_channel`.  The ``receive``
+    threaded here is the disconnect-detecting *wrapper*, which captures
+    ``conn``; overwriting the raw binding with it re-forms the per-request
+    reference cycle the actor binding exists to avoid.  Only a hand-built scope
+    that reached the router with no channel bound falls through to this bind.
     """
     conn, built = stashed_connection(target, receive)
     if built and isinstance(target, dict):
-        # Transitional bridge: an *input* ``path_params`` key on a bare scope
-        # (external callers, and the router's own unit tests that drive a
-        # wrapper directly) seeds ``conn.path_params``.  The framework itself no
-        # longer writes path params onto the scope — ``_set_path_params`` sets
-        # them on the Connection (proposal §2.2).
+        # An *input* ``path_params`` key on a bare scope seeds
+        # ``conn.path_params``, for external callers and for unit tests that
+        # drive a wrapper directly.  The framework's own writes go the other
+        # way, through ``_set_path_params``.
         seed = target.get('path_params')
         if seed:
             conn.path_params.update(seed)
@@ -929,28 +881,22 @@ def _conn_of(target, receive):
 
 
 def _set_path_params(target, receive, params: dict) -> None:
-    """Record matched URL path params on the request's :class:`Connection`.
+    """Record matched URL path params on the request's :class:`Connection`,
+    where the handler reads them back as ``conn.path_params``.
 
-    Replaces the old ``scope.setdefault('path_params', {})``
-    closure. The handler reads them back via ``conn.path_params`` (see
-    :func:`_conn_of`).
-
-    No-op fast-return when there are no matched params, so a
-    no-param route never touches ``conn.path_params`` and its lazy backing dict
-    is never allocated.
+    The no-param fast return keeps a no-param route from ever touching
+    ``conn.path_params``, so its lazy backing dict is never allocated.
     """
     if not params:
         return
     _conn_of(target, receive).path_params.update(params)
 
 
-#: Parameter names that receive the high-level :class:`~blackbull.websocket.WebSocket`
-#: when they carry no annotation.  ``ws: WebSocket`` works under any name.
+#: Recognised only on an *un*annotated parameter; ``ws: WebSocket`` works
+#: under any name.
 _WS_PARAM_NAMES = frozenset({'ws', 'websocket'})
 
-#: RFC 6455 §7.4.1 close code 1008 — "policy violation".  Used to refuse a
-#: handshake whose declared handler params could not be bound; the HTTP path
-#: answers the equivalent failure with 400, which a WebSocket cannot carry.
+#: RFC 6455 §7.4.1 close code 1008 — "policy violation".
 _WS_POLICY_VIOLATION = 1008
 
 #: RFC 6455 §5.5 caps a Close frame payload at 125 bytes, of which the code
@@ -991,21 +937,13 @@ def _websocket_param_plan(fn, path_param_names: set = frozenset()) -> tuple[tupl
     registration time.
 
     Returns ``(name, kind, payload)`` per parameter, in signature order, with
-    kind one of ``'ws'`` (the :class:`~blackbull.websocket.WebSocket`),
-    ``'conn'`` (the native :class:`~blackbull.connection.Connection`),
-    ``'path'`` (payload: the annotation to coerce to, or ``None``),
-    ``'query'`` (payload: :class:`_QuerySpec`), or ``'depends'`` (payload: the
-    :class:`~blackbull.di.Depends` instance).
+    the same payloads :func:`_handler_param_plan` uses.  Annotation wins over
+    name, so an explicitly annotated parameter always means what it says;
+    after that the ``elif`` chain is the precedence, as on the HTTP side.
 
-    Annotation wins over name, so an explicitly annotated parameter always
-    means what it says.  Precedence after that mirrors
-    :func:`_handler_param_plan`: path params, then the bare reserved names,
-    then a ``Depends`` default, and query params as the fallback category.
-
-    A WebSocket has no request body, so the ``'body'``/``'dataclass'``
-    categories have no WebSocket analogue — such a parameter falls through to
-    the query branch and is rejected there.  Anything unresolvable raises
-    ``TypeError`` at registration rather than failing on the first connection.
+    The two deliberate divergences from the HTTP plan — a query param must
+    carry its annotation, and there is no body parameter — are argued in
+    ``docs/guide/websockets.md`` §Injected parameters.
     """
     from .connection import Connection as _Conn  # noqa: PLC0415 — cycle-safe
     from .websocket import WebSocket as _WS      # noqa: PLC0415 — cycle-safe
@@ -1051,14 +989,7 @@ def _websocket_param_plan(fn, path_param_names: set = frozenset()) -> tuple[tupl
         elif is_dep:
             plan.append((name, _ParamKind.DEPENDS, default))
         else:
-            # Unlike the HTTP plan, a *bare* leftover name is not silently taken
-            # as a str query param.  On HTTP that fallback is load-bearing
-            # (`async def search(q)` is idiomatic); on a WebSocket query params
-            # are rare and the reserved-name space makes bare names genuinely
-            # ambiguous — `async def chat(socket)` means the socket, not a query
-            # param named "socket".  Requiring the annotation costs one word and
-            # keeps the property that a typo fails at registration
-            # instead of rejecting every connection at runtime.
+            # ``None`` for a bare name finds no coercer, and so raises below.
             target = None if bare else _unwrap_optional(ann)
             coercer = _QUERY_COERCERS.get(target) if isinstance(target, type) else None
             if coercer is None:
@@ -1089,17 +1020,9 @@ def _adapt_websocket_handler(fn, path: str = ''):
     The plan is resolved once here, at registration; the wrapper itself only
     indexes it.  One object per *connection* — not per message — so an
     ``async for`` loop over a long-lived socket allocates nothing extra per
-    message.
-
-    **Dependency lifetime.**  A ``Depends`` parameter is resolved **once per
-    connection** and released when the handler returns, via an
-    :class:`~contextlib.AsyncExitStack` that unwinds on every exit — clean
-    close, ``WebSocketDisconnect``, or a handler exception alike.  That means a
-    dependency is held for the *whole socket lifetime*, which on a WebSocket
-    may be hours rather than the milliseconds an HTTP request holds one.  Do
-    not resolve a pooled or otherwise scarce resource this way: app-scope the
-    pool (``@app.on_startup``) and borrow per use inside the handler.  See
-    ``docs/guide/websockets.md``.
+    message.  A ``Depends`` is likewise resolved once per connection, which is
+    long enough to matter: see ``docs/guide/websockets.md`` §Dependency
+    lifetime before injecting a pooled resource.
 
     Nothing is done to the wire: the wrapper's methods emit the same
     ``websocket.*`` events the raw form sends by hand.
@@ -1181,10 +1104,9 @@ def _adapt_websocket_handler(fn, path: str = ''):
             await fn(**kwargs)
             return
 
-        # One stack per connection.  Teardown is LIFO on handler exit and runs
-        # on an exception propagating out of the handler just as it does on a
-        # clean return — that is the whole point of binding it to the `async
-        # with` rather than to a close event.
+        # Bound to the `async with` rather than to a close event, so teardown
+        # runs on an exception propagating out of the handler exactly as it
+        # does on a clean return.
         async with AsyncExitStack() as stack:
             cache: dict = {}
             for name, dep in depends_plan:
@@ -1197,11 +1119,8 @@ def _adapt_websocket_handler(fn, path: str = ''):
 async def _ws_reject(ws, detail: str) -> None:
     """Reject a WebSocket handshake whose declared params could not be bound.
 
-    The HTTP path answers a bad query param with 400; a WebSocket has no
-    response to put a status on, so the handshake is refused with close code
-    1008 (policy violation) — the same shape FastAPI uses for WebSocket
-    validation failures.  Called before the handler runs, so the client's
-    ``connect()`` fails rather than opening and immediately closing.
+    Called before the handler runs, so the client's ``connect()`` fails rather
+    than opening and immediately closing.
     """
     logger.info(f'WebSocket handshake rejected: {detail}')
     await ws.close(code=_WS_POLICY_VIOLATION, reason=_truncate_close_reason(detail))
@@ -1294,50 +1213,22 @@ def _make_extended_wrapper(fn, annotations: dict, plan: tuple, depends_plan: tup
 
 
 def _adapt_handler(fn, path: str, converters: dict | None = None):
-    """Wrap a simplified handler in an ASGI (scope, receive, send) coroutine.
+    """Wrap a simplified handler in a ``(conn, receive, send)`` coroutine.
 
-    *converters* is the app's ``type → callable`` registry (shared by
-    reference so converters registered after this route are still visible).
-    When a handler returns a value that is none of the natively supported
-    shapes, a matching converter — if any — maps it to a sendable.
-
-    Parameter resolution (classified once, by :func:`_handler_param_plan`):
-    - Name matches a {param} in the path pattern → conn.path_params[name],
-      coerced to the annotated type if one is given.
-    - Annotation is a Python ``@dataclass`` → request body parsed as JSON and
-      instantiated; nested dataclasses, ``list[T]``, and ``T | None`` are
-      handled recursively.  ``body: SomeDataclass`` also works.
-    - 'body' (un-annotated, or annotated as ``bytes``) → await read_body(receive)
-    - 'conn' / 'connection' (or the deprecated alias 'scope') → the native
-      :class:`~blackbull.connection.Connection`
-    - Annotation is ``Request`` (any name), or the name is ``request`` with no
-      annotation → a per-request ``Request(scope, receive)`` context object.
-      Its ``body()`` cache is the drain point for 'body' / dataclass params
-      too, so the body is read at most once per request.
-    - Default value is ``Depends(provider)`` → the provider's value, with
-      ``AsyncExitStack``-backed teardown after the response is sent.
-    - Anything else → a **query param**: resolved from scope['query_string'],
-      coerced to the annotation (str/int/float/bool, optionally ``| None``).
-      A default makes it optional; missing-required or failed coercion is a
-      400 via :class:`HTTPException`.  An unsupported annotation is a
-      TypeError at registration time (fail fast).
-
-    Handlers using neither query params nor ``Depends`` compile to the same
-    basic wrapper as a handler that uses neither — the zero-overhead pin.
-
-    Return values: Response → send(result); bytes → send(Response(result));
-    str → send(Response(result.encode())); dict → send(JSONResponse(result));
-    None → no send; other → TypeError at call time.
+    Parameters are classified once by :func:`_handler_param_plan`, which owns
+    the categories and their precedence; return values are serialised by
+    :func:`_send_native`, which owns the supported shapes.  *converters* is
+    ``Router._converters``, consulted only for a return value none of those
+    shapes matched.
     """
     from .connection import Connection as _Conn
 
     path_param_names: set[str] = _path_param_names(path)
     params, annotations, categories = _handler_param_plan(fn, path_param_names)
 
-    # A path param always resolves from the path, so a declared default can
-    # never apply — and any same-named query-string key is shadowed.  The
-    # default is the one registration-time signal that the author may have
-    # meant a query param, so say so now rather than 404-by-surprise later.
+    # A default on a path param is the one registration-time signal that the
+    # author may have meant a query param, so say so now rather than let the
+    # shadowing surprise them at request time.
     for name, p in params.items():
         if categories[name][0] is _ParamKind.PATH and p.default is not inspect.Parameter.empty:
             warnings.warn(
@@ -1351,9 +1242,6 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
 
     @wraps(fn)
     async def _wrapper(conn, receive, send):
-        # The typed Connection is the single source for the request object,
-        # the body cache (one drain point shared with the body branches), and
-        # the path params (set by the router's ``_inject`` on ``conn``).
         conn = _conn_of(conn, receive)
         kwargs: dict = {}
         for name in params:
@@ -1391,9 +1279,6 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
         if await _send_native(result, conn, receive, send):
             return
         if converters and (conv := _lookup_converter(converters, type(result))) is not None:
-            # Cold path: an app-registered type→sendable converter.  Guarded by
-            # ``converters`` truthiness so an empty registry costs nothing here
-            # and the common shapes above never reach this branch at all.
             await _send_converted(conv(result), conn, receive, send)
             return
         raise TypeError(
@@ -1408,13 +1293,8 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
         (n, payload) for n, (kind, payload) in categories.items() if kind is _ParamKind.DEPENDS)
 
     if not has_query and not depends_plan:
-        # Zero-overhead pin: neither new parameter category is in play, so
-        # this handler gets the plain wrapper.
-        return _wrapper
+        return _wrapper  # zero-overhead pin: neither category is in play
 
-    # Extended wrapper — query params and/or Depends.  The plan below was
-    # fully computed at registration; the per-request work is only what the
-    # declared parameters require.
     plan = tuple((n, kind, payload) for n, (kind, payload) in categories.items()
                  if kind is not _ParamKind.DEPENDS)
     return _make_extended_wrapper(fn, annotations, plan, depends_plan, converters)
@@ -1465,22 +1345,15 @@ def _to_tuple(value: Any) -> tuple:
 # ---------------------------------------------------------------------------
 # Per-route hooks — generic request/response metadata a handler can carry.
 #
-# The dispatcher (``BlackBull._dispatch``) treats every method identically.
-# A route may attach two optional, method-agnostic hooks that the dispatcher
-# applies uniformly — it does not know (or name) any specific method or
-# feature:
+#   ``_bb_response_headers`` — headers appended to every response the route
+#       produces, the centrally-rendered error included.
+#   ``_bb_request_guard`` — a ``(conn) -> None`` callable run before the
+#       handler, raising :class:`HTTPException` to reject pre-dispatch.
 #
-#   ``_bb_response_headers`` — extra headers appended to every response the
-#       route produces (success *and* the centrally-rendered error), e.g. the
-#       RFC 10008 ``Accept-Query`` header.
-#   ``_bb_request_guard`` — a ``(scope) -> None`` callable run before the
-#       handler; it raises :class:`HTTPException` to reject the request
-#       pre-dispatch (routed like a 404/405).
-#
-# ``accept_query`` (below) is currently the only producer of these hooks; the
-# QUERY-specific logic lives entirely inside the guard it builds, never in the
-# dispatcher.  A future feature (e.g. a rate-limit guard, other declared
-# response headers) reuses the same two hooks with no dispatcher change.
+# Both are method-agnostic by construction: ``BlackBull._dispatch`` applies
+# them without naming a method or a feature, so all of ``accept_query``'s
+# QUERY-specific logic lives inside the guard it builds.  It is the only
+# producer today; the next one needs no dispatcher change.
 # ---------------------------------------------------------------------------
 
 _ROUTE_HOOK_ATTRS = ('_bb_response_headers', '_bb_request_guard')
@@ -1500,16 +1373,12 @@ def _copy_route_hooks(dst: Callable, src: Callable) -> None:
 
 
 def _accept_query_hooks(media_types: Iterable[str]):
-    """Build the ``(response_headers, request_guard)`` hooks for the RFC 10008
-    ``accept_query`` route option.
+    """Build the ``(response_headers, request_guard)`` hooks implementing the
+    ``accept_query`` route option, whose contract is on :meth:`BlackBull.route`.
 
-    ``response_headers`` carries the ``Accept-Query`` field (an RFC 9651
-    Structured Field list of media-type tokens; serialising through
-    :func:`serialize_list` validates each token at registration, so an invalid
-    entry raises ``ValueError`` up front).  ``request_guard`` enforces the
-    request ``Content-Type`` on QUERY requests only — 400 when absent, 415
-    when unaccepted — while other methods sharing the route still receive the
-    header but are not media-type gated.
+    Serialising the header through :func:`serialize_list` is what validates
+    each media type, so an invalid entry raises ``ValueError`` at registration
+    rather than producing a malformed header per response.
     """
     from .protocol.structured_fields import Token, serialize_list  # noqa: PLC0415
 
@@ -1537,9 +1406,6 @@ def _accept_query_hooks(media_types: Iterable[str]):
 def request_media_type(conn) -> str:
     """Return the request's media type (``Content-Type`` sans parameters),
     lowercased; ``''`` when no Content-Type is present.
-
-    ``conn.headers`` is always a :class:`~blackbull.headers.Headers`, so a plain
-    ``.get`` suffices.
     """
     ct = conn.headers.get(b'content-type', b'')
     if not ct:
@@ -1548,15 +1414,12 @@ def request_media_type(conn) -> str:
 
 
 class _LookupCache:
-    """Bounded LRU for resolved route lookups.
+    """Bounded LRU for resolved route lookups; ``cache_max`` of 0 disables it.
 
-    Encapsulates the ``OrderedDict`` store, the ``cache_max`` bound, the
-    refresh-LRU-order-only-when-full optimisation, and ``popitem`` eviction —
-    the whole caching *strategy* — behind ``get`` / ``set`` / ``clear``.  A
-    replacement strategy (e.g. a trie-backed or unbounded cache) is a drop-in:
-    swap ``Router._cache`` for a different instance with the same three-method
-    interface; ``__getitem__`` and the ``_cache_get`` / ``_cache_set``
-    delegates never change.  A ``cache_max`` of 0 (or less) disables caching.
+    The whole caching *strategy* — store, bound, LRU ordering, eviction — is
+    behind ``get`` / ``set`` / ``clear``, so a replacement (trie-backed,
+    unbounded) is a drop-in: give ``Router._cache`` a different instance with
+    the same three methods and nothing on the lookup path changes.
     """
     __slots__ = ('cache_max', '_store')
 
@@ -1576,12 +1439,12 @@ class _LookupCache:
 
     def set(self, key, result) -> None:
         """Store *result* under *key*, evicting the least-recently-used entry
-        when the cache is full.  A ``cache_max`` of 0 disables caching."""
+        when the cache is full."""
         if self.cache_max <= 0:
             return
         store = self._store
         if len(store) >= self.cache_max:
-            store.popitem(last=False)  # evict least-recently-used
+            store.popitem(last=False)
         store[key] = result
 
     def clear(self) -> None:
@@ -1603,8 +1466,6 @@ class Router:
     """
     _param_pattern = re.compile(r'\{([a-zA-Z_]\w*?)(?::([a-zA-Z_]\w*?))?\}', flags=re.ASCII)
 
-    # Default bound for the per-worker lookup cache (overridable per instance
-    # via the ``cache_max`` constructor argument).
     _DEFAULT_CACHE_MAX: int = 2048
 
     def __init__(self, cache_max: int = _DEFAULT_CACHE_MAX):
@@ -1612,25 +1473,19 @@ class Router:
         self._named_routes: dict[str, tuple[str, dict[str, str]]] = {}
         self._frozen: bool = False
         self._trie = _RouteTrie()
-        self._string_paths: set[str] = set()  # registered string paths (for __contains__/__repr__)
-        self._raw_regex: dict = {}  # raw re.Pattern routes (not compiled from string paths)
-        # Per-worker lookup cache: maps (path, method, scheme) → resolved
-        # handler; cleared whenever a route is registered.  The whole caching
-        # strategy — bound, eviction, LRU order — lives in ``_LookupCache`` so
-        # it can be swapped by replacing this one instance, without touching
-        # ``__getitem__`` / ``_cache_get`` / ``_cache_set`` / ``_resolve``.
+        self._string_paths: set[str] = set()  # answers __contains__ / __repr__
+        self._raw_regex: dict = {}
+        # (path, method, scheme) → resolved handler, cleared on registration.
         self._cache: _LookupCache = _LookupCache(cache_max)
-        # type → callable registry for simplified-handler return coercion.
-        # Empty by default (falsy) so the common return paths never consult it.
-        # Shared by reference with every adapted handler, so a converter
+        # Empty by default (falsy) so the common return paths never consult it,
+        # and shared by reference with every adapted handler, so a converter
         # registered after a route is still honoured.
         self._converters: dict[type, Callable] = {}
 
     @property
     def cache_max(self) -> int:
-        """The lookup cache's entry bound (0 disables caching).  Kept as a
-        property delegating to :class:`_LookupCache` so the constructor knob
-        and ``router.cache_max = N`` retuning both flow to the one store."""
+        """The lookup cache's entry bound; 0 disables caching.  Writable, so
+        the cache can be retuned after construction."""
         return self._cache.cache_max
 
     @cache_max.setter
@@ -1649,17 +1504,9 @@ class Router:
                       Scheme | Iterable[Scheme] | None]),
         value: Any,
     ):
-        """
-        If key[0] is a str:
-            - Insert it into the routing trie under the normalised
-              (path, methods, scheme) key.  ``{param}`` / ``{param:converter}``
-              placeholders become parameter segments with converter functions.
-
-        If key[0] is a re.Pattern:
-            - Store it in self._raw_regex (scanned on trie miss).
-
-        When scheme is omitted it is stored as _ANY_SCHEME,
-        which matches any scheme at lookup time.
+        """Register *value* under ``(path, methods)`` or ``(path, methods,
+        scheme)``, routing the path to whichever of the two stores the class
+        docstring describes.  An omitted scheme is stored as ``_ANY_SCHEME``.
         """
         if self._frozen:
             raise RuntimeError(
@@ -1667,7 +1514,6 @@ class Router:
 
         self._cache.clear()
 
-        # Unpack key
         if len(key) == 3:
             path, methods, scheme = key
         elif len(key) == 2:
@@ -1679,7 +1525,6 @@ class Router:
                 f"(path, methods, scheme), got: {key!r}"
             )
 
-        # Normalise methods / scheme to tuples
         methods = _to_tuple(methods)
         for m in methods:
             if isinstance(m, str):
@@ -1691,7 +1536,6 @@ class Router:
 
         scheme_key = _ANY_SCHEME if isinstance(scheme, _AnyScheme) else tuple(scheme)
 
-        # Dispatch on path type
         if isinstance(path, str):
             # Validate converter specs up front — the trie itself defaults an
             # unknown spec to str, which would silently mis-register the route.
@@ -1702,10 +1546,8 @@ class Router:
                         f"Unknown converter {spec!r} in path {path!r}. "
                         f"Valid converters: {sorted(_CONVERTERS)}")
 
-            # String paths are matched literally (plus {param} placeholders).
-            # Before the trie became the sole string-path store, every string
-            # was also compiled as a regex, so a regex source string happened
-            # to work — reject it loudly rather than 404 silently.
+            # A regex source string passed as a str path matches nothing, since
+            # string paths are literal — reject it loudly rather than 404.
             stripped = self._param_pattern.sub('', path)
             if any(c in _REGEX_METACHARS for c in stripped):
                 raise ValueError(
@@ -1732,14 +1574,8 @@ class Router:
         """
         key: (path: str, method: str | HTTPMethod, scheme: Scheme)
 
-        Uses the routing trie for O(path-depth) lookup of string-path routes,
-        then falls back to a linear scan of raw re.Pattern routes.
-
-        Results are cached (up to ``cache_max`` entries) so repeated requests
-        to the same (path, method, scheme) skip the trie traversal entirely
-        after the first hit.  The query→miss→resolve→store flow lives here;
-        the cache mechanics are delegated to ``_cache_get`` / ``_cache_set``
-        so the cache strategy can be swapped without touching this method.
+        The query→miss→resolve→store flow; :meth:`_resolve` does the matching.
+        A repeat of the same key skips resolution entirely after the first hit.
         """
         hit, result = self._cache_get(key)
         if hit:
@@ -1750,12 +1586,10 @@ class Router:
         return result
 
     def _cache_get(self, key: Tuple[str, str | HTTPMethod, Scheme]):
-        """Return ``(hit: bool, result)`` for *key* — delegates to the
-        swappable :class:`_LookupCache` strategy."""
+        """Return ``(hit: bool, result)`` for *key*."""
         return self._cache.get(key)
 
     def _cache_set(self, key: Tuple[str, str | HTTPMethod, Scheme], result) -> None:
-        """Store *result* under *key* — delegates to :class:`_LookupCache`."""
         self._cache.set(key, result)
 
     def _resolve(
@@ -1770,7 +1604,6 @@ class Router:
         """
         key_path, key_method, key_scheme = key
 
-        # --- 1. Trie lookup (all string-path routes) ----------------------
         h, params, trie_allowed = self._trie.lookup(key_path, key_method, key_scheme)
         if h is not None:
             if params:
@@ -1779,15 +1612,12 @@ class Router:
                                   _fn=_fn, _params=_params):
                     _set_path_params(conn, receive, _params)
                     return await _fn(conn, receive, send)
-                # Preserve any route hooks across the path-param wrapper so
-                # the dispatcher still finds them.
                 _copy_route_hooks(_inject, _fn)
                 return _inject
             return h
 
-        # --- 2. Regex scan (fallback: raw re.Pattern routes only) ----------
-        # Skipped entirely when no re.Pattern routes are registered (the
-        # common case) — a miss then raises straight from the trie result.
+        # With no re.Pattern routes registered — the common case — a trie miss
+        # is the whole answer and raises here.
         if not self._raw_regex:
             if trie_allowed:
                 raise MethodNotApplicable(trie_allowed)
@@ -1813,7 +1643,6 @@ class Router:
                     return _inject
                 return fn
 
-        # --- 3. Raise appropriate exception --------------------------------
         logger.debug("No match: key=%r allowed=%r", key, allowed_methods)
         if allowed_methods:
             raise MethodNotApplicable(allowed_methods)
@@ -1825,7 +1654,6 @@ class Router:
         True when the path was registered verbatim as a string route, or when
         any raw re.Pattern route matches it.
         """
-        # Extract only the path when a tuple is given
         if isinstance(item, tuple):
             path = item[0]
         else:
@@ -1834,7 +1662,6 @@ class Router:
         if path in self._string_paths:
             return True
 
-        # Check whether any raw re.Pattern route matches
         for (pattern, *_) in self._raw_regex:
             m = pattern.match(path)
             if m:
@@ -1854,8 +1681,9 @@ class Router:
     def _method_matches(key_method, registered_methods: tuple) -> bool:
         """Return True if key_method matches any entry in registered_methods.
 
-        Accepts both HTTPMethod enum values and plain strings (e.g. 'GET'),
-        comparing by normalised uppercase name so the two forms are interchangeable.
+        ``HTTPMethod`` is a ``StrEnum``, so a registered member compares equal
+        to the plain token and the two forms are interchangeable.  The match is
+        exact: ``'get'`` does not match ``HTTPMethod.GET``.
         """
         return key_method in registered_methods
 
@@ -1877,11 +1705,7 @@ class Router:
                  accept_query: Iterable[str] | None = None):
         """Return a decorator that registers the decorated handler.
 
-        ``accept_query`` (RFC 10008) is the list of request **media types** the
-        route accepts — the ``Accept-Query`` header value driving Content-Type
-        enforcement on QUERY requests.  It is **not** a switch for the QUERY
-        *method* (methods are accepted by ``methods``); it installs the route
-        hooks in :func:`_accept_query_hooks`.  See ``BlackBull.route``.
+        See :meth:`BlackBull.route` for ``accept_query``.
         """
         logger.debug('Router.route_fn() is called.')
         methods = _to_tuple(methods)
@@ -1917,10 +1741,8 @@ class Router:
                         accept_query: Iterable[str] | None = None):
         """Build a middleware chain from *functions* and register it.
 
-        ``accept_query`` (RFC 10008) — the request **media types** the route
-        accepts (the ``Accept-Query`` header value), attached to the chain as
-        route hooks; **not** a switch for the QUERY *method*.  See
-        ``BlackBull.route``.
+        ``accept_query``'s hooks attach to the chain wrapper, not to the inner
+        handler; see :meth:`BlackBull.route` for what the option means.
         """
         if not isinstance(functions, Iterable):
             raise TypeError(f'{functions} is not iterable.')
@@ -1938,10 +1760,9 @@ class Router:
                 raise ValueError(f'{fn} does not have "inner" or "call_next" in its parameters.')
             inner_chain = partial(fn, **{param: inner_chain})
 
-        # Wrap in a named coroutine so it is recognisable at lookup time.
-        # Path parameters will be injected into the Connection's path_params by
-        # _resolve rather than forwarded as kwargs to the outermost
-        # middleware (which would raise TypeError for unknown keyword args).
+        # The wrapper takes the three positional channels and nothing else, so
+        # _resolve injects path params onto the Connection rather than passing
+        # them as kwargs the outermost middleware would reject.
         _ic = inner_chain
         async def _chain_wrapper(conn, receive, send):
             return await _ic(conn, receive, send)
@@ -2056,10 +1877,8 @@ class Router:
                 if p is None:
                     continue
 
-                # Resolve string annotations (forward refs / PEP 563) to real
-                # types before handing to beartype.  inspect.Parameter.annotation
-                # returns the raw string when __future__.annotations is active,
-                # and beartype's code generator cannot handle unresolved strings.
+                # beartype's code generator cannot handle an unresolved string
+                # annotation, which is what inspect returns under PEP 563.
                 try:
                     hints = typing.get_type_hints(info.handler)
                 except Exception:
@@ -2068,13 +1887,8 @@ class Router:
                 if annotation is inspect.Parameter.empty:
                     continue
 
-                # A bare {param} (no explicit :converter) defaults to a
-                # 'str' router-level spec, but _adapt_handler re-coerces
-                # the captured string to the handler's own annotation at
-                # call time — so a 'str' spec next to an `int` annotation
-                # here is the documented pattern (docs/getting-started/
-                # first-app.md), not a bug. Only an *explicit* {param:type}
-                # promises the router itself will produce that type.
+                # See ``_RouteInfo.explicit_param_specs`` for why bare params
+                # are exempt from the type-match check.
                 if param_name not in info.explicit_param_specs:
                     continue
 
@@ -2088,9 +1902,7 @@ class Router:
                         f"converter {spec!r} yields {type(sample).__name__!r} "
                         f"but annotation is {annotation!r}: {exc}")
                 except BeartypeException:
-                    # beartype internal error (e.g. code-gen bug with a
-                    # partially-resolved forward ref) — skip this check.
-                    pass
+                    pass  # beartype's own failure is not the route's fault
 
         if errors:
             raise ConfigurationError('\n'.join(errors))
@@ -2113,13 +1925,8 @@ class Router:
            appended to the middleware list before the chain is registered.
 
         ``name`` registers the route for use with ``url_path_for()``.
-
-        ``accept_query`` (RFC 10008) declares the request **media types** the
-        route accepts — the value of the ``Accept-Query`` response header, and
-        **not** a switch for the QUERY *method* (methods are accepted by being
-        listed in ``methods``).  It drives that header plus Content-Type
-        enforcement (400 missing / 415 unsupported) on QUERY requests — see
-        ``BlackBull.route``.
+        ``accept_query`` is documented on :meth:`BlackBull.route`, which
+        delegates here.
         """
         logger.debug('Router.route() is called. functions=%r middlewares=%r', functions, middlewares)
 
@@ -2175,11 +1982,11 @@ class ErrorRouter:
 
         errors = ErrorRouter()
 
-        @errors[HTTPStatus.NOT_FOUND]
+        @errors(HTTPStatus.NOT_FOUND)
         async def handle_404(conn, receive, send):
             ...
 
-        @errors[ValueError]
+        @errors(ValueError)
         async def handle_value_error(conn, receive, send):
             ...
 
@@ -2189,17 +1996,12 @@ class ErrorRouter:
     """
 
     def __init__(self, default: Callable | None = None):
-        """*default* is returned on any lookup miss (error statuses and
-        unmatched exceptions) instead of ``None``.  Only explicitly
-        registered handlers appear in the two registries, so "which statuses
-        have custom handlers" stays inspectable."""
+        """*default* is returned on any lookup miss instead of ``None``.  It is
+        not written into either registry, so those keep answering which
+        statuses and exceptions have handlers of their own."""
         self._status_handlers: dict[HTTPStatus, Callable] = {}
         self._exc_handlers: dict[Type[BaseException], Callable] = {}
         self._default = default
-
-    # ------------------------------------------------------------------
-    # Registration
-    # ------------------------------------------------------------------
 
     def __setitem__(self, key: HTTPStatus | Type[BaseException], fn: Callable):
         if isinstance(key, HTTPStatus):
@@ -2214,15 +2016,11 @@ class ErrorRouter:
             )
 
     def __call__(self, key: HTTPStatus | Type[BaseException]) -> Callable:
-        """Decorator form: @errors[HTTPStatus.NOT_FOUND]"""
+        """Decorator form: ``@errors(HTTPStatus.NOT_FOUND)``."""
         def decorator(fn: Callable) -> Callable:
             self[key] = fn
             return fn
         return decorator
-
-    # ------------------------------------------------------------------
-    # Lookup
-    # ------------------------------------------------------------------
 
     def __getitem__(
         self, key: HTTPStatus | Type[BaseException] | BaseException
@@ -2237,7 +2035,6 @@ class ErrorRouter:
         if isinstance(key, HTTPStatus):
             return self._status_handlers.get(key, self._default)
 
-        # Normalise instance → class
         exc_class = key if isinstance(key, type) else type(key)
         if not issubclass(exc_class, BaseException):
             raise TypeError(f"Key must be HTTPStatus or exception class/instance, got {key!r}")
