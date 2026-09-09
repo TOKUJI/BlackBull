@@ -195,12 +195,13 @@ class ConnectionActor(Actor):
         # both halves.
         deadline = cfg.header_timeout if cfg.header_timeout > 0 else None
 
-        # One rescheduled TimerHandle per connection replaces
-        # the per-phase ``async with asyncio.timeout(d):`` allocations.
-        # The deadline binds to *this* task — the per-connection dispatch
-        # task — and gets passed down into HTTP1Actor / HTTP1Recipient so
-        # each phase boundary (peek, headers, body chunk, keep-alive) just
-        # re-arms the same handle.
+        # Replaces the per-phase ``async with asyncio.timeout(d):``
+        # allocations.  This object is per-connection registry state, not a
+        # per-connection timer — one process-wide scanner walks the registry
+        # (see ``deadline.py``).  It binds to *this* task, the per-connection
+        # dispatch task, and is passed down into HTTP1Actor / HTTP1Recipient
+        # so each phase boundary (peek, headers, body chunk, keep-alive)
+        # re-arms the same object.
         dl = ConnectionDeadline()
 
         # Port-bound non-ASGI protocol: the listening socket already
