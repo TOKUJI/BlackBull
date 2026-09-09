@@ -582,10 +582,8 @@ class HTTP1Actor(Actor):
         import time as _time  # noqa: PLC0415
         from ..env import get_settings as _get_settings  # noqa: PLC0415
         cfg = _get_settings()
-        # One rescheduled TimerHandle per connection drives every phase
-        # deadline (headers / body / keep-alive); lazy so an actor driven
-        # directly, without a wrapping ConnectionActor, takes the same path.
-        if self._deadline is None:
+        driven_without_connection_actor = self._deadline is None
+        if driven_without_connection_actor:
             self._deadline = ConnectionDeadline()
         dl = self._deadline
         max_body_size = cfg.max_body_size
@@ -613,10 +611,10 @@ class HTTP1Actor(Actor):
                     else:
                         await self._read_headers(cfg.header_max_total)
                 except IncompleteReadError:
-                    # Empty buffer ⇒ an idle peer closed ⇒ silent close.
-                    # Partial bytes then EOF ⇒ 400 before close, so the
-                    # differential tests read a protocol violation, not a reset.
-                    if self._request:
+                    partial_head_before_eof = bool(self._request)
+                    if partial_head_before_eof:
+                        # 400 before close, so the differential tests read a
+                        # protocol violation rather than a reset.
                         logger.info(
                             '400 Bad Request — peer EOF mid-headers '
                             'after %d bytes; peer=%r',
@@ -1265,10 +1263,10 @@ class HTTP1Actor(Actor):
         if send._head_mode:
             conn.method = 'GET'
 
-        # One recipient per connection, rebound per request: the reader, body
-        # timeout and deadline are all connection properties.  ``bind``
-        # re-derives the framing from the new head.
-        if inner_receive is None:
+        # Reusable: reader, body timeout and deadline are all connection
+        # properties.  ``bind`` re-derives the framing from the new head.
+        first_request_on_connection = inner_receive is None
+        if first_request_on_connection:
             inner_receive = RecipientFactory.http1(
                 self._reader, conn, body_timeout=cfg.body_timeout, deadline=dl)
         else:
