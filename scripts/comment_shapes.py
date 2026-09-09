@@ -98,6 +98,38 @@ def annotate(tree):
     return info
 
 
+def prose_blocks(src, lines):
+    """Comment blocks *and* docstrings, for the duplication measurement.
+
+    Restricting this to ``#`` comments hid the largest duplication in
+    ``server/server.py``: ``_max_connections_report``'s docstring and a comment
+    ninety lines away made the same argument in the same seven words, and the
+    tool reported nothing.  A fact restated across the two kinds is still one
+    fact in two places, so both are blocks here.
+
+    The if/while classification above still reads comments only, where the
+    restriction is correct: a docstring does not sit above a condition.
+    """
+    out = list(own_blocks(src, lines))
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return out
+    holders = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+    for node in ast.walk(tree):
+        if not isinstance(node, holders):
+            continue
+        body = getattr(node, 'body', None)
+        if not body:
+            continue
+        first = body[0]
+        if (isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant)
+                and isinstance(first.value.value, str)):
+            lo, hi = first.lineno, (first.end_lineno or first.lineno)
+            out.append((lo, hi, lines[lo - 1:hi]))
+    return out
+
+
 def repeated_topics(src, lines):
     """Topics several separate comment blocks each explain.
 
@@ -112,7 +144,7 @@ def repeated_topics(src, lines):
     are reported per *block*, since one fact spread over five blocks is five
     places to keep true.
     """
-    blocks = own_blocks(src, lines)
+    blocks = prose_blocks(src, lines)
     sym = re.compile(r'\b(BB_[A-Z0-9_]+|[A-Za-z_]\w*_\w+|[A-Z][a-z]+[A-Z]\w+)\b')
     sec = re.compile(r'(?:RFC\s*\d+\s*)?§\s*[\d.]+|RFC\s*\d+')
     topics, grams = {}, {}
