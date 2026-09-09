@@ -281,9 +281,9 @@ class HTTP2Actor(Actor):
         self._min_body_rate: float = _cfg.min_body_rate
         self._min_body_rate_grace: float = _cfg.min_body_rate_grace
         self._write_timeout: float = _cfg.write_timeout
-        # Two settings because one worker meets every connection's streams on
-        # one loop, where SO_REUSEPORT spreads them across several.
-        if _cfg.workers == 1:
+        # SO_REUSEPORT spreads them over several, hence the second setting.
+        all_streams_on_one_loop = _cfg.workers == 1
+        if all_streams_on_one_loop:
             _stream_cap = _cfg.h2_active_streams_1w
         else:
             _stream_cap = _cfg.h2_active_streams
@@ -503,14 +503,14 @@ class HTTP2Actor(Actor):
                 return None
             return (ErrorCodes.STREAM_CLOSED, 'stream')
 
-        # HEADERS/CONTINUATION are a *connection* error here because allowing
-        # them would reopen the stream; on everything else the peer may simply
-        # be racing our RST_STREAM / END_STREAM, which is a stream error.
         if state == StreamState.CLOSED:
             if frame_type == FrameTypes.PRIORITY:
                 return None
-            if frame_type in (FrameTypes.HEADERS, FrameTypes.CONTINUATION):
+            would_reopen_the_stream = frame_type in (
+                FrameTypes.HEADERS, FrameTypes.CONTINUATION)
+            if would_reopen_the_stream:
                 return (ErrorCodes.STREAM_CLOSED, 'connection')
+            # Anything else may be the peer racing our RST_STREAM / END_STREAM.
             return (ErrorCodes.STREAM_CLOSED, 'stream')
 
         return None
