@@ -46,6 +46,9 @@ first — it covers installation and the shape of a minimal app.
   Swagger UI, dataclass schemas, body deserialization.
 - [**Testing**](testing.md) — BlackBull's clients on an
   ephemeral port, `httpx.ASGITransport`, direct handler tests.
+- [**Async client**](client.md) — choosing between `Client`,
+  `HTTP1Client` and `HTTP2Client`; what a connection owns; what
+  a call raises; what the `BB_CLIENT_*` defaults leave open.
 
 ## Deploying
 

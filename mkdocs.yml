@@ -65,6 +65,7 @@ nav:
     - Extensions: guide/extensions.md
     - OpenAPI: guide/openapi.md
     - Testing: guide/testing.md
+    - Async client: guide/client.md
     - Fault injection: guide/fault_injection.md
   - Deployment:
     - Running BlackBull: deployment/running.md
