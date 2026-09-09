@@ -27,6 +27,14 @@ Only the third shape is worth a pass, so only it is classified here:
 ``CANDIDATE``
     neither.  A name may be able to carry it -- a reader still decides.
 
+The DO-NOT-EXTRACT test reads as a performance decision, and a decision made
+on other grounds slips through it.  ``client/http2.py``'s cap-naming block
+records that forwarding the name from ``phase`` was rejected because it would
+hide the refusing site from a reader and from the cap-record audit -- a
+diagnosability argument, so it classifies as CANDIDATE and only a reader
+catches it.  Widening the pattern to reach it would cost more in false
+positives than it saves, so this is a known limit rather than a bug.
+
 Two heuristics were wrong before they were right, and both cost a pass:
 
 * **loop depth.** A site inside a loop is not per-request but per-iteration;
@@ -90,6 +98,46 @@ def annotate(tree):
     return info
 
 
+def repeated_topics(src, lines):
+    """Topics several separate comment blocks each explain.
+
+    Line equality is the wrong instrument and measuring it did real harm: on
+    ``sender.py`` it reported zero self-duplication, a brief passed that on as
+    "do not hunt for it", and the pass that ignored the advice found most of
+    its 195 deleted lines there.  Nothing repeated *word for word*; the same
+    facts were restated in different words across the file.
+
+    So this counts topics, not lines.  A topic is a symbol or an RFC section;
+    a shared four-word phrase catches the restatements a symbol misses.  Both
+    are reported per *block*, since one fact spread over five blocks is five
+    places to keep true.
+    """
+    blocks = own_blocks(src, lines)
+    sym = re.compile(r'\b(BB_[A-Z0-9_]+|[A-Za-z_]\w*_\w+|[A-Z][a-z]+[A-Z]\w+)\b')
+    sec = re.compile(r'(?:RFC\s*\d+\s*)?§\s*[\d.]+|RFC\s*\d+')
+    topics, grams = {}, {}
+    for start, end, texts in blocks:
+        body = ' '.join(texts)
+        for name in set(sym.findall(body)) | {m.strip() for m in sec.findall(body)}:
+            topics.setdefault(name, set()).add(start)
+        words = re.sub(r'[^a-z0-9 ]', ' ', body.lower()).split()
+        for i in range(len(words) - 3):
+            g = ' '.join(words[i:i + 4])
+            grams.setdefault(g, set()).add(start)
+    # Intersect the two signals rather than reporting them side by side.  A
+    # symbol named in six blocks is usually a *referent*, not a topic:
+    # ``__aexit__`` was reported six times on client/http2.py where the six
+    # blocks state six unrelated facts, and the reader has to discard it by
+    # hand.  Every cluster that turned out to be real duplication scored on
+    # both signals, so a topic counts only where its blocks also share a
+    # phrase.
+    grams = {k: sorted(v) for k, v in grams.items() if len(v) >= 2}
+    shared = {ln for v in grams.values() for ln in v}
+    topics = {k: sorted(v & shared) for k, v in topics.items()
+              if len(v & shared) >= 3}
+    return topics, grams
+
+
 for path in sys.argv[1:]:
     src = pathlib.Path(path).read_text()
     lines = src.splitlines()
@@ -136,3 +184,11 @@ for path in sys.argv[1:]:
         if verdict == 'CANDIDATE':
             loop = f'x{depth}' if depth else '-'
             print(f'    :{start:<6} {n}L  {loop:5} {fn:30} {txt}')
+
+    topics, grams = repeated_topics(src, lines)
+    print(f'\n    topics explained in >= 3 separate blocks : {len(topics)}')
+    for k, v in sorted(topics.items(), key=lambda kv: -len(kv[1]))[:6]:
+        print(f'      {k:34} x{len(v):<3} {v[:7]}')
+    print(f'    4-word phrases shared by >= 2 blocks     : {len(grams)}')
+    for k, v in sorted(grams.items(), key=lambda kv: -len(kv[1]))[:6]:
+        print(f'      {k[:44]:44} x{len(v):<3} {v[:7]}')
