@@ -142,7 +142,10 @@ the *why* lives there; here is the *what* so you don't violate it by accident.
   typed `Connection` end-to-end.  ASGI scope dicts exist only at two boundaries
   (external ASGI hosts and `BB_FORCE_ASGI_SCOPE=1`).  The word `scope` in code
   means a genuine ASGI scope dict — never a `Connection`.
-  → `docs/about/architecture.md`
+  → `docs/about/internals.md` §Read-path invariant.  This pointer said
+  `architecture.md` for a long time; that page contains the word "ASGI" zero
+  times, so an agent sent there found nothing and re-derived the principle in
+  the source — four times over, in `app.py` alone.
 
 - **Multi-protocol, one process** — HTTP, WebSocket, gRPC, and MQTT share one
   runtime.  Non-HTTP protocols attach through `app.add_extension(...)`.
