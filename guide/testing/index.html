@@ -16,7 +16,7 @@
         <link rel="prev" href="../openapi/">
       
       
-        <link rel="next" href="../fault_injection/">
+        <link rel="next" href="../client/">
       
       
         
@@ -1442,6 +1442,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Async client
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -6387,7 +6415,7 @@ cannot observe them:</p>
 </code></pre></div>
 <p>Full details in <a href="../grpc/#testing-your-servicers">the gRPC guide</a>.</p>
 <h2 id="end-to-end-with-blackbulls-clients">End-to-end with BlackBull's clients<a class="headerlink" href="#end-to-end-with-blackbulls-clients" title="Permanent link">&para;</a></h2>
-<p>BlackBull bundles four async clients in <code>blackbull.client</code>, with
+<p>BlackBull bundles five async clients in <code>blackbull.client</code>, with
 testing and fault injection as their primary uses:</p>
 <table>
 <thead>
@@ -6418,8 +6446,16 @@ testing and fault injection as their primary uses:</p>
 <td>RFC 6455 Upgrade</td>
 <td>WebSocket round-trip tests</td>
 </tr>
+<tr>
+<td><code>WebSocketH2Client</code></td>
+<td>RFC 8441 Extended CONNECT</td>
+<td>WebSocket over an HTTP/2 stream</td>
+</tr>
 </tbody>
 </table>
+<p>Using them from an application rather than a test — which one to reach for,
+what a call raises, and what the defaults do and do not bound — is the
+<a href="../client/">async client guide</a>.</p>
 <p>The pattern is: bind the app on an ephemeral port in a fixture,
 then <code>async with</code> a client at that port.</p>
 <p>Every client bounds connection establishment at <strong>30 seconds</strong> by
