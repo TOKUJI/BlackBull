@@ -101,7 +101,10 @@ RULES: list[Rule] = [
          '(e.g. "0 disables the cap", not "pre-0.29 behaviour")'),
     Rule(re.compile(r'\bas of version\b', re.I), _is_timeline_scope,
          'git log owns the version timeline'),
-    Rule(re.compile(r'\b(?:Refactor|Review)\s+\d+\.\d+|\bbugs?\s+\d+\.\d+[a-z]?'),
+    # ``Review M2`` slipped past a digits-only pattern and had to be removed by
+    # hand, so a milestone letter counts as an id too.
+    Rule(re.compile(r'\b(?:Refactor|Review)\s+[A-Z]?\d+(?:\.\d+)?\b'
+                    r'|\bbugs?\s+\d+\.\d+[a-z]?'),
          _is_timeline_scope,
          'an internal tracker id no reader outside the project can resolve'),
     Rule(re.compile(r'\bBLA-(?:A-)?\d+'),

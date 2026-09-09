@@ -42,31 +42,17 @@ _CRLF = b'\r\n'
 # memory-peak guarantees stay consistent across paths.
 _PATHSEND_FALLBACK_CHUNK = 64 * 1024
 
-# Bytes offered to one ``loop.sendfile`` call.  The kernel copies the same
-# total either way; what the boundary buys is somewhere to re-arm the write
-# deadline, so a stalled transfer is bounded by progress rather than by the
-# file's size.  Deliberately far above ordinary web assets: below this a file
-# still goes out in a single call, so the common path is unchanged.
+# Why a megabyte: docs/about/internals.md §Send-path invariant.
 _SENDFILE_CHUNK = 1024 * 1024
 
-# ``BaseSender._write_many`` size gate: parts totalling at most this many
-# bytes are joined and sent via ``write()``; larger payloads use vectored
-# ``writelines``.  Breakeven measured on a drained socketpair (selector
-# transport, 2026-07-12 protocol-layer audit): join wins ≤ 16 KiB, vectored
-# wins ≥ 64 KiB — and HttpArena's 17 KiB static lanes regressed under
-# ``writelines``, so the crossover sits at 32 KiB.  Deliberately NOT a
-# Settings knob (audit: no configuration surface without deployment data).
+# The join-vs-vectored gate; why 32 KiB: docs/about/internals.md §Send-path
+# invariant.  Breakeven measured on a drained socketpair (selector transport):
+# join wins ≤ 16 KiB, vectored wins ≥ 64 KiB, and HttpArena's 17 KiB static
+# lanes regressed under ``writelines``.  Deliberately not a Settings knob — no
+# configuration surface without deployment data.
 _VECTORED_JOIN_THRESHOLD = 32 * 1024
 
 
-# Status line and Content-Length are the two per-response values that are
-# rebuilt from scratch on every single request and drawn from a small, known
-# domain.  Both tables are built once at import; both fall back to the original
-# expression for an input outside the domain, so an unregistered status code or
-# a large body renders exactly as before rather than raising.
-
-#: ``status -> b'HTTP/1.1 <code> <phrase>\r\n'``, the full first line.  The CRLF
-#: is baked in so the renderer appends one list item instead of two.
 _STATUS_LINES: dict[HTTPStatus, bytes] = {
     s: f'HTTP/1.1 {s} {s.phrase}'.encode() + _CRLF for s in HTTPStatus
 }
@@ -76,18 +62,13 @@ def _status_line(status) -> bytes:
     """The full ``HTTP/1.1 <code> <phrase>\\r\\n`` line for *status*."""
     line = _STATUS_LINES.get(status)
     if line is None:
-        # Not an ``HTTPStatus`` member — an application answering with a code
-        # IANA has not registered.  Render it the long way; ``phrase`` is only
-        # available on the enum, so an unknown code has an empty reason phrase
-        # (legal: RFC 9112 §4 makes the reason phrase optional).
+        # A code IANA has not registered has no ``phrase``, so it renders with
+        # an empty reason phrase — legal: RFC 9112 §4 makes it optional.
         phrase = getattr(status, 'phrase', '')
         return f'HTTP/1.1 {int(status)} {phrase}'.encode() + _CRLF
     return line
 
 
-#: Content-Length values below this are answered from a table.  Covers every
-#: response whose body fits in a few pages — the ``/ping``-shaped traffic that
-#: dominates request *count* — while keeping the table itself small.
 _CONTENT_LENGTH_CACHE_MAX = 8192
 
 _CONTENT_LENGTHS: tuple[bytes, ...] = tuple(
@@ -157,22 +138,12 @@ def _has_header(items, name: bytes) -> bool:
     return any(k.lower() == needle for k, _ in items)
 
 
-# ---------------------------------------------------------------------------
-# Response-HEADERS fast-path builders
-# ---------------------------------------------------------------------------
-#
-# These encode a HEADERS frame straight to wire bytes, skipping
-# ``FrameFactory.create()``, the registry lookup, and the receive-oriented
-# ``Headers`` object — none of whose parsing machinery the send side reads.
-# They are wire-equivalent to ``Headers.save()`` for the response path:
-#  - the same shared per-connection HPACK ``Encoder`` is used, so dynamic
-#    table state stays coherent with every other emitter on the connection;
-#  - ``status_fast_bytes`` is the same static-table fast path ``Headers.save()``
-#    already uses (RFC 7541 §6.1 — static-indexed fields don't touch the
-#    dynamic table), just hoisted out of the object;
-#  - the 9-byte frame header is byte-identical to ``FrameBase.save()``.
-# Verified byte-for-byte against ``Headers.save()`` in
-# ``tests/conformance/http2/test_headers_fastpath_builder.py``.
+# The two builders below must stay byte-for-byte equivalent to the frame-object
+# path they replace — ``protocol.frame_types.Headers.save()``, not this module's
+# field-collection ``Headers`` — including how the shared HPACK dynamic table
+# evolves; ``tests/conformance/http2/test_headers_fastpath_builder.py`` asserts
+# both.  ``status_fast_bytes`` is static-indexed, so it never touches that table
+# (RFC 7541 §6.1).
 #
 # Assumption: the encoded block fits one frame (END_HEADERS always set).
 # BlackBull does not split outbound HEADERS across CONTINUATION; if that
@@ -219,10 +190,6 @@ def build_trailers(encoder, stream_id: int, headers) -> bytes:
             + flags.to_bytes(1, 'big') + stream_id.to_bytes(4, 'big') + payload)
 
 
-# ---------------------------------------------------------------------------
-# Writer abstraction — swap asyncio for trio/curio by implementing this ABC
-# ---------------------------------------------------------------------------
-
 class AbstractWriter(ABC):
     """Protocol-agnostic async byte-sink.
 
@@ -247,15 +214,12 @@ class AbstractWriter(ABC):
         """
         return False
 
-    #: Set once the peer is known to be gone.  A class attribute so every
-    #: writer has it without touching each ``__init__``; an instance assigns
-    #: over it on first discovery.
-    #:
-    #: It lives here rather than on the sender because *the connection* is
-    #: what died.  HTTP/2 builds one sender per stream over one writer
-    #: (``HTTP2Actor.make_sender``), so a per-sender flag has every stream
-    #: rediscover the same dead socket by writing into it — asyncio drops
-    #: those writes and logs a warning for each one past its threshold of 5.
+    #: Set once the peer is known to be gone.  It lives on the writer rather
+    #: than on the sender because *the connection* is what died.  HTTP/2 builds
+    #: one sender per stream over one writer (``HTTP2Actor.make_sender``), so a
+    #: per-sender flag has every stream rediscover the same dead socket by
+    #: writing into it — asyncio drops those writes and logs a warning for each
+    #: one past its threshold of 5.
     peer_gone: bool = False
 
     @abstractmethod
@@ -318,8 +282,6 @@ class AsyncioWriter(AbstractWriter):
     is ~1 %.
     """
 
-    # Client callers may inject an owner and protocol so the shared
-    # rejection site preserves the caller's diagnostic identity.
     def __init__(self, stream_writer, write_timeout: float = 0.0,
                  cap_name: str = 'write_timeout',
                  protocol: str | None = None):
@@ -329,12 +291,9 @@ class AsyncioWriter(AbstractWriter):
                 f"got {type(stream_writer)}"
             )
         self._sw = stream_writer
-        # Resolved once: the bound ``is_closing`` of whatever transport this
-        # writer sits on.  ``ConnectionProtocol`` (what the server passes) and
-        # ``asyncio.StreamWriter`` (what tests and embedders pass) both expose
-        # ``.transport``.  A ``MagicMock`` fabricates the attribute too, which
-        # is why the result is compared against ``True`` by identity rather
-        # than truthiness — a mock must not be able to close every write.
+        # A ``MagicMock`` fabricates ``.transport.is_closing`` on demand, which
+        # is why ``peer_is_gone`` compares the result against ``True`` by
+        # identity rather than truthiness — a mock must not close every write.
         _transport = getattr(stream_writer, 'transport', None)
         self._is_closing = getattr(_transport, 'is_closing', None)
         self._write_timeout = write_timeout
@@ -342,10 +301,8 @@ class AsyncioWriter(AbstractWriter):
         self._protocol = protocol
         self._deadline = (WriteDeadline(write_timeout)
                           if write_timeout > 0 else None)
-        # Resolved once, and only for a genuine coroutine function.  A bare
-        # ``getattr`` at close time would be satisfied by any ``MagicMock``,
-        # which fabricates every attribute on demand — so the capability
-        # check has to be something a mock cannot accidentally pass.
+        # Same mock hazard: the capability check has to be something a
+        # fabricated attribute cannot accidentally pass.
         linger = getattr(stream_writer, 'linger_close', None)
         self._linger = (linger
                         if linger is not None and iscoroutinefunction(linger)
@@ -393,11 +350,9 @@ class AsyncioWriter(AbstractWriter):
         try:
             self._sw.close()
         except Exception as close_exc:
-            # Best-effort transport teardown.  We're already in the
-            # timeout error path and the transport may be half-broken
-            # (SSL aborted, FD already reaped by a sibling task, etc.);
-            # swallowing here lets us still raise ConnectionResetError
-            # below so the peer-disconnect handling runs uniformly.
+            # The transport may already be half-broken (SSL aborted, FD reaped
+            # by a sibling task); swallowing lets the ConnectionResetError
+            # below still reach the uniform peer-disconnect handling.
             if _DEBUG:
                 logger.debug(
                     'write timeout: transport.close() also failed (%s) — '
@@ -426,36 +381,24 @@ class AsyncioWriter(AbstractWriter):
     def peer_is_gone(self) -> bool:
         check = self._is_closing
         if check is None:
-            # No transport yet (or a stand-in without one): fall back to the
-            # exception path.
-            return False
+            return False  # No transport to ask; the exception path decides.
         try:
             return check() is True
         except Exception:  # noqa: BLE001 - a diagnostic must never break a write
             return False
 
     async def close(self) -> None:
-        # ``self._sw.close()`` is synchronous: it initiates the TCP
-        # shutdown and schedules the transport's ``connection_lost``
-        # callback for a later loop iteration.  We DO NOT await
-        # ``wait_closed()`` here — under burst-keepalive workloads
-        # (HttpArena ``static`` at c=4096) awaiting it serializes the
-        # connection-actor coroutine with the transport-close completion,
-        # adding 1-3 event-loop turns per connection.  With thousands of
-        # simultaneous closes that latency multiplies into a multi-second
-        # drain that monopolises the loop and starves the next wrk run.
+        # We deliberately do NOT await ``wait_closed()``: under burst-keepalive
+        # workloads (HttpArena ``static`` at c=4096) it serialises the
+        # connection-actor coroutine with the transport-close completion, adding
+        # 1-3 event-loop turns per connection — thousands of simultaneous closes
+        # then multiply into a multi-second drain that monopolises the loop.
+        # It is safe to skip because every ``write()`` above flushed via
+        # ``drain()``, so there is no buffered payload left to lose.
         #
-        # Safety: every ``write()`` above flushes via ``drain()``, so by
-        # the time we reach close() there is no buffered payload.  The
-        # transport tears down asynchronously; our coroutine exiting
-        # earlier is harmless for the connection-actor path (no
-        # follow-up state to flush).
-        #
-        # A buffer-owning protocol offers ``linger_close`` instead: closing
-        # with bytes we deliberately did not read (an over-budget head, say)
-        # makes the kernel send RST, and RST discards the response we just
-        # wrote.  It self-selects — with nothing unread it degrades to exactly
-        # the bare close above, so the burst path keeps its zero extra turns.
+        # ``linger_close`` is the exception: docs/about/internals.md
+        # §Rejecting requires lingering.  It self-selects, so the burst path
+        # above keeps its zero extra turns.
         if self._linger is not None:
             await self._linger()
             return
@@ -505,19 +448,10 @@ class AsyncioWriter(AbstractWriter):
         return sent
 
 
-# ---------------------------------------------------------------------------
-# Sender hierarchy
-# ---------------------------------------------------------------------------
-
-# The senders accept one thing beyond the public ASGI send contract — raw
-# ``bytes``, the ``send(body, status, headers)`` convenience form — so it gets
-# a private widening rather than polluting ``ASGISendEvent``.
-#
-# Keeping the public alias honestly ASGI-shaped is the point: an app or
-# middleware author holding an ``ASGISendCallable`` should not be told that
-# sending a bare byte string is legal, because through the app-facing channel
-# it is not.  The actor→sender disconnect signal is a method,
-# :meth:`BaseSender.mark_client_gone`, so it needs no widening here.
+# What the senders accept beyond the ASGI send contract is widened privately
+# here rather than in ``ASGISendEvent``: an app or middleware author holding an
+# ``ASGISendCallable`` must not be told that sending a bare byte string is
+# legal, because through the app-facing channel it is not.
 _SenderEvent = ASGISendEvent
 _SenderBody = _SenderEvent | bytes | NativeResponse
 _WSSenderEvent = WebSocketSendEvent | WebSocketCloseEvent | WebSocketAcceptEvent
@@ -535,18 +469,14 @@ class BaseSender(ABC):
     logic is decoupled from asyncio internals.
     """
 
-    # Per-stream / per-request senders are allocated on the hot path; ABCs
-    # provide ``__slots__ = ()`` so adding slots here drops the per-instance
-    # ``__dict__``.  Subclasses extend with their own protocol-specific
-    # slots; together they declare every attribute referenced by the class.
+    # Senders are allocated per stream / per request on the hot path, and an
+    # ABC already provides ``__slots__ = ()``, so declaring slots here drops
+    # the per-instance ``__dict__``.  Every subclass must extend the tuple with
+    # its own attributes or pay the ``__dict__`` back.
     __slots__ = ('_writer', '_closed')
 
     def __init__(self, writer: AbstractWriter):
         self._writer = writer
-        # ``_write`` / ``_write_many`` flip this to True on a peer-closed
-        # transport and silently drop further writes.  Initialised here so
-        # that the slot is bound from construction; the ``getattr(...,
-        # False)`` reads in the write methods remain compatible.
         self._closed = False
 
     def mark_client_gone(self) -> None:
@@ -579,21 +509,11 @@ class BaseSender(ABC):
     async def _guarded_write(self, write_fn, arg) -> None:
         """Run *write_fn(arg)* tolerant of peer-closed transports.
 
-        Once a write hits ``ConnectionResetError`` / ``BrokenPipeError`` /
-        SSL EOF, the sender marks itself closed and subsequent writes
-        silently drop.  Unguarded, these exceptions propagate out as
-        tracebacks under wrk c=1024 sustained load — 22 per 30 s in the
-        141848 run.
-
-        ``_closed`` is bound in ``__init__`` for every sender, so a direct
-        attribute read is safe — and cheaper than a ``getattr`` guard — on
-        this per-write hot path.
-
-        The discovery is published to :attr:`AbstractWriter.peer_gone`, which
-        every sender on the connection shares.  A sender that has not written
-        yet must not have to learn it the same way: on HTTP/2 that is one
-        wasted write per open stream, and asyncio's transport counts them all
-        and warns on each past the fifth.
+        Once a write hits ``ConnectionResetError`` / ``BrokenPipeError`` / SSL
+        EOF the sender marks itself closed and subsequent writes silently drop;
+        unguarded, those surface as tracebacks under sustained load.  The
+        discovery is published to :attr:`AbstractWriter.peer_gone` so that no
+        other sender on the connection has to rediscover it.
         """
         if self._closed or self._writer.peer_gone:
             return
@@ -622,20 +542,9 @@ class BaseSender(ABC):
     async def _write_many(self, parts) -> None:
         """Write *parts* (peer-close tolerant), choosing join vs vectored I/O.
 
-        Protocol senders call this to express *what* they have — a response
-        that naturally exists as separate fragments (``(head, body)``,
-        ``(frame_header, payload)``) — and this method owns *how* to send it:
-
-        * total ≤ :data:`_VECTORED_JOIN_THRESHOLD` — join and ``write()``.
-          On CPython's selector transport ``writelines`` costs more than the
-          small memcpy it avoids (per-part ``memoryview`` allocations and
-          ``sendmsg`` setup; under backpressure it also attempts a send and
-          re-registers the writer on every call, where ``write()`` merely
-          appends).  This was the v0.33.1 → v0.51.0 HttpArena regression
-          (echo-ws −8~−20 %, HTTP/1.1 −4~−8 %); see the 2026-07-12
-          protocol-layer audit.
-        * total > threshold — vectored ``writelines``: skipping the
-          full-body memcpy wins on the static-file cache-hit path.
+        Senders express *what* they have — a response that naturally exists as
+        separate fragments — and this method owns *how* it goes out.  It is the
+        one decision point: docs/about/internals.md §Send-path invariant.
         """
         if sum(map(len, parts)) <= _VECTORED_JOIN_THRESHOLD:
             await self._guarded_write(self._writer.write, b''.join(parts))
@@ -679,13 +588,10 @@ class HTTP1Sender(BaseSender):
         # consults this after BB_REQUEST_TIMEOUT expiry to decide
         # whether a synthetic 408 can still be emitted.
         self._started: bool = False
-        # Set True once a complete response has been written for this request
-        # (a full ``bytes`` response, a terminal body when no trailers were
-        # declared, the final trailer event, or a pathsend).  Further response
-        # events are then dropped
-        # so a handler that raises *after* completing its response
-        # can't write a second one onto the same keep-alive connection —
-        # mirrors the H2 sender's post-END_STREAM drop.
+        # Set True once a complete response has been written for this request.
+        # Further response events are then dropped, so a handler that raises
+        # *after* completing its response cannot write a second one onto the
+        # same keep-alive connection (the H2 post-END_STREAM drop).
         self._completed: bool = False
         self._trailers_started: bool = False
         self._content_length: int | None = None
@@ -701,11 +607,10 @@ class HTTP1Sender(BaseSender):
         # have the same headers (including Content-Length) as a GET would
         # but no body.  HTTP1Actor sets this before dispatch.
         self._head_mode: bool = False
-        # Optional access-log record; set by the actor before dispatch.
-        # When non-None, ``__call__`` updates ``status`` and
-        # ``response_bytes`` inline as events flow through — this saves
-        # the per-event coroutine dispatch through ``_make_capturing_send``
-        # (~7% of HTTP/1.1 CPU in the profile).  When None, no capture.
+        # Optional access-log record; set by the actor before dispatch.  The
+        # sender's arms update it inline rather than through a per-event
+        # capturing ``send`` wrapper, whose coroutine dispatch measured ~7% of
+        # HTTP/1.1 CPU.  ``None`` means no capture.
         self._log_record = None
 
     async def __call__(self, body: _SenderBody,
@@ -732,8 +637,6 @@ class HTTP1Sender(BaseSender):
         bodies raise ``TypeError``.
         """
         if self._completed or self._poisoned:
-            # A completed response or a response whose boundary failed cannot
-            # accept another event on this connection.
             return
 
         begins_response = (
@@ -756,20 +659,12 @@ class HTTP1Sender(BaseSender):
                     self._log_record.status = int(status)
                     self._log_record.response_bytes += len(body)
                 await self._flush(status, h, body)
-                # An interim (1xx) response does not complete the exchange —
-                # the final response still has to go out on this same sender,
-                # and completing here would drop it.
                 if not _is_informational(status):
                     self._completed = True
 
             case NativeResponse():
-                # Unified native response: one object may carry header,
-                # body, and/or trailers; presence is
-                # `is not None`.  A complete response is one object, one
-                # dispatch; streaming is header-object then body-chunk
-                # objects.  Header is buffered exactly like the dict start
-                # arm (body completes the flush); body/trailers delegate to
-                # the shared helpers the dict arms use.
+                # One object may carry header, body, and/or trailers; each arm
+                # does what the correspondingly named dict arm below does.
                 if body._header is not None:
                     self._response_started = True
                     self._buffered_status = HTTPStatus(body.status)
@@ -791,9 +686,6 @@ class HTTP1Sender(BaseSender):
                                     self._log_record.resp_content_encoding = hv
                         self._log_record.mark('start_arm_out')
                 if body.file_path is not None:
-                    # Sendfile form: the header arm was just buffered, which
-                    # is exactly what ``_pathsend`` needs — it flushes those
-                    # headers and hands the file to ``loop.sendfile``.
                     if await self._pathsend(body.file_path):
                         self._completed = True
                     return
@@ -813,13 +705,6 @@ class HTTP1Sender(BaseSender):
                 self._buffered_headers = Headers(header_pairs)
                 if self._log_record is not None:
                     self._log_record.status = body.get('status', '-')
-                    # Capture response headers
-                    # inline (same pattern as response_bytes capture) so
-                    # we can correlate per-phase µs against negotiated
-                    # Content-Type / Content-Encoding without re-walking
-                    # the headers list elsewhere.  No-op when PHASE_TRACE
-                    # is off because the AccessLogRecord fields are
-                    # already empty defaults.
                     self._log_record.mark('start_arm_in')
                     for hk, hv in body.get('headers', []):
                         if isinstance(hk, bytes):
@@ -854,11 +739,8 @@ class HTTP1Sender(BaseSender):
 
     async def _handle_body_content(self, content: bytes, more_body: bool) -> None:
         """Write one body chunk — shared by the dict and native paths."""
-        # Bracket the actual transport
-        # write for the last body event so we can see whether the
-        # 30-60 ms woff2 tail lives in middleware/handler work
-        # before the write (``start_arm_out → body_arm_in``) or
-        # inside the write + drain (``body_arm_in → body_arm_out``).
+        # These two marks bracket the last body event's transport write, so a
+        # slow response splits into handler work before it and drain inside it.
         if self._log_record is not None and not more_body:
             self._log_record.mark('body_arm_in')
         if self._buffered_status is not None:
@@ -912,10 +794,8 @@ class HTTP1Sender(BaseSender):
             self._completed = True
 
     def reset_per_request_state(self) -> None:
-        # HTTP1Sender is shared across keep-alive requests;
-        # forgetting a reset silently breaks the next request's framing
-        # (`_started` skipped 408 emission on the second request).  See
-        # `.claude/patterns/cautions.md`.
+        # One HTTP1Sender serves every request on a keep-alive connection, so
+        # any slot left behind here becomes the next request's framing.
         self._buffered_status = None
         self._buffered_headers = None
         self._chunked = False
@@ -1006,19 +886,13 @@ class HTTP1Sender(BaseSender):
 
     @staticmethod
     def _ensure_date_header(headers: Headers) -> None:
-        # RFC 9110 §6.6.1 — origin server SHOULD generate Date.  The
-        # check is case-sensitive against b'Date' because the HTTP/1.1
-        # path stores headers in the framework's canonical capitalisation;
-        # the HTTP/2 path uses a separate _has_header() lookup because
-        # RFC 9113 §8.2.1 mandates lowercase.
+        # RFC 9110 §6.6.1 — origin server SHOULD generate Date.  The check is
+        # case-sensitive because the HTTP/1.1 path stores headers in the
+        # framework's canonical capitalisation; HTTP/2 needs ``_has_header``.
         if b'Date' not in headers:
             headers.append(b'Date', _http_date())
 
     async def _flush(self, status: HTTPStatus, headers: Headers, body: bytes, more_body: bool = False) -> None:
-        # ``_started`` means the *final* status line is on the wire, which is
-        # what the actor's 408 synthesis consults.  An interim response does
-        # not commit a status, so a request that later times out can still be
-        # answered with 408 (RFC 9110 §15.2 — 1xx is provisional).
         headers = self._ensure_framing_headers(
             status, headers, len(body), more_body)
         self._track_content_length(len(body), more_body)
@@ -1026,17 +900,14 @@ class HTTP1Sender(BaseSender):
             self._started = True
         self._ensure_date_header(headers)
 
-        # Coalesce status line + headers + body into a single write so the
-        # response is emitted as one TLS record / one drain.  Uncoalesced,
-        # each header line is a separate `_write` (= a separate
-        # `await drain()` yield); a 3-header response then costs ~6 yields
-        # per request, measured in py-spy at ~33% of HTTP/1.1 CPU spread
-        # across `_write_start` / `_write` / `streams.write`.
+        # Coalescing status line, headers and body into one write makes the
+        # response one drain instead of one per header line: uncoalesced, a
+        # 3-header response cost ~6 event-loop yields and measured ~33% of
+        # HTTP/1.1 CPU.
         head = self._render_start(status, headers)
 
-        # RFC 9110 §9.3.2 — HEAD response carries no body.  Headers (and
-        # the Content-Length we just computed from the GET body) still go
-        # out so caches and proxies remain accurate.
+        # Headers still go out; only the body is suppressed (RFC 9110 §9.3.2
+        # for HEAD, and the codes whose content is forbidden).
         if self._suppress_body:
             await self._write(head)
             return
@@ -1050,10 +921,6 @@ class HTTP1Sender(BaseSender):
                 chunk += b'0\r\n\r\n'
             await self._write(chunk)
         elif body:
-            # Vectored write: avoids the full-body memcpy a ``head + body``
-            # concatenation forces.  At static-file rates of ~5k req/s ×
-            # ~17 KB on average that allocation is ~88 MB/s of pure
-            # user-space copy before the bytes even reach the transport.
             await self._write_many((head, body))
         else:
             await self._write(head)
@@ -1220,59 +1087,44 @@ class HTTP2Sender(BaseSender):
         self._factory = factory
         self._stream_id = stream_id
         self._push_callback = push_callback
-        # Shared connection-level send window.  Both server and client pass
-        # one ``ConnectionWindow`` instance to every stream sender so they
-        # debit a single budget.  A sender constructed without one gets a
-        # private window, which is correct only for a lone stream — see the
-        # class docstring for what N private copies cost.
+        # A sender built without one gets a private window, which is correct
+        # only for a lone stream (:class:`ConnectionWindow`).
         self._conn_window = conn_window if conn_window is not None else ConnectionWindow()
-        # Per-stream send window — a plain int, since one sender serves one
-        # stream; keying it by stream id would invite a reader to hunt for
-        # multi-stream semantics that do not exist.  Seeded at construction
-        # from the peer's SETTINGS_INITIAL_WINDOW_SIZE when known: both
-        # server and client pass ``initial_window`` so a sender created after
-        # the SETTINGS exchange starts at the peer's announced window, not
-        # the RFC 9113 §6.9.2 default.
+        # A plain int, not a per-stream mapping: one sender serves one stream,
+        # and keying it would invite a reader to hunt for multi-stream
+        # semantics that do not exist.  Callers pass ``initial_window`` so a
+        # sender created after the SETTINGS exchange starts at the peer's
+        # announced window rather than the RFC 9113 §6.9.2 default.
         self.stream_window_size = (DEFAULT_INITIAL_WINDOW_SIZE
                                    if initial_window is None else initial_window)
         self.max_frame_size = DEFAULT_MAX_FRAME_SIZE
         self._window_open: asyncio.Event | None = None
         # How long the peer may take to grant flow-control credit before the
-        # stream gives up.  Held here rather than read at the wait so a stalled
-        # write costs no settings lookup.
-        #
-        # Passed in by every caller that builds senders in bulk: one sender is
-        # created *per stream*, so resolving this here would put a
-        # function-level relative import — resolved through
+        # stream gives up.  Every caller that builds senders in bulk passes it,
+        # because one sender is created *per stream* and the fallback below
+        # puts a function-level import — resolved through
         # ``importlib._bootstrap`` on every execution — on the per-request
-        # path.  The fallback is for direct instantiation by tests, embedders,
-        # and other callers that do not use a protocol factory.
+        # path.  The fallback serves direct instantiation only.
         if flow_control_timeout is None:
             from ..env import get_settings  # noqa: PLC0415
             flow_control_timeout = get_settings().write_timeout
         self._flow_control_timeout: float = flow_control_timeout
         self._flow_control_cap = flow_control_cap
         self._end_stream_sent: bool = False
-        # Defer HEADERS write until first body event (mirrors HTTP1Sender).
         self._buffered_status: HTTPStatus | None = None
         self._buffered_headers: list[tuple[bytes, bytes]] | None = None
         self._expect_trailers: bool = False
-        # When trailers are expected, the first single-frame body chunk is held
-        # here so HEADERS + DATA + trailing HEADERS coalesce into one write at
-        # the trailers event (the unary-gRPC pattern).  Flushed early if a
-        # second body chunk arrives (multi-frame body / streaming).
+        # Holds the first single-frame body chunk when trailers are expected,
+        # so HEADERS + DATA + trailing HEADERS coalesce into one write.
         self._buffered_body: bytes | None = None
         # HTTP/2 has one terminal trailer field section.  ASGI may deliver
         # that section over multiple events, so hold non-terminal parts until
         # one HEADERS block can carry END_STREAM.
         self._buffered_trailers: list[tuple[bytes, bytes]] | None = None
-        # The deferred auto-flush task (retained so a non-connection failure
-        # inside it is surfaced, not lost as an un-retrieved task exception).
         self._auto_flush_task: asyncio.Future | None = None
-        # Optional access-log record: the actor sets this so
-        # the sender can capture status / response_bytes inline in its arms —
-        # no per-event coroutine-dispatch wrapper (the H2 native seam would
-        # otherwise never match the dict-shaped capturing wrapper).
+        # Optional access-log record, set by the actor.  Captured inline in the
+        # arms below rather than through a capturing ``send`` wrapper, which is
+        # dict-shaped and so would never match the native seam.
         self._log_record = None
 
     @property
@@ -1298,9 +1150,6 @@ class HTTP2Sender(BaseSender):
         self._buffered_body = None
         self._buffered_trailers = None
         self._log_record = None
-        # Drop the slot reference; a still-pending task from the prior request
-        # is harmless — its identity guard (buffered body ``is`` its snapshot)
-        # no-ops now that the buffer is cleared.
         self._auto_flush_task = None
 
     async def _write_response_start_and_body(
@@ -1315,8 +1164,7 @@ class HTTP2Sender(BaseSender):
         "flush the buffered start" name would not.
         """
         headers = headers or []
-        # HEADERS never carries END_STREAM here — an empty DATA frame does
-        # (mirrors the object path).
+        # END_STREAM rides the DATA frame below, never HEADERS.
         h_bytes = build_response_headers(
             self._factory.encoder, self._stream_id, status, headers,
             end_stream=False)
@@ -1351,9 +1199,7 @@ class HTTP2Sender(BaseSender):
         chance to consume the buffer and coalesce before the task fires.  The
         buffered tuple is snapshotted here and passed to the task, decoupling the
         flush from whatever the live ``_buffered_*`` slots hold when it runs
-        (``reset_per_request_state`` sender reuse).  The task is retained in a
-        slot with a done-callback so a non-connection failure inside it is
-        surfaced rather than lost as an un-retrieved task exception at GC."""
+        (``reset_per_request_state`` sender reuse)."""
         task = asyncio.ensure_future(self._do_auto_flush(
             self._buffered_body, self._buffered_status,
             self._buffered_headers, self._expect_trailers))
@@ -1551,8 +1397,6 @@ class HTTP2Sender(BaseSender):
         the trailing HEADERS (RFC 9113 §8.1 — frames after END_STREAM are a
         protocol error).
         """
-        # Inline access-log capture (mirrors the H1 body helper): count every
-        # chunk's bytes; bracket the terminal chunk's write for phase trace.
         if self._log_record is not None and payload:
             self._log_record.response_bytes += len(payload)
         if self._log_record is not None and end_stream:
@@ -1572,9 +1416,6 @@ class HTTP2Sender(BaseSender):
                 self._buffered_body = payload
                 self._schedule_auto_flush()
             else:
-                # A second body chunk (or a multi-frame / terminal one):
-                # flush any deferred first chunk with the HEADERS, then
-                # write this chunk normally.
                 if self._buffered_body is not None:
                     buffered_body = self._buffered_body
                     buffered_status = self._buffered_status
@@ -1586,9 +1427,6 @@ class HTTP2Sender(BaseSender):
                     await self._write_response_start_and_body(
                         buffered_body, False, buffered_status,
                         buffered_headers, self._expect_trailers)
-                    # Review M2: withhold END_STREAM from a terminal chunk
-                    # while trailers are pending — the trailing HEADERS
-                    # carries it.
                     await self._write_data(
                         payload,
                         end_stream=end_stream and not self._expect_trailers)
@@ -1599,9 +1437,6 @@ class HTTP2Sender(BaseSender):
                     self._buffered_status = None
                     self._buffered_headers = None
         else:
-            # Streaming continuation after the start (and possibly a deferred
-            # first chunk) already flushed.  Review M2: same END_STREAM
-            # withholding when trailers are pending.
             await self._write_data(
                 payload, end_stream=end_stream and not self._expect_trailers)
         if self._log_record is not None and end_stream:
@@ -1636,8 +1471,6 @@ class HTTP2Sender(BaseSender):
             self._buffered_trailers = None
 
         if self._buffered_status is not None:
-            # Start (and possibly one deferred body chunk) never flushed:
-            # emit HEADERS [+ DATA] + trailing HEADERS in a single write.
             buffered_body = self._buffered_body
             self._buffered_body = None
             h_bytes = build_response_headers(
@@ -1663,9 +1496,8 @@ class HTTP2Sender(BaseSender):
                 else:
                     await self._write(h_bytes)
                     await self._write_data(buffered_body, end_stream=False)
-                    # Encoding mutates the connection-wide HPACK table.
-                    # A credit wait can let another stream send HEADERS, so
-                    # encode these trailers only when they can be written.
+                    # Encode only after the credit wait: another stream may
+                    # send HEADERS during it, and the HPACK table is shared.
                     await self._write(build_trailers(
                         self._factory.encoder, self._stream_id, headers))
             else:
@@ -1683,7 +1515,6 @@ class HTTP2Sender(BaseSender):
     async def __call__(self, body: _SenderBody | FrameBase,
                        status: HTTPStatus = HTTPStatus.OK,
                        headers: HeaderList = []):
-        # Control-plane: raw frame object (SETTINGS, PING ACK, WINDOW_UPDATE, …)
         if isinstance(body, FrameBase):
             if _DEBUG:
                 logger.debug('HTTP2Sender raw frame: %r', body)
@@ -1691,9 +1522,7 @@ class HTTP2Sender(BaseSender):
             return
 
         if isinstance(body, bytes):
-            # RFC 9113 §8.1 — same defensive guard the dict branch carries.
-            # If the application bytes-sends after the stream has ended,
-            # drop with a warning instead of writing past END_STREAM.
+            # RFC 9113 §8.1, as in the dict branch below.
             if self._end_stream_sent:
                 logger.warning(
                     'HTTP2Sender: dropping bytes write on stream %d — '
@@ -1701,14 +1530,9 @@ class HTTP2Sender(BaseSender):
                     'the response was complete)',
                     self._stream_id)
                 return
-            # Inline access-log capture (mirrors the H1 bytes path).
             if self._log_record is not None:
                 self._log_record.status = int(status)
                 self._log_record.response_bytes += len(body)
-            # High-level: build HEADERS + DATA frames from bytes + status.
-            # RFC 9110 §6.6.1 — Date SHOULD be present; the builder injects
-            # it when the app didn't (mirrors the HTTP/1.1 _flush path).
-            # END_STREAM always rides the DATA frame below, never HEADERS.
             h_bytes = build_response_headers(
                 self._factory.encoder, self._stream_id, status, headers,
                 end_stream=False)
@@ -1718,7 +1542,6 @@ class HTTP2Sender(BaseSender):
             if (total <= self._conn_window.size and
                     total <= self.stream_window_size and
                     total <= self.max_frame_size):
-                # Fast path: body fits in one DATA frame — single write + drain
                 end_flag = DataFrameFlags.END_STREAM.to_bytes(1, 'big')
                 if total == 0:
                     d_bytes = b'\x00\x00\x00\x00' + end_flag + sid_bytes
@@ -1731,18 +1554,6 @@ class HTTP2Sender(BaseSender):
             self._end_stream_sent = True
 
         elif isinstance(body, NativeResponse):
-            # Unified native response (the H2 arm of the H1 seam): one
-            # object may carry header, body, and/or
-            # trailers; presence is `is not None`.  Header is buffered exactly
-            # like the dict start arm (the first body object completes the
-            # flush); body/trailers delegate to the shared helpers the dict
-            # arms use.  A terminal body sends END_STREAM; trailers after that
-            # are dropped (frames after END_STREAM are a protocol error,
-            # RFC 9113 §8.1), mirroring the dict lane's entry guard.  A
-            # non-terminal body — or an ``expects_trailers`` deferral — keeps
-            # END_STREAM withheld, so a single object may legitimately carry
-            # header + body + trailers (HEADERS + DATA + trailing HEADERS
-            # coalesce into one write).
             if self._end_stream_sent:
                 logger.warning(
                     'HTTP2Sender: dropping NativeResponse on stream %d — '
@@ -1754,8 +1565,6 @@ class HTTP2Sender(BaseSender):
                 self._buffered_status = HTTPStatus(body.status)
                 self._buffered_headers = list(body._header)
                 self._expect_trailers = body.expects_trailers
-                # Inline access-log capture (mirrors the H1 native arm; no
-                # per-event capturing wrapper on this lane).
                 if self._log_record is not None:
                     self._log_record.status = body.status
                     self._log_record.mark('start_arm_in')
@@ -1790,11 +1599,10 @@ class HTTP2Sender(BaseSender):
                 return
 
             if event_type == ASGIEvent.HTTP_RESPONSE_START:
-                # Buffer — defer HEADERS write until body event.
+                # Buffered, not written: HEADERS coalesces with the first body.
                 self._buffered_status = HTTPStatus(body.get('status', 200))
                 self._buffered_headers = list(body.get('headers', []))
                 self._expect_trailers = bool(body.get('trailers', False))
-                # Inline access-log capture (mirrors the H1 dict start arm).
                 if self._log_record is not None:
                     self._log_record.status = body.get('status', '-')
                     self._log_record.mark('start_arm_in')
@@ -1847,9 +1655,8 @@ class WebSocketSender(BaseSender):
 
     def __init__(self, writer: AbstractWriter, *, compressor=None):
         super().__init__(writer)
-        # When permessage-deflate is negotiated, an
-        # :class:`OutboundCompressor` is supplied here.  ``None`` means
-        # outbound frames are sent verbatim (RSV1=0).
+        # An :class:`OutboundCompressor` when permessage-deflate is negotiated;
+        # ``None`` sends outbound frames verbatim (RSV1=0).
         self._compressor = compressor
 
     def _frame_payload(self, raw: bytes,
@@ -1907,8 +1714,6 @@ class WebSocketSender(BaseSender):
                                    event_type)
             return
 
-        # Native arm (the WS counterpart of the HTTP ``case NativeResponse():``
-        # seam).  BlackBull's own object path emits these.
         if isinstance(body, NativeWSMessage):
             match body.kind:
                 case NativeWSMessage.SEND:
@@ -1923,7 +1728,7 @@ class WebSocketSender(BaseSender):
                                            if body.code is not None
                                            else WSCloseCode.NORMAL)
                 case NativeWSMessage.ACCEPT:
-                    pass  # handshake reply is the actor's, not the sender's
+                    pass
                 case _:
                     logger.warning('WebSocketSender: unknown native kind %r',
                                    body.kind)
@@ -1933,11 +1738,6 @@ class WebSocketSender(BaseSender):
             f'WebSocketSender expected a NativeWSMessage or a dict, '
             f'got {type(body)!r}')
 
-
-
-# ---------------------------------------------------------------------------
-# Factory
-# ---------------------------------------------------------------------------
 
 class SenderFactory:
     """Creates the appropriate BaseSender for the given protocol.
