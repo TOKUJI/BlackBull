@@ -11,7 +11,6 @@ from dataclasses import replace
 from pathlib import Path
 import time
 
-# private library
 from ..protocol.rsock import (
     create_dual_stack_sockets, create_unix_socket,
     adopt_inherited_sockets, adopt_listening_fd,
@@ -35,15 +34,12 @@ def _listener_from_args(port, unix_path, inherited_fd, tls=None) -> Listener:
 
 
 def _address_of(sock) -> Tcp | Unix:
-    """The address a already-bound socket is listening on."""
     sockname = sock.getsockname()
     if isinstance(sockname, str):
         return Unix(sockname)
     return Tcp(sockname[1])
 
-#: ``eager_start`` landed in 3.12; the supported floor is 3.11.  A task
-#: constructed with it runs its coroutine synchronously until the first
-#: suspension instead of queueing that first step for the next loop iteration.
+# ``eager_start`` landed in 3.12; the supported floor is 3.11.
 _EAGER_TASKS = sys.version_info >= (3, 12)
 
 
@@ -87,18 +83,12 @@ class LifespanManager:
             if event.get('type') == ASGIEvent.LIFESPAN_STARTUP_FAILED:
                 raise RuntimeError(event.get('message', 'Lifespan startup failed'))
             return self
-        # The task finished before acking startup.
         if self._task.done():
             exc = self._task.exception()
             if exc is not None:
-                # The lifespan app raised before acking — a real startup
-                # failure.  Without this raise, __aenter__ strands on an
-                # empty send queue and the server never starts.
                 raise RuntimeError(f'Lifespan startup failed: {exc!r}') from exc
-            # The app returned without implementing the lifespan protocol — a
-            # bare ASGI app that ignores the lifespan scope.  ASGI treats this
-            # as "lifespan unsupported": proceed to serve rather than hang or
-            # error.
+            # A bare ASGI app that ignores the lifespan scope returns without
+            # acking.  ASGI calls that "lifespan unsupported": serve anyway.
             return self
         raise RuntimeError('Lifespan startup did not complete')
 
@@ -106,15 +96,11 @@ class LifespanManager:
         task = self._task
         if task is None:
             return False
-        # Drive the shutdown handshake only while the lifespan app is alive.
-        # A lifespan task that was cancelled out from under us — e.g. by
-        # asyncio.run()'s _cancel_all_tasks during interpreter teardown, which
-        # cancels *every* outstanding task at once — will never emit
-        # lifespan.shutdown.complete.  Waiting unconditionally on the send
-        # queue would then block __aexit__ forever and wedge the whole
-        # teardown (observed as an H2 "deadlock" in the flow-control
-        # conformance subprocess).  Race the acknowledgement against the task
-        # itself so a dead lifespan app can never strand us.
+        # A lifespan task cancelled out from under us — asyncio.run()'s
+        # _cancel_all_tasks cancels every outstanding task at once — never
+        # emits lifespan.shutdown.complete, so an unconditional wait on the
+        # send queue would wedge teardown.  Handshake only while it is alive,
+        # and race the ack against the task itself.
         if not task.done():
             await self._receive_q.put({'type': ASGIEvent.LIFESPAN_SHUTDOWN})
             getter = asyncio.ensure_future(self._send_q.get())
@@ -128,7 +114,7 @@ class LifespanManager:
         try:
             await task   # drain finally blocks inside the lifespan app
         except asyncio.CancelledError:
-            pass  # task was just cancelled; its unwind is expected.
+            pass
         return False
 
 
@@ -158,21 +144,16 @@ async def SocketManager(socket_cb_pairs, ssl_context):
     import socket as _socket  # noqa: PLC0415
     from ..env import get_settings as _get_settings  # noqa: PLC0415
     _backlog = _get_settings().socket_backlog
-    # AF_UNIX is absent on platforms without Unix-domain socket support
-    # (notably some Windows builds where socket.AF_UNIX is not defined).
-    # Use a sentinel so the family comparison never raises AttributeError.
+    # Some Windows builds do not define AF_UNIX at all.
     _af_unix = getattr(_socket, 'AF_UNIX', None)
     loop = asyncio.get_running_loop()
     servers = []
     for sock, factory in socket_cb_pairs:
-        # ssl_handshake_timeout is meaningful only when SSL is enabled.
         kwargs = {'sock': sock, 'ssl': ssl_context, 'backlog': _backlog}
         if ssl_context is not None:
             kwargs['ssl_handshake_timeout'] = 60.0
         if _af_unix is not None and sock.family == _af_unix:
-            # AF_UNIX needs the dedicated unix-server entry point — the
-            # TCP create_server() rejects non-INET families at family-
-            # validation time.
+            # create_server() rejects non-INET families at family validation.
             srv = await loop.create_unix_server(factory, **kwargs)
         else:
             srv = await loop.create_server(factory, **kwargs)
@@ -187,11 +168,11 @@ async def SocketManager(socket_cb_pairs, ssl_context):
 def _max_connections_report(resolved: int) -> tuple[str, str]:
     """Describe the connection cap in force, and where it came from.
 
-    ``BB_MAX_CONNECTIONS`` resolves to a plain integer long before it
-    reaches the server, so the number alone cannot say whether an
-    operator chose it or the fd budget did.  Calling a derived value
-    "explicit" would send someone hunting for a setting nobody wrote,
-    which is the opposite of what logging it is for.
+    ``BB_MAX_CONNECTIONS`` resolves to a plain integer long before it reaches
+    the server, so the origin is re-read from the environment here: the number
+    alone cannot say whether an operator chose it or the fd budget did, and
+    calling a derived value "explicit" sends someone hunting for a setting
+    nobody wrote.
     """
     import os  # noqa: PLC0415
     raw = os.environ.get('BB_MAX_CONNECTIONS')
@@ -222,52 +203,34 @@ class Server:
                  listeners=None,
                  **kwds):
         self.app = app
-        # The sockets this server was asked for.  ``None`` means the caller
-        # said it the old way — a single port through ``open_socket`` — which
-        # is turned into one listener there rather than kept as a second path.
+        # ``None`` = the caller said it the old way; ``open_socket`` builds
+        # the one listener that stands for it.
         self._listeners = list(listeners) if listeners else None
         #: ``[(Listener, [socket, ...]), ...]`` — what is actually bound.
         self.bound_listeners: list = []
         self._max_connections = max_connections
-        # A derived default depends on the host, so the only way an operator
-        # learns the value in force is by being told it — including where it
-        # came from.  Reporting a derived number as "explicit" would send
-        # someone hunting for a setting nobody wrote.  The origin is read from
-        # the environment rather than passed in, because every caller that
-        # resolves the value throws that fact away.
         logger.info('max_connections=%s (%s)', *_max_connections_report(max_connections))
         self._stream_queue_depth = stream_queue_depth
         self._ws_queue_depth = ws_queue_depth
         self._active_connections = 0
 
-        # Protocol registry: explicit arg wins, else the app's (a BlackBull
-        # carries one once a raw_handler is registered), else a default holding
-        # only the built-in http1/http2 bindings.
+        # An app carries a registry only once a raw_handler is registered.
         from .protocol_registry import ProtocolRegistry as _PR  # noqa: PLC0415
         self._protocol_registry = (protocol_registry
                                    or getattr(app, '_protocol_registry', None)
                                    or _PR())
-        # name -> bound port, populated by open_socket for port-bound protocols.
         self.protocol_ports: dict[str, int] = {}
-        #: Live connection tasks — what a shutdown drain waits on.
         self._connection_tasks: set = set()
         self._stopping = False
-        #: The budget a drain in progress is working to.  ``run()`` reads it
-        #: to finish the job rather than returning into the loop teardown.
         self._drain_timeout = None
-        #: Set by :meth:`stop` to release :meth:`run`.  ``run`` blocks on this
-        #: rather than on ``Server.serve_forever()`` — see there.
         self._stopped_event = None
-        # Cache the dispatcher + aggregator pair once — both are
-        # process-wide singletons.  Looking them up per accept is wasted
-        # work on the hot connection-burst path.
+        # Process-wide singletons: looked up once, not once per accept.
         from ..event_aggregator import EventAggregator as _EA  # noqa: PLC0415
         self._cached_dispatcher = getattr(self.app, '_dispatcher', None)
         self._cached_aggregator = (_EA(self._cached_dispatcher)
                                     if self._cached_dispatcher is not None
                                     else None)
 
-        # Create TLS context
         if ssl_context and (certfile or keyfile):
             raise TypeError('SSLContext and certfile (or keyfile) must not be set at the same time')
 
@@ -326,8 +289,8 @@ class Server:
         logger.debug(self.certfile)
         logger.debug(self.keyfile)
         if not self.certfile or not self.keyfile:
-            # One or both paths not yet assigned (called during __init__ before
-            # both properties are set).  Silently defer until both are ready.
+            # ``__init__`` calls this before both properties are set; defer
+            # rather than raise, so the half-configured state is not an error.
             return
 
         context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
@@ -335,16 +298,14 @@ class Server:
         context.load_cert_chain(certfile=self.certfile, keyfile=self.keyfile)
         context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.options |= ssl.OP_NO_COMPRESSION
-        # Enable server-side session cache so reconnecting clients can resume
-        # without a full handshake (saves ~1 RTT and CPU on TLS 1.2 connections).
-        # TLS 1.3 uses its own 0-RTT ticket mechanism independently of this flag.
+        # Resumption without a full handshake, worth ~1 RTT — to TLS 1.2 only.
+        # TLS 1.3 tickets are independent of this flag.
         if hasattr(ssl, 'SESS_CACHE_SERVER'):
             context.set_session_cache_mode(ssl.SESS_CACHE_SERVER)  # type: ignore[attr-defined]
         self.ssl_context = context
 
         if hasattr(self, 'raw_sockets'):
-            # raw_sockets are already bound; asyncio.start_server will handle
-            # TLS via ssl= so no manual wrapping is needed here.
+            # Already-bound sockets need no rewrap; see ``open_socket``.
             pass
 
     def configure_mtls(self, ca_cert: str) -> None:
@@ -375,30 +336,25 @@ class Server:
         class _ServedConnection(ConnectionProtocol):
             def connection_made(self, transport):
                 super().connection_made(transport)
-                # Started eagerly: the serve prologue — deadline handle,
-                # detection order, first peek — runs inside this callback and
+                # Eager start runs the serve prologue inside this callback and
                 # parks at the same read it would have parked at anyway, one
-                # loop iteration earlier.  A connection pays that hop once, so
-                # it is churn latency rather than keep-alive throughput.
-                #
-                # Eager start does not change where a failure lands: a
-                # coroutine that raises before its first suspension completes
-                # the task with that exception rather than raising out of this
-                # transport callback, so ``_serve_done`` still reports it.
+                # loop iteration earlier — a hop paid once per connection, so
+                # it buys churn latency, not keep-alive throughput.  It does
+                # not move where a failure lands: a raise before the first
+                # suspension completes the task, so ``_serve_done`` still
+                # reports it rather than this transport callback.
                 if _EAGER_TASKS:
-                    # The explicit ``loop=`` is load-bearing, not cosmetic:
-                    # ``Task(..., eager_start=True)`` without it leaves
-                    # ``_loop`` unset and crashes on 3.12+ (verified on 3.14:
-                    # ``'NoneType' object has no attribute 'is_running'``).
+                    # ``loop=`` is load-bearing: without it ``eager_start``
+                    # leaves ``_loop`` unset and crashes on 3.12+ (seen on
+                    # 3.14: ``'NoneType' object has no attribute 'is_running'``).
                     task = asyncio.Task(self._serve(),
                                         loop=asyncio.get_running_loop(),
                                         eager_start=True)
                 else:
                     task = asyncio.create_task(self._serve())
-                # A protocol factory cannot await, so the task is detached.
-                # Held for the connection's lifetime and given a done-callback
-                # so a failure surfaces as a log line rather than asyncio's
-                # "Task exception was never retrieved" at GC time.
+                # A protocol factory cannot await, so the task is detached; the
+                # done-callback is what keeps a failure from surfacing as
+                # asyncio's "Task exception was never retrieved" at GC time.
                 self._serve_task = task
                 server._connection_tasks.add(task)
                 task.add_done_callback(self._serve_done)
@@ -412,9 +368,8 @@ class Server:
                         transport=self.transport,
                     )
                 finally:
-                    # Lingering close, not a bare close: a peer still sending
-                    # when we answered would otherwise RST away the response
-                    # it was waiting for.
+                    # A bare close would RST away the response a peer that is
+                    # still sending has not read yet.
                     await self.linger_close()
 
             @staticmethod
@@ -462,13 +417,12 @@ class Server:
                                 transport=None):
         """Wrap the transport and run one :class:`ConnectionActor`.
 
-        *bound_binding* is set for port-bound non-ASGI protocols —
-        the connection skips HTTP detection and is handed straight to the
-        binding's raw handler.
+        *bound_binding* is set for port-bound non-ASGI protocols: the
+        connection skips HTTP detection and goes straight to the raw handler.
 
         *transport* is passed explicitly by the buffered-protocol path, which
-        has no `StreamWriter` to carry it.  Peer/socket names and the TLS
-        object are read from it, so it is the one thing that path cannot infer.
+        has no `StreamWriter` to carry it — and peer/socket names and the TLS
+        object are read from it, so it cannot be inferred.
         """
         from .conn_id import new_connection_id  # noqa: PLC0415
         from .connection_actor import ConnectionActor  # noqa: PLC0415
@@ -479,21 +433,15 @@ class Server:
             transport = getattr(writer, 'transport', None)
         peername = transport.get_extra_info('peername') if transport else None
         sockname = transport.get_extra_info('sockname') if transport else None
-        # AF_UNIX sockname is the path string; AF_INET[6] is a tuple.
-        # ASGI 3.0 expects ``scope['server']`` to be an iterable of
-        # ``(host, port)`` — encode UDS as ``(path, None)`` here so the
-        # actor layer doesn't have to special-case.  Peername on a UDS
-        # is typically an empty string; surface it as ``(path, None)``
-        # for symmetry.
+        # ASGI 3.0 §Connection Scope requires ``scope['client']`` and
+        # ``scope['server']`` to be ``(host, port)``.  What the transport hands
+        # back is not: AF_UNIX gives a bare path string (and an empty peername),
+        # AF_INET6 a 4-tuple ``(host, port, flowinfo, scope_id)``.  Normalise
+        # both here so the actor layer never special-cases a family.
         if isinstance(sockname, str):
             sockname = (sockname, None)
         if isinstance(peername, str):
             peername = (peername or '', None)
-        # AF_INET6 get_extra_info returns a 4-tuple
-        # ``(host, port, flowinfo, scope_id)``; ASGI 3.0 §Connection Scope
-        # requires ``scope['client']`` / ``scope['server']`` to be
-        # ``(host, port)``.  Truncate so IPv6 peers get spec-compliant
-        # 2-tuples instead of ``['::1', port, 0, 0]``.
         if isinstance(sockname, tuple) and len(sockname) > 2:
             sockname = sockname[:2]
         if isinstance(peername, tuple) and len(peername) > 2:
@@ -502,14 +450,9 @@ class Server:
         ssl_flag = ssl_object is not None
         alpn = ssl_object.selected_alpn_protocol() if ssl_object else None
 
-        # Defense against dead/stuck peers — moved off the hot accept path:
-        #   SO_SNDBUF / SO_RCVBUF / TCP_USER_TIMEOUT are on the LISTENING
-        #     socket and inherited (set once at open_socket time).
-        #   Idle keep-alive ghosts are evicted by an app-level timer in
-        #     HTTP1Actor (``BB_KEEP_ALIVE_TIMEOUT``, default 5 s) — the
-        #     uvicorn / granian / Caddy pattern.
-        # Net cost: 0 setsockopt syscalls per accept (was 6, then 4).
-
+        # No setsockopt on this path, by design: SO_SNDBUF / SO_RCVBUF /
+        # TCP_USER_TIMEOUT are set once on the listening socket and inherited,
+        # and idle keep-alive ghosts are HTTP1Actor's timer to evict.
         wrapped_reader = (reader if isinstance(reader, AbstractReader)
                           else AsyncioReader(reader))
         if isinstance(writer, AbstractWriter):
@@ -521,33 +464,22 @@ class Server:
 
         aggregator = self._cached_aggregator
 
-        # max_connections == 0 disables the cap entirely (rely on OS fd
-        # limits).  Otherwise, send a well-formed HTTP/1.1 503 +
-        # Retry-After so load-balancers and health-checks can interpret
-        # the response — better than a silent reset, which looks like a
-        # crash from the LB's perspective.  For ALPN-negotiated h2 we
-        # don't have the SETTINGS exchange to send GOAWAY cleanly, so a
-        # straight close is the safest answer there.
         if self._max_connections and self._active_connections >= self._max_connections:
             logger.warning(
                 'Connection limit reached (%d/%d) — 503 to %s',
                 self._active_connections, self._max_connections, peername,
             )
-            # ASGIServer-level cap fires before ConnectionActor binds a
-            # CapHitCounter, so the contextvar is unset; this call emits
-            # unconditionally.  An adversary cannot flood the log
-            # because they cannot accept a connection past the cap to
-            # begin with.
+            # This fires before ConnectionActor binds a CapHitCounter, so the
+            # contextvar is unset and the record is emitted unconditionally —
+            # safe, because nobody gets a connection past the cap to flood it.
             log_cap_hit('max_connections',
                         requested=self._active_connections + 1,
                         limit=self._max_connections,
                         peer=peername, protocol='tcp')
+            # h1 is the safe guess for cleartext the client has not spoken on
+            # yet.  h2 gets a bare close (no SETTINGS exchange yet, so no clean
+            # GOAWAY) and so does a raw binding, whose framing we do not know.
             if bound_binding is None and alpn != 'h2':
-                # HTTP/1.1 (or undetected cleartext — h1 is the safe
-                # default since the client hasn't spoken yet).  Minimal
-                # response: no body, content-length: 0, connection:
-                # close.  Retry-After in seconds.  A port-bound non-ASGI
-                # protocol gets a plain close — we don't know its framing.
                 try:
                     await wrapped_writer.write(
                         b'HTTP/1.1 503 Service Unavailable\r\n'
@@ -556,8 +488,6 @@ class Server:
                         b'connection: close\r\n'
                         b'\r\n')
                 except Exception:
-                    # Peer may already be gone or transport broken; the
-                    # close() below still runs.  No further action.
                     logger.debug(
                         '503 write failed for %s (peer disconnected?)',
                         peername)
@@ -593,26 +523,17 @@ class Server:
         _cfg = _get_settings()
 
         if self._listeners is None:
-            # When the master re-execs itself for an auto-reload, it hands off
-            # the bound listening sockets via fd inheritance + the
-            # BB_INHERIT_FDS env var.  Adopt them instead of binding so the
-            # listener stays continuous across the reload (no port-release
-            # race, no missed SYNs).
+            # Adopting the re-exec'd master's sockets keeps the listener
+            # continuous across a reload: no port-release race, no missed SYNs.
             inherited = adopt_inherited_sockets()
             if inherited:
-                # The handoff carries the HTTP fds only, so a broker port is
-                # rebound below rather than adopted.  Safe: sockets are
-                # CLOEXEC, and the caller terminates the workers holding
-                # copies before re-execing, so the port is free by now.
+                # HTTP fds only, so a raw-protocol port is rebound below rather
+                # than adopted.  Safe: those sockets are CLOEXEC and the caller
+                # terminates the workers holding copies before re-execing.
                 self.bound_listeners = [
                     (Listener(_address_of(inherited[0]), tls=self.ssl_context),
                      inherited)]
             else:
-                # certfile / keyfile / ssl_context are sugar for this one
-                # listener, but they are resolved in run(), not here: a caller
-                # may replace ``server.ssl_context`` between open_socket() and
-                # run() -- mTLS is configured that way -- and a context frozen
-                # at bind time would silently serve the pre-mTLS one.
                 self._listeners = [
                     _listener_from_args(port, unix_path, inherited_fd,
                                         self.ssl_context)]
@@ -621,13 +542,8 @@ class Server:
             self.bound_listeners = [(listener, self._bind_listener(listener, _cfg))
                                     for listener in self._listeners]
         self._publish_socket_view()
-
-        # Do NOT wrap sockets with ssl_context here.
-        # asyncio.start_server() accepts raw TCP sockets via sockets= and
-        # handles the TLS handshake itself when ssl= is also provided.
-        # Pre-wrapping with ssl_context.wrap_socket() causes a double-TLS
-        # layer and breaks the handshake.
-
+        # Sockets are handed over bare: ``create_server(ssl=...)`` does the
+        # handshake, and a ``wrap_socket`` here would make it a double layer.
         self._bind_protocol_sockets(_cfg)
 
     def _bind_listener(self, listener, _cfg) -> list:
@@ -635,12 +551,9 @@ class Server:
         where = listener.where
 
         if isinstance(where, InheritedFd):
-            # Systemd-style socket activation: bind / listen already happened
-            # in the supervisor, so adopt the fd rather than binding again.
             return [adopt_listening_fd(where.fd)]
 
         if isinstance(where, Unix):
-            # No port check, no dual-stack pairing, no TCP sockopts.
             sock = create_unix_socket(
                 where.path,
                 backlog=_cfg.socket_backlog,
@@ -659,18 +572,12 @@ class Server:
             rcvbuf=_cfg.socket_rcvbuf,
             user_timeout_ms=_cfg.tcp_user_timeout_ms,
             keepalive=False,  # replaced by app-level keep_alive_timeout
-            # Honour BB_SOCKET_REUSEPORT so forked workers can co-bind the
-            # same port and the kernel load-balances accepts across them.
-            # (Stateful protocol ports are bound WITHOUT reuseport on
-            # purpose — they must have a single owner.)
             reuseport=_cfg.socket_reuseport,
             host=where.host,
         )
         if not socks:
-            # No connect-probe pre-check (that shape was racy, IPv4-localhost
-            # only, and hid the OS error): binding is the check.  The specific
-            # OS failure (e.g. EADDRINUSE naming the address) was already
-            # logged by _bind_socket.
+            # Binding is the availability check.  A connect probe before it was
+            # racy, IPv4-localhost only, and hid the OS error.
             logger.error(f'Failed to bind port {where.port}. Try another port.')
             raise RuntimeError(
                 f'Failed to bind port {where.port} (see log for the OS error, '
@@ -680,16 +587,13 @@ class Server:
     def _publish_socket_view(self) -> None:
         """Expose the bound listeners the way the rest of the server reads them.
 
-        ``raw_sockets`` is every HTTP socket, which is what the multi-worker
-        master hands to each worker; ``port`` / ``unix_path`` describe the
-        first listener, which is what callers report and tests connect to.
+        ``raw_sockets`` is every HTTP socket — what the multi-worker master
+        hands each worker.  ``port`` / ``unix_path`` describe the first one.
         """
         self.raw_sockets = [sock for listener, socks in self.bound_listeners
                             for sock in socks if listener.speaks == HTTP]
         first = self.raw_sockets[0] if self.raw_sockets else None
         sockname = first.getsockname() if first is not None else None
-        # AF_UNIX getsockname() returns the bound path string; TCP returns
-        # ``(host, port)`` — AF_INET6 adds flowinfo/scopeid, port is always [1].
         if isinstance(sockname, str):
             self.port, self.unix_path = None, sockname
         elif sockname is not None:
@@ -699,14 +603,13 @@ class Server:
         """Bind a listening socket per port-bound non-ASGI protocol.
 
         Each :class:`RawBinding` registered with a ``port`` gets its own
-        dual-stack socket set.  ``port=0`` lets the OS pick a free port (used by
-        tests); the bound port is recorded in :attr:`protocol_ports`.  Sockets
-        are bound bare here; :meth:`run` layers TLS onto the listeners whose
-        binding set ``tls=True``, cleartext otherwise.
+        dual-stack socket set, recorded in :attr:`protocol_ports`.  Sockets are
+        bound bare here; :meth:`run` layers TLS onto the listeners whose
+        binding set ``tls=True``, cleartext otherwise.  These ports get no
+        ``SO_REUSEPORT``: a stateful protocol needs a single owning worker.
         """
-        # Iterate the bindings themselves, not the port-keyed view — several
-        # bindings may all ask for port=0 (OS-assigned, common in tests), and
-        # keying by port would silently collapse them to one listener.
+        # Iterate the bindings, not a port-keyed view of them: several may ask
+        # for port=0, which a port key would collapse into one listener.
         for binding in self._protocol_registry.raw_bindings.values():
             if binding.port is None:
                 continue
@@ -724,9 +627,8 @@ class Server:
                 continue
             bound_port = socks[0].getsockname()[1]
             self.protocol_ports[binding.name] = bound_port
-            # ``tls=True`` on a registry binding means the server's certificate;
-            # a binding has no way to name one of its own.  Refused here rather
-            # than at serve time so a misconfiguration fails before workers fork.
+            # Refused here rather than at serve time, so the misconfiguration
+            # fails before workers fork.
             if binding.tls and self.ssl_context is None:
                 raise RuntimeError(
                     f'Raw protocol binding {binding.name!r} requires TLS '
@@ -739,8 +641,7 @@ class Server:
             logger.info('Protocol %r listening on port %d', binding.name, bound_port)
 
     def close_socket(self):
-        # bound_listeners is the truth; raw_sockets is a view of the HTTP ones,
-        # so closing only that would leak whatever else was bound.
+        # raw_sockets names the HTTP ones only; closing that would leak the rest.
         for _listener, socks in self.bound_listeners:
             for s in socks:
                 s.close()
@@ -767,27 +668,17 @@ class Server:
         """Run an asyncio socket server with the setting in this object."""
         if not self.bound_listeners:
             if getattr(self, 'raw_sockets', None):
-                # A forked worker is handed the sockets the master bound.
-                # The handoff carries a flat list and one context, so every
-                # one of them terminates the server's — until it carries
-                # listeners, which is what lets workers differ per port.
+                # A forked worker gets what the master bound: a flat socket
+                # list and one context, so every listener terminates that one.
                 self.bound_listeners = [
                     (Listener(_address_of(sock), tls=self.ssl_context), [sock])
                     for sock in self.raw_sockets]
             else:
                 self.open_socket(port)
 
-        # SocketManager wraps each socket in asyncio.start_server and closes all
-        # servers on exit.  Raw
-        # sockets are cleartext unless the binding was registered with
-        # ``tls=True``, which serves them through the same TLS
-        # machinery as the HTTPS listener.
-        # LifespanManager drives the ASGI lifespan protocol; nesting it inside
-        # SocketManager guarantees: startup completes before the server begins
-        # accepting, and shutdown completes before sockets are closed.
-        # One group per distinct TLS context, because a listener terminates
-        # the certificate it names and its neighbour may name another — or
-        # none.  ``None`` is a group like any other; it is the cleartext one.
+        # One group per distinct TLS context, because a listener terminates the
+        # certificate it names and its neighbour may name another — or none.
+        # ``None`` is a group like any other; it is the cleartext one.
         groups: dict[object, list] = defaultdict(list)
         for listener, socks in self.bound_listeners:
             # ``speaks`` is a name; the binding it names is resolved here, so a
@@ -804,18 +695,19 @@ class Server:
                 servers += await stack.enter_async_context(
                     SocketManager(pairs, context))
             self._running_servers = servers
+            # Nested inside the stack so lifespan shutdown completes before
+            # the sockets it may still be answering on are closed.
             async with LifespanManager(self.app):
                 logger.info(f'Server(s) created: {servers}')
-                # Block on our own event, not ``Server.serve_forever()``.
-                # The sockets are already accepting — ``create_server`` starts
-                # them — so ``serve_forever`` only ever blocked.  Recent 3.13
-                # and 3.14 patch releases made its cancellation path call
-                # ``Server.close_clients()``, which closes the *accepted*
-                # transports: a drain then finishes the handler, and the send
-                # path drops its response into a transport asyncio has already
-                # closed.  The client sees a closed connection, which is what
-                # the drain exists to prevent.  Measured: 3.14.6 has no such
-                # call and passes, 3.14.7 and 3.13.15 have it and fail.
+                # Block on our own event, not ``Server.serve_forever()``:
+                # ``create_server`` already started accepting, so that call
+                # only ever blocked, and its cancellation path now calls
+                # ``Server.close_clients()`` — which closes the *accepted*
+                # transports, so a drain finishes the handler and the send path
+                # writes into a transport asyncio already closed.  The client
+                # sees exactly the reset the drain exists to prevent.
+                # Measured: 3.14.6 lacks the call and passes; 3.14.7 and
+                # 3.13.15 have it and fail.
                 self._stopped_event = asyncio.Event()
                 try:
                     await self._stopped_event.wait()
@@ -829,9 +721,6 @@ class Server:
                 except Exception as exc:
                     logger.error('Server error: %s', exc)
 
-                # The listeners closing is what ended the TaskGroup, and a
-                # request may still be unanswered.  Leaving now returns into
-                # asyncio.run(), which cancels it; finish the drain here.
                 if self._stopping:
                     await self._drain(self._drain_timeout or 8.0)
 
@@ -867,12 +756,11 @@ class Server:
     async def _drain(self, drain_timeout: float) -> None:
         """Let the connections already being served finish.  Idempotent.
 
-        Called by :meth:`stop` and again by :meth:`run` on its way out, because
-        closing the listeners is what ends ``serve_forever()`` and unwinds the
-        TaskGroup — so a drain started from a signal handler is racing its
-        caller's teardown, and returning into ``asyncio.run()`` would cancel
-        both the drain and the request it is protecting.  Whichever gets there
-        second finds nothing left to wait for.
+        Called by :meth:`stop`, and again by :meth:`run` on its way out: a
+        drain started from a signal handler is racing its caller's teardown,
+        and returning into ``asyncio.run()`` would cancel both the drain and
+        the request it is protecting.  Whichever arrives second finds nothing
+        left to wait for.
         """
         pending = [t for t in self._connection_tasks if not t.done()]
         if not pending:
@@ -892,11 +780,9 @@ class Server:
         if self.port is None:
             raise RuntimeError("Server port is not set")
 
-        # Connect via IPv4 127.0.0.1 (the same path external clients such as
-        # nginx use) and send a minimal HTTP request so that the check only
-        # succeeds once the child process's asyncio event loop has actually
-        # accepted the connection and is processing data — not merely because
-        # the OS-level listen socket was set up in the parent before fork.
+        # A request, not just a connect: the listen socket exists in the parent
+        # from before the fork, so only a served response proves that a child's
+        # event loop is running.
         import http.client
         deadline = time.time() + timeout
         while True:
@@ -907,8 +793,8 @@ class Server:
                 conn.close()
                 return True
             except http.client.RemoteDisconnected:
-                # TLS server accepted the TCP connection then closed it because
-                # we sent a plain HTTP request — the asyncio loop is live.
+                # A TLS listener hanging up on our cleartext request is still
+                # a live loop answering.
                 return True
             except OSError:
                 if time.time() >= deadline:
@@ -923,7 +809,4 @@ class Server:
         self.close_socket()
 
 
-# Backward-compat alias: the class was named ``ASGIServer`` before it gained
-# non-ASGI (raw protocol) listeners.  Existing imports
-# (``from blackbull.server import ASGIServer``) keep working.
 ASGIServer = Server

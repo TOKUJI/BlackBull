@@ -80,6 +80,11 @@ def count(src: str) -> Counts:
     A line carrying both code and a trailing comment counts as a comment: the
     question this answers is how much prose there is to keep true, and a
     trailing comment is prose.
+
+    One consequence to know before reading a delta: deleting a trailing comment
+    moves its line from the prose column into the code column, so ``code`` is
+    not a fixed denominator across a reduction pass.  A pass over many trailing
+    comments inflates ``code`` slightly and understates its own ratio win.
     """
     lines = src.splitlines()
     com = comment_lines(src)
