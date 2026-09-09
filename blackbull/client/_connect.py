@@ -8,9 +8,7 @@ import ssl as _ssl
 
 # How long a client may spend establishing a connection before giving up.
 #
-# This is the *time* column of the limit triad; a transport open has no size
-# dimension, and the unit/total columns belong to the response-reading path
-# instead.  A bare open_connection() has no deadline of its own -- TLS
+# A bare open_connection() has no deadline of its own -- TLS
 # negotiation in particular can stall for the lifetime of the process -- so
 # leaving it unset is an unbounded wait, not a generous one.
 #
