@@ -506,7 +506,7 @@ Full details in [the gRPC guide](grpc.md#testing-your-servicers).
 
 ## End-to-end with BlackBull's clients
 
-BlackBull bundles four async clients in `blackbull.client`, with
+BlackBull bundles five async clients in `blackbull.client`, with
 testing and fault injection as their primary uses:
 
 | Client | Picks the protocol by | Use for |
@@ -515,6 +515,11 @@ testing and fault injection as their primary uses:
 | `HTTP1Client` | Always HTTP/1.1 | Cleartext, or HTTPS without ALPN |
 | `HTTP2Client` | Always HTTP/2 | h2c (cleartext h2) or pre-negotiated TLS |
 | `WebSocketClient` | RFC 6455 Upgrade | WebSocket round-trip tests |
+| `WebSocketH2Client` | RFC 8441 Extended CONNECT | WebSocket over an HTTP/2 stream |
+
+Using them from an application rather than a test — which one to reach for,
+what a call raises, and what the defaults do and do not bound — is the
+[async client guide](client.md).
 
 The pattern is: bind the app on an ephemeral port in a fixture,
 then `async with` a client at that port.
