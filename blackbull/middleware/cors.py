@@ -99,7 +99,7 @@ class CORS:
         are never mutated in place.
         """
 
-        # Unannotated on purpose: rebuilt per request (see _wrap_send in
+        # Unannotated on purpose: rebuilt per request (see _wrap_send_native in
         # app.py).  ``event`` is a NativeResponse or an ASGISendEvent.
         async def cors_send(event):
             if isinstance(event, NativeResponse):

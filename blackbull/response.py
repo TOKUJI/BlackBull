@@ -72,7 +72,7 @@ async def _emit_response(send, body: bytes, status, headers) -> None:
     The single source of truth for the ``http.response.start`` /
     ``http.response.body`` event pair used by every non-streaming response
     path — :meth:`Response.__call__`, the app's ``send(body, status, headers)``
-    convenience form (``_wrap_send``), and the default error handler.  *status*
+    convenience form (``_wrap_send_native``), and the default error handler.  *status*
     may be an ``int`` or an ``HTTPStatus`` (coerced to ``int`` for the wire);
     *headers* is any iterable of ``(bytes, bytes)`` pairs (copied defensively).
     """
@@ -113,7 +113,7 @@ class Response:
         Mirrors :class:`StreamingResponse` so every BlackBull response type
         shares one protocol — ``await response(conn, receive, send)`` —
         whether returned from a simplified handler, invoked explicitly by a
-        full-form handler, or normalised by ``app._wrap_send``.  Keeping the
+        full-form handler, or normalised by ``_wrap_send_native``.  Keeping the
         start/body serialisation here means there is a single source of truth
         for turning a Response into ASGI events.
         """
@@ -340,16 +340,12 @@ def WebSocketResponse(content) -> dict:
 def wrap_native_send(raw_send):
     """Handler-facing send adapter: every accepted shape → NativeResponse.
 
-    The native-ization flip of ``app._wrap_send``: instead of normalising
-    convenience shapes (``Response``, 3-arg) into ASGI dicts so downstream
-    sees plain dicts, **every** accepted shape becomes a
-    :class:`~blackbull.native.NativeResponse` here, so everything above the
-    route handler (route-header injection, middleware, access log, sender)
-    observes a single native representation on the H1 path.
-
-    Shared by ``app._wrap_send_native`` (the handler boundary) and
-    ``middleware.utils._normalize_send`` (``as_middleware``'s ``call_next``),
-    so global and per-route middleware see the same native contract.
+    **Every** accepted shape becomes a
+    :class:`~blackbull.native.NativeResponse`, so everything above the route
+    handler — route-header injection, middleware, access log, sender —
+    observes one representation on the H1 path.  The handler boundary and
+    ``as_middleware``'s ``call_next`` both wrap through here, so global and
+    per-route middleware see the same contract.
 
     Accepted shapes (full-form ``send`` — the compat contract, held until
     2027-07-29):
@@ -366,7 +362,7 @@ def wrap_native_send(raw_send):
     * ``NativeResponse`` — pass through;
     * anything else — pass through so the sender's type check decides.
     """
-    # Deliberately unannotated: rebuilt per request (see _wrap_send in app.py).
+    # Deliberately unannotated: rebuilt per request (see _wrap_send_native in app.py).
     async def _send(event, status=HTTPStatus.OK, headers=()):
         if isinstance(event, StreamingResponse):
             # Streaming owns its start/body sequence; drive it through a
@@ -419,7 +415,7 @@ async def _stream_and_convert(stream, raw_send) -> None:
     *raw_send*.  Kept as a module function so the per-request send adapter
     holds no self-referential closure (the v0.60.0 per-request cycle guard).
     """
-    # Deliberately unannotated: rebuilt per request (see _wrap_send in app.py).
+    # Deliberately unannotated: rebuilt per request (see _wrap_send_native in app.py).
     async def convert(event, status=HTTPStatus.OK, headers=()):
         if isinstance(event, dict):
             ev_type = event.get('type')

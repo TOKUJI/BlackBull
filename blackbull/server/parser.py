@@ -142,34 +142,18 @@ def parse_headers(frame) -> Connection | None:
     """Build a native :class:`Connection` (``http`` or ``websocket``) from a
     HEADERS frame, or ``None`` when the request is malformed.
 
-    Hot path on every request — kept as a module-level function so that
-    callers avoid the dict-lookup + parser allocation that ``ParserFactory``
-    requires.
-
-    Yields a :class:`Connection`, not an ASGI scope dict — the H/2 analogue of
-    :meth:`HTTP1Actor._parse`.  The actor derives the compat scope via
-    :meth:`Connection.as_scope` at the dispatch boundary; the websocket-only
-    ``subprotocols`` scope key is attached there too, since it is not a
-    :class:`Connection` field, the same way
-    :meth:`HTTP1Actor._handle_upgrade` augments the derived scope.
-
-    The :class:`Connection` is built **once**, at the very end, from locals
-    accumulated while walking the pseudo-headers — the same
-    single-construction idiom :meth:`HTTP1Actor._parse` uses.  Every early-out
-    returns ``None`` rather than a half-built ``Connection``, so the contract
-    is uniformly ``result is None ⟺ frame.malformed``: callers check
-    ``frame.malformed`` before reading the result, and
-    ``_request_headers_with_host`` marks it before returning ``None``.  The
-    plain-HTTP branch constructs through ``_build_h2_connection`` rather than
-    the dataclass constructor; see that function's docstring.
+    ``result is None`` if and only if ``frame.malformed``.  Every early-out
+    returns ``None`` rather than a half-built :class:`Connection`, so a caller
+    checks ``frame.malformed`` and never reads a partial object, and nothing
+    is constructed on the error path.
 
     Also performs request-level pseudo-header presence checks (RFC 9113
-    §8.3.1).  Field-level checks already happened in ``parse_payload``.  On any
-    known-bad input — ``parse_payload`` having flagged ``frame.malformed``, or a
-    missing/empty required pseudo found here (which sets ``frame.malformed``) —
-    we return ``None`` rather than build a throwaway :class:`Connection`: the
-    actor's ``frame.malformed`` check answers RST_STREAM before it would read
-    the result, so no object is constructed on the error path.
+    §8.3.1); field-level checks already happened in ``parse_payload``.
+
+    A module-level function rather than a ``ParserFactory`` product: this runs
+    on every request, and the factory's dict lookup and parser allocation
+    would be paid per request for nothing.  The Internals page states why the
+    read path threads a :class:`Connection` rather than an ASGI scope dict.
     """
     # Short-circuit if the frame parser already flagged this malformed.
     if getattr(frame, 'malformed', False):
