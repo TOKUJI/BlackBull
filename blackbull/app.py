@@ -282,11 +282,9 @@ class BlackBull:
     def on_startup(self, fn: Callable[[], Awaitable[None]]) -> Callable[[], Awaitable[None]]:
         """Register a zero-argument coroutine to run at lifespan startup.
 
-        The handler is wrapped in an adapter and registered as an
-        ``'app_startup'`` interception handler so it runs before the ASGI
-        server receives the ``lifespan.startup.complete`` acknowledgement.
-        Startup handlers run in registration order; an exception aborts the
-        remaining handlers and prevents the completion event from being sent.
+        Handlers run in registration order, before the ASGI server receives
+        the ``lifespan.startup.complete`` acknowledgement.  An exception aborts
+        the remaining handlers and withholds that acknowledgement.
 
         Args:
             fn: Async callable that takes no arguments.
@@ -315,11 +313,9 @@ class BlackBull:
     def on_shutdown(self, fn: Callable[[], Awaitable[None]]) -> Callable[[], Awaitable[None]]:
         """Register a zero-argument coroutine to run at lifespan shutdown.
 
-        The handler is wrapped in an adapter and registered as an
-        ``'app_shutdown'`` interception handler so it runs before the ASGI
-        server receives the ``lifespan.shutdown.complete`` acknowledgement.
-        Shutdown handlers run in registration order; an exception aborts the
-        remaining handlers.
+        Handlers run in registration order, before the ASGI server receives
+        the ``lifespan.shutdown.complete`` acknowledgement.  An exception
+        aborts the remaining handlers.
 
         Args:
             fn: Async callable that takes no arguments.
@@ -341,20 +337,17 @@ class BlackBull:
                   ) -> Callable[['BlackBull'], Awaitable[None]]:
         """Register a coroutine to warm the app **before it binds or forks**.
 
-        Unlike :meth:`on_startup` (which runs inside *each* worker's lifespan,
-        after ``fork()`` and after the listening socket already exists), an
-        ``on_warmup`` hook runs **once, in the master, before the socket is
-        created and before workers are forked**.  Forked workers then inherit
-        the warmed heap via copy-on-write (PEP 659 specialization survives
-        ``fork()``; the framework calls ``gc.collect()`` + ``gc.freeze()`` after
-        warm-up to keep those pages shared).  In single-worker mode the one
-        process is warmed before it binds.
+        The hook runs once in the master, before the listening socket is
+        created and before workers fork; :meth:`on_startup` runs per worker,
+        after both.  In single-worker mode the one process is warmed before it
+        binds.  The Workers deployment page explains what makes a warmed
+        master's heap survive the fork.
 
         Hooks receive the ``app`` and must do **pure warming only** — drive hot
         code paths, prime codecs/TLS — and acquire **no** per-worker resources
         (DB pools, sockets, live connections); those belong in
-        :meth:`on_startup`, which runs per worker.  Use :meth:`warm_request` to
-        exercise the ASGI dispatch/handler path in-process, and
+        :meth:`on_startup`.  Use :meth:`warm_request` to exercise the ASGI
+        dispatch/handler path in-process, and
         :func:`blackbull.server.warmup.warm_tls` to prime the TLS handshake.
 
         Warm-up is best-effort: a hook's exception is logged and swallowed
@@ -460,13 +453,8 @@ class BlackBull:
     async def drain_events(self, timeout: float = 5.0) -> bool:
         """Wait for detached (`@app.on`) observers to finish.  Returns success.
 
-        Two of the three hook kinds need no seam: ``@app.intercept`` and
-        ``@app.on(..., blocking=True)`` are awaited before a request
-        returns, so their effects are already visible.  The third is
-        detached on purpose, so asserting its side-effect straight after a
-        request is a race — this is how a test waits instead of sleeping.
-
-        ``False`` means *timeout* expired with work still outstanding.
+        Only detached observers need waiting for; the events guide says which
+        do not.  ``False`` means *timeout* expired with work still outstanding.
         Nothing is cancelled; call again with a longer budget.
         """
         return await self._dispatcher.drain(timeout)
@@ -904,9 +892,6 @@ class BlackBull:
         supported* sendable (a ``Response``, ``str``/``bytes``, ``None``, or a
         JSON-able ``dict``/``list``/dataclass).
 
-        The registry is empty by default, so registering nothing costs nothing:
-        the coercion fast path never consults it for the built-in shapes.
-
         Direct form::
 
             app.register_converter(MyOrmObject, lambda o: o.to_dict())
@@ -917,8 +902,8 @@ class BlackBull:
             def _(o):
                 return o.to_dict()
 
-        Converters registered after a route are still honoured — the registry
-        is shared with every adapted handler by reference.
+        Registration order does not matter: a converter registered after a
+        route is still honoured by that route's handler.
         """
         if converter is None:
             def _decorator(fn: Callable) -> Callable:
