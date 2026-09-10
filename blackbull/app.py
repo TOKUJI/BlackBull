@@ -1155,9 +1155,8 @@ class BlackBull:
     def add_extension(self, ext):
         """Register an extension and return it (for decorator chaining).
 
-        *ext* is any object exposing ``init_app(app)`` — a
-        :class:`~blackbull.extension.Extension` subclass, or a legacy
-        duck-typed extension.  ``init_app`` is called immediately to wire the
+        *ext* is any object exposing ``init_app(app)``; subclassing
+        :class:`~blackbull.extension.Extension` is optional.  ``init_app`` is called immediately to wire the
         extension's routes / middleware / protocol handlers / events through
         the public ``app.*`` API.  Optional async ``startup(app)`` /
         ``shutdown(app)`` methods are wired into the ``app_startup`` /

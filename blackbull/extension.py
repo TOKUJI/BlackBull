@@ -29,8 +29,8 @@ class Extension(ABC):
     resource lifecycle; :meth:`BlackBull.add_extension` wires those into the
     application's ``app_startup`` / ``app_shutdown`` lifespan events.
 
-    ``add_extension`` accepts any object exposing ``init_app(app)``, so legacy
-    duck-typed extensions keep working without adopting this base class.
+    ``add_extension`` accepts any object exposing ``init_app(app)``, so a
+    duck-typed extension works without adopting this base class.
     """
 
     #: Key under which the extension stores itself in ``app.extensions``.

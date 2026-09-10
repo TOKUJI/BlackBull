@@ -129,7 +129,7 @@ def _bind_socket(family, host, port,
 
 def create_socket(address, backlog: int = _DEFAULT_BACKLOG):
     """
-    Create a **single** socket (legacy helper).
+    Create a **single** socket.
 
     The *host* in *address* determines the address family:
     an IPv6 literal (e.g. ``'::'``) opens an ``AF_INET6`` socket;
