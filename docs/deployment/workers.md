@@ -127,6 +127,47 @@ Neither of the obvious knobs fixes it:
 For churn-heavy deployments keep `BB_WORKERS` at or below the
 core count; extra workers buy contention, not throughput.
 
+## Warm-up before fork
+
+A worker that has just forked runs interpreted bytecode: no
+specialization, no filled caches, cold branch predictors.  Every
+worker pays that cost separately, and under a pre-fork model it is
+paid *N* times for the same code.
+
+`@app.on_warmup` moves the payment forward.  The hook runs once in
+the master, before the listening socket is created and before any
+worker forks, so the heap it warms is the heap every worker
+inherits:
+
+```python
+@app.on_warmup
+async def warm(app):
+    from blackbull import Connection, Headers
+    conn = Connection(
+        method='POST', path='/rpc', raw_path=b'/rpc',
+        headers=Headers([(b'content-type', b'application/grpc')]))
+    await app.warm_request(conn, body=req_bytes, n=2000)
+```
+
+Two mechanisms carry the warmth across `fork()`.  PEP 659
+specialization lives in the code objects, which are shared pages,
+so it survives.  Reference-count churn would otherwise dirty those
+pages and copy them per worker, so the framework calls
+`gc.collect()` and then `gc.freeze()` once warm-up finishes —
+`gc.freeze()` moves surviving objects to a permanent generation the
+collector no longer traverses, which is what keeps the pages shared
+rather than copied.
+
+The hook must therefore warm and nothing else.  A DB pool or a
+socket opened here would be inherited by every worker as the *same*
+file descriptor, which is a bug, not a saving; per-worker resources
+belong in `@app.on_startup`.  Warm-up is best-effort — an
+exception is logged and the master degrades to a cold start — and
+the whole budget is capped by `BB_WARMUP_BUDGET_S` (default 60 s).
+
+In single-worker mode there is no fork, and the one process is
+warmed before it binds.
+
 ## `uvloop`
 
 `uvloop` is a drop-in libuv-based replacement for the standard

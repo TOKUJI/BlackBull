@@ -50,6 +50,17 @@ that only make sense inside BlackBull.
   block cannot be abandoned per-stream, since HPACK state is connection-wide.
   → `BLA-A-1` [private]
 
+- **Write the intent into the implementation, not into a comment beside it.**
+  This is a rule for every change, not only for a reduction pass.  Before
+  writing a sentence, ask whether a name, a signature, or a named constant
+  could carry it; a comment of the form "must be X when Y" is usually a
+  missing accessor.  And **never state a fact twice** — if a page, a sibling
+  function, or another file already argues it, point at that and stop.  A
+  second copy is not redundancy, it is a second thing to keep true, and the
+  copies drift apart rather than together: a design that was measured and
+  *rejected* described as though it shipped, a clamp no code implements, a
+  `--help` line calling a finite cap unlimited.
+
 - **Comment drift has two causes, and only one of them is a detection
   problem.**  Prose that *was* true and stopped being true is caught, crudely,
   by tooling (→ `BLA-389` [private]).  Prose that never kept up with the code

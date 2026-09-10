@@ -1592,24 +1592,57 @@ _INVENTORY = (
 
 @pytest.mark.parametrize('cap', _INVENTORY + tuple(sorted(_CLIENT_CAPS)))
 def test_cap_present_in_codebase(cap):
-    """Static audit — every inventory cap must appear in at least one
-    ``log_cap_hit('<cap>', ...)`` call under ``blackbull/``.  Cheap and
-    catches the developer-forgot-to-wire mistake even when a functional
-    test would silently skip.
+    """Static audit — every inventory cap is spelled as a call argument at a
+    rejection site under ``blackbull/``.  Cheap, and catches the
+    developer-forgot-to-wire mistake even when a functional test would
+    silently skip.
 
-    The name and the call need not be on the same line.  A rejection site that
-    shares one refusal helper — as the HTTP/2 client's three bounds do — passes
-    the cap name *to the helper*, so the literal ``log_cap_hit('<cap>'`` never
-    appears.  Requiring that spelling would make this audit an argument for
-    copying the helper; what it requires instead is the name and a
-    ``log_cap_hit`` call in the same file, with the name spelled as a call
-    argument — which is how both the direct sites and the forwarded ones
-    write it, and which a mention in prose is not."""
+    Three shapes count.  A direct site names the cap in its own
+    ``log_cap_hit`` call.  A forwarded site hands the name to a shared refusal
+    helper through a ``*_cap_name`` argument — the WebSocket client does this,
+    and the helper that ends up logging it lives in another module — so
+    requiring the literal beside ``log_cap_hit`` would be an argument for
+    copying the helper.  The helper's own ``*_cap_name`` default is the third:
+    that is how the server side names the cap it shares with that client.
+
+    What does *not* count is a mention in prose.  The evidence is read from
+    the syntax tree, so only a string literal in argument position is
+    admissible; a docstring naming the cap is invisible here.
+    """
     from pathlib import Path
     root = Path(__file__).resolve().parents[2] / 'blackbull'
-    hits = [
-        p for p in root.rglob('*.py')
-        if p.is_file() and f"'{cap}'," in (text := p.read_text())
-        and 'log_cap_hit' in text
-    ]
-    assert hits, f'{cap!r} not wired in any blackbull/ file'
+
+    def cited(tree: ast.AST) -> bool:
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            direct = (isinstance(node.func, ast.Name)
+                      and node.func.id == 'log_cap_hit')
+            for arg in node.args:
+                if (isinstance(arg, ast.Constant) and arg.value == cap
+                        and direct):
+                    return True
+            for kw in node.keywords:
+                if (isinstance(kw.value, ast.Constant) and kw.value.value == cap
+                        and (direct or (kw.arg or '').endswith('cap_name'))):
+                    return True
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            a = node.args
+            names = a.posonlyargs + a.args + a.kwonlyargs
+            for arg, default in zip(names[len(names) - len(a.defaults):],
+                                    a.defaults):
+                if (isinstance(default, ast.Constant) and default.value == cap
+                        and arg.arg.endswith('cap_name')):
+                    return True
+            for arg, default in zip(a.kwonlyargs, a.kw_defaults):
+                if (default is not None and isinstance(default, ast.Constant)
+                        and default.value == cap
+                        and arg.arg.endswith('cap_name')):
+                    return True
+        return False
+
+    hits = [p for p in root.rglob('*.py')
+            if p.is_file() and cited(ast.parse(p.read_text()))]
+    assert hits, f'{cap!r} is never passed as a cap-name argument under blackbull/'
