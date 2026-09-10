@@ -111,12 +111,12 @@ def emit_access_log(record: 'AccessLogRecord') -> None:
     listener thread instead of running on the event loop.  ``finalize()``
     snapshots the duration first so that deferred format still reports the
     request's real duration, not duration + queue latency.  The structured
-    ``extra`` fields stay eager — they are the documented public access-log API
-    (guide.md §14; ``tests/integration/test_access_log.py``).
+    ``extra`` fields stay eager — they are the documented public access-log
+    API, held by ``tests/integration/test_access_log.py``.
 
     When async logging is active *and* the access logger has not been customised,
     the record is enqueued directly onto the listener queue via
-    :func:`~blackbull.logger.enqueue_access_log` (O4), which bypasses
+    :func:`~blackbull.logger.enqueue_access_log`, which bypasses
     ``logging.Logger._log`` — ~93% of the loop-side emit cost lives in that
     stdlib machinery.  The fast path is skipped (and the standard synchronous
     ``logger.info`` path used) when async logging is off *or* the user has

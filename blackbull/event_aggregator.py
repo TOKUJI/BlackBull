@@ -31,9 +31,9 @@ class EventAggregator:
     It is instantiated once per application and passed by reference to each
     Actor at construction time.
 
-    Each method corresponds to one Level B event defined in ActorDesign.md.
-    Methods are called by Actors; they must always be called from the event
-    loop thread.
+    Each method corresponds to one Level B event, the set the Events guide
+    documents.  Methods are called by Actors, always from the event-loop
+    thread.
 
     Note:
         Do not export this class from ``blackbull/__init__.py``.
