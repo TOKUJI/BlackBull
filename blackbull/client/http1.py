@@ -1198,8 +1198,7 @@ class HTTP1Client:
                *, ssl: _ssl.SSLContext | None = None) -> 'HTTP1Client':
         """Wrap an already-open ``(reader, writer)`` pair as an HTTP1Client.
 
-        Used by ``Client`` (the ALPN dispatcher) to hand off a TLS-handshaken
-        connection without re-opening the transport.
+        HTTP/1.1 owes nothing on connect, so the client is usable on return.
         """
         c = cls(host, port, ssl=ssl)
         c._raw_writer = writer
@@ -1410,13 +1409,9 @@ class HTTP1Client:
 
     # ---- Low-level test-instrument primitives ----------------------------
     #
-    # These methods bypass HTTP1RequestSender's safety net (no Host
-    # injection, no Content-Length, no validation).  They exist so tests
-    # can put deliberately malformed bytes on the wire — slowloris-style
-    # trickle, duplicate Content-Length, invalid request lines, etc. —
-    # without dropping to a raw asyncio socket and duplicating wire-
-    # shaping logic.  The high-level request() / stream() API is the
-    # production path and remains source-compatible.
+    # These bypass HTTP1RequestSender's safety net: no Host injection, no
+    # Content-Length, no validation.  What they are for is
+    # ``docs/guide/client.md`` §Driving a misbehaving peer.
 
     @property
     def wire_buffer(self) -> bytes:
@@ -1551,11 +1546,9 @@ class HTTP1Client:
 
     # ---- Scenario executor -----------------------------------------------
     #
-    # A :class:`Scenario` is a tagged sequence of steps (SendBytes / Sleep /
-    # ReadResponse / Abort) shared by the differential test and the atheris
-    # fuzz harness.  The executor below is glue over the low-level primitives:
-    # it walks the steps, dispatches each to the appropriate primitive, and
-    # folds the outcome into a :class:`ScenarioResult` without raising.
+    # Glue over the primitives above: walk a :class:`Scenario`'s steps, dispatch
+    # each, fold the outcome into a :class:`ScenarioResult` without raising.
+    # The vocabulary is ``docs/guide/fault_injection.md``.
 
     async def execute_scenario(
         self, scenario: Scenario,

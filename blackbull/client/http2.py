@@ -230,11 +230,9 @@ class _PendingResponse:
 
 
 def _record_frame(result, frame) -> None:
-    """Log one frame: newest in ``response``, all of them in ``received``.
+    """Log one frame, under the naming ``http1._record_response`` sets.
 
-    ``response`` keeps its old meaning so existing scenarios are
-    untouched.  The twin of ``http1._record_response`` — the two roles
-    report the same things under the same names.
+    A frame's wire cost is its 9-byte header plus its declared length.
     """
     result.response = frame
     result.received.append(frame)
@@ -368,9 +366,9 @@ class HTTP2Client:
                *, ssl: _ssl.SSLContext | None = None) -> 'HTTP2Client':
         """Wrap an already-open ``(reader, writer)`` pair as an HTTP2Client.
 
-        Used by ``Client`` (the ALPN dispatcher) to hand off a TLS-handshaken
-        connection without re-opening the transport.  Call ``await self._start()``
-        — or enter via ``async with`` — to send the connection preface.
+        Unlike the HTTP/1.1 twin the client is not usable on return: call
+        ``await self._start()``, or enter via ``async with``, to send the
+        connection preface.
         """
         c = cls(host, port, ssl=ssl)
         c._raw_writer = writer
