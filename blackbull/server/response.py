@@ -305,9 +305,13 @@ class PriorityUpdateResponder(Responder):
         )
         stream = handler.find_stream(self.frame.prioritized_stream_id)
         if stream is None:
+            is_closed, _ = handler._is_closed_stream(
+                self.frame.prioritized_stream_id)
+            if is_closed:
+                return
             # PRIORITY_UPDATE arrived before HEADERS — pre-create the stream so
             # the hint survives until HEADERS does.  This is the one path on
-            # which a peer can still grow the priority tree, so RFC 9218 §7's
+            # which a peer can grow the priority tree, so RFC 9218 §7's
             # permission to bound the buffer is taken: a hint for more streams
             # than it may hold open at once is one it can never redeem.
             if len(handler.root_stream.children) >= handler.max_concurrent_streams:
@@ -367,25 +371,13 @@ class RstStreamResponder(Responder):
             return
 
         logger.warning('stream_id=%d %s', stream_id, self.frame.error_code)
-        # An abandoned server-streaming handler would otherwise block forever in
-        # the sender's flow-control wait — no further WINDOW_UPDATE is coming —
-        # holding a max_concurrent_streams slot, so a high-churn streaming
-        # client leaks slots until new streams are REFUSED_STREAM'd.  Cancelling
-        # interrupts that wait cleanly: finally/aclose still run and the
-        # done-callback frees the slot.
-        task = handler._stream_tasks.get(stream_id)
-        if task is not None and not task.done():
-            task.cancel()
-        # Recorded as closed-via-RST so the frame loop's _closed_streams check
-        # answers STREAM_CLOSED to later frames on this identifier.
-        handler.root_stream.children.pop(stream_id, None)
-        handler._mark_closed(stream_id, via_rst=True)
-        handler._senders.pop(stream_id, None)
-        released = handler._recipients.pop(stream_id, None)
-        if released is not None:
-            # Consume-based crediting: DATA the cancelled handler never read
-            # was debited from the shared connection window — replay the
-            # balance to stream 0 so later streams aren't starved.
-            handler._release_recipient_credit(released)
+        # Cancel the running handler for this stream.  Without this a
+        # server-streaming handler abandoned by the client blocks forever in the
+        # sender's flow-control wait (no further WINDOW_UPDATE will ever arrive),
+        # permanently holding a max_concurrent_streams slot — a high-churn
+        # streaming client leaks slots until new streams are REFUSED_STREAM'd.
+        # Common retirement frees the slot synchronously and cancels the
+        # flow-control wait; the handler's finally/aclose continues to run.
+        handler._retire_stream(stream_id, via_rst=True)
 
     FRAME_TYPE = FrameTypes.RST_STREAM

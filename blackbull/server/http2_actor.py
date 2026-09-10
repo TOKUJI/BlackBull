@@ -351,15 +351,18 @@ class HTTP2Actor(Actor):
         self._empty_frame_meter = RateWindow(_rate, _window)  # CVE-2019-9518
 
         # RFC 8441 stream-exhaustion guard, capped at
-        # ``cfg.h2_ws_max_streams_per_connection``.
+        # ``cfg.h2_ws_max_streams_per_connection``.  The id set makes common
+        # retirement decrement the count exactly once.
         self._ws_stream_count: int = 0
+        self._ws_stream_ids: set[int] = set()
 
         # RFC 9113 §5.1 late-frame validation: stream_id → closed-via-RST.
         # Bounded, so a connection cycling millions of streams (gRPC) cannot
-        # grow it; evicted ids stay CLOSED via the high-water mark.  Holding
-        # this rather than the Stream node is what keeps find_child O(1).
+        # grow it; evicted ids stay CLOSED via parity-specific high-water marks
+        # so a push id cannot close a legal peer id.
         self._closed_streams: dict[int, bool] = {}
-        self._closed_high_water: int = 0
+        self._closed_peer_high_water: int = 0
+        self._closed_push_high_water: int = 0
         # Non-zero when receive() declined to buffer an oversize payload.
         self._oversize_frame_len: int = 0
 
@@ -398,53 +401,59 @@ class HTTP2Actor(Actor):
         ``docs/about/rfc9113-implementation.md`` §6.9.1.
         """
 
-        # Unannotated for the per-request-closure reason (see app.py::_wrap_send_native).
-        async def _credit(n, sid=stream_id):
-            # Skip the stream-level frame once the stream is released (§5.1
-            # forbids non-PRIORITY frames on a closed stream); the
-            # connection-level credit must still flow or stream-0 leaks shut.
-            if sid in self._recipients:
-                await self.send_frame(self.factory.window_update(sid, n))
-            await self.send_frame(self.factory.window_update(0, n))
-
         return RecipientFactory.http2(
             queue_depth=self._stream_queue_depth,
-            credit_callback=_credit,
+            credit_callback=self._make_consume_credit_callback(stream_id),
             credit_budget=self._inbound_stream_window,
             max_body=self._max_body_size,
             min_rate=self._min_body_rate,
             min_rate_grace=self._min_body_rate_grace,
         )
 
-    def _release_recipient_credit(self, recipient) -> None:
-        """Replay a released stream's un-consumed inbound credit to stream 0.
+    def _make_consume_credit_callback(
+        self, stream_id: int,
+    ) -> Callable[[int], Awaitable[None]]:
+        """Return a callback that replays both levels of consumed credit."""
 
-        Stream-level credit is not replayed: the stream is closed (RFC 9113
-        §5.1).  The connection-level half, and what leaks without it, is
-        ``docs/about/rfc9113-implementation.md`` §6.9.1.
-        """
-        take = getattr(recipient, 'take_uncredited', None)
-        balance = take() if take is not None else 0
+        # Unannotated for the per-request-closure reason (see app.py::_wrap_send_native).
+        async def _credit(n):
+            task = self._schedule_credit_replay(n)
+            if task is None:
+                return
+            # Consumer cancellation must not revoke connection credit that
+            # was earned when the DATA left the recipient queue.
+            await asyncio.shield(task)
+            if self._goaway_sent or stream_id not in self._recipients:
+                return
+            try:
+                # Stream credit remains stream-owned so RST cancellation can
+                # stop a writer suspended after the liveness check.
+                await self.send_frame(
+                    self.factory.window_update(stream_id, n))
+            except Exception:
+                if _DEBUG:
+                    logger.debug('stream credit replay failed', exc_info=True)
+
+        return _credit
+
+    def _schedule_credit_replay(self, balance: int) -> asyncio.Task | None:
+        """Schedule stream-0 WINDOW_UPDATE replay owned by the connection."""
         if balance <= 0 or self._goaway_sent:
-            return
+            return None
 
         # Unannotated for the per-request-closure reason (see app.py::_wrap_send_native).
         async def _replay():
+            if self._goaway_sent:
+                return
             try:
                 await self.send_frame(self.factory.window_update(0, balance))
             except Exception:
                 if _DEBUG:
-                    logger.debug('post-stream connection credit replay failed',
-                                 exc_info=True)
+                    logger.debug('connection credit replay failed', exc_info=True)
 
-        # Callers may be sync done-callbacks, so the replay is scheduled:
-        # the connection TaskGroup where run() can await it, a bare loop task
-        # once the group is closing.  Each create_task must get its OWN
-        # coroutine object — CPython 3.13's TaskGroup.create_task() closes the
-        # coroutine before raising, so reusing it here schedules an
-        # already-closed one, the task dies with "cannot reuse already awaited
-        # coroutine", and the credit is silently never replayed on exactly the
-        # teardown path this fallback exists for.
+        # A done-callback and stream teardown cannot await this replay.  Keep
+        # a strong reference until completion and join the connection's task
+        # group whenever it can accept work.
         task = None
         if self._task_group is not None:
             try:
@@ -457,9 +466,23 @@ class HTTP2Actor(Actor):
                 task = asyncio.get_running_loop().create_task(coro)
             except RuntimeError:
                 coro.close()
-                return  # no running loop — nothing left to credit against
+                return None
         self._credit_flush_tasks.add(task)
         task.add_done_callback(self._credit_flush_tasks.discard)
+        return task
+
+    def _release_recipient_credit(self, recipient, additional: int = 0) -> None:
+        """Replay a released stream's un-consumed inbound credit to stream 0.
+
+        Stream-level credit is not replayed: the stream is closed (RFC 9113
+        §5.1).  The connection-level half, and what leaks without it, is
+        ``docs/about/rfc9113-implementation.md`` §6.9.1.  ``additional`` is
+        the complete current DATA frame, including padding, when refusal
+        happens before it enters the recipient.
+        """
+        take = getattr(recipient, 'take_uncredited', None)
+        balance = (take() if take is not None else 0) + additional
+        self._schedule_credit_replay(balance)
 
     def _fill_scope_connection(self, conn: Connection) -> None:
         """Inject peername/sockname into a freshly-parsed HTTP/2 Connection."""
@@ -476,9 +499,16 @@ class HTTP2Actor(Actor):
         this the one place the G8 blind spot can be closed without dusting
         the counter across a dozen refusal sites.
         """
+        terminal_reset = (frame.FrameType() == FrameTypes.RST_STREAM
+                          and not self._goaway_sent)
+        if terminal_reset:
+            # Stop stream-owned work at the decision boundary, before a
+            # transport drain can yield to a producer forbidden from emitting
+            # output.  Cleanup must also survive a failed RST write; the
+            # connection cannot make that stream live again.
+            self._retire_stream(frame.stream_id, via_rst=True)
         await self._control_sender(frame)
-        if (frame.FrameType() == FrameTypes.RST_STREAM
-                and not self._goaway_sent):
+        if terminal_reset:
             await self._count_emitted_rst()
 
     def _validate_stream_state(
@@ -528,9 +558,13 @@ class HTTP2Actor(Actor):
             return
         logger.warning(
             'HTTP/2 connection error %s: %s', error_code.name, reason)
-        await self.send_frame(
-            self.factory.goaway(self._last_peer_stream_id, error_code))
+        # A terminal connection decision revokes every output owner before the
+        # GOAWAY write can suspend; only the connection-control write remains.
         self._goaway_sent = True
+        self._retire_all_streams()
+        with contextlib.suppress(Exception):
+            await self.send_frame(
+                self.factory.goaway(self._last_peer_stream_id, error_code))
         try:
             await self._writer.close()
         except Exception:
@@ -544,6 +578,7 @@ class HTTP2Actor(Actor):
     ) -> Callable[[asyncio.Task], None]:
         """Return a done-callback that releases per-stream resources on completion.
 
+        Drops every live owner and retains only the bounded closed-id record.
         ``is_ws`` is tagged at the call site rather than blanket-decremented:
         letting regular HTTP completions touch ``_ws_stream_count`` would
         drift it below the true in-flight count and the RFC 8441 cap would
@@ -552,29 +587,106 @@ class HTTP2Actor(Actor):
 
         # Unannotated for the per-request-closure reason (see app.py::_wrap_send_native).
         def _cb(_task):
-            self._active_stream_count = max(0, self._active_stream_count - 1)
-            if is_ws:
-                self._ws_stream_count = max(0, self._ws_stream_count - 1)
-            self._stream_tasks.pop(stream_id, None)
-            self._senders.pop(stream_id, None)
-            released = self._recipients.pop(stream_id, None)
-            if released is not None:
-                self._release_recipient_credit(released)
-            # Prune the node but remember the id, so late frames still reach
-            # the CLOSED branch of §5.1 validation without this connection
-            # paying a Stream object per completed request.
-            if self.root_stream.children.pop(stream_id, None) is not None:
-                self._mark_closed(stream_id, via_rst=False)
+            self._retire_stream(
+                stream_id, via_rst=False, finished_task=_task,
+                is_ws_hint=is_ws)
         return _cb
 
-    def _mark_closed(self, stream_id: int, via_rst: bool) -> None:
+    def _retire_stream(
+        self,
+        stream_id: int,
+        *,
+        via_rst: bool,
+        finished_task: asyncio.Task | None = None,
+        additional_credit: int = 0,
+        is_ws_hint: bool = False,
+    ) -> None:
+        """Release every owner of one stream exactly once.
+
+        This is synchronous so task callbacks and frame responders share the
+        same transition.  Connection-credit replay remains scheduled because
+        a done-callback cannot await it and that write outlives the stream.
+        """
+        task = self._stream_tasks.get(stream_id)
+        if finished_task is not None and task is not finished_task:
+            task = None
+        elif task is not None:
+            self._stream_tasks.pop(stream_id, None)
+            self._active_stream_count = max(0, self._active_stream_count - 1)
+            current = asyncio.current_task()
+            if task is not current and not task.done():
+                task.cancel()
+
+        sender = self._senders.pop(stream_id, None)
+        recipient = self._recipients.pop(stream_id, None)
+        stream = self.root_stream.children.pop(stream_id, None)
+        advances_watermark = (
+            stream is not None and stream.state != StreamState.IDLE
+        )
+        owned = any(owner is not None for owner in (
+            task, sender, recipient, stream,
+        ))
+
+        if sender is not None:
+            retire = getattr(sender, 'retire_stream', None)
+            if retire is not None:
+                retire()
+            else:
+                sender.mark_client_gone()
+        if recipient is not None:
+            recipient.put_disconnect()
+            self._release_recipient_credit(recipient, additional_credit)
+        elif additional_credit:
+            self._release_recipient_credit(None, additional_credit)
+
+        if stream_id in self._ws_stream_ids:
+            self._ws_stream_ids.remove(stream_id)
+            self._ws_stream_count = max(0, self._ws_stream_count - 1)
+        elif is_ws_hint and owned:
+            self._ws_stream_count = max(0, self._ws_stream_count - 1)
+
+        if owned or via_rst:
+            self._mark_closed(
+                stream_id, via_rst=via_rst,
+                advances_watermark=advances_watermark)
+
+    def _retire_all_streams(self) -> None:
+        """Release connection work while preserving connection codecs."""
+        for task in tuple(self._credit_flush_tasks):
+            if not task.done():
+                task.cancel()
+        self._credit_flush_tasks.clear()
+        stream_ids = (
+            set(self.root_stream.children)
+            | set(self._stream_tasks)
+            | set(self._senders)
+            | set(self._recipients)
+        )
+        for stream_id in stream_ids:
+            self._retire_stream(stream_id, via_rst=False)
+
+    def _mark_closed(
+        self, stream_id: int, via_rst: bool, *, advances_watermark: bool = True,
+    ) -> None:
         """Record *stream_id* as closed for §5.1 late-frame validation."""
         self._closed_streams[stream_id] = via_rst
-        if stream_id > self._closed_high_water:
-            self._closed_high_water = stream_id
+        if advances_watermark and stream_id % 2:
+            if stream_id > self._closed_peer_high_water:
+                self._closed_peer_high_water = stream_id
+        elif advances_watermark and stream_id > self._closed_push_high_water:
+            self._closed_push_high_water = stream_id
         if len(self._closed_streams) > _CLOSED_STREAMS_CAP:
             # Evict the oldest recorded id (dict preserves insertion order).
             del self._closed_streams[next(iter(self._closed_streams))]
+
+    def _is_closed_stream(self, stream_id: int) -> tuple[bool, bool | None]:
+        """Return closed membership and exact reset origin when retained."""
+        exact = self._closed_streams.get(stream_id)
+        if exact is not None:
+            return True, exact
+        watermark = (self._closed_peer_high_water if stream_id % 2
+                     else self._closed_push_high_water)
+        return 0 < stream_id <= watermark, None
 
     async def receive(self) -> bytes:
         """Read one HTTP/2 frame from the connection."""
@@ -755,10 +867,11 @@ class HTTP2Actor(Actor):
         await self._close_connection(ErrorCodes.NO_ERROR)
 
     async def _close_connection(self, error_code: int) -> None:
+        self._goaway_sent = True
+        self._retire_all_streams()
         with contextlib.suppress(Exception):
             await self.send_frame(self.factory.goaway(
                 self._last_peer_stream_id, error_code))
-        self._goaway_sent = True
         with contextlib.suppress(Exception):
             result = self._writer.close()
             # Async on the asyncio adapter, sync on the raw transports; accept
@@ -883,14 +996,31 @@ class HTTP2Actor(Actor):
             # from IDLE below.
             stream = self.root_stream.children.get(frame.stream_id)
 
+            if (frame.stream_id != 0 and frame_type == FrameTypes.HEADERS
+                    and stream is not None and stream.state == StreamState.IDLE):
+                # A PRIORITY_UPDATE hint may reserve the node, but HEADERS is
+                # what opens and orders the peer stream.
+                if frame.stream_id % 2 == 0:
+                    await self._connection_error(
+                        ErrorCodes.PROTOCOL_ERROR,
+                        f'peer used even stream_id={frame.stream_id}')
+                    continue
+                if frame.stream_id <= self._last_peer_stream_id:
+                    await self._connection_error(
+                        ErrorCodes.PROTOCOL_ERROR,
+                        f'peer stream_id={frame.stream_id} '
+                        f'<= last={self._last_peer_stream_id}')
+                    continue
+                self._last_peer_stream_id = frame.stream_id
+                stream.state = StreamState.OPEN
+
             if frame.stream_id != 0 and stream is None:
-                closed_via_rst = self._closed_streams.get(frame.stream_id)
-                is_closed = closed_via_rst is not None
-                if not is_closed and 0 < frame.stream_id <= self._closed_high_water:
-                    # Evicted from the bounded record — still CLOSED, not IDLE.
-                    # Assume the lenient close, so a late WINDOW_UPDATE or
-                    # RST_STREAM is ignored rather than answered.
-                    is_closed = True
+                is_closed, closed_via_rst = self._is_closed_stream(frame.stream_id)
+                if is_closed and closed_via_rst is None:
+                    # Evicted from the bounded record but classified CLOSED,
+                    # not IDLE.  Assume the lenient close, so a late
+                    # WINDOW_UPDATE or RST_STREAM is ignored rather than
+                    # answered.
                     closed_via_rst = False
                 if is_closed:
                     # Late frame on a CLOSED stream (§5.1).
@@ -911,6 +1041,12 @@ class HTTP2Actor(Actor):
                         # it tear the stream down early.
                         continue
                     else:
+                        if frame_type == FrameTypes.DATA and frame.length:
+                            # DATA consumes connection flow-control credit even
+                            # when its stream has already closed.  Return only
+                            # stream-0 credit; recreating stream ownership or a
+                            # stream WINDOW_UPDATE would violate §5.1.
+                            self._release_recipient_credit(None, frame.length)
                         await self.send_frame(self.factory.rst_stream(
                             frame.stream_id, ErrorCodes.STREAM_CLOSED))
                         continue
@@ -930,6 +1066,11 @@ class HTTP2Actor(Actor):
                             continue
                         self._last_peer_stream_id = frame.stream_id
                         stream = self.root_stream.add_child(frame.stream_id)
+                        # HEADERS opens the RFC stream before application
+                        # admission.  Keep it OPEN until the complete block can
+                        # apply END_STREAM, so rejected requests remain distinct
+                        # from nodes created only for future priority hints.
+                        stream.state = StreamState.OPEN
                     elif frame_type == FrameTypes.PRIORITY:
                         # §6.3 lets a peer prioritise a stream it has not
                         # opened, so this is legal on an idle stream — and must
@@ -956,6 +1097,10 @@ class HTTP2Actor(Actor):
                             f'frame {frame_type.name} on stream {frame.stream_id} '
                             f'in {stream.state.name} state')
                         continue
+                    if frame_type == FrameTypes.DATA and frame.length:
+                        self._retire_stream(
+                            frame.stream_id, via_rst=True,
+                            additional_credit=frame.length)
                     await self.send_frame(
                         self.factory.rst_stream(frame.stream_id, error_code))
                     continue
@@ -1008,11 +1153,13 @@ class HTTP2Actor(Actor):
         *conn* is always the native [`Connection`][]; the compat lane's ASGI
         scope is derived beyond here, at the app boundary, and nowhere else.
 
+        Registers the task and increments ``_active_stream_count`` only after
+        task creation succeeds.  The common done-callback retirement reverses
+        both registrations exactly once when the task finishes.
+
         A ``BB_REQUEST_TIMEOUT`` expiry sends RST_STREAM CANCEL and lets the
         task complete normally, so it does not cancel the TaskGroup.
         """
-        self._active_stream_count += 1
-
         # One dispatch path, never a fork on the aggregator: ``StreamActor`` is
         # already None-tolerant in both fields that would differ, and a second
         # path would duplicate ``RequestActor``'s plumbing while losing this
@@ -1062,8 +1209,10 @@ class HTTP2Actor(Actor):
             if _DEBUG:
                 logger.debug('stream %d not started: connection closing',
                              stream_id)
+            self._retire_stream(stream_id, via_rst=False)
             return
 
+        self._active_stream_count += 1
         self._stream_tasks[stream_id] = task
         task.add_done_callback(self._make_done_cb(stream_id))
 
@@ -1234,15 +1383,16 @@ class HTTP2Actor(Actor):
         if len(header_frame.raw_block) > self._header_max_total:
             logger.warning(
                 'Stream %d header block exceeded BB_HEADER_MAX_TOTAL=%d '
-                'across CONTINUATION frames — RST_STREAM ENHANCE_YOUR_CALM',
+                'across CONTINUATION frames — GOAWAY ENHANCE_YOUR_CALM',
                 stream.stream_id, self._header_max_total,
             )
             log_cap_hit('header_max_total',
                         requested=len(header_frame.raw_block),
                         limit=self._header_max_total,
                         protocol='http2')
-            await self.send_frame(self.factory.rst_stream(
-                stream.stream_id, ErrorCodes.ENHANCE_YOUR_CALM))
+            await self._connection_error(
+                ErrorCodes.ENHANCE_YOUR_CALM,
+                'undecoded header block exceeded BB_HEADER_MAX_TOTAL')
             return True
 
         if not frame.end_headers:
@@ -1291,6 +1441,9 @@ class HTTP2Actor(Actor):
         RFC 9113 §6.9.1 (``docs/about/rfc9113-implementation.md``).
         """
         if stream.state in (StreamState.HALF_CLOSED_REMOTE, StreamState.CLOSED):
+            self._retire_stream(
+                stream.stream_id, via_rst=True,
+                additional_credit=frame.length)
             await self.send_frame(
                 self.factory.rst_stream(stream.stream_id, ErrorCodes.STREAM_CLOSED))
             return
@@ -1304,6 +1457,9 @@ class HTTP2Actor(Actor):
             if stream.received_data_bytes > expected or (
                 frame.end_stream and stream.received_data_bytes != expected
             ):
+                self._retire_stream(
+                    stream.stream_id, via_rst=True,
+                    additional_credit=frame.length)
                 await self.send_frame(self.factory.rst_stream(
                     stream.stream_id, ErrorCodes.PROTOCOL_ERROR))
                 return
@@ -1339,9 +1495,11 @@ class HTTP2Actor(Actor):
                 # tiny-frame flood, or a body limit.  Tell the recipient as
                 # well, so a handler parked in ``receive()`` for a body that
                 # will never continue unwinds now rather than at the timeout.
+                self._retire_stream(
+                    stream.stream_id, via_rst=True,
+                    additional_credit=frame.length)
                 await self.send_frame(
                     self.factory.rst_stream(stream.stream_id, ErrorCodes.ENHANCE_YOUR_CALM))
-                recipient.put_disconnect()
         else:
             logger.warning('DATA for stream %d but no recipient found', stream.stream_id)
 
@@ -1404,16 +1562,8 @@ class HTTP2Actor(Actor):
 
         conn._ws = {'send_101': _ws_send_200}
 
-        sid = stream.stream_id
-
-        # Unannotated for the per-request-closure reason (see app.py::_wrap_send_native).
-        async def _replay_credit(n):
-            # Both windows, so a reader that withheld credit at its buffer cap
-            # reopens the peer's symmetrically with the per-frame path.
-            await self.send_frame(self.factory.window_update(sid, n))
-            await self.send_frame(self.factory.window_update(0, n))
-
-        ws_reader = HTTP2WSReader(credit_callback=_replay_credit)
+        ws_reader = HTTP2WSReader(
+            credit_callback=self._make_consume_credit_callback(stream.stream_id))
         ws_writer = HTTP2WSWriter(stream_send)
         self._recipients[stream.stream_id] = ws_reader
 
@@ -1435,9 +1585,15 @@ class HTTP2Actor(Actor):
             finally:
                 _close_ws_record(log_record, ws_actor._disconnect_code)
 
+        try:
+            task = tg.create_task(_run_ws())
+        except RuntimeError:
+            self._retire_stream(stream.stream_id, via_rst=False)
+            return
+        self._ws_stream_ids.add(stream.stream_id)
         self._ws_stream_count += 1
         self._active_stream_count += 1
-        task = tg.create_task(_run_ws())
+        self._stream_tasks[stream.stream_id] = task
         task.add_done_callback(
             self._make_done_cb(stream.stream_id, is_ws=True))
 
@@ -1456,19 +1612,23 @@ class HTTP2Actor(Actor):
                 'peer SETTINGS_ENABLE_PUSH=0', parent_stream_id)
             return
 
+        parent_stream = self.root_stream.find_child(parent_stream_id)
+        if parent_stream is None or self._task_group is None:
+            logger.warning(
+                'HTTP2Actor: dropping http.response.push on stream %d — '
+                'parent or connection task group is no longer live',
+                parent_stream_id)
+            return
+
         from .parser import _split_h2_path  # noqa: PLC0415
 
         push_stream_id = self._allocate_push_stream_id()
         path = event.get('path', '/')
 
-        parent_stream = self.root_stream.find_child(parent_stream_id)
-        parent = parent_stream.conn if parent_stream is not None else None
+        parent = parent_stream.conn
         # Plain attribute reads, never ``.get()`` on a scope: under
         # BB_FORCE_ASGI_SCOPE that reaches a header *list* and raises
-        # AttributeError for every push.  A parent can genuinely be missing —
-        # pushed against an already-evicted stream — so the defaults are
-        # spelled out rather than left to an empty-dict sentinel that would
-        # turn a typo into a silent empty value.
+        # AttributeError for every push.
         if parent is not None:
             parent_headers = parent.headers
             parent_scheme = parent.scheme
@@ -1495,7 +1655,37 @@ class HTTP2Actor(Actor):
         ]
 
         pp = self.factory.push_promise(parent_stream_id, push_stream_id, pseudo, regular)
-        await self.send_frame(pp)
+        # The peer may reset a promised id as soon as the frame reaches its
+        # transport, including while our write waits for drain.
+        push_stream = self.root_stream.add_child(push_stream_id)
+        push_stream.state = StreamState.HALF_CLOSED_REMOTE
+        try:
+            await self.send_frame(pp)
+        except asyncio.CancelledError:
+            if (self.root_stream.find_child(push_stream_id) is push_stream
+                    and not self._goaway_sent and not self._writer.peer_gone):
+                # Cancellation can arrive from a reset of the parent after
+                # PUSH_PROMISE reached the transport but before drain returned.
+                try:
+                    await self.send_frame(self.factory.rst_stream(
+                        push_stream_id, ErrorCodes.CANCEL))
+                except OSError:
+                    # A best-effort reset cannot replace the cancellation that
+                    # owns the parent stream's terminal state.
+                    self._retire_stream(push_stream_id, via_rst=True)
+                    if _DEBUG:
+                        logger.debug(
+                            'promised-stream reset write failed', exc_info=True)
+            else:
+                self._retire_stream(push_stream_id, via_rst=False)
+            raise
+        except Exception:
+            self._retire_stream(push_stream_id, via_rst=False)
+            raise
+        if (self.root_stream.find_child(push_stream_id) is not push_stream
+                or self._writer.peer_gone):
+            self._retire_stream(push_stream_id, via_rst=False)
+            return
 
         _pushed_path, _pushed_raw_path, _pushed_query = _split_h2_path(path)
         pushed_conn = Connection(
@@ -1528,15 +1718,16 @@ class HTTP2Actor(Actor):
             self._writer, self.factory, push_stream_id, push_callback=None,
             conn_window=self._conn_window,
             flow_control_timeout=self._write_timeout)
+        self._senders[push_stream_id] = push_sender
+        push_stream.conn = pushed_conn
         log_record = _start_record(pushed_conn)
         push_sender._log_record = log_record
         capturing_send = push_sender
 
-        if self._task_group is not None:
-            self._spawn_stream_task(
-                self._task_group, push_stream_id, pushed_conn,
-                push_recipient, capturing_send, log_record,
-            )
+        self._spawn_stream_task(
+            self._task_group, push_stream_id, pushed_conn,
+            push_recipient, capturing_send, log_record,
+        )
 
     async def _handle(self, msg: Message) -> None:
         raise NotImplementedError

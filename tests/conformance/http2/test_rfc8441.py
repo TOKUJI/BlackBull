@@ -494,6 +494,12 @@ class TestDataExchange:
         assert any(e.get('type') == 'websocket.disconnect'
                    for e in received_events), (
             'END_STREAM DATA frame must deliver websocket.disconnect to the app')
+        assert handler._stream_tasks == {}
+        assert handler._senders == {}
+        assert handler._recipients == {}
+        assert handler.root_stream.children == {}
+        assert handler._active_stream_count == 0
+        assert handler._ws_stream_count == 0
 
     async def test_app_send_text_produces_data_frame(self):
         """websocket.send(text='hi') must result in DATA frame bytes on the wire

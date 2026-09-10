@@ -420,7 +420,13 @@ async def test_continuation_for_another_open_stream_is_connection_error() -> Non
 
     assert actor._goaway_sent
     assert writer.closed
-    assert calls == [
-        ('http', 'GET', '/one'),
-        ('http', 'GET', '/three'),
-    ]
+    # A connection-level framing failure is fatal: work accepted earlier in
+    # the same loop turn must not start producing output after GOAWAY/close.
+    # Graceful peer GOAWAY and EOF have separate positive controls which let
+    # already-running responses drain.
+    assert calls == []
+    assert actor._stream_tasks == {}
+    assert actor._senders == {}
+    assert actor._recipients == {}
+    assert actor.root_stream.children == {}
+    assert actor._active_stream_count == 0

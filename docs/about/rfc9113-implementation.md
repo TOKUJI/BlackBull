@@ -147,11 +147,25 @@ loop.  The state check is the second line of defence.
 
 *Because* the state table is the heart of multiplexing — getting it wrong means
 either rejecting valid concurrent streams or leaking resources on dead ones.
-A subtlety: closed streams are not kept as full `Stream` objects.  When a task
-finishes, `HTTP2Actor._make_done_cb()` prunes the node and records just
-`HTTP2Actor._closed_streams[stream_id] = closed_via_rst`.  *Because* a late frame on a
-closed stream still needs the CLOSED branch of validation, but an integer
-lookup is enough — you should not pay a `Stream` object per completed request.
+A subtlety: closed streams are not kept as full `Stream` objects.
+`HTTP2Actor._retire_stream()` is the single idempotent transition used by task
+completion and local or peer reset.  It releases the task, sender, recipient,
+stream-tree node, counters, and any unconsumed connection-window credit, then
+records only the closed identifier.  Exact reset origin is bounded, with
+separate odd peer-stream and even push-stream high-water marks after eviction.
+*Because* a late frame still needs the CLOSED branch of validation, but an
+integer is enough; mixing the two identifier namespaces would make a closed
+push stream incorrectly classify a lower legal peer stream as closed.  An idle
+node created only to retain a future `PRIORITY_UPDATE` hint is kept in the exact
+record if reset, but does not advance a high-water mark: it was never opened,
+and a larger hint identifier says nothing about lower legal request streams.
+The same rule applies when the server emits an ownerless `RST_STREAM` for a
+future identifier: the exact id is terminal, without implying that lower ids
+were opened and closed.
+
+Receiving `END_STREAM` closes the request body, not the response lifetime.  The
+stream remains owned while its app task produces the response, and retirement
+occurs only when that work completes or an error/reset ends it.
 
 **§5.1.1 Stream Identifiers** ✅
 Peer-initiated streams **MUST** use odd identifiers, strictly increasing.
@@ -212,6 +226,10 @@ refund a possibly delivered frame. Deferred bodies are taken out of their
 buffer before awaiting a write, so automatic flushing cannot send them twice.
 When a trailer must wait for body credit, its HPACK block is encoded only at
 the final write, preserving connection-wide header order across other streams.
+Every header-producing path also rechecks stream retirement before encoding,
+including after a body-credit wait.  Encoding an unsent block would mutate the
+shared dynamic table and make a later sibling refer to an entry its peer never
+received.
 The unit bound remains the peer's maximum DATA frame payload; the total is the
 peer's connection/stream credit, and the wait bound belongs to the existing
 server or client write timeout.
@@ -238,14 +256,17 @@ survives.
 
 **§5.4 Error Handling** ✅ — *this is where the actor model earns its place.*
 A **connection error** (§5.4.1) goes through `HTTP2Actor._connection_error()`:
-build GOAWAY with the accumulated `HTTP2Actor._last_peer_stream_id`, flush it,
-then `writer.close()` so the peer sees FIN after the GOAWAY; idempotent via
-`HTTP2Actor._goaway_sent`.  A **stream error** (§5.4.2) sends RST_STREAM and lets the
-stream's task die *without taking the connection down* — because
+retire output owners, cancel pending credit replay, build GOAWAY with the
+accumulated `HTTP2Actor._last_peer_stream_id`, flush it, then `writer.close()` so
+the peer sees FIN after the GOAWAY; idempotent via `HTTP2Actor._goaway_sent`.  A
+**stream error** (§5.4.2) sends RST_STREAM and lets the stream's task die
+*without taking the connection down* — because
 `HTTP2Actor.run()` supervises every stream task in an `asyncio.TaskGroup`.
 *Because* the RFC's two-tier error model maps exactly onto the actor supervision
 model: stream-fatal = isolate the child task, connection-fatal = propagate and
-GOAWAY.
+GOAWAY.  Both paths use the common retirement transition, which is safe when a
+reset races normal task completion.  A peer's graceful GOAWAY is different:
+already-accepted streams may finish their responses while new work stops.
 
 **§5.5 Extending HTTP/2** ✅
 Unknown frame types **MUST** be ignored (outside a header block).  The parser
@@ -413,6 +434,12 @@ if credit and self._credit_cb is not None:
 
 A single DATA frame debits *both* windows (§5.2), so both must be credited
 back — one `WINDOW_UPDATE` on the stream, one on stream 0 (the connection).
+The recipient transfers the stream-0 replay to a connection-owned task before
+awaiting it.  Connection credit is emitted first; stream credit follows in the
+consumer task only while the recipient remains live.  Cancelling a handler
+during its stream update therefore stops that stream-owned write without
+revoking the already-earned stream-0 credit, and connection teardown cancels
+any connection replay that has not completed before GOAWAY.
 Credit is sent when the **application consumes** the event, not when the
 frame is *delivered* to the recipient's queue — a stalled handler (blocked on
 `yield` under response back-pressure, or simply CPU-starved) then stops
@@ -436,12 +463,17 @@ can't see; the latter gets its own small frame-count cap).
 
 A stream that finishes — or is cancelled by `RST_STREAM` — without its
 handler draining the whole body leaves an "un-credited" balance: bytes the
-peer already debited from the shared *connection* window that were never
-paid back, because the app never popped them. `HTTP2Actor._release_recipient_credit`
-replays that balance to stream 0 when the stream is released (either
-completion path), so the connection window can't ratchet down to zero across
-a long-lived, high-churn connection. The stream-level side is not replayed —
-the stream is gone (§5.1) and any further frame on that id is `STREAM_CLOSED`.
+peer already debited from the shared *connection* window that were never paid
+back because the app never popped them.  `HTTP2Actor._release_recipient_credit`
+replays that balance to stream 0 whenever the common retirement transition
+releases the stream, so the connection window can't ratchet down to zero
+across a long-lived, high-churn connection.  A DATA frame rejected before it
+enters the recipient contributes its complete flow-controlled length,
+including padding; the RFC 8441 reader likewise hands back buffered credit it
+withheld.  Late DATA on an already-closed stream also returns its connection
+credit without recreating a stream owner.  The stream-level side is not
+replayed — the stream is gone (§5.1) and any further frame on that id is
+`STREAM_CLOSED`.
 
 *Because* the connection window is the easy half to forget, and forgetting it
 fails *late*.  Credit only the stream window — the obvious half — and everything
@@ -457,11 +489,13 @@ A `Continuation` frame is handled by `HTTP2Actor._on_continuation_frame()`,
 legal only while the `_frame_loop()`-local `waiting_continuation` is set; any
 other frame in that state → connection PROTOCOL_ERROR, checked *first* in the
 loop.  Bytes accumulate into
-`raw_block`; if it exceeds `BB_HEADER_MAX_TOTAL` (64 KiB) the stream is reset
-with ENHANCE_YOUR_CALM *before* `Headers.parse_payload()` — the
+`raw_block`; if it exceeds `BB_HEADER_MAX_TOTAL` (64 KiB) the connection is
+closed with GOAWAY ENHANCE_YOUR_CALM *before* `Headers.parse_payload()` — the
 **CONTINUATION-flood / CVE-2024-27983** defence.  *Because* an unbounded
 CONTINUATION stream is an OOM vector: you must cap the buffer before handing it
-to the HPACK decoder.
+to the HPACK decoder.  The not-yet-decoded block belongs to the connection's
+HPACK context, so resetting only its stream and continuing could leave decoder
+state ambiguous for later streams.
 
 ---
 
@@ -481,10 +515,12 @@ client a different thing to do next.
 ## §8 — Expressing HTTP Semantics
 
 **§8.1 Request/Response Exchange** ✅
-`HTTP2Actor._spawn_stream_task()` bridges connection and application: count the
-stream, create the `StreamActor`, optionally wrap in a request-timeout
+`HTTP2Actor._spawn_stream_task()` bridges connection and application: create
+the `StreamActor`, optionally wrap in a request-timeout
 (`BB_REQUEST_TIMEOUT` → RST CANCEL on expiry) and a per-worker concurrency
-semaphore (`BB_H2_ACTIVE_STREAMS_1W`), and register the done-callback.  An HTTP
+semaphore (`BB_H2_ACTIVE_STREAMS_1W`), then register and count the task only
+after task creation succeeds.  Failure rolls every prepared owner back through
+the common retirement transition.  An HTTP
 message is HEADERS → zero or more DATA → optional trailing HEADERS.  The
 app-boundary decision itself — call the app with the native `Connection`, or a
 materialised ASGI scope on the `BB_FORCE_ASGI_SCOPE=1` compat lane — is owned by
@@ -543,17 +579,28 @@ duplicated ones are a malformed-message condition (§8.1.1).
 **§8.4 Server Push → `HTTP2Actor._handle_push()`** ✅
 Triggered by the ASGI `http.response.push` event from inside a handler.  Pushed
 requests are GET, safe, cacheable, body-less (**§8.4.1**); the pushed response
-streams on its own even-numbered stream (**§8.4.2**).  *Because* push lets the
+streams on its own even-numbered stream (**§8.4.2**) registered in the same
+task, sender, recipient, tree, and counter lifecycle as peer streams.  *Because* push lets the
 server pre-empt a request it knows the client will make — but only for the
 method/cacheability class the RFC permits.  The actor also gates the event on
 the peer's current `SETTINGS_ENABLE_PUSH` permission before allocating a stream
-ID or mutating stream state.
+ID or mutating stream state.  The promised id enters the stream tree before the
+`PUSH_PROMISE` write can wait for transport drain.  A peer reset during that
+wait therefore retires only the push, and the resumed producer verifies
+ownership before dispatching its synthetic GET.  Cancellation after the
+promise reaches the transport emits a best-effort reset for the promised id
+while the connection is live; transport failure or connection teardown retires
+the reservation locally.
 
 **§8.5 The CONNECT Method** ✅ (Extended CONNECT only)
 Plain CONNECT tunnelling is not offered, but **Extended CONNECT** (RFC 8441,
 `:protocol=websocket`) is — that is the WebSocket-over-HTTP/2 path, opt-in via
-`BB_H2_ENABLE_WEBSOCKET=1`.  *Because* the project's CONNECT use case is
-WebSocket bootstrapping, not proxy tunnelling.
+`BB_H2_ENABLE_WEBSOCKET=1`.  Its task, sender, recipient, tree node, and
+per-connection WebSocket counter use the common stream retirement lifecycle.
+The WebSocket id and counter become owned only after its task group accepts the
+task, so a failed spawn cannot decrement another live WebSocket's count.
+*Because* the project's CONNECT use case is WebSocket bootstrapping, not proxy
+tunnelling.
 
 **§8.6 Upgrade / §8.7 Request Reliability / §8.8 Examples** ✗ / n/a
 `Upgrade` does not exist in HTTP/2 (§8.6 explicitly forbids it).  §8.7

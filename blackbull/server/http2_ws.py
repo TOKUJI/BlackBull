@@ -63,9 +63,10 @@ class HTTP2WSReader(AbstractReader):
         self._max_buffer: int = max_buffer
         self._credit_cb: Optional[Callable[[int], Awaitable[None]]] = (
             credit_callback)
-        # Bytes received-and-buffered but not yet credited via
-        # WINDOW_UPDATE.  Replayed by readexactly once the buffer
-        # drains below max_buffer.
+        # Flow-controlled octets received but not yet credited via
+        # WINDOW_UPDATE.  This includes DATA padding even though only the
+        # payload is buffered.  Replayed by readexactly once the buffer drains
+        # below max_buffer.
         self._pending_credit: int = 0
 
     # ------------------------------------------------------------------
@@ -87,7 +88,7 @@ class HTTP2WSReader(AbstractReader):
             self._eof = True
         self._data_ready.set()
         if len(self._buffer) > self._max_buffer:
-            self._pending_credit += len(frame.payload)
+            self._pending_credit += frame.length
             return False
         return True
 
@@ -95,6 +96,12 @@ class HTTP2WSReader(AbstractReader):
         """Signal EOF (connection closed or GOAWAY received)."""
         self._eof = True
         self._data_ready.set()
+
+    def take_uncredited(self) -> int:
+        """Return and clear flow-control credit withheld for buffered bytes."""
+        credit = self._pending_credit
+        self._pending_credit = 0
+        return credit
 
     # ------------------------------------------------------------------
     # AbstractReader interface

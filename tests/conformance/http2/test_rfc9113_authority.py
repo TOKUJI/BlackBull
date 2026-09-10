@@ -13,6 +13,8 @@ helpers as ``test_rfc9113_gaps.py``); scope-mapping tests call
 """
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from hpack import Encoder
@@ -265,7 +267,10 @@ class TestPushPromiseAuthority:
             type='http', scheme='https', method='GET', path='/',
             raw_path=b'/', http_version='2',
             headers=Headers([(b'host', b'example.com:8443')]))
-        await handler._handle_push({'path': '/style.css'}, 1)
+        async with asyncio.TaskGroup() as tg:
+            handler._task_group = tg
+            await handler._handle_push({'path': '/style.css'}, 1)
+        handler._task_group = None
         pp = None
         for call in handler.send_frame.call_args_list:
             frame = call.args[0]

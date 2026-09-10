@@ -342,7 +342,7 @@ class TestContinuationHandling:
 # ``header_frame.raw_block`` until OOM — the prior code only checked
 # ``frame.end_headers`` to decide when to stop accumulating.  The fix
 # mirrors the HTTP/1.1 ``BB_HEADER_MAX_TOTAL`` cap (64 KiB default)
-# and responds with RST_STREAM ENHANCE_YOUR_CALM (RFC 6585 §5 /
+# and responds with GOAWAY ENHANCE_YOUR_CALM (RFC 6585 §5 /
 # RFC 9113 §7 — the standard error code for "header block too large";
 # nginx and Envoy use the same).
 
@@ -352,10 +352,10 @@ from blackbull.protocol.frame_types import ErrorCodes as _ErrorCodes  # noqa: E4
 @pytest.mark.asyncio
 class TestContinuationFloodGuard:
 
-    async def test_continuation_flood_emits_rst_enhance_your_calm(self):
+    async def test_continuation_flood_emits_goaway_enhance_your_calm(self):
         """10 × 16 KiB CONTINUATION frames (160 KiB total) on one
         stream — above the 64 KiB BB_HEADER_MAX_TOTAL default —
-        must trigger RST_STREAM ENHANCE_YOUR_CALM and the app must
+        must trigger GOAWAY ENHANCE_YOUR_CALM and the app must
         NOT be invoked."""
         called: list[dict] = []
 
@@ -389,15 +389,15 @@ class TestContinuationFloodGuard:
             'app handler must not be invoked when CONTINUATION flood '
             'exceeds the header-block cap')
 
-        rsts = [c.args[0] for c in handler.send_frame.call_args_list
+        goaways = [c.args[0] for c in handler.send_frame.call_args_list
                 if hasattr(c.args[0], 'FrameType')
-                and c.args[0].FrameType() == FrameTypes.RST_STREAM]
+                and c.args[0].FrameType() == FrameTypes.GOAWAY]
         assert any(
-            getattr(r, 'error_code', None) == _ErrorCodes.ENHANCE_YOUR_CALM
-            and r.stream_id == 1 for r in rsts
+            getattr(frame, 'error_code', None) == _ErrorCodes.ENHANCE_YOUR_CALM
+            for frame in goaways
         ), (
-            f'expected RST_STREAM(ENHANCE_YOUR_CALM) on stream 1; '
-            f'got RSTs={[(r.stream_id, getattr(r, "error_code", None)) for r in rsts]}')
+            'expected GOAWAY(ENHANCE_YOUR_CALM); '
+            f'got GOAWAYs={[getattr(frame, "error_code", None) for frame in goaways]}')
 
     async def test_continuation_within_cap_still_dispatches(self):
         """The guard must not regress legitimate fragmented HEADERS
