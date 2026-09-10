@@ -6128,21 +6128,11 @@ cost the inbound rewrite is removing on the read side.</p>
     <div class="doc doc-contents ">
 
         <p>Close after briefly discarding whatever the peer is still sending.</p>
-<p>Closing a socket with unread bytes in its receive queue makes the
-kernel send RST, and an RST discards data we already wrote — so a peer
-that is still mid-send when we answer never sees the response.  That
-is not hypothetical: it is how a 431 for an over-budget header block
-goes missing, because rejecting at the budget means, by design, not
-reading the rest.</p>
-<p>nginx calls this <code>lingering_close</code>.  Both bounds matter: reading
-without a byte cap hands an attacker the unbounded read the budget
-exists to refuse, and reading without a deadline lets a slow peer hold
-the connection open after it has been answered.</p>
-<p>Skipped unless we are closing with bytes we chose not to consume.  A
-completed request leaves the buffer empty, so the normal close stays a
-bare close — lingering on every connection would put a timeout on the
-teardown path that <code>AsyncioWriter.close</code> deliberately keeps free of
-even one extra loop turn, for the burst-keepalive workload.</p>
+<p>Reads and discards up to <em>max_bytes</em> for at most <em>timeout</em> seconds,
+then closes.  Skipped when nothing was left unconsumed, so a completed
+request still gets a bare close.</p>
+<p>The Internals page explains why a rejection has to close this way and
+why both bounds are needed.  nginx calls it <code>lingering_close</code>.</p>
 
 
     </div>

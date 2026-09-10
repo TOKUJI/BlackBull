@@ -6785,12 +6785,6 @@ straight out of it.</p>
     <div class="doc doc-contents ">
 
         <p>One message head — start line, field lines, terminator included.</p>
-<p>Part of the reader contract rather than something the caller sniffs
-for, so a protocol asks for a head the same way whatever is underneath
-it.  A reader that owns its buffer overrides this to find the
-terminator in a single scan and to return without a loop turn when the
-head is already resident; the default below is what a reader with only
-<code>readuntil</code> can do — one call per line.</p>
 <p>Three outcomes, because the caller answers each differently:</p>
 <ul>
 <li>a complete head → returned;</li>
@@ -6802,6 +6796,8 @@ head is already resident; the default below is what a reader with only
 stops an unbounded read; :class:<code>ReadLimitExceeded</code> says the budget was
 passed and carries the bytes, and the protocol decides which status
 that becomes.</p>
+<p>The Internals page argues why this is a contract every reader meets
+rather than a capability the caller sniffs for.</p>
 
 
     </div>
@@ -7184,12 +7180,13 @@ ends on a separate empty one.</p>
     <div class="doc doc-contents ">
 
         <p>What the connection should do now the handler has answered.</p>
-<p>One question, because it is one judgement.  Asking <code>must_close</code> and
-<code>needs_drain()</code> separately and combining them puts the verdict in
-the caller and leaves the two predicates free to drift apart — the
-recipient is the object that knows whether the message boundary
-survived, so it should say what follows from that.</p>
-<p>Also one call per request instead of two on the keep-alive path.</p>
+<p>One of <code>CONNECTION_REUSABLE</code>, <code>CONNECTION_NEEDS_DRAIN</code> (an unread
+body stands between here and the next request), or
+<code>CONNECTION_MUST_CLOSE</code>.</p>
+<p>One question rather than two, because it is one judgement: this object
+is the one that knows whether the message boundary survived, so a
+caller combining <code>must_close</code> with a drain check would be re-deriving
+a verdict that already exists here.</p>
 
 
     </div>
@@ -7289,21 +7286,11 @@ this and <code>must_close</code> in one call.</p>
     <div class="doc doc-contents ">
 
         <p>The next body chunk, or <code>None</code> once the body is complete.</p>
-<p>The native receive channel: a chunk is the bytes themselves, and the
-end of the body is carried by the <em>call protocol</em> rather than by a
-field beside the payload.  <code>more_body</code> was never information about
-the chunk — it is the channel's state — and every internal consumer
-did the same one thing with it (<code>if not more_body: break</code>), so the
-boundary belongs where a Python caller already looks for it.</p>
-<p><code>None</code>, not <code>b''</code>: an empty body is a real body, the same reason
-:class:<code>~blackbull.native.NativeResponse</code> decides presence with
-<code>is not None</code>.  On both framings the sentinel is unambiguous — a
-zero-length chunk <em>is</em> the terminator in chunked encoding (RFC 9112
-§7.1), and a Content-Length slice is never empty.</p>
-<p>Asking again past the end keeps answering <code>None</code>.  A peer that
+<p><code>None</code>, not <code>b''</code> — an empty body is a real body.  Asking again past the end keeps answering <code>None</code>.  A peer that
 vanishes mid-body raises :class:<code>ClientDisconnected</code> — a truncated
 upload must never read as a complete one — and so does a body-read
 timeout, which is recorded as a cap hit first.</p>
+<p>The Internals page states the receive-path invariant this implements.</p>
 
 
     </div>
@@ -7874,8 +7861,6 @@ and wrap it in <code>AsyncioReader</code> internally.</p>
 
 
         <p>Reads WebSocket frames and emits ASGI <code>websocket.*</code> events.</p>
-<p>Client callers inject the ownership names 'client_ws_max_frame_payload',
-and 'client_ws_max_message_size', at these shared rejection sites.</p>
 <p>First call returns <code>{'type': 'websocket.connect'}</code>.  Subsequent calls
 read the next frame from the transport:
   - Text frame   → <code>{'type': 'websocket.receive', 'text': ..., 'bytes': None}</code>
@@ -7883,14 +7868,13 @@ read the next frame from the transport:
   - Close frame  → <code>{'type': 'websocket.disconnect', 'code': 1000}</code>
   - Ping frame   → sends Pong immediately, then reads the next frame
   - Pong frame   → silently dropped, reads the next frame</p>
-<p>Ping/pong handling requires write access to the transport, so the raw
-writer is stored alongside the reader.</p>
 <p><strong>Two read modes, selected by <code>ws_queue_depth</code>.</strong></p>
 <p><code>0</code> (default) — <em>inline</em>.  Frames are read in the app's own task, only
 when it calls <code>receive()</code>.  There is no background task and no queue, so
-a message costs no handoff.  This is the difference between WebSocket's
-4.09 loop touches/req and HTTP/1.1's 2.06: read-ahead is exactly one extra
-future plus one extra <code>call_soon</code> per message.</p>
+a message costs no handoff, and the connection measures the same loop
+touches per request as HTTP/1.1; read-ahead adds exactly one future and
+one <code>call_soon</code> per message on top.  <code>bench/loop_touches.py</code> holds
+both figures and fails if either moves.</p>
 <p><code>&gt; 0</code> — <em>eager</em>.  A background task reads ahead into a bounded queue of
 that depth.  Costs the handoff, and buys read-ahead: control frames are
 serviced while the handler is busy, so a PING is answered even between
@@ -7903,9 +7887,8 @@ PONG, which is what makes inline mode conformant.</p>
 <p>The one thing that <em>can</em> tell the modes apart is the <code>websocket_message</code>
 Level B event, which fires when the server reads a message rather than when
 the app consumes it — a handler that never calls <code>receive()</code> must still
-produce it.  A registered listener does not force read-ahead on, though:
-a consuming handler is already reading, so the reader is only marked
-<em>deferred</em> and the idle watchdog starts it if the handler goes quiet.</p>
+produce it.  Registering a listener does not force read-ahead on; the
+<code>BB_WS_QUEUE_DEPTH</code> reference entry says what happens instead.</p>
 
 
 

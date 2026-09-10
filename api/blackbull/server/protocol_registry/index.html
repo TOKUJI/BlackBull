@@ -6028,7 +6028,7 @@ non-HTTP protocols (raw TCP, and later MQTT/Redis) register their own bindings
 via :meth:<code>BlackBull.raw_handler</code> / :meth:<code>BlackBull.register_protocol_handler</code>.</p>
 <p>A <em>binding</em> owns protocol selection, <em>its own</em> framing reads, and Actor
 construction.  <code>ConnectionActor</code> peeks only a tiny protocol-agnostic
-discriminator prefix (decouple-connection-detection, Stage 2); the 24-byte
+discriminator prefix; the 24-byte
 HTTP/2 preface read and the HTTP/1.1 request-line read live in
 :class:<code>Http2Binding</code> / :class:<code>Http1Binding</code>, reached through the single
 :meth:<code>ProtocolBinding.serve</code> entry point.</p>
@@ -6037,7 +6037,7 @@ HTTP/2 preface read and the HTTP/1.1 request-line read live in
 <li><strong>Detection</strong> (the shared HTTP listener): <code>ConnectionActor</code> peeks the
   discriminator and asks each :class:<code>ProtocolBinding</code> via :meth:<code>claims</code> — ALPN
   first, then the ordered cleartext chain (<code>http2</code> preface, <code>http1</code>
-  fallback) — then replays the peeked bytes to the winner's :meth:<code>serve</code>.</li>
+  fallback) — then calls the winner's :meth:<code>serve</code>.</li>
 <li><strong>Port-bound</strong> (raw protocols): a binding registered with <code>port=</code> gets its
   own listening socket; connections there skip detection entirely.</li>
 </ul>
@@ -6258,13 +6258,14 @@ decouples bindings from <code>ConnectionActor</code>'s internals.</p>
 <p>A binding declares how many leading bytes it needs to recognise a
 connection (:attr:<code>detect_prefix_len</code>) and whether it :meth:<code>claims</code> a given
 peeked prefix; the winner's single :meth:<code>serve</code> then performs <em>its own</em>
-protocol reads from a reader positioned at the start of the stream (the
-peeked bytes are replayed via a :class:<code>~blackbull.server.recipient.PrefixReader</code>).</p>
-<p>Collapsing the old <code>serve_alpn</code> / <code>serve_cleartext</code> / <code>serve_raw</code> trio
-into one <code>serve(conn)</code> is what lets <code>ConnectionActor</code> stay
-protocol-agnostic (decouple-connection-detection, Stage 2): the <code>24</code>-byte
-HTTP/2 preface read and the HTTP/1.1 <code>\r\n</code> request-line read now live in
-the bindings, not in the dispatcher.</p>
+protocol reads from a reader still positioned at the first byte, because
+detection peeks without consuming.  Only a reader that cannot peek hands
+back what it took, and there a
+:class:<code>~blackbull.server.recipient.PrefixReader</code> restores the stream.</p>
+<p>One <code>serve(conn)</code> rather than a per-transport trio is what lets
+<code>ConnectionActor</code> stay protocol-agnostic: the <code>24</code>-byte HTTP/2 preface
+read and the HTTP/1.1 <code>\r\n</code> request-line read live in the
+bindings, not in the dispatcher.</p>
 
 
 
@@ -6300,8 +6301,8 @@ the bindings, not in the dispatcher.</p>
 
         <p>Unified detection predicate: does this binding own a connection whose
 first bytes are <em>prefix</em> (with negotiated <em>alpn</em>)?</p>
-<p>The single selection seam for cleartext + shared-port dispatch
-(decouple-connection-detection, Stage 1).  Default delegates to
+<p>The single selection seam for cleartext + shared-port dispatch.
+Default delegates to
 :meth:<code>matches_cleartext</code>; :class:<code>RawBinding</code> overrides it to consult
 its :class:<code>ProtocolDetector</code>.  <code>alpn</code> is accepted so a future binding
 can claim on the negotiated token, not just the wire prefix.</p>
@@ -6349,8 +6350,7 @@ line is <em>first_line</em>.  Default: no match.</p>
 detection deadline.  Default: close silently (the caller closes the
 transport) — appropriate for a protocol with no meaningful "you were too
 slow" wire message.  HTTP overrides this to emit a 408.  Lets
-<code>ConnectionActor</code> stay free of protocol-specific status strings
-(decouple-connection-detection, Stage 3).</p>
+<code>ConnectionActor</code> stay free of protocol-specific status strings.</p>
 
 
     </div>
@@ -6398,8 +6398,8 @@ a <code>GET</code> out on its first byte).</p>
     <div class="doc doc-contents ">
 
         <p>Drive one connection.  <code>conn.reader</code> is positioned at the first
-byte of the stream (detection peeks are replayed), so the binding reads
-whatever framing it needs — no bytes are pre-consumed on its behalf.</p>
+byte of the stream, so the binding reads whatever framing it needs —
+detection peeked without consuming anything on its behalf.</p>
 
 
     </div>

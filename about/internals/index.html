@@ -6693,7 +6693,9 @@ exists to refuse, and no deadline would let a slow peer hold an
 already-answered connection open.  nginx calls this <code>lingering_close</code>.</p>
 <p>It is skipped unless the connection is closing with bytes it chose not to
 consume — a completed request leaves the buffer empty, so the ordinary
-close stays a bare close.</p>
+close stays a bare close.  Lingering on every connection would put a
+timeout on the teardown path that <code>AsyncioWriter.close</code> keeps free of even
+one extra loop turn, which is what the burst-keepalive workload needs.</p>
 <h2 id="receive-path-invariant">Receive-path invariant<a class="headerlink" href="#receive-path-invariant" title="Permanent link">&para;</a></h2>
 <p>The request body crosses the framework as <strong><code>bytes</code></strong>, and the end of
 the body is carried by the call protocol rather than by a field beside

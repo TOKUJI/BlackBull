@@ -1373,6 +1373,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#warm-up-before-fork" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Warm-up before fork
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#uvloop" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5609,6 +5620,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#warm-up-before-fork" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Warm-up before fork
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#uvloop" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5891,6 +5913,39 @@ amplification of per-connection work.</p>
 </ul>
 <p>For churn-heavy deployments keep <code>BB_WORKERS</code> at or below the
 core count; extra workers buy contention, not throughput.</p>
+<h2 id="warm-up-before-fork">Warm-up before fork<a class="headerlink" href="#warm-up-before-fork" title="Permanent link">&para;</a></h2>
+<p>A worker that has just forked runs interpreted bytecode: no
+specialization, no filled caches, cold branch predictors.  Every
+worker pays that cost separately, and under a pre-fork model it is
+paid <em>N</em> times for the same code.</p>
+<p><code>@app.on_warmup</code> moves the payment forward.  The hook runs once in
+the master, before the listening socket is created and before any
+worker forks, so the heap it warms is the heap every worker
+inherits:</p>
+<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">on_warmup</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">warm</span><span class="p">(</span><span class="n">app</span><span class="p">):</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">Connection</span><span class="p">,</span> <span class="n">Headers</span>
+    <span class="n">conn</span> <span class="o">=</span> <span class="n">Connection</span><span class="p">(</span>
+        <span class="n">method</span><span class="o">=</span><span class="s1">'POST'</span><span class="p">,</span> <span class="n">path</span><span class="o">=</span><span class="s1">'/rpc'</span><span class="p">,</span> <span class="n">raw_path</span><span class="o">=</span><span class="sa">b</span><span class="s1">'/rpc'</span><span class="p">,</span>
+        <span class="n">headers</span><span class="o">=</span><span class="n">Headers</span><span class="p">([(</span><span class="sa">b</span><span class="s1">'content-type'</span><span class="p">,</span> <span class="sa">b</span><span class="s1">'application/grpc'</span><span class="p">)]))</span>
+    <span class="k">await</span> <span class="n">app</span><span class="o">.</span><span class="n">warm_request</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">body</span><span class="o">=</span><span class="n">req_bytes</span><span class="p">,</span> <span class="n">n</span><span class="o">=</span><span class="mi">2000</span><span class="p">)</span>
+</code></pre></div>
+<p>Two mechanisms carry the warmth across <code>fork()</code>.  PEP 659
+specialization lives in the code objects, which are shared pages,
+so it survives.  Reference-count churn would otherwise dirty those
+pages and copy them per worker, so the framework calls
+<code>gc.collect()</code> and then <code>gc.freeze()</code> once warm-up finishes —
+<code>gc.freeze()</code> moves surviving objects to a permanent generation the
+collector no longer traverses, which is what keeps the pages shared
+rather than copied.</p>
+<p>The hook must therefore warm and nothing else.  A DB pool or a
+socket opened here would be inherited by every worker as the <em>same</em>
+file descriptor, which is a bug, not a saving; per-worker resources
+belong in <code>@app.on_startup</code>.  Warm-up is best-effort — an
+exception is logged and the master degrades to a cold start — and
+the whole budget is capped by <code>BB_WARMUP_BUDGET_S</code> (default 60 s).</p>
+<p>In single-worker mode there is no fork, and the one process is
+warmed before it binds.</p>
 <h2 id="uvloop"><code>uvloop</code><a class="headerlink" href="#uvloop" title="Permanent link">&para;</a></h2>
 <p><code>uvloop</code> is a drop-in libuv-based replacement for the standard
 asyncio event loop.  BlackBull installs it as the loop policy

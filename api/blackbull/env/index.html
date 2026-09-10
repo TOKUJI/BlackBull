@@ -6365,22 +6365,12 @@ in the process.</p>
 
         <p>Resolve <code>BB_MAX_CONNECTIONS</code> — <code>auto</code>, <code>0</code>, or a number.</p>
 <p><code>auto</code> (the default) derives the cap from this process's own
-<code>RLIMIT_NOFILE</code>.  A cap above the file-descriptor budget is
-decorative: <code>accept()</code> fails with <code>EMFILE</code> before the cap is
-consulted, so the peer gets a dropped connection instead of the
-<code>503 + Retry-After</code> the mechanism exists to send.  Derived, the cap
-can only refuse connections the OS was going to refuse anyway — which
-is what makes a finite default safe to ship — and it tracks the
-operator's own intent, since raising the fd limit is how an operator
-states how large this process may become.</p>
-<p>An explicit number is honoured as given, <em>not</em> clamped to the fd
-budget: an operator who names a number means it, and silently running
-a different one would make the live configuration differ from the
-configured one with nothing to show for it.  <code>0</code> disables the cap.</p>
-<p>Note this bounds <em>descriptor exhaustion</em>, not event-loop health.  A
-ceiling reflecting what one asyncio loop serves well is a policy
-number that depends on the workload — set it explicitly; 1024 is a
-typical single-loop value.</p>
+<code>RLIMIT_NOFILE</code>, less a reserve.  An explicit number is honoured as
+given, <em>not</em> clamped to that budget: an operator who names a number
+means it.  <code>0</code> disables the cap.</p>
+<p>The environment-variable reference argues why a derived default is safe
+to ship, and why this bounds descriptor exhaustion rather than
+event-loop health.</p>
 
 
     </div>

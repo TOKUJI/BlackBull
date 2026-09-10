@@ -7982,12 +7982,8 @@ async def on_temp(msg: Message):
     <div class="doc doc-contents ">
 
         <p>Wait for detached (<code>@app.on</code>) observers to finish.  Returns success.</p>
-<p>Two of the three hook kinds need no seam: <code>@app.intercept</code> and
-<code>@app.on(..., blocking=True)</code> are awaited before a request
-returns, so their effects are already visible.  The third is
-detached on purpose, so asserting its side-effect straight after a
-request is a race — this is how a test waits instead of sleeping.</p>
-<p><code>False</code> means <em>timeout</em> expired with work still outstanding.
+<p>Only detached observers need waiting for; the events guide says which
+do not.  <code>False</code> means <em>timeout</em> expired with work still outstanding.
 Nothing is cancelled; call again with a longer budget.</p>
 
 
@@ -8369,11 +8365,9 @@ conn.state contains:
     <div class="doc doc-contents ">
 
         <p>Register a zero-argument coroutine to run at lifespan shutdown.</p>
-<p>The handler is wrapped in an adapter and registered as an
-<code>'app_shutdown'</code> interception handler so it runs before the ASGI
-server receives the <code>lifespan.shutdown.complete</code> acknowledgement.
-Shutdown handlers run in registration order; an exception aborts the
-remaining handlers.</p>
+<p>Handlers run in registration order, before the ASGI server receives
+the <code>lifespan.shutdown.complete</code> acknowledgement.  An exception
+aborts the remaining handlers.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -8464,11 +8458,9 @@ remaining handlers.</p>
     <div class="doc doc-contents ">
 
         <p>Register a zero-argument coroutine to run at lifespan startup.</p>
-<p>The handler is wrapped in an adapter and registered as an
-<code>'app_startup'</code> interception handler so it runs before the ASGI
-server receives the <code>lifespan.startup.complete</code> acknowledgement.
-Startup handlers run in registration order; an exception aborts the
-remaining handlers and prevents the completion event from being sent.</p>
+<p>Handlers run in registration order, before the ASGI server receives
+the <code>lifespan.startup.complete</code> acknowledgement.  An exception aborts
+the remaining handlers and withholds that acknowledgement.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -8559,33 +8551,21 @@ remaining handlers and prevents the completion event from being sent.</p>
     <div class="doc doc-contents ">
 
         <p>Register a coroutine to warm the app <strong>before it binds or forks</strong>.</p>
-<p>Unlike :meth:<code>on_startup</code> (which runs inside <em>each</em> worker's lifespan,
-after <code>fork()</code> and after the listening socket already exists), an
-<code>on_warmup</code> hook runs <strong>once, in the master, before the socket is
-created and before workers are forked</strong>.  Forked workers then inherit
-the warmed heap via copy-on-write (PEP 659 specialization survives
-<code>fork()</code>; the framework calls <code>gc.collect()</code> + <code>gc.freeze()</code> after
-warm-up to keep those pages shared).  In single-worker mode the one
-process is warmed before it binds.</p>
+<p>The hook runs once in the master, before the listening socket is
+created and before workers fork; :meth:<code>on_startup</code> runs per worker,
+after both.  In single-worker mode the one process is warmed before it
+binds.</p>
 <p>Hooks receive the <code>app</code> and must do <strong>pure warming only</strong> — drive hot
 code paths, prime codecs/TLS — and acquire <strong>no</strong> per-worker resources
 (DB pools, sockets, live connections); those belong in
-:meth:<code>on_startup</code>, which runs per worker.  Use :meth:<code>warm_request</code> to
-exercise the ASGI dispatch/handler path in-process, and
+:meth:<code>on_startup</code>.  Use :meth:<code>warm_request</code> to exercise the ASGI
+dispatch/handler path in-process, and
 :func:<code>blackbull.server.warmup.warm_tls</code> to prime the TLS handshake.</p>
 <p>Warm-up is best-effort: a hook's exception is logged and swallowed
 (the master degrades to a cold start), and total warm-up time is capped
 by <code>BB_WARMUP_BUDGET_S</code> (default 60 s).  Multiple hooks run in
-registration order.</p>
-<p>Example::</p>
-<pre><code>@app.on_warmup
-async def warm(app):
-    from blackbull import Connection, Headers
-    conn = Connection(
-        method='POST', path='/rpc', raw_path=b'/rpc',
-        headers=Headers([(b'content-type', b'application/grpc')]))
-    await app.warm_request(conn, body=req_bytes, n=2000)
-</code></pre>
+registration order.  The Workers deployment page shows a hook and
+explains what makes a warmed master's heap survive the fork.</p>
 
 
     </div>
@@ -8635,8 +8615,6 @@ converter to extend that set — e.g. so a handler can
 converter receives the returned value and must return a <em>natively
 supported</em> sendable (a <code>Response</code>, <code>str</code>/<code>bytes</code>, <code>None</code>, or a
 JSON-able <code>dict</code>/<code>list</code>/dataclass).</p>
-<p>The registry is empty by default, so registering nothing costs nothing:
-the coercion fast path never consults it for the built-in shapes.</p>
 <p>Direct form::</p>
 <pre><code>app.register_converter(MyOrmObject, lambda o: o.to_dict())
 </code></pre>
@@ -8645,8 +8623,8 @@ the coercion fast path never consults it for the built-in shapes.</p>
 def _(o):
     return o.to_dict()
 </code></pre>
-<p>Converters registered after a route are still honoured — the registry
-is shared with every adapted handler by reference.</p>
+<p>Registration order does not matter: a converter registered after a
+route is still honoured by that route's handler.</p>
 
 
     </div>
@@ -8866,21 +8844,13 @@ methods on the same route still receive the <code>Accept-Query</code> header.</p
 write <code>app.run(port=8000)</code>, not <code>asyncio.run(app.run(...))</code>.
 For <code>workers &gt; 1</code> <em>or</em> <code>reload=True</code> the master pre-binds
 sockets, forks workers, and blocks until SIGTERM / SIGINT.</p>
-<p>Each argument left unset (<code>None</code>) is resolved, highest precedence
-first: the explicit argument → a <code>BLACKBULL_*</code> environment variable
-(<code>BLACKBULL_PORT</code> / <code>CERT</code> / <code>KEY</code> / <code>UNIX_PATH</code> / <code>RELOAD</code>)
-→ a <code>.env</code> file in the working directory (needs the <code>[dotenv]</code>
-extra) → the bound :class:<code>~blackbull.AppConfig</code> → :func:<code>blackbull.serve</code>'s
-own default.  Server-tuning knobs (<code>workers</code>, <code>max_connections</code>,
-queue depths) keep their <code>BB_*</code> environment variables; <code>BLACKBULL_*</code>
-is the deployment namespace.  The provenance of each non-default deploy
-setting is logged once at startup on the <code>blackbull.config</code> logger::</p>
-<pre><code>app = BlackBull(config=AppConfig(port=8443, certfile='c.pem',
-                                 keyfile='k.pem'))
-app.run()              # binds 8443 with TLS from the config
-app.run(port=9000)     # explicit arg overrides the config's 8443
-# BLACKBULL_PORT=9000 python app.py   # env overrides the config too
-</code></pre>
+<p>An argument left unset falls back to a <code>BLACKBULL_*</code> environment
+variable, then to a <code>.env</code> file, then to the bound
+:class:<code>~blackbull.AppConfig</code>; the Configuration guide gives the order
+in full and names every variable.  Server-tuning knobs keep their
+<code>BB_*</code> names — <code>BLACKBULL_*</code> is the deployment namespace.  The
+provenance of each non-default setting is logged once at startup on
+the <code>blackbull.config</code> logger.</p>
 <p>For embedded use under an existing event loop, or for pre-binding
 a socket before forking a test subprocess, instantiate
 :class:<code>blackbull.server.ASGIServer</code> directly.  Any external
