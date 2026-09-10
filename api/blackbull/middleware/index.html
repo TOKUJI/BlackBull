@@ -5964,8 +5964,8 @@ async def handler(conn, receive, send): ...
         <p>Serve files from <code>directory</code> (or <code>root_dir</code>).</p>
 <p><code>index</code> (default <code>None</code> — off): when set to a filename (e.g.
 <code>'index.html'</code>), a request that resolves to a <em>directory</em> is
-served that file from inside the directory if it exists.  Off by
-default so existing exact-path serving is unchanged; the
+served that file from inside the directory if it exists.  Left off, a
+request that resolves to a directory is not served at all; the
 <code>blackbull serve</code> CLI turns it on to match <code>python -m
 http.server</code>'s directory-index behaviour.</p>
 <p><code>cache</code> (default <code>False</code>): when <code>True</code>, file bodies up to

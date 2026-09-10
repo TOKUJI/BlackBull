@@ -5598,8 +5598,8 @@ protocol justifies one.</p>
 may optionally override :meth:<code>startup</code> / :meth:<code>shutdown</code> for async
 resource lifecycle; :meth:<code>BlackBull.add_extension</code> wires those into the
 application's <code>app_startup</code> / <code>app_shutdown</code> lifespan events.</p>
-<p><code>add_extension</code> accepts any object exposing <code>init_app(app)</code>, so legacy
-duck-typed extensions keep working without adopting this base class.</p>
+<p><code>add_extension</code> accepts any object exposing <code>init_app(app)</code>, so a
+duck-typed extension works without adopting this base class.</p>
 
 
 

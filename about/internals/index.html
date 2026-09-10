@@ -6714,8 +6714,8 @@ underneath them — consume that channel directly.  The ASGI
 <code>http.request</code> dict is built <strong>only</strong> by <code>HTTP1Recipient.__call__</code> /
 <code>HTTP2Recipient.__call__</code>, which is to say only when something asks for
 the ASGI encoding: a full-form handler calling <code>receive()</code>, or an
-external host.  It used to be built unconditionally, so a handler using
-<code>conn.body()</code> paid one dict per chunk that it never read.</p>
+external host.  A handler using <code>conn.body()</code> therefore pays no per-chunk
+dict at all.</p>
 <p>The two channels share one end marker on both protocols.  <code>__call__</code>
 does not <em>consult</em> it — a full-form handler calling <code>receive()</code> past the
 end still gets <code>http.disconnect</code> (H1) or still waits for the disconnect

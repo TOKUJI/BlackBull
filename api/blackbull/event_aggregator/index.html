@@ -5823,9 +5823,9 @@
 <p>This class is <em>not</em> an Actor — it has no inbox and no lifecycle of its own.
 It is instantiated once per application and passed by reference to each
 Actor at construction time.</p>
-<p>Each method corresponds to one Level B event defined in ActorDesign.md.
-Methods are called by Actors; they must always be called from the event
-loop thread.</p>
+<p>Each method corresponds to one Level B event, the set the Events guide
+documents.  Methods are called by Actors, always from the event-loop
+thread.</p>
 
 
 <details class="note" open>
@@ -5866,12 +5866,9 @@ It is a framework-internal component.</p>
     <div class="doc doc-contents ">
 
         <p>Return True if any <code>request_completed</code> handler is registered.</p>
-<p>Read on the request hot path to decide whether the per-request
-AccessLogRecord (whose wire fields this event reports) must be built,
-and whether the disconnect-detecting receive wrapper (whose
-<code>mark_disconnected</code> this event reads to suppress itself on a dropped
-request) is observed.  Cached against the dispatcher's registration
-generation, so the lookup runs only when listeners change.</p>
+<p>Cached against the dispatcher's registration generation, so the
+request path can ask on every request and the lookup runs only when
+listeners change.</p>
 
 
     </div>

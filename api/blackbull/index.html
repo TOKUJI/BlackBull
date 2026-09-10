@@ -7941,9 +7941,8 @@ explicit <code>run(...)</code> argument overrides them.</p>
     <div class="doc doc-contents ">
 
         <p>Register an extension and return it (for decorator chaining).</p>
-<p><em>ext</em> is any object exposing <code>init_app(app)</code> — a
-:class:<code>~blackbull.extension.Extension</code> subclass, or a legacy
-duck-typed extension.  <code>init_app</code> is called immediately to wire the
+<p><em>ext</em> is any object exposing <code>init_app(app)</code>; subclassing
+:class:<code>~blackbull.extension.Extension</code> is optional.  <code>init_app</code> is called immediately to wire the
 extension's routes / middleware / protocol handlers / events through
 the public <code>app.*</code> API.  Optional async <code>startup(app)</code> /
 <code>shutdown(app)</code> methods are wired into the <code>app_startup</code> /
@@ -10577,7 +10576,7 @@ await send(Response(b'data', status=HTTPStatus.NOT_FOUND))
 <p>Mirrors :class:<code>StreamingResponse</code> so every BlackBull response type
 shares one protocol — <code>await response(conn, receive, send)</code> —
 whether returned from a simplified handler, invoked explicitly by a
-full-form handler, or normalised by <code>app._wrap_send</code>.  Keeping the
+full-form handler, or normalised by <code>_wrap_send_native</code>.  Keeping the
 start/body serialisation here means there is a single source of truth
 for turning a Response into ASGI events.</p>
 

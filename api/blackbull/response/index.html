@@ -5942,7 +5942,7 @@ await send(Response(b'data', status=HTTPStatus.NOT_FOUND))
 <p>Mirrors :class:<code>StreamingResponse</code> so every BlackBull response type
 shares one protocol — <code>await response(conn, receive, send)</code> —
 whether returned from a simplified handler, invoked explicitly by a
-full-form handler, or normalised by <code>app._wrap_send</code>.  Keeping the
+full-form handler, or normalised by <code>_wrap_send_native</code>.  Keeping the
 start/body serialisation here means there is a single source of truth
 for turning a Response into ASGI events.</p>
 
@@ -6095,15 +6095,12 @@ async def handler(conn, receive, send):
     <div class="doc doc-contents ">
 
         <p>Handler-facing send adapter: every accepted shape → NativeResponse.</p>
-<p>The native-ization flip of <code>app._wrap_send</code>: instead of normalising
-convenience shapes (<code>Response</code>, 3-arg) into ASGI dicts so downstream
-sees plain dicts, <strong>every</strong> accepted shape becomes a
-:class:<code>~blackbull.native.NativeResponse</code> here, so everything above the
-route handler (route-header injection, middleware, access log, sender)
-observes a single native representation on the H1 path.</p>
-<p>Shared by <code>app._wrap_send_native</code> (the handler boundary) and
-<code>middleware.utils._normalize_send</code> (<code>as_middleware</code>'s <code>call_next</code>),
-so global and per-route middleware see the same native contract.</p>
+<p><strong>Every</strong> accepted shape becomes a
+:class:<code>~blackbull.native.NativeResponse</code>, so everything above the route
+handler — route-header injection, middleware, access log, sender —
+observes one representation on the H1 path.  The handler boundary and
+<code>as_middleware</code>'s <code>call_next</code> both wrap through here, so global and
+per-route middleware see the same contract.</p>
 <p>Accepted shapes (full-form <code>send</code> — the compat contract, held until
 2027-07-29):</p>
 <ul>

@@ -5599,14 +5599,12 @@ conformance suite's territory, not this helper's.</p>
     The BlackBull app the MQTT extension is registered on.</p>
 <p>The helper is <strong>async-only by design</strong>: taps are coroutines and
 <code>publish</code> awaits them on the caller's event loop, so tests are written
-as <code>async def</code> (the suite runs with <code>asyncio_mode = strict</code>).  A
-synchronous façade like :class:<code>blackbull.testing.native.NativeClient</code> is
-deliberately not provided — there is no background loop to bridge to, and
-no socket or broker that would need one.</p>
-<p>The <code>async with</code> form is ceremony: the broker binds no socket, starts no
-task and owns no resource, so entering and exiting are no-ops.  It is kept
-for a consistent test idiom, and so a later version can acquire state here
-without changing call sites.</p>
+as <code>async def</code> (the suite runs with <code>asyncio_mode = strict</code>).  There
+is no synchronous façade of the
+:class:<code>blackbull.testing.native.NativeClient</code> kind: with no socket,
+broker or background loop, there would be nothing to bridge to.</p>
+<p><code>async with</code> is supported for a consistent test idiom, but the broker
+owns no resource, so entering and exiting are no-ops.</p>
 
 
 

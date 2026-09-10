@@ -7153,15 +7153,12 @@ request-smuggling shape — so the answer is to close, not to resynchronise.</p>
     <div class="doc doc-contents ">
 
         <p>The ASGI receive channel: the same body, encoded as event dicts.</p>
-<p>The compat surface, and the only place the <code>http.request</code> dict is
-built.  It costs one dict per chunk and is paid for by the caller that
-wanted the ASGI encoding — a full-form handler calling <code>receive()</code>,
-or an external host.  <code>Connection.body()</code> / <code>stream()</code> take
-:meth:<code>next_chunk</code> and pay nothing.</p>
-<p>The event sequence is unchanged: <code>more_body</code> is recovered from
-<code>_done</code>, which :meth:<code>next_chunk</code> has just set, so a Content-Length
-body still ends on its last data event while a chunked body still
-ends on a separate empty one.</p>
+<p>The only place the <code>http.request</code> dict is built, for whoever wants
+that encoding — a full-form handler calling <code>receive()</code>, or an
+external host.  <code>Connection.body()</code> / <code>stream()</code> take
+:meth:<code>next_chunk</code> and skip the per-chunk dict.</p>
+<p>A Content-Length body ends on its last data event; a chunked body ends
+on a separate empty one.</p>
 
 
     </div>

@@ -5722,9 +5722,9 @@ request to the app.</p>
         <p>Drives the HTTP/1.1 keep-alive loop for one connection.</p>
 <p>Supervisor strategy: isolate — an unhandled exception from a RequestActor
 closes the connection without crashing sibling connections.</p>
-<p>If <em>aggregator</em> is <code>None</code> the actor falls back to the legacy direct-
-dispatcher path (fires events via <code>app._dispatcher</code> directly), so that
-BlackBull apps without a full EventAggregator still receive lifecycle events.</p>
+<p>If <em>aggregator</em> is <code>None</code> the actor fires events through
+<code>app._dispatcher</code> directly, so an app assembled without an
+EventAggregator still receives the lifecycle events.</p>
 
 
 

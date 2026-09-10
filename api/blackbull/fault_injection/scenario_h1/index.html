@@ -6655,10 +6655,9 @@ presence alone.  <code>header_absent</code> takes a name.</p>
     <div class="doc doc-contents ">
 
         <p>Serialise <em>scenario</em> to JSON Lines (one step per line).</p>
-<p>The same free function the other three vocabularies expose.  This cell
-shipped first and grew <code>Scenario.to_json</code> as a method; the method
-stays, because callers use it, but a reader comparing the four files
-should not be told they differ where they do not.</p>
+<p>The same free function the other three vocabularies expose, so a reader
+comparing the four files is not told they differ where they do not.
+<code>Scenario.to_json</code> is the same serialisation reached as a method.</p>
 
 
     </div>
