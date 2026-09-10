@@ -6100,11 +6100,11 @@ registered with it need no migration.</p>
 </details>        <p>Usage::</p>
 <pre><code>errors = ErrorRouter()
 
-@errors[HTTPStatus.NOT_FOUND]
+@errors(HTTPStatus.NOT_FOUND)
 async def handle_404(conn, receive, send):
     ...
 
-@errors[ValueError]
+@errors(ValueError)
 async def handle_value_error(conn, receive, send):
     ...
 
@@ -6145,7 +6145,7 @@ handler = errors[KeyError]               # same, accepting the class directly
 
     <div class="doc doc-contents ">
 
-        <p>Decorator form: @errors[HTTPStatus.NOT_FOUND]</p>
+        <p>Decorator form: <code>@errors(HTTPStatus.NOT_FOUND)</code>.</p>
 
 
     </div>
@@ -6190,10 +6190,9 @@ handler = errors[KeyError]               # same, accepting the class directly
 
     <div class="doc doc-contents ">
 
-        <p><em>default</em> is returned on any lookup miss (error statuses and
-unmatched exceptions) instead of <code>None</code>.  Only explicitly
-registered handlers appear in the two registries, so "which statuses
-have custom handlers" stays inspectable.</p>
+        <p><em>default</em> is returned on any lookup miss instead of <code>None</code>.  It is
+not written into either registry, so those keep answering which
+statuses and exceptions have handlers of their own.</p>
 
 
     </div>
@@ -6492,9 +6491,8 @@ human-readable message surfaced in development-mode error pages.</p>
 
     <div class="doc doc-contents ">
 
-        <p>The lookup cache's entry bound (0 disables caching).  Kept as a
-property delegating to :class:<code>_LookupCache</code> so the constructor knob
-and <code>router.cache_max = N</code> retuning both flow to the one store.</p>
+        <p>The lookup cache's entry bound; 0 disables caching.  Writable, so
+the cache can be retuned after construction.</p>
 
     </div>
 
@@ -6535,13 +6533,8 @@ any raw re.Pattern route matches it.</p>
     <div class="doc doc-contents ">
 
         <p>key: (path: str, method: str | HTTPMethod, scheme: Scheme)</p>
-<p>Uses the routing trie for O(path-depth) lookup of string-path routes,
-then falls back to a linear scan of raw re.Pattern routes.</p>
-<p>Results are cached (up to <code>cache_max</code> entries) so repeated requests
-to the same (path, method, scheme) skip the trie traversal entirely
-after the first hit.  The query→miss→resolve→store flow lives here;
-the cache mechanics are delegated to <code>_cache_get</code> / <code>_cache_set</code>
-so the cache strategy can be swapped without touching this method.</p>
+<p>The query→miss→resolve→store flow; :meth:<code>_resolve</code> does the matching.
+A repeat of the same key skips resolution entirely after the first hit.</p>
 
 
     </div>
@@ -6559,14 +6552,9 @@ so the cache strategy can be swapped without touching this method.</p>
 
     <div class="doc doc-contents ">
 
-        <p>If key[0] is a str:
-    - Insert it into the routing trie under the normalised
-      (path, methods, scheme) key.  <code>{param}</code> / <code>{param:converter}</code>
-      placeholders become parameter segments with converter functions.</p>
-<p>If key[0] is a re.Pattern:
-    - Store it in self._raw_regex (scanned on trie miss).</p>
-<p>When scheme is omitted it is stored as _ANY_SCHEME,
-which matches any scheme at lookup time.</p>
+        <p>Register <em>value</em> under <code>(path, methods)</code> or <code>(path, methods,
+scheme)</code>, routing the path to whichever of the two stores the class
+docstring describes.  An omitted scheme is stored as <code>_ANY_SCHEME</code>.</p>
 
 
     </div>
@@ -6634,13 +6622,9 @@ sendable (a Response, str/bytes, or JSON-able).</p>
    returns None (same as before).
 3. <code>middlewares=[...]</code> — returns a decorator; the decorated handler is
    appended to the middleware list before the chain is registered.</p>
-<p><code>name</code> registers the route for use with <code>url_path_for()</code>.</p>
-<p><code>accept_query</code> (RFC 10008) declares the request <strong>media types</strong> the
-route accepts — the value of the <code>Accept-Query</code> response header, and
-<strong>not</strong> a switch for the QUERY <em>method</em> (methods are accepted by being
-listed in <code>methods</code>).  It drives that header plus Content-Type
-enforcement (400 missing / 415 unsupported) on QUERY requests — see
-<code>BlackBull.route</code>.</p>
+<p><code>name</code> registers the route for use with <code>url_path_for()</code>.
+<code>accept_query</code> is documented on :meth:<code>BlackBull.route</code>, which
+delegates here.</p>
 
 
     </div>
@@ -6659,11 +6643,7 @@ enforcement (400 missing / 415 unsupported) on QUERY requests — see
     <div class="doc doc-contents ">
 
         <p>Return a decorator that registers the decorated handler.</p>
-<p><code>accept_query</code> (RFC 10008) is the list of request <strong>media types</strong> the
-route accepts — the <code>Accept-Query</code> header value driving Content-Type
-enforcement on QUERY requests.  It is <strong>not</strong> a switch for the QUERY
-<em>method</em> (methods are accepted by <code>methods</code>); it installs the route
-hooks in :func:<code>_accept_query_hooks</code>.  See <code>BlackBull.route</code>.</p>
+<p>See :meth:<code>BlackBull.route</code> for <code>accept_query</code>.</p>
 
 
     </div>
@@ -6795,8 +6775,6 @@ logging.</p>
 
         <p>Return the request's media type (<code>Content-Type</code> sans parameters),
 lowercased; <code>''</code> when no Content-Type is present.</p>
-<p><code>conn.headers</code> is always a :class:<code>~blackbull.headers.Headers</code>, so a plain
-<code>.get</code> suffices.</p>
 
 
     </div>
