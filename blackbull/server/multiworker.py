@@ -43,13 +43,11 @@ _RELOAD_TICK = 0.1        # finer poll when reload mode is active
 def _settle_stateful_bindings(app, workers: int) -> None:
     """Decide how a stateful raw protocol is reachable once workers multiply.
 
-    A shared listener is served by every worker, so a stateful protocol
-    sniffed off it is answered by whichever worker accepted — and one that
-    never saw the earlier exchange answers wrongly rather than not at all.
-    A dedicated port has one owner and stays sound, so a binding that has one
-    simply stops claiming the shared port.  A binding that has *only* the
-    shared port cannot be given an owner, and is refused here — before the
-    fork, so the failure is one message and not one per worker.
+    Why a stateful binding stops claiming the shared listener is
+    :meth:`RawBinding.claims`.  What is decided *here* is the case it cannot
+    cover: a binding whose only route is the shared port has no owner to fall
+    back to, so it is refused — before the fork, making the failure one
+    message rather than one per worker.
     """
     registry = getattr(app, '_protocol_registry', None)
     if registry is None:
@@ -121,11 +119,10 @@ class MultiWorkerServer:
         self._reload = reload
         self._reload_paths = reload_paths
         self._reload_pending = False
-        # Owned from construction, never re-initialised in run(): the signal
-        # handlers are installed before the workers spawn, so a stop signal
-        # can land while startup is still in progress.  Resetting the flag
-        # after that point would discard the request and leave the master
-        # supervising until something SIGKILLs it.
+        # Never re-initialised in run(): signal handlers are installed before
+        # the workers spawn, so a stop can land mid-startup, and resetting the
+        # flag afterwards would discard it and leave the master supervising
+        # until something SIGKILLs it.
         self._stopped = False
         self._watcher = None  # set in run() when reload is enabled
         self._processes: list = []
@@ -138,12 +135,11 @@ class MultiWorkerServer:
         # and would re-import all modules from scratch.
         self._mp_ctx = multiprocessing.get_context('fork')
 
-        # Per-worker sockets via SO_REUSEPORT: each worker gets its own kernel
-        # accept queue so the kernel distributes connections evenly without
-        # thundering-herd.  Falls back to the shared inherited socket when
-        # SO_REUSEPORT is unavailable or disabled via BB_SOCKET_REUSEPORT=0.
-        # Reload mode forces the shared-socket path: the master must hold
-        # the listening sockets so they survive worker recycling and exec.
+        # Per-worker sockets via SO_REUSEPORT give each worker its own kernel
+        # accept queue, so connections spread without a thundering herd.  The
+        # else-branch — one worker, no SO_REUSEPORT, or reload — shares the
+        # master's pre-bound sockets instead; reload needs that, because the
+        # master must still hold the listeners to hand them across the exec.
         from ..env import get_settings as _get_settings  # noqa: PLC0415
         cfg = _get_settings()
         if workers > 1 and REUSEPORT_SUPPORTED and cfg.socket_reuseport and not reload:
@@ -167,9 +163,6 @@ class MultiWorkerServer:
             logger.info('SO_REUSEPORT: created %d per-worker socket set(s) for %d listener(s)',
                         workers, len(ports))
         else:
-            # Single-worker, SO_REUSEPORT unavailable, or reload mode:
-            # all workers share the master's pre-bound sockets so the
-            # master can hand them off across reload.
             self._worker_listeners = [self._shared] * workers
 
     # ------------------------------------------------------------------
@@ -233,11 +226,10 @@ class MultiWorkerServer:
         listeners = list(self._worker_listeners[worker_id])
         if worker_id == 0:
             listeners += self._single_owner
-        # fork copies the whole descriptor table, so this child also holds
-        # every other worker's sockets and — but for worker 0 — the broker's.
-        # Hand it the list to let go of: a process that does not have the
-        # descriptor cannot accept on it, which makes single ownership
-        # structural instead of a consequence of what nobody calls.
+        # fork copies the whole descriptor table, so hand the child the list to
+        # let go of: a process without the descriptor cannot accept on it,
+        # which makes single ownership structural rather than a consequence of
+        # what nobody happens to call.
         mine = {id(sock) for _listener, socks in listeners for sock in socks}
         disowned = [sock for sock in self._all_listening_sockets()
                     if id(sock) not in mine]

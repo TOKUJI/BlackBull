@@ -72,11 +72,9 @@ _HIGH_WATER = 128 * 1024
 _LOW_WATER = 32 * 1024
 
 #: Fully-consumed *small* messages a grown buffer must survive before
-#: :meth:`BufferReader._at_boundary` returns it to the floor.  Hysteresis: a
-#: keep-alive connection that repeats a large message reuses its grown
-#: allocation instead of churning grow+shrink per message (F6 follow-up); the
-#: peak is given back once the connection has shown a few messages that did
-#: not need it.
+#: :meth:`BufferReader._at_boundary` returns it to the floor.  The hysteresis is
+#: what lets a connection repeating a large message reuse its allocation
+#: instead of churning grow+shrink per message (F6 follow-up).
 _RELEASE_HYSTERESIS = 4
 
 
@@ -110,18 +108,13 @@ class BufferReader(AbstractReader):
         self._buf = buf
         self._proto = proto
         #: This reader is parked waiting for bytes.  Held here rather than
-        #: inferred from the protocol's rendezvous future: the future is
-        #: cleared when the reader is *woken*, so an arrival landing between
-        #: the wake and the reader running read as "nobody is waiting" and
-        #: armed a pause that the next park immediately released.
+        #: inferred from the protocol's rendezvous future, which is cleared on
+        #: *wake* rather than on stopping waiting — an arrival in that window
+        #: read as "nobody is waiting" and armed a pause the next park released.
         self._waiting = False
         #: How much this reader wants the arrival that wakes it to be able to
-        #: deliver, capped at the high-water mark; 0 unless it is parked.
-        #: Published for the arrival path to consult, because ``get_buffer``
-        #: runs on every arrival on every connection and a method call in that
-        #: position measured at the same order as a whole regression.  Held
-        #: *here*, on the object that decides it: the protocol reads it, never
-        #: writes it, which is what keeps "published" from meaning "shared".
+        #: deliver, capped at the high-water mark; 0 unless it is parked.  The
+        #: protocol reads it on the arrival path and never writes it.
         self.read_offer = 0
         self._release_count = 0  # consecutive small messages since the last grow
 
@@ -147,10 +140,6 @@ class BufferReader(AbstractReader):
     def _consumed(self) -> None:
         """A read took bytes out: the two decisions that follow from that.
 
-        Releasing backpressure is gated on the low mark rather than on any
-        consumption, so the gap between the marks stops the transport being
-        paused and resumed on alternate reads.
-
         The message boundary is answered here and nowhere else, late rather
         than eagerly.  ``compact()`` also raises it from the *arrival* path
         (``_make_room`` compacts before growing), and a delivery lands
@@ -164,18 +153,12 @@ class BufferReader(AbstractReader):
             self._at_boundary()
 
     def _at_boundary(self) -> None:
-        """A message is provably gone: decide whether to keep its allocation.
+        """Decide whether the finished message's allocation is kept.
 
-        Hysteretic.  A message whose peak exceeded the floor re-arms the
-        counter, so a connection that keeps serving large messages reuses its
-        allocation instead of growing and shrinking per message (the F6/B7
-        churn); only after ``_RELEASE_HYSTERESIS`` fully-consumed *small*
-        messages is the peak given back.
-
-        The decision is read off the buffer's accounting and the buffer is then
-        told to close the message out; this method never writes the buffer's
-        own fields.  Reached only on a real boundary, so the call costs nothing
-        on the reads that do not end one.
+        A message whose peak exceeded the floor re-arms the counter; only after
+        ``_RELEASE_HYSTERESIS`` fully-consumed *small* ones is the peak given
+        back.  The decision is read off the buffer's accounting, which the
+        buffer is then told to close out — this method writes none of it.
         """
         buf = self._buf
         if buf.grown:
@@ -224,8 +207,8 @@ class BufferReader(AbstractReader):
             if self._proto.peer_closed:
                 return b''
             # Declared around the park and nowhere else: a read the buffer can
-            # already satisfy never yields, so nothing could consult an offer
-            # it published, and on HTTP/2 that is the great majority of reads.
+            # already satisfy never yields, so nothing could consult the offer —
+            # and on HTTP/2 that is the great majority of reads.
             self.read_offer = (
                 _HIGH_WATER if n < 0 else min(n, _HIGH_WATER))
             try:
@@ -366,7 +349,7 @@ class BufferReader(AbstractReader):
     # -- the one-scan header read ------------------------------------------
 
     async def _read_head_unbounded(self) -> bytes:
-        """The message head, terminator included, with no byte budget."""
+        """:meth:`read_head` with no byte budget."""
         while True:
             if not self._buf.available:
                 if self._proto.peer_closed:
@@ -386,25 +369,17 @@ class BufferReader(AbstractReader):
             await self.wait_for_data()
 
     async def _read_head_bounded(self, limit: int) -> bytes:
-        """The message head, terminator included — found in one scan.
-
-        The override the whole rewrite exists for: the terminator is looked for
-        once, across everything resident, and the head leaves the buffer in a
-        single copy.  Resumable, so bytes already scanned are not scanned again
-        when the head arrives split across reads.
+        """:meth:`read_head` under a byte budget, found in one scan.
 
         Contract as documented on :meth:`AbstractReader.read_head` — an idle
         close returns ``b''`` and a truncated one raises with the partial.
         """
         while True:
             if not self._buf.available:
-                # Nothing resident: go straight to the wait — the "check" of
-                # the check-then-wait-then-check pattern.  The empty scan it
-                # skips is a control-flow artifact (~0.79 µs/req on EC2, F5):
-                # an empty buffer cannot exceed a positive limit and the
-                # scan's resumption state is untouched (it
-                # sets ``_scanned = _w``, which already equals ``_r``), so the
-                # idle-close and truncated-head contracts below are unchanged.
+                # Nothing resident: wait without scanning first.  The skipped
+                # scan is pure overhead (~0.79 µs/req on EC2, F5) — an empty
+                # buffer cannot exceed a positive limit, and it would leave
+                # ``_scanned`` where it already is.
                 if self._proto.peer_closed:
                     return b''
                 await self.wait_for_data()
@@ -449,9 +424,8 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
         self._exc: BaseException | None = None
         # Cleartext until connection_made says otherwise.
         self._half_close_is_honoured = True
-        #: The transport is not reading.  Public because the reader consults it
-        #: on the consuming path, where a property call is not free; kept a
-        #: plain flag maintained by the two methods that change it.
+        #: The transport is not reading.  Written only by :meth:`pause_reading`
+        #: / :meth:`resume_reading`; the reader polls it on the consuming path.
         self.reading_paused = False
         self._drain_waiter: asyncio.Future[None] | None = None
 
@@ -474,23 +448,17 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
 
     def connection_made(self, transport) -> None:
         self.transport = transport
-        # Whether a half-close can leave the write half open, resolved once.
-        # TLS cannot: asyncio's SSL protocol tears the connection down on EOF
-        # regardless of what the app protocol returns, and says so.  See
-        # :meth:`eof_received`.
+        # Whether a half-close can leave the write half open, resolved once —
+        # see :meth:`eof_received`.
         self._half_close_is_honoured = (
             transport.get_extra_info('ssl_object') is None)
 
     def get_buffer(self, sizehint: int) -> memoryview:
-        # The demand comes from the reader, not the hint: the reader owns
-        # "how much to offer the transport" (see ``BufferReader.read_offer``),
-        # and the hint is unreliable (asyncio passes -1, uvloop a fixed
-        # 64 KiB).  Read as a published attribute rather than asked for through
-        # the reader: this runs on every arrival on every connection, and the
-        # EC2 /conn A/B put a *method call* here at the same order as the whole
-        # regression it showed (~0.7 %).  One attribute hop to reach the owner
-        # is not that call — measured at 1.66 ns — and it is what keeps the
-        # field on the object that decides it.
+        # The demand comes from the reader, not the hint.  Read as a published
+        # attribute rather than through a call: this runs on every arrival on
+        # every connection, and the EC2 /conn A/B put a *method call* here at
+        # the same order as the whole regression it showed (~0.7 %).  One
+        # attribute hop to the owner is not that call — measured at 1.66 ns.
         return self._rb.get_buffer(sizehint, want=self.reader.read_offer)
 
     def buffer_updated(self, nbytes: int) -> None:
@@ -498,10 +466,8 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
             # asyncio treats a zero-length read as EOF on some transports.
             self.eof_received()
             return
-        # The byte threshold is a transport-side fact: whether this arrival
-        # crossed the high-water mark is compared here at base-equal per-arrival
-        # cost.  Whether that crossing should pause — the parked-reader
-        # exemption — is the reader's decision, invoked only on the crossing.
+        # The threshold is a transport fact; what a crossing *means* is the
+        # reader's, so it is asked only on the crossing.
         avail = self._rb.buffer_updated(nbytes)
         if avail >= _HIGH_WATER:
             self.reader.maybe_pause()
@@ -539,10 +505,9 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
     # -- write side -------------------------------------------------------
     #
     # ``AsyncioWriter`` needs only ``write(bytes)`` + ``async drain()``, so the
-    # protocol supplies them directly and the whole existing sender stack —
-    # the ``_write_many`` join-vs-vectored gate, ``BB_WRITE_TIMEOUT``, the
-    # deadline scanner — is reused untouched.  This is the inbound path's
-    # replacement; the outbound path is already leaner than both peers.
+    # protocol supplies them directly and the whole sender stack — the
+    # ``_write_many`` gate, ``BB_WRITE_TIMEOUT``, the deadline scanner — is
+    # reused unchanged.
 
     def write(self, data) -> None:
         if self.transport is not None:
@@ -623,19 +588,15 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
             self.close()
             return
         try:
-            # FIN tells the peer we are done writing, so it stops waiting for
-            # more response and closes its end.  That, and the close below, are
-            # this object's whole share of a lingering close: throwing the
-            # peer's remaining bytes away is *reading* them, which is the
-            # reader's, bounds and all.
+            # FIN tells the peer we are done writing, so it stops waiting and
+            # closes its end.  Discarding what it still sends is *reading*, so
+            # that half belongs to the reader, bounds and all.
             if self.transport.can_write_eof():
                 self.transport.write_eof()
             loop = asyncio.get_running_loop()
             await self.reader.discard(max_bytes, loop.time() + timeout)
         except Exception:
-            # Teardown is best-effort: the response is already on the wire and
-            # the close below is what actually matters.
-            pass
+            pass  # best-effort: the response is on the wire; the close matters
         finally:
             self.close()
 

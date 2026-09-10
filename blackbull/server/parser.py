@@ -8,17 +8,14 @@ from .http1_actor import _HOST_FORBIDDEN_RE
 
 logger = logging.getLogger(__name__)
 
-# Shared empty extensions dict for the plain-HTTP/2 dispatch path — safe to
-# share because ``HTTP2Actor._apply_priority_and_extensions`` unconditionally
-# replaces ``conn.extensions`` with a fresh per-stream dict *before* the app or
-# any middleware sees the Connection (``_on_headers_frame`` /
-# ``_on_continuation_frame`` both call it ahead of ``_spawn_stream_task``), so
-# this sentinel is never read or mutated by user code.  Same convention as
-# ``http1_actor._H1_PATHSEND_EXTENSIONS``.
+# Shared empty extensions dict for the plain-HTTP/2 dispatch path — safe only
+# because ``HTTP2Actor._apply_priority_and_extensions`` replaces
+# ``conn.extensions`` with a fresh per-stream dict before the app or any
+# middleware sees the Connection, so user code never reads or mutates this one.
+# Same convention as ``http1_actor._H1_PATHSEND_EXTENSIONS``.
 #
-# The RFC 8441 WebSocket branch of ``parse_headers`` does NOT go through
-# ``_apply_priority_and_extensions``, so it must NOT use this sentinel — it
-# keeps a fresh ``{}`` for the connection's lifetime.
+# The RFC 8441 WebSocket branch does NOT go through that call, so it must keep
+# a dict of its own.
 _EMPTY_H2_EXTENSIONS: dict = {}
 
 
@@ -29,15 +26,12 @@ def _build_h2_connection(method: str, path: str, raw_path: bytes,
 
     Bypasses the dataclass-generated ``Connection.__init__`` (type-call +
     default-binding machinery, ~200 ns/req) via ``object.__new__`` + explicit
-    slot stores.  Behaviourally identical to ``Connection(method=method,
-    path=path, raw_path=raw_path, query_string=query_string, headers=headers,
-    http_version='2', scheme=scheme)`` — pinned field-for-field by
-    ``tests/architecture/test_h2_connection_builder.py``, which must be kept
-    in sync with any change to :class:`Connection`'s field set.
+    slot stores.  ``tests/architecture/test_h2_connection_builder.py`` pins it
+    field-for-field against the dataclass and must be kept in sync with any
+    change to :class:`Connection`'s field set.
 
-    Only used by the plain-HTTP branch of ``parse_headers`` — the RFC 8441
-    WebSocket branch is a cold path (one Extended CONNECT per WS-over-H2
-    session, not one per request) and keeps the plain dataclass constructor.
+    The RFC 8441 WebSocket branch is cold — one Extended CONNECT per session,
+    not one per request — and keeps the plain constructor.
     """
     c = object.__new__(Connection)
     c.method = method
@@ -72,20 +66,16 @@ def _split_h2_path(raw: str):
     """Split an HTTP/2 ``:path`` pseudo into ASGI (path, raw_path, query_string).
 
     RFC 9113 §8.3.1: ``:path`` carries the origin-form request target
-    (path + optional query) joined by ``?``.  ASGI requires
-    ``scope['path']`` to be the percent-decoded (UTF-8) path component
-    (str), ``scope['raw_path']`` the undecoded path-component bytes, and
-    ``scope['query_string']`` the raw query as ``bytes``.
+    (path + optional query) joined by ``?``.
 
-    ``raw`` is always ``str`` — pseudo-header values are normalised to
-    ``str`` when the HEADERS frame is parsed (``frame_types`` decodes them),
-    and the server-push caller passes the ASGI event's ``str`` path.
+    ``raw`` is always ``str`` — ``frame_types`` decodes pseudo-header values
+    when the HEADERS frame is parsed, and the server-push caller passes the
+    ASGI event's ``str`` path.
 
-    ``urlsplit`` (not ``urlparse``) so an RFC 3986 ``;`` path sub-delimiter is
-    kept in the path component rather than split off as obsolete RFC 2396
-    ``;params`` (``urlparse`` would strip it from both ``path`` and
-    ``raw_path``).  The ``'%' in path`` guard keeps escape-free targets on the
-    plain fast path; unquote semantics match uvicorn ('+' stays literal,
+    ``urlsplit`` (not ``urlparse``) so an RFC 3986 ``;`` path sub-delimiter
+    stays in the path component rather than being split off as obsolete RFC
+    2396 ``;params``.  The ``'%' in path`` guard keeps escape-free targets on
+    the plain fast path; unquote semantics match uvicorn ('+' stays literal,
     malformed escapes pass through, ``errors='replace'`` can never raise).
     """
     parsed = urlsplit(raw)
@@ -104,14 +94,13 @@ def _request_headers_with_host(frame, *, require_present: bool) -> list | None:
     ``http``/``https`` request without ``:authority`` must carry a valid
     ``Host`` field (*require_present*).  The grammar is H1's
     ``_validate_host`` (RFC 3986 §3.2 delimiters, same forbidden set);
-    a present ``:authority`` replaces any literal ``Host`` in the header
-    list handed to the application, mirroring H1's absolute-form
-    override (RFC 9112 §3.2.2) so handlers see one ``host`` under
-    either transport (ASGI host mapping).
+    a present ``:authority`` replaces any literal ``Host`` handed to the
+    application, mirroring H1's absolute-form override (RFC 9112 §3.2.2)
+    so handlers see one ``host`` under either transport.
 
     Returns the header list for ``Headers(...)``, or ``None`` after
     marking the frame malformed (the actor then answers RST_STREAM
-    PROTOCOL_ERROR, the §8.3.1 stream error).
+    PROTOCOL_ERROR).
     """
     authority = frame.pseudo_headers.get(PseudoHeaders.AUTHORITY)
     if authority is not None:
@@ -216,19 +205,12 @@ def parse_headers(frame) -> Connection | None:
 
     if method == 'CONNECT' and protocol == 'websocket':
         # RFC 8441 §4 — Extended CONNECT bootstrapping WebSocket over HTTP/2.
-        # ``method='CONNECT'`` here (the true wire value) — the previous
-        # per-field-mutation version left this at the ``_default_connection``
-        # placeholder ('HEAD') because the old code path only assigned
-        # ``conn.method`` outside this branch. This is an intentional,
-        # observable correction: ``conn.method`` IS read for websocket-typed
-        # Connections — by ``AccessLogRecord.from_conn`` (the WS-over-H2
-        # access-log line now records CONNECT, matching H/1.1 upgrades which
-        # record their true GET) and by any installed global middleware whose
-        # method gate lacks a ``conn.type`` guard (e.g. ``Cache``'s
-        # cacheable-methods check, which the 'HEAD' placeholder wrongly
-        # satisfied for WS-over-H2 requests). Routing and lifecycle events
-        # are unaffected — ``BlackBull._dispatch`` branches on ``conn.type``
-        # before any method-based dispatch.
+        # ``method`` is the true wire value, never a placeholder: it IS read
+        # for websocket-typed Connections, by ``AccessLogRecord.from_conn``
+        # and by any global middleware whose method gate lacks a ``conn.type``
+        # guard (``Cache``'s cacheable-methods check, for one).  Routing and
+        # lifecycle events are unaffected — ``BlackBull._dispatch`` branches on
+        # ``conn.type`` before any method-based dispatch.
         scheme_pseudo = frame.pseudo_headers.get(PseudoHeaders.SCHEME, 'https')
         path, raw_path, query_string = '', b'', b''
         if p := frame.pseudo_headers.get(PseudoHeaders.PATH):
@@ -238,10 +220,7 @@ def parse_headers(frame) -> Connection | None:
         # enforced (the Extended CONNECT handshake already succeeded).
         raw_headers = _request_headers_with_host(frame, require_present=False)
         if raw_headers is None:
-            return None  # frame already marked malformed by the helper
-        # ``root_path`` is NOT taken from the client-controlled
-        # X-Forwarded-Prefix; only TrustedProxy sets it after verifying the
-        # peer.  Left at the field default ('') — the RFC-safe empty mount.
+            return None
         # ``subprotocols`` is derived from the request headers by the actor
         # bridge, not stored here.
         return Connection(
@@ -260,10 +239,9 @@ def parse_headers(frame) -> Connection | None:
     # CONNECT and the empty-value case.
     scheme = frame.pseudo_headers.get(PseudoHeaders.SCHEME) or 'https'
 
-    # RFC 9113 §8.3.1 — validate the host authority and surface
-    # ``:authority`` as the ``host`` header (ASGI).  Plain CONNECT is
-    # excluded: §8.5 gives its ``:authority`` tunnel semantics, and the
-    # presence rule only binds http/https requests.
+    # Plain CONNECT is excluded from the host check: §8.5 gives its
+    # ``:authority`` tunnel semantics, and the presence rule only binds
+    # http/https requests.
     #
     # ``from_lowered`` is safe on every H/2 path: §8.2.1 makes an uppercase
     # field name malformed and ``HeadersFrame.parse_payload`` rejects the
@@ -275,7 +253,7 @@ def parse_headers(frame) -> Connection | None:
         raw_headers = _request_headers_with_host(
             frame, require_present=scheme in ('http', 'https'))
         if raw_headers is None:
-            return None  # frame already marked malformed by the helper
+            return None
         headers = Headers.from_lowered(raw_headers)
 
     # A spec-illegal empty ``:method`` falls back to 'HEAD' instead of being
@@ -284,8 +262,8 @@ def parse_headers(frame) -> Connection | None:
     # change, not a cleanup.
     effective_method = method or 'HEAD'
 
-    # ``root_path`` is NOT taken from the client-controlled
-    # X-Forwarded-Prefix; only TrustedProxy sets it after verifying the peer.
-    # Left at the field default ('').
+    # ``root_path`` is NOT taken from the client-controlled X-Forwarded-Prefix;
+    # only TrustedProxy sets it after verifying the peer.  Both branches leave
+    # it at the field default ('') — the RFC-safe empty mount.
     return _build_h2_connection(effective_method, path, raw_path,
                                 query_string, headers, scheme)

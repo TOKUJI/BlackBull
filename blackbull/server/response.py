@@ -34,16 +34,14 @@ class Responder:
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
 
-        # If FRAME_TYPE is None, we won't register it, as it's meant to be an abstract base class
+        # No FRAME_TYPE marks an intermediate abstract base, which is not
+        # dispatchable and so is not registered.
         if cls.FRAME_TYPE is None:
             return
 
-        # Check for duplicate FRAME_TYPE to avoid overwriting existing entries in the registry
         if cls.FRAME_TYPE in cls._registry:
             raise ValueError(f"Duplicate FRAME_TYPE: {cls.FRAME_TYPE}")
 
-        # Register the subclass in the registry based on its FRAME_TYPE
-        # This allows us to create instances of the correct subclass based on the frame type
         cls._registry[cls.FRAME_TYPE] = cls
 
     async def respond(self, handler):
@@ -82,8 +80,8 @@ class PingResponder(Responder):
 
 
 class WindowUpdateResponder(Responder):
-    # RFC 9113 §6.9.1 — flow-control windows are 31-bit; values above this
-    # cause a FLOW_CONTROL_ERROR.
+    # RFC 9113 §6.9.1 — flow-control windows are 31-bit; exceeding this is a
+    # FLOW_CONTROL_ERROR, at whichever level the overflow happened.
     _MAX_FLOW_WINDOW = 2**31 - 1
 
     async def respond(self, handler):
@@ -109,12 +107,11 @@ class WindowUpdateResponder(Responder):
             return
 
         if self.frame.stream_id == 0:
-            # Connection-level: credit the ONE shared connection window (bug
-            # 1.2), then wake every blocked stream sender so they re-check.
+            # Credit the ONE shared connection window, then wake every blocked
+            # stream sender so they re-check.
             conn_window = handler._conn_window
             new_window = conn_window.size + increment
-            # RFC 9113 §6.9.1 — exceeding 2^31-1 is a connection-level
-            # FLOW_CONTROL_ERROR with GOAWAY.
+            # Connection-level overflow answers with GOAWAY.
             if new_window > self._MAX_FLOW_WINDOW:
                 await handler._connection_error(
                     ErrorCodes.FLOW_CONTROL_ERROR,
@@ -128,8 +125,7 @@ class WindowUpdateResponder(Responder):
             sid = self.frame.stream_id
             current = sender.stream_window_size
             if current + increment > self._MAX_FLOW_WINDOW:
-                # RFC 9113 §6.9.1 — stream-level flow window overflow is a
-                # stream error of type FLOW_CONTROL_ERROR.
+                # Stream-level overflow is a stream error, so RST_STREAM.
                 await handler.send_frame(handler.factory.rst_stream(
                     sid, ErrorCodes.FLOW_CONTROL_ERROR))
                 return
@@ -192,9 +188,8 @@ class SettingsResponder(Responder):
                 f'SETTINGS_MAX_FRAME_SIZE out of range: {mfs}')
             return
 
-        # RFC 9113 §6.5.2 — ENABLE_PUSH has an initial value of 1 and is
-        # connection-scoped.  Update only after all frame validation succeeds;
-        # an invalid SETTINGS frame must not partially mutate connection state.
+        # Applied only after every check above passes: an invalid SETTINGS
+        # frame must not partially mutate connection state.
         if ep is not None:
             handler._peer_enable_push = bool(ep)
 
@@ -215,10 +210,9 @@ class SettingsResponder(Responder):
         if mfs is not None:
             for sender in handler._senders.values():
                 sender.apply_settings(max_frame_size=mfs)
-        # NOTE: per RFC 7540 §6.5.2, peer's SETTINGS_HEADER_TABLE_SIZE
-        # constrains OUR encoder's table, not OUR decoder's. Updating the
-        # decoder here would (and did) trip hpack's InvalidTableSizeError
-        # because the peer's encoder never asked us to resize.
+        # RFC 7540 §6.5.2 — the peer's SETTINGS_HEADER_TABLE_SIZE constrains
+        # OUR encoder's table, not our decoder's.  Resizing the decoder here
+        # trips InvalidTableSizeError: the peer's encoder never asked us to.
         await handler.send_frame(handler.factory.settings(ack=True))
 
     FRAME_TYPE = FrameTypes.SETTINGS
@@ -265,12 +259,11 @@ class PriorityUpdateResponder(Responder):
         )
         stream = handler.find_stream(self.frame.prioritized_stream_id)
         if stream is None:
-            # PRIORITY_UPDATE arrived before HEADERS — pre-create the stream
-            # so the hint is available when HEADERS arrives later.  RFC 9218
-            # §7 permits limiting how many such hints are buffered, and the
-            # limit has to exist: this is the one path on which a peer can
-            # still make the priority tree grow, and a hint for more streams
-            # than it may have open at once is a hint it can never redeem.
+            # PRIORITY_UPDATE arrived before HEADERS — pre-create the stream so
+            # the hint survives until HEADERS does.  This is the one path on
+            # which a peer can still grow the priority tree, so RFC 9218 §7's
+            # permission to bound the buffer is taken: a hint for more streams
+            # than it may hold open at once is one it can never redeem.
             if len(handler.root_stream.children) >= handler.max_concurrent_streams:
                 log_cap_hit('h2_priority_update_buffer',
                             requested=len(handler.root_stream.children) + 1,
@@ -282,12 +275,11 @@ class PriorityUpdateResponder(Responder):
         if stream is not None:
             stream.priority_hint = hint
             # Reflect a late PRIORITY_UPDATE onto an already-dispatched request.
-            # ``stream.conn`` is the native Connection on every lane, and its
-            # ``extensions`` dict is shared by reference with the ASGI scope the
-            # compat lane hands the app — so this one write reaches both.  That
-            # sharing is why the extension is the only home for the hint: a
-            # top-level scope key would be a dispatch-time copy that a late
-            # PRIORITY_UPDATE like this one could not reach.
+            # ``stream.conn.extensions`` is shared by reference with the ASGI
+            # scope the compat lane hands the app, so one write reaches both —
+            # and that is why the hint lives in an extension rather than a
+            # top-level scope key, which would be a dispatch-time copy this
+            # write could not reach.
             conn = stream.conn
             if conn is not None and conn.extensions is not None:
                 conn.extensions['http.response.priority'] = hint
@@ -312,8 +304,8 @@ class RstStreamResponder(Responder):
             return
 
         stream = handler.find_stream(stream_id)
-        # A stream that we have never seen HEADERS/PUSH_PROMISE on is in
-        # the IDLE state (or doesn't exist in our tree yet — same thing).
+        # Absent from the tree and IDLE are the same condition: no HEADERS or
+        # PUSH_PROMISE has been seen on this identifier.
         if stream is None or stream.state == StreamState.IDLE:
             await handler._connection_error(
                 ErrorCodes.PROTOCOL_ERROR,
@@ -321,19 +313,17 @@ class RstStreamResponder(Responder):
             return
 
         logger.warning('stream_id=%d %s', stream_id, self.frame.error_code)
-        # Cancel the running handler for this stream.  Without this a
-        # server-streaming handler abandoned by the client blocks forever in the
-        # sender's flow-control wait (no further WINDOW_UPDATE will ever arrive),
-        # permanently holding a max_concurrent_streams slot — a high-churn
-        # streaming client leaks slots until new streams are REFUSED_STREAM'd.
-        # Cancellation cleanly interrupts the flow-control wait; the handler's
-        # finally/aclose still runs, and the done-callback frees the slot.
+        # An abandoned server-streaming handler would otherwise block forever in
+        # the sender's flow-control wait — no further WINDOW_UPDATE is coming —
+        # holding a max_concurrent_streams slot, so a high-churn streaming
+        # client leaks slots until new streams are REFUSED_STREAM'd.  Cancelling
+        # interrupts that wait cleanly: finally/aclose still run and the
+        # done-callback frees the slot.
         task = handler._stream_tasks.get(stream_id)
         if task is not None and not task.done():
             task.cancel()
-        # Prune the stream node and record it as closed-via-RST.  Later frames
-        # from the peer on this identifier are detected by the frame-loop's
-        # _closed_streams check and trigger STREAM_CLOSED.
+        # Recorded as closed-via-RST so the frame loop's _closed_streams check
+        # answers STREAM_CLOSED to later frames on this identifier.
         handler.root_stream.children.pop(stream_id, None)
         handler._mark_closed(stream_id, via_rst=True)
         handler._senders.pop(stream_id, None)

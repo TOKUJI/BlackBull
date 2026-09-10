@@ -8,21 +8,17 @@ from dataclasses import dataclass, field
 from typing import ClassVar
 
 from ..asgi import ASGIEvent
-# Imported at runtime (not under TYPE_CHECKING) so beartype can resolve the
-# ``EventAggregator`` union annotations below (with ``from __future__ import
-# annotations`` beartype parses them as expressions against module globals).
-# No circular-import risk — ``event_aggregator`` does not import anything
-# back from this module.
+# Runtime import, not TYPE_CHECKING: beartype resolves the ``EventAggregator``
+# union annotations below as expressions against module globals.  Neither
+# module imports anything back from this one, so there is no cycle.
 from ..event_aggregator import EventAggregator  # noqa: TC002
-from ..logger import enqueue_access_log  # O4 fast path (no import cycle: logger imports nothing here)
+from ..logger import enqueue_access_log
 
 _access_logger = logging.getLogger('blackbull.access')
 
-# Capture per-request phase wall + CPU
-# checkpoints into AccessLogRecord.phases.  Off by default — the
-# extra time.perf_counter() + time.process_time() calls would otherwise
-# show up in benchmark numbers.  Set ``BB_PHASE_TRACE=1`` to turn on
-# (intended for one-off perf investigation runs, not production).
+# Capture per-request wall + CPU checkpoints into AccessLogRecord.phases.  Off
+# by default: the extra perf_counter()/process_time() calls would show up in
+# benchmark numbers.  For one-off investigation runs, not production.
 PHASE_TRACE: bool = os.environ.get('BB_PHASE_TRACE', '0') == '1'
 
 
@@ -132,8 +128,6 @@ def emit_access_log(record: 'AccessLogRecord') -> None:
     if _access_logger.isEnabledFor(logging.INFO):
         record.finalize()
         extra = record.as_extra()
-        # Fast path only when nobody has customised blackbull.access — an empty
-        # handlers/filters list is the default, so the common case stays fast.
         if (_access_logger.handlers or _access_logger.filters
                 or not enqueue_access_log(record, extra)):
             _access_logger.info(record, extra=extra)
@@ -187,11 +181,9 @@ class AccessLogRecord:
     status:         int | str = '-'
     response_bytes: int       = 0
     close_code:     int | None = None
-    # Request/response headers we want
-    # to correlate against per-phase timing.  Empty bytes are interpreted
-    # as "header absent" in ``format()``.  Populated only when
-    # ``PHASE_TRACE=1`` so production responses don't pay the bytes
-    # capture per request.
+    # Headers correlated against the per-phase timing.  Populated only under
+    # ``PHASE_TRACE``, so production pays no capture; empty bytes read as
+    # "header absent" in ``format()``.
     req_accept_encoding:   bytes = b''
     req_range:             bytes = b''
     resp_content_type:     bytes = b''
@@ -200,12 +192,9 @@ class AccessLogRecord:
     # name → (perf_counter_seconds, process_time_seconds).  Only written
     # when PHASE_TRACE is on; empty otherwise.
     phases: dict[str, tuple[float, float]] = field(default_factory=dict, repr=False)
-    # Duration snapshot taken by finalize() at emit time so a format() run
-    # later on the logging listener thread reports the real request duration
-    # (not duration + queue latency).  None until finalize()/emit.
+    # None until :meth:`finalize`.
     _duration_ms_snapshot: float | None = field(default=None, repr=False)
-    # Cached format() output — filled on first str() (listener thread).  Cached
-    # because several sink handlers may each format the same record.
+    # Filled on first ``str()``, on the listener thread.
     _formatted: str | None = field(default=None, repr=False)
 
     # Marker read by the deferred-format QueueHandler (blackbull.logger) to
@@ -259,9 +248,8 @@ class AccessLogRecord:
         )
 
     def duration_ms(self) -> float:
-        # Return the finalize() snapshot when present so the value is stable
-        # across the emit → enqueue → listener-format hop; fall back to a live
-        # reading for records that were never finalized (e.g. direct callers).
+        # The snapshot keeps the value stable across the emit → enqueue →
+        # listener-format hop; a record nothing finalized reads live.
         if self._duration_ms_snapshot is not None:
             return self._duration_ms_snapshot
         return (time.monotonic() - self._started_at) * 1000
@@ -289,11 +277,9 @@ class AccessLogRecord:
                     f'"{self.method} {self.path} WS/{self.http_version}" '
                     f'101 close={self.close_code} '
                     f'{self.duration_ms():.0f}ms')
-        # Default to %.0f ms (existing access-log format).  When phase
-        # tracing is on, bump to %.3f and append the per-phase deltas
-        # plus request / response headers we want to correlate against
-        # per-phase timing — the investigation needs sub-millisecond
-        # resolution and header-level visibility into negotiation.
+        # Phase tracing needs sub-millisecond resolution and header-level
+        # visibility into negotiation, so it bumps %.0f to %.3f and appends
+        # the deltas and the captured headers.
         if PHASE_TRACE and self.phases:
             def _h(b: bytes) -> str:
                 return b.decode('ascii', errors='replace') if b else '-'
