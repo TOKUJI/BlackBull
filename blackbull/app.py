@@ -1,21 +1,8 @@
 """BlackBull application object — the user-facing ASGI 3.0 entry point.
 
-Exposes the ``BlackBull`` class which wraps a ``Router``, an ``ErrorRouter``,
-lifespan hooks, per-route and global middleware chains, and (via
-``app.static``) static-file serving.  ``BlackBull.__call__`` is the ASGI
-callable: it dispatches lifespan events to ``_handle_lifespan`` and routes
-HTTP / WebSocket scopes through the global-middleware chain ending in
-``_dispatch``.
-
-Companion definitions live in this module to avoid circular imports:
-
-- ``RouteGroup`` — returned by ``app.group(middlewares=[...])`` to share a
-  middleware prefix across routes.
-- ``_default_error_handler`` — registered on every ``HTTPStatus`` error and
-  on ``Exception`` so unhandled errors produce a sensible plain-text reply.
-- ``_wrap_send_native`` — the handler-boundary adapter: converts every
-  accepted send shape (``Response``, 3-arg, ASGI dict, NativeResponse) to
-  :class:`~blackbull.native.NativeResponse` on the HTTP path (H1 + H2).
+``RouteGroup``, the default error handler and the handler-boundary send
+adapter live here rather than in the modules they belong to: importing them
+from there would close an import cycle back to this one.
 """
 import functools
 from collections.abc import Awaitable, Callable, Iterable
@@ -39,17 +26,13 @@ from .logger import debug_gate  # noqa: E402
 from .server.protocol_registry import RawBinding
 
 logger = logging.getLogger(__name__)
-#: Import-time gate; the cost it buys back is measured in
-#: :func:`blackbull.logger.debug_gate`.
 _DEBUG = debug_gate(logger)
 
 
 
 def _wrap_send_native(raw_send: ASGISendCallable):
     """Install :func:`blackbull.response.wrap_native_send` at the handler
-    boundary (innermost), so everything above the route handler sees only
-    :class:`~blackbull.native.NativeResponse`.  That function owns the
-    accepted shapes and the compat contract.
+    boundary, which is the innermost wrap.
     """
     return wrap_native_send(raw_send)
 
@@ -57,11 +40,7 @@ def _wrap_send_native(raw_send: ASGISendCallable):
 def _to_asgi_boundary(send: ASGISendCallable):
     """Wrap an external ASGI host's ``send`` with native→ASGI conversion.
 
-    Expands both native shapes — ``NativeResponse`` from the router,
-    ``NativeWSMessage`` from the object-form
-    :class:`~blackbull.websocket.WebSocket` — back into standard
-    ``http.response.*`` / ``websocket.*`` dicts; lifespan and already-ASGI
-    events pass straight through.  ``__call__`` decides when to install it.
+    :meth:`BlackBull.__call__` decides when to install it.
     """
     from .native import asgi_send_boundary  # noqa: PLC0415
 
@@ -206,19 +185,54 @@ class RouteGroup:
 
 
 class BlackBull:
+    """The application: a router, its error handlers, and the ASGI callable.
+
+    Register routes with [`route`][blackbull.app.BlackBull.route], or with [`group`][blackbull.app.BlackBull.group] when several
+    should share a middleware prefix; global middleware with [`use`][blackbull.app.BlackBull.use];
+    lifecycle hooks with [`on_startup`][blackbull.app.BlackBull.on_startup], [`on_shutdown`][blackbull.app.BlackBull.on_shutdown] and
+    [`on_warmup`][blackbull.app.BlackBull.on_warmup].  [`run`][blackbull.app.BlackBull.run] serves the app on BlackBull's own server,
+    and the instance is itself a plain ASGI 3.0 callable, so an external host
+    can drive it instead.
+
+    Protocols other than HTTP and WebSocket attach through
+    [`add_extension`][blackbull.app.BlackBull.add_extension] or [`register_protocol_handler`][blackbull.app.BlackBull.register_protocol_handler]; nothing here
+    is added by subclassing.
+
+    Attributes:
+        extensions: Installed extensions by name.  The Extensions guide says
+            what an extension puts there and how to reach it.
+    """
+
     def __init__(self,
-                 loop=None,
+                 loop: asyncio.AbstractEventLoop | None = None,
                  observer_shutdown_timeout: float = 5.0,
                  trusted_proxies: list[str] | str | None = None,
                  config: AppConfig | None = None,
                  cache_max: int | None = None,
                  asgi: bool = False,
                  ):
-        # Marks the app external-host-oriented; ``__call__`` owns what the
-        # flag decides.
+        """Build an application.
+
+        Args:
+            loop: Event loop to bind to.  Left unset,
+                [`loop`][blackbull.app.BlackBull.loop] picks up the running
+                loop once there is one.
+            observer_shutdown_timeout: Seconds to wait at shutdown for
+                detached ``@app.on`` observers to finish.
+            trusted_proxies: Addresses or CIDRs whose forwarded headers are
+                honoured; installs
+                [`TrustedProxy`][blackbull.middleware.proxy.TrustedProxy].
+            config: Deploy settings [`run`][blackbull.app.BlackBull.run]
+                falls back to.  The Configuration guide gives the resolution
+                order.
+            cache_max: Route-resolution cache size.  ``None`` keeps the
+                router's own default.
+            asgi: Mark the app as driven by an external ASGI host, so
+                [`__call__`][blackbull.app.BlackBull.__call__] converts at the
+                boundary in both directions.
+        """
         self._asgi = asgi
         self._config = config
-        # ``None`` keeps the Router's own default; see the routing guide.
         self._router = Router() if cache_max is None else Router(cache_max=cache_max)
         self._logger = logger
         self._error_router = ErrorRouter(default=_default_error_handler)
@@ -232,17 +246,13 @@ class BlackBull:
         self._static_roots: list[tuple[str, Path]] = []
         self._chain = None
 
-        # See on_warmup.
         self._warmup_hooks: list = []
-
-        # Name→object registry; see docs/guide/extensions.md.
         self.extensions: dict[str, object] = {}
 
         # Built on the first registration, so an HTTP-only app allocates no
         # registry and binds no extra listener.
         self._protocol_registry = None
 
-        # See enable_grpc.
         self._grpc_registry = None
 
         if trusted_proxies is not None:
@@ -251,13 +261,16 @@ class BlackBull:
 
     @property
     def loop(self):
+        """The bound event loop, or ``None`` when none is running yet.
+
+        Read from synchronous setup code this answers ``None`` rather than
+        raising, so a caller that does not need a loop still works; asyncio
+        supplies one once the coroutines run.
+        """
         if self._loop is None:
             try:
                 self._loop = asyncio.get_running_loop()
             except RuntimeError:
-                # Called from synchronous setup code.  None rather than a
-                # raise, so a caller that does not need the loop still works;
-                # asyncio supplies one once the coroutines run.
                 return None
         return self._loop
 
@@ -271,6 +284,10 @@ class BlackBull:
     
     @property
     def available_ws_protocols(self) -> list[bytes]:
+        """WebSocket subprotocols this app offers, as bytes.
+
+        Assigning a list of ``str`` encodes each entry.
+        """
         return self._wsprotocols or []
 
     @available_ws_protocols.setter
@@ -338,14 +355,14 @@ class BlackBull:
         """Register a coroutine to warm the app **before it binds or forks**.
 
         The hook runs once in the master, before the listening socket is
-        created and before workers fork; :meth:`on_startup` runs per worker,
+        created and before workers fork; [`on_startup`][blackbull.app.BlackBull.on_startup] runs per worker,
         after both.  In single-worker mode the one process is warmed before it
         binds.
 
         Hooks receive the ``app`` and must do **pure warming only** — drive hot
         code paths, prime codecs/TLS — and acquire **no** per-worker resources
         (DB pools, sockets, live connections); those belong in
-        :meth:`on_startup`.  Use :meth:`warm_request` to exercise the ASGI
+        [`on_startup`][blackbull.app.BlackBull.on_startup].  Use :meth:`warm_request` to exercise the ASGI
         dispatch/handler path in-process, and
         :func:`blackbull.server.warmup.warm_tls` to prime the TLS handshake.
 
@@ -368,7 +385,7 @@ class BlackBull:
         with a synthetic ``receive`` that yields *body* once and a ``send`` that
         discards output.  Faults in code pages and trips PEP 659 specialization
         on the dispatch + handler + codec — no socket, no wire I/O.  Intended
-        for use from an :meth:`on_warmup` hook; safe to call anytime.
+        for use from an [`on_warmup`][blackbull.app.BlackBull.on_warmup] hook; safe to call anytime.
 
         Each iteration runs on a fresh copy of *conn* (its own body cache,
         ``state`` and receive binding), so the one template drives all *n* runs
@@ -721,23 +738,28 @@ class BlackBull:
             chain = functools.partial(mw, call_next=chain)
         self._chain = chain
 
-    async def __call__(self, conn, receive: ASGIReceiveCallable | None,
+    async def __call__(self, conn: 'Connection | dict',
+                       receive: ASGIReceiveCallable | None,
                        send: ASGISendCallable):
-        # The one boundary (decision 2026-08-03).  The app is native internally
-        # in BOTH modes, so everything below this function threads a
-        # ``Connection``: an ASGI scope dict arrives only from an external host
-        # (uvicorn, ``httpx.ASGITransport``) or ``BB_FORCE_ASGI_SCOPE=1``, and is
-        # converted here, once.  The same edge wraps the host's ``send`` with
-        # the native→ASGI conversion; BlackBull's own server (native entry,
-        # asgi=False) passes a native-capable send through untouched.  Lifespan
-        # is the one scope that is not a request and never becomes a Connection.
-        #
-        # ``receive`` is Optional because a handler that never reads a body
-        # never touches it: the router guards on ``conn._receive is None`` and
-        # dispatch completes normally.  A conforming ASGI host always passes a
-        # real callable, but the tolerance is load-bearing for direct drives,
-        # so the annotation states it rather than quietly outlawing it.
-        #
+        """The ASGI 3.0 callable, and the app's only native/ASGI boundary.
+
+        Everything below this method threads a
+        :class:`~blackbull.connection.Connection`, in both modes.  An ASGI
+        scope dict arrives only from an external host (uvicorn,
+        ``httpx.ASGITransport``) or under ``BB_FORCE_ASGI_SCOPE=1``, and is
+        converted here, once; the same edge wraps the host's ``send`` with the
+        native→ASGI conversion, while BlackBull's own server passes a
+        native-capable send through untouched.  Lifespan is the one scope that
+        is never a request and never becomes a ``Connection``.
+
+        Args:
+            conn: A ``Connection``, or an ASGI scope dict from a host.
+            receive: Optional because a handler that never reads a body never
+                touches it — the router guards on a missing receive and
+                dispatch completes normally.  A conforming ASGI host always
+                passes a callable; the tolerance is for direct drives.
+            send: The host's send callable.
+        """
         # ``target`` is what the actor's disconnect-detecting receive wrapper
         # shares with us (the Connection natively, the scope dict in the compat
         # lanes); ``disconnected(target)`` reads the flag off whichever it is.
@@ -745,7 +767,7 @@ class BlackBull:
             send = _to_asgi_boundary(send)
         target = conn
         if isinstance(conn, Connection):
-            request = conn                        # HTTP/WebSocket native
+            request = conn
         elif conn.get('type') == 'lifespan':
             await self._handle_lifespan(receive, send)
             return
@@ -1136,7 +1158,7 @@ class BlackBull:
     def raw_handler(self, name: str, *, port: int | None = None,
                     detector: object | None = None, tls: bool = False,
                     stateful: bool = True):
-        """Decorator form of :meth:`register_protocol_handler`.
+        """Decorator form of [`register_protocol_handler`][blackbull.app.BlackBull.register_protocol_handler].
 
         ::
 

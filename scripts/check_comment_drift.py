@@ -109,6 +109,16 @@ RULES: list[Rule] = [
                     r'|\bbugs?\s+\d+\.\d+[a-z]?', re.I),
          _is_timeline_scope,
          'an internal tracker id no reader outside the project can resolve'),
+    # A bare ISO date is deliberately NOT refused: measured on this tree, 3 of
+    # the 8 prose lines carrying one are deprecation contracts whose sentence
+    # wrapped, leaving the date on a line without the word "removal".  A 38%
+    # false-positive rate is how a check gets bypassed.  A date attached to a
+    # decision has no such second reading.
+    Rule(re.compile(r'\b(?:decision|decided|agreed|chosen)\b[^\n]{0,40}\d{4}-\d{2}-\d{2}'
+                    r'|\d{4}-\d{2}-\d{2}[^\n]{0,40}\b(?:decision|decided|agreed|chosen)\b',
+                    re.I),
+         _is_timeline_scope,
+         'a decision date; state what was decided, and git log owns when'),
     Rule(re.compile(r'\bBLA-(?:A-)?\d+'),
          lambda p: _is_shipped_source(p) or _is_public_doc(p),
          'a private tracker id in shipped source or a public document.  State '
