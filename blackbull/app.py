@@ -340,8 +340,7 @@ class BlackBull:
         The hook runs once in the master, before the listening socket is
         created and before workers fork; :meth:`on_startup` runs per worker,
         after both.  In single-worker mode the one process is warmed before it
-        binds.  The Workers deployment page explains what makes a warmed
-        master's heap survive the fork.
+        binds.
 
         Hooks receive the ``app`` and must do **pure warming only** — drive hot
         code paths, prime codecs/TLS — and acquire **no** per-worker resources
@@ -353,17 +352,8 @@ class BlackBull:
         Warm-up is best-effort: a hook's exception is logged and swallowed
         (the master degrades to a cold start), and total warm-up time is capped
         by ``BB_WARMUP_BUDGET_S`` (default 60 s).  Multiple hooks run in
-        registration order.
-
-        Example::
-
-            @app.on_warmup
-            async def warm(app):
-                from blackbull import Connection, Headers
-                conn = Connection(
-                    method='POST', path='/rpc', raw_path=b'/rpc',
-                    headers=Headers([(b'content-type', b'application/grpc')]))
-                await app.warm_request(conn, body=req_bytes, n=2000)
+        registration order.  The Workers deployment page shows a hook and
+        explains what makes a warmed master's heap survive the fork.
         """
         self._warmup_hooks.append(fn)
         return fn
@@ -1217,21 +1207,13 @@ class BlackBull:
         For ``workers > 1`` *or* ``reload=True`` the master pre-binds
         sockets, forks workers, and blocks until SIGTERM / SIGINT.
 
-        Each argument left unset (``None``) is resolved, highest precedence
-        first: the explicit argument → a ``BLACKBULL_*`` environment variable
-        (``BLACKBULL_PORT`` / ``CERT`` / ``KEY`` / ``UNIX_PATH`` / ``RELOAD``)
-        → a ``.env`` file in the working directory (needs the ``[dotenv]``
-        extra) → the bound :class:`~blackbull.AppConfig` → :func:`blackbull.serve`'s
-        own default.  Server-tuning knobs (``workers``, ``max_connections``,
-        queue depths) keep their ``BB_*`` environment variables; ``BLACKBULL_*``
-        is the deployment namespace.  The provenance of each non-default deploy
-        setting is logged once at startup on the ``blackbull.config`` logger::
-
-            app = BlackBull(config=AppConfig(port=8443, certfile='c.pem',
-                                             keyfile='k.pem'))
-            app.run()              # binds 8443 with TLS from the config
-            app.run(port=9000)     # explicit arg overrides the config's 8443
-            # BLACKBULL_PORT=9000 python app.py   # env overrides the config too
+        An argument left unset falls back to a ``BLACKBULL_*`` environment
+        variable, then to a ``.env`` file, then to the bound
+        :class:`~blackbull.AppConfig`; the Configuration guide gives the order
+        in full and names every variable.  Server-tuning knobs keep their
+        ``BB_*`` names — ``BLACKBULL_*`` is the deployment namespace.  The
+        provenance of each non-default setting is logged once at startup on
+        the ``blackbull.config`` logger.
 
         For embedded use under an existing event loop, or for pre-binding
         a socket before forking a test subprocess, instantiate

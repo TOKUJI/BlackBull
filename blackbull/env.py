@@ -687,24 +687,13 @@ def resolve_max_connections(raw: str | None) -> int:
     """Resolve ``BB_MAX_CONNECTIONS`` — ``auto``, ``0``, or a number.
 
     ``auto`` (the default) derives the cap from this process's own
-    ``RLIMIT_NOFILE``.  A cap above the file-descriptor budget is
-    decorative: ``accept()`` fails with ``EMFILE`` before the cap is
-    consulted, so the peer gets a dropped connection instead of the
-    ``503 + Retry-After`` the mechanism exists to send.  Derived, the cap
-    can only refuse connections the OS was going to refuse anyway — which
-    is what makes a finite default safe to ship — and it tracks the
-    operator's own intent, since raising the fd limit is how an operator
-    states how large this process may become.
+    ``RLIMIT_NOFILE``, less a reserve.  An explicit number is honoured as
+    given, *not* clamped to that budget: an operator who names a number
+    means it.  ``0`` disables the cap.
 
-    An explicit number is honoured as given, *not* clamped to the fd
-    budget: an operator who names a number means it, and silently running
-    a different one would make the live configuration differ from the
-    configured one with nothing to show for it.  ``0`` disables the cap.
-
-    Note this bounds *descriptor exhaustion*, not event-loop health.  A
-    ceiling reflecting what one asyncio loop serves well is a policy
-    number that depends on the workload — set it explicitly; 1024 is a
-    typical single-loop value.
+    The environment-variable reference argues why a derived default is safe
+    to ship, and why this bounds descriptor exhaustion rather than
+    event-loop health.
     """
     if raw is None or raw.strip().lower() in ('', 'auto'):
         try:

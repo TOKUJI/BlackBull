@@ -143,9 +143,10 @@ inherits:
 @app.on_warmup
 async def warm(app):
     from blackbull import Connection, Headers
-    conn = Connection(method='GET', path='/', raw_path=b'/',
-                      headers=Headers([]))
-    await app.warm_request(conn, n=2000)
+    conn = Connection(
+        method='POST', path='/rpc', raw_path=b'/rpc',
+        headers=Headers([(b'content-type', b'application/grpc')]))
+    await app.warm_request(conn, body=req_bytes, n=2000)
 ```
 
 Two mechanisms carry the warmth across `fork()`.  PEP 659
