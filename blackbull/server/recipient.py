@@ -1304,16 +1304,13 @@ class HTTP1Recipient(BaseRecipient):
     async def __call__(self) -> dict:
         """The ASGI receive channel: the same body, encoded as event dicts.
 
-        The compat surface, and the only place the ``http.request`` dict is
-        built.  It costs one dict per chunk and is paid for by the caller that
-        wanted the ASGI encoding — a full-form handler calling ``receive()``,
-        or an external host.  ``Connection.body()`` / ``stream()`` take
-        :meth:`next_chunk` and pay nothing.
+        The only place the ``http.request`` dict is built, for whoever wants
+        that encoding — a full-form handler calling ``receive()``, or an
+        external host.  ``Connection.body()`` / ``stream()`` take
+        :meth:`next_chunk` and skip the per-chunk dict.
 
-        The event sequence is unchanged: ``more_body`` is recovered from
-        ``_done``, which :meth:`next_chunk` has just set, so a Content-Length
-        body still ends on its last data event while a chunked body still
-        ends on a separate empty one.
+        A Content-Length body ends on its last data event; a chunked body ends
+        on a separate empty one.
         """
         if self._done:
             return {'type': ASGIEvent.HTTP_DISCONNECT}

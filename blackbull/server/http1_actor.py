@@ -524,9 +524,9 @@ class HTTP1Actor(Actor):
     Supervisor strategy: isolate — an unhandled exception from a RequestActor
     closes the connection without crashing sibling connections.
 
-    If *aggregator* is ``None`` the actor falls back to the legacy direct-
-    dispatcher path (fires events via ``app._dispatcher`` directly), so that
-    BlackBull apps without a full EventAggregator still receive lifecycle events.
+    If *aggregator* is ``None`` the actor fires events through
+    ``app._dispatcher`` directly, so an app assembled without an
+    EventAggregator still receives the lifecycle events.
     """
 
     # Class-level defaults, because test doubles built with ``object.__new__``

@@ -310,7 +310,7 @@ async def test_plain_middleware_send_wrapper_sees_native():
     """An undecorated middleware that wraps ``send`` must receive
     NativeResponse on the H1 native path — never raw ``Response`` objects.
 
-    Before 0.43.2 ``_wrap_send`` was applied at ``BlackBull.__call__``
+    Before 0.43.2 ``_wrap_send_native`` was applied at ``BlackBull.__call__``
     (outermost), so a simplified handler returning a dict (auto-JSONResponse)
     reached the middleware's send wrapper as a ``Response`` object →
     ``TypeError: 'Response' object is not subscriptable``.  The adapter now

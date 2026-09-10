@@ -94,7 +94,7 @@ def test_no_annotated_closure_in_a_per_request_factory(path):
     assert not offenders, (
         'Annotated nested def(s) in a per-request factory — each costs '
         '~90 ns per creation. Strip the annotations and record the accepted '
-        'shape in a comment (see blackbull/app.py::_wrap_send):\n'
+        'shape in a comment (see blackbull/app.py::_wrap_send_native):\n'
         + '\n'.join(f'  {path}:{line}  {factory}::{closure}  ({what})'
                     for factory, closure, line, what in offenders))
 

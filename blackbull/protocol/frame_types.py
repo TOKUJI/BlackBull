@@ -616,14 +616,11 @@ class PushPromise(FrameBase):
 class GoAway(FrameBase):
     """RFC 9113 §6.8 — GOAWAY frame.
 
-    The frame's stream identifier (set by ``FrameBase``) MUST be 0; this is a
-    connection-level frame.  The first 4 bytes of the payload are the
-    ``last_stream_id`` (a separate field) and the next 4 bytes are the error
-    code.  Earlier revisions of this class assigned the payload's
-    last_stream_id back into ``self.stream_id``, which made every outgoing
-    GOAWAY ship with the wrong frame header — h2spec saw a malformed GOAWAY
-    and reported "Error: connection error: PROTOCOL_ERROR" instead of
-    accepting the GOAWAY for the connection-error tests.
+    GOAWAY is connection-level, so the frame header's stream identifier is
+    always 0.  ``last_stream_id`` is a *separate* field carried in the first 4
+    bytes of the payload, followed by the 4-byte error code; a GOAWAY
+    announcing stream 3 still rides on stream 0.  Held by
+    ``tests/unit/test_frame.py::test_goaway_save_includes_last_stream_id_and_error_code``.
     """
     FRAME_TYPE = FrameTypes.GOAWAY
     def __init__(self, length: int, type_, flags: int, stream_id: int, *, data=None, **kwds):

@@ -256,7 +256,7 @@ class Compression:
         Same predicate as the compress path's decision
         point: compressible Content-Type AND no pre-existing Content-Encoding.
         """
-        # Unannotated on purpose: rebuilt per request (see _wrap_send in
+        # Unannotated on purpose: rebuilt per request (see _wrap_send_native in
         # app.py).  ``event`` is a NativeResponse or an ASGISendEvent.  The
         # import lives at per-request scope — inside the per-event closure it
         # would re-bind for every chunk of a streamed response.
@@ -315,7 +315,7 @@ class Compression:
         # one object at the decision point.
         pending_header = None
 
-        # Unannotated on purpose: rebuilt per request (see _wrap_send in
+        # Unannotated on purpose: rebuilt per request (see _wrap_send_native in
         # app.py).  ``event`` is a NativeResponse or an ASGISendEvent.  The
         # import lives at per-request scope — inside the per-event closure it
         # would re-bind for every chunk of a streamed response.

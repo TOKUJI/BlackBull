@@ -375,9 +375,21 @@ class TestFrameSavePayload:
         )
 
     def test_goaway_save_includes_last_stream_id_and_error_code(self):
-        """GoAway.save() must produce a 17-byte frame (9 header + 8 payload)."""
+        """GoAway.save() must produce a 17-byte frame (9 header + 8 payload).
+
+        The header's stream identifier and the payload's ``last_stream_id``
+        are two fields.  A GOAWAY announcing stream 3 still rides on stream 0,
+        because GOAWAY is connection-level (RFC 9113 §6.8); letting the
+        payload's value reach the header ships a malformed frame that a peer
+        reads as a connection error rather than as the GOAWAY it is.
+        """
         frame = FrameFactory().goaway(last_stream_id=3, error_code=0)
         wire = frame.save()
+        assert int.from_bytes(wire[5:9], 'big') == 0, (
+            f'GOAWAY is connection-level, so the frame header must name '
+            f'stream 0 even when the payload announces stream 3; '
+            f'got {int.from_bytes(wire[5:9], "big")}'
+        )
         assert len(wire) == 17, (
             f'GoAway wire frame must be 17 bytes (9 header + 4 last-stream-id '
             f'+ 4 error-code); got {len(wire)}: {wire.hex()}'

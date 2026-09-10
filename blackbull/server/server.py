@@ -192,7 +192,7 @@ class Server:
     :meth:`BlackBull.raw_handler` get their own listening socket.
     When ssl_context or certfile is set, the HTTP listener runs as HTTPS.
 
-    Formerly ``ASGIServer`` — that name remains as a backward-compat alias.
+    ``ASGIServer`` is an alias of this class.
     """
     def __init__(self, app, *,
                  ssl_context=None, certfile=None, keyfile=None, password=None,

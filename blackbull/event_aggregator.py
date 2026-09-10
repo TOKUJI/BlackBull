@@ -31,9 +31,9 @@ class EventAggregator:
     It is instantiated once per application and passed by reference to each
     Actor at construction time.
 
-    Each method corresponds to one Level B event defined in ActorDesign.md.
-    Methods are called by Actors; they must always be called from the event
-    loop thread.
+    Each method corresponds to one Level B event, the set the Events guide
+    documents.  Methods are called by Actors, always from the event-loop
+    thread.
 
     Note:
         Do not export this class from ``blackbull/__init__.py``.
@@ -125,12 +125,9 @@ class EventAggregator:
     def has_request_completed_listeners(self) -> bool:
         """Return True if any ``request_completed`` handler is registered.
 
-        Read on the request hot path to decide whether the per-request
-        AccessLogRecord (whose wire fields this event reports) must be built,
-        and whether the disconnect-detecting receive wrapper (whose
-        ``mark_disconnected`` this event reads to suppress itself on a dropped
-        request) is observed.  Cached against the dispatcher's registration
-        generation, so the lookup runs only when listeners change.
+        Cached against the dispatcher's registration generation, so the
+        request path can ask on every request and the lookup runs only when
+        listeners change.
         """
         gen = self._dispatcher.generation
         if gen != self._req_completed_cache_gen:

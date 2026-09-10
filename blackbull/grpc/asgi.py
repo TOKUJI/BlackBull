@@ -584,7 +584,7 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
     flush_lock = asyncio.Lock()
 
     # Unannotated for the per-request-closure reason (see
-    # app.py::_wrap_send); takes nothing, returns nothing.
+    # app.py::_wrap_send_native); takes nothing, returns nothing.
     async def _flush():
         async with flush_lock:
             if not buf:
@@ -608,7 +608,7 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
     finished = False
 
     # Unannotated for the per-request-closure reason (see
-    # app.py::_wrap_send); takes nothing, returns nothing.
+    # app.py::_wrap_send_native); takes nothing, returns nothing.
     async def _idle_flusher():
         while not finished:
             await flush_wanted.wait()
@@ -618,7 +618,7 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
     idle_flusher = asyncio.create_task(_idle_flusher())
 
     # Unannotated for the per-request-closure reason (see
-    # app.py::_wrap_send); takes nothing, returns nothing.
+    # app.py::_wrap_send_native); takes nothing, returns nothing.
     async def _stop_idle_flusher():
         # Graceful stop so an in-flight flush completes rather than being
         # cancelled mid-send; the drive/error paths flush any tail themselves.
@@ -631,7 +631,7 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
             logger.exception('gRPC stream idle flusher raised')
 
     # Unannotated for the per-request-closure reason (see
-    # app.py::_wrap_send); takes nothing, returns nothing.
+    # app.py::_wrap_send_native); takes nothing, returns nothing.
     async def _drive():
         # Coalesce consecutive messages into one DATA frame.  A *synchronous*
         # burst (the bulk case — thousands of tiny messages yielded without

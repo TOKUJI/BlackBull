@@ -228,9 +228,8 @@ Step = (WaitForRequest | ExpectRequest | SendStatusLine | SendHeader | EndHeader
 class ScenarioH1Server:
     """An ordered sequence of steps, plus a name for test parametrisation.
 
-    ``steps`` is a **tuple**, matching :class:`ScenarioH2` — a frozen
-    dataclass holding a mutable list is a frozen container of mutable
-    contents, and the HTTP/2 half settled the question first.
+    ``steps`` is a **tuple**, as on :class:`ScenarioH2`: a frozen dataclass
+    holding a mutable list is a frozen container of mutable contents.
     """
     steps: tuple[Step, ...] = ()
     name: str = ''

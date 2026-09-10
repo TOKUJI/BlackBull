@@ -500,10 +500,9 @@ def response_matches(response, match: dict) -> bool:
 def scenario_to_json(scenario: Scenario) -> str:
     """Serialise *scenario* to JSON Lines (one step per line).
 
-    The same free function the other three vocabularies expose.  This cell
-    shipped first and grew ``Scenario.to_json`` as a method; the method
-    stays, because callers use it, but a reader comparing the four files
-    should not be told they differ where they do not.
+    The same free function the other three vocabularies expose, so a reader
+    comparing the four files is not told they differ where they do not.
+    ``Scenario.to_json`` is the same serialisation reached as a method.
     """
     return scenario.to_json()
 

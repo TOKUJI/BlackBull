@@ -150,8 +150,8 @@ class StaticFiles:
 
         ``index`` (default ``None`` — off): when set to a filename (e.g.
         ``'index.html'``), a request that resolves to a *directory* is
-        served that file from inside the directory if it exists.  Off by
-        default so existing exact-path serving is unchanged; the
+        served that file from inside the directory if it exists.  Left off, a
+        request that resolves to a directory is not served at all; the
         ``blackbull serve`` CLI turns it on to match ``python -m
         http.server``'s directory-index behaviour.
 

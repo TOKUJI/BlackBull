@@ -398,7 +398,7 @@ class HTTP2Actor(Actor):
         ``docs/about/rfc9113-implementation.md`` §6.9.1.
         """
 
-        # Unannotated for the per-request-closure reason (see app.py::_wrap_send).
+        # Unannotated for the per-request-closure reason (see app.py::_wrap_send_native).
         async def _credit(n, sid=stream_id):
             # Skip the stream-level frame once the stream is released (§5.1
             # forbids non-PRIORITY frames on a closed stream); the
@@ -428,7 +428,7 @@ class HTTP2Actor(Actor):
         if balance <= 0 or self._goaway_sent:
             return
 
-        # Unannotated for the per-request-closure reason (see app.py::_wrap_send).
+        # Unannotated for the per-request-closure reason (see app.py::_wrap_send_native).
         async def _replay():
             try:
                 await self.send_frame(self.factory.window_update(0, balance))
@@ -550,7 +550,7 @@ class HTTP2Actor(Actor):
         over-admit.
         """
 
-        # Unannotated for the per-request-closure reason (see app.py::_wrap_send).
+        # Unannotated for the per-request-closure reason (see app.py::_wrap_send_native).
         def _cb(_task):
             self._active_stream_count = max(0, self._active_stream_count - 1)
             if is_ws:
@@ -1406,7 +1406,7 @@ class HTTP2Actor(Actor):
 
         sid = stream.stream_id
 
-        # Unannotated for the per-request-closure reason (see app.py::_wrap_send).
+        # Unannotated for the per-request-closure reason (see app.py::_wrap_send_native).
         async def _replay_credit(n):
             # Both windows, so a reader that withheld credit at its buffer cap
             # reopens the peer's symmetrically with the per-frame path.

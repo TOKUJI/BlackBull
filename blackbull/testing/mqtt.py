@@ -56,15 +56,13 @@ class MQTTTestBroker:
 
     The helper is **async-only by design**: taps are coroutines and
     ``publish`` awaits them on the caller's event loop, so tests are written
-    as ``async def`` (the suite runs with ``asyncio_mode = strict``).  A
-    synchronous façade like :class:`blackbull.testing.native.NativeClient` is
-    deliberately not provided — there is no background loop to bridge to, and
-    no socket or broker that would need one.
+    as ``async def`` (the suite runs with ``asyncio_mode = strict``).  There
+    is no synchronous façade of the
+    :class:`blackbull.testing.native.NativeClient` kind: with no socket,
+    broker or background loop, there would be nothing to bridge to.
 
-    The ``async with`` form is ceremony: the broker binds no socket, starts no
-    task and owns no resource, so entering and exiting are no-ops.  It is kept
-    for a consistent test idiom, and so a later version can acquire state here
-    without changing call sites.
+    ``async with`` is supported for a consistent test idiom, but the broker
+    owns no resource, so entering and exiting are no-ops.
     """
 
     def __init__(self, app: Any) -> None:

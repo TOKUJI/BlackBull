@@ -35,6 +35,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   binding.  A static audit that checks every resource cap is wired at its
   rejection site was being satisfied by a docstring; it now reads the syntax
   tree, so prose cannot stand in for wiring.
+- Published API docstrings no longer retell how the code got here.  `GoAway`
+  narrated a past defect; the invariant it was protecting — GOAWAY is
+  connection-level, so the frame header names stream 0 while `last_stream_id`
+  is a separate payload field — is now asserted by the test that covers the
+  frame, and the docstring cites it.  Seven more entries stated an
+  arrangement in terms of the change that produced it (`Server` "formerly
+  `ASGIServer`", a default kept "so existing serving is unchanged", three
+  supported paths described as "legacy"), and now state the arrangement.
+  Eighteen citations of a `_wrap_send` that does not exist — one of them
+  inside an assertion message, so a failing architecture check sent the
+  developer to a function they could not find — name `_wrap_send_native`.
+  Two pointers a reader could not follow are retired: a `guide.md §14` that
+  is not a file, and an `ActorDesign.md` that exists nowhere in the
+  repository.
 
 ## Versioning
 
