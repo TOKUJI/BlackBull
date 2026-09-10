@@ -1131,10 +1131,8 @@ class HTTP2Sender(BaseSender):
     def connection_window_size(self) -> int:
         """The shared connection-level send window.
 
-        Proxies :attr:`ConnectionWindow.size` so direct users' per-sender
-        crediting and flow-control tests keep reading/writing
-        ``sender.connection_window_size`` while the real state lives on the
-        shared object.
+        A property over :class:`ConnectionWindow`, not a per-sender field:
+        every sender on the connection reads and writes the same value.
         """
         return self._conn_window.size
 

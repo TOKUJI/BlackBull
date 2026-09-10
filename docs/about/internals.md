@@ -492,8 +492,8 @@ underneath them — consume that channel directly.  The ASGI
 `http.request` dict is built **only** by `HTTP1Recipient.__call__` /
 `HTTP2Recipient.__call__`, which is to say only when something asks for
 the ASGI encoding: a full-form handler calling `receive()`, or an
-external host.  It used to be built unconditionally, so a handler using
-`conn.body()` paid one dict per chunk that it never read.
+external host.  A handler using `conn.body()` therefore pays no per-chunk
+dict at all.
 
 The two channels share one end marker on both protocols.  `__call__`
 does not *consult* it — a full-form handler calling `receive()` past the
