@@ -564,23 +564,12 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
                            timeout: float = 0.25) -> None:
         """Close after briefly discarding whatever the peer is still sending.
 
-        Closing a socket with unread bytes in its receive queue makes the
-        kernel send RST, and an RST discards data we already wrote — so a peer
-        that is still mid-send when we answer never sees the response.  That
-        is not hypothetical: it is how a 431 for an over-budget header block
-        goes missing, because rejecting at the budget means, by design, not
-        reading the rest.
+        Reads and discards up to *max_bytes* for at most *timeout* seconds,
+        then closes.  Skipped when nothing was left unconsumed, so a completed
+        request still gets a bare close.
 
-        nginx calls this ``lingering_close``.  Both bounds matter: reading
-        without a byte cap hands an attacker the unbounded read the budget
-        exists to refuse, and reading without a deadline lets a slow peer hold
-        the connection open after it has been answered.
-
-        Skipped unless we are closing with bytes we chose not to consume.  A
-        completed request leaves the buffer empty, so the normal close stays a
-        bare close — lingering on every connection would put a timeout on the
-        teardown path that ``AsyncioWriter.close`` deliberately keeps free of
-        even one extra loop turn, for the burst-keepalive workload.
+        The Internals page explains why a rejection has to close this way and
+        why both bounds are needed.  nginx calls it ``lingering_close``.
         """
         if self.transport is None:
             return

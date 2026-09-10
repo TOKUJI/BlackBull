@@ -7,7 +7,7 @@ via :meth:`BlackBull.raw_handler` / :meth:`BlackBull.register_protocol_handler`.
 
 A *binding* owns protocol selection, *its own* framing reads, and Actor
 construction.  ``ConnectionActor`` peeks only a tiny protocol-agnostic
-discriminator prefix (decouple-connection-detection, Stage 2); the 24-byte
+discriminator prefix; the 24-byte
 HTTP/2 preface read and the HTTP/1.1 request-line read live in
 :class:`Http2Binding` / :class:`Http1Binding`, reached through the single
 :meth:`ProtocolBinding.serve` entry point.
@@ -17,7 +17,7 @@ Two dispatch routes:
 * **Detection** (the shared HTTP listener): ``ConnectionActor`` peeks the
   discriminator and asks each :class:`ProtocolBinding` via :meth:`claims` — ALPN
   first, then the ordered cleartext chain (``http2`` preface, ``http1``
-  fallback) — then replays the peeked bytes to the winner's :meth:`serve`.
+  fallback) — then calls the winner's :meth:`serve`.
 * **Port-bound** (raw protocols): a binding registered with ``port=`` gets its
   own listening socket; connections there skip detection entirely.
 
@@ -129,14 +129,15 @@ class ProtocolBinding:
     A binding declares how many leading bytes it needs to recognise a
     connection (:attr:`detect_prefix_len`) and whether it :meth:`claims` a given
     peeked prefix; the winner's single :meth:`serve` then performs *its own*
-    protocol reads from a reader positioned at the start of the stream (the
-    peeked bytes are replayed via a :class:`~blackbull.server.recipient.PrefixReader`).
+    protocol reads from a reader still positioned at the first byte, because
+    detection peeks without consuming.  Only a reader that cannot peek hands
+    back what it took, and there a
+    :class:`~blackbull.server.recipient.PrefixReader` restores the stream.
 
-    Collapsing the old ``serve_alpn`` / ``serve_cleartext`` / ``serve_raw`` trio
-    into one ``serve(conn)`` is what lets ``ConnectionActor`` stay
-    protocol-agnostic (decouple-connection-detection, Stage 2): the ``24``-byte
-    HTTP/2 preface read and the HTTP/1.1 ``\\r\\n`` request-line read now live in
-    the bindings, not in the dispatcher.
+    One ``serve(conn)`` rather than a per-transport trio is what lets
+    ``ConnectionActor`` stay protocol-agnostic: the ``24``-byte HTTP/2 preface
+    read and the HTTP/1.1 ``\\r\\n`` request-line read live in the
+    bindings, not in the dispatcher.
     """
 
     name: str = ''
@@ -170,8 +171,8 @@ class ProtocolBinding:
         """Unified detection predicate: does this binding own a connection whose
         first bytes are *prefix* (with negotiated *alpn*)?
 
-        The single selection seam for cleartext + shared-port dispatch
-        (decouple-connection-detection, Stage 1).  Default delegates to
+        The single selection seam for cleartext + shared-port dispatch.
+        Default delegates to
         :meth:`matches_cleartext`; :class:`RawBinding` overrides it to consult
         its :class:`ProtocolDetector`.  ``alpn`` is accepted so a future binding
         can claim on the negotiated token, not just the wire prefix.
@@ -180,8 +181,8 @@ class ProtocolBinding:
 
     async def serve(self, conn: ConnectionView) -> None:
         """Drive one connection.  ``conn.reader`` is positioned at the first
-        byte of the stream (detection peeks are replayed), so the binding reads
-        whatever framing it needs — no bytes are pre-consumed on its behalf."""
+        byte of the stream, so the binding reads whatever framing it needs —
+        detection peeked without consuming anything on its behalf."""
         raise NotImplementedError
 
     async def on_detect_timeout(self, conn: ConnectionView) -> None:
@@ -189,8 +190,7 @@ class ProtocolBinding:
         detection deadline.  Default: close silently (the caller closes the
         transport) — appropriate for a protocol with no meaningful "you were too
         slow" wire message.  HTTP overrides this to emit a 408.  Lets
-        ``ConnectionActor`` stay free of protocol-specific status strings
-        (decouple-connection-detection, Stage 3)."""
+        ``ConnectionActor`` stay free of protocol-specific status strings."""
         return
 
 

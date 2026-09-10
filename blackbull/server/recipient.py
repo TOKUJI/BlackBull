@@ -1226,20 +1226,12 @@ class HTTP1Recipient(BaseRecipient):
     async def next_chunk(self) -> bytes | None:
         """The next body chunk, or ``None`` once the body is complete.
 
-        The native receive channel: a chunk is the bytes themselves, and the
-        end of the body is carried by the *call protocol* rather than by a
-        ``more_body`` field beside the payload.
-
-        ``None``, not ``b''``: an empty body is a real body, the same reason
-        :class:`~blackbull.native.NativeResponse` decides presence with
-        ``is not None``.  On both framings the sentinel is unambiguous — a
-        zero-length chunk *is* the terminator in chunked encoding (RFC 9112
-        §7.1), and a Content-Length slice is never empty.
-
-        Asking again past the end keeps answering ``None``.  A peer that
+        ``None``, not ``b''`` — an empty body is a real body.  Asking again past the end keeps answering ``None``.  A peer that
         vanishes mid-body raises :class:`ClientDisconnected` — a truncated
         upload must never read as a complete one — and so does a body-read
         timeout, which is recorded as a cap hit first.
+
+        The Internals page states the receive-path invariant this implements.
         """
         if self._done:
             return None

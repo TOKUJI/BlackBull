@@ -465,7 +465,9 @@ already-answered connection open.  nginx calls this `lingering_close`.
 
 It is skipped unless the connection is closing with bytes it chose not to
 consume — a completed request leaves the buffer empty, so the ordinary
-close stays a bare close.
+close stays a bare close.  Lingering on every connection would put a
+timeout on the teardown path that `AsyncioWriter.close` keeps free of even
+one extra loop turn, which is what the burst-keepalive workload needs.
 
 ## Receive-path invariant
 
