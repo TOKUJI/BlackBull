@@ -20,6 +20,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   defect history; the invariant is stated where it applies, and where a test
   holds it, that test is named.  Three new architecture tests fail the build
   when a stated default and the shipped one disagree again.
+- The Workers deployment page now documents warm-up before fork — a shipped
+  feature previously reachable only through its budget environment variable —
+  and `@app.on_warmup`'s reference entry states the contract rather than the
+  copy-on-write mechanism behind it.  Published docstrings no longer restate
+  arguments the guides already make: `app.run()`, `BB_MAX_CONNECTIONS`, the
+  WebSocket recipient, `read_head`, `next_chunk` and `linger_close` each state
+  their contract and name the page that argues it.  Three published claims
+  were wrong and are corrected — a WebSocket connection's default read mode
+  costs the same loop touches per request as HTTP/1.1 (the higher figure was
+  the read-ahead mode's), `after_dispatch` now names the three values it
+  returns instead of only defending its shape, and protocol detection peeks
+  without consuming rather than replaying peeked bytes to the winning
+  binding.  A static audit that checks every resource cap is wired at its
+  rejection site was being satisfied by a docstring; it now reads the syntax
+  tree, so prose cannot stand in for wiring.
 
 ## Versioning
 
