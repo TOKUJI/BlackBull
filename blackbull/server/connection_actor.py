@@ -70,21 +70,15 @@ class ConnectionActor(Actor):
                                  if bound_binding is not None else 'http')
 
     async def run(self) -> None:
-        # Per-connection cap-hit rate-limit state — bound on the
-        # ambient contextvar so every log_cap_hit() call inside this
-        # task tree (protocol actor, stream actors, recipients,
-        # senders) picks it up without constructor plumbing.  TaskGroup
-        # children inherit the context automatically.
         import time  # noqa: PLC0415
-        # Lazy holder: the real CapHitCounter (and its os.urandom connection id)
-        # is built only if a cap actually fires.  On the keep-alive path this is
-        # a strict no-op; on connection-churn profiles it removes a getrandom(2)
-        # syscall + an allocation + a flush from every accepted connection.
-        # Hand the accept-time connection id to the (lazy) cap counter so a
-        # cap-hit record correlates with lifecycle events and ProtocolContext
-        # — one id per connection.  Only when the actor was constructed
-        # without an id (direct test drives) does the counter fall back to
-        # generating its own.
+        # Per-connection cap-hit state, bound on the ambient contextvar so every
+        # log_cap_hit() in this task tree picks it up without constructor
+        # plumbing (TaskGroup children inherit the context).  Lazy: the real
+        # counter and its os.urandom id are built only if a cap fires, which
+        # keeps a getrandom(2) syscall, an allocation and a flush off every
+        # accepted connection.  It reuses the accept-time id so a cap-hit record
+        # correlates with the lifecycle events, and generates its own only for
+        # the direct test drives that pass none.
         counter = (_LazyCapHitCounter(connection_id=self._connection_id)
                    if self._connection_id else _LazyCapHitCounter())
         start = time.monotonic()
@@ -95,9 +89,8 @@ class ConnectionActor(Actor):
             try:
                 await self._dispatch()
             except Exception as exc:
-                # One error path for every protocol: a handler / actor that
-                # raises is isolated here (decouple-connection-detection Stage 4
-                # — RawProtocolActor's L2 error wrapper folded in).
+                # One error path for every protocol: a handler or actor that
+                # raises is isolated here.
                 if self._aggregator is not None:
                     await self._aggregator.on_error({}, exc)
             finally:
@@ -105,10 +98,9 @@ class ConnectionActor(Actor):
                 # transport goes away.
                 counter.flush(peer=self._peername)
                 await self._writer.close()
-                # ``connection_closed`` now fires for *every* protocol, not just
-                # raw/MQTT (the old asymmetry — decouple-connection-detection
-                # symptom #5).  ``_served_protocol`` is the binding that handled
-                # the connection (or the accept-time guess if none was selected).
+                # Fires for *every* protocol.  ``_served_protocol`` is the
+                # binding that handled the connection, or the accept-time guess
+                # when none was selected.
                 if self._aggregator is not None:
                     elapsed_ms = (time.monotonic() - start) * 1000
                     await self._aggregator.on_connection_closed(
@@ -152,10 +144,9 @@ class ConnectionActor(Actor):
         """Inspect the smallest discriminating prefix and return the binding.
 
         Grows the peek one step at a time up to ``max(detect_prefix_len)`` and
-        stops the instant a binding claims — so a short non-HTTP frame (e.g. a
-        15-byte MQTT CONNECT) is recognised on its first byte and never blocks
-        waiting for HTTP-sized input.  This is the fix for the shared-port MQTT
-        ``readuntil`` hang (decouple-connection-detection symptom #4).
+        stops the instant a binding claims — so a short non-HTTP frame (a
+        15-byte MQTT CONNECT, say) is recognised on its first byte and never
+        blocks waiting for HTTP-sized input.
 
         Nothing is consumed: the bytes stay in the reader, so the winning
         binding gets a stream still positioned at its own first byte and there
@@ -186,22 +177,16 @@ class ConnectionActor(Actor):
         from ..env import get_settings as _get_settings  # noqa: PLC0415
         cfg = _get_settings()
 
-        # Slowloris defence at protocol-detection: a connected peer that
-        # never sends its discriminator prefix would otherwise hold a slot
-        # forever waiting on the peek read.  We use the same ``header_timeout``
-        # setting HTTP1Actor uses for its own header-completion deadline — the
-        # practical worst case is two timeouts back-to-back (protocol-detect +
-        # first request headers), still bounded.  ``header_timeout=0`` disables
-        # both halves.
+        # Slowloris defence at detection: a peer that connects and never sends
+        # its discriminator would hold a slot forever on the peek read.  Shares
+        # HTTP1Actor's ``header_timeout``, so the worst case is two bounded
+        # timeouts back to back (detect + first headers); ``0`` disables both.
         deadline = cfg.header_timeout if cfg.header_timeout > 0 else None
 
-        # Replaces the per-phase ``async with asyncio.timeout(d):``
-        # allocations.  This object is per-connection registry state, not a
-        # per-connection timer — one process-wide scanner walks the registry
-        # (see ``deadline.py``).  It binds to *this* task, the per-connection
-        # dispatch task, and is passed down into HTTP1Actor / HTTP1Recipient
-        # so each phase boundary (peek, headers, body chunk, keep-alive)
-        # re-arms the same object.
+        # Per-connection registry state, not a per-connection timer: one
+        # process-wide scanner walks the registry (see ``deadline.py``).  Bound
+        # to *this* dispatch task and passed down into HTTP1Actor /
+        # HTTP1Recipient, so every phase boundary re-arms the same object.
         dl = ConnectionDeadline()
 
         # Port-bound non-ASGI protocol: the listening socket already
@@ -211,12 +196,8 @@ class ConnectionActor(Actor):
             await self._bound_binding.serve(self._make_conn(self._reader, dl))
             return
 
-        # Non-consuming detection: ``ConnectionActor`` inspects only a
-        # protocol-agnostic discriminator — no hardcoded byte counts,
-        # delimiters, or HTTP knowledge — and consumes none of it.  Each
-        # binding then reads its own framing (the 24-byte preface / the
-        # ``\r\n`` request line) from a reader still positioned at the start
-        # of the stream, because the bytes never left it.
+        # The discriminator is protocol-agnostic: no hardcoded byte counts, no
+        # delimiters, no HTTP knowledge.  Each binding reads its own framing.
         alpn_binding = self._registry.by_alpn(self._alpn)
         try:
             if alpn_binding is not None:
@@ -244,11 +225,10 @@ class ConnectionActor(Actor):
             # no http1 fallback (it always does for HTTP listeners).  Close.
             return
         self._served_protocol = binding.name
-        # A buffer-owning reader peeked without consuming, so this is empty and
-        # the binding gets the reader itself.  A reader that could only read
-        # ahead hands back what it took, and the replay wrapper restores the
-        # stream — the indirection exists exactly where it is still needed and
-        # nowhere else.
+        # Empty for a buffer-owning reader, which peeked without consuming, so
+        # the binding gets that reader itself.  A reader that could only read
+        # ahead hands back what it took and the replay wrapper restores the
+        # stream — the indirection exists only where it is still needed.
         ahead = self._reader.take_ahead()
         reader = PrefixReader(ahead, self._reader) if ahead else self._reader
         await binding.serve(self._make_conn(reader, dl))
@@ -274,9 +254,9 @@ class ConnectionActor(Actor):
         """Peer connected but never sent its discriminator within the deadline.
 
         Records the (protocol-agnostic) slowloris cap hit, then delegates the
-        wire response to the binding's :meth:`~ProtocolBinding.on_detect_timeout`
-        — HTTP writes a 408; other protocols close silently.  No status string
-        lives here (decouple-connection-detection, Stage 3).
+        wire response to the binding's
+        :meth:`~ProtocolBinding.on_detect_timeout` — HTTP writes a 408, other
+        protocols close silently.
         """
         from .cap_log import log_cap_hit  # noqa: PLC0415
         # The deadline only fires under ``_guarded``, which arms a timer solely

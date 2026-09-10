@@ -143,10 +143,9 @@ class ProtocolBinding:
     alpn_token: str | None = None
     port: int | None = None
     #: Bytes of the connection prefix this binding needs to make a ``claims``
-    #: decision.  ``ConnectionActor`` peeks the maximum across all candidate
-    #: bindings (incrementally, stopping as soon as a higher-priority binding
-    #: claims) so a short non-HTTP frame is never blocked waiting for HTTP-sized
-    #: input.  ``0`` = the catch-all fallback (claims any prefix).
+    #: decision; ``0`` = the catch-all fallback, which claims any prefix.
+    #: ``ConnectionActor._peek_and_select`` grows the peek towards the maximum
+    #: across candidates.
     detect_prefix_len: int = 0
 
     def matches_cleartext(self, first_line: bytes) -> bool:
@@ -206,18 +205,14 @@ class Http2Binding(ProtocolBinding):
         return first_line == _HTTP2_PREFACE_FIRST_LINE
 
     def prefix_possible(self, prefix: bytes) -> bool:
-        # The preface's first line is fixed: once *prefix* diverges from it, no
-        # prefix that continues from it can ever match, so the http1 catch-all
-        # decides on the bytes already in hand instead of waiting for a
-        # 16-byte peek.
         return _HTTP2_PREFACE_FIRST_LINE.startswith(prefix)
 
     async def serve(self, conn: ConnectionView) -> None:
-        # One read path for both routes: whether the peer arrived via ALPN ``h2``
-        # or the cleartext preface, ``conn.reader`` replays the peeked first line
-        # so the full 24-byte preface (RFC 9113 §3.4) reads back here.
-        # ``readexactly`` (not ``read``) so a byte-by-byte peer still yields the
-        # full remainder (regression: test_connection_actor fragmented preface).
+        # One read path for both routes: detection consumed nothing, so the
+        # full 24-byte preface (RFC 9113 §3.4) is still there to read whether
+        # the peer arrived via ALPN ``h2`` or the cleartext preface.
+        # ``readexactly`` (not ``read``) so a byte-by-byte peer still yields
+        # the whole remainder.
         preface = await conn.reader.readexactly(len(_HTTP2_PREFACE))
         if preface != _HTTP2_PREFACE:
             # Best-effort GOAWAY(PROTOCOL_ERROR) before closing so a peer that
@@ -230,7 +225,7 @@ class Http2Binding(ProtocolBinding):
             try:
                 await conn.writer.write(goaway)
             except Exception:
-                pass  # best-effort GOAWAY before rejecting the bad preface; peer may be gone.
+                pass
             raise ValueError(f'Invalid HTTP/2 preface: {preface!r}')
         await self._run(conn)
 
@@ -270,16 +265,15 @@ class Http1Binding(ProtocolBinding):
         await actor.run()
 
     async def on_detect_timeout(self, conn: ConnectionView) -> None:
-        # Best-effort 408 (RFC 9110 §15.5.9).  An h1 client parses it; a peer of
-        # any other cleartext protocol that stalled here simply ignores it.
+        # Best-effort 408 (RFC 9110 §15.5.9): an h1 client parses it, a peer of
+        # any other cleartext protocol that stalled here ignores it, and a peer
+        # that is already gone makes the write fail with nothing to be done.
         try:
             await conn.writer.write(
                 b'HTTP/1.1 408 Request Timeout\r\n'
                 b'connection: close\r\n'
                 b'content-length: 0\r\n\r\n')
         except Exception:
-            # Best-effort only — the peer may already be gone or the socket
-            # unwritable; there is nothing useful to do on a failed 408 write.
             pass
 
 
@@ -300,16 +294,14 @@ class RawBinding(ProtocolBinding):
         self.handler = handler
         self.detector = detector
         self.port = port
-        # Serve this binding's port through the server's TLS
-        # machinery (mqtts:// and friends).  Cleartext remains the default.
+        # Serve this binding's port through the server's TLS machinery
+        # (mqtts:// and friends).  Cleartext remains the default.
         self.tls = tls
         # Whether an exchange depends on what an earlier one left behind.
         # True by default: a raw protocol that keeps nothing is the rarer
         # case, and mistaking a stateful one for stateless scatters its state
         # silently, while the opposite mistake is refused out loud.
         self.stateful = stateful
-        # Cleared by the master when more than one worker would answer this
-        # binding's shared-port connections.  A dedicated port is unaffected.
         self._shared_dispatch = True
 
     @property
@@ -340,11 +332,10 @@ class RawBinding(ProtocolBinding):
         self._shared_dispatch = False
 
     async def serve(self, conn: ConnectionView) -> None:
-        # The handler owns the connection for its whole lifetime (long-lived,
-        # stateful protocols decide when to close).  Connection timing, error
-        # isolation, and the ``connection_closed`` event are provided uniformly
-        # by ``ConnectionActor.run()`` for every protocol, so a binding needs
-        # no Actor wrapper of its own.
+        # The handler owns the connection for its whole lifetime.  Timing,
+        # error isolation and the ``connection_closed`` event come from
+        # ``ConnectionActor.run()`` for every protocol alike, so a binding
+        # needs no Actor wrapper of its own.
         ctx = ProtocolContext(
             peername=conn.peername, sockname=conn.sockname, ssl=conn.ssl,
             aggregator=conn.aggregator, connection_id=conn.connection_id,
@@ -371,10 +362,9 @@ class ProtocolRegistry:
             b.alpn_token: b for b in self._cleartext if b.alpn_token
         }
         self._ports: dict[str, RawBinding] = {}
-        # Cleartext-detection chain, cached: registrations happen at startup,
-        # but ``ConnectionActor`` consults the order on EVERY accepted
-        # connection — rebuilding it there cost a dict copy + two list
-        # allocations per accept (limited-conn churn analysis, 2026-07-12).
+        # Cached because ``ConnectionActor`` consults the order on EVERY accept
+        # while registration happens once at startup: rebuilding it per accept
+        # cost a dict copy plus two list allocations.
         self._detection_order: tuple[ProtocolBinding, ...] = tuple(self._cleartext)
 
     def register(
