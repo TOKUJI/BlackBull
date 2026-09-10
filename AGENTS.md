@@ -90,6 +90,11 @@ that only make sense inside BlackBull.
   turn that changed comments until an independent subagent has reviewed
   exactly those lines.  `scripts/changed_comments.py` is what defines "exactly
   those lines" — hand the reviewer that command, never a file list.
+  **What the API reference publishes is public members *and dunders*.**
+  mkdocstrings' default filter is `!^_[^_]`, which drops a single-underscore
+  name and keeps `__getitem__`; ten briefs said "public docstrings only" and
+  were lucky that no pass reached for a dunder.  A `#` comment renders
+  nowhere — that half was right.
   **Only unambiguous vocabulary is machine-refused** (sprint numbers, version
   boundaries, internal tracker ids).  `used to`, `legacy`, `still` and
   `no longer` are measured to be mostly present-tense and are deliberately
