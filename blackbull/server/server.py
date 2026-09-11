@@ -1,3 +1,22 @@
+"""The listening server: binds sockets, accepts connections, drives lifespan.
+
+[`Server`][blackbull.server.server.Server] — ``ASGIServer`` is an alias — is
+the object under ``BlackBull.run()``.  It resolves its
+[`Listener`][blackbull.server.listener.Listener] set into bound sockets, groups
+them by TLS context so a listener terminates the certificate it names, and
+serves each group through
+[`SocketManager`][blackbull.server.server.SocketManager].  Every accepted
+connection becomes a buffered protocol and, from there, one
+[`ConnectionActor`][blackbull.server.connection_actor.ConnectionActor].
+[`LifespanManager`][blackbull.server.server.LifespanManager] drives the ASGI
+lifespan handshake around all of it.
+
+``run()`` blocks until ``stop()``.  ``stop()`` closes the listeners first, then
+lets the requests already in flight finish inside a drain budget instead of
+cancelling them, because a cancelled handler leaves a client holding a
+half-written response.  ``open_socket()`` binds without serving — what the
+multi-worker master, and a test that needs a port before it forks, both use.
+"""
 import asyncio
 import contextlib
 

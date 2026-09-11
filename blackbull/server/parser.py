@@ -1,3 +1,18 @@
+"""HTTP/2 request parsing: a HEADERS frame becomes a native ``Connection``.
+
+[`parse_headers`][blackbull.server.parser.parse_headers] is the whole surface.
+Given a parsed HEADERS frame it returns the
+[`Connection`][blackbull.connection.Connection] the router and the application
+see — typed ``http`` for a request, ``websocket`` for an RFC 8441 Extended
+CONNECT — or ``None`` when the request is malformed, having marked the frame so
+the actor answers RST_STREAM.
+
+The request-level pseudo-header rules (RFC 9113 §8.3.1) live here: which
+pseudo-headers must be present, that ``:status`` may not appear in a request,
+and the ``:authority`` / ``Host`` authority grammar that decides the ``host``
+a handler sees.  Field-level validation already happened when the frame parsed
+its payload.
+"""
 from urllib.parse import unquote, urlsplit
 
 from ..protocol.frame_types import PseudoHeaders

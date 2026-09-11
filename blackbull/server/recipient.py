@@ -1,3 +1,32 @@
+"""The receive side: bytes off the transport, events into the application.
+
+Two layers, deliberately separable.  An
+[`AbstractReader`][blackbull.server.recipient.AbstractReader] is a
+protocol-agnostic async byte source; a
+[`BaseRecipient`][blackbull.server.recipient.BaseRecipient] turns those bytes
+into what the application reads, one subclass per protocol —
+[`HTTP1Recipient`][blackbull.server.recipient.HTTP1Recipient],
+[`HTTP2Recipient`][blackbull.server.recipient.HTTP2Recipient] and
+[`WebSocketRecipient`][blackbull.server.recipient.WebSocketRecipient].
+
+Each HTTP recipient offers the body on two channels.  ``__call__`` yields the
+ASGI event dict a full-form handler's ``receive()`` returns; ``next_chunk()``
+yields ``bytes``, with ``None`` for end of body, and is what
+``Connection.body()`` and ``Connection.stream()`` consume.  Both channels share
+one end marker, so a reader may start on either.  The Internals page argues why
+the native one exists.
+
+``CONNECTION_REUSABLE``, ``CONNECTION_NEEDS_DRAIN`` and
+``CONNECTION_MUST_CLOSE`` are the verdicts
+[`HTTP1Recipient.after_dispatch`][blackbull.server.recipient.HTTP1Recipient.after_dispatch]
+returns: serve the next request as we stand, drain the unread body first, or
+close.
+
+The bounds a hostile peer meets on this path — body size, frame and message
+size, queue depth, minimum read rate, idle and body timeouts — are constructor
+arguments here, defaulted from the ``BB_*`` settings
+``docs/reference/env-vars.md`` lists.
+"""
 import asyncio
 import contextlib
 from abc import ABC, abstractmethod

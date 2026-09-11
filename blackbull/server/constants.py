@@ -10,6 +10,14 @@ from enum import IntEnum
 
 
 class WSCloseCode(IntEnum):
+    """Close codes for the WebSocket CLOSE frame (RFC 6455 §7.4.1).
+
+    ``NO_STATUS_RCVD``, ``ABNORMAL`` and ``TLS_HANDSHAKE`` name conditions an
+    endpoint reports to its own application; those three and the reserved 1004
+    are never put on the wire, and a peer that sends one is answered with
+    ``PROTOCOL_ERROR``.  An application wanting a code of its own takes the
+    private range 4000–4999 (§7.4.2), which has no member here.
+    """
     NORMAL              = 1000
     GOING_AWAY          = 1001
     PROTOCOL_ERROR      = 1002

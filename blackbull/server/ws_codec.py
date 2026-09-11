@@ -10,6 +10,13 @@ from typing import NamedTuple
 
 
 class WSOpcode(IntEnum):
+    """WebSocket frame opcodes (RFC 6455 §5.2).
+
+    ``CONTINUATION``, ``TEXT`` and ``BINARY`` are data frames and may be
+    fragmented across several frames.  ``CLOSE``, ``PING`` and ``PONG`` are
+    control frames: §5.5 caps their payload at 125 bytes and forbids
+    fragmenting them, and one may arrive between the fragments of a message.
+    """
     CONTINUATION = 0x0
     TEXT         = 0x1
     BINARY       = 0x2
@@ -19,6 +26,12 @@ class WSOpcode(IntEnum):
 
 
 class WSFrameBits(IntEnum):
+    """Bit masks for the two-byte WebSocket frame header (RFC 6455 §5.2).
+
+    RSV1 marks a message compressed with permessage-deflate, and is set on the
+    first frame of it only (RFC 7692 §7).  RSV2 and RSV3 have no negotiated
+    meaning, so a peer setting either is a protocol error.
+    """
     FIN         = 0x80  # FIN bit in byte 0
     RSV1        = 0x40  # RSV1 bit in byte 0 (per-message deflate, RFC 7692)
     RSV2        = 0x20  # RSV2 bit in byte 0 (reserved)
