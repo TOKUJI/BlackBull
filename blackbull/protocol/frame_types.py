@@ -33,6 +33,13 @@ DEFAULT_MAX_FRAME_SIZE = 16384
 
 
 class FrameTypes(bytes, Enum):
+    """Registered HTTP/2 frame types (RFC 9113 §11.2).
+
+    Each member's value is the single type octet exactly as it appears in the
+    frame header, so a member compares equal to the byte read off the wire and
+    not to the integer it encodes.  ``PRIORITY_UPDATE`` is RFC 9218 §7.1.
+    """
+
     DATA = b'\x00'
     HEADERS = b'\x01'
     PRIORITY = b'\x02'
@@ -57,26 +64,53 @@ class FrameFlags(IntEnum):
 
 
 class HeaderFrameFlags(FrameFlags):
+    """Flags a HEADERS frame may carry (RFC 9113 §6.2).
+
+    ``PRIORITY`` announces the exclusive/dependency/weight fields ahead of the
+    field block; the scheme they describe is deprecated by §5.3, but the five
+    octets still have to be skipped to reach the block.
+    """
+
     END_STREAM = 0x1
     END_HEADERS = 0x4
     PADDED = 0x8
     PRIORITY = 0x20
 
 class SettingFrameFlags(FrameFlags):
+    """Flags a SETTINGS frame may carry (RFC 9113 §6.5).
+
+    ``INIT`` is the absence of ``ACK`` rather than a flag the RFC defines: it
+    names the frame that carries settings, as opposed to the empty frame that
+    acknowledges them.
+    """
+
     INIT = 0x0
     ACK = 0x1
 
 
 class PingFrameFlags(FrameFlags):
+    """The one flag a PING frame may carry (RFC 9113 §6.7): ``ACK`` marks the
+    frame as the reply, whose payload must echo the ping's own."""
+
     ACK = 0x1
 
 
 class DataFrameFlags(FrameFlags):
+    """Flags a DATA frame may carry (RFC 9113 §6.1)."""
+
     END_STREAM = 0x1
     PADDED = 0x8
 
 
 class ErrorCodes(IntEnum):
+    """HTTP/2 error codes (RFC 9113 §7), carried by RST_STREAM and GOAWAY.
+
+    The set is open: §7 requires an unknown code to be accepted without special
+    behaviour, so a code read off the wire is not guaranteed to be a member
+    here — [`RstStream`][blackbull.protocol.frame_types.RstStream] keeps a
+    plain ``int`` when the peer sent one this enum does not name.
+    """
+
     NO_ERROR = 0x0
     PROTOCOL_ERROR = 0x1
     INTERNAL_ERROR = 0x2
@@ -107,7 +141,14 @@ class FrameFormatError(ValueError):
 
 
 class FrameBase:
-    """docstring for FrameBase"""
+    """Common frame header and the subclass registry (RFC 9113 §4.1).
+
+    Holds the four fields every frame header carries — ``length``, ``type_``,
+    ``flags``, ``stream_id`` — and turns them back into nine octets in
+    ``save()``, which a subclass extends with its own payload.  Setting
+    ``FRAME_TYPE`` on a subclass registers it for that type; a second class
+    claiming the same type is a ``ValueError`` at import.
+    """
     FRAME_TYPE = None
     _registry = {}
 
@@ -167,7 +208,15 @@ class FrameBase:
 
 
 class SettingFrame(FrameBase):
-    """docstring for SettingFrame"""
+    """A SETTINGS frame — connection-wide parameters (RFC 9113 §6.5).
+
+    Each identifier the peer sends becomes an attribute named for it
+    (``header_table_size``, ``max_concurrent_streams``, ``max_frame_size``, …).
+    An omitted setting leaves no attribute at all, so read one with ``getattr``
+    and supply the default the RFC names — ``initial_window_size`` is the
+    exception, present as ``None`` until the peer sets it.  An unknown
+    identifier is ignored, as §6.5.2 requires.
+    """
     initial_window_size = None
     FRAME_TYPE = FrameTypes.SETTINGS
 
@@ -219,7 +268,12 @@ class SettingFrame(FrameBase):
 
 class WindowUpdate(FrameBase):
 
-    """docstring for WindowUpdate"""
+    """A WINDOW_UPDATE frame — a flow-control credit (RFC 9113 §6.9).
+
+    ``window_size`` is the increment to add, not the resulting window, and it
+    applies to the connection when ``stream_id`` is 0 and to that stream
+    otherwise.
+    """
     FRAME_TYPE = FrameTypes.WINDOW_UPDATE
     def __init__(self, length: int, type_, flags: int, stream_id: int, *, data=None, **kwds):
         super(WindowUpdate, self).__init__(length, type_, flags, stream_id)
@@ -329,6 +383,24 @@ def no_hpack_context(frame: 'FrameBase', codec: str) -> TypeError:
 
 
 class Headers(FrameBase):
+    """A HEADERS frame and the field block it opens (RFC 9113 §6.2).
+
+    Construct it with the connection's shared HPACK *decoder* / *encoder*: the
+    dynamic table spans the whole connection, so a per-frame codec decodes
+    against the wrong table.  When ``END_HEADERS`` is set the block is decoded
+    immediately; otherwise append each CONTINUATION payload to ``raw_block``
+    and call ``parse_payload`` once the block is complete.
+
+    Decoding splits the result two ways.  ``pseudo_headers`` maps
+    ``PseudoHeaders`` to ``str``, since those values become the request's
+    method, path and scheme; ``headers`` is the ordinary field list as
+    ``(name, value)`` byte pairs.
+
+    A block that breaks §8.1.2 / §8.2 does not raise — it sets ``malformed``
+    with a ``malformed_reason``, so the caller can reset the stream while the
+    connection-wide table stays in step with the peer's.
+    """
+
     FRAME_TYPE = FrameTypes.HEADERS
 
     def __init__(self, length: int, type_, flags: int, stream_id: int, *, data=None, decoder=None, encoder=None):
@@ -643,6 +715,15 @@ class GoAway(FrameBase):
 
 
 class RstStream(FrameBase):
+    """A RST_STREAM frame — abrupt termination of one stream (RFC 9113 §6.4).
+
+    The payload is exactly four octets; any other length raises
+    ``FrameFormatError`` carrying ``FRAME_SIZE_ERROR``.  ``error_code`` is an
+    [`ErrorCodes`][blackbull.protocol.frame_types.ErrorCodes] member when the
+    peer sent a registered code and a plain ``int`` when it did not, so read it
+    as an integer rather than assuming the enum.
+    """
+
     FRAME_TYPE = FrameTypes.RST_STREAM
     def __init__(self, length: int, type_, flags: int, stream_id: int, *, data=None, **kwds):
         super().__init__(length, type_, flags, stream_id)
@@ -673,7 +754,13 @@ class RstStream(FrameBase):
 
 
 class Data(FrameBase):
-    """docstring for Data"""
+    """A DATA frame — one chunk of a message body (RFC 9113 §6.1).
+
+    ``payload`` is the body octets with any padding already removed, so its
+    length is the application's and ``length`` is the wire's.  Padding that
+    would not fit the frame raises ``FrameFormatError`` carrying
+    ``PROTOCOL_ERROR``.
+    """
     FRAME_TYPE = FrameTypes.DATA
 
     def __init__(self, length: int, type_, flags: int, stream_id: int, *, data=None, **kwds):
@@ -719,6 +806,15 @@ class Data(FrameBase):
 
 
 class Priority(FrameBase):
+    """A PRIORITY frame — a stream dependency and weight (RFC 9113 §6.3).
+
+    RFC 9113 §5.3 deprecates the scheme these fields express, but a peer may
+    still send them, so they are parsed rather than refused.  ``weight`` is the
+    true weight in 1–256, one more than the octet on the wire; ``exclusion``
+    holds the top bit of the dependency field and ``dependent_stream`` the
+    remaining 31.
+    """
+
     FRAME_TYPE = FrameTypes.PRIORITY
     def __init__(self, length: int, type_, flags: int, stream_id: int, *, data=None, **kwds):
         super().__init__(length, type_, flags, stream_id)
@@ -752,7 +848,13 @@ class Priority(FrameBase):
 
 
 class Ping(FrameBase):
-    """docstring for Ping"""
+    """A PING frame — connection liveness and round-trip measurement
+    (RFC 9113 §6.7).
+
+    The payload is exactly eight octets; any other length raises
+    ``FrameFormatError`` carrying ``FRAME_SIZE_ERROR``.  A reply repeats the
+    payload unchanged with ``PingFrameFlags.ACK`` set.
+    """
     FRAME_TYPE = FrameTypes.PING
     def __init__(self, length: int, type_, flags: int, stream_id: int, *, data, **kwds):
         super().__init__(length, type_, flags, stream_id)
@@ -779,7 +881,14 @@ class Ping(FrameBase):
         return super().__eq__(other) and (self.payload == other.payload)
 
 class Continuation(FrameBase):
-    """docstring for Continuation"""
+    """A CONTINUATION frame — the rest of a field block (RFC 9113 §6.10).
+
+    Its payload is a fragment, never a block of its own: append it to the
+    HEADERS or PUSH_PROMISE frame that opened the block and decode there, so
+    the connection-wide HPACK table sees every insertion in order.  No frame
+    for another stream may arrive in between, and ``end_headers`` marks the
+    last fragment.
+    """
     FRAME_TYPE = FrameTypes.CONTINUATION
     def __init__(self, length: int, type_, flags: int, stream_id: int, *, data=None, **kwds):
         super().__init__(length, type_, flags, stream_id)
