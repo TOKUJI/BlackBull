@@ -3477,34 +3477,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../middleware/cache/" class="md-nav__link">
         
   
@@ -6290,7 +6262,12 @@ supplies one once the coroutines run.</p>
 
         <p>The ASGI 3.0 callable, and the app's only native/ASGI boundary.</p>
 <p>Everything below this method threads a
-:class:<code>~blackbull.connection.Connection</code>, in both modes.  An ASGI
+<a class="autorefs autorefs-internal" title="Connection
+
+
+  
+      dataclass
+  " href="../connection/#blackbull.connection.Connection"><code>Connection</code></a>, in both modes.  An ASGI
 scope dict arrives only from an external host (uvicorn,
 <code>httpx.ASGITransport</code>) or under <code>BB_FORCE_ASGI_SCOPE=1</code>, and is
 converted here, once; the same edge wraps the host's <code>send</code> with the
@@ -6539,7 +6516,7 @@ boundary in both directions.</p>
 
         <p>Register an extension and return it (for decorator chaining).</p>
 <p><em>ext</em> is any object exposing <code>init_app(app)</code>; subclassing
-:class:<code>~blackbull.extension.Extension</code> is optional.  <code>init_app</code> is called immediately to wire the
+<a class="autorefs autorefs-internal" href="../extension/#blackbull.extension.Extension"><code>Extension</code></a> is optional.  <code>init_app</code> is called immediately to wire the
 extension's routes / middleware / protocol handlers / events through
 the public <code>app.*</code> API.  Optional async <code>startup(app)</code> /
 <code>shutdown(app)</code> methods are wired into the <code>app_startup</code> /
@@ -6603,7 +6580,7 @@ Nothing is cancelled; call again with a longer budget.</p>
 such requests are dispatched to the registry's handlers (returning
 <code>grpc-status</code> trailers) instead of the HTTP router, while REST and
 WebSocket traffic on the same port is unaffected.</p>
-<p><code>registry</code> is a :class:<code>blackbull.grpc.GrpcServiceRegistry</code>.  gRPC
+<p><code>registry</code> is a <a class="autorefs autorefs-internal" title="GrpcServiceRegistry" href="../grpc/#blackbull.grpc.GrpcServiceRegistry"><code>blackbull.grpc.GrpcServiceRegistry</code></a>.  gRPC
 requires HTTP/2, so run the app with TLS+ALPN (or h2c) for real
 clients.  Protobuf is not pulled in — handlers exchange raw message
 bytes; see <code>blackbull.grpc</code> for the handler contract.</p>
@@ -6662,7 +6639,7 @@ assert app.extensions['openapi'] is ext
     <div class="doc doc-contents ">
 
         <p>Return a snapshot of all registered routes.</p>
-<p>Each entry is a :class:<code>~blackbull.router.RouteInfo</code> named tuple
+<p>Each entry is a <a class="autorefs autorefs-internal" href="../router/#blackbull.router.RouteInfo"><code>RouteInfo</code></a> named tuple
 <code>(method, path, name)</code>.  Routes are returned in registration
 order, one entry per HTTP method.  The list is a shallow copy and
 may be freely sorted, filtered, or mutated without affecting the
@@ -6810,7 +6787,7 @@ event's completion — most notably <code>scope_completed</code> (close a
 per-request DB session, delete a temp file).</p>
 <p>Either way the handler's exceptions are isolated: they are caught and
 logged and never propagate to the emitter or affect other handlers.
-(For a hook that <em>may</em> affect the request, use :meth:<code>intercept</code>.)</p>
+(For a hook that <em>may</em> affect the request, use <a class="autorefs autorefs-internal" title="intercept(event_name)" href="#blackbull.app.BlackBull.intercept"><code>intercept</code></a>.)</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -6923,7 +6900,7 @@ logged and never propagate to the emitter or affect other handlers.
     <div class="doc doc-contents ">
 
         <p>Register a custom error handler for an HTTPStatus or exception class.</p>
-<p><code>key</code> may be an :class:<code>HTTPStatus</code>, a plain <code>int</code> status code
+<p><code>key</code> may be an <code>HTTPStatus</code>, a plain <code>int</code> status code
 (coerced to <code>HTTPStatus</code>), or an exception class.</p>
 <p>Usage::</p>
 <pre><code>@app.on_error(HTTPStatus.FORBIDDEN)
@@ -7154,9 +7131,17 @@ binds.</p>
 <p>Hooks receive the <code>app</code> and must do <strong>pure warming only</strong> — drive hot
 code paths, prime codecs/TLS — and acquire <strong>no</strong> per-worker resources
 (DB pools, sockets, live connections); those belong in
-<a class="autorefs autorefs-internal" title="on_startup(fn)" href="#blackbull.app.BlackBull.on_startup"><code>on_startup</code></a>.  Use :meth:<code>warm_request</code> to exercise the ASGI
+<a class="autorefs autorefs-internal" title="on_startup(fn)" href="#blackbull.app.BlackBull.on_startup"><code>on_startup</code></a>.  Use <a class="autorefs autorefs-internal" title="warm_request(conn, *, body=b'', n=1)
+
+  
+      async
+  " href="#blackbull.app.BlackBull.warm_request"><code>warm_request</code></a> to exercise the ASGI
 dispatch/handler path in-process, and
-:func:<code>blackbull.server.warmup.warm_tls</code> to prime the TLS handshake.</p>
+<a class="autorefs autorefs-internal" title="warm_tls(ssl_context, *, n=_DEFAULT_TLS_N)
+
+  
+      async
+  " href="../server/warmup/#blackbull.server.warmup.warm_tls"><code>blackbull.server.warmup.warm_tls</code></a> to prime the TLS handshake.</p>
 <p>Warm-up is best-effort: a hook's exception is logged and swallowed
 (the master degrades to a cold start), and total warm-up time is capped
 by <code>BB_WARMUP_BUDGET_S</code> (default 60 s).  Multiple hooks run in
@@ -7415,7 +7400,7 @@ a request body.  When set, the route's responses carry an
 media types), and QUERY requests are Content-Type-enforced: a missing
 media type is answered <code>400</code>, an unaccepted one <code>415</code> (with the
 <code>Accept-Query</code> header so the client can correct).  A handler may raise
-:class:<code>~blackbull.UnprocessableQuery</code> for <code>422</code> on a well-formed but
+<a class="autorefs autorefs-internal" href="../#blackbull.UnprocessableQuery"><code>UnprocessableQuery</code></a> for <code>422</code> on a well-formed but
 unprocessable query.  Enforcement applies only to QUERY requests; other
 methods on the same route still receive the <code>Accept-Query</code> header.</p>
 
@@ -7442,16 +7427,21 @@ For <code>workers &gt; 1</code> <em>or</em> <code>reload=True</code> the master 
 sockets, forks workers, and blocks until SIGTERM / SIGINT.</p>
 <p>An argument left unset falls back to a <code>BLACKBULL_*</code> environment
 variable, then to a <code>.env</code> file, then to the bound
-:class:<code>~blackbull.AppConfig</code>; the Configuration guide gives the order
+<a class="autorefs autorefs-internal" title="AppConfig
+
+
+  
+      dataclass
+  " href="../#blackbull.AppConfig"><code>AppConfig</code></a>; the Configuration guide gives the order
 in full and names every variable.  Server-tuning knobs keep their
 <code>BB_*</code> names — <code>BLACKBULL_*</code> is the deployment namespace.  The
 provenance of each non-default setting is logged once at startup on
 the <code>blackbull.config</code> logger.</p>
 <p>For embedded use under an existing event loop, or for pre-binding
 a socket before forking a test subprocess, instantiate
-:class:<code>blackbull.server.ASGIServer</code> directly.  Any external
+<code>blackbull.server.ASGIServer</code> directly.  Any external
 ASGI server (uvicorn / hypercorn / granian / …) can drive the
-:class:<code>BlackBull</code> instance via its ASGI 3.0 <code>__call__</code>.</p>
+<a class="autorefs autorefs-internal" href="#blackbull.app.BlackBull"><code>BlackBull</code></a> instance via its ASGI 3.0 <code>__call__</code>.</p>
 <p>Example::</p>
 <pre><code>app.run(port=8000)
 app.run(port=8443, certfile='cert.pem', keyfile='key.pem', workers=4)
@@ -7575,7 +7565,12 @@ it the app is wired for BlackBull's own native server.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Invoke this app in-process <em>n</em> times with a :class:<code>Connection</code> to
+        <p>Invoke this app in-process <em>n</em> times with a <a class="autorefs autorefs-internal" title="Connection
+
+
+  
+      dataclass
+  " href="../connection/#blackbull.connection.Connection"><code>Connection</code></a> to
 warm the request path.</p>
 <p>A warm-up primitive: drives the full <strong>native</strong> <code>__call__</code> →
 middleware → <code>_dispatch</code> chain (HTTP, gRPC, whatever <em>conn</em> routes to)
@@ -7653,7 +7648,7 @@ any per-route middlewares.</p>
     <div class="doc doc-contents ">
 
         <p>Register a route on this group, prepending the group middlewares.</p>
-<p>Same parameters as :meth:<code>BlackBull.route</code>.  <code>accept_query</code> is the
+<p>Same parameters as <a class="autorefs autorefs-internal" title="route(methods=[HTTPMethod.GET], path='/', scheme=Scheme.http, functions=[], middlewares=[], name=None, accept_query=None)" href="#blackbull.app.BlackBull.route"><code>BlackBull.route</code></a>.  <code>accept_query</code> is the
 RFC 10008 list of request <strong>media types</strong> the route accepts (the
 <code>Accept-Query</code> response header + Content-Type enforcement) — it is a
 content-negotiation policy, <strong>not</strong> a switch for the QUERY <em>method</em>
@@ -7685,24 +7680,29 @@ content-negotiation policy, <strong>not</strong> a switch for the QUERY <em>meth
     <div class="doc doc-contents ">
 
         <p>Synchronous entry point for any ASGI 3.0 callable.</p>
-<p>Works for a :class:<code>BlackBull</code> instance <em>and</em> for any plain ASGI
+<p>Works for a <a class="autorefs autorefs-internal" href="#blackbull.app.BlackBull"><code>BlackBull</code></a> instance <em>and</em> for any plain ASGI
 callable (uvicorn/hypercorn-style <code>async def app(scope, receive,
 send): …</code>).  This is what the <code>blackbull</code> console script calls
-after resolving <code>module:attr</code>; :meth:<code>BlackBull.serve</code> is a thin
+after resolving <code>module:attr</code>; <a class="autorefs autorefs-internal" title="run(certfile=None, keyfile=None, port=None, unix_path=None, inherited_fd=None, listeners=None, workers=None, max_connections=None, stream_queue_depth=None, ws_queue_depth=None, reload=None, reload_paths=None)" href="#blackbull.app.BlackBull.run"><code>BlackBull.run</code></a> is a thin
 shim around it.</p>
 <p>For <code>workers=1</code> without reload the server runs in the current
 process via <code>asyncio.run</code>.  For <code>workers &gt; 1</code> <em>or</em>
 <code>reload=True</code> the master pre-binds sockets, forks workers, and
 blocks until SIGTERM / SIGINT — or in reload mode, until a
 watched file changes (master then re-execs itself, see
-:mod:<code>blackbull.server.reload</code>).</p>
+<a class="autorefs autorefs-internal" href="../server/reload/#blackbull.server.reload"><code>blackbull.server.reload</code></a>).</p>
 <p><em>listeners</em> states the sockets directly — one
-:class:<code>~blackbull.server.listener.Listener</code> each, saying where it is,
+<a class="autorefs autorefs-internal" title="Listener
+
+
+  
+      dataclass
+  " href="../server/listener/#blackbull.server.listener.Listener"><code>Listener</code></a> each, saying where it is,
 what speaks there and whether TLS terminates there.  It replaces <em>port</em>,
 <em>unix_path</em> and <em>inherited_fd</em> rather than joining them, so passing both
 is refused.</p>
 <p>All integer parameters default to their corresponding <code>BB_*</code>
-environment variables (see :mod:<code>blackbull.env</code>).</p>
+environment variables (see <a class="autorefs autorefs-internal" href="../env/#blackbull.env"><code>blackbull.env</code></a>).</p>
 
 
     </div>

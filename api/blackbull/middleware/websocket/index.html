@@ -3073,34 +3073,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../cache/" class="md-nav__link">
         
   
@@ -5434,15 +5406,13 @@
     <div class="doc doc-contents first">
 
         <p>Handshake middleware — accepts the connection before the handler runs.</p>
-<p>Predates the high-level :class:<code>~blackbull.websocket.WebSocket</code> object and
-exists to strip the accept/close boilerplate from raw-triplet handlers.  It
-works with either handler form: it records the handshake on the connection,
-so a <code>WebSocket</code> object built downstream adopts that state instead of
-waiting for a <code>websocket.connect</code> that has already been consumed.</p>
-<p>With the object form the middleware is largely redundant — <code>await
-ws.accept()</code> is the line it was removing — but combining them is supported
-rather than refused, because a route's middleware list and its handler
-signature are usually changed by different people at different times.</p>
+<p>Strips the accept/close boilerplate from a raw-triplet handler.  It works
+with either handler form: the handshake is recorded on the connection, so a
+<a class="autorefs autorefs-internal" href="../../websocket/#blackbull.websocket.WebSocket"><code>WebSocket</code></a> built downstream adopts that state
+instead of waiting for a <code>websocket.connect</code> already consumed.</p>
+<p>The object form makes it redundant — <code>await ws.accept()</code> is the line it
+removes — but the two combine rather than conflict, so a route need not
+change its middleware list and its handler signature together.</p>
 
 
 

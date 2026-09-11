@@ -3071,34 +3071,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -6023,21 +5995,25 @@
 
         <p>Unified protocol registry.</p>
 <p>BlackBull dispatches every accepted connection through a single
-:class:<code>ProtocolRegistry</code>.  <code>http1</code> and <code>http2</code> are built-in <em>bindings</em>;
+<a class="autorefs autorefs-internal" href="#blackbull.server.protocol_registry.ProtocolRegistry"><code>ProtocolRegistry</code></a>.  <code>http1</code> and <code>http2</code> are built-in <em>bindings</em>;
 non-HTTP protocols (raw TCP, and later MQTT/Redis) register their own bindings
-via :meth:<code>BlackBull.raw_handler</code> / :meth:<code>BlackBull.register_protocol_handler</code>.</p>
+via <a class="autorefs autorefs-internal" title="raw_handler(name, *, port=None, detector=None, tls=False, stateful=True)" href="../../app/#blackbull.app.BlackBull.raw_handler"><code>BlackBull.raw_handler</code></a> / <a class="autorefs autorefs-internal" title="register_protocol_handler(name, handler, *, detector=None, port=None, tls=False, stateful=True)" href="../../app/#blackbull.app.BlackBull.register_protocol_handler"><code>BlackBull.register_protocol_handler</code></a>.</p>
 <p>A <em>binding</em> owns protocol selection, <em>its own</em> framing reads, and Actor
 construction.  <code>ConnectionActor</code> peeks only a tiny protocol-agnostic
 discriminator prefix; the 24-byte
 HTTP/2 preface read and the HTTP/1.1 request-line read live in
-:class:<code>Http2Binding</code> / :class:<code>Http1Binding</code>, reached through the single
-:meth:<code>ProtocolBinding.serve</code> entry point.</p>
+<a class="autorefs autorefs-internal" href="#blackbull.server.protocol_registry.Http2Binding"><code>Http2Binding</code></a> / <a class="autorefs autorefs-internal" href="#blackbull.server.protocol_registry.Http1Binding"><code>Http1Binding</code></a>, reached through the single
+<a class="autorefs autorefs-internal" title="serve(conn)
+
+  
+      async
+  " href="#blackbull.server.protocol_registry.ProtocolBinding.serve"><code>ProtocolBinding.serve</code></a> entry point.</p>
 <p>Two dispatch routes:</p>
 <ul>
 <li><strong>Detection</strong> (the shared HTTP listener): <code>ConnectionActor</code> peeks the
-  discriminator and asks each :class:<code>ProtocolBinding</code> via :meth:<code>claims</code> — ALPN
+  discriminator and asks each <a class="autorefs autorefs-internal" href="#blackbull.server.protocol_registry.ProtocolBinding"><code>ProtocolBinding</code></a> via <code>claims</code> — ALPN
   first, then the ordered cleartext chain (<code>http2</code> preface, <code>http1</code>
-  fallback) — then calls the winner's :meth:<code>serve</code>.</li>
+  fallback) — then calls the winner's <code>serve</code>.</li>
 <li><strong>Port-bound</strong> (raw protocols): a binding registered with <code>port=</code> gets its
   own listening socket; connections there skip detection entirely.</li>
 </ul>
@@ -6046,8 +6022,8 @@ HTTP/2 preface read and the HTTP/1.1 request-line read live in
 <details class="note" open>
   <summary>Note</summary>
   <p>Do not export the internal classes from <code>blackbull/__init__.py</code>; the
-public surface is :meth:<code>BlackBull.raw_handler</code> and
-:meth:<code>BlackBull.register_protocol_handler</code>.</p>
+public surface is <a class="autorefs autorefs-internal" title="raw_handler(name, *, port=None, detector=None, tls=False, stateful=True)" href="../../app/#blackbull.app.BlackBull.raw_handler"><code>BlackBull.raw_handler</code></a> and
+<a class="autorefs autorefs-internal" title="register_protocol_handler(name, handler, *, detector=None, port=None, tls=False, stateful=True)" href="../../app/#blackbull.app.BlackBull.register_protocol_handler"><code>BlackBull.register_protocol_handler</code></a>.</p>
 </details>
 
 
@@ -6109,8 +6085,8 @@ public surface is :meth:<code>BlackBull.raw_handler</code> and
 
 
 
-        <p>Everything a :class:<code>ProtocolBinding</code> needs to build its Actor.</p>
-<p>Assembled once per connection by :class:<code>ConnectionActor</code> and handed to the
+        <p>Everything a <a class="autorefs autorefs-internal" href="#blackbull.server.protocol_registry.ProtocolBinding"><code>ProtocolBinding</code></a> needs to build its Actor.</p>
+<p>Assembled once per connection by <code>ConnectionActor</code> and handed to the
 selected binding's <code>serve_*</code> method.  Keeps the binding API narrow and
 decouples bindings from <code>ConnectionActor</code>'s internals.</p>
 
@@ -6256,16 +6232,15 @@ decouples bindings from <code>ConnectionActor</code>'s internals.</p>
 
         <p>One connection-level protocol.</p>
 <p>A binding declares how many leading bytes it needs to recognise a
-connection (:attr:<code>detect_prefix_len</code>) and whether it :meth:<code>claims</code> a given
-peeked prefix; the winner's single :meth:<code>serve</code> then performs <em>its own</em>
+connection (<code>detect_prefix_len</code>) and whether it <code>claims</code> a given
+peeked prefix; the winner's single <code>serve</code> then performs <em>its own</em>
 protocol reads from a reader still positioned at the first byte, because
 detection peeks without consuming.  Only a reader that cannot peek hands
 back what it took, and there a
-:class:<code>~blackbull.server.recipient.PrefixReader</code> restores the stream.</p>
-<p>One <code>serve(conn)</code> rather than a per-transport trio is what lets
-<code>ConnectionActor</code> stay protocol-agnostic: the <code>24</code>-byte HTTP/2 preface
-read and the HTTP/1.1 <code>\r\n</code> request-line read live in the
-bindings, not in the dispatcher.</p>
+<a class="autorefs autorefs-internal" href="../recipient/#blackbull.server.recipient.PrefixReader"><code>PrefixReader</code></a> restores the stream.</p>
+<p>Every protocol-specific read is the binding's, never the dispatcher's —
+the <code>24</code>-byte HTTP/2 preface and the HTTP/1.1 <code>\r\n</code> request line
+alike — which is what keeps <code>ConnectionActor</code> protocol-agnostic.</p>
 
 
 
@@ -6303,8 +6278,8 @@ bindings, not in the dispatcher.</p>
 first bytes are <em>prefix</em> (with negotiated <em>alpn</em>)?</p>
 <p>The single selection seam for cleartext + shared-port dispatch.
 Default delegates to
-:meth:<code>matches_cleartext</code>; :class:<code>RawBinding</code> overrides it to consult
-its :class:<code>ProtocolDetector</code>.  <code>alpn</code> is accepted so a future binding
+<a class="autorefs autorefs-internal" title="matches_cleartext(first_line)" href="#blackbull.server.protocol_registry.ProtocolBinding.matches_cleartext"><code>matches_cleartext</code></a>; <a class="autorefs autorefs-internal" href="#blackbull.server.protocol_registry.RawBinding"><code>RawBinding</code></a> overrides it to consult
+its <a class="autorefs autorefs-internal" href="#blackbull.server.protocol_registry.ProtocolDetector"><code>ProtocolDetector</code></a>.  <code>alpn</code> is accepted so a future binding
 can claim on the negotiated token, not just the wire prefix.</p>
 
 
@@ -6434,7 +6409,7 @@ detection peeked without consuming anything on its behalf.</p>
 
 
         <p>Context passed to a non-ASGI protocol handler.</p>
-<p>Carries connection metadata and the shared :class:<code>EventAggregator</code>
+<p>Carries connection metadata and the shared <a class="autorefs autorefs-internal" href="../../event_aggregator/#blackbull.event_aggregator.EventAggregator"><code>EventAggregator</code></a>
 without exposing any ASGI concept (no <code>scope</code> / <code>receive</code> / <code>send</code>).</p>
 
 
@@ -6484,10 +6459,9 @@ without exposing any ASGI concept (no <code>scope</code> / <code>receive</code> 
 
 
         <p>Inspects the first bytes of a connection to identify the protocol.</p>
-<p>Stateless — one instance is shared across all connections.  Used for
-first-byte sniffing on <em>shared</em> ports (e.g. MQTT + HTTP on one port);
-consulted by <code>ConnectionActor._dispatch()</code> after ALPN detection and
-before the http1 cleartext fallback.</p>
+<p>Stateless — one instance is shared across all connections.  First-byte
+sniffing on <em>shared</em> ports (MQTT + HTTP on one port, say), reached only
+when ALPN did not already name the protocol.</p>
 
 
 
@@ -6642,8 +6616,7 @@ cleartext-detection order is fixed: <code>http2</code> (preface) before <code>ht
         <p>Bindings consulted during cleartext detection, in priority order:
 registered raw detectors first (shared-port protocols such as MQTT),
 then the ordered cleartext chain (<code>http2</code> preface, <code>http1</code>
-fallback).  Cached — rebuilt only by :meth:<code>register</code>, so an
-HTTP-only app pays no per-connection allocation for it.</p>
+fallback).  Cached, and rebuilt only by <a class="autorefs autorefs-internal" title="register(name, handler, *, detector=None, port=None, tls=False, stateful=True)" href="#blackbull.server.protocol_registry.ProtocolRegistry.register"><code>register</code></a>.</p>
 
     </div>
 
@@ -6705,7 +6678,7 @@ HTTP-only app pays no per-connection allocation for it.</p>
 
         <p>Register a non-ASGI protocol handler.  Raises on duplicate name.</p>
 <p>A <code>detector</code> enables shared-port sniffing (see
-:class:<code>ProtocolDetector</code>).  When several registered detectors could
+<a class="autorefs autorefs-internal" href="#blackbull.server.protocol_registry.ProtocolDetector"><code>ProtocolDetector</code></a>).  When several registered detectors could
 match the same first bytes, dispatch picks the <strong>first registered</strong>
 one — <code>raw_bindings</code> preserves insertion order.  <code>tls=True</code> serves
 the binding's own port through the server's TLS machinery.</p>
@@ -6801,10 +6774,9 @@ e.g. MQTT's <code>0x10</code>) suffices.  Port-bound bindings never detect → 0
         <p>A raw binding claims a shared-port connection when its detector
 recognises the first bytes.  Port-bound bindings (no detector) never
 claim via detection — they own their own listening socket instead.</p>
-<p>A stateful binding stops claiming once the shared listener is served
-by more than one worker: whichever worker accepted would answer, and
-the ones that never saw the earlier exchange would answer wrongly.
-Its dedicated port is unaffected — that is where it stays reachable.</p>
+<p>A stateful binding stops claiming once more than one worker serves the
+shared listener: a worker that never saw the earlier exchange would
+answer wrongly.  Its dedicated port is where it stays reachable.</p>
 
 
     </div>

@@ -3071,34 +3071,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -5602,7 +5574,7 @@ blocking until enough bytes arrive or EOF is signalled.</p>
 HTTP/2 actor to skip the per-frame <code>WINDOW_UPDATE</code> emission.  The
 bytes are <em>still</em> buffered (the peer's window debited on the wire
 the moment the frame arrived; dropping them would be silent data
-loss).  As soon as :meth:<code>readexactly</code> drains the buffer back under
+loss).  As soon as <code>readexactly</code> drains the buffer back under
 <code>max_buffer</code>, the reader replays the withheld credit through
 <code>credit_callback</code>, opening the peer's window again.</p>
 

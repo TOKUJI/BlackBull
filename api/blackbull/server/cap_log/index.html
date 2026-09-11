@@ -3071,34 +3071,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -5581,15 +5553,15 @@ that logger gets actionable visibility without grep-walking the
 framework code.</p>
 <p>Surface:</p>
 <ul>
-<li>:func:<code>log_cap_hit</code> — the single emission point.  Call from any
+<li><a class="autorefs autorefs-internal" title="log_cap_hit(cap, requested, limit, *, counter=None, peer=None, scope_path=None, protocol=None, connection_id=None)" href="#blackbull.server.cap_log.log_cap_hit"><code>log_cap_hit</code></a> — the single emission point.  Call from any
   cap-rejection site with the cap name, requested value, and limit.</li>
-<li>:class:<code>CapHitCounter</code> — per-connection state for the "first hit
+<li><a class="autorefs autorefs-internal" href="#blackbull.server.cap_log.CapHitCounter"><code>CapHitCounter</code></a> — per-connection state for the "first hit
   per cap logs in full; later hits silently counted; summary on
-  :meth:<code>~CapHitCounter.flush</code>" rate-limit pattern.</li>
-<li>:meth:<code>CapHitCounter.bind</code> — context manager that installs the
-  counter on a :class:<code>~contextvars.ContextVar</code>.  All
-  :func:<code>log_cap_hit</code> calls inside the <code>with</code> block (including
-  those in child tasks created via :class:<code>asyncio.TaskGroup</code>, which
+  <a class="autorefs autorefs-internal" title="flush(*, peer=None, protocol=None, connection_id=None)" href="#blackbull.server.cap_log.CapHitCounter.flush"><code>flush</code></a>" rate-limit pattern.</li>
+<li><a class="autorefs autorefs-internal" title="bind()" href="#blackbull.server.cap_log.CapHitCounter.bind"><code>CapHitCounter.bind</code></a> — context manager that installs the
+  counter on a <code>ContextVar</code>.  All
+  <a class="autorefs autorefs-internal" title="log_cap_hit(cap, requested, limit, *, counter=None, peer=None, scope_path=None, protocol=None, connection_id=None)" href="#blackbull.server.cap_log.log_cap_hit"><code>log_cap_hit</code></a> calls inside the <code>with</code> block (including
+  those in child tasks created via <code>asyncio.TaskGroup</code>, which
   inherit context) automatically pick up the counter.  Zero
   plumbing through actor constructors.</li>
 </ul>
@@ -5600,7 +5572,7 @@ same connection — useful when <code>peer</code> is shared across many
 clients behind a NAT.</p>
 <p>The counter also runs two dirty-flush triggers so a connection
 torn down by RST (or any abnormal path that skips graceful
-:meth:<code>flush</code>) still emits a summary for any suppressed hits:</p>
+<code>flush</code>) still emits a summary for any suppressed hits:</p>
 <ul>
 <li><strong>Threshold trigger</strong>: after <code>flush_threshold</code> suppressed hits
   on any single cap, emit an intermediate summary and reset counts.
@@ -5647,13 +5619,13 @@ torn down by RST (or any abnormal path that skips graceful
 
         <p>Per-connection state for cap-hit rate limiting.</p>
 <p>Construct one instance per connection (typically in
-:class:<code>~blackbull.server.connection_actor.ConnectionActor</code>),
+<a class="autorefs autorefs-internal" href="../connection_actor/#blackbull.server.connection_actor.ConnectionActor"><code>ConnectionActor</code></a>),
 install it as the ambient counter for the duration of the
-connection via the :meth:<code>bind</code> context manager, and call
-:meth:<code>flush</code> once when the connection closes so a single
+connection via the <a class="autorefs autorefs-internal" title="bind()" href="#blackbull.server.cap_log.CapHitCounter.bind"><code>bind</code></a> context manager, and call
+<code>flush</code> once when the connection closes so a single
 summary record reports any suppressed hits.</p>
 <p>Two dirty-flush triggers fire intermediate summaries even when
-:meth:<code>flush</code> is never called (e.g. RST close that skips the
+<code>flush</code> is never called (e.g. RST close that skips the
 graceful path):</p>
 <ul>
 <li><code>flush_threshold</code> (default 100) — after this many suppressed
@@ -5780,15 +5752,19 @@ without parsing the message string.</p>
 <p>Resolution order for the rate-limit counter:</p>
 <ol>
 <li>The explicit <em>counter</em> keyword argument, if given.</li>
-<li>The active :class:<code>CapHitCounter</code> from the ambient
-   :class:<code>~contextvars.ContextVar</code> (set via
-   :meth:<code>CapHitCounter.bind</code>).</li>
+<li>The active <a class="autorefs autorefs-internal" href="#blackbull.server.cap_log.CapHitCounter"><code>CapHitCounter</code></a> from the ambient
+   <code>ContextVar</code> (set via
+   <a class="autorefs autorefs-internal" title="bind()" href="#blackbull.server.cap_log.CapHitCounter.bind"><code>CapHitCounter.bind</code></a>).</li>
 <li><code>None</code> — every call emits, no rate limiting.</li>
 </ol>
 <p><code>connection_id</code> resolution mirrors the counter chain:</p>
 <ol>
 <li>The explicit <code>connection_id</code> keyword argument, if given.</li>
-<li>The active counter's :attr:<code>CapHitCounter.connection_id</code>.</li>
+<li>The active counter's <a class="autorefs autorefs-internal" title="connection_id
+
+  
+      property
+  " href="#blackbull.server.cap_log.CapHitCounter.connection_id"><code>CapHitCounter.connection_id</code></a>.</li>
 <li><code>None</code> — record carries <code>connection_id=None</code>.</li>
 </ol>
 <p>The first call per <code>(counter, cap)</code> emits a full record;

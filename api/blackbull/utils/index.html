@@ -3071,34 +3071,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../middleware/cache/" class="md-nav__link">
         
   
@@ -5051,6 +5023,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.utils.Scheme" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scheme
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.utils.is_client_error" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5437,6 +5420,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.utils.Scheme" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scheme
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.utils.is_client_error" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5537,6 +5531,61 @@
 
 
 
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.utils.Scheme" class="doc doc-heading">
+            <code>Scheme</code>
+
+
+<a href="#blackbull.utils.Scheme" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="enum.StrEnum">StrEnum</span></code></p>
+
+
+
+        <p>Which of the two request kinds a route serves.</p>
+<p>Passed to <code>@app.route(scheme=...)</code> and matched against a request's
+<code>Connection.type</code>.  It names the shape of the exchange, not the URL
+scheme: <code>http</code> covers both plaintext and TLS, and HTTP/1.1, HTTP/2 and
+gRPC alike, because all of them are one request and one response.
+<code>websocket</code> is the long-lived one, which is why it routes separately.</p>
+<p>A <code>StrEnum</code>, so <code>Scheme.http == 'http'</code> holds and either spelling can
+be handed to the router.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
 
 
 <div class="doc doc-object doc-function">

@@ -2559,6 +2559,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.client.WebSocketSession.__aenter__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __aenter__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.client.WebSocketSession.close" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2570,10 +2581,43 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.client.WebSocketSession.ping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ping
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.client.WebSocketSession.receive" class="md-nav__link">
     <span class="md-ellipsis">
       
         receive
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.client.WebSocketSession.send_bytes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        send_bytes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.client.WebSocketSession.send_text" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        send_text
       
     </span>
   </a>
@@ -3870,34 +3914,6 @@
     
   
     blackbull.middleware
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
   
 
     
@@ -6885,6 +6901,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.client.WebSocketSession.__aenter__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __aenter__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.client.WebSocketSession.close" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6896,10 +6923,43 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.client.WebSocketSession.ping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ping
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.client.WebSocketSession.receive" class="md-nav__link">
     <span class="md-ellipsis">
       
         receive
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.client.WebSocketSession.send_bytes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        send_bytes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.client.WebSocketSession.send_text" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        send_text
       
     </span>
   </a>
@@ -6950,6 +7010,31 @@
 <a href="#blackbull.client" class="headerlink" title="Permanent link">&para;</a></h2>
 
     <div class="doc doc-contents first">
+
+        <p>BlackBull's own async client, speaking the server's wire code from the
+other side.</p>
+<p>Pure Python, no third-party protocol library, and the same frame and parser
+implementations the server uses — which is what makes it useful for testing
+BlackBull against its own bytes and for pointing at a deliberately broken
+peer.</p>
+<p>Pick a client by naming the protocol, or let ALPN decide:</p>
+<ul>
+<li><a class="autorefs autorefs-internal" href="#blackbull.client.Client"><code>Client</code></a> negotiates over TLS and hands back
+  whichever of the two it chose.  With no TLS there is no ALPN to read, so it
+  is always HTTP/1.1 — h2c is supported, but only by naming
+  <a class="autorefs autorefs-internal" href="#blackbull.client.HTTP2Client"><code>HTTP2Client</code></a> yourself.</li>
+<li><a class="autorefs autorefs-internal" href="#blackbull.client.WebSocketClient"><code>WebSocketClient</code></a> (an HTTP/1.1 upgrade)
+  and <a class="autorefs autorefs-internal" href="#blackbull.client.WebSocketH2Client"><code>WebSocketH2Client</code></a> (extended
+  CONNECT) are chosen explicitly, never by negotiation.</li>
+</ul>
+<p>Every client is an async context manager, and the connection lives exactly as
+long as its <code>async with</code> block.  Everything they raise derives from
+<a class="autorefs autorefs-internal" href="#blackbull.client.ClientError"><code>ClientError</code></a>, so one <code>except</code> catches the
+family and the subclasses tell the causes apart.</p>
+<p>The scenario primitives re-exported here — <code>Scenario</code>, <code>Step</code>, <code>Abort</code>
+and the rest — belong to <code>blackbull.fault_injection</code>; this is an alias, not
+a second implementation.</p>
+<p><code>docs/guide/client.md</code> answers what the defaults do and do not bound.</p>
 
 
 
@@ -7038,15 +7123,12 @@ executor stops walking the scenario after an Abort.</p>
 
 
 
-        <p>ALPN-negotiating client.</p>
-<p>Picks <code>HTTP2Client</code> if the server advertises <code>h2</code>, else <code>HTTP1Client</code>.
-With <code>ssl=None</code> (the default), no ALPN is performed and HTTP/1.1 is used
-— h2c (HTTP/2 over plaintext) is supported by <code>HTTP2Client</code> directly,
-but the dispatcher only triggers it when ALPN selects <code>h2</code>.</p>
+        <p>ALPN-negotiating client: <code>HTTP2Client</code> on <code>h2</code>, else <code>HTTP1Client</code>.</p>
+<p>With <code>ssl=None</code> (the default) there is no ALPN to read, so the answer is
+always HTTP/1.1.  WebSocket is never dispatched to; name its client.</p>
 <p>Use as an async context manager::</p>
 <pre><code>async with Client('localhost', 8000) as c:
     res = await c.request(HTTPMethod.GET, '/')
-    # `c` is an HTTP1Client when ssl=None, or whichever the ALPN handshake chose.
 </code></pre>
 
 
@@ -7216,8 +7298,8 @@ DATA-frame payloads received on the stream.</p>
 </code></pre>
 <p>The connection persists across multiple <code>request()</code> calls when HTTP
 version, Connection options, and body framing permit it.  A successful
-CONNECT or 101 can be transferred with :meth:<code>handoff</code>; after that, the
-returned :class:<code>HTTP1UpgradeSession</code> owns transport closure.  Pass
+CONNECT or 101 can be transferred with <a class="autorefs autorefs-internal" title="handoff()" href="http1/#blackbull.client.http1.HTTP1Client.handoff"><code>handoff</code></a>; after that, the
+returned <a class="autorefs autorefs-internal" href="http1/#blackbull.client.http1.HTTP1UpgradeSession"><code>HTTP1UpgradeSession</code></a> owns transport closure.  Pass
 <code>ssl=</code> to use TLS.</p>
 <p>The <code>Host</code> header is injected automatically when the caller omits it.</p>
 
@@ -7257,7 +7339,7 @@ returned :class:<code>HTTP1UpgradeSession</code> owns transport closure.  Pass
 
         <p>Bytes sent so far by the low-level primitives in this session.</p>
 <p>Empty unless the client was constructed with
-<code>record_wire_bytes=True</code>.  Reset with :meth:<code>reset_wire_buffer</code>.</p>
+<code>record_wire_bytes=True</code>.  Reset with <a class="autorefs autorefs-internal" title="reset_wire_buffer()" href="http1/#blackbull.client.http1.HTTP1Client.reset_wire_buffer"><code>reset_wire_buffer</code></a>.</p>
 
     </div>
 
@@ -7328,17 +7410,50 @@ returned :class:<code>HTTP1UpgradeSession</code> owns transport closure.  Pass
         <p>Walk <code>scenario.steps</code> against the connected socket.</p>
 <p>Never raises.  Every outcome (response, timeout, transport
 failure, hard-abort) is folded into the returned
-:class:<code>ScenarioResult</code> so callers can categorise without
+<a class="autorefs autorefs-internal" title="ScenarioResult
+
+
+  
+      dataclass
+  " href="../fault_injection/scenario_h1/#blackbull.fault_injection.scenario_h1.ScenarioResult"><code>ScenarioResult</code></a> so callers can categorise without
 try/except boilerplate per scenario.</p>
 
 
 <details class="step-dispatch" open>
   <summary>Step dispatch</summary>
   <ul>
-<li>:class:<code>SendBytes</code>   → :meth:<code>send_raw</code></li>
-<li>:class:<code>Sleep</code>       → :func:<code>asyncio.sleep</code></li>
-<li>:class:<code>ReadResponse</code> → :meth:<code>read_response</code></li>
-<li>:class:<code>Abort</code>       → <code>transport.abort()</code> (RST on Linux);
+<li><a class="autorefs autorefs-internal" title="SendRawBytes
+
+
+  
+      dataclass
+  " href="../fault_injection/scenario_h1/#blackbull.fault_injection.scenario_h1.SendRawBytes"><code>SendBytes</code></a>   → <a class="autorefs autorefs-internal" title="send_raw(data, *, byte_interval=0.0)
+
+  
+      async
+  " href="http1/#blackbull.client.http1.HTTP1Client.send_raw"><code>send_raw</code></a></li>
+<li><a class="autorefs autorefs-internal" title="Sleep
+
+
+  
+      dataclass
+  " href="../fault_injection/scenario_h1/#blackbull.fault_injection.scenario_h1.Sleep"><code>Sleep</code></a>       → <code>asyncio.sleep</code></li>
+<li><a class="autorefs autorefs-internal" title="ReadResponse
+
+
+  
+      dataclass
+  " href="../fault_injection/scenario_h1/#blackbull.fault_injection.scenario_h1.ReadResponse"><code>ReadResponse</code></a> → <a class="autorefs autorefs-internal" title="read_response(*, request_method=None, timeout=None)
+
+  
+      async
+  " href="http1/#blackbull.client.http1.HTTP1Client.read_response"><code>read_response</code></a></li>
+<li><a class="autorefs autorefs-internal" title="Abort
+
+
+  
+      dataclass
+  " href="../fault_injection/scenario_h1/#blackbull.fault_injection.scenario_h1.Abort"><code>Abort</code></a>       → <code>transport.abort()</code> (RST on Linux);
                          walks no further steps.</li>
 </ul>
 </details>
@@ -7386,7 +7501,7 @@ the client closes the transport; after handoff, the session owns it.</p>
 
         <p>Read one HTTP/1.1 response from the connection.</p>
 <p>Optional <code>timeout</code> bounds the entire read (status line + headers
-+ body).  Raises :class:<code>asyncio.TimeoutError</code> if the deadline is
++ body).  Raises <code>asyncio.TimeoutError</code> if the deadline is
 hit; the caller decides whether to treat that as a transport-
 fail or a normal protocol outcome.</p>
 
@@ -7429,7 +7544,11 @@ fail or a normal protocol outcome.</p>
     <div class="doc doc-contents ">
 
         <p>Send body octets to the peer.</p>
-<p>Same semantics as :meth:<code>send_raw</code>, kept separate for readability
+<p>Same semantics as <a class="autorefs autorefs-internal" title="send_raw(data, *, byte_interval=0.0)
+
+  
+      async
+  " href="http1/#blackbull.client.http1.HTTP1Client.send_raw"><code>send_raw</code></a>, kept separate for readability
 at call sites that frame headers separately from the body.</p>
 
 
@@ -7454,8 +7573,20 @@ at call sites that frame headers separately from the body.</p>
 
         <p>Send one <code>Transfer-Encoding: chunked</code> chunk.</p>
 <p>Caller must have already emitted <code>Transfer-Encoding: chunked</code>
-via :meth:<code>send_header_line</code> and called :meth:<code>end_headers</code>.
-Finish the chunked stream with :meth:<code>end_chunked</code>.</p>
+via <a class="autorefs autorefs-internal" title="send_header_line(name, value)
+
+  
+      async
+  " href="http1/#blackbull.client.http1.HTTP1Client.send_header_line"><code>send_header_line</code></a> and called <a class="autorefs autorefs-internal" title="end_headers()
+
+  
+      async
+  " href="http1/#blackbull.client.http1.HTTP1Client.end_headers"><code>end_headers</code></a>.
+Finish the chunked stream with <a class="autorefs autorefs-internal" title="end_chunked()
+
+  
+      async
+  " href="http1/#blackbull.client.http1.HTTP1Client.end_chunked"><code>end_chunked</code></a>.</p>
 
 
     </div>
@@ -7503,12 +7634,10 @@ directly.</p>
     <div class="doc doc-contents ">
 
         <p>Push arbitrary bytes onto the underlying socket.</p>
-<p>When <code>byte_interval &gt; 0</code> the bytes are transmitted one at a time
-with <code>byte_interval</code> seconds between writes — the primitive
-slowloris-style stall the differential tests rely on.  Each per-
-byte write is followed by <code>drain()</code> (inherited from
-:class:<code>AsyncioWriter</code>), so the bytes actually leave the socket
-on schedule rather than accumulating in the asyncio send buffer.</p>
+<p>With <code>byte_interval &gt; 0</code> the bytes go out one at a time, that many
+seconds apart — the primitive a slowloris-style stall is built from.
+Each write is drained, so the pacing is on the wire and not in the
+asyncio send buffer.</p>
 
 
     </div>
@@ -7658,7 +7787,11 @@ keep-alive connection.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Write a request returned by :meth:<code>prepare</code>.</p>
+        <p>Write a request returned by <a class="autorefs autorefs-internal" title="prepare(method, path, headers, body=b'')
+
+  
+      classmethod
+  " href="http1/#blackbull.client.http1.HTTP1RequestSender.prepare"><code>prepare</code></a>.</p>
 
 
     </div>
@@ -7767,7 +7900,7 @@ only at the read.</p>
 
 
         <p>Bidirectional transport after CONNECT or an HTTP 101 switch.</p>
-<p>Obtain one with :meth:<code>HTTP1Client.handoff</code>.  The handoff is one-shot:
+<p>Obtain one with <a class="autorefs autorefs-internal" title="handoff()" href="http1/#blackbull.client.http1.HTTP1Client.handoff"><code>HTTP1Client.handoff</code></a>.  The handoff is one-shot:
 once returned, this session owns transport closure and the originating
 HTTP client can no longer read or write the connection.</p>
 
@@ -7963,16 +8096,19 @@ advertises.</p>
 
         <p>Walk <code>scenario.steps</code> against the connected socket.</p>
 <p>The HTTP/2 counterpart of
-:meth:<code>blackbull.client.http1.HTTP1Client.execute_scenario</code>, and
+<a class="autorefs autorefs-internal" title="execute_scenario(scenario)
+
+  
+      async
+  " href="http1/#blackbull.client.http1.HTTP1Client.execute_scenario"><code>blackbull.client.http1.HTTP1Client.execute_scenario</code></a>, and
 deliberately the same shape: every <em>outcome</em> — a frame read, a
 timeout, a transport failure, a hard-abort — is folded into the
-returned result so callers categorise without a try/except per
-scenario.  What is raised instead is the scenario this connection
-cannot express at all: an unowned step (see
-:meth:<code>_check_scenario_ownership</code>) or a client whose context has
-exited.  Neither is news about the peer, and folding one would make
-a closed client indistinguishable in the result from a silent
-server.</p>
+returned result, so callers categorise without a try/except per
+scenario.  Raised instead is the scenario this connection cannot
+express at all: a step belonging to another vocabulary, or a client
+whose context has exited.  Neither is news about the peer, and
+folding one would make a closed client indistinguishable from a
+silent server.</p>
 
 
 <details class="step-dispatch" open>
@@ -7983,14 +8119,11 @@ server.</p>
   production sender (which is what lets a scenario declare a
   length its payload does not match)</li>
 <li><code>SendBytes</code>    → arbitrary bytes, optionally one at a time</li>
-<li><code>Sleep</code>        → :func:<code>asyncio.sleep</code></li>
+<li><code>Sleep</code>        → <code>asyncio.sleep</code></li>
 <li><code>ReadResponse</code> → one frame, or a recorded timeout</li>
 <li><code>Abort</code>        → <code>transport.abort()</code>; walks no further steps</li>
 </ul>
-</details>        <p>This lives on the client rather than in <code>fault_injection</code> because
-its twin does: a scenario executor needs the connection, and the
-client is what owns one.</p>
-
+</details>
 
     </div>
 
@@ -8012,9 +8145,7 @@ client is what owns one.</p>
     <div class="doc doc-contents ">
 
         <p>Escape hatch: read one raw frame, bypassing the receive loop's dispatch.</p>
-<p>For negative-path / fault-injection tests and raw-frame clients that
-need a peer frame <code>_receive_loop</code> would otherwise route through the
-normal dispatcher — the read-side twin of :meth:<code>send_raw_frame</code>.</p>
+<p>The read-side twin of <code>send_raw_frame</code>.</p>
 <p>Only safe to call when the receive loop is not running (i.e. before
 <code>__aenter__</code> finishes or after the loop has been cancelled); a
 concurrent loop would race this call for the reader.</p>
@@ -8044,16 +8175,10 @@ life of the process.</p>
         <p>Mark <em>stream_id</em> as a raw-frame stream.</p>
 <p>Frames arriving on this stream are pushed into the returned
 <code>asyncio.Queue</code> instead of being routed through the
-request/response state machine.  Used by
-:class:<code>blackbull.client.WebSocketH2Client</code> to receive
-WebSocket frames (carried in DATA frames after RFC 8441
-Extended CONNECT) without racing the receive loop.</p>
-<p>Returning a fresh queue each call is intentional — registering
-the same stream twice would be a programming error.</p>
-<p>The depth is <code>client_raw_queue_depth</code>.  Flow control does not
-substitute for it: most of what lands here is not flow-controlled,
-and RFC 9113 §6.9.1 charges a DATA frame's payload only, so a
-zero-length one costs the peer no credit at all.</p>
+request/response state machine.</p>
+<p>A fresh queue per call: registering the same stream twice is a
+programming error, not a second subscription.  The depth is
+<code>client_raw_queue_depth</code>, which flow control cannot stand in for.</p>
 
 
     </div>
@@ -8122,10 +8247,9 @@ its frame reached the peer.</p>
     <div class="doc doc-contents ">
 
         <p>Stop routing frames for <em>stream_id</em> into its raw-frame queue.</p>
-<p>The one door a closed client still admits, and deliberately: this is
-teardown, <code>WebSocketH2Session.close</code> calls it from a <code>finally</code>,
-and a cleanup path that raises after close turns an orderly shutdown
-into an error.  Nothing here needs the connection.</p>
+<p>The one door a closed client still admits: this is teardown, nothing
+here needs the connection, and a cleanup path that raises after close
+turns an orderly shutdown into an error.</p>
 
 
     </div>
@@ -8224,7 +8348,12 @@ into an error.  Nothing here needs the connection.</p>
         <p>Read one HTTP/1.1 response from the connection.</p>
 <p><code>timeout</code> bounds the entire status-line + headers + body read.
 On timeout the executor records the outcome on the
-:class:<code>ScenarioResult</code> and does <em>not</em> raise — the caller decides
+<a class="autorefs autorefs-internal" title="ScenarioResult
+
+
+  
+      dataclass
+  " href="../fault_injection/scenario_h1/#blackbull.fault_injection.scenario_h1.ScenarioResult"><code>ScenarioResult</code></a> and does <em>not</em> raise — the caller decides
 whether to treat that as a transport-fail or normal outcome.</p>
 
 
@@ -8320,7 +8449,7 @@ whether to treat that as a transport-fail or normal outcome.</p>
 
 
         <p>The peer's response head passed a byte budget the client set.</p>
-<p>Distinct from :class:<code>ProtocolError</code>: the response was well-formed as far
+<p>Distinct from <a class="autorefs autorefs-internal" href="exceptions/#blackbull.client.exceptions.ProtocolError"><code>ProtocolError</code></a>: the response was well-formed as far
 as it was read.  What failed is a limit this client chose, so a caller that
 wants the peer's output anyway can raise the budget rather than conclude
 the peer is broken.</p>
@@ -8466,12 +8595,16 @@ per-iteration fuzz throughput.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Parse JSON Lines back to a :class:<code>Scenario</code>.</p>
+        <p>Parse JSON Lines back to a <a class="autorefs autorefs-internal" title="Scenario
+
+
+  
+      dataclass
+  " href="../fault_injection/scenario_h1/#blackbull.fault_injection.scenario_h1.Scenario"><code>Scenario</code></a>.</p>
 <p>Skips blank lines so files that end with a trailing newline
 (the conventional git-friendly shape) parse cleanly.</p>
-<p>A <code>HEADER</code> line carries the name.  It is optional on the way in:
-corpus files written before the header existed have no such line
-and still parse, yielding an unnamed scenario.</p>
+<p>A <code>HEADER</code> line carries the name and is optional on the way in:
+a file without one parses to an unnamed scenario.</p>
 
 
     </div>
@@ -8492,7 +8625,7 @@ and still parse, yielding an unnamed scenario.</p>
         <p>Serialise to JSON Lines: one <code>{"op": ..., ...}</code> per line.</p>
 <p>Bytes payloads are base64-encoded so the result round-trips
 through stdout / git / json.loads without escape ambiguity.
-Round-tripped by :meth:<code>from_json</code>.</p>
+Round-tripped by <code>from_json</code>.</p>
 <p>The scenario's name rides the first line under the op <code>HEADER</code>,
 the convention the other three vocabularies use, so the file stays
 one line-oriented stream with no out-of-band metadata.  Without it
@@ -8556,12 +8689,11 @@ HTTP/1.1 differential suite.</p>
 
 
 
-        <p>Outcome of one :meth:<code>HTTP1Client.execute_scenario</code> call.</p>
+        <p>Outcome of one <code>HTTP1Client.execute_scenario</code> call.</p>
 <p>Exactly one of <code>response</code> / <code>exception</code> / <code>timed_out</code> /
 <code>aborted</code> is the meaningful field; the others are <code>None</code> /
-<code>False</code>.  The executor never raises, so callers (differential
-test, fuzz harness) categorise on this object instead of writing
-try/except boilerplate per scenario.</p>
+<code>False</code>.  The executor never raises, so a caller categorises on this
+object rather than on an exception.</p>
 
 
 
@@ -8901,7 +9033,11 @@ transport-level deadline does not cover this wait.  <code>None</code> opts out.<
         <p>Async WebSocket-over-HTTP/2 client (RFC 8441).</p>
 <p>Owns the TLS + HTTP/2 connection; performs the Extended CONNECT
 handshake (<code>:method=CONNECT</code>, <code>:protocol=websocket</code>) on
-:meth:<code>connect</code> and returns a :class:<code>WebSocketH2Session</code> for
+<a class="autorefs autorefs-internal" title="connect(path='/', *, response_timeout=5.0)
+
+  
+      async
+  " href="websocket_h2/#blackbull.client.websocket_h2.WebSocketH2Client.connect"><code>connect</code></a> and returns a <a class="autorefs autorefs-internal" href="websocket_h2/#blackbull.client.websocket_h2.WebSocketH2Session"><code>WebSocketH2Session</code></a> for
 post-handshake frame I/O.</p>
 <p>The peer server must advertise <code>SETTINGS_ENABLE_CONNECT_PROTOCOL=1</code>;
 BlackBull's server does so when <code>BB_H2_ENABLE_WEBSOCKET=1</code>.</p>
@@ -8941,7 +9077,11 @@ BlackBull's server does so when <code>BB_H2_ENABLE_WEBSOCKET=1</code>.</p>
     <div class="doc doc-contents ">
 
         <p><code>:status</code> from the last Extended CONNECT response, or <code>None</code>
-if :meth:<code>connect</code> has not run yet.</p>
+if <a class="autorefs autorefs-internal" title="connect(path='/', *, response_timeout=5.0)
+
+  
+      async
+  " href="websocket_h2/#blackbull.client.websocket_h2.WebSocketH2Client.connect"><code>connect</code></a> has not run yet.</p>
 
     </div>
 
@@ -8970,7 +9110,7 @@ connection one dynamic table in each direction.  Reading the context
 from the connection is what keeps the CONNECT's header block and
 every other block on the wire encoded against the same table the
 peer's single decoder is building.</p>
-<p>Raises :class:<code>RuntimeError</code> before <code>__aenter__</code>: the context comes
+<p>Raises <code>RuntimeError</code> before <code>__aenter__</code>: the context comes
 into being with the connection, so there is none to hand out yet.</p>
 
     </div>
@@ -8996,9 +9136,9 @@ into being with the connection, so there is none to hand out yet.</p>
     <div class="doc doc-contents ">
 
         <p>Run the RFC 8441 Extended CONNECT handshake on this connection.</p>
-<p>Returns a :class:<code>WebSocketH2Session</code> bound to the new H2 stream.
-Raises :class:<code>HandshakeError</code> on a non-200 <code>:status</code> response
-or :class:<code>TimeoutError</code> if no response arrives within
+<p>Returns a <a class="autorefs autorefs-internal" href="websocket_h2/#blackbull.client.websocket_h2.WebSocketH2Session"><code>WebSocketH2Session</code></a> bound to the new H2 stream.
+Raises <a class="autorefs autorefs-internal" href="exceptions/#blackbull.client.exceptions.HandshakeError"><code>HandshakeError</code></a> on a non-200 <code>:status</code> response
+or <code>TimeoutError</code> if no response arrives within
 <em>response_timeout</em>.</p>
 
 
@@ -9032,7 +9172,7 @@ or :class:<code>TimeoutError</code> if no response arrives within
         <p>Frame-level WebSocket session over one HTTP/2 stream.</p>
 <p>Outgoing frames are masked (RFC 6455 §5.1) and wrapped in H2 DATA
 frames.  Incoming DATA payloads feed the shared
-<code>WebSocketRecipient</code> stack through :class:<code>_H2QueueReader</code> —
+<code>WebSocketRecipient</code> stack through <code>_H2QueueReader</code> —
 fragmentation reassembly, FIN/RSV/mask
 validation, UTF-8 checks, and auto-PONG all come from the same
 codec the server and the H1 client use.</p>
@@ -9077,7 +9217,11 @@ codec the server and the H1 client use.</p>
 frame), await the peer's echoed CLOSE bounded by <em>drain_timeout</em>,
 and stop the recipient's reader task.  Idempotent.</p>
 <p>Same close discipline as the H1
-client's :meth:<code>WebSocketSession.close</code>.</p>
+client's <a class="autorefs autorefs-internal" title="close(code=_CLOSE_CODE_NORMAL, *, drain_timeout=5.0)
+
+  
+      async
+  " href="websocket/#blackbull.client.websocket.WebSocketSession.close"><code>WebSocketSession.close</code></a>.</p>
 
 
     </div>
@@ -9102,9 +9246,9 @@ client's :meth:<code>WebSocketSession.close</code>.</p>
         <p>Return <code>(opcode, payload)</code> for the next complete WebSocket
 <strong>message</strong> on this stream (fragmented messages are reassembled;
 PING is answered transparently).</p>
-<p>Raises :class:<code>TimeoutError</code> if no message arrives within
+<p>Raises <code>TimeoutError</code> if no message arrives within
 <em>timeout</em>.  Returned opcodes match
-:class:<code>blackbull.server.ws_codec.WSOpcode</code>; a peer CLOSE (or
+<a class="autorefs autorefs-internal" title="WSOpcode" href="../server/ws_codec/#blackbull.server.ws_codec.WSOpcode"><code>blackbull.server.ws_codec.WSOpcode</code></a>; a peer CLOSE (or
 stream end) is surfaced as <code>(WSOpcode.CLOSE, 2-byte code)</code>.</p>
 
 
@@ -9164,6 +9308,28 @@ mask their outgoing frames.</p>
 <div class="doc doc-object doc-function">
 
 
+<h4 id="blackbull.client.WebSocketSession.__aenter__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="fm">__aenter__</span><span class="p">()</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.client.WebSocketSession.__aenter__" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return the already-connected session; the handshake ran before this.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h4 id="blackbull.client.WebSocketSession.close" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">close</span><span class="p">(</span><span class="n">code</span><span class="o">=</span><span class="n">_CLOSE_CODE_NORMAL</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">drain_timeout</span><span class="o">=</span><span class="mf">5.0</span><span class="p">)</span></code>
 
@@ -9183,6 +9349,28 @@ is complete once both endpoints have sent and received a Close
 frame.  A silent peer cannot hang <code>close()</code>: after
 <em>drain_timeout</em> the reader is shut down regardless.  Data frames
 still in flight during the drain are discarded.  Idempotent.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.client.WebSocketSession.ping" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">ping</span><span class="p">(</span><span class="n">data</span><span class="o">=</span><span class="sa">b</span><span class="s1">''</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.client.WebSocketSession.ping" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Send a PING carrying <em>data</em>; the peer's PONG arrives on the read path.</p>
 
 
     </div>
@@ -9217,6 +9405,50 @@ still in flight during the drain are discarded.  Idempotent.</p>
 </details>        <p>Server-initiated PING frames are auto-PONGed by the underlying
 <code>WebSocketRecipient</code> (with masking, since this session is the
 client).  Server PONG frames are silently dropped.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.client.WebSocketSession.send_bytes" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">send_bytes</span><span class="p">(</span><span class="n">data</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.client.WebSocketSession.send_bytes" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Send <em>data</em> as a binary message.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.client.WebSocketSession.send_text" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">send_text</span><span class="p">(</span><span class="n">text</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.client.WebSocketSession.send_text" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Send <em>text</em> as a UTF-8 text message.</p>
 
 
     </div>

@@ -3071,34 +3071,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -5713,13 +5685,22 @@
 
         <p>Application taps on broker routing — the <code>on_message</code> observability layer.</p>
 <p>A <em>tap</em> is an async <code>(message, **captures) -&gt; None</code> callback registered via
-:meth:<code>blackbull.mqtt.MQTTExtension.on_message</code> for a topic filter.  Taps are
+<a class="autorefs autorefs-internal" title="on_message(topic='#')" href="../#blackbull.mqtt.MQTTExtension.on_message"><code>blackbull.mqtt.MQTTExtension.on_message</code></a> for a topic filter.  Taps are
 best-effort observers on top of normal broker routing; the broker runs whether
 or not any tap is registered.</p>
-<p>Two dispatch engines share one code path (:func:<code>run_taps</code>):</p>
+<p>Two dispatch engines share one code path (<a class="autorefs autorefs-internal" title="run_taps(taps, message, *, raise_exceptions=False)
+
+  
+      async
+  " href="#blackbull.mqtt.tap.run_taps"><code>run_taps</code></a>):</p>
 <ul>
-<li><strong>actor</strong> (default) — :class:<code>TapActor</code> is a single, lifespan-owned consumer.
-  A connection actor hands it a :class:<code>Message</code> with :meth:<code>TapActor.offer</code>
+<li><strong>actor</strong> (default) — <a class="autorefs autorefs-internal" href="#blackbull.mqtt.tap.TapActor"><code>TapActor</code></a> is a single, lifespan-owned consumer.
+  A connection actor hands it a <a class="autorefs autorefs-internal" title="Message
+
+
+  
+      dataclass
+  " href="#blackbull.mqtt.tap.Message"><code>Message</code></a> with <a class="autorefs autorefs-internal" title="offer(message)" href="#blackbull.mqtt.tap.TapActor.offer"><code>TapActor.offer</code></a>
   (non-blocking) and returns immediately, so a slow tap can never back-pressure
   the connection or the broker.  Its inbox is <strong>bounded</strong>; on overflow the
   <em>newest</em> message is dropped and a running dropped-count is logged (taps are
@@ -5771,11 +5752,10 @@ binds it as a keyword argument to the callback, mirroring HTTP path params.</p>
 
 
         <p>A published message handed to an <code>on_message</code> tap.</p>
-<p>The user-facing read-model — a plain, immutable view of one PUBLISH,
-deliberately distinct from the wire codec <code>MQTTPublish</code> (which carries the
-<code>__iter__</code>/<code>__getitem__</code> tuple-magic) and from the actor inbox
-<code>Message</code> base.  Named <code>Message</code> for ecosystem consistency (aiomqtt,
-paho): users write <code>from blackbull.mqtt import Message</code>.</p>
+<p>A plain, immutable read-model of one PUBLISH — neither the wire codec
+<code>MQTTPublish</code> nor the actor inbox <code>Message</code> base, both of which it
+sits between.  It takes the bare name anyway, because <code>Message</code> is
+what aiomqtt and paho call this and what users reach for.</p>
 
 
 
@@ -5827,7 +5807,7 @@ paho): users write <code>from blackbull.mqtt import Message</code>.</p>
 
         <p>A compiled <code>on_message</code> registration.</p>
 <p><code>match_filter</code> is the topic filter with each <code>{name}</code> segment rewritten
-to <code>+</code> (so the validated :func:<code>topic_matches_filter</code> does the matching);
+to <code>+</code> (so the validated <a class="autorefs autorefs-internal" title="topic_matches_filter(topic, filter_str)" href="../messages/#blackbull.mqtt.messages.topic_matches_filter"><code>topic_matches_filter</code></a> does the matching);
 <code>captures</code> records the <code>(level_index, name)</code> of each <code>{name}</code> segment
 for binding once a topic matches.</p>
 
@@ -5868,9 +5848,7 @@ for binding once a topic matches.</p>
         <p>The topic filter as originally written, with <code>{name}</code> captures
 restored (<code>match_filter</code> rewrites each to <code>+</code> for matching).</p>
 <p><code>'sensors/{room}/temperature'</code> round-trips back to itself; a plain
-<code>'sensors/+/temperature'</code> stays as <code>'sensors/+/temperature'</code>.  Used
-by documentation tooling (<code>AsyncAPIExtension</code>) that wants to show the
-filter the application declared rather than the internal match form.</p>
+<code>'sensors/+/temperature'</code> stays as <code>'sensors/+/temperature'</code>.</p>
 
     </div>
 
@@ -5923,7 +5901,7 @@ filter the application declared rather than the internal match form.</p>
 
 
         <p>Decoupled, lifespan-owned consumer of <code>on_message</code> taps.</p>
-<p>Producers call :meth:<code>offer</code> (non-blocking); a single consumer task drains
+<p>Producers call <a class="autorefs autorefs-internal" title="offer(message)" href="#blackbull.mqtt.tap.TapActor.offer"><code>offer</code></a> (non-blocking); a single consumer task drains
 the bounded inbox and runs the matching taps, so FIFO order of <em>accepted</em>
 messages is preserved and tap latency never reaches the connection or broker.</p>
 
@@ -6026,7 +6004,12 @@ unacceptable outcome.</p>
 
 
 
-        <p>Hand a published :class:<code>Message</code> to the :class:<code>TapActor</code>.</p>
+        <p>Hand a published <a class="autorefs autorefs-internal" title="Message
+
+
+  
+      dataclass
+  " href="#blackbull.mqtt.tap.Message"><code>Message</code></a> to the <a class="autorefs autorefs-internal" href="#blackbull.mqtt.tap.TapActor"><code>TapActor</code></a>.</p>
 
 
 
@@ -6069,7 +6052,12 @@ unacceptable outcome.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Compile a topic filter (possibly with <code>{name}</code> captures) into a :class:<code>Tap</code>.</p>
+        <p>Compile a topic filter (possibly with <code>{name}</code> captures) into a <a class="autorefs autorefs-internal" title="Tap
+
+
+  
+      dataclass
+  " href="#blackbull.mqtt.tap.Tap"><code>Tap</code></a>.</p>
 
 
     </div>
@@ -6087,7 +6075,12 @@ unacceptable outcome.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Normalise a handler list to :class:<code>Tap</code> objects.</p>
+        <p>Normalise a handler list to <a class="autorefs autorefs-internal" title="Tap
+
+
+  
+      dataclass
+  " href="#blackbull.mqtt.tap.Tap"><code>Tap</code></a> objects.</p>
 <p>Accepts already-compiled <code>Tap</code> objects or <code>(topic, callback)</code> pairs, so
 direct callers (tests, benchmarks) can keep the lightweight tuple form.</p>
 
@@ -6116,9 +6109,8 @@ direct callers (tests, benchmarks) can keep the lightweight tuple form.</p>
 without captures is simply called <code>callback(message)</code>.</p>
 <p>A handler exception is logged and isolated by default — taps are
 best-effort observers, and one raising handler must not stop the others
-(nor the broker).  Pass <code>raise_exceptions=True</code> to propagate the first
-exception instead: the mode test instrumentation wants, where a failing
-tap should fail the test rather than vanish into a log line.</p>
+(nor the broker).  <code>raise_exceptions=True</code> propagates the first one
+instead, so a failing tap fails a test rather than a log line.</p>
 
 
     </div>

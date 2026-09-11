@@ -3361,34 +3361,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../middleware/cache/" class="md-nav__link">
         
   
@@ -5901,12 +5873,26 @@ representation.</p>
 self-hosted path; the ASGI <code>scope</code> dict is therefore an <em>internal
 data-format choice</em>, not an interoperability contract — and a poor one
 (untyped, string-keyed, carrying private <code>_</code>-prefixed keys). This module
-makes a typed :class:<code>Connection</code> the internal model; the ASGI scope becomes
-a <strong>derived</strong> view produced by :meth:<code>Connection.as_scope</code> and consumed by
-:meth:<code>Connection.from_scope</code>, used only where external compatibility needs
+makes a typed <a class="autorefs autorefs-internal" title="Connection
+
+
+  
+      dataclass
+  " href="#blackbull.connection.Connection"><code>Connection</code></a> the internal model; the ASGI scope becomes
+a <strong>derived</strong> view produced by <a class="autorefs autorefs-internal" title="as_scope()" href="#blackbull.connection.Connection.as_scope"><code>Connection.as_scope</code></a> and consumed by
+<a class="autorefs autorefs-internal" title="from_scope(scope, receive=None)
+
+  
+      classmethod
+  " href="#blackbull.connection.Connection.from_scope"><code>Connection.from_scope</code></a>, used only where external compatibility needs
 it (uvicorn, <code>httpx.ASGITransport</code>/TestClient, third-party ASGI middleware).</p>
 <p>The <code>_CONNECTION_FIELDS</code> registry is the single source of truth from which
-both conversions are generated: adding a field to :class:<code>Connection</code> without
+both conversions are generated: adding a field to <a class="autorefs autorefs-internal" title="Connection
+
+
+  
+      dataclass
+  " href="#blackbull.connection.Connection"><code>Connection</code></a> without
 a registry entry is a test failure (proposal §4.2 / §9.5), which mechanically
 prevents the two representations from drifting apart.</p>
 
@@ -5950,7 +5936,11 @@ prevents the two representations from drifting apart.</p>
 <p>ASGI signals a mid-body disconnect with an <code>http.disconnect</code> event that
 carries no <code>body</code>/<code>more_body</code> keys.  Treating it as end-of-message
 would return a <em>truncated</em> upload as if it were whole, so
-:func:<code>read_body</code> raises this instead — the handler must not process a
+<a class="autorefs autorefs-internal" title="read_body(receive)
+
+  
+      async
+  " href="../request/#blackbull.request.read_body"><code>read_body</code></a> raises this instead — the handler must not process a
 partial body as complete.  The <code>partial</code> attribute holds whatever body
 bytes had arrived before the disconnect.</p>
 
@@ -6005,7 +5995,7 @@ bytes had arrived before the disconnect.</p>
         <p>One HTTP (or WebSocket) request — the single internal representation.</p>
 <p>Built by the protocol actor, consumed by the router, dispatcher,
 middleware, and handlers. The ASGI <code>scope</code> dict is a <em>derived</em> view
-(:meth:<code>as_scope</code>). <code>Request</code> is a deprecated alias of this class.</p>
+(<a class="autorefs autorefs-internal" title="as_scope()" href="#blackbull.connection.Connection.as_scope"><code>as_scope</code></a>). <code>Request</code> is a deprecated alias of this class.</p>
 
 
 
@@ -6064,19 +6054,20 @@ middleware, and handlers. The ASGI <code>scope</code> dict is a <em>derived</em>
     <div class="doc doc-contents ">
 
         <p>True once the client dropped mid-request.</p>
-<p>The named form of the state the module-level :func:<code>disconnected</code>
-helper also reports.  A long-running
-handler polls this to abandon work whose answer nobody is waiting for::</p>
+<p>A long-running handler polls this to abandon work whose answer nobody
+is waiting for::</p>
 <pre><code>for row in rows:
     if conn.disconnected:
         break
 </code></pre>
-<p>Set by the actor's disconnect-detecting receive wrapper, so it goes
-true when the <em>server</em> notices — at the next <code>receive()</code> — rather
-than the instant the peer's FIN lands.</p>
-<p>The module-level :func:<code>disconnected</code> remains the form to use at the
-two ASGI boundaries, where the same state may live on a <code>scope</code>
-dict instead of a :class:<code>Connection</code>.</p>
+<p>It goes true when the <em>server</em> notices, at the next <code>receive()</code>,
+rather than the instant the peer's FIN lands.  The module-level
+<a class="autorefs autorefs-internal" title="disconnected
+
+  
+      property
+  " href="#blackbull.connection.Connection.disconnected"><code>disconnected</code></a> reads the same state at the two ASGI boundaries,
+where it may live on a <code>scope</code> dict instead.</p>
 
     </div>
 
@@ -6152,7 +6143,11 @@ answers a malformed value with 400 rather than a silent fallback).</p>
 
         <p>Query params keeping <strong>every</strong> value, parsed once and cached.</p>
 <p>The full <code>parse_qsl</code> result: <code>?tag=a&amp;tag=b</code> gives
-<code>{'tag': ['a', 'b']}</code>.  Unlike :attr:<code>query</code>, which folds repeats to
+<code>{'tag': ['a', 'b']}</code>.  Unlike <a class="autorefs autorefs-internal" title="query
+
+  
+      property
+  " href="#blackbull.connection.Connection.query"><code>query</code></a>, which folds repeats to
 the last value, this is what list-valued keys need.  The backing dict
 is created lazily on first access, so handlers that never read a query
 param allocate nothing.</p>
@@ -6227,9 +6222,21 @@ buffering middleware's writes reach the handler.</p>
     <div class="doc doc-contents ">
 
         <p>Return the complete request body, draining <code>receive</code> at most once.</p>
-<p>Repeated calls (and :meth:<code>json</code> / :meth:<code>text</code>) return the cached
-bytes. A mid-body disconnect raises :class:<code>ClientDisconnected</code>. Raises
-:class:<code>RuntimeError</code> if :meth:<code>stream</code> already consumed the body — the
+<p>Repeated calls (and <a class="autorefs autorefs-internal" title="json()
+
+  
+      async
+  " href="#blackbull.connection.Connection.json"><code>json</code></a> / <a class="autorefs autorefs-internal" title="text(encoding='utf-8')
+
+  
+      async
+  " href="#blackbull.connection.Connection.text"><code>text</code></a>) return the cached
+bytes. A mid-body disconnect raises <a class="autorefs autorefs-internal" href="../request/#blackbull.request.ClientDisconnected"><code>ClientDisconnected</code></a>. Raises
+<code>RuntimeError</code> if <a class="autorefs autorefs-internal" title="stream()
+
+  
+      async
+  " href="#blackbull.connection.Connection.stream"><code>stream</code></a> already consumed the body — the
 channel is a single drain, so there is nothing left to buffer.</p>
 
 
@@ -6253,11 +6260,27 @@ channel is a single drain, so there is nothing left to buffer.</p>
     <div class="doc doc-contents ">
 
         <p><code>application/x-www-form-urlencoded</code> body, parsed once and cached.</p>
-<p>Reads the body through :meth:<code>body</code>, so a later :meth:<code>json</code> /
-:meth:<code>text</code> call reuses the cached bytes.  On a non-form
+<p>Reads the body through <a class="autorefs autorefs-internal" title="body()
+
+  
+      async
+  " href="#blackbull.connection.Connection.body"><code>body</code></a>, so a later <a class="autorefs autorefs-internal" title="json()
+
+  
+      async
+  " href="#blackbull.connection.Connection.json"><code>json</code></a> /
+<a class="autorefs autorefs-internal" title="text(encoding='utf-8')
+
+  
+      async
+  " href="#blackbull.connection.Connection.text"><code>text</code></a> call reuses the cached bytes.  On a non-form
 <code>Content-Type</code> (or no body) it returns <code>{}</code> rather than raising,
 and does not touch the body.  Multipart uploads are out of scope — use
-:meth:<code>stream</code> and parse them manually.</p>
+<a class="autorefs autorefs-internal" title="stream()
+
+  
+      async
+  " href="#blackbull.connection.Connection.stream"><code>stream</code></a> and parse them manually.</p>
 
 
     </div>
@@ -6326,7 +6349,11 @@ fall back to the field defaults.</p>
     <div class="doc doc-contents ">
 
         <p>Yield the request body one chunk at a time, draining <code>receive</code> once.</p>
-<p>The streaming counterpart to :meth:<code>body</code>.  Use it when the handler only
+<p>The streaming counterpart to <a class="autorefs autorefs-internal" title="body()
+
+  
+      async
+  " href="#blackbull.connection.Connection.body"><code>body</code></a>.  Use it when the handler only
 needs to <em>process</em> the body incrementally — count/hash/forward a large
 upload — so the working set stays one chunk instead of the whole
 payload::</p>
@@ -6334,11 +6361,23 @@ payload::</p>
 async for chunk in conn.stream():
     total += len(chunk)
 </code></pre>
-<p>Mutually exclusive with :meth:<code>body</code>/:meth:<code>json</code>/:meth:<code>text</code>, which
+<p>Mutually exclusive with <a class="autorefs autorefs-internal" title="body()
+
+  
+      async
+  " href="#blackbull.connection.Connection.body"><code>body</code></a>/<a class="autorefs autorefs-internal" title="json()
+
+  
+      async
+  " href="#blackbull.connection.Connection.json"><code>json</code></a>/<a class="autorefs autorefs-internal" title="text(encoding='utf-8')
+
+  
+      async
+  " href="#blackbull.connection.Connection.text"><code>text</code></a>, which
 buffer: the body is a single-drain stream, so mixing the two on one
-request raises :class:<code>RuntimeError</code> rather than silently returning a
+request raises <code>RuntimeError</code> rather than silently returning a
 partial or empty body.  A mid-body disconnect raises
-:class:<code>ClientDisconnected</code>.</p>
+<a class="autorefs autorefs-internal" href="../request/#blackbull.request.ClientDisconnected"><code>ClientDisconnected</code></a>.</p>
 
 
     </div>
@@ -6379,26 +6418,40 @@ partial or empty body.  A mid-body disconnect raises
     <div class="doc doc-contents ">
 
         <p>Materialize the ASGI scope the dispatch pipeline consumes, with this
-typed :class:<code>Connection</code> stashed on it for zero-reconversion reads.</p>
+typed <a class="autorefs autorefs-internal" title="Connection
+
+
+  
+      dataclass
+  " href="#blackbull.connection.Connection"><code>Connection</code></a> stashed on it for zero-reconversion reads.</p>
 <p>The single canonical <em>Connection → dispatch-ready scope</em> bridge shared
 by the H/1.1 <code>run()</code> and H/2 <code>_conn_to_scope</code> seams, which would
 otherwise each hand-roll the same five steps:</p>
 <ol>
-<li>derive the ASGI scope via :meth:<code>as_scope</code> (the one native→ASGI point);</li>
+<li>derive the ASGI scope via <a class="autorefs autorefs-internal" title="as_scope()" href="#blackbull.connection.Connection.as_scope"><code>as_scope</code></a> (the one native→ASGI point);</li>
 <li>when <code>force_asgi</code> (the §4.3 <code>BB_FORCE_ASGI_SCOPE</code> dual-path lane),
-   round-trip through :meth:<code>from_scope</code> so both the derived scope <em>and</em>
+   round-trip through <a class="autorefs autorefs-internal" title="from_scope(scope, receive=None)
+
+  
+      classmethod
+  " href="#blackbull.connection.Connection.from_scope"><code>from_scope</code></a> so both the derived scope <em>and</em>
    the Connection the consumers read are rebuilt from scratch on every
    request, keeping the compat conversion from bitrotting.  <code>_asterisk_form</code>
    is Connection-only (not in the scope), so carry it across the rebuild;</li>
-<li>restore <code>scope['headers']</code> to the rich :class:<code>Headers</code> object
+<li>restore <code>scope['headers']</code> to the rich <a class="autorefs autorefs-internal" href="../headers/#blackbull.headers.Headers"><code>Headers</code></a> object
    (<code>as_scope</code> emits the ASGI <code>list[tuple]</code> form; internal <code>.get()</code>
    callers want the object);</li>
 <li>re-expose the H/1.1 <code>_asterisk_form</code> OPTIONS marker on the envelope;</li>
-<li>stash the Connection under :data:<code>CONNECTION_STASH_KEY</code>.</li>
+<li>stash the Connection under <code>CONNECTION_STASH_KEY</code>.</li>
 </ol>
 <p>Protocol-specific augmentation (the websocket-only <code>subprotocols</code> key)
 is layered on by the caller <em>after</em> this returns — it is not a
-:class:<code>Connection</code> field (proposal §2.1).</p>
+<a class="autorefs autorefs-internal" title="Connection
+
+
+  
+      dataclass
+  " href="#blackbull.connection.Connection"><code>Connection</code></a> field (proposal §2.1).</p>
 <p>The default (<code>force_asgi=False</code>) native path builds
 the scope by <strong>direct attribute access</strong>, placing the rich <code>Headers</code>
 object straight in (no <code>list(headers)</code> that the old code computed via
@@ -6434,17 +6487,17 @@ conformance lane (§4.3) keeps the full <code>as_scope</code> → <code>from_sco
 
         <p>Bind the <strong>raw</strong> body-receive channel onto the request's Connection so
 lazy <code>conn.body()</code> / <code>request.body()</code> drain the right stream once.</p>
-<p>Called by the protocol actor with the <em>unwrapped</em> recipient — never with a
-disconnect-detecting wrapper. Storing the wrapper would form a per-request
-reference cycle: <code>conn._receive</code> → wrapper → (closure captures) <code>conn</code>.
-The refcount of a cyclic group never reaches zero when the request's local
-refs drop, so reclamation is deferred to the generational cyclic GC — whose
-periodic pauses are a measured tail-latency cost on this path. The raw
-recipient does <strong>not</strong> reference <code>conn</code> (HTTP/1.1 keeps only the path
-string; HTTP/2 keeps none), so <code>conn</code> → recipient is an acyclic chain that
-refcounting frees the instant the request ends.</p>
+<p>Pass the <em>unwrapped</em> recipient, never a disconnect-detecting wrapper: the
+wrapper's closure captures <code>conn</code>, so storing it makes <code>conn</code> →
+wrapper → <code>conn</code> a cycle that only the generational GC can free, and its
+pauses are a measured tail-latency cost here.  The raw recipient holds no
+reference back, so refcounting frees the chain when the request ends.</p>
 <p>Idempotent — binds only when unset, so the external-ASGI path (uvicorn /
-<code>httpx.ASGITransport</code>), where :meth:<code>Connection.from_scope</code> already bound
+<code>httpx.ASGITransport</code>), where <a class="autorefs autorefs-internal" title="from_scope(scope, receive=None)
+
+  
+      classmethod
+  " href="#blackbull.connection.Connection.from_scope"><code>Connection.from_scope</code></a> already bound
 the host's own receive channel, keeps that binding.</p>
 
 
@@ -6464,7 +6517,12 @@ the host's own receive channel, keeps that binding.</p>
     <div class="doc doc-contents ">
 
         <p>True if the client disconnected mid-request. Accepts either a native
-:class:<code>Connection</code> (the <code>app(conn, …)</code> path) or an ASGI <code>scope</code> dict
+<a class="autorefs autorefs-internal" title="Connection
+
+
+  
+      dataclass
+  " href="#blackbull.connection.Connection"><code>Connection</code></a> (the <code>app(conn, …)</code> path) or an ASGI <code>scope</code> dict
 (the <code>BB_FORCE_ASGI_SCOPE</code> / external-server path).</p>
 
 
@@ -6483,8 +6541,13 @@ the host's own receive channel, keeps that binding.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Record a mid-request client disconnect on a :class:<code>Connection</code> or an
-ASGI <code>scope</code> dict (idempotent — caller guards on :func:<code>disconnected</code>).</p>
+        <p>Record a mid-request client disconnect on a <a class="autorefs autorefs-internal" title="Connection
+
+
+  
+      dataclass
+  " href="#blackbull.connection.Connection"><code>Connection</code></a> or an
+ASGI <code>scope</code> dict (idempotent — caller guards on <a class="autorefs autorefs-internal" title="disconnected(target)" href="#blackbull.connection.disconnected"><code>disconnected</code></a>).</p>
 
 
     </div>
@@ -6502,17 +6565,31 @@ ASGI <code>scope</code> dict (idempotent — caller guards on :func:<code>discon
 
     <div class="doc doc-contents ">
 
-        <p>Return the typed :class:<code>Connection</code> for this request, plus whether it
+        <p>Return the typed <a class="autorefs autorefs-internal" title="Connection
+
+
+  
+      dataclass
+  " href="#blackbull.connection.Connection"><code>Connection</code></a> for this request, plus whether it
 was freshly built.</p>
-<p><em>target</em> is the threaded dispatch object — a :class:<code>Connection</code> on the
+<p><em>target</em> is the threaded dispatch object — a <a class="autorefs autorefs-internal" title="Connection
+
+
+  
+      dataclass
+  " href="#blackbull.connection.Connection"><code>Connection</code></a> on the
 native path, or an ASGI scope dict on the external/compat lane.</p>
 <p>The one <em>ASGI-scope → Connection</em> accessor shared by the dispatcher
 (<code>app._connection_of</code>) and the router (<code>router._conn_of</code>).
 BlackBull's own protocol actors stash the <code>Connection</code> they parsed on the
-scope envelope under :data:<code>CONNECTION_STASH_KEY</code>, so the self-hosted path
+scope envelope under <code>CONNECTION_STASH_KEY</code>, so the self-hosted path
 reads it back with <strong>no</strong> re-conversion. Under an external ASGI server
 (uvicorn, <code>httpx.ASGITransport</code>) there is no stash, so build one via
-:meth:<code>Connection.from_scope</code> — the single ASGI→native point — and stash it
+<a class="autorefs autorefs-internal" title="from_scope(scope, receive=None)
+
+  
+      classmethod
+  " href="#blackbull.connection.Connection.from_scope"><code>Connection.from_scope</code></a> — the single ASGI→native point — and stash it
 so later accessors in the same request reuse the one object.</p>
 <p>Returns <code>(conn, built)</code> where <em>built</em> is <code>True</code> only on the external
 path (no prior stash). Callers layer their own post-processing on a freshly

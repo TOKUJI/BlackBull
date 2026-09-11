@@ -3229,34 +3229,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../middleware/cache/" class="md-nav__link">
         
   
@@ -5721,9 +5693,7 @@ detached is right for telemetry that must not add latency to the hot path.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Arbitrary per-event data.  <code>detail</code> is used (rather than
-<code>payload</code>) to avoid colliding with HTTP/2 and WebSocket
-protocol terminology already used in the codebase.</p>
+                <p>Arbitrary per-event data.</p>
               </div>
             </td>
           </tr>
@@ -5780,7 +5750,11 @@ their exceptions propagate to the emitter.  Observation handlers (<code>on</code
 are scheduled via <code>asyncio.create_task</code> (fire-and-forget) and their
 exceptions are caught and logged — they never reach the emitter.</p>
 <p>Observer tasks are tracked so they can be drained at shutdown via
-:meth:<code>aclose</code>.  The drain timeout is configured at construction time
+<a class="autorefs autorefs-internal" title="aclose()
+
+  
+      async
+  " href="#blackbull.event.EventDispatcher.aclose"><code>aclose</code></a>.  The drain timeout is configured at construction time
 (<code>shutdown_timeout</code>); any task still running after the timeout is
 logged at WARNING and cancelled.</p>
 
@@ -5825,13 +5799,12 @@ logged at WARNING and cancelled.</p>
 construction) for all in-flight observer tasks to complete.  Any
 tasks still running after the timeout are logged at WARNING and
 cancelled.</p>
-<p>Drains to <em>quiescence</em> via :meth:<code>drain</code>, not to a snapshot of the
-pending set.  An observer may itself <code>emit</code>, and the task for that
-second observer is created while the wait is already in progress —
-so awaiting one <code>list(self._pending_tasks)</code> returns, and reports a
-clean drain, with the second generation still running.  Nothing is
-logged in that case either, because the overrun warning below only
-covers tasks that were in the set being awaited.</p>
+<p>Drains to quiescence through <a class="autorefs autorefs-internal" title="drain(timeout=5.0)
+
+  
+      async
+  " href="#blackbull.event.EventDispatcher.drain"><code>drain</code></a>, so an observer that emits
+is waited for too.</p>
 <p>The cost is that a pathological observer chain can hold shutdown for
 the full budget rather than returning early.  Returning early is the
 wrong answer, not a cheaper one, and <code>shutdown_timeout</code> is the
@@ -5861,19 +5834,17 @@ latency cost at shutdown.</p>
         <p>Wait until no detached observer task is outstanding.</p>
 <p>Returns <code>True</code> on quiescence, <code>False</code> if <em>timeout</em> ran out
 first.  <strong>Nothing is cancelled either way</strong> — that is the whole
-difference from :meth:<code>aclose</code>, which is a shutdown operation and
+difference from <a class="autorefs autorefs-internal" title="aclose()
+
+  
+      async
+  " href="#blackbull.event.EventDispatcher.aclose"><code>aclose</code></a>, which is a shutdown operation and
 kills what overruns.  A test helper that cancelled the work it was
 asked to observe would make the side-effect it exists to reveal
 unobservable.</p>
-<p>Drains to <em>quiescence</em>, not to a snapshot.  An observer may itself
-emit, so the pending set can refill while it is being awaited;
-waiting on one <code>list(self._pending_tasks)</code> returns while that
-second generation is still running.  The loop re-reads the set
-after every wait for exactly that reason.</p>
-<p>Intended for tests.  <code>@app.intercept</code> and
-<code>@app.on(..., blocking=True)</code> are awaited inline and need no
-seam; <code>@app.on(name)</code> is detached by design, which is what makes
-a side-effect assertion after a request a race.</p>
+<p>Drains to <em>quiescence</em>, not to a snapshot: an observer may itself
+emit, so the set is re-read after every wait and a second generation
+is waited for too.</p>
 
 
     </div>
@@ -5905,7 +5876,11 @@ a side-effect assertion after a request a race.</p>
    return until they finish, so cleanup registered here is guaranteed
    to complete within the event's lifetime.</li>
 <li><strong>Detached observers</strong> — scheduled as independent tasks (isolated),
-   tracked so they can be drained at shutdown via :meth:<code>aclose</code>.</li>
+   tracked so they can be drained at shutdown via <a class="autorefs autorefs-internal" title="aclose()
+
+  
+      async
+  " href="#blackbull.event.EventDispatcher.aclose"><code>aclose</code></a>.</li>
 </ol>
 
 
@@ -5925,12 +5900,8 @@ a side-effect assertion after a request a race.</p>
     <div class="doc doc-contents ">
 
         <p>Return True if any interceptor or observer is registered for <code>event_name</code>.</p>
-<p>Hot path: callers use this to skip detail-dict / <code>Event</code> construction
-when no one will receive the event, and there is one such call site per
-lifecycle event per request.  Answered from the registration index, so
-the common "nobody is listening" verdict costs one set lookup instead
-of three dict probes — and, like the <code>defaultdict.get</code> form it
-replaces, it never inserts an empty list for an unknown name.</p>
+<p>One set lookup, and it never inserts an entry for a name nobody has
+registered, so a caller may ask on every event.</p>
 
 
     </div>

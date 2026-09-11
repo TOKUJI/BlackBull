@@ -3071,34 +3071,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../middleware/cache/" class="md-nav__link">
         
   
@@ -4077,6 +4049,17 @@
     <span class="md-ellipsis">
       
         __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.router.ErrorRouter.__setitem__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __setitem__
       
     </span>
   </a>
@@ -5735,6 +5718,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#blackbull.router.ErrorRouter.__setitem__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __setitem__
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5980,7 +5974,7 @@ parameter syntax; <code>ErrorRouter</code> does the same for HTTPStatus codes an
 exception classes.  <code>_register_chain</code> composes per-route middlewares with
 <code>functools.partial</code> so each middleware receives <code>call_next</code> bound to the
 next link.</p>
-<p><code>RouteGroup</code> is defined in :mod:<code>blackbull.app</code> to avoid a circular
+<p><code>RouteGroup</code> is defined in <a class="autorefs autorefs-internal" href="../app/#blackbull.app"><code>blackbull.app</code></a> to avoid a circular
 import; this module re-exports it lazily through <code>__getattr__</code>.</p>
 
 
@@ -6199,6 +6193,27 @@ statuses and exceptions have handlers of their own.</p>
 
 </div>
 
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.router.ErrorRouter.__setitem__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="fm">__setitem__</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">fn</span><span class="p">)</span></code>
+
+<a href="#blackbull.router.ErrorRouter.__setitem__" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Register <em>fn</em> as the handler for a status or an exception class.</p>
+<p>The status must be 4xx or 5xx: the annotation admits any
+<code>HTTPStatus</code>, but registering a handler for, say, <code>200</code> raises
+<code>ValueError</code>.</p>
+
+
+    </div>
+
+</div>
+
 
 
   </div>
@@ -6357,7 +6372,7 @@ human-readable message surfaced in development-mode error pages.</p>
 
 
         <p>Immutable snapshot of a single registered route entry.</p>
-<p>Returned by :meth:<code>BlackBull.get_routes</code>.  One entry is produced per
+<p>Returned by <a class="autorefs autorefs-internal" title="get_routes()" href="../app/#blackbull.app.BlackBull.get_routes"><code>BlackBull.get_routes</code></a>.  One entry is produced per
 <code>(route, method)</code> pair — a route registered with
 <code>methods=[GET, POST]</code> yields two <code>RouteInfo</code> records.</p>
 
@@ -6533,7 +6548,7 @@ any raw re.Pattern route matches it.</p>
     <div class="doc doc-contents ">
 
         <p>key: (path: str, method: str | HTTPMethod, scheme: Scheme)</p>
-<p>The query→miss→resolve→store flow; :meth:<code>_resolve</code> does the matching.
+<p>The query→miss→resolve→store flow; <code>_resolve</code> does the matching.
 A repeat of the same key skips resolution entirely after the first hit.</p>
 
 
@@ -6572,7 +6587,7 @@ docstring describes.  An omitted scheme is stored as <code>_ANY_SCHEME</code>.</
 
     <div class="doc doc-contents ">
 
-        <p>Return a snapshot of all registered routes as :class:<code>RouteInfo</code>.</p>
+        <p>Return a snapshot of all registered routes as <a class="autorefs autorefs-internal" href="#blackbull.router.RouteInfo"><code>RouteInfo</code></a>.</p>
 <p>Routes are returned in registration order.  A route registered with
 multiple methods (e.g. <code>methods=[GET, POST]</code>) produces one entry
 per method, in the order the methods were declared.  The returned
@@ -6623,7 +6638,7 @@ sendable (a Response, str/bytes, or JSON-able).</p>
 3. <code>middlewares=[...]</code> — returns a decorator; the decorated handler is
    appended to the middleware list before the chain is registered.</p>
 <p><code>name</code> registers the route for use with <code>url_path_for()</code>.
-<code>accept_query</code> is documented on :meth:<code>BlackBull.route</code>, which
+<code>accept_query</code> is documented on <a class="autorefs autorefs-internal" title="route(methods=[HTTPMethod.GET], path='/', scheme=Scheme.http, functions=[], middlewares=[], name=None, accept_query=None)" href="../app/#blackbull.app.BlackBull.route"><code>BlackBull.route</code></a>, which
 delegates here.</p>
 
 
@@ -6643,7 +6658,7 @@ delegates here.</p>
     <div class="doc doc-contents ">
 
         <p>Return a decorator that registers the decorated handler.</p>
-<p>See :meth:<code>BlackBull.route</code> for <code>accept_query</code>.</p>
+<p>See <a class="autorefs autorefs-internal" title="route(methods=[HTTPMethod.GET], path='/', scheme=Scheme.http, functions=[], middlewares=[], name=None, accept_query=None)" href="../app/#blackbull.app.BlackBull.route"><code>BlackBull.route</code></a> for <code>accept_query</code>.</p>
 
 
     </div>
@@ -6688,10 +6703,10 @@ are missing.</p>
 <li>Every path param appears in the handler signature (simplified handlers).</li>
 <li>Converter output type matches the handler's annotation.</li>
 </ul>
-<p>Raises :class:<code>ConfigurationError</code> listing all violations found.
+<p>Raises <a class="autorefs autorefs-internal" href="#blackbull.router.ConfigurationError"><code>ConfigurationError</code></a> listing all violations found.
 Sets <code>self._frozen = True</code> on success so no further routes can
-be added.  Called once at app boot from :meth:<code>BlackBull.run</code> /
-:meth:<code>BlackBull.serve</code> — handler bugs that violate the contract
+be added.  Called once at app boot from <a class="autorefs autorefs-internal" title="run(certfile=None, keyfile=None, port=None, unix_path=None, inherited_fd=None, listeners=None, workers=None, max_connections=None, stream_queue_depth=None, ws_queue_depth=None, reload=None, reload_paths=None)" href="../app/#blackbull.app.BlackBull.run"><code>BlackBull.run</code></a>
+or <a class="autorefs autorefs-internal" title="serve(app, *, certfile=None, keyfile=None, port=0, unix_path=None, inherited_fd=None, listeners=None, workers=None, max_connections=None, stream_queue_depth=None, ws_queue_depth=None, reload=False, reload_paths=None)" href="../app/#blackbull.app.serve"><code>serve</code></a> — handler bugs that violate the contract
 surface before the first request is served, not after.</p>
 
 
@@ -6728,7 +6743,7 @@ surface before the first request is served, not after.</p>
 <p>Raise this from a QUERY handler when the request media type was accepted
 (so 400/415 do not apply) but the query itself is semantically invalid —
 references an unknown field, violates a constraint, etc.  The dispatcher
-answers <code>422 Unprocessable Content</code> and, being an :class:<code>HTTPException</code>
+answers <code>422 Unprocessable Content</code> and, being an <a class="autorefs autorefs-internal" href="#blackbull.router.HTTPException"><code>HTTPException</code></a>
 subclass, it flows through the normal error-router path and quiet 4xx
 logging.</p>
 

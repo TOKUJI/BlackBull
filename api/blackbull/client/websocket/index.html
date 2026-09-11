@@ -2097,6 +2097,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.client.websocket.WebSocketSession.__aenter__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __aenter__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.client.websocket.WebSocketSession.close" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2108,10 +2119,43 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.client.websocket.WebSocketSession.ping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ping
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.client.websocket.WebSocketSession.receive" class="md-nav__link">
     <span class="md-ellipsis">
       
         receive
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.client.websocket.WebSocketSession.send_bytes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        send_bytes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.client.websocket.WebSocketSession.send_text" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        send_text
       
     </span>
   </a>
@@ -3184,34 +3228,6 @@
     
   
     blackbull.middleware
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
   
 
     
@@ -5513,6 +5529,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.client.websocket.WebSocketSession.__aenter__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __aenter__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.client.websocket.WebSocketSession.close" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5524,10 +5551,43 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.client.websocket.WebSocketSession.ping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ping
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.client.websocket.WebSocketSession.receive" class="md-nav__link">
     <span class="md-ellipsis">
       
         receive
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.client.websocket.WebSocketSession.send_bytes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        send_bytes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.client.websocket.WebSocketSession.send_text" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        send_text
       
     </span>
   </a>
@@ -5739,6 +5799,28 @@ mask their outgoing frames.</p>
 <div class="doc doc-object doc-function">
 
 
+<h4 id="blackbull.client.websocket.WebSocketSession.__aenter__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="fm">__aenter__</span><span class="p">()</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.client.websocket.WebSocketSession.__aenter__" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return the already-connected session; the handshake ran before this.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h4 id="blackbull.client.websocket.WebSocketSession.close" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">close</span><span class="p">(</span><span class="n">code</span><span class="o">=</span><span class="n">_CLOSE_CODE_NORMAL</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">drain_timeout</span><span class="o">=</span><span class="mf">5.0</span><span class="p">)</span></code>
 
@@ -5758,6 +5840,28 @@ is complete once both endpoints have sent and received a Close
 frame.  A silent peer cannot hang <code>close()</code>: after
 <em>drain_timeout</em> the reader is shut down regardless.  Data frames
 still in flight during the drain are discarded.  Idempotent.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.client.websocket.WebSocketSession.ping" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">ping</span><span class="p">(</span><span class="n">data</span><span class="o">=</span><span class="sa">b</span><span class="s1">''</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.client.websocket.WebSocketSession.ping" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Send a PING carrying <em>data</em>; the peer's PONG arrives on the read path.</p>
 
 
     </div>
@@ -5792,6 +5896,50 @@ still in flight during the drain are discarded.  Idempotent.</p>
 </details>        <p>Server-initiated PING frames are auto-PONGed by the underlying
 <code>WebSocketRecipient</code> (with masking, since this session is the
 client).  Server PONG frames are silently dropped.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.client.websocket.WebSocketSession.send_bytes" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">send_bytes</span><span class="p">(</span><span class="n">data</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.client.websocket.WebSocketSession.send_bytes" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Send <em>data</em> as a binary message.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.client.websocket.WebSocketSession.send_text" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">send_text</span><span class="p">(</span><span class="n">text</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.client.websocket.WebSocketSession.send_text" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Send <em>text</em> as a UTF-8 text message.</p>
 
 
     </div>

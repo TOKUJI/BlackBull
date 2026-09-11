@@ -3071,34 +3071,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -5654,14 +5626,11 @@ when omitted (the value lives on the sender, not the stream).</p>
     <div class="doc doc-contents ">
 
         <p>Locate a node by stream_id.</p>
-<p>BlackBull only nests streams under their priority parent in the rare
-case where PRIORITY arrives for a stream whose dependent_stream is
-another peer stream rather than root.  h2 in the wild — and h2load
-in particular — never exercises this; every peer-initiated stream
-ends up as a direct child of root.  Walking the entire subtree on a
-miss therefore wasted O(N) per lookup once we stopped pruning closed
-streams for §5.1 state validation.  Keep the fast path flat; recurse
-only when the priority tree actually has depth.</p>
+<p>A stream nests under a priority parent only when PRIORITY names
+another peer stream as its dependency, which is rare — in practice
+every peer-initiated stream is a direct child of root.  So the
+search stays flat and recurses only where the tree has depth; a
+subtree walk on every miss costs O(N) per lookup and finds nothing.</p>
 
 
     </div>

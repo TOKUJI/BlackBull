@@ -2214,6 +2214,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.env.Environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.env.Settings" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3181,34 +3192,6 @@
     
   
     blackbull.middleware
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
   
 
     
@@ -5481,6 +5464,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.env.Environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.env.Settings" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5576,8 +5570,17 @@
     <div class="doc doc-contents first">
 
         <p>Runtime configuration sourced from environment variables.</p>
-<p>All server settings live in :class:<code>Settings</code>.  Retrieve the current
-configuration with :func:<code>get_settings</code>, which reads environment variables
+<p>All server settings live in <a class="autorefs autorefs-internal" title="Settings
+
+
+  
+      dataclass
+  " href="#blackbull.env.Settings"><code>Settings</code></a>.  Retrieve the current
+configuration with <a class="autorefs autorefs-internal" title="get_settings()
+
+  
+      cached
+  " href="#blackbull.env.get_settings"><code>get_settings</code></a>, which reads environment variables
 once and returns an immutable snapshot.</p>
 <h4 id="blackbull.env--environment-variables">Environment variables<a class="headerlink" href="#blackbull.env--environment-variables" title="Permanent link">&para;</a></h4>
 <p>BLACKBULL_ENV
@@ -6024,7 +6027,7 @@ BB_MQTT_MAX_SESSIONS
     only.  <code>0</code> disables the cap.  Default: <code>10000</code>.
 BB_COMPRESSION_MIN_SIZE
     Minimum response body size in bytes below which
-    :class:<code>~blackbull.middleware.compression.Compression</code> skips
+    <a class="autorefs autorefs-internal" href="../middleware/compression/#blackbull.middleware.compression.Compression"><code>Compression</code></a> skips
     compression entirely.  Raising this threshold under load reduces CPU
     pressure at the cost of slightly larger small responses.
     Default: <code>100</code>.
@@ -6071,7 +6074,12 @@ BB_UVLOOP
     not importable.  Default: <code>false</code>.
 BB_FORCE_ASGI_SCOPE
     Dual-path conformance lane.  When enabled, every request round-trips the
-    native :class:<code>~blackbull.connection.Connection</code> through <code>as_scope()</code> +
+    native <a class="autorefs autorefs-internal" title="Connection
+
+
+  
+      dataclass
+  " href="../connection/#blackbull.connection.Connection"><code>Connection</code></a> through <code>as_scope()</code> +
     <code>from_scope()</code> before dispatch, so the ASGI compat conversion is
     exercised on the self-hosted path and cannot silently bitrot.  Enabled in
     CI; off in normal operation, where the native path skips the round-trip.
@@ -6097,7 +6105,12 @@ BB_CPU_PINNING
 The two are held apart deliberately: a server is addressed by anyone, while a
 client picks its peer, so the same shape of limit gets a different default on
 each side.  Each entry states what it bounds; the trade-off behind each number
-lives on the matching :class:<code>Settings</code> field.</p>
+lives on the matching <a class="autorefs autorefs-internal" title="Settings
+
+
+  
+      dataclass
+  " href="#blackbull.env.Settings"><code>Settings</code></a> field.</p>
 <p>BB_CLIENT_HEAD_MAX_TOTAL
     Maximum total bytes in a response head the client will read (status line
     + all field lines + CRLFCRLF), bounded as it accumulates so an endless
@@ -6229,6 +6242,62 @@ BB_CLIENT_WS_MAX_MESSAGE_SIZE
 
 
 
+<h3 id="blackbull.env.Environment" class="doc doc-heading">
+            <code>Environment</code>
+
+
+<a href="#blackbull.env.Environment" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="enum.StrEnum">StrEnum</span></code></p>
+
+
+
+        <p>Which deployment the process thinks it is, read from <code>BLACKBULL_ENV</code>.</p>
+<p>Reachable as <code>get_settings().env</code>.  A value that is not one of these
+three resolves to <code>DEVELOPMENT</code> rather than raising, so a misspelled
+<code>production</code> gets the <em>looser</em> of the two behaviours and says nothing
+about it — worth asserting on at startup if it matters to you.</p>
+<p>Two behaviours turn on it, and both tighten in <code>PRODUCTION</code>:
+<a class="autorefs autorefs-internal" href="../middleware/static/#blackbull.middleware.static.StaticFiles"><code>StaticFiles</code></a> declines to serve
+anything, and the default error handler answers without exception detail.
+The fault-injection servers refuse to start there at all.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
 <h3 id="blackbull.env.Settings" class="doc doc-heading">
             <code>Settings</code>
 
@@ -6245,7 +6314,11 @@ BB_CLIENT_WS_MAX_MESSAGE_SIZE
 
 
         <p>Immutable snapshot of all runtime settings.</p>
-<p>Construct via :func:<code>get_settings</code> rather than directly so that
+<p>Construct via <a class="autorefs autorefs-internal" title="get_settings()
+
+  
+      cached
+  " href="#blackbull.env.get_settings"><code>get_settings</code></a> rather than directly so that
 environment variables are read at the right time.</p>
 
 
@@ -6315,7 +6388,12 @@ kept; the server still starts.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Read environment variables and return an immutable :class:<code>Settings</code>.</p>
+        <p>Read environment variables and return an immutable <a class="autorefs autorefs-internal" title="Settings
+
+
+  
+      dataclass
+  " href="#blackbull.env.Settings"><code>Settings</code></a>.</p>
 <p>Cached: first call parses env vars and builds the dataclass; subsequent
 calls return the same instance.  Settings are server-process-wide
 configuration, not per-request data — there's no reason to re-parse
@@ -6323,7 +6401,7 @@ configuration, not per-request data — there's no reason to re-parse
 <code>_int_env_nonneg</code> consuming ~5–6% of CPU in the HTTP/1.1 hot path
 before this cache.</p>
 <p>Tests that mutate environment between cases must call
-:func:<code>reset_settings_cache</code> in their teardown.</p>
+<a class="autorefs autorefs-internal" title="reset_settings_cache()" href="#blackbull.env.reset_settings_cache"><code>reset_settings_cache</code></a> in their teardown.</p>
 
 
     </div>
@@ -6341,9 +6419,18 @@ before this cache.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Clear the cached :class:<code>Settings</code>.</p>
+        <p>Clear the cached <a class="autorefs autorefs-internal" title="Settings
+
+
+  
+      dataclass
+  " href="#blackbull.env.Settings"><code>Settings</code></a>.</p>
 <p>Call this in test teardown if the test mutated env vars that
-:func:<code>get_settings</code> reads.  Without this, the cached settings reflect
+<a class="autorefs autorefs-internal" title="get_settings()
+
+  
+      cached
+  " href="#blackbull.env.get_settings"><code>get_settings</code></a> reads.  Without this, the cached settings reflect
 whatever environment was visible the first time <code>get_settings()</code> ran
 in the process.</p>
 

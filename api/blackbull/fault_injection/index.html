@@ -4134,34 +4134,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../middleware/cache/" class="md-nav__link">
         
   
@@ -7443,27 +7415,29 @@
 <p>A single namespace for the two directions of protocol fault injection:</p>
 <ul>
 <li>
-<p><strong>Client-side, HTTP/1.1</strong> — :mod:<code>blackbull.fault_injection.scenario_h1</code>
+<p><strong>Client-side, HTTP/1.1</strong> — <a class="autorefs autorefs-internal" href="scenario_h1/#blackbull.fault_injection.scenario_h1"><code>blackbull.fault_injection.scenario_h1</code></a>
   ships a programmable client (driven through
-  :meth:<code>blackbull.client.HTTP1Client.execute_scenario</code>) that emits
+  <a class="autorefs autorefs-internal" title="execute_scenario(scenario)
+
+  
+      async
+  " href="../client/#blackbull.client.HTTP1Client.execute_scenario"><code>blackbull.client.HTTP1Client.execute_scenario</code></a>) that emits
   deliberately bad HTTP/1.1 against a target <em>server</em>: trickled bytes,
   partial headers, mid-request idle, abrupt RST.
-  :mod:<code>blackbull.fault_injection.oracle_h1</code> adds a differential oracle
+  <a class="autorefs autorefs-internal" href="oracle_h1/#blackbull.fault_injection.oracle_h1"><code>blackbull.fault_injection.oracle_h1</code></a> adds a differential oracle
   for comparing two HTTP/1.1 implementations under the same scenario.</p>
 </li>
 <li>
-<p><strong>Server-side, HTTP/2</strong> — :mod:<code>blackbull.fault_injection.h2_server</code>
+<p><strong>Server-side, HTTP/2</strong> — <a class="autorefs autorefs-internal" href="h2_server/#blackbull.fault_injection.h2_server"><code>blackbull.fault_injection.h2_server</code></a>
   ships a programmable server that emits deliberately bad HTTP/2 toward
   a target <em>client</em>: half-closed streams, exhausted windows, illegal
   SETTINGS, weird frame sequences.  A canned-misbehaviour catalogue
-  lives at :mod:<code>blackbull.fault_injection.catalogue</code>.</p>
+  lives at <a class="autorefs autorefs-internal" href="catalogue/#blackbull.fault_injection.catalogue"><code>blackbull.fault_injection.catalogue</code></a>.</p>
 </li>
 </ul>
-<p>This module is an opt-in testing instrument.  The HTTP/2 server refuses
-to start in a production context — when <code>BLACKBULL_ENV=production</code> (the
-framework's production signal) or the explicit <code>BB_PRODUCTION</code> override
-is set — so a deliberate-misbehaviour code path cannot accidentally fire on
-a production deployment.</p>
+<p>This module is an opt-in testing instrument.  Both fault servers refuse to
+start when <code>BLACKBULL_ENV=production</code> or <code>BB_PRODUCTION</code> is set, and
+refuse a non-loopback bind without <code>allow_remote=True</code>.</p>
 <p>See <code>docs/guide/fault_injection.md</code> for a tutorial.</p>
 
 
@@ -7609,8 +7583,13 @@ and keeps <code>assert ctx.category == 'OK'</code>-style sites readable.</p>
 
         <p>Send a GOAWAY then close cleanly.</p>
 <p>Subsequent scenario steps short-circuit (this is a terminator
-just like :class:<code>Abort</code>).  <code>error_code</code> is one of the
-:class:<code>~blackbull.protocol.frame_types.ErrorCodes</code> values;
+just like <a class="autorefs autorefs-internal" title="Abort
+
+
+  
+      dataclass
+  " href="scenario_h2/#blackbull.fault_injection.scenario_h2.Abort"><code>Abort</code></a>).  <code>error_code</code> is one of the
+<a class="autorefs autorefs-internal" href="../protocol/frame_types/#blackbull.protocol.frame_types.ErrorCodes"><code>ErrorCodes</code></a> values;
 <code>last_stream_id</code> advertises the last stream the server is
 willing to process — pass <code>0</code> to refuse all client streams,
 or the highest accepted stream ID otherwise.</p>
@@ -7666,7 +7645,12 @@ or the highest accepted stream ID otherwise.</p>
         <p>Read one inbound frame and record whether it matched.</p>
 <p>A guard, not a filter: nothing is skipped and the executor moves on
 either way.  It answers a different question from
-:class:<code>WaitForClientFrame</code> — <em>is the client under test behaving as
+<a class="autorefs autorefs-internal" title="WaitForClientFrame
+
+
+  
+      dataclass
+  " href="scenario_h2/#blackbull.fault_injection.scenario_h2.WaitForClientFrame"><code>WaitForClientFrame</code></a> — <em>is the client under test behaving as
 this scenario assumes?</em> — and a scenario whose premise silently failed
 would otherwise look like a pass.</p>
 <p>The HTTP/1.1 half has the same pair for the same reason
@@ -7722,18 +7706,12 @@ would otherwise look like a pass.</p>
 
         <p>Read one request head and record whether it matched.</p>
 <p>A guard, not a filter: nothing is skipped and the connection stays in
-step.  It answers a different question from :class:<code>WaitForRequest</code> —
-<em>is the client under test behaving as this scenario assumes?</em>  A
-scenario that stages a fault against <code>Expect: 100-continue</code> is testing
-nothing at all if the client never sent that header, and without this
-the run would look like a pass.</p>
+step.  It asks whether the client under test is behaving as the
+scenario assumes — a fault staged against <code>Expect: 100-continue</code> tests
+nothing if the client never sent that header.</p>
 <p>A mismatch is <strong>recorded, not raised</strong>:
 <code>ScenarioH1ServerResult.expectations</code> collects one
-<code>(match, matched)</code> pair per step, so a scenario reports what it
-assumed alongside what it got.</p>
-<p>Deliberately not called <code>WaitForRequest(match=...)</code> even though the
-grammar is the same: reusing a name for a different meaning is the
-thing the 107+108 consistency sweep was run to prevent.</p>
+<code>(match, matched)</code> pair per step.</p>
 
 
 
@@ -7789,7 +7767,12 @@ on either way.  It answers <em>is the peer behaving as this scenario
 assumes?</em> — and a scenario whose premise silently failed would
 otherwise look like a pass.</p>
 <p>Twin of
-:class:<code>~blackbull.fault_injection.scenario_h1_server.ExpectRequest</code>.</p>
+<a class="autorefs autorefs-internal" title="ExpectRequest
+
+
+  
+      dataclass
+  " href="scenario_h1_server/#blackbull.fault_injection.scenario_h1_server.ExpectRequest"><code>ExpectRequest</code></a>.</p>
 
 
 
@@ -7842,7 +7825,12 @@ otherwise look like a pass.</p>
         <p>Read one frame and record whether it matched.</p>
 <p>A <strong>guard</strong>, not a filter: nothing is skipped and the executor moves
 on either way.  Twin of
-:class:<code>~blackbull.fault_injection.scenario_h2.ExpectClientFrame</code>.</p>
+<a class="autorefs autorefs-internal" title="ExpectClientFrame
+
+
+  
+      dataclass
+  " href="scenario_h2/#blackbull.fault_injection.scenario_h2.ExpectClientFrame"><code>ExpectClientFrame</code></a>.</p>
 
 
 
@@ -7898,7 +7886,12 @@ on either way.  It answers <em>is the peer behaving as this scenario
 assumes?</em> — and a scenario whose premise silently failed would
 otherwise look like a pass.</p>
 <p>Twin of
-:class:<code>~blackbull.fault_injection.scenario_h1_server.ExpectRequest</code>.</p>
+<a class="autorefs autorefs-internal" title="ExpectRequest
+
+
+  
+      dataclass
+  " href="scenario_h1_server/#blackbull.fault_injection.scenario_h1_server.ExpectRequest"><code>ExpectRequest</code></a>.</p>
 
 
 
@@ -8005,7 +7998,12 @@ dropping to a raw asyncio socket.</p>
         <p>Read responses until one satisfies <code>match</code>, or the timeout wins.</p>
 <p>A <strong>filter</strong>: non-matching responses are read, counted in
 <code>wait_skipped</code>, and passed over.  The role-axis twin of
-:class:<code>~blackbull.fault_injection.scenario_h1_server.WaitForRequest</code>,
+<a class="autorefs autorefs-internal" title="WaitForRequest
+
+
+  
+      dataclass
+  " href="scenario_h1_server/#blackbull.fault_injection.scenario_h1_server.WaitForRequest"><code>WaitForRequest</code></a>,
 and it exists for the same reason — a scenario that has to know
 exactly how many messages precede the interesting one is a scenario
 written against a particular peer.</p>
@@ -8057,7 +8055,12 @@ response further along than it thinks.</p>
 
 
 
-        <p>Serves one :class:<code>ScenarioH1Server</code> to each connecting client.</p>
+        <p>Serves one <a class="autorefs autorefs-internal" title="ScenarioH1Server
+
+
+  
+      dataclass
+  " href="scenario_h1_server/#blackbull.fault_injection.scenario_h1_server.ScenarioH1Server"><code>ScenarioH1Server</code></a> to each connecting client.</p>
 
 
 
@@ -8207,9 +8210,13 @@ for handlers would wait out the sleep on every such case.</p>
 
 
         <p>Close cleanly (FIN) after whatever has been written.</p>
-<p>Terminal.  The difference from :class:<code>Abort</code> is what the client sees
-— an orderly EOF mid-body rather than a reset — and clients do not
-always treat the two alike, which is the point of having both.</p>
+<p>Terminal.  What the client sees is an orderly EOF mid-body, not the
+reset <a class="autorefs autorefs-internal" title="Abort
+
+
+  
+      dataclass
+  " href="scenario_h1_server/#blackbull.fault_injection.scenario_h1_server.Abort"><code>Abort</code></a> sends.</p>
 
 
 
@@ -8363,13 +8370,9 @@ never finishes.</p>
 
 
         <p>Shut down the sending direction only (FIN), keep reading.</p>
-<p>Neither :class:<code>Abort</code> nor a full close says this.  <code>Abort</code> sends RST,
-which discards whatever is buffered and leaves nothing to read; a full
-close ends both directions at once.  A half-close is the ordinary end of
-a non-keep-alive exchange — "I have finished sending, I am still waiting
-for your answer" — and it is a distinct code path on the peer.</p>
-<p><strong>Not terminal</strong>: later steps still run, because continuing to read is
-the whole point.</p>
+<p><strong>Not terminal</strong> — later steps still run, which is the whole point.
+<code>Abort</code> is not a substitute: it sends RST, discarding what is buffered
+and leaving nothing to read.</p>
 
 
 
@@ -8582,12 +8585,10 @@ way.</p>
 
 
         <p>Emit a status line, field by field.</p>
-<p>Added by the 107+108 consistency sweep.  Nothing validates: a status
-line with no reason phrase, an impossible version, or a three-digit
-code that is not a status are all faults worth staging, and a typed
-step that refused them would be useless here.  What it buys over raw
-bytes is that the <em>shape</em> is legible — a reader sees which field the
-scenario is bending.</p>
+<p>Nothing validates: a status line with no reason phrase, an impossible
+version, or a three-digit code that is not a status are all faults
+worth staging.  What it buys over raw bytes is that the <em>shape</em> is
+legible — a reader sees which field the scenario is bending.</p>
 
 
 
@@ -8793,7 +8794,12 @@ a client's own response deadline is measured against.</p>
         <p>Read one frame and record whether it matched.</p>
 <p>A <strong>guard</strong>, not a filter: nothing is skipped and the executor moves
 on either way.  Twin of
-:class:<code>~blackbull.fault_injection.scenario_h2.ExpectClientFrame</code>.</p>
+<a class="autorefs autorefs-internal" title="ExpectClientFrame
+
+
+  
+      dataclass
+  " href="scenario_h2/#blackbull.fault_injection.scenario_h2.ExpectClientFrame"><code>ExpectClientFrame</code></a>.</p>
 
 
 
@@ -8844,13 +8850,9 @@ on either way.  Twin of
 
 
         <p>Shut down the sending direction only (FIN), keep reading.</p>
-<p>Neither :class:<code>Abort</code> nor a full close says this.  <code>Abort</code> sends RST,
-which discards whatever is buffered and leaves nothing to read; a full
-close ends both directions at once.  A half-close is the ordinary end of
-a non-keep-alive exchange — "I have finished sending, I am still waiting
-for your answer" — and it is a distinct code path on the peer.</p>
-<p><strong>Not terminal</strong>: later steps still run, because continuing to read is
-the whole point.</p>
+<p><strong>Not terminal</strong> — later steps still run, which is the whole point.
+<code>Abort</code> is not a substitute: it sends RST, discarding what is buffered
+and leaving nothing to read.</p>
 
 
 
@@ -9005,14 +9007,13 @@ with that delay.</p>
 
         <p>Emit one frame, built here rather than by the production sender.</p>
 <p><code>payload</code> is the frame payload; the 9-byte header is assembled from
-the other fields.  Deliberately low-level: a fault scenario wants to
-set a length that disagrees with the payload, or a flag combination the
-typed frame classes refuse, and a step that went through
-<code>FrameFactory</code> could not.</p>
+the other fields.  Low-level on purpose: a length that disagrees with
+the payload, or a flag combination the typed frame classes refuse, is
+unreachable through <code>FrameFactory</code>.</p>
 <p><code>declared_length</code> overrides the header's length field without
 changing the bytes actually written — the direct way to express "the
 peer lied about how much is coming".</p>
-<p><code>frame_type</code> is the raw type byte: a :class:<code>~blackbull.protocol.frame_types.FrameTypes</code>
+<p><code>frame_type</code> is the raw type byte: a <a class="autorefs autorefs-internal" href="../protocol/frame_types/#blackbull.protocol.frame_types.FrameTypes"><code>FrameTypes</code></a>
 member (which <em>is</em> a one-byte <code>bytes</code>), or an <code>int</code> for a type the
 enum does not name — an unregistered type being itself a fault worth
 staging.</p>
@@ -9066,10 +9067,9 @@ staging.</p>
 
 
         <p>Write the client connection preface (RFC 9113 §3.4).</p>
-<p>A step rather than a scenario flag, unlike <code>ScenarioH2.send_preface</code>
-on the server side: a <em>client</em> scenario's whole point may be to delay
-the preface, split it, or never send it, and a boolean cannot say
-"after 30 seconds".</p>
+<p>A step, not the boolean <code>ScenarioH2.send_preface</code> the server side
+has: delaying or splitting the preface is the fault, and a flag cannot
+say "after 30 seconds".</p>
 
 
 
@@ -9225,7 +9225,12 @@ with that delay.</p>
         <p>Read frames until one satisfies <code>match</code>, or the timeout wins.</p>
 <p>A <strong>filter</strong>: non-matching frames are read, counted in
 <code>wait_skipped</code>, and passed over.  Twin of
-:class:<code>~blackbull.fault_injection.scenario_h2.WaitForClientFrame</code>.</p>
+<a class="autorefs autorefs-internal" title="WaitForClientFrame
+
+
+  
+      dataclass
+  " href="scenario_h2/#blackbull.fault_injection.scenario_h2.WaitForClientFrame"><code>WaitForClientFrame</code></a>.</p>
 <p>This is what makes an HTTP/2 client scenario able to observe a
 <em>verdict</em>.  A single <code>ReadResponse</code> cannot: the first frame any
 correct server sends is its handshake SETTINGS, so a GOAWAY or
@@ -9277,13 +9282,23 @@ written against one server.</p>
 
 
 
-        <p>Programmable HTTP/2 server emitting a :class:<code>ScenarioH2</code>.</p>
+        <p>Programmable HTTP/2 server emitting a <a class="autorefs autorefs-internal" title="ScenarioH2
+
+
+  
+      dataclass
+  " href="scenario_h2/#blackbull.fault_injection.scenario_h2.ScenarioH2"><code>ScenarioH2</code></a>.</p>
 <p>Async context manager: enter to bind + start accepting, exit to
 shut down.  <code>self.url</code> is set after enter and gives the URL a
 real h2c client can dial.</p>
 <h5 id="blackbull.fault_injection.H2FaultServer--parameters">Parameters<a class="headerlink" href="#blackbull.fault_injection.H2FaultServer--parameters" title="Permanent link">&para;</a></h5>
 <p>scenario:
-    The :class:<code>ScenarioH2</code> the executor walks for each accepted
+    The <a class="autorefs autorefs-internal" title="ScenarioH2
+
+
+  
+      dataclass
+  " href="scenario_h2/#blackbull.fault_injection.scenario_h2.ScenarioH2"><code>ScenarioH2</code></a> the executor walks for each accepted
     connection.
 host:
     Bind host.  Defaults to <code>'127.0.0.1'</code> — binding to a
@@ -9294,7 +9309,7 @@ port:
 allow_remote:
     Bypass the localhost-only safety check.  Off by default.
 ssl_context:
-    Optional :class:<code>ssl.SSLContext</code>.  When provided, the server
+    Optional <code>ssl.SSLContext</code>.  When provided, the server
     terminates TLS and <code>self.url</code> is <code>https://...</code>; ALPN must
     offer <code>h2</code> so clients negotiating H/2 over TLS (httpx, curl
     <code>--http2</code>, …) connect cleanly.  When <code>None</code> (default), the
@@ -9305,7 +9320,12 @@ ssl_context:
     <code>http://&lt;host&gt;:&lt;port&gt;/</code> after start, or <code>https://...</code> when
     a TLS context is provided.
 last_result:
-    :class:<code>ScenarioH2Result</code> from the most recently completed
+    <a class="autorefs autorefs-internal" title="ScenarioH2Result
+
+
+  
+      dataclass
+  " href="scenario_h2/#blackbull.fault_injection.scenario_h2.ScenarioH2Result"><code>ScenarioH2Result</code></a> from the most recently completed
     connection.  <code>None</code> before any client has connected.</p>
 
 
@@ -9465,8 +9485,13 @@ production signal (<code>BLACKBULL_ENV=production</code>) — or the explicit
 
         <p>Send a GOAWAY then close cleanly.</p>
 <p>Subsequent scenario steps short-circuit (this is a terminator
-just like :class:<code>Abort</code>).  <code>error_code</code> is one of the
-:class:<code>~blackbull.protocol.frame_types.ErrorCodes</code> values;
+just like <a class="autorefs autorefs-internal" title="Abort
+
+
+  
+      dataclass
+  " href="scenario_h2/#blackbull.fault_injection.scenario_h2.Abort"><code>Abort</code></a>).  <code>error_code</code> is one of the
+<a class="autorefs autorefs-internal" href="../protocol/frame_types/#blackbull.protocol.frame_types.ErrorCodes"><code>ErrorCodes</code></a> values;
 <code>last_stream_id</code> advertises the last stream the server is
 willing to process — pass <code>0</code> to refuse all client streams,
 or the highest accepted stream ID otherwise.</p>
@@ -9522,7 +9547,12 @@ or the highest accepted stream ID otherwise.</p>
         <p>Read one inbound frame and record whether it matched.</p>
 <p>A guard, not a filter: nothing is skipped and the executor moves on
 either way.  It answers a different question from
-:class:<code>WaitForClientFrame</code> — <em>is the client under test behaving as
+<a class="autorefs autorefs-internal" title="WaitForClientFrame
+
+
+  
+      dataclass
+  " href="scenario_h2/#blackbull.fault_injection.scenario_h2.WaitForClientFrame"><code>WaitForClientFrame</code></a> — <em>is the client under test behaving as
 this scenario assumes?</em> — and a scenario whose premise silently failed
 would otherwise look like a pass.</p>
 <p>The HTTP/1.1 half has the same pair for the same reason
@@ -9577,13 +9607,9 @@ would otherwise look like a pass.</p>
 
 
         <p>Shut down the sending direction only (FIN), keep reading.</p>
-<p>Neither :class:<code>Abort</code> nor a full close says this.  <code>Abort</code> sends RST,
-which discards whatever is buffered and leaves nothing to read; a full
-close ends both directions at once.  A half-close is the ordinary end of
-a non-keep-alive exchange — "I have finished sending, I am still waiting
-for your answer" — and it is a distinct code path on the peer.</p>
-<p><strong>Not terminal</strong>: later steps still run, because continuing to read is
-the whole point.</p>
+<p><strong>Not terminal</strong> — later steps still run, which is the whole point.
+<code>Abort</code> is not a substitute: it sends RST, discarding what is buffered
+and leaving nothing to read.</p>
 
 
 
@@ -9634,15 +9660,18 @@ the whole point.</p>
 
 
         <p>Emit one parsed frame onto the connection.</p>
-<p>Routed through :class:<code>~blackbull.protocol.frame.FrameFactory</code> so
+<p>Routed through <a class="autorefs autorefs-internal" href="../protocol/frame/#blackbull.protocol.frame.FrameFactory"><code>FrameFactory</code></a> so
 the on-wire serialisation matches the framework's normal output.
-Use :class:<code>SendRawBytes</code> for frames the factory cannot construct.</p>
+Use <a class="autorefs autorefs-internal" title="SendRawBytes
+
+
+  
+      dataclass
+  " href="scenario_h2/#blackbull.fault_injection.scenario_h2.SendRawBytes"><code>SendRawBytes</code></a> for frames the factory cannot construct.</p>
 <p><code>declared_length</code> overrides the header's length field without
 changing the bytes actually written — "the peer lied about how much is
-coming", which a serialiser that computes the length cannot say.  The
-client-side vocabulary had this from the start; the consistency sweep
-at the 107+108 close found the server side could not express the same
-fault.  Leave it <code>None</code> (the default) and nothing changes.</p>
+coming", which a serialiser that computes the length cannot say.
+Leave it <code>None</code> (the default) and nothing changes.</p>
 
 
 
@@ -9695,7 +9724,12 @@ fault.  Leave it <code>None</code> (the default) and nothing changes.</p>
         <p>Push arbitrary bytes onto the connection.</p>
 <p>Escape hatch for malformed frames (illegal type byte, length
 exceeding <code>SETTINGS_MAX_FRAME_SIZE</code>, etc.) that the typed
-:class:<code>SendFrame</code> path will not produce.</p>
+<a class="autorefs autorefs-internal" title="SendFrame
+
+
+  
+      dataclass
+  " href="scenario_h2/#blackbull.fault_injection.scenario_h2.SendFrame"><code>SendFrame</code></a> path will not produce.</p>
 <p><code>byte_interval &gt; 0</code> transmits one byte at a time with that
 delay — useful for stalled-handshake patterns where the client
 is expected to enforce a preface-completion timeout.</p>
@@ -9804,7 +9838,12 @@ keys.  Frames the client sends that do <em>not</em> match are still
 consumed (the executor remains responsive to the wire) but do
 not advance this step.</p>
 <p>On <code>timeout</code> expiry the executor records the miss on
-:class:<code>ScenarioH2Result</code> and proceeds to the next step.</p>
+<a class="autorefs autorefs-internal" title="ScenarioH2Result
+
+
+  
+      dataclass
+  " href="scenario_h2/#blackbull.fault_injection.scenario_h2.ScenarioH2Result"><code>ScenarioH2Result</code></a> and proceeds to the next step.</p>
 
 
 
@@ -9905,13 +9944,9 @@ not advance this step.</p>
 
 
         <p>Shut down the sending direction only (FIN), keep reading.</p>
-<p>Neither :class:<code>Abort</code> nor a full close says this.  <code>Abort</code> sends RST,
-which discards whatever is buffered and leaves nothing to read; a full
-close ends both directions at once.  A half-close is the ordinary end of
-a non-keep-alive exchange — "I have finished sending, I am still waiting
-for your answer" — and it is a distinct code path on the peer.</p>
-<p><strong>Not terminal</strong>: later steps still run, because continuing to read is
-the whole point.</p>
+<p><strong>Not terminal</strong> — later steps still run, which is the whole point.
+<code>Abort</code> is not a substitute: it sends RST, discarding what is buffered
+and leaving nothing to read.</p>
 
 
 
@@ -9964,7 +9999,12 @@ the whole point.</p>
         <p>Read one HTTP/1.1 response from the connection.</p>
 <p><code>timeout</code> bounds the entire status-line + headers + body read.
 On timeout the executor records the outcome on the
-:class:<code>ScenarioResult</code> and does <em>not</em> raise — the caller decides
+<a class="autorefs autorefs-internal" title="ScenarioResult
+
+
+  
+      dataclass
+  " href="scenario_h1/#blackbull.fault_injection.scenario_h1.ScenarioResult"><code>ScenarioResult</code></a> and does <em>not</em> raise — the caller decides
 whether to treat that as a transport-fail or normal outcome.</p>
 
 
@@ -10108,12 +10148,16 @@ per-iteration fuzz throughput.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Parse JSON Lines back to a :class:<code>Scenario</code>.</p>
+        <p>Parse JSON Lines back to a <a class="autorefs autorefs-internal" title="Scenario
+
+
+  
+      dataclass
+  " href="scenario_h1/#blackbull.fault_injection.scenario_h1.Scenario"><code>Scenario</code></a>.</p>
 <p>Skips blank lines so files that end with a trailing newline
 (the conventional git-friendly shape) parse cleanly.</p>
-<p>A <code>HEADER</code> line carries the name.  It is optional on the way in:
-corpus files written before the header existed have no such line
-and still parse, yielding an unnamed scenario.</p>
+<p>A <code>HEADER</code> line carries the name and is optional on the way in:
+a file without one parses to an unnamed scenario.</p>
 
 
     </div>
@@ -10134,7 +10178,7 @@ and still parse, yielding an unnamed scenario.</p>
         <p>Serialise to JSON Lines: one <code>{"op": ..., ...}</code> per line.</p>
 <p>Bytes payloads are base64-encoded so the result round-trips
 through stdout / git / json.loads without escape ambiguity.
-Round-tripped by :meth:<code>from_json</code>.</p>
+Round-tripped by <code>from_json</code>.</p>
 <p>The scenario's name rides the first line under the op <code>HEADER</code>,
 the convention the other three vocabularies use, so the file stays
 one line-oriented stream with no out-of-band metadata.  Without it
@@ -10199,7 +10243,12 @@ HTTP/1.1 differential suite.</p>
 
 
         <p>An ordered sequence of steps, plus a name for test parametrisation.</p>
-<p><code>steps</code> is a <strong>tuple</strong>, as on :class:<code>ScenarioH2</code>: a frozen dataclass
+<p><code>steps</code> is a <strong>tuple</strong>, as on <a class="autorefs autorefs-internal" title="ScenarioH2
+
+
+  
+      dataclass
+  " href="scenario_h2/#blackbull.fault_injection.scenario_h2.ScenarioH2"><code>ScenarioH2</code></a>: a frozen dataclass
 holding a mutable list is a frozen container of mutable contents.</p>
 
 
@@ -10251,7 +10300,12 @@ holding a mutable list is a frozen container of mutable contents.</p>
 
 
         <p>What the executor observed while running a scenario.</p>
-<p>Field names match :class:<code>~blackbull.fault_injection.scenario_h2.ScenarioH2Result</code>
+<p>Field names match <a class="autorefs autorefs-internal" title="ScenarioH2Result
+
+
+  
+      dataclass
+  " href="scenario_h2/#blackbull.fault_injection.scenario_h2.ScenarioH2Result"><code>ScenarioH2Result</code></a>
 wherever the two mean the same thing, so a harness that reports on one
 half does not need a second spelling for the other.</p>
 
@@ -10416,9 +10470,14 @@ the whole connection, not to one step:</p>
 
 
 
-        <p>Outcome of one :meth:<code>HTTP2Client.execute_scenario</code> call.</p>
+        <p>Outcome of one <code>HTTP2Client.execute_scenario</code> call.</p>
 <p>Field names come from
-:class:<code>~blackbull.fault_injection.scenario_h1.ScenarioResult</code>, its
+<a class="autorefs autorefs-internal" title="ScenarioResult
+
+
+  
+      dataclass
+  " href="scenario_h1/#blackbull.fault_injection.scenario_h1.ScenarioResult"><code>ScenarioResult</code></a>, its
 twin, so a harness reporting on one does not need a second spelling for
 the other.</p>
 
@@ -10470,8 +10529,18 @@ the other.</p>
 
 
 
-        <p>Outcome of one :class:<code>ScenarioH2</code> run.</p>
-<p>Mirrors :class:<code>~blackbull.fault_injection.scenario_h1.ScenarioResult</code>'s
+        <p>Outcome of one <a class="autorefs autorefs-internal" title="ScenarioH2
+
+
+  
+      dataclass
+  " href="scenario_h2/#blackbull.fault_injection.scenario_h2.ScenarioH2"><code>ScenarioH2</code></a> run.</p>
+<p>Mirrors <a class="autorefs autorefs-internal" title="ScenarioResult
+
+
+  
+      dataclass
+  " href="scenario_h1/#blackbull.fault_injection.scenario_h1.ScenarioResult"><code>ScenarioResult</code></a>'s
 shape so callers can write uniform pytest assertions across
 protocols.</p>
 
@@ -10523,12 +10592,11 @@ protocols.</p>
 
 
 
-        <p>Outcome of one :meth:<code>HTTP1Client.execute_scenario</code> call.</p>
+        <p>Outcome of one <code>HTTP1Client.execute_scenario</code> call.</p>
 <p>Exactly one of <code>response</code> / <code>exception</code> / <code>timed_out</code> /
 <code>aborted</code> is the meaningful field; the others are <code>None</code> /
-<code>False</code>.  The executor never raises, so callers (differential
-test, fuzz harness) categorise on this object instead of writing
-try/except boilerplate per scenario.</p>
+<code>False</code>.  The executor never raises, so a caller categorises on this
+object rather than on an exception.</p>
 
 
 
@@ -10633,15 +10701,18 @@ dropping to a raw asyncio socket.</p>
 
 
         <p>Emit one parsed frame onto the connection.</p>
-<p>Routed through :class:<code>~blackbull.protocol.frame.FrameFactory</code> so
+<p>Routed through <a class="autorefs autorefs-internal" href="../protocol/frame/#blackbull.protocol.frame.FrameFactory"><code>FrameFactory</code></a> so
 the on-wire serialisation matches the framework's normal output.
-Use :class:<code>SendRawBytes</code> for frames the factory cannot construct.</p>
+Use <a class="autorefs autorefs-internal" title="SendRawBytes
+
+
+  
+      dataclass
+  " href="scenario_h2/#blackbull.fault_injection.scenario_h2.SendRawBytes"><code>SendRawBytes</code></a> for frames the factory cannot construct.</p>
 <p><code>declared_length</code> overrides the header's length field without
 changing the bytes actually written — "the peer lied about how much is
-coming", which a serialiser that computes the length cannot say.  The
-client-side vocabulary had this from the start; the consistency sweep
-at the 107+108 close found the server side could not express the same
-fault.  Leave it <code>None</code> (the default) and nothing changes.</p>
+coming", which a serialiser that computes the length cannot say.
+Leave it <code>None</code> (the default) and nothing changes.</p>
 
 
 
@@ -10694,7 +10765,12 @@ fault.  Leave it <code>None</code> (the default) and nothing changes.</p>
         <p>Push arbitrary bytes onto the connection.</p>
 <p>Escape hatch for malformed frames (illegal type byte, length
 exceeding <code>SETTINGS_MAX_FRAME_SIZE</code>, etc.) that the typed
-:class:<code>SendFrame</code> path will not produce.</p>
+<a class="autorefs autorefs-internal" title="SendFrame
+
+
+  
+      dataclass
+  " href="scenario_h2/#blackbull.fault_injection.scenario_h2.SendFrame"><code>SendFrame</code></a> path will not produce.</p>
 <p><code>byte_interval &gt; 0</code> transmits one byte at a time with that
 delay — useful for stalled-handshake patterns where the client
 is expected to enforce a preface-completion timeout.</p>
@@ -10749,7 +10825,7 @@ is expected to enforce a preface-completion timeout.</p>
 
         <p>One side's response in a differential pair.</p>
 <p>Exactly one of (response, exception) is populated.  <code>timed_out</code>
-is True if the failure was an :class:<code>asyncio.TimeoutError</code> from
+is True if the failure was an <code>asyncio.TimeoutError</code> from
 the per-example wait_for; we record it separately because timeouts
 are semantically distinct from other transport errors.</p>
 
@@ -11052,7 +11128,12 @@ keys.  Frames the client sends that do <em>not</em> match are still
 consumed (the executor remains responsive to the wire) but do
 not advance this step.</p>
 <p>On <code>timeout</code> expiry the executor records the miss on
-:class:<code>ScenarioH2Result</code> and proceeds to the next step.</p>
+<a class="autorefs autorefs-internal" title="ScenarioH2Result
+
+
+  
+      dataclass
+  " href="scenario_h2/#blackbull.fault_injection.scenario_h2.ScenarioH2Result"><code>ScenarioH2Result</code></a> and proceeds to the next step.</p>
 
 
 
@@ -11103,25 +11184,19 @@ not advance this step.</p>
 
 
         <p>Block until a request head arrives, optionally one that matches.</p>
-<p>A scenario that writes before the request is read is testing a
-different thing — an unsolicited response — and can simply omit this
-step.  On <code>timeout</code> expiry the executor records the miss and
-proceeds, matching <code>WaitForClientFrame</code> on the HTTP/2 side.</p>
-<p>With <code>match</code> set, heads that do not match are <strong>read and skipped</strong>,
-and the step keeps waiting — the same filter-over-a-stream meaning
-<code>WaitForClientFrame</code> has.  On HTTP/1.1 that stream is a pipeline
-(RFC 9112 §9.3.2), so this is how a scenario misbehaves at one request
-among several: answer the GET normally, break on the POST.</p>
-<p><strong>Skipping desyncs the connection, and that is not hidden.</strong>  HTTP/1.1
-responses are positional — a skipped request is one the scenario can
-no longer answer, so everything after it is off by one.  On HTTP/2 the
-equivalent is harmless because streams are independent; here it is a
-fault in its own right, staged deliberately or not at all.  The count
-lands on <code>ScenarioH1ServerResult.requests_skipped</code> so a scenario
-author reads it from the result rather than deducing it.</p>
-<p>Use :class:<code>ExpectRequest</code> when the question is "did the client send
-what this scenario assumes" — that one reads a single head and skips
-nothing.</p>
+<p>A filter: with <code>match</code> set, heads that do not match are <strong>read and
+skipped</strong> and the step keeps waiting, which on a pipelined connection
+(RFC 9112 §9.3.2) is how a scenario breaks the POST and not the GET.
+On <code>timeout</code> expiry the executor records the miss and proceeds.</p>
+<p><strong>Skipping desyncs the connection</strong>, because HTTP/1.1 responses are
+positional: a head passed over is one the scenario can no longer
+answer.  The count is on <code>ScenarioH1ServerResult.requests_skipped</code>.</p>
+<p><a class="autorefs autorefs-internal" title="ExpectRequest
+
+
+  
+      dataclass
+  " href="scenario_h1_server/#blackbull.fault_injection.scenario_h1_server.ExpectRequest"><code>ExpectRequest</code></a> is the guard that skips nothing.</p>
 
 
 
@@ -11174,7 +11249,12 @@ nothing.</p>
         <p>Read responses until one satisfies <code>match</code>, or the timeout wins.</p>
 <p>A <strong>filter</strong>: non-matching responses are read, counted in
 <code>wait_skipped</code>, and passed over.  The role-axis twin of
-:class:<code>~blackbull.fault_injection.scenario_h1_server.WaitForRequest</code>,
+<a class="autorefs autorefs-internal" title="WaitForRequest
+
+
+  
+      dataclass
+  " href="scenario_h1_server/#blackbull.fault_injection.scenario_h1_server.WaitForRequest"><code>WaitForRequest</code></a>,
 and it exists for the same reason — a scenario that has to know
 exactly how many messages precede the interesting one is a scenario
 written against a particular peer.</p>
@@ -11233,7 +11313,12 @@ response further along than it thinks.</p>
         <p>Read frames until one satisfies <code>match</code>, or the timeout wins.</p>
 <p>A <strong>filter</strong>: non-matching frames are read, counted in
 <code>wait_skipped</code>, and passed over.  Twin of
-:class:<code>~blackbull.fault_injection.scenario_h2.WaitForClientFrame</code>.</p>
+<a class="autorefs autorefs-internal" title="WaitForClientFrame
+
+
+  
+      dataclass
+  " href="scenario_h2/#blackbull.fault_injection.scenario_h2.WaitForClientFrame"><code>WaitForClientFrame</code></a>.</p>
 <p>This is what makes an HTTP/2 client scenario able to observe a
 <em>verdict</em>.  A single <code>ReadResponse</code> cannot: the first frame any
 correct server sends is its handshake SETTINGS, so a GOAWAY or
@@ -11282,7 +11367,7 @@ written against one server.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Bucket a differential example into a :class:<code>Category</code>.</p>
+        <p>Bucket a differential example into a <a class="autorefs autorefs-internal" href="oracle_h1/#blackbull.fault_injection.oracle_h1.Category"><code>Category</code></a>.</p>
 <p>Order of the checks matters: both-rejected wins over individual
 transport failures so we don't flag inputs that nginx also
 refused.</p>
@@ -11332,7 +11417,7 @@ is available to the broken server and the broken client alike.</p>
         <p>Return a server-side SSLContext that negotiates <code>h2</code> via ALPN.</p>
 <p>The returned context loads an ephemeral RSA self-signed cert from
 a tempdir and advertises <code>h2</code> (and <code>http/1.1</code> as a fallback)
-in the ALPN protocol list.  Use it with :class:<code>H2FaultServer</code>'s
+in the ALPN protocol list.  Use it with <a class="autorefs autorefs-internal" href="h2_server/#blackbull.fault_injection.h2_server.H2FaultServer"><code>H2FaultServer</code></a>'s
 <code>ssl_context=</code> parameter.</p>
 <p>The certificate path is attached to the returned object as
 <code>bb_ca_cert_path: str</code> so callers can hand it to a client
@@ -11431,7 +11516,7 @@ presence alone.  <code>header_absent</code> takes a name.</p>
     <div class="doc doc-contents ">
 
         <p>Execute <em>scenario</em> against (host, port) and return (outcome, wire_bytes).</p>
-<p>Drives the scenario through :meth:<code>HTTP1Client.execute_scenario</code>,
+<p>Drives the scenario through <code>HTTP1Client.execute_scenario</code>,
 which itself never raises; this wrapper only adds an outer
 <code>asyncio.wait_for</code> so a runaway scenario (e.g. trickled bytes
 plus a long read timeout) can't blow the per-side budget.</p>
@@ -11454,7 +11539,12 @@ bytes, so a single capture is enough for failure diagnostics).</p>
 
     <div class="doc doc-contents ">
 
-        <p>Parse JSON Lines back to a :class:<code>ScenarioH1Server</code>.</p>
+        <p>Parse JSON Lines back to a <a class="autorefs autorefs-internal" title="ScenarioH1Server
+
+
+  
+      dataclass
+  " href="scenario_h1_server/#blackbull.fault_injection.scenario_h1_server.ScenarioH1Server"><code>ScenarioH1Server</code></a>.</p>
 
 
     </div>
@@ -11473,12 +11563,10 @@ bytes, so a single capture is enough for failure diagnostics).</p>
     <div class="doc doc-contents ">
 
         <p>Serialise <em>scenario</em> to JSON Lines (one step per line).</p>
-<p>The name sits on the first line under the op <code>HEADER</code>, so the file is
-one line-oriented stream with no out-of-band metadata — the convention
-:func:<code>blackbull.fault_injection.scenario_h2.scenario_to_json</code> set.</p>
-<p>Payloads are hex rather than base64 or an escaped string: a fault
-scenario's bytes are frequently <em>not</em> valid UTF-8 and are meant to be
-read by a human comparing them against a packet capture.</p>
+<p>The name sits on the first line under the op <code>HEADER</code>, keeping the
+file one line-oriented stream with no out-of-band metadata.</p>
+<p>Payloads are hex, not base64: a fault scenario's bytes are frequently
+not valid UTF-8 and are read against a packet capture by eye.</p>
 
 
     </div>
@@ -11496,7 +11584,12 @@ read by a human comparing them against a packet capture.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Parse JSON Lines back to a :class:<code>ScenarioH2Client</code>.</p>
+        <p>Parse JSON Lines back to a <a class="autorefs autorefs-internal" title="ScenarioH2Client
+
+
+  
+      dataclass
+  " href="scenario_h2_client/#blackbull.fault_injection.scenario_h2_client.ScenarioH2Client"><code>ScenarioH2Client</code></a>.</p>
 
 
     </div>
@@ -11532,7 +11625,12 @@ read by a human comparing them against a packet capture.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Parse JSON Lines back to a :class:<code>ScenarioH2</code>.</p>
+        <p>Parse JSON Lines back to a <a class="autorefs autorefs-internal" title="ScenarioH2
+
+
+  
+      dataclass
+  " href="scenario_h2/#blackbull.fault_injection.scenario_h2.ScenarioH2"><code>ScenarioH2</code></a>.</p>
 
 
     </div>
@@ -11571,10 +11669,15 @@ line-oriented stream with no out-of-band metadata.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Convert a :class:<code>FrameBase</code> instance to wire bytes.</p>
+        <p>Convert a <code>FrameBase</code> instance to wire bytes.</p>
 <p>Restricted to the frame types this server emits: SETTINGS,
 WINDOW_UPDATE, RST_STREAM, GOAWAY, PING, DATA.  Anything else
-must go through :class:<code>SendRawBytes</code> instead.</p>
+must go through <a class="autorefs autorefs-internal" title="SendRawBytes
+
+
+  
+      dataclass
+  " href="scenario_h2/#blackbull.fault_injection.scenario_h2.SendRawBytes"><code>SendRawBytes</code></a> instead.</p>
 
 
     </div>

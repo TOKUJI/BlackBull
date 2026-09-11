@@ -3170,34 +3170,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -5521,7 +5493,7 @@ carries each message inside an HTTP/2 DATA stream as:</p>
 <p><code>Compressed-Flag</code> is 0 for an uncompressed message and 1 when the message
 body is compressed with the algorithm named in the <code>grpc-encoding</code> header.
 This module is pure framing: it carries the flag but does not (de)compress —
-:mod:<code>~blackbull.grpc.compression</code> holds the gzip codec and the ASGI bridge
+<a class="autorefs autorefs-internal" title="blackbull.grpc.compression" href="../compression/#blackbull.grpc.compression"><code>compression</code></a> holds the gzip codec and the ASGI bridge
 sets/reads the flag around it.</p>
 <p>This module is pure binary framing — no protobuf dependency.  Protobuf
 serialisation is the application's concern; handlers receive and return the
@@ -5593,7 +5565,7 @@ Length-Prefixed-Messages (truncated prefix or short body).</p>
         <p>Parse <em>data</em> into a list of <code>(compressed, payload)</code> messages.</p>
 <p>A single DATA buffer may contain zero, one, or many framed messages
 (gRPC permits multiple messages per stream and does not align them to
-DATA-frame boundaries).  Raises :class:<code>GrpcDecodeError</code> on a truncated
+DATA-frame boundaries).  Raises <a class="autorefs autorefs-internal" href="#blackbull.grpc.codec.GrpcDecodeError"><code>GrpcDecodeError</code></a> on a truncated
 prefix or a message body shorter than its declared length.</p>
 
 

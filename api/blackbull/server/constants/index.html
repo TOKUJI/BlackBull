@@ -3071,34 +3071,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -4286,6 +4258,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="constants">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.constants.WSCloseCode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WSCloseCode
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -5396,6 +5385,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="constants">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.constants.WSCloseCode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WSCloseCode
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -5458,6 +5464,59 @@ is the server's own.</p>
 
 
 
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.server.constants.WSCloseCode" class="doc doc-heading">
+            <code>WSCloseCode</code>
+
+
+<a href="#blackbull.server.constants.WSCloseCode" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="enum.IntEnum">IntEnum</span></code></p>
+
+
+
+        <p>Close codes for the WebSocket CLOSE frame (RFC 6455 §7.4.1).</p>
+<p><code>NO_STATUS_RCVD</code>, <code>ABNORMAL</code> and <code>TLS_HANDSHAKE</code> name conditions an
+endpoint reports to its own application; those three and the reserved 1004
+are never put on the wire, and a peer that sends one is answered with
+<code>PROTOCOL_ERROR</code>.  An application wanting a code of its own takes the
+private range 4000–4999 (§7.4.2), which has no member here.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
 
 
 

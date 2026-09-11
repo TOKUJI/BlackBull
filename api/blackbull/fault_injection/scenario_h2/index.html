@@ -3313,34 +3313,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -5798,17 +5770,22 @@
     <div class="doc doc-contents first">
 
         <p>Programmable HTTP/2 wire-level scenario model.</p>
-<p>A :class:<code>ScenarioH2</code> is a sequence of typed <em>steps</em> that the
-:class:<code>blackbull.fault_injection.h2_server.H2FaultServer</code> executor
+<p>A <a class="autorefs autorefs-internal" title="ScenarioH2
+
+
+  
+      dataclass
+  " href="#blackbull.fault_injection.scenario_h2.ScenarioH2"><code>ScenarioH2</code></a> is a sequence of typed <em>steps</em> that the
+<a class="autorefs autorefs-internal" title="H2FaultServer" href="../h2_server/#blackbull.fault_injection.h2_server.H2FaultServer"><code>blackbull.fault_injection.h2_server.H2FaultServer</code></a> executor
 walks in order against a connected HTTP/2 client.  This is the
-<em>server-side</em> half of the :mod:<code>blackbull.fault_injection</code> toolkit:
+<em>server-side</em> half of the <a class="autorefs autorefs-internal" href="../#blackbull.fault_injection"><code>blackbull.fault_injection</code></a> toolkit:
 a programmable server that emits deliberate misbehaviour toward a
 client — half-closed streams, exhausted flow-control windows,
 illegal SETTINGS, weird frame sequences — expressed as data, not
 procedural test code.</p>
 <p>The symmetric <em>client-side</em> half (programmable HTTP/1.1 client
 driving deliberate misbehaviour toward a server) lives in
-:mod:<code>blackbull.fault_injection.scenario_h1</code>.</p>
+<a class="autorefs autorefs-internal" href="../scenario_h1/#blackbull.fault_injection.scenario_h1"><code>blackbull.fault_injection.scenario_h1</code></a>.</p>
 <p>Use cases:</p>
 <ul>
 <li>HTTP/2 client-library authors testing their client's resilience
@@ -5820,13 +5797,28 @@ driving deliberate misbehaviour toward a server) lives in
 </ul>
 <h4 id="blackbull.fault_injection.scenario_h2--steps">Steps<a class="headerlink" href="#blackbull.fault_injection.scenario_h2--steps" title="Permanent link">&para;</a></h4>
 <ul>
-<li>:class:<code>SendFrame</code> — emit one parsed :class:<code>FrameBase</code> instance.
+<li><a class="autorefs autorefs-internal" title="SendFrame
+
+
+  
+      dataclass
+  " href="#blackbull.fault_injection.scenario_h2.SendFrame"><code>SendFrame</code></a> — emit one parsed <code>FrameBase</code> instance.
   The executor handles serialisation through the existing
-  :class:<code>~blackbull.protocol.frame.FrameFactory</code>.</li>
-<li>:class:<code>SendRawBytes</code> — escape hatch for bytes the framework's
+  <a class="autorefs autorefs-internal" href="../../protocol/frame/#blackbull.protocol.frame.FrameFactory"><code>FrameFactory</code></a>.</li>
+<li><a class="autorefs autorefs-internal" title="SendRawBytes
+
+
+  
+      dataclass
+  " href="#blackbull.fault_injection.scenario_h2.SendRawBytes"><code>SendRawBytes</code></a> — escape hatch for bytes the framework's
   <code>FrameFactory</code> cannot construct (e.g. illegal frame types,
   oversized frames, malformed length fields).</li>
-<li>:class:<code>WaitForClientFrame</code> — pause until an inbound frame from
+<li><a class="autorefs autorefs-internal" title="WaitForClientFrame
+
+
+  
+      dataclass
+  " href="#blackbull.fault_injection.scenario_h2.WaitForClientFrame"><code>WaitForClientFrame</code></a> — pause until an inbound frame from
   the client matches the <em>declarative match dict</em>.  Fields supported:</li>
 </ul>
 <p>===============  =========================================
@@ -5836,19 +5828,44 @@ driving deliberate misbehaviour toward a server) lives in
   <code>flags_unset</code>  List of flag names that must be unset.
   ===============  =========================================</p>
 <ul>
-<li>:class:<code>Sleep</code> — idle without sending or reading.</li>
-<li>:class:<code>Abort</code> — hard-close the underlying transport (RST on
+<li><a class="autorefs autorefs-internal" title="Sleep
+
+
+  
+      dataclass
+  " href="#blackbull.fault_injection.scenario_h2.Sleep"><code>Sleep</code></a> — idle without sending or reading.</li>
+<li><a class="autorefs autorefs-internal" title="Abort
+
+
+  
+      dataclass
+  " href="#blackbull.fault_injection.scenario_h2.Abort"><code>Abort</code></a> — hard-close the underlying transport (RST on
   Linux).</li>
-<li>:class:<code>CloseGracefully</code> — send a GOAWAY frame, then close
+<li><a class="autorefs autorefs-internal" title="CloseGracefully
+
+
+  
+      dataclass
+  " href="#blackbull.fault_injection.scenario_h2.CloseGracefully"><code>CloseGracefully</code></a> — send a GOAWAY frame, then close
   cleanly.</li>
 </ul>
 <h4 id="blackbull.fault_injection.scenario_h2--serialisation">Serialisation<a class="headerlink" href="#blackbull.fault_injection.scenario_h2--serialisation" title="Permanent link">&para;</a></h4>
-<p>:meth:<code>ScenarioH2.to_json</code> / :meth:<code>ScenarioH2.from_json</code> round-trip
-through JSON Lines.  Because :class:<code>SendFrame</code> carries a frame
+<p><a class="autorefs autorefs-internal" title="scenario_to_json(scenario)" href="#blackbull.fault_injection.scenario_h2.scenario_to_json"><code>scenario_to_json</code></a> / <a class="autorefs autorefs-internal" title="scenario_from_json(src)" href="#blackbull.fault_injection.scenario_h2.scenario_from_json"><code>scenario_from_json</code></a> round-trip
+through JSON Lines.  Because <a class="autorefs autorefs-internal" title="SendFrame
+
+
+  
+      dataclass
+  " href="#blackbull.fault_injection.scenario_h2.SendFrame"><code>SendFrame</code></a> carries a frame
 object, round-tripping requires the frame to be reconstructable from
 its serialised form — currently SETTINGS, WINDOW_UPDATE, RST_STREAM,
 GOAWAY, PING, and a typed-payload form of HEADERS / DATA.  For ad-hoc
-frames the caller passes through :class:<code>SendRawBytes</code>, which is
+frames the caller passes through <a class="autorefs autorefs-internal" title="SendRawBytes
+
+
+  
+      dataclass
+  " href="#blackbull.fault_injection.scenario_h2.SendRawBytes"><code>SendRawBytes</code></a>, which is
 always round-trippable.</p>
 
 
@@ -5941,8 +5958,13 @@ always round-trippable.</p>
 
         <p>Send a GOAWAY then close cleanly.</p>
 <p>Subsequent scenario steps short-circuit (this is a terminator
-just like :class:<code>Abort</code>).  <code>error_code</code> is one of the
-:class:<code>~blackbull.protocol.frame_types.ErrorCodes</code> values;
+just like <a class="autorefs autorefs-internal" title="Abort
+
+
+  
+      dataclass
+  " href="#blackbull.fault_injection.scenario_h2.Abort"><code>Abort</code></a>).  <code>error_code</code> is one of the
+<a class="autorefs autorefs-internal" href="../../protocol/frame_types/#blackbull.protocol.frame_types.ErrorCodes"><code>ErrorCodes</code></a> values;
 <code>last_stream_id</code> advertises the last stream the server is
 willing to process — pass <code>0</code> to refuse all client streams,
 or the highest accepted stream ID otherwise.</p>
@@ -5998,7 +6020,12 @@ or the highest accepted stream ID otherwise.</p>
         <p>Read one inbound frame and record whether it matched.</p>
 <p>A guard, not a filter: nothing is skipped and the executor moves on
 either way.  It answers a different question from
-:class:<code>WaitForClientFrame</code> — <em>is the client under test behaving as
+<a class="autorefs autorefs-internal" title="WaitForClientFrame
+
+
+  
+      dataclass
+  " href="#blackbull.fault_injection.scenario_h2.WaitForClientFrame"><code>WaitForClientFrame</code></a> — <em>is the client under test behaving as
 this scenario assumes?</em> — and a scenario whose premise silently failed
 would otherwise look like a pass.</p>
 <p>The HTTP/1.1 half has the same pair for the same reason
@@ -6053,13 +6080,9 @@ would otherwise look like a pass.</p>
 
 
         <p>Shut down the sending direction only (FIN), keep reading.</p>
-<p>Neither :class:<code>Abort</code> nor a full close says this.  <code>Abort</code> sends RST,
-which discards whatever is buffered and leaves nothing to read; a full
-close ends both directions at once.  A half-close is the ordinary end of
-a non-keep-alive exchange — "I have finished sending, I am still waiting
-for your answer" — and it is a distinct code path on the peer.</p>
-<p><strong>Not terminal</strong>: later steps still run, because continuing to read is
-the whole point.</p>
+<p><strong>Not terminal</strong> — later steps still run, which is the whole point.
+<code>Abort</code> is not a substitute: it sends RST, discarding what is buffered
+and leaving nothing to read.</p>
 
 
 
@@ -6172,8 +6195,18 @@ the whole connection, not to one step:</p>
 
 
 
-        <p>Outcome of one :class:<code>ScenarioH2</code> run.</p>
-<p>Mirrors :class:<code>~blackbull.fault_injection.scenario_h1.ScenarioResult</code>'s
+        <p>Outcome of one <a class="autorefs autorefs-internal" title="ScenarioH2
+
+
+  
+      dataclass
+  " href="#blackbull.fault_injection.scenario_h2.ScenarioH2"><code>ScenarioH2</code></a> run.</p>
+<p>Mirrors <a class="autorefs autorefs-internal" title="ScenarioResult
+
+
+  
+      dataclass
+  " href="../scenario_h1/#blackbull.fault_injection.scenario_h1.ScenarioResult"><code>ScenarioResult</code></a>'s
 shape so callers can write uniform pytest assertions across
 protocols.</p>
 
@@ -6226,15 +6259,18 @@ protocols.</p>
 
 
         <p>Emit one parsed frame onto the connection.</p>
-<p>Routed through :class:<code>~blackbull.protocol.frame.FrameFactory</code> so
+<p>Routed through <a class="autorefs autorefs-internal" href="../../protocol/frame/#blackbull.protocol.frame.FrameFactory"><code>FrameFactory</code></a> so
 the on-wire serialisation matches the framework's normal output.
-Use :class:<code>SendRawBytes</code> for frames the factory cannot construct.</p>
+Use <a class="autorefs autorefs-internal" title="SendRawBytes
+
+
+  
+      dataclass
+  " href="#blackbull.fault_injection.scenario_h2.SendRawBytes"><code>SendRawBytes</code></a> for frames the factory cannot construct.</p>
 <p><code>declared_length</code> overrides the header's length field without
 changing the bytes actually written — "the peer lied about how much is
-coming", which a serialiser that computes the length cannot say.  The
-client-side vocabulary had this from the start; the consistency sweep
-at the 107+108 close found the server side could not express the same
-fault.  Leave it <code>None</code> (the default) and nothing changes.</p>
+coming", which a serialiser that computes the length cannot say.
+Leave it <code>None</code> (the default) and nothing changes.</p>
 
 
 
@@ -6287,7 +6323,12 @@ fault.  Leave it <code>None</code> (the default) and nothing changes.</p>
         <p>Push arbitrary bytes onto the connection.</p>
 <p>Escape hatch for malformed frames (illegal type byte, length
 exceeding <code>SETTINGS_MAX_FRAME_SIZE</code>, etc.) that the typed
-:class:<code>SendFrame</code> path will not produce.</p>
+<a class="autorefs autorefs-internal" title="SendFrame
+
+
+  
+      dataclass
+  " href="#blackbull.fault_injection.scenario_h2.SendFrame"><code>SendFrame</code></a> path will not produce.</p>
 <p><code>byte_interval &gt; 0</code> transmits one byte at a time with that
 delay — useful for stalled-handshake patterns where the client
 is expected to enforce a preface-completion timeout.</p>
@@ -6444,7 +6485,12 @@ keys.  Frames the client sends that do <em>not</em> match are still
 consumed (the executor remains responsive to the wire) but do
 not advance this step.</p>
 <p>On <code>timeout</code> expiry the executor records the miss on
-:class:<code>ScenarioH2Result</code> and proceeds to the next step.</p>
+<a class="autorefs autorefs-internal" title="ScenarioH2Result
+
+
+  
+      dataclass
+  " href="#blackbull.fault_injection.scenario_h2.ScenarioH2Result"><code>ScenarioH2Result</code></a> and proceeds to the next step.</p>
 
 
 
@@ -6513,7 +6559,12 @@ is available to the broken server and the broken client alike.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Parse JSON Lines back to a :class:<code>ScenarioH2</code>.</p>
+        <p>Parse JSON Lines back to a <a class="autorefs autorefs-internal" title="ScenarioH2
+
+
+  
+      dataclass
+  " href="#blackbull.fault_injection.scenario_h2.ScenarioH2"><code>ScenarioH2</code></a>.</p>
 
 
     </div>

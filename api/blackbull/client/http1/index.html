@@ -3414,34 +3414,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -6004,7 +5976,7 @@
 <code>HTTP1ResponseRecipient</code> helpers that frame and unframe HTTP/1.1 messages
 on the wire.</p>
 <p>Symmetric with the server-side <code>HTTP1Sender</code> / <code>HTTP1Recipient</code> in
-:mod:<code>blackbull.server.sender</code> and :mod:<code>blackbull.server.recipient</code>,
+<a class="autorefs autorefs-internal" href="../../server/sender/#blackbull.server.sender"><code>blackbull.server.sender</code></a> and <a class="autorefs autorefs-internal" href="../../server/recipient/#blackbull.server.recipient"><code>blackbull.server.recipient</code></a>,
 but reversed: the client <em>writes</em> request lines + request headers + request
 body, and <em>reads</em> status lines + response headers + response body.</p>
 
@@ -6049,8 +6021,8 @@ body, and <em>reads</em> status lines + response headers + response body.</p>
 </code></pre>
 <p>The connection persists across multiple <code>request()</code> calls when HTTP
 version, Connection options, and body framing permit it.  A successful
-CONNECT or 101 can be transferred with :meth:<code>handoff</code>; after that, the
-returned :class:<code>HTTP1UpgradeSession</code> owns transport closure.  Pass
+CONNECT or 101 can be transferred with <a class="autorefs autorefs-internal" title="handoff()" href="#blackbull.client.http1.HTTP1Client.handoff"><code>handoff</code></a>; after that, the
+returned <a class="autorefs autorefs-internal" href="#blackbull.client.http1.HTTP1UpgradeSession"><code>HTTP1UpgradeSession</code></a> owns transport closure.  Pass
 <code>ssl=</code> to use TLS.</p>
 <p>The <code>Host</code> header is injected automatically when the caller omits it.</p>
 
@@ -6090,7 +6062,7 @@ returned :class:<code>HTTP1UpgradeSession</code> owns transport closure.  Pass
 
         <p>Bytes sent so far by the low-level primitives in this session.</p>
 <p>Empty unless the client was constructed with
-<code>record_wire_bytes=True</code>.  Reset with :meth:<code>reset_wire_buffer</code>.</p>
+<code>record_wire_bytes=True</code>.  Reset with <a class="autorefs autorefs-internal" title="reset_wire_buffer()" href="#blackbull.client.http1.HTTP1Client.reset_wire_buffer"><code>reset_wire_buffer</code></a>.</p>
 
     </div>
 
@@ -6161,17 +6133,50 @@ returned :class:<code>HTTP1UpgradeSession</code> owns transport closure.  Pass
         <p>Walk <code>scenario.steps</code> against the connected socket.</p>
 <p>Never raises.  Every outcome (response, timeout, transport
 failure, hard-abort) is folded into the returned
-:class:<code>ScenarioResult</code> so callers can categorise without
+<a class="autorefs autorefs-internal" title="ScenarioResult
+
+
+  
+      dataclass
+  " href="../../fault_injection/scenario_h1/#blackbull.fault_injection.scenario_h1.ScenarioResult"><code>ScenarioResult</code></a> so callers can categorise without
 try/except boilerplate per scenario.</p>
 
 
 <details class="step-dispatch" open>
   <summary>Step dispatch</summary>
   <ul>
-<li>:class:<code>SendBytes</code>   → :meth:<code>send_raw</code></li>
-<li>:class:<code>Sleep</code>       → :func:<code>asyncio.sleep</code></li>
-<li>:class:<code>ReadResponse</code> → :meth:<code>read_response</code></li>
-<li>:class:<code>Abort</code>       → <code>transport.abort()</code> (RST on Linux);
+<li><a class="autorefs autorefs-internal" title="SendRawBytes
+
+
+  
+      dataclass
+  " href="../../fault_injection/scenario_h1/#blackbull.fault_injection.scenario_h1.SendRawBytes"><code>SendBytes</code></a>   → <a class="autorefs autorefs-internal" title="send_raw(data, *, byte_interval=0.0)
+
+  
+      async
+  " href="#blackbull.client.http1.HTTP1Client.send_raw"><code>send_raw</code></a></li>
+<li><a class="autorefs autorefs-internal" title="Sleep
+
+
+  
+      dataclass
+  " href="../../fault_injection/scenario_h1/#blackbull.fault_injection.scenario_h1.Sleep"><code>Sleep</code></a>       → <code>asyncio.sleep</code></li>
+<li><a class="autorefs autorefs-internal" title="ReadResponse
+
+
+  
+      dataclass
+  " href="../../fault_injection/scenario_h1/#blackbull.fault_injection.scenario_h1.ReadResponse"><code>ReadResponse</code></a> → <a class="autorefs autorefs-internal" title="read_response(*, request_method=None, timeout=None)
+
+  
+      async
+  " href="#blackbull.client.http1.HTTP1Client.read_response"><code>read_response</code></a></li>
+<li><a class="autorefs autorefs-internal" title="Abort
+
+
+  
+      dataclass
+  " href="../../fault_injection/scenario_h1/#blackbull.fault_injection.scenario_h1.Abort"><code>Abort</code></a>       → <code>transport.abort()</code> (RST on Linux);
                          walks no further steps.</li>
 </ul>
 </details>
@@ -6219,7 +6224,7 @@ the client closes the transport; after handoff, the session owns it.</p>
 
         <p>Read one HTTP/1.1 response from the connection.</p>
 <p>Optional <code>timeout</code> bounds the entire read (status line + headers
-+ body).  Raises :class:<code>asyncio.TimeoutError</code> if the deadline is
++ body).  Raises <code>asyncio.TimeoutError</code> if the deadline is
 hit; the caller decides whether to treat that as a transport-
 fail or a normal protocol outcome.</p>
 
@@ -6262,7 +6267,11 @@ fail or a normal protocol outcome.</p>
     <div class="doc doc-contents ">
 
         <p>Send body octets to the peer.</p>
-<p>Same semantics as :meth:<code>send_raw</code>, kept separate for readability
+<p>Same semantics as <a class="autorefs autorefs-internal" title="send_raw(data, *, byte_interval=0.0)
+
+  
+      async
+  " href="#blackbull.client.http1.HTTP1Client.send_raw"><code>send_raw</code></a>, kept separate for readability
 at call sites that frame headers separately from the body.</p>
 
 
@@ -6287,8 +6296,20 @@ at call sites that frame headers separately from the body.</p>
 
         <p>Send one <code>Transfer-Encoding: chunked</code> chunk.</p>
 <p>Caller must have already emitted <code>Transfer-Encoding: chunked</code>
-via :meth:<code>send_header_line</code> and called :meth:<code>end_headers</code>.
-Finish the chunked stream with :meth:<code>end_chunked</code>.</p>
+via <a class="autorefs autorefs-internal" title="send_header_line(name, value)
+
+  
+      async
+  " href="#blackbull.client.http1.HTTP1Client.send_header_line"><code>send_header_line</code></a> and called <a class="autorefs autorefs-internal" title="end_headers()
+
+  
+      async
+  " href="#blackbull.client.http1.HTTP1Client.end_headers"><code>end_headers</code></a>.
+Finish the chunked stream with <a class="autorefs autorefs-internal" title="end_chunked()
+
+  
+      async
+  " href="#blackbull.client.http1.HTTP1Client.end_chunked"><code>end_chunked</code></a>.</p>
 
 
     </div>
@@ -6336,12 +6357,10 @@ directly.</p>
     <div class="doc doc-contents ">
 
         <p>Push arbitrary bytes onto the underlying socket.</p>
-<p>When <code>byte_interval &gt; 0</code> the bytes are transmitted one at a time
-with <code>byte_interval</code> seconds between writes — the primitive
-slowloris-style stall the differential tests rely on.  Each per-
-byte write is followed by <code>drain()</code> (inherited from
-:class:<code>AsyncioWriter</code>), so the bytes actually leave the socket
-on schedule rather than accumulating in the asyncio send buffer.</p>
+<p>With <code>byte_interval &gt; 0</code> the bytes go out one at a time, that many
+seconds apart — the primitive a slowloris-style stall is built from.
+Each write is drained, so the pacing is on the wire and not in the
+asyncio send buffer.</p>
 
 
     </div>
@@ -6491,7 +6510,11 @@ keep-alive connection.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Write a request returned by :meth:<code>prepare</code>.</p>
+        <p>Write a request returned by <a class="autorefs autorefs-internal" title="prepare(method, path, headers, body=b'')
+
+  
+      classmethod
+  " href="#blackbull.client.http1.HTTP1RequestSender.prepare"><code>prepare</code></a>.</p>
 
 
     </div>
@@ -6600,7 +6623,7 @@ only at the read.</p>
 
 
         <p>Bidirectional transport after CONNECT or an HTTP 101 switch.</p>
-<p>Obtain one with :meth:<code>HTTP1Client.handoff</code>.  The handoff is one-shot:
+<p>Obtain one with <a class="autorefs autorefs-internal" title="handoff()" href="#blackbull.client.http1.HTTP1Client.handoff"><code>HTTP1Client.handoff</code></a>.  The handoff is one-shot:
 once returned, this session owns transport closure and the originating
 HTTP client can no longer read or write the connection.</p>
 

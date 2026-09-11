@@ -3071,34 +3071,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -4682,6 +4654,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.response.PingResponder" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PingResponder
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.response.PriorityResponder" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4715,6 +4698,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.response.ResponderFactory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ResponderFactory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.response.RstStreamResponder" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4739,6 +4733,28 @@
         
       </ul>
     </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.response.SettingsResponder" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SettingsResponder
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.response.WindowUpdateResponder" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WindowUpdateResponder
+      
+    </span>
+  </a>
   
 </li>
         
@@ -5467,6 +5483,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.response.PingResponder" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PingResponder
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.response.PriorityResponder" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5500,6 +5527,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.response.ResponderFactory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ResponderFactory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.response.RstStreamResponder" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5524,6 +5562,28 @@
         
       </ul>
     </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.response.SettingsResponder" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SettingsResponder
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.response.WindowUpdateResponder" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WindowUpdateResponder
+      
+    </span>
+  </a>
   
 </li>
         
@@ -5567,6 +5627,20 @@
 
     <div class="doc doc-contents first">
 
+        <p>Server-side responders: what an incoming HTTP/2 control frame makes happen.</p>
+<p>One <code>Responder</code> subclass per frame type, each declaring its <code>FRAME_TYPE</code>.
+<code>__init_subclass__</code> registers it, so
+<a class="autorefs autorefs-internal" href="#blackbull.server.response.ResponderFactory"><code>ResponderFactory</code></a> dispatches by
+dict lookup, and <code>respond(handler)</code> reaches back into the owning
+<code>HTTP2Actor</code> for state rather than keeping any of its own.</p>
+<p>Only the connection-management half of RFC 9113 arrives here — PING, SETTINGS,
+WINDOW_UPDATE, PRIORITY, PRIORITY_UPDATE and RST_STREAM.  HEADERS,
+CONTINUATION, DATA and GOAWAY drive the request lifecycle and stay in the
+actor's own frame loop; <code>docs/about/rfc9113-implementation.md</code> says where
+each frame type is dispatched.</p>
+<p>A responder also owns the validation its frame type owes, because a malformed
+control frame is a connection or stream error before it is anything else.</p>
+
 
 
 
@@ -5585,6 +5659,56 @@
 
 
 
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.server.response.PingResponder" class="doc doc-heading">
+            <code>PingResponder</code>
+
+
+<a href="#blackbull.server.response.PingResponder" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="Responder (blackbull.server.response.Responder)" href="#blackbull.server.response.Responder">Responder</a></code></p>
+
+
+
+        <p>Answers a PING with PING(ACK) carrying the same payload (RFC 9113 §6.7).</p>
+<p>A PING that already carries ACK is the answer to one of ours and is
+dropped; a PING on any stream but 0 is a connection PROTOCOL_ERROR.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
 
 <div class="doc doc-object doc-class">
 
@@ -5744,6 +5868,56 @@ depending on itself a stream error, and h2spec asserts it.</p>
 
 
 
+<h3 id="blackbull.server.response.ResponderFactory" class="doc doc-heading">
+            <code>ResponderFactory</code>
+
+
+<a href="#blackbull.server.response.ResponderFactory" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Builds the responder registered for a frame's type.</p>
+<p>Raises <code>ValueError</code> for a type no responder claims.  The server
+dispatches only the control frames it acts on, so an unclaimed type is the
+caller's decision rather than a default to fall through to — unlike the
+client-side factory of the same name, which drops what it does not handle.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
 <h3 id="blackbull.server.response.RstStreamResponder" class="doc doc-heading">
             <code>RstStreamResponder</code>
 
@@ -5756,6 +5930,13 @@ depending on itself a stream error, and h2spec asserts it.</p>
               Bases: <code><a class="autorefs autorefs-internal" title="Responder (blackbull.server.response.Responder)" href="#blackbull.server.response.Responder">Responder</a></code></p>
 
 
+
+        <p>Tears down the stream a RST_STREAM names, and frees what it held.</p>
+<p>Cancels the handler task, drops the stream's sender and recipient, and
+replays to the connection window the inbound credit the cancelled handler
+never consumed, so later streams are not starved by it.  The identifier is
+recorded as closed-via-RST, so a frame arriving on it afterwards is
+answered STREAM_CLOSED rather than opening a new stream.</p>
 
 
 
@@ -5803,6 +5984,113 @@ depending on itself a stream error, and h2spec asserts it.</p>
     </div>
 
 </div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.server.response.SettingsResponder" class="doc doc-heading">
+            <code>SettingsResponder</code>
+
+
+<a href="#blackbull.server.response.SettingsResponder" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="Responder (blackbull.server.response.Responder)" href="#blackbull.server.response.Responder">Responder</a></code></p>
+
+
+
+        <p>Validates the peer's SETTINGS, applies them, and ACKs (RFC 9113 §6.5).</p>
+<p>Nothing is applied until every parameter has passed its range check, so a
+frame carrying one bad value leaves connection state untouched rather than
+half-updated.  A changed <code>SETTINGS_INITIAL_WINDOW_SIZE</code> reaches open
+streams as a delta (§6.9.2), which may leave an already drained send window
+negative — later credit adds to the negative value before DATA may go out.
+A SETTINGS that is itself an ACK is not answered.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.server.response.WindowUpdateResponder" class="doc doc-heading">
+            <code>WindowUpdateResponder</code>
+
+
+<a href="#blackbull.server.response.WindowUpdateResponder" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="Responder (blackbull.server.response.Responder)" href="#blackbull.server.response.Responder">Responder</a></code></p>
+
+
+
+        <p>Credits a flow-control window and wakes what was blocked on it.</p>
+<p>RFC 9113 §6.9.  Stream 0 credits the one shared connection window and every
+blocked stream sender re-checks; any other identifier credits that stream's
+sender alone.  A window is 31 bits, so an increment that would overflow it
+— and likewise an increment of zero — is an error at the level it arrived
+on: fatal to the connection on stream 0, a RST_STREAM on a stream.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
 
 
 

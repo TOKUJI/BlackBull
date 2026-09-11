@@ -2988,6 +2988,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#blackbull.grpc.status.GrpcStatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GrpcStatus
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -3128,34 +3139,6 @@
     
   
     blackbull.middleware
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
   
 
     
@@ -5427,6 +5410,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#blackbull.grpc.status.GrpcStatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GrpcStatus
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5511,6 +5505,59 @@ the wire as the decimal <code>grpc-status</code> trailer; <code>OK</code> (0) si
         <p>Raised by a service handler (or <code>context.abort</code>) to end the RPC with
 a non-OK status.  <code>serve_grpc</code> translates it into <code>grpc-status</code> /
 <code>grpc-message</code> trailers.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.grpc.status.GrpcStatus" class="doc doc-heading">
+            <code>GrpcStatus</code>
+
+
+<a href="#blackbull.grpc.status.GrpcStatus" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="enum.IntEnum">IntEnum</span></code></p>
+
+
+
+        <p>The canonical gRPC status codes, as the <code>grpc-status</code> trailer carries
+them.</p>
+<p><code>OK</code> (0) is success; every other member ends the RPC.  Raise one through
+<a class="autorefs autorefs-internal" href="#blackbull.grpc.status.GrpcError"><code>GrpcError</code></a> — that is the typed contract
+a handler is checked against, so a bare integer is a caller error rather
+than an unnamed code.</p>
 
 
 

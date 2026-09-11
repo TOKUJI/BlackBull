@@ -3242,34 +3242,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -5659,13 +5631,10 @@
 <p>gRPC is HTTP/2 with a fixed request shape (<code>POST /package.Service/Method</code>,
 <code>content-type: application/grpc</code>) and a Length-Prefixed-Message body, where
 the call result is reported in <code>grpc-status</code> / <code>grpc-message</code> <em>trailers</em>.
-BlackBull's HTTP/2 sender already emits trailers via the
-<code>http.response.trailers</code> ASGI event, and <code>HTTP2Recipient</code> already delivers
-request DATA as incremental <code>http.request</code> events, so all four RPC kinds —
-unary, server-, client-, and bidirectional-streaming — map cleanly onto the
-existing (scope, receive, send) bridge; no new protocol Actor is needed.</p>
-<p><code>serve_grpc</code> is dispatched from :meth:<code>BlackBull._dispatch</code> when the request
-content-type is <code>application/grpc</code> and a registry was installed via
+All four RPC kinds — unary, server-, client-, and bidirectional-streaming —
+ride the existing (scope, receive, send) bridge; no new protocol Actor.</p>
+<p><code>serve_grpc</code> is dispatched when the request content-type is
+<code>application/grpc</code> and a registry was installed via
 <code>app.enable_grpc(...)</code>.</p>
 
 
@@ -5707,9 +5676,16 @@ content-type is <code>application/grpc</code> and a registry was installed via
 and lets the handler set the outgoing status, a human-readable message,
 leading/trailing metadata, or abort the call outright — the subset of
 grpcio's <code>ServicerContext</code> that a raw-bytes transport can honour.</p>
-<p>The response-start machinery (<code>_send</code> … <code>_started</code>) is bound by
-:func:<code>serve_grpc</code> just before the handler runs; handlers touch it only via
-:meth:<code>send_initial_metadata</code>.</p>
+<p><a class="autorefs autorefs-internal" title="send_initial_metadata(metadata)
+
+  
+      async
+  " href="#blackbull.grpc.asgi.GrpcContext.send_initial_metadata"><code>send_initial_metadata</code></a> is the only door to the response-start
+machinery <a class="autorefs autorefs-internal" title="serve_grpc(registry, conn, receive, send)
+
+  
+      async
+  " href="#blackbull.grpc.asgi.serve_grpc"><code>serve_grpc</code></a> binds before the handler runs.</p>
 
 
 
@@ -5743,7 +5719,7 @@ grpcio's <code>ServicerContext</code> that a raw-bytes transport can honour.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Raise :class:<code>GrpcError</code> to end the call with a non-OK status.</p>
+        <p>Raise <a class="autorefs autorefs-internal" href="../status/#blackbull.grpc.status.GrpcError"><code>GrpcError</code></a> to end the call with a non-OK status.</p>
 
 
     </div>
@@ -5830,7 +5806,7 @@ before the first response message — grpcio's
 (just before the first message, or with the trailers for an empty
 response).  Calling it flushes them early with <em>metadata</em> attached — used
 to hand the client leading metadata (auth challenges, stream ids) up
-front.  Raises :class:<code>ValueError</code> once the HEADERS have already gone
+front.  Raises <code>ValueError</code> once the HEADERS have already gone
 out (grpcio's "initial metadata no longer allowed").</p>
 
 
@@ -5870,10 +5846,8 @@ finish in time.</p>
 
     <div class="doc doc-contents ">
 
-        <p>The trailing metadata set so far (a copy) — lets helpers compose
-with, rather than clobber, what the handler already set (e.g.
-blackbull-protobuf's <code>abort_with_details</code> appending
-<code>grpc-status-details-bin</code>).</p>
+        <p>The trailing metadata set so far, as a copy — so a helper composes
+with what the handler already set instead of clobbering it.</p>
 
 
     </div>

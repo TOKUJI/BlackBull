@@ -3071,34 +3071,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -3546,6 +3518,17 @@
   
     <nav class="md-nav" aria-label="MQTTExtension">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.extension.MQTTExtension.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#blackbull.mqtt.extension.MQTTExtension.iter_subscriptions" class="md-nav__link">
@@ -5512,6 +5495,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.mqtt.extension.MQTTExtension.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.mqtt.extension.MQTTExtension.iter_subscriptions" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5633,7 +5627,7 @@
 
     <div class="doc doc-contents first">
 
-        <p>User-facing wiring for the MQTT 5 broker — detector + :class:<code>MQTTExtension</code>.</p>
+        <p>User-facing wiring for the MQTT 5 broker — detector + <a class="autorefs autorefs-internal" href="#blackbull.mqtt.extension.MQTTExtension"><code>MQTTExtension</code></a>.</p>
 
 
 
@@ -5672,7 +5666,7 @@
 
 
         <p>Wires the MQTT 5 broker into a BlackBull app as a non-ASGI protocol.</p>
-<p>Register it once and tap the broker's routing with :meth:<code>on_message</code>::</p>
+<p>Register it once and tap the broker's routing with <a class="autorefs autorefs-internal" title="on_message(topic='#')" href="#blackbull.mqtt.extension.MQTTExtension.on_message"><code>on_message</code></a>::</p>
 <pre><code>from blackbull.mqtt import MQTTExtension, Message
 
 mqtt = app.add_extension(MQTTExtension(port=1883))
@@ -5684,17 +5678,13 @@ async def on_temp(msg: Message, room: str):
 <p>The broker itself (CONNECT/SUBSCRIBE/PUBLISH/QoS flows, retained messages,
 Will delivery) runs whether or not any handler is registered; handlers are
 an application-level tap on top of normal broker routing.</p>
-<p>This instance owns a single :class:<code>BrokerActor</code> and a single
-:class:<code>TapActor</code> (both started on app startup, stopped on shutdown) — one
-broker and one tap consumer per worker, no module globals.  The class is
-self-contained and importable from a future <code>blackbull-mqtt</code> package
-without touching the core.</p>
+<p>This instance owns one <a class="autorefs autorefs-internal" href="../broker/#blackbull.mqtt.broker.BrokerActor"><code>BrokerActor</code></a> and one <a class="autorefs autorefs-internal" href="../tap/#blackbull.mqtt.tap.TapActor"><code>TapActor</code></a>,
+started on app startup and stopped on shutdown — one of each per worker.</p>
 <p><code>tap_mode</code> selects how taps are dispatched: <code>'actor'</code> (default) runs
-them on the decoupled :class:<code>TapActor</code> so a slow tap never back-pressures
-delivery; <code>'inline'</code> uses the connection-actor dispatch directly
-and exists mainly so <code>bench/mqtt/tap_throughput.py</code> can compare the two on
-one build.  <code>tap_queue_size</code> bounds the actor-mode inbox (drop-newest on
-overflow).</p>
+them on the decoupled <a class="autorefs autorefs-internal" href="../tap/#blackbull.mqtt.tap.TapActor"><code>TapActor</code></a>, so a slow tap never
+back-pressures delivery; <code>'inline'</code> dispatches on the connection actor
+itself.  <code>tap_queue_size</code> bounds the actor-mode inbox (drop-newest on
+overflow), and <code>docs/about/mqtt-actor-design.md</code> covers the choice.</p>
 
 
 
@@ -5720,6 +5710,26 @@ overflow).</p>
 <div class="doc doc-object doc-function">
 
 
+<h4 id="blackbull.mqtt.extension.MQTTExtension.__init__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="fm">__init__</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">port</span><span class="o">=</span><span class="mi">1883</span><span class="p">,</span> <span class="n">tls</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">tap_mode</span><span class="o">=</span><span class="s1">'actor'</span><span class="p">,</span> <span class="n">tap_queue_size</span><span class="o">=</span><span class="mi">1024</span><span class="p">)</span></code>
+
+<a href="#blackbull.mqtt.extension.MQTTExtension.__init__" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Configure the broker extension.</p>
+<p><em>tap_mode</em> is <code>'actor'</code> or <code>'inline'</code> — any other value raises
+<code>ValueError</code>.  The annotation cannot say so, which is why this does.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h4 id="blackbull.mqtt.extension.MQTTExtension.iter_subscriptions" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">iter_subscriptions</span><span class="p">()</span></code>
 
@@ -5728,12 +5738,10 @@ overflow).</p>
 
     <div class="doc doc-contents ">
 
-        <p>Yield a :class:<code>Subscription</code> for each registered <code>on_message</code> tap.</p>
-<p>A stable, public, read-only accessor over the compiled handlers — the
-seam <code>AsyncAPIExtension</code> reads instead of touching <code>_handlers</code>.
-Reflects the handlers registered <em>at call time</em>, so a documentation
-endpoint that calls this per request picks up taps added after the
-documenting extension was wired in.</p>
+        <p>Yield a <a class="autorefs autorefs-internal" href="#blackbull.mqtt.extension.Subscription"><code>Subscription</code></a> for each registered <code>on_message</code> tap.</p>
+<p>A read-only view of the compiled handlers <em>at call time</em>, so a
+documentation endpoint calling it per request picks up taps
+registered after that endpoint was wired in.</p>
 
 
     </div>
@@ -5751,13 +5759,27 @@ documenting extension was wired in.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Yield the compiled :class:<code>Tap</code> for each registered <code>on_message</code> handler.</p>
-<p>The dispatch-side counterpart of :meth:<code>iter_subscriptions</code>: that
+        <p>Yield the compiled <a class="autorefs autorefs-internal" title="Tap
+
+
+  
+      dataclass
+  " href="../tap/#blackbull.mqtt.tap.Tap"><code>Tap</code></a> for each registered <code>on_message</code> handler.</p>
+<p>The dispatch-side counterpart of <a class="autorefs autorefs-internal" title="iter_subscriptions()" href="#blackbull.mqtt.extension.MQTTExtension.iter_subscriptions"><code>iter_subscriptions</code></a>: that
 method yields the <em>display</em> form (<code>topic</code> as the application wrote
 it, <code>{name}</code> captures restored) for documentation tools; this yields
-the already-compiled :class:<code>Tap</code> objects, so a dispatch consumer
+the already-compiled <a class="autorefs autorefs-internal" title="Tap
+
+
+  
+      dataclass
+  " href="../tap/#blackbull.mqtt.tap.Tap"><code>Tap</code></a> objects, so a dispatch consumer
 (<code>MQTTTestBroker</code>) can feed them straight to
-:func:<code>blackbull.mqtt.tap.run_taps</code> without re-parsing the filters.
+<a class="autorefs autorefs-internal" title="run_taps(taps, message, *, raise_exceptions=False)
+
+  
+      async
+  " href="../tap/#blackbull.mqtt.tap.run_taps"><code>blackbull.mqtt.tap.run_taps</code></a> without re-parsing the filters.
 Both reflect the handlers registered <em>at call time</em>.</p>
 
 
@@ -5779,7 +5801,12 @@ Both reflect the handlers registered <em>at call time</em>.</p>
         <p>Decorator: register an async <code>(message, **captures) -&gt; None</code> tap for
 every PUBLISH whose topic matches <em>topic</em> (an MQTT topic filter, so <code>+</code>
 and <code>#</code> wildcards apply, plus <code>{name}</code> capture segments).  The
-callback receives a :class:<code>~blackbull.mqtt.Message</code>.</p>
+callback receives a <a class="autorefs autorefs-internal" title="Message
+
+
+  
+      dataclass
+  " href="../#blackbull.mqtt.Message"><code>Message</code></a>.</p>
 
 
     </div>
@@ -5907,7 +5934,7 @@ request line and the HTTP/2 preface, both of which start with ASCII text.</p>
 
 
         <p>A read-only view of one registered <code>on_message</code> tap.</p>
-<p>Yielded by :meth:<code>MQTTExtension.iter_subscriptions</code> so documentation tools
+<p>Yielded by <a class="autorefs autorefs-internal" title="iter_subscriptions()" href="#blackbull.mqtt.extension.MQTTExtension.iter_subscriptions"><code>MQTTExtension.iter_subscriptions</code></a> so documentation tools
 (<code>AsyncAPIExtension</code>) can describe an app's taps without reaching into the
 private <code>_handlers</code> list.  <code>topic</code> is the filter as the application
 wrote it (<code>{name}</code> captures restored); <code>callback</code> is the registered

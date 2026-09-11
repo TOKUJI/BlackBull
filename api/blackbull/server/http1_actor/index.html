@@ -3071,34 +3071,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -5685,7 +5657,7 @@ RequestActor owns the lifetime of a single HTTP request.</p>
 
 
 
-        <p>Raised by :meth:<code>HTTP1Actor._parse</code> on an RFC 9112 framing violation.</p>
+        <p>Raised by <code>HTTP1Actor._parse</code> on an RFC 9112 framing violation.</p>
 <p>The actor's keep-alive loop catches this and sends a 400 Bad Request
 before closing the connection — never tries to dispatch the malformed
 request to the app.</p>
@@ -5797,7 +5769,7 @@ EventAggregator still receives the lifecycle events.</p>
         <p>Raised when a request header line or the whole header block exceeds
 the configured limit (<code>BB_HEADER_MAX_LINE</code> / <code>BB_HEADER_MAX_TOTAL</code>).</p>
 <p>The actor answers with 431 Request Header Fields Too Large (RFC 6585
-§5) and closes the connection.  Distinct from :class:<code>BadRequestError</code>
+§5) and closes the connection.  Distinct from <a class="autorefs autorefs-internal" href="#blackbull.server.http1_actor.BadRequestError"><code>BadRequestError</code></a>
 because the response status differs.</p>
 
 
@@ -5831,7 +5803,7 @@ because the response status differs.</p>
 
         <p>RFC 9112 §6.1 — the request used a Transfer-Encoding the server
 does not implement.  Answered with 501 Not Implemented (a separate
-response code from :class:<code>BadRequestError</code>'s 400).</p>
+response code from <a class="autorefs autorefs-internal" href="#blackbull.server.http1_actor.BadRequestError"><code>BadRequestError</code></a>'s 400).</p>
 
 
 
@@ -5864,8 +5836,13 @@ response code from :class:<code>BadRequestError</code>'s 400).</p>
 
         <p>Owns one request's app boundary: what the app is called with.</p>
 <p>Shared by both protocol actors — H/1 reuses one instance per connection
-via :meth:<code>bind</code>; H/2 builds one per stream.  Owns the app-facing
-representation (the native :class:<code>Connection</code> on the default lane, the
+via <a class="autorefs autorefs-internal" title="bind(conn, recipient, send)" href="#blackbull.server.http1_actor.RequestActor.bind"><code>bind</code></a>; H/2 builds one per stream.  Owns the app-facing
+representation (the native <a class="autorefs autorefs-internal" title="Connection
+
+
+  
+      dataclass
+  " href="../../connection/#blackbull.connection.Connection"><code>Connection</code></a> on the default lane, the
 materialized ASGI scope on <code>BB_FORCE_ASGI_SCOPE=1</code>), binds the raw
 recipient before any wrapper exists, and calls the app.</p>
 <p>The request-lifecycle Level B events are emitted by the application
@@ -5909,9 +5886,8 @@ escape the app call (e.g. a raising global middleware).</p>
         <p>Point this actor at the next request on the same connection.</p>
 <p>HTTP/1.1 dispatches one request at a time per connection, so the
 instance is free between requests and rebinding it is indistinguishable
-from building a new one — except for the allocation, which the keep-alive
-loop would otherwise pay on every request.  <code>app</code>, <code>aggregator</code> and
-<code>force_asgi</code> are per-connection and stay put.</p>
+from building a new one.  <code>app</code>, <code>aggregator</code> and <code>force_asgi</code>
+are per-connection and stay put.</p>
 <p>Deliberately <strong>not</strong> available to HTTP/2, whose streams are concurrent:
 two live requests sharing one actor would interleave their fields.</p>
 
@@ -5949,7 +5925,7 @@ two live requests sharing one actor would interleave their fields.</p>
 <code>HTTP/x.y</code> version whose major version the server does not support
 (RFC9112-2.3-INVALID-VERSION).  Answered with 505 HTTP Version Not
 Supported and the connection is closed.  Distinct from
-:class:<code>BadRequestError</code>: the request <em>grammar</em> was valid.</p>
+<a class="autorefs autorefs-internal" href="#blackbull.server.http1_actor.BadRequestError"><code>BadRequestError</code></a>: the request <em>grammar</em> was valid.</p>
 
 
 

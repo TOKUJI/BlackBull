@@ -3071,34 +3071,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -3545,6 +3517,83 @@
     <span class="md-ellipsis">
       
         ClientProtocolError
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.broker.ClientPuback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ClientPuback
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.broker.ClientPubcomp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ClientPubcomp
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.broker.ClientPublish" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ClientPublish
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.broker.ClientPubrec" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ClientPubrec
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.broker.ClientPubrel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ClientPubrel
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.broker.ClientSubscribe" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ClientSubscribe
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.broker.ClientUnsubscribe" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ClientUnsubscribe
       
     </span>
   </a>
@@ -5583,6 +5632,83 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.mqtt.broker.ClientPuback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ClientPuback
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.broker.ClientPubcomp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ClientPubcomp
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.broker.ClientPublish" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ClientPublish
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.broker.ClientPubrec" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ClientPubrec
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.broker.ClientPubrel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ClientPubrel
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.broker.ClientSubscribe" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ClientSubscribe
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.broker.ClientUnsubscribe" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ClientUnsubscribe
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.mqtt.broker.Close" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5656,12 +5782,22 @@
     <div class="doc doc-contents first">
 
         <p>MQTT 5.0 broker — the routing/session state owner (actor model).</p>
-<p>:class:<code>BrokerActor</code> is one per app/worker, supervisor/lifespan-owned. It owns
+<p><a class="autorefs autorefs-internal" href="#blackbull.mqtt.broker.BrokerActor"><code>BrokerActor</code></a> is one per app/worker, supervisor/lifespan-owned. It owns
 <em>all</em> routing state (subscriptions, sessions, retained messages, the live
 connection registry) and processes its inbox serially, so there are no locks
 and no shared mutable state. Per-connection actors (see
-:mod:<code>blackbull.mqtt.connection</code>) <code>send</code> it the Level A messages defined here
-and receive :class:<code>Send</code> / :class:<code>Close</code> back.</p>
+<a class="autorefs autorefs-internal" href="../connection/#blackbull.mqtt.connection"><code>blackbull.mqtt.connection</code></a>) <code>send</code> it the Level A messages defined here
+and receive <a class="autorefs autorefs-internal" title="Send
+
+
+  
+      dataclass
+  " href="#blackbull.mqtt.broker.Send"><code>Send</code></a> / <a class="autorefs autorefs-internal" title="Close
+
+
+  
+      dataclass
+  " href="#blackbull.mqtt.broker.Close"><code>Close</code></a> back.</p>
 <p>Because the broker outlives every connection actor, a Will (LWT) routes to live
 subscribers during a peer's teardown with no special-casing.</p>
 
@@ -5951,6 +6087,415 @@ state — the design goal of the actor split.</p>
 
 
         <p>A decoded packet that is not permitted in the client-to-server direction.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.mqtt.broker.ClientPuback" class="doc doc-heading">
+            <code>ClientPuback</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#blackbull.mqtt.broker.ClientPuback" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="Message
+
+
+  
+      dataclass
+   (blackbull.actor.Message)" href="../../actor/#blackbull.actor.Message">Message</a></code></p>
+
+
+
+        <p>The client's PUBACK; the outbound QoS 1 message for this packet id is
+delivered and its slot is free.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.mqtt.broker.ClientPubcomp" class="doc doc-heading">
+            <code>ClientPubcomp</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#blackbull.mqtt.broker.ClientPubcomp" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="Message
+
+
+  
+      dataclass
+   (blackbull.actor.Message)" href="../../actor/#blackbull.actor.Message">Message</a></code></p>
+
+
+
+        <p>The client's PUBCOMP; the outbound QoS 2 exchange for this packet id is
+finished and its slot is free.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.mqtt.broker.ClientPublish" class="doc doc-heading">
+            <code>ClientPublish</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#blackbull.mqtt.broker.ClientPublish" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="Message
+
+
+  
+      dataclass
+   (blackbull.actor.Message)" href="../../actor/#blackbull.actor.Message">Message</a></code></p>
+
+
+
+        <p>A PUBLISH arrived; route it to matching subscribers.</p>
+<p><code>admitted</code> is an optional future the broker resolves with whether the
+sender still held a session when this packet reached the front of the
+inbox.  A reader may pipeline PUBLISH ahead of CONNACK, and only the
+broker's own FIFO knows whether a rejection or a takeover overtook it, so
+a caller that must act after the packet is accepted awaits this rather
+than assuming the send succeeded.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.mqtt.broker.ClientPubrec" class="doc doc-heading">
+            <code>ClientPubrec</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#blackbull.mqtt.broker.ClientPubrec" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="Message
+
+
+  
+      dataclass
+   (blackbull.actor.Message)" href="../../actor/#blackbull.actor.Message">Message</a></code></p>
+
+
+
+        <p>The client's PUBREC for an outbound QoS 2 message; the broker answers
+with PUBREL for the same packet id.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.mqtt.broker.ClientPubrel" class="doc doc-heading">
+            <code>ClientPubrel</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#blackbull.mqtt.broker.ClientPubrel" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="Message
+
+
+  
+      dataclass
+   (blackbull.actor.Message)" href="../../actor/#blackbull.actor.Message">Message</a></code></p>
+
+
+
+        <p>The client's PUBREL for an inbound QoS 2 message; the broker releases
+the held message and answers with PUBCOMP.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.mqtt.broker.ClientSubscribe" class="doc doc-heading">
+            <code>ClientSubscribe</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#blackbull.mqtt.broker.ClientSubscribe" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="Message
+
+
+  
+      dataclass
+   (blackbull.actor.Message)" href="../../actor/#blackbull.actor.Message">Message</a></code></p>
+
+
+
+        <p>A SUBSCRIBE arrived; record its filters and reply with SUBACK.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.mqtt.broker.ClientUnsubscribe" class="doc doc-heading">
+            <code>ClientUnsubscribe</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#blackbull.mqtt.broker.ClientUnsubscribe" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="Message
+
+
+  
+      dataclass
+   (blackbull.actor.Message)" href="../../actor/#blackbull.actor.Message">Message</a></code></p>
+
+
+
+        <p>An UNSUBSCRIBE arrived; drop its filters and reply with UNSUBACK.</p>
 
 
 

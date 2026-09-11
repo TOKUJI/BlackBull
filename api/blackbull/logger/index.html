@@ -3051,6 +3051,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.logger.ColoredFormatter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ColoredFormatter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.logger.JsonFormatter" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3209,34 +3220,6 @@
     
   
     blackbull.middleware
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
   
 
     
@@ -5509,6 +5492,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.logger.ColoredFormatter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ColoredFormatter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.logger.JsonFormatter" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5631,6 +5625,29 @@
 
     <div class="doc doc-contents first">
 
+        <p>Keeping logging off the event loop, and the formatters and gates that help.</p>
+<p>Nothing here replaces the standard library — BlackBull logs through ordinary
+<code>logging</code> loggers and attaches no handler of its own until asked.  What this
+module adds is the machinery for logging from an event loop without paying for
+it there.</p>
+<p><a class="autorefs autorefs-internal" title="setup_async_logging(handlers=None, *, log_format=None, syslog_addr=None, batch_size=None, batch_timeout_ms=None, log_file=None)" href="#blackbull.logger.setup_async_logging"><code>setup_async_logging</code></a> moves every
+handler on the <code>blackbull</code> hierarchy behind a queue drained by a background
+thread, so a log call on the loop is an enqueue and nothing else; formatting,
+I/O and rotation all happen off the loop until
+<a class="autorefs autorefs-internal" title="teardown_async_logging()" href="#blackbull.logger.teardown_async_logging"><code>teardown_async_logging</code></a> undoes it.
+<a class="autorefs autorefs-internal" href="#blackbull.logger.JsonFormatter"><code>JsonFormatter</code></a> and
+<a class="autorefs autorefs-internal" href="#blackbull.logger.ColoredFormatter"><code>ColoredFormatter</code></a> are the two sink
+formats, and <a class="autorefs autorefs-internal" href="#blackbull.logger.BatchWriteHandler"><code>BatchWriteHandler</code></a>
+coalesces a burst of records into one write.</p>
+<p><a class="autorefs autorefs-internal" title="log(fn)" href="#blackbull.logger.log"><code>log</code></a> and
+<a class="autorefs autorefs-internal" title="debug_gate(logger)" href="#blackbull.logger.debug_gate"><code>debug_gate</code></a> are the other half: both read the
+logger's level once, at import, and cost nothing afterwards.  That is the one
+thing to know before using them — raising a level at runtime does not switch
+on what they guard, so configure <code>DEBUG</code> before importing the framework.</p>
+<p><code>docs/guide/logging.md</code> describes the three logger hierarchies
+(<code>blackbull</code>, <code>blackbull.access</code>, <code>blackbull.caps</code>) and the fields an
+access record carries.</p>
+
 
 
 
@@ -5721,6 +5738,62 @@ rate.</p>
 
 
 
+<h3 id="blackbull.logger.ColoredFormatter" class="doc doc-heading">
+            <code>ColoredFormatter</code>
+
+
+<a href="#blackbull.logger.ColoredFormatter" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="logging.Formatter">Formatter</span></code></p>
+
+
+
+        <p>A <code>logging.Formatter</code> that colours <code>%(levelname)s</code> by severity.</p>
+<p>Takes the same <code>fmt</code> / <code>datefmt</code> / <code>style</code> arguments as its base and
+behaves identically except that the level name is wrapped in an ANSI colour
+sequence.  Only the copy of the record being formatted is coloured, so
+other handlers on the same record still see the plain name.</p>
+<p>The escape sequences are written unconditionally — this is a terminal
+format, and pointing it at a file or a pipe puts them in the output.  Use
+<a class="autorefs autorefs-internal" href="#blackbull.logger.JsonFormatter"><code>JsonFormatter</code></a> or a plain
+<code>logging.Formatter</code> for anything that is not a terminal.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
 <h3 id="blackbull.logger.JsonFormatter" class="doc doc-heading">
             <code>JsonFormatter</code>
 
@@ -5737,7 +5810,7 @@ rate.</p>
         <p>Emit one JSON object per log line (logging approach 3 — structured JSON).</p>
 <p>Every record carries <code>timestamp</code> / <code>level</code> / <code>logger</code> / <code>message</code>.
 Access-log records (<code>blackbull.access</code>) additionally attach the structured
-fields from :meth:<code>AccessLogRecord.as_extra</code> via <code>extra=</code> — those are
+fields from <code>AccessLogRecord.as_extra</code> via <code>extra=</code> — those are
 lifted to first-class JSON keys (<code>client_ip</code>, <code>method</code>, <code>path</code>,
 <code>http_version</code>, <code>status</code>, <code>response_bytes</code>, <code>duration_ms</code>, and
 <code>close_code</code> for WebSocket disconnects).  <code>exc_info</code> is rendered as a
@@ -5800,7 +5873,7 @@ brings it down to 4 (one global read and a branch).</p>
 if _DEBUG:
     logger.debug('...', x)
 </code></pre>
-<p>This is the same bargain :func:<code>log</code> already makes and
+<p>This is the same bargain <a class="autorefs autorefs-internal" title="log(fn)" href="#blackbull.logger.log"><code>log</code></a> already makes and
 <code>docs/guide/logging.md</code> already documents: the level is read at import,
 so raising it afterwards does not switch these on.  Configure <code>DEBUG</code>
 before importing the framework, or restart.  The paths this guards emit
@@ -5887,14 +5960,14 @@ functions.</p>
 <p>After this call every <code>logger.debug/info/warning</code> in the event loop
 enqueues a <code>LogRecord</code> and returns immediately.  A daemon thread
 (<code>QueueListener</code>) drains the queue and forwards records to <em>handlers</em>.</p>
-<p>Idempotent — a second call before :func:<code>teardown_async_logging</code> is a no-op.</p>
+<p>Idempotent — a second call before <a class="autorefs autorefs-internal" title="teardown_async_logging()" href="#blackbull.logger.teardown_async_logging"><code>teardown_async_logging</code></a> is a no-op.</p>
 <h5 id="blackbull.logger.setup_async_logging--parameters">Parameters<a class="headerlink" href="#blackbull.logger.setup_async_logging--parameters" title="Permanent link">&para;</a></h5>
 <p>handlers:
     Handlers the background listener should write to.  Defaults to the
     non-NullHandler handlers already on the <code>blackbull</code> logger, or the
-    sink built by :func:<code>_build_sink_handlers</code> when none exist.
+    sink built by <code>_build_sink_handlers</code> when none exist.
 log_format, syslog_addr, batch_size, batch_timeout_ms, log_file:
-    Sink configuration forwarded to :func:<code>_build_sink_handlers</code> (only used
+    Sink configuration forwarded to <code>_build_sink_handlers</code> (only used
     when <em>handlers</em> is None and no handlers are pre-attached).  The server
     startup passes these from <code>Settings</code> (<code>get_settings()</code>); each
     defaults to <code>None</code> → the matching <code>BB_*</code> env var.</p>

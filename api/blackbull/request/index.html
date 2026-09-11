@@ -3071,34 +3071,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../middleware/cache/" class="md-nav__link">
         
   
@@ -5608,11 +5580,21 @@
 <li><code>parse_cookies</code>: the ASGI-scope-shaped wrapper of the above, for external
   callers that hold a scope dict.</li>
 </ul>
-<p>The opt-in HTTP context object is :class:<code>blackbull.connection.Connection</code>;
+<p>The opt-in HTTP context object is <a class="autorefs autorefs-internal" title="Connection
+
+
+  
+      dataclass
+  " href="../connection/#blackbull.connection.Connection"><code>blackbull.connection.Connection</code></a>;
 <code>Request</code> is a <strong>deprecated</strong> alias of it, resolved through
 <code>blackbull.__getattr__</code>, and will be removed no earlier than 2027-08-01.
 This module holds only the transport-agnostic free functions, which
-:class:<code>Connection</code> builds on.</p>
+<a class="autorefs autorefs-internal" title="Connection
+
+
+  
+      dataclass
+  " href="../connection/#blackbull.connection.Connection"><code>Connection</code></a> builds on.</p>
 
 
 
@@ -5654,7 +5636,11 @@ This module holds only the transport-agnostic free functions, which
 <p>ASGI signals a mid-body disconnect with an <code>http.disconnect</code> event that
 carries no <code>body</code>/<code>more_body</code> keys.  Treating it as end-of-message
 would return a <em>truncated</em> upload as if it were whole, so
-:func:<code>read_body</code> raises this instead — the handler must not process a
+<a class="autorefs autorefs-internal" title="read_body(receive)
+
+  
+      async
+  " href="#blackbull.request.read_body"><code>read_body</code></a> raises this instead — the handler must not process a
 partial body as complete.  The <code>partial</code> attribute holds whatever body
 bytes had arrived before the disconnect.</p>
 
@@ -5701,10 +5687,14 @@ bytes had arrived before the disconnect.</p>
 
         <p>Parse the <code>Cookie</code> header(s) into a dict, straight from a headers
 object/iterable — no ASGI scope dict involved.</p>
-<p>This is the native core: :meth:<code>Connection.cookies</code> calls it directly on
-<code>conn.headers</code>; :func:<code>parse_cookies</code> is the ASGI-scope-shaped wrapper kept
+<p>This is the native core: <a class="autorefs autorefs-internal" title="cookies
+
+  
+      property
+  " href="../connection/#blackbull.connection.Connection.cookies"><code>Connection.cookies</code></a> calls it directly on
+<code>conn.headers</code>; <a class="autorefs autorefs-internal" title="parse_cookies(source)" href="#blackbull.request.parse_cookies"><code>parse_cookies</code></a> is the ASGI-scope-shaped wrapper kept
 for external callers that hold a scope dict. Accepts a
-:class:<code>blackbull.headers.Headers</code> instance (uses <code>getlist</code>) or a plain
+<a class="autorefs autorefs-internal" title="Headers" href="../headers/#blackbull.headers.Headers"><code>blackbull.headers.Headers</code></a> instance (uses <code>getlist</code>) or a plain
 iterable of <code>(name, value)</code> bytes tuples (the ASGI 3.0 form).</p>
 
 
@@ -5736,7 +5726,7 @@ parsing, so both wire formats produce the same result.</p>
 <li>A plain list/iterable of <code>(name, value)</code> bytes tuples — the
   standard ASGI 3.0 form, used by external servers (uvicorn,
   hypercorn, <code>httpx.ASGITransport</code>).</li>
-<li>A :class:<code>blackbull.headers.Headers</code> instance — what BlackBull's
+<li>A <a class="autorefs autorefs-internal" title="Headers" href="../headers/#blackbull.headers.Headers"><code>blackbull.headers.Headers</code></a> instance — what BlackBull's
   own server attaches as a handler ergonomics enhancement.</li>
 </ul>
 
@@ -5761,10 +5751,7 @@ parsing, so both wire formats produce the same result.</p>
     <div class="doc doc-contents ">
 
         <p>Read the complete request body from the ASGI receive channel.</p>
-<p>Collects chunks in a list and joins once, rather than the O(n²) <code>+=</code>
-growth.  A single-chunk body (the common case) is returned directly with
-no intermediate copy at all.</p>
-<p>Raises :class:<code>ClientDisconnected</code> if an <code>http.disconnect</code> arrives
+<p>Raises <a class="autorefs autorefs-internal" href="#blackbull.request.ClientDisconnected"><code>ClientDisconnected</code></a> if an <code>http.disconnect</code> arrives
 before the body is complete, so a truncated upload is never silently
 returned as if whole.</p>
 
@@ -5800,8 +5787,12 @@ if data is None:
     return
 </code></pre>
 <p>Note that a literal JSON <code>null</code> body also parses to <code>None</code>; if that
-distinction matters, read the body yourself with :func:<code>read_body</code>.</p>
-<p>A mid-body client disconnect propagates as :class:<code>ClientDisconnected</code>
+distinction matters, read the body yourself with <a class="autorefs autorefs-internal" title="read_body(receive)
+
+  
+      async
+  " href="#blackbull.request.read_body"><code>read_body</code></a>.</p>
+<p>A mid-body client disconnect propagates as <a class="autorefs autorefs-internal" href="#blackbull.request.ClientDisconnected"><code>ClientDisconnected</code></a>
 rather than being reported as invalid JSON — a truncated body is a
 transport failure, not a parse error.</p>
 
@@ -5830,7 +5821,7 @@ transport failure, not a parse error.</p>
 raising — a malformed body never crashes the handler.  Override
 <em>encoding</em> for non-UTF-8 payloads.</p>
 <p>A mid-body client disconnect still propagates as
-:class:<code>ClientDisconnected</code>: a truncated upload must not be decoded and
+<a class="autorefs autorefs-internal" href="#blackbull.request.ClientDisconnected"><code>ClientDisconnected</code></a>: a truncated upload must not be decoded and
 returned as if it were the complete text.</p>
 
 
@@ -5854,15 +5845,16 @@ returned as if it were the complete text.</p>
     <div class="doc doc-contents ">
 
         <p>Yield the request body one <code>http.request</code> chunk at a time.</p>
-<p>The streaming counterpart to :func:<code>read_body</code>: it never accumulates the
+<p>The streaming counterpart to <a class="autorefs autorefs-internal" title="read_body(receive)
+
+  
+      async
+  " href="#blackbull.request.read_body"><code>read_body</code></a>: it never accumulates the
 whole payload, so a handler that only needs to <em>process</em> the body (count
 bytes, hash it, forward it, parse incrementally) holds one chunk at a time
-instead of the entire upload.  For a 20 MB upload this is the difference
-between a ~64 KiB and a ~20 MB working set — and, because <code>read_body</code>
-additionally <code>b''.join</code>s the chunk list, several times the throughput
-under concurrency (the join is a full-payload memcpy plus GC pressure).</p>
+instead of the entire upload.</p>
 <p>Empty chunks are skipped.  A peer that vanishes mid-body raises
-:class:<code>ClientDisconnected</code> (with no <code>partial</code> — chunks already yielded
+<a class="autorefs autorefs-internal" href="#blackbull.request.ClientDisconnected"><code>ClientDisconnected</code></a> (with no <code>partial</code> — chunks already yielded
 are the caller's to keep), so a truncated upload is never silently treated
 as complete.</p>
 

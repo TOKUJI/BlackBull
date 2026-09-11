@@ -3146,34 +3146,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../middleware/cache/" class="md-nav__link">
         
   
@@ -5467,15 +5439,15 @@
 
         <p><code>blackbull</code> console-script entry point.</p>
 <p>Resolves a <code>module:attribute</code> import path to an ASGI 3.0 callable
-(typically a :class:<code>blackbull.BlackBull</code> instance, but any ASGI app
-works) and serves it via :func:<code>blackbull.app.serve</code>.</p>
+(typically a <a class="autorefs autorefs-internal" title="BlackBull" href="../#blackbull.BlackBull"><code>blackbull.BlackBull</code></a> instance, but any ASGI app
+works) and serves it via <a class="autorefs autorefs-internal" title="serve(app, *, certfile=None, keyfile=None, port=0, unix_path=None, inherited_fd=None, listeners=None, workers=None, max_connections=None, stream_queue_depth=None, ws_queue_depth=None, reload=False, reload_paths=None)" href="../app/#blackbull.app.serve"><code>blackbull.app.serve</code></a>.</p>
 <p>Usage::</p>
 <pre><code>blackbull myapp:app --bind 0.0.0.0:8443 \
           --certfile cert.pem --keyfile key.pem --workers 4
 </code></pre>
-<p>Flags mirror :func:<code>blackbull.app.serve</code> kwargs; anything left
+<p>Flags mirror <a class="autorefs autorefs-internal" title="serve(app, *, certfile=None, keyfile=None, port=0, unix_path=None, inherited_fd=None, listeners=None, workers=None, max_connections=None, stream_queue_depth=None, ws_queue_depth=None, reload=False, reload_paths=None)" href="../app/#blackbull.app.serve"><code>blackbull.app.serve</code></a> kwargs; anything left
 unspecified falls back to the matching <code>BB_*</code> environment variable
-(see :mod:<code>blackbull.env</code>).</p>
+(see <a class="autorefs autorefs-internal" href="../env/#blackbull.env"><code>blackbull.env</code></a>).</p>
 <p>This module is registered as the <code>blackbull</code> console script via
 <code>[project.scripts]</code> in <code>pyproject.toml</code>.  The in-Python entry
 <code>app.run(...)</code> (synchronous) is the preferred path for embedded
@@ -5516,7 +5488,7 @@ callers (notebooks, test harnesses, <code>examples/*.py</code>).</p>
 <p>Two forms are dispatched here:</p>
 <ul>
 <li><code>blackbull serve [DIR] …</code> — the zero-code static file server
-  (see :func:<code>_serve_static</code>);</li>
+  (see <code>_serve_static</code>);</li>
 <li><code>blackbull module:attr …</code> — run an ASGI 3.0 application.</li>
 </ul>
 <p>Returns a process exit code.  argparse handles <code>--help</code> and

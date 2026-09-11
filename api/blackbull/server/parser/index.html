@@ -3071,34 +3071,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -5467,6 +5439,24 @@
 
     <div class="doc doc-contents first">
 
+        <p>HTTP/2 request parsing: a HEADERS frame becomes a native <code>Connection</code>.</p>
+<p><a class="autorefs autorefs-internal" title="parse_headers(frame)" href="#blackbull.server.parser.parse_headers"><code>parse_headers</code></a> is the whole surface.
+Given a parsed HEADERS frame it returns the
+<a class="autorefs autorefs-internal" title="Connection
+
+
+  
+      dataclass
+  " href="../../connection/#blackbull.connection.Connection"><code>Connection</code></a> the router and the application
+see — typed <code>http</code> for a request, <code>websocket</code> for an RFC 8441 Extended
+CONNECT — or <code>None</code> when the request is malformed, having marked the frame so
+the actor answers RST_STREAM.</p>
+<p>The request-level pseudo-header rules (RFC 9113 §8.3.1) live here: which
+pseudo-headers must be present, that <code>:status</code> may not appear in a request,
+and the <code>:authority</code> / <code>Host</code> authority grammar that decides the <code>host</code>
+a handler sees.  Field-level validation already happened when the frame parsed
+its payload.</p>
+
 
 
 
@@ -5498,18 +5488,33 @@
 
     <div class="doc doc-contents ">
 
-        <p>Build a native :class:<code>Connection</code> (<code>http</code> or <code>websocket</code>) from a
+        <p>Build a native <a class="autorefs autorefs-internal" title="Connection
+
+
+  
+      dataclass
+  " href="../../connection/#blackbull.connection.Connection"><code>Connection</code></a> (<code>http</code> or <code>websocket</code>) from a
 HEADERS frame, or <code>None</code> when the request is malformed.</p>
 <p><code>result is None</code> if and only if <code>frame.malformed</code>.  Every early-out
-returns <code>None</code> rather than a half-built :class:<code>Connection</code>, so a caller
+returns <code>None</code> rather than a half-built <a class="autorefs autorefs-internal" title="Connection
+
+
+  
+      dataclass
+  " href="../../connection/#blackbull.connection.Connection"><code>Connection</code></a>, so a caller
 checks <code>frame.malformed</code> and never reads a partial object, and nothing
 is constructed on the error path.</p>
 <p>Also performs request-level pseudo-header presence checks (RFC 9113
 §8.3.1); field-level checks already happened in <code>parse_payload</code>.</p>
-<p>A module-level function rather than a <code>ParserFactory</code> product: this runs
-on every request, and the factory's dict lookup and parser allocation
-would be paid per request for nothing.  The Internals page states why the
-read path threads a :class:<code>Connection</code> rather than an ASGI scope dict.</p>
+<p>A module-level function and not a <code>ParserFactory</code> product: nothing here
+is per-instance, so a factory would charge every request for a dict lookup
+and an allocation.  The Internals page states why the read path threads a
+<a class="autorefs autorefs-internal" title="Connection
+
+
+  
+      dataclass
+  " href="../../connection/#blackbull.connection.Connection"><code>Connection</code></a> rather than an ASGI scope dict.</p>
 
 
     </div>

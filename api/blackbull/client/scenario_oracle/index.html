@@ -3192,34 +3192,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -5555,9 +5527,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>Deprecation shim — moved to :mod:<code>blackbull.fault_injection</code>.</p>
+        <p>Deprecation shim — moved to <a class="autorefs autorefs-internal" href="../../fault_injection/#blackbull.fault_injection"><code>blackbull.fault_injection</code></a>.</p>
 <p>Groups the HTTP/1.1 differential oracle alongside the
-scenario model under :mod:<code>blackbull.fault_injection</code>.  Import from
+scenario model under <a class="autorefs autorefs-internal" href="../../fault_injection/#blackbull.fault_injection"><code>blackbull.fault_injection</code></a>.  Import from
 there going forward::</p>
 <pre><code>from blackbull.fault_injection import Category, run_scenario  # ...
 </code></pre>
@@ -5656,7 +5628,7 @@ and keeps <code>assert ctx.category == 'OK'</code>-style sites readable.</p>
 
         <p>One side's response in a differential pair.</p>
 <p>Exactly one of (response, exception) is populated.  <code>timed_out</code>
-is True if the failure was an :class:<code>asyncio.TimeoutError</code> from
+is True if the failure was an <code>asyncio.TimeoutError</code> from
 the per-example wait_for; we record it separately because timeouts
 are semantically distinct from other transport errors.</p>
 
@@ -5701,7 +5673,7 @@ are semantically distinct from other transport errors.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Bucket a differential example into a :class:<code>Category</code>.</p>
+        <p>Bucket a differential example into a <a class="autorefs autorefs-internal" href="../../fault_injection/oracle_h1/#blackbull.fault_injection.oracle_h1.Category"><code>Category</code></a>.</p>
 <p>Order of the checks matters: both-rejected wins over individual
 transport failures so we don't flag inputs that nginx also
 refused.</p>
@@ -5745,7 +5717,7 @@ refused.</p>
     <div class="doc doc-contents ">
 
         <p>Execute <em>scenario</em> against (host, port) and return (outcome, wire_bytes).</p>
-<p>Drives the scenario through :meth:<code>HTTP1Client.execute_scenario</code>,
+<p>Drives the scenario through <code>HTTP1Client.execute_scenario</code>,
 which itself never raises; this wrapper only adds an outer
 <code>asyncio.wait_for</code> so a runaway scenario (e.g. trickled bytes
 plus a long read timeout) can't blow the per-side budget.</p>

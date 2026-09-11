@@ -3071,34 +3071,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -5767,25 +5739,19 @@
 
         <p>The single owned buffer for the H/1.1 inbound path.</p>
 <p>One <code>bytearray</code> per connection, written <strong>directly by the kernel</strong> through
-:meth:<code>ReadBuffer.get_buffer</code> and read by cursor.  Every inbound byte is
+<a class="autorefs autorefs-internal" title="get_buffer(sizehint, *, want=0)" href="#blackbull.server.read_buffer.ReadBuffer.get_buffer"><code>ReadBuffer.get_buffer</code></a> and read by cursor.  Every inbound byte is
 materialised once: the head is sliced out for the parser, the body is handed
 out as a <code>memoryview</code>, and a keep-alive peer's next request is simply the bytes
 that were already sitting between the cursors.</p>
-<p>This replaces reading through <code>asyncio.StreamReader</code>.  The distinction that
-matters is <em>ownership</em>, not buffering — a buffer layered over a reader that is
-already buffering is a third copy, which measured slower than the per-line
-<code>readuntil</code> loop it was meant to beat.  The buffer only pays when it is the
-only one.</p>
 <p>Deliberately free of HTTP semantics.  It reports an over-budget head with
-:data:<code>LIMIT_EXCEEDED</code> rather than raising, because the 431 belongs to the
+<code>LIMIT_EXCEEDED</code> rather than raising, because the 431 belongs to the
 actor; it distinguishes "EOF with nothing" from "EOF mid-head" only by leaving
-:attr:<code>available</code> intact, because deciding between a silent close and a 400 is
+<code>available</code> intact, because deciding between a silent close and a 400 is
 also the actor's job.</p>
-<p>Free of <em>receive</em> policy for the same reason.  It grows on demand, reports a
-drained message boundary, tracks the message's peak resident bytes (accounting
-— the release <em>policy</em> consumes it), and offers :meth:<code>release_to_floor</code> — but
-when the allocation is actually given back is the reader's call, because only
-the reader knows what the connection has been asked to deliver.</p>
+<p>Free of <em>receive</em> policy for the same reason: it grows on demand, reports a
+drained message boundary, tracks the message's peak resident bytes, and offers
+<code>release_to_floor</code>, but takes none of those decisions.  The Internals
+page says which object does.</p>
 <p>Not thread-safe and not concurrency-safe — one connection, one buffer, one
 actor loop, per the actor model.</p>
 
@@ -5905,10 +5871,10 @@ actor loop, per the actor model.</p>
 
         <p>Cumulative bytes the head scan has looked at on this connection.</p>
 <p>Exposed so the linear-scan invariant is assertable rather than merely
-intended: a scan that restarted from the front on every arrival would
-make this quadratic in the number of segments, which is a peer-chosen
-CPU cost.  Overlap of up to three bytes per resumption is expected —
-that is the straddled-terminator back-off.</p>
+intended: a scan restarting from the front on every arrival would make
+this quadratic in the number of segments, a peer-chosen CPU cost.
+Overlap of up to three bytes per resumption is the straddled-terminator
+back-off, not a restart.</p>
 
     </div>
 
@@ -5928,12 +5894,10 @@ that is the straddled-terminator back-off.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Declare how much of the last :meth:<code>get_buffer</code> was written.</p>
-<p>Returns the new resident count so the caller — the reader's arrival
-decision — need not re-read it.  Tracks the message's peak resident
-bytes while it is at it, but only once the buffer has grown past the
-floor; a floor-sized buffer can never need the hysteresis decision,
-so the common case costs one compare.</p>
+        <p>Declare how much of the last <a class="autorefs autorefs-internal" title="get_buffer(sizehint, *, want=0)" href="#blackbull.server.read_buffer.ReadBuffer.get_buffer"><code>get_buffer</code></a> was written.</p>
+<p>Returns the new resident count, and updates <code>peak_avail</code> on the
+way — but only for a grown buffer, since a floor-sized one can never
+reach the release decision that reads it.</p>
 
 
     </div>
@@ -5954,12 +5918,8 @@ so the common case costs one compare.</p>
         <p>Move the unconsumed tail to the front.</p>
 <p>Called on message boundaries.  Without it the cursors walk forward for
 the life of a keep-alive connection and the allocation grows to every
-byte ever received on it.</p>
-<p>Compacting to empty is the one moment a message is provably gone, so it
-raises :attr:<code>drained_boundary</code> for the reader's release policy.  The
-flag is a report, not a decision: this object does not know whether a
-connection that has just finished a large message is about to serve
-another one.</p>
+byte ever received on it.  Compacting to empty is the one moment a
+message is provably gone, so it raises <code>drained_boundary</code>.</p>
 
 
     </div>
@@ -5977,7 +5937,7 @@ another one.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Advance past <em>n</em> bytes handed out by :meth:<code>view</code>.</p>
+        <p>Advance past <em>n</em> bytes handed out by <a class="autorefs autorefs-internal" title="view(n)" href="#blackbull.server.read_buffer.ReadBuffer.view"><code>view</code></a>.</p>
 
 
     </div>
@@ -5996,16 +5956,10 @@ another one.</p>
     <div class="doc doc-contents ">
 
         <p>Take the raised boundary, and start the next message's accounting.</p>
-<p>The reader polls :attr:<code>drained_boundary</code> on every consuming read —
-cheap, and true only rarely — and calls this when it is set.  Clearing
-it here rather than at the call site is the whole point: the flag and
-the peak are this object's state, so the transition that ends a
-message's accounting is this object's to make.  A consumer that reset
-them itself would be an edge-triggered signal with the reset on the
-wrong side, and the edge would go to whichever consumer reached it
-first.</p>
-<p>Called only on a real boundary, so the cost is a rare call rather than
-a per-read one — the same shape as the reader's own <code>maybe_pause</code>.</p>
+<p>The reader polls <code>drained_boundary</code> and calls this when it is
+set.  Clearing the flag and the peak has to happen here rather than at
+the call site: a consumer resetting them itself makes an edge-triggered
+signal whose edge goes to whichever consumer reaches it first.</p>
 
 
     </div>
@@ -6024,12 +5978,11 @@ a per-read one — the same shape as the reader's own <code>maybe_pause</code>.<
     <div class="doc doc-contents ">
 
         <p>Offset of <em>sep</em> within the resident bytes, or <code>-1</code>.</p>
-<p>Unlike :meth:<code>find_head_end</code> this scans from the read cursor every
-call: its callers are the generic <code>readuntil</code> paths (chunk-size lines,
-WebSocket framing), where the search target changes between calls so a
-carried scan offset would be wrong rather than merely wasteful.</p>
-<p><em>start</em> is a relative offset used by one <code>readuntil</code> call to resume
-its scan while a fixed separator is still pending.</p>
+<p>Scans from the read cursor every call, unlike <a class="autorefs autorefs-internal" title="find_head_end(limit=0)" href="#blackbull.server.read_buffer.ReadBuffer.find_head_end"><code>find_head_end</code></a>:
+its callers change the search target between calls, so a carried scan
+offset would be wrong rather than merely wasteful.  <em>start</em> is a
+relative offset for a caller resuming its own scan on a separator that
+is still pending.</p>
 
 
     </div>
@@ -6049,7 +6002,7 @@ its scan while a fixed separator is still pending.</p>
 
         <p>Length of the message head, terminator included, or a sentinel.</p>
 <p>Returns <code>-1</code> when the terminator has not arrived yet and
-:data:<code>LIMIT_EXCEEDED</code> when <em>limit</em> (0 = unbounded) is passed without
+<code>LIMIT_EXCEEDED</code> when <em>limit</em> (0 = unbounded) is passed without
 one.</p>
 <p>The scan resumes from where the last call stopped, backed off by three
 bytes so a <code>\r\n\r\n</code> split across two arrivals is still found.
@@ -6073,23 +6026,14 @@ every arrival re-scan the whole head — quadratic, and attacker-chosen.</p>
     <div class="doc doc-contents ">
 
         <p>Space for the transport to read into.</p>
-<p>asyncio passes <code>-1</code> when it has no preference, and the protocol
-contract requires a non-empty buffer — returning an empty one stalls
-the connection permanently.</p>
-<p>The <em>sizehint</em> is what the transport would <em>like</em> to read in one
-recv, not what it needs: uvloop's cleartext path passes libuv's fixed
-64 KiB on every call, so honouring it would grow every connection's
-buffer to 64 KiB on its first request and the reader's release policy
-would give it back at the message boundary — a 64 KiB alloc/free
-churn per request (the F5 read-path finding).  Growth is therefore
-driven by bytes actually arriving (the <code>_w</code> cursor) and by the
-<em>demand</em> the caller passes in — the reader's pending read size, via
-:class:<code>ConnectionProtocol</code> — never by the hint.  A parked read of
-<em>n</em> gets a free span of up to <code>min(n, high-water)</code> so one recv
-feeds most of it: the arrival granularity follows the demand, not the
-idle floor, which is what keeps a transport-paced (up-to-n) read from
-collapsing to floor-sized deliveries.  Idle (<code>want = 0</code>) stays at
-the floor span.</p>
+<p>The returned buffer is never empty — an empty one stalls the connection
+permanently — even though asyncio passes <code>sizehint = -1</code> when it has
+no preference.</p>
+<p><em>sizehint</em> is advisory and is never honoured; the Internals page says
+why.  Growth follows arriving bytes and <em>want</em>, the caller's pending
+read size: a parked read of <em>n</em> gets a span of up to
+<code>min(n, high-water)</code> so one recv feeds most of it, and <code>want = 0</code>
+stays at the floor.</p>
 
 
     </div>
@@ -6108,17 +6052,13 @@ the floor span.</p>
     <div class="doc doc-contents ">
 
         <p>Hand a grown allocation back.  <code>True</code> when it was given up.</p>
-<p>A single large upload must not leave every connection that served one
-holding its peak allocation for the rest of its keep-alive life — that
-is the idle-memory floor the read window is also sized against.  <em>When</em>
-to do that is hysteretic and belongs to the reader, which is the only
-object that knows what the connection has been asked for; this is the
-mechanism it calls.</p>
-<p>Refuses while bytes are resident, and that is not a policy check but
-the one invariant the container owes its caller: the boundary flag is
-raised inside :meth:<code>compact</code>, including the compaction
-:meth:<code>_make_room</code> does on the <em>arrival</em> path, where a delivery lands
-immediately afterwards.  Reallocating there would discard bytes the
+<p>The mechanism behind the reader's hysteretic release policy: a single
+large upload must not leave every connection that served one holding
+its peak allocation for the rest of its keep-alive life.</p>
+<p>Refuses while bytes are resident.  That is the one invariant this
+container owes its caller, not a policy check — <code>drained_boundary</code>
+is also raised on the <em>arrival</em> path, where a delivery lands
+immediately afterwards and reallocating would discard bytes the
 transport has already handed over.</p>
 
 

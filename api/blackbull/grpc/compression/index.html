@@ -3192,34 +3192,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -5556,7 +5528,7 @@
     <div class="doc doc-contents first">
 
         <p>gRPC message compression (the <code>grpc-encoding</code> header + LPM Compressed-Flag).</p>
-<p>Only <code>gzip</code> is implemented, via the stdlib :mod:<code>zlib</code> in gzip-framing mode
+<p>Only <code>gzip</code> is implemented, via the stdlib <code>zlib</code> in gzip-framing mode
 (RFC 1952); <code>identity</code> (no compression) needs no code.  gzip is the encoding
 grpcio and grpc-go negotiate by default, so it covers the real interop cases.</p>
 <p>Compression is a <strong>transport</strong> concern and lives here beside the LPM codec, not
@@ -5566,7 +5538,7 @@ it is entangled with framing, not a whole-body byte transform a <code>send</code
 could apply.  A second codec (deflate, snappy, …) is the one anticipated
 extension of <em>this</em> module: lift <code>SUPPORTED</code> to a
 <code>{grpc-encoding-name: (compress, decompress)}</code> registry and route it through
-the two negotiation points already in :mod:<code>~blackbull.grpc.asgi</code> (the request
+the two negotiation points already in <a class="autorefs autorefs-internal" title="blackbull.grpc.asgi" href="../asgi/#blackbull.grpc.asgi"><code>asgi</code></a> (the request
 <code>grpc-encoding</code> lookup and the response <code>grpc-accept-encoding</code> selection).
 Deferred until a real second codec is needed — YAGNI, gzip is the interop floor.</p>
 <p>Compression is only <em>one form</em> of gRPC runtime extension, and this registry is
@@ -5576,7 +5548,7 @@ Deferred until a real second codec is needed — YAGNI, gzip is the interop floo
 health, rich errors) are the Track B package; new wire protocols attach via the
 framework Extension mechanism.  Keep the problem's scope where it belongs.</p>
 <p>This module is pure compression, with <strong>no</strong> gRPC-status dependency (mirroring
-:mod:<code>~blackbull.grpc.codec</code>): callers translate :class:<code>DecompressionError</code>
+<a class="autorefs autorefs-internal" title="blackbull.grpc.codec" href="../codec/#blackbull.grpc.codec"><code>codec</code></a>): callers translate <a class="autorefs autorefs-internal" href="#blackbull.grpc.compression.DecompressionError"><code>DecompressionError</code></a>
 into the appropriate gRPC status.</p>
 
 
@@ -5696,12 +5668,12 @@ stream, or an output larger than the caller's limit).</p>
 <em>max_output</em> bytes.</p>
 <p>The gRPC 4-byte length prefix bounds only the <em>compressed</em> transfer size;
 a small compressed payload can inflate to gigabytes.  Decompression is
-therefore capped: :meth:<code>zlib.decompressobj.decompress</code> is given a
+therefore capped: <code>zlib.decompressobj.decompress</code> is given a
 <code>max_length</code> so it stops at the limit and parks any unprocessed input in
 <code>unconsumed_tail</code> — a non-empty tail (or an output past <em>max_output</em>)
 means the message would exceed the cap and raises
-:class:<code>DecompressionBombError</code>.  A corrupt stream (bad header or trailing
-CRC) raises :class:<code>DecompressionError</code> via the final :func:<code>flush</code>.</p>
+<a class="autorefs autorefs-internal" href="#blackbull.grpc.compression.DecompressionBombError"><code>DecompressionBombError</code></a>.  A corrupt stream (bad header or trailing
+CRC) raises <a class="autorefs autorefs-internal" href="#blackbull.grpc.compression.DecompressionError"><code>DecompressionError</code></a> via the final <code>flush</code>.</p>
 
 
     </div>

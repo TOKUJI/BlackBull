@@ -3187,34 +3187,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -5558,19 +5530,14 @@ async with H1FaultServer(scenario) as srv:
     with pytest.raises(...):
         await my_client.get(f'http://{srv.host}:{srv.port}/')
 </code></pre>
-<p><strong>It assembles every byte itself.</strong>  Nothing here imports
-<code>blackbull.server.sender</code> or <code>blackbull.server.response</code>, and that is
-load-bearing rather than incidental: a fault server built on the
-production send path cannot emit a fault the production send path has, so
-the one bug class it is least able to find is the one in the code it
-shares.  The HTTP/2 half made the same choice — it carries its own frame
-encoder rather than calling <code>FrameBase.save()</code>.  There is a test for it
-(<code>tests/unit/test_fault_injection_h1_server.py::TestTheBreakerIsIndependent</code>)
-because the property is invisible until the day it matters.</p>
-<p>Two safety locks, the same pair :class:<code>H2FaultServer</code> carries and both
-in scope for security reports per <code>SECURITY.md</code>: it refuses to start in
-a production context, and it refuses a non-loopback bind without an
-explicit <code>allow_remote=True</code>.</p>
+<p><strong>It assembles every byte itself</strong>, importing nothing from
+<code>blackbull.server.sender</code> or <code>blackbull.server.response</code> —
+<code>tests/unit/test_fault_injection_h1_server.py::TestTheBreakerIsIndependent</code>
+pins that, because the property is invisible until the day it matters.</p>
+<p>Two safety locks, the same pair <a class="autorefs autorefs-internal" href="../h2_server/#blackbull.fault_injection.h2_server.H2FaultServer"><code>H2FaultServer</code></a> carries and both in
+scope for security reports per <code>SECURITY.md</code>: it refuses to start in a
+production context, and it refuses a non-loopback bind without an explicit
+<code>allow_remote=True</code>.</p>
 
 
 
@@ -5606,7 +5573,12 @@ explicit <code>allow_remote=True</code>.</p>
 
 
 
-        <p>Serves one :class:<code>ScenarioH1Server</code> to each connecting client.</p>
+        <p>Serves one <a class="autorefs autorefs-internal" title="ScenarioH1Server
+
+
+  
+      dataclass
+  " href="../scenario_h1_server/#blackbull.fault_injection.scenario_h1_server.ScenarioH1Server"><code>ScenarioH1Server</code></a> to each connecting client.</p>
 
 
 

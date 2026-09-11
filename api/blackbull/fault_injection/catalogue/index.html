@@ -3183,34 +3183,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -5536,27 +5508,18 @@
     <div class="doc doc-contents first">
 
         <p>Canned-misbehaviour catalogue for HTTP/2 client testing.</p>
-<p>Each function returns a :class:<code>~blackbull.fault_injection.ScenarioH2</code>
-that drives :class:<code>~blackbull.fault_injection.H2FaultServer</code> through
-one well-known misbehaviour pattern.  Catalogue scenarios are
-deliberately small — one named pathology per scenario — so test
-suites can stack <code>parametrize</code> over the catalogue to assert
-client-side resilience across the four spec-grade categories the
-roadmap calls out:</p>
-<ul>
-<li><strong>Half-closed streams</strong> — server stops mid-stream without
-    END_STREAM / RST_STREAM; client must time out or give up.</li>
-<li><strong>Exhausted flow-control windows</strong> — server advertises a
-    zero-byte window then refuses to grant WINDOW_UPDATE; client
-    must respect backpressure rather than spin.</li>
-<li><strong>Custom / illegal SETTINGS</strong> — server advertises a value
-    below the RFC-mandated minimum or an unknown setting id;
-    client must treat as PROTOCOL_ERROR per RFC 9113 §6.5.2.</li>
-<li><strong>Weird frame sequences</strong> — server emits frames in an
-    out-of-order or unfinished pattern (HEADERS without
-    END_HEADERS and no CONTINUATION, DATA on stream 0); client
-    must close the connection with PROTOCOL_ERROR.</li>
-</ul>
+<p>Each function returns a <a class="autorefs autorefs-internal" title="ScenarioH2
+
+
+  
+      dataclass
+  " href="../#blackbull.fault_injection.ScenarioH2"><code>ScenarioH2</code></a>
+that drives <a class="autorefs autorefs-internal" href="../#blackbull.fault_injection.H2FaultServer"><code>H2FaultServer</code></a> through
+one well-known misbehaviour pattern: one named pathology per scenario,
+so a suite can <code>parametrize</code> over the set.  The four spec-grade
+categories they cover — half-closed streams, exhausted flow-control
+windows, illegal SETTINGS, weird frame sequences — are tabulated in
+<code>docs/guide/fault_injection.md</code> against the builder for each.</p>
 <p>Catalogue entries are pure builders.  They allocate nothing at
 import time, take no I/O, and the returned scenario is immutable;
 two consecutive calls to the same builder are interchangeable.</p>

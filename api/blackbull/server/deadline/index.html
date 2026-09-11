@@ -3071,34 +3071,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -5646,14 +5618,11 @@
     <div class="doc doc-contents first">
 
         <p>Per-connection rescheduled deadline.</p>
-<p>Replaces <code>async with asyncio.timeout(...)</code> on the per-request hot
-path, and the per-connection <code>loop.call_later</code> <code>TimerHandle</code> that
-had to be cancelled and rescheduled at every phase transition.
-Instead, a per-process tick scanner: one singleton <code>TimerHandle</code>
-re-arms itself
-every :data:<code>_TICK_S</code> and walks the registry of armed
-:class:<code>ConnectionDeadline</code> instances for expirations.  Per-arm cost
-is ~0.34 µs rather than ~1.7 µs.</p>
+<p>No per-connection asyncio timer.  One singleton <code>TimerHandle</code> per
+process re-arms itself every <code>_TICK_S</code> and walks the registry of
+armed <a class="autorefs autorefs-internal" href="#blackbull.server.deadline.ConnectionDeadline"><code>ConnectionDeadline</code></a> instances for expirations, so arming
+costs a <code>loop.time()</code>, a comparison and a set insertion — ~0.34 µs
+against the ~1.7 µs of a <code>TimerHandle</code> plus heap push plus cancel.</p>
 <p>Trade-off: a fired deadline lands within <code>[now, now + _TICK_S]</code>
 rather than at the exact requested instant.  At the default
 <code>_TICK_S = 0.3 s</code> this is ~3 % slop on the tightest configurable
@@ -5706,13 +5675,8 @@ that the deadline's monotonic <code>_deadline_at</code> has passed, the bound
 task is cancelled — the cancellation propagates into whichever
 <code>reader.readuntil</code> / <code>read</code> / <code>readexactly</code> is currently
 awaiting.  Call sites translate the cancellation into
-<code>TimeoutError</code> via :meth:<code>guard</code> (the common case) or manually
-by checking :attr:<code>fired</code>.</p>
-<p>Why a scanner instead of one <code>call_later</code> per arm?  At
-saturation the per-arm path costs ~1.7 µs (TimerHandle + heap
-push + cancel).  The scanner replaces that with one
-<code>loop.time()</code> call + one comparison + one set membership check
-on the registry (~0.34 µs) — an ~80 % per-call reduction.</p>
+<code>TimeoutError</code> via <a class="autorefs autorefs-internal" title="guard(seconds)" href="#blackbull.server.deadline.ConnectionDeadline.guard"><code>guard</code></a> (the common case) or manually
+by checking <code>fired</code>.</p>
 
 
 
@@ -5747,7 +5711,7 @@ on the registry (~0.34 µs) — an ~80 % per-call reduction.</p>
     <div class="doc doc-contents ">
 
         <p>(Re-)set the deadline; <code>seconds &lt;= 0</code> disables it.</p>
-<p>Safe to call repeatedly.  Resets :attr:<code>fired</code> so a recovered
+<p>Safe to call repeatedly.  Resets <code>fired</code> so a recovered
 deadline can be reused across phases on the same connection.</p>
 
 
@@ -5790,13 +5754,12 @@ deadline can be reused across phases on the same connection.</p>
     await reader.readuntil(...)
 </code></pre>
 <p>Matches the observable behaviour of <code>async with asyncio.timeout(d):</code>
-— a fired deadline manifests as <code>TimeoutError</code>.  The
-same-loop-iteration race where the underlying read completes
-<em>and</em> the deadline fires in the same tick is treated as a
-timeout (same convention as <code>asyncio.timeout</code>).</p>
-<p>Returns <code>self</code> rather than allocating a wrapper object.  Safe
-because each connection owns its own <code>ConnectionDeadline</code>
-and uses it sequentially from a single task.</p>
+— a fired deadline manifests as <code>TimeoutError</code>, and a read that
+completes in the same tick the deadline fires is a timeout, which is
+<code>asyncio.timeout</code>'s convention too.</p>
+<p><code>self</code> <em>is</em> the context manager, so guards cannot nest or overlap:
+each connection owns one of these and uses it sequentially from the
+single task that constructed it.</p>
 
 
     </div>
@@ -5827,8 +5790,8 @@ and uses it sequentially from a single task.</p>
 
 
         <p>Bounds a drain on a connection's writer, via the same scanner.</p>
-<p>Rides in :data:<code>_Scanner._REGISTRY</code> alongside
-:class:<code>ConnectionDeadline</code> — the scanner only needs
+<p>Rides in <code>_Scanner._REGISTRY</code> alongside
+<a class="autorefs autorefs-internal" href="#blackbull.server.deadline.ConnectionDeadline"><code>ConnectionDeadline</code></a> — the scanner only needs
 <code>_deadline_at</code> and <code>_fire_from_scanner</code>.  Two differences from
 that class, both forced by the write path:</p>
 <p><em>Binding is per-arm, not per-construction.</em>  HTTP/2 drains the one
@@ -5897,14 +5860,10 @@ reads, or send-only — stops servicing control frames, and (with a
 bounds both: while a connection has been quiet for more than one tick,
 the scanner fires the connection's callback roughly every tick, and the
 callback services buffered control frames / starts the deferred reader.</p>
-<p>The design constraint is the same one that built
-:class:<code>ConnectionDeadline</code>: no per-connection asyncio timers.  One
-<code>TimerHandle</code> serves every connection; this object is just registry
-state plus a callback, re-armed on every fire so it keeps watching until
-:meth:<code>disarm</code>.  <code>touch()</code> is called on each receive/send, which keeps
-an actively-driven connection from ever firing (the common case — so the
-default hot path pays a <code>loop.time()</code> + one comparison per message and
-no scanner work at all).</p>
+<p>Registry state plus a callback, under this module's no-per-connection-timer
+rule, re-armed on every fire so it keeps watching until <a class="autorefs autorefs-internal" title="disarm()" href="#blackbull.server.deadline.WsIdleWatchdog.disarm"><code>disarm</code></a>.
+<code>touch()</code> on each receive/send keeps an actively-driven connection from
+ever firing.</p>
 
 
 

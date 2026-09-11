@@ -3071,34 +3071,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -5558,16 +5530,15 @@
         <p>Pre-fork warm-up — run an app's warm-up hooks <em>once</em> in the master before it
 binds a listening socket or forks workers, so every worker is born warm.</p>
 <h4 id="blackbull.server.warmup--motivation">Motivation<a class="headerlink" href="#blackbull.server.warmup--motivation" title="Permanent link">&para;</a></h4>
-<p>BlackBull runs one asyncio event loop per worker; that loop services both
-<code>accept()</code> and request processing.  A <strong>cold</strong> CPU-bound coroutine (a fresh
-gRPC codec encoding thousands of streams, or a burst of cold TLS handshakes)
-can hold the loop long enough that the <code>accept</code> reader callback never runs,
-the kernel listen backlog overflows, and a colocated load generator's redial
-storm turns a cold-start transient into an <code>ECONNREFUSED</code> collapse.  The
-empirical tell is that the <em>second</em> run of the same process is always clean —
-warmth, not structure, is the differentiator.</p>
-<p>The fix is to reach that warmth <em>before the listening socket exists</em>.  Warm-up
-registered via :meth:<code>BlackBull.on_warmup</code> runs here, once, in the master:</p>
+<p>One asyncio event loop per worker services both <code>accept()</code> and request
+processing, so a <strong>cold</strong> CPU-bound coroutine — a fresh gRPC codec encoding
+thousands of streams, a burst of cold TLS handshakes — can hold the loop until
+the kernel listen backlog overflows and a colocated load generator's redial
+storm turns the transient into an <code>ECONNREFUSED</code> collapse.  The empirical
+tell is that the <em>second</em> run of the same process is always clean: warmth, not
+structure, is the differentiator.</p>
+<p>Warm-up registered via <a class="autorefs autorefs-internal" title="on_warmup(fn)" href="../../app/#blackbull.app.BlackBull.on_warmup"><code>BlackBull.on_warmup</code></a> therefore runs here, once,
+before the listening socket exists:</p>
 <ul>
 <li><strong>Before bind + fork</strong> (multi-worker): forked workers inherit the warmed heap
   via copy-on-write.  PEP 659's adaptive specialization lives in the code
@@ -5578,11 +5549,11 @@ registered via :meth:<code>BlackBull.on_warmup</code> runs here, once, in the ma
 </ul>
 <h4 id="blackbull.server.warmup--safety">Safety<a class="headerlink" href="#blackbull.server.warmup--safety" title="Permanent link">&para;</a></h4>
 <p>Warm-up is best-effort and must never crash the master: every failure is logged
-and swallowed, degrading to today's cold start.  It uses only in-process ASGI
-drives and in-memory (:class:<code>ssl.MemoryBIO</code>) handshakes — it never creates a
-socket, a live connection, or a lingering event loop that a subsequent
-<code>fork()</code> could inherit (the classic <code>preload_app</code> hazard).  The temporary
-loop used by :func:<code>run_warmup</code> is closed before it returns.</p>
+and swallowed, degrading to a cold start.  It uses only in-process ASGI drives
+and in-memory (<code>ssl.MemoryBIO</code>) handshakes — never a socket, a live
+connection, or a lingering event loop that a subsequent <code>fork()</code> could
+inherit (the classic <code>preload_app</code> hazard).  The temporary loop
+<a class="autorefs autorefs-internal" title="run_warmup(app, ssl_context=None)" href="#blackbull.server.warmup.run_warmup"><code>run_warmup</code></a> uses is closed before it returns.</p>
 
 
 
@@ -5616,7 +5587,7 @@ loop used by :func:<code>run_warmup</code> is closed before it returns.</p>
     <div class="doc doc-contents ">
 
         <p>Synchronous pre-fork entry point (called from <code>serve</code> before bind/fork).</p>
-<p>No-op when <em>app</em> registered no :meth:<code>BlackBull.on_warmup</code> hooks.  Otherwise
+<p>No-op when <em>app</em> registered no <a class="autorefs autorefs-internal" title="on_warmup(fn)" href="../../app/#blackbull.app.BlackBull.on_warmup"><code>BlackBull.on_warmup</code></a> hooks.  Otherwise
 runs the hooks (plus the built-in TLS warm-up when <em>ssl_context</em> is set) in a
 <strong>temporary</strong> event loop that is closed before returning, so a subsequent
 <code>fork()</code> never inherits a live loop.  Ends with <code>gc.collect()</code> +
@@ -5644,7 +5615,7 @@ runs the hooks (plus the built-in TLS warm-up when <em>ssl_context</em> is set) 
 
         <p>Prime the TLS handshake path with <em>n</em> in-memory handshakes (no socket).</p>
 <p>Drives full handshakes between the server <em>ssl_context</em> and a throwaway
-client context over paired :class:<code>ssl.MemoryBIO</code> buffers, faulting in the
+client context over paired <code>ssl.MemoryBIO</code> buffers, faulting in the
 OpenSSL / RSA / ALPN code the TLS benchmark profiles hit cold on run-1.
 Self-contained: creates no listener and no file descriptor.</p>
 
@@ -5669,7 +5640,7 @@ Self-contained: creates no listener and no file descriptor.</p>
     <div class="doc doc-contents ">
 
         <p>Async warm-up used by the single-worker path (runs on the serving loop).</p>
-<p>Same behaviour as :func:<code>run_warmup</code> minus the temporary-loop management:
+<p>Same behaviour as <a class="autorefs autorefs-internal" title="run_warmup(app, ssl_context=None)" href="#blackbull.server.warmup.run_warmup"><code>run_warmup</code></a> minus the temporary-loop management:
 the single-worker process never forks, so warming on the loop that will go
 on to serve is both correct and cheaper.  Never raises.</p>
 

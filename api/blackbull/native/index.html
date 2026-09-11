@@ -3071,34 +3071,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../middleware/cache/" class="md-nav__link">
         
   
@@ -3664,6 +3636,61 @@
   
     <nav class="md-nav" aria-label="NativeResponse">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.native.NativeResponse.body" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        body
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.native.NativeResponse.content_length" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        content_length
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.native.NativeResponse.content_type" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        content_type
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.native.NativeResponse.header" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        header
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.native.NativeResponse.is_empty" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        is_empty
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#blackbull.native.NativeResponse.complete" class="md-nav__link">
@@ -5505,6 +5532,61 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.native.NativeResponse.body" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        body
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.native.NativeResponse.content_length" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        content_length
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.native.NativeResponse.content_type" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        content_type
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.native.NativeResponse.header" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        header
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.native.NativeResponse.is_empty" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        is_empty
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.native.NativeResponse.complete" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5643,7 +5725,7 @@ and one <code>send</code></strong>, while streaming is header-object then body-c
 <li><strong><code>to_asgi()</code> is the boundary conversion</strong> — 1 object → ASGI event list,
   used only at conversion boundaries: the external ASGI edge (<code>asgi=True</code>
   / external hosts) and the middleware native-read arms (symmetric with
-  :meth:<code>Connection.as_scope</code>).</li>
+  <a class="autorefs autorefs-internal" title="as_scope()" href="../connection/#blackbull.connection.Connection.as_scope"><code>Connection.as_scope</code></a>).</li>
 </ul>
 
 
@@ -5707,6 +5789,119 @@ trailers would otherwise corrupt chunked framing).</p>
 
 
 
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.native.NativeResponse.body" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">body</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+      <small class="doc doc-label doc-label-writable"><code>writable</code></small>
+  </span>
+
+<a href="#blackbull.native.NativeResponse.body" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>The body arm, or <code>None</code> when there is none.  <code>b''</code> is a real body.</p>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.native.NativeResponse.content_length" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">content_length</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#blackbull.native.NativeResponse.content_length" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Octets in the body arm; <code>0</code> when there is no body.</p>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.native.NativeResponse.content_type" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">content_type</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#blackbull.native.NativeResponse.content_type" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>The <code>content-type</code> header value, or <code>b''</code> if unset or headerless.</p>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.native.NativeResponse.header" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">header</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+      <small class="doc doc-label doc-label-writable"><code>writable</code></small>
+  </span>
+
+<a href="#blackbull.native.NativeResponse.header" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>The header arm as a mutable view, or <code>None</code> when there is none.</p>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.native.NativeResponse.is_empty" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">is_empty</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#blackbull.native.NativeResponse.is_empty" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>True when the body arm is absent <em>or</em> zero-length.</p>
+<p>Distinct from <code>body is None</code>, which separates the two.</p>
+
+    </div>
+
+</div>
 
 
 
@@ -5807,15 +6002,15 @@ either way (RFC 9113 §8.1).</p>
 
 
         <p>One message on the native WebSocket send channel.</p>
-<p>The WS counterpart of :class:<code>NativeResponse</code>, and it exists for the same
+<p>The WS counterpart of <a class="autorefs autorefs-internal" href="#blackbull.native.NativeResponse"><code>NativeResponse</code></a>, and it exists for the same
 reason.  HTTP has a native send message and the sender a native arm;
 WebSocket would otherwise be native only in the sense that "conn is
 native, no scope" while its <em>event channel</em> stayed ASGI-shaped — so
 <code>websocket.*</code> dicts would travel object → middleware → actor → sender
 on BlackBull's own path.
-The handler never saw them (that is the :class:<code>~blackbull.websocket.WebSocket</code>
+The handler never saw them (that is the <a class="autorefs autorefs-internal" href="../websocket/#blackbull.websocket.WebSocket"><code>WebSocket</code></a>
 object's whole point), but everything under it did.</p>
-<p>Three kinds, discriminated by :attr:<code>kind</code> rather than by which of seven
+<p>Three kinds, discriminated by <code>kind</code> rather than by which of seven
 fields happens to be set — the variants carry disjoint payloads, so a tag
 reads better here than the presence test that suits <code>NativeResponse</code>'s
 combinable arms:</p>
@@ -5826,7 +6021,7 @@ combinable arms:</p>
 </ul>
 <p><code>data</code> rather than <code>bytes</code>: the ASGI key is <code>bytes</code>, but a slot of
 that name shadows the builtin at every use site inside the class.
-:meth:<code>to_asgi</code> maps it back for the boundary.</p>
+<a class="autorefs autorefs-internal" title="to_asgi()" href="#blackbull.native.NativeWSMessage.to_asgi"><code>to_asgi</code></a> maps it back for the boundary.</p>
 
 
 
@@ -5863,7 +6058,7 @@ that name shadows the builtin at every use site inside the class.
         <p>Convert to the ASGI <code>websocket.*</code> event list.</p>
 <p>Used only at conversion boundaries — the external ASGI edge and the
 raw <code>(conn, receive, send)</code> compat surface — exactly like
-:meth:<code>NativeResponse.to_asgi</code> on the HTTP side.</p>
+<a class="autorefs autorefs-internal" title="to_asgi()" href="#blackbull.native.NativeResponse.to_asgi"><code>NativeResponse.to_asgi</code></a> on the HTTP side.</p>
 
 
     </div>

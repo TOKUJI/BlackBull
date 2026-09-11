@@ -3242,34 +3242,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -5832,16 +5804,19 @@ advertises.</p>
 
         <p>Walk <code>scenario.steps</code> against the connected socket.</p>
 <p>The HTTP/2 counterpart of
-:meth:<code>blackbull.client.http1.HTTP1Client.execute_scenario</code>, and
+<a class="autorefs autorefs-internal" title="execute_scenario(scenario)
+
+  
+      async
+  " href="../http1/#blackbull.client.http1.HTTP1Client.execute_scenario"><code>blackbull.client.http1.HTTP1Client.execute_scenario</code></a>, and
 deliberately the same shape: every <em>outcome</em> — a frame read, a
 timeout, a transport failure, a hard-abort — is folded into the
-returned result so callers categorise without a try/except per
-scenario.  What is raised instead is the scenario this connection
-cannot express at all: an unowned step (see
-:meth:<code>_check_scenario_ownership</code>) or a client whose context has
-exited.  Neither is news about the peer, and folding one would make
-a closed client indistinguishable in the result from a silent
-server.</p>
+returned result, so callers categorise without a try/except per
+scenario.  Raised instead is the scenario this connection cannot
+express at all: a step belonging to another vocabulary, or a client
+whose context has exited.  Neither is news about the peer, and
+folding one would make a closed client indistinguishable from a
+silent server.</p>
 
 
 <details class="step-dispatch" open>
@@ -5852,14 +5827,11 @@ server.</p>
   production sender (which is what lets a scenario declare a
   length its payload does not match)</li>
 <li><code>SendBytes</code>    → arbitrary bytes, optionally one at a time</li>
-<li><code>Sleep</code>        → :func:<code>asyncio.sleep</code></li>
+<li><code>Sleep</code>        → <code>asyncio.sleep</code></li>
 <li><code>ReadResponse</code> → one frame, or a recorded timeout</li>
 <li><code>Abort</code>        → <code>transport.abort()</code>; walks no further steps</li>
 </ul>
-</details>        <p>This lives on the client rather than in <code>fault_injection</code> because
-its twin does: a scenario executor needs the connection, and the
-client is what owns one.</p>
-
+</details>
 
     </div>
 
@@ -5881,9 +5853,7 @@ client is what owns one.</p>
     <div class="doc doc-contents ">
 
         <p>Escape hatch: read one raw frame, bypassing the receive loop's dispatch.</p>
-<p>For negative-path / fault-injection tests and raw-frame clients that
-need a peer frame <code>_receive_loop</code> would otherwise route through the
-normal dispatcher — the read-side twin of :meth:<code>send_raw_frame</code>.</p>
+<p>The read-side twin of <code>send_raw_frame</code>.</p>
 <p>Only safe to call when the receive loop is not running (i.e. before
 <code>__aenter__</code> finishes or after the loop has been cancelled); a
 concurrent loop would race this call for the reader.</p>
@@ -5913,16 +5883,10 @@ life of the process.</p>
         <p>Mark <em>stream_id</em> as a raw-frame stream.</p>
 <p>Frames arriving on this stream are pushed into the returned
 <code>asyncio.Queue</code> instead of being routed through the
-request/response state machine.  Used by
-:class:<code>blackbull.client.WebSocketH2Client</code> to receive
-WebSocket frames (carried in DATA frames after RFC 8441
-Extended CONNECT) without racing the receive loop.</p>
-<p>Returning a fresh queue each call is intentional — registering
-the same stream twice would be a programming error.</p>
-<p>The depth is <code>client_raw_queue_depth</code>.  Flow control does not
-substitute for it: most of what lands here is not flow-controlled,
-and RFC 9113 §6.9.1 charges a DATA frame's payload only, so a
-zero-length one costs the peer no credit at all.</p>
+request/response state machine.</p>
+<p>A fresh queue per call: registering the same stream twice is a
+programming error, not a second subscription.  The depth is
+<code>client_raw_queue_depth</code>, which flow control cannot stand in for.</p>
 
 
     </div>
@@ -5991,10 +5955,9 @@ its frame reached the peer.</p>
     <div class="doc doc-contents ">
 
         <p>Stop routing frames for <em>stream_id</em> into its raw-frame queue.</p>
-<p>The one door a closed client still admits, and deliberately: this is
-teardown, <code>WebSocketH2Session.close</code> calls it from a <code>finally</code>,
-and a cleanup path that raises after close turns an orderly shutdown
-into an error.  Nothing here needs the connection.</p>
+<p>The one door a closed client still admits: this is teardown, nothing
+here needs the connection, and a cleanup path that raises after close
+turns an orderly shutdown into an error.</p>
 
 
     </div>

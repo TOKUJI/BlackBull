@@ -3231,34 +3231,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -5634,7 +5606,7 @@
     <div class="doc doc-contents first">
 
         <p>gRPC service registry — maps <code>/package.Service/Method</code> to a handler.</p>
-<p>This is the gRPC analogue of :class:<code>blackbull.router.Router</code>: it holds the
+<p>This is the gRPC analogue of <a class="autorefs autorefs-internal" title="Router" href="../../router/#blackbull.router.Router"><code>blackbull.router.Router</code></a>: it holds the
 table of method paths and the coroutine that serves each one.</p>
 <p>A <strong>unary</strong> handler is::</p>
 <pre><code>async def handler(request: bytes, context: GrpcContext) -&gt; bytes
@@ -5649,7 +5621,7 @@ response messages::</p>
 the yielded / returned value is a response message body.  Protobuf
 (de)serialisation is the handler's responsibility — the framework stays
 dependency-free.  Handlers signal a non-OK result by raising
-:class:<code>GrpcError</code> or calling <code>context.abort(...)</code>.</p>
+<a class="autorefs autorefs-internal" href="../status/#blackbull.grpc.status.GrpcError"><code>GrpcError</code></a> or calling <code>context.abort(...)</code>.</p>
 <p>A <strong>client-streaming</strong> or <strong>bidirectional</strong> handler takes an async iterator of
 request messages instead of a single <code>request</code>::</p>
 <pre><code>async def handler(request_iter, context) -&gt; bytes:   # client-streaming
@@ -5661,7 +5633,7 @@ async def handler(request_iter, context):            # bidirectional
         yield ...
 </code></pre>
 <p>Response-streaming is detected automatically at registration via
-:func:<code>inspect.isasyncgenfunction</code>; request-streaming is detected from the first
+<code>inspect.isasyncgenfunction</code>; request-streaming is detected from the first
 parameter name (<code>request_iter</code> / <code>requests</code> / <code>request_iterator</code> /
 <code>request_stream</code>).  Pass <code>streaming=</code> / <code>client_streaming=</code> explicitly to
 override when a decorator hides the handler's nature.</p>
@@ -5708,11 +5680,10 @@ yields response messages); <em>client_streaming</em> is the <strong>request</str
 handler takes an async iterator of request messages instead of a single
 <code>request: bytes</code>).  The four combinations are unary, server-streaming,
 client-streaming, and bidirectional.</p>
-<p><em>handler</em> is annotated as a bare :class:<code>~collections.abc.Callable</code> rather
-than :data:<code>GrpcHandler</code>: a response-streaming handler is an async generator
-function (its call returns an async iterator, not an <code>Awaitable</code>), and a
-plain <code>Callable</code> is the one form that stays runtime-isinstanceable for the
-NamedTuple field check (see memory <code>beartype-namedtuple-callable-alias</code>).</p>
+<p><em>handler</em> is annotated as a bare <code>Callable</code> and
+not <code>GrpcHandler</code>, which would break the runtime NamedTuple field
+check: a response-streaming handler is an async generator function, so
+calling it returns an async iterator rather than an <code>Awaitable</code>.</p>
 
 
 
@@ -5794,18 +5765,11 @@ NamedTuple field check (see memory <code>beartype-namedtuple-callable-alias</cod
 
         <p>Register <em>handler</em> for the fully-qualified method <em>path</em>
 (<code>/package.Service/Method</code> or <code>package.Service/Method</code>).</p>
-<p><em>streaming</em> is the <strong>response</strong> axis — server-streaming (the handler is
-an async generator that yields response messages).  When <code>None</code> (the
-default) it is auto-detected with :func:<code>inspect.isasyncgenfunction</code>;
-pass <code>True</code> to force it for a handler whose async-generator nature is
-hidden behind a wrapper, or <code>False</code> to force a single response.
-Forcing <code>False</code> on an async-generator function is a contradiction and
-raises <code>ValueError</code>.</p>
-<p><em>client_streaming</em> is the <strong>request</strong> axis — the handler takes an async
-iterator of request messages (first parameter <code>request_iter</code> /
-<code>requests</code> / <code>request_iterator</code> / <code>request_stream</code>) instead of a
-single <code>request: bytes</code>.  When <code>None</code> it is auto-detected from that
-first parameter name; pass an explicit bool to override.</p>
+<p>Both streaming axes default to <code>None</code>, meaning auto-detection —
+see <a class="autorefs autorefs-internal" href="#blackbull.grpc.registry.GrpcMethod"><code>GrpcMethod</code></a> for what each axis is.  Pass a bool to
+override it for a handler whose nature a wrapper hides.  Forcing
+<em>streaming</em> <code>False</code> on an async-generator function is a
+contradiction and raises <code>ValueError</code>.</p>
 
 
     </div>
@@ -5845,7 +5809,7 @@ fully-qualified <em>service</em> name (e.g. <code>"helloworld.Greeter"</code>).<
 
         <p>Return the handler for <em>path</em>, or <code>None</code> if unregistered.</p>
 <p>Backwards-compatible accessor (returns just the callable); use
-:meth:<code>lookup_method</code> when the streaming flag is needed.</p>
+<a class="autorefs autorefs-internal" title="lookup_method(path)" href="#blackbull.grpc.registry.GrpcServiceRegistry.lookup_method"><code>lookup_method</code></a> when the streaming flag is needed.</p>
 
 
     </div>
@@ -5863,7 +5827,7 @@ fully-qualified <em>service</em> name (e.g. <code>"helloworld.Greeter"</code>).<
 
     <div class="doc doc-contents ">
 
-        <p>Return the :class:<code>GrpcMethod</code> for <em>path</em>, or <code>None</code> if
+        <p>Return the <a class="autorefs autorefs-internal" href="#blackbull.grpc.registry.GrpcMethod"><code>GrpcMethod</code></a> for <em>path</em>, or <code>None</code> if
 unregistered.</p>
 
 
@@ -5882,7 +5846,7 @@ unregistered.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Decorator form of :meth:<code>add_method</code>.</p>
+        <p>Decorator form of <a class="autorefs autorefs-internal" title="add_method(path, handler, *, streaming=None, client_streaming=None)" href="#blackbull.grpc.registry.GrpcServiceRegistry.add_method"><code>add_method</code></a>.</p>
 
 
     </div>

@@ -3071,34 +3071,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -5535,18 +5507,14 @@ tests repeat — serve the app on an ephemeral h2c port, POST with
 assert reply.status is GrpcStatus.OK
 assert reply.message == b'hi world'
 </code></pre>
-<p><strong>Why a seam is needed at all.</strong>  Every gRPC response reports its status in
-trailing headers — success and error alike — so a transport with no
-<code>http.response.trailers</code> support never observes completion.  That is why
-the framework's own gRPC tests moved off the in-process <code>TestClient</code> and
-onto :class:<code>~blackbull.client.http2.HTTP2Client</code> over a real socket:
-<code>HTTP2Client</code> handles trailers natively and folds them into
-<code>res.headers</code>.  An application developer testing a servicer needs the
-same thing, and until now had to rediscover it.</p>
-<p>The gRPC analogue of :class:<code>~blackbull.testing.native.NativeTestServer</code>,
-and deliberately the same shape: a real server on a loopback port, the
-whole dispatch path exercised, and the port left public so anything else
-can drive it too.</p>
+<p>Every gRPC response reports its status in trailing headers, success and
+error alike, so a transport without <code>http.response.trailers</code> never
+observes completion — which is why this runs over a real socket rather than
+in process.  <code>docs/guide/grpc.md</code> argues it under "Why not the in-process
+test client".</p>
+<p>The gRPC analogue of <a class="autorefs autorefs-internal" href="../native/#blackbull.testing.native.NativeTestServer"><code>NativeTestServer</code></a>,
+and the same shape: a real server on a loopback port, the whole dispatch
+path exercised, and the port left public so anything else can drive it.</p>
 
 
 

@@ -3071,34 +3071,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -5012,6 +4984,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.testing.mqtt.MQTTTestBroker.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.testing.mqtt.MQTTTestBroker.publish" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5468,6 +5451,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.testing.mqtt.MQTTTestBroker.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.testing.mqtt.MQTTTestBroker.publish" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5546,18 +5540,14 @@ async def test_tap():
         await broker.publish(topic='sensors/room1/temperature', payload=b'21.5')
     assert captured == [('room1', b'21.5')]
 </code></pre>
-<p><code>publish</code> dispatches to the matching taps inline and awaits their
-completion, so the test asserts on the side effect the moment <code>publish</code>
-returns.  A tap that raises propagates its exception out of <code>publish</code> —
-where production logs and isolates a failing tap (taps are best-effort
-observers), a test wants the failure visible.  The extension's own
-<code>tap_mode</code> is irrelevant here: a test wants determinism, not the production
-decoupling.</p>
-<p>This is the application-handler-level counterpart of the conformance suite's
-in-process fake-reader harness (<code>tests/conformance/mqtt/conftest.py</code>) — that
-drives the wire codec, this drives the taps.  Only the tap pipeline is
-exercised: broker routing, QoS flows and retained messages are the
-conformance suite's territory, not this helper's.</p>
+<p>Taps run inline and a failing one raises, so a test is deterministic
+whatever the extension's <code>tap_mode</code> says — see <a class="autorefs autorefs-internal" title="publish(topic, payload=b'', *, qos=0, retain=False, properties=None)
+
+  
+      async
+  " href="#blackbull.testing.mqtt.MQTTTestBroker.publish"><code>MQTTTestBroker.publish</code></a>.</p>
+<p>Only the tap pipeline is exercised.  Broker routing, QoS flows and retained
+messages belong to the conformance suite, not to this helper.</p>
 
 
 
@@ -5597,12 +5587,11 @@ conformance suite's territory, not this helper's.</p>
 <h5 id="blackbull.testing.mqtt.MQTTTestBroker--parameters">Parameters<a class="headerlink" href="#blackbull.testing.mqtt.MQTTTestBroker--parameters" title="Permanent link">&para;</a></h5>
 <p>app:
     The BlackBull app the MQTT extension is registered on.</p>
-<p>The helper is <strong>async-only by design</strong>: taps are coroutines and
-<code>publish</code> awaits them on the caller's event loop, so tests are written
-as <code>async def</code> (the suite runs with <code>asyncio_mode = strict</code>).  There
-is no synchronous façade of the
-:class:<code>blackbull.testing.native.NativeClient</code> kind: with no socket,
-broker or background loop, there would be nothing to bridge to.</p>
+<p><strong>Async-only</strong>: taps are coroutines and <code>publish</code> awaits them on the
+caller's event loop, so tests are written as <code>async def</code>.  A
+synchronous façade of the
+<a class="autorefs autorefs-internal" title="NativeClient" href="../native/#blackbull.testing.native.NativeClient"><code>blackbull.testing.native.NativeClient</code></a> kind would have no
+socket, broker or background loop to bridge to.</p>
 <p><code>async with</code> is supported for a consistent test idiom, but the broker
 owns no resource, so entering and exiting are no-ops.</p>
 
@@ -5630,6 +5619,27 @@ owns no resource, so entering and exiting are no-ops.</p>
 <div class="doc doc-object doc-function">
 
 
+<h4 id="blackbull.testing.mqtt.MQTTTestBroker.__init__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="fm">__init__</span><span class="p">(</span><span class="n">app</span><span class="p">)</span></code>
+
+<a href="#blackbull.testing.mqtt.MQTTTestBroker.__init__" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Bind to <em>app</em>'s MQTT extension.</p>
+<p>The extension must already be registered on the app; without it this
+raises <code>RuntimeError</code> at construction rather than failing later on a
+publish.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h4 id="blackbull.testing.mqtt.MQTTTestBroker.publish" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">publish</span><span class="p">(</span><span class="n">topic</span><span class="p">,</span> <span class="n">payload</span><span class="o">=</span><span class="sa">b</span><span class="s1">''</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">qos</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">retain</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">properties</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
@@ -5652,7 +5662,12 @@ this <code>publish</code> are skipped — the first-failure semantics a
 sequential test loop already has.  Production, by contrast, logs and
 isolates a raising tap; <code>publish</code> deliberately does not.</p>
 <p><code>qos</code>, <code>retain</code> and <code>properties</code> are passed through to the
-:class:<code>~blackbull.mqtt.Message</code> without validation, so a test may
+<a class="autorefs autorefs-internal" title="Message
+
+
+  
+      dataclass
+  " href="../../mqtt/#blackbull.mqtt.Message"><code>Message</code></a> without validation, so a test may
 exercise values the wire layer would reject.  Wire-level QoS
 validation is the conformance suite's territory, not this helper's.</p>
 

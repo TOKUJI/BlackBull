@@ -3071,34 +3071,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -6055,6 +6027,22 @@
 
     <div class="doc doc-contents first">
 
+        <p>The send side: what a handler produced, as protocol bytes.</p>
+<p>An <a class="autorefs autorefs-internal" href="#blackbull.server.sender.AbstractWriter"><code>AbstractWriter</code></a> is a
+protocol-agnostic async byte sink; a
+<a class="autorefs autorefs-internal" href="#blackbull.server.sender.BaseSender"><code>BaseSender</code></a> turns a bytes body, an ASGI
+send event, or a <a class="autorefs autorefs-internal" href="../../native/#blackbull.native.NativeResponse"><code>NativeResponse</code></a> into wire
+format, one subclass per protocol —
+<a class="autorefs autorefs-internal" href="#blackbull.server.sender.HTTP1Sender"><code>HTTP1Sender</code></a>,
+<a class="autorefs autorefs-internal" href="#blackbull.server.sender.HTTP2Sender"><code>HTTP2Sender</code></a> and
+<a class="autorefs autorefs-internal" href="#blackbull.server.sender.WebSocketSender"><code>WebSocketSender</code></a>.
+<a class="autorefs autorefs-internal" href="#blackbull.server.sender.SenderFactory"><code>SenderFactory</code></a> builds the right one
+over a raw asyncio stream writer.</p>
+<p>A sender never picks between joining its parts and writing them vectored: it
+hands them to <code>BaseSender._write_many</code> and a size gate decides.  The
+Internals page states that threshold, and what anything backing
+<a class="autorefs autorefs-internal" href="#blackbull.server.sender.AsyncioWriter"><code>AsyncioWriter</code></a> therefore owes it.</p>
+
 
 
 
@@ -6275,20 +6263,13 @@ and <code>drain()</code> (async) — the asyncio StreamWriter API — so that te
 doubles such as <code>MagicMock</code> can be injected without ceremony.</p>
 <p><code>drain()</code> is called inside <code>write()</code> so the asyncio backpressure
 mechanism is handled transparently and <code>BaseSender</code> stays runtime-agnostic.</p>
-<p><code>write_timeout</code> (seconds, <code>0</code> = disabled) bounds the time spent
-in <code>drain()</code> waiting for the kernel send buffer to flush.  Defends
-against the slow-read shape of slowloris: a client that reads the
-response 1 byte/sec fills the send buffer and our drain blocks
-indefinitely waiting for the peer's TCP window to reopen.  On
-timeout we close the transport and raise <code>ConnectionResetError</code>
-so the sender treats the failure the same as a peer-side reset.</p>
-<p>The bound is carried by the per-process deadline scanner rather than
-an <code>asyncio</code> timer, because with the timeout enabled <em>every</em>
-response takes this path — one <code>loop.call_at</code> per write is a
-per-request cost paid to defend against a case that essentially
-never happens.  The scanner's granularity (<code>BB_DEADLINE_TICK_MS</code>)
-becomes the slop on when the timeout fires; at the 30 s default that
-is ~1 %.</p>
+<p><code>write_timeout</code> (seconds, <code>0</code> = disabled) bounds the time spent in
+<code>drain()</code> waiting for the kernel send buffer to flush — the slow-read
+shape of slowloris, where a peer reading at 1 byte/sec blocks the drain on
+a TCP window that never reopens.  On timeout the transport is closed and
+<code>ConnectionResetError</code> raised, so the sender treats it as a peer-side
+reset.  The bound rides the shared <code>ConnectionDeadline</code> scanner,
+whose <code>BB_DEADLINE_TICK_MS</code> granularity is the slop on when it fires.</p>
 
 
 
@@ -6328,20 +6309,17 @@ is ~1 %.</p>
 
         <p>Zero-copy <code>loop.sendfile</code> against the underlying transport, in
 bounded chunks.</p>
-<p>Raises <code>NotImplementedError</code> (propagated from the loop) when
-the transport is SSL — TLS framing happens in user-space, so
-the kernel can't see the plaintext to copy.  Callers must catch
-that and fall back to a read+write loop.  Support is a property of
-the transport, so it is decided on the first chunk: a later chunk
-cannot discover that sendfile was unavailable all along.</p>
-<p>Drains any pending writes first so headers we already buffered
-precede the file bytes in wire order — under the write bound, like
-every other drain, so the header flush cannot stall unwatched.</p>
-<p>One call per <code>_SENDFILE_CHUNK</code> rather than one for the whole file:
-each chunk re-arms <code>BB_WRITE_TIMEOUT</code>, which turns "this transfer
-is stalled" into something expressible without also declaring a
-legitimately large file to be too slow.  Returns the octets actually
-sent, which is short of <em>count</em> only when the peer stopped accepting.</p>
+<p>Raises <code>NotImplementedError</code> (propagated from the loop) when the
+transport is SSL — TLS framing happens in user-space, so the kernel
+cannot see the plaintext to copy.  Callers must catch that and fall
+back to a read+write loop.  Support is a property of the transport, so
+it is decided on the first chunk: a later chunk cannot discover that
+sendfile was unavailable all along.</p>
+<p>Drains any pending writes first, under the write bound like every
+other drain, so buffered headers precede the file bytes in wire order.
+The chunking is what gives <code>BB_WRITE_TIMEOUT</code> somewhere to re-arm;
+the Internals page sizes it.  Returns the octets actually sent, short
+of <em>count</em> only when the peer stopped accepting.</p>
 
 
     </div>
@@ -6446,16 +6424,12 @@ logic is decoupled from asyncio internals.</p>
 connection is dead (an <code>IncompleteReadError</code> that escaped the body
 reader), so the response it may still be mid-way through writing dies
 quietly rather than as a broken-pipe traceback.</p>
-<p>This is a <em>control signal between the actor and its sender</em>, which is
-why it is a method and not an event.  As an <code>http.disconnect</code> dict
-down the send channel it would be the one place the server pushes a
-receive-side event the wrong way through the pipe, purely because that
-pipe is already there.  The cost is not the dict but the type: every
-sender's public event union would have to widen to admit a message no
-application or middleware may ever legally send, and anyone reading
-the signature would learn the wrong contract.</p>
-<p><code>http.disconnect</code> remains the app-facing spelling on <code>receive()</code>,
-which is the direction ASGI defines it in.</p>
+<p>A method and not an <code>http.disconnect</code> down the send channel: that
+would widen every sender's public event union to admit a message no
+application or middleware may legally send, teaching the wrong
+contract to anyone who reads the signature.  <code>http.disconnect</code>
+stays the app-facing spelling on <code>receive()</code>, the direction ASGI
+defines it in.</p>
 
 
     </div>
@@ -6487,7 +6461,7 @@ which is the direction ASGI defines it in.</p>
 
         <p>Shared HTTP/2 connection-level (stream 0) send flow-control window.</p>
 <p>One instance per connection, referenced by every stream's
-:class:<code>HTTP2Sender</code>, so all senders debit and await a single budget.</p>
+<a class="autorefs autorefs-internal" href="#blackbull.server.sender.HTTP2Sender"><code>HTTP2Sender</code></a>, so all senders debit and await a single budget.</p>
 <p>Without sharing each sender held a <em>private copy</em> of the
 connection window and debited only that copy, while the actor-level total
 was only ever incremented — so N concurrent streams could each spend a
@@ -6681,7 +6655,7 @@ bodies raise <code>TypeError</code>.</p>
 <p><strong>High-level</strong> (bytes body + status):
   <code>await sender(body_bytes, HTTPStatus.OK, headers=[...])</code>
   Sends a HEADERS frame followed by a DATA frame.</p>
-<p><strong>Native</strong> (:class:<code>~blackbull.native.NativeResponse</code>):
+<p><strong>Native</strong> (<a class="autorefs autorefs-internal" href="../../native/#blackbull.native.NativeResponse"><code>NativeResponse</code></a>):
   <code>await sender(NativeResponse(status=..., header=..., body=...))</code>
   One object may carry header, body, and/or trailers; the sender buffers
   the header arm exactly like the dict start and delegates body/trailers
@@ -6729,7 +6703,7 @@ bodies raise <code>TypeError</code>.</p>
     <div class="doc doc-contents ">
 
         <p>The shared connection-level send window.</p>
-<p>A property over :class:<code>ConnectionWindow</code>, not a per-sender field:
+<p>A property over <a class="autorefs autorefs-internal" href="#blackbull.server.sender.ConnectionWindow"><code>ConnectionWindow</code></a>, not a per-sender field:
 every sender on the connection reads and writes the same value.</p>
 
     </div>

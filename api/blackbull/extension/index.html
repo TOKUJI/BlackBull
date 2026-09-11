@@ -3185,34 +3185,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../middleware/cache/" class="md-nav__link">
         
   
@@ -5544,15 +5516,15 @@
     <div class="doc doc-contents first">
 
         <p>Extension mechanism — the single, generic plugin contract.</p>
-<p>An :class:<code>Extension</code> wires itself into a :class:<code>~blackbull.app.BlackBull</code>
+<p>An <a class="autorefs autorefs-internal" href="#blackbull.extension.Extension"><code>Extension</code></a> wires itself into a <a class="autorefs autorefs-internal" href="../app/#blackbull.app.BlackBull"><code>BlackBull</code></a>
 application through the public <code>app.*</code> API: routes, middleware, event
 listeners, and — for non-HTTP protocols — <code>app.register_protocol_handler</code>.
-Registration goes through one core method, :meth:<code>BlackBull.add_extension</code>, so
+Registration goes through one core method, <a class="autorefs autorefs-internal" title="add_extension(ext)" href="../app/#blackbull.app.BlackBull.add_extension"><code>BlackBull.add_extension</code></a>, so
 the core class carries <strong>no</strong> protocol-specific surface.</p>
 <p>This generalises the convention that <code>OpenAPIExtension</code> already followed
 (<code>extension_key</code> + <code>init_app(app)</code> + self-storage in <code>app.extensions</code>).
 Protocol extensions (the MQTT broker is the reference) are <em>just</em> extensions
-that call <code>register_protocol_handler</code> in :meth:<code>init_app</code> — there is
+that call <code>register_protocol_handler</code> in <code>init_app</code> — there is
 deliberately no separate "protocol extension" base class until a second
 protocol justifies one.</p>
 <p>See <code>docs/guide/extensions.md</code>.</p>
@@ -5594,9 +5566,17 @@ protocol justifies one.</p>
 
 
         <p>Base class for BlackBull extensions.</p>
-<p>Subclasses set :attr:<code>extension_key</code> and implement :meth:<code>init_app</code>.  They
-may optionally override :meth:<code>startup</code> / :meth:<code>shutdown</code> for async
-resource lifecycle; :meth:<code>BlackBull.add_extension</code> wires those into the
+<p>Subclasses set <code>extension_key</code> and implement <code>init_app</code>.  They
+may optionally override <a class="autorefs autorefs-internal" title="startup(app)
+
+  
+      async
+  " href="#blackbull.extension.Extension.startup"><code>startup</code></a> / <a class="autorefs autorefs-internal" title="shutdown(app)
+
+  
+      async
+  " href="#blackbull.extension.Extension.shutdown"><code>shutdown</code></a> for async
+resource lifecycle; <a class="autorefs autorefs-internal" title="add_extension(ext)" href="../app/#blackbull.app.BlackBull.add_extension"><code>BlackBull.add_extension</code></a> wires those into the
 application's <code>app_startup</code> / <code>app_shutdown</code> lifespan events.</p>
 <p><code>add_extension</code> accepts any object exposing <code>init_app(app)</code>, so a
 duck-typed extension works without adopting this base class.</p>
@@ -5638,9 +5618,9 @@ duck-typed extension works without adopting this base class.</p>
     <div class="doc doc-contents ">
 
         <p>Wire this extension into <em>app</em> (synchronous).</p>
-<p>Called by :meth:<code>BlackBull.add_extension</code>.  Register routes,
+<p>Called by <a class="autorefs autorefs-internal" title="add_extension(ext)" href="../app/#blackbull.app.BlackBull.add_extension"><code>BlackBull.add_extension</code></a>.  Register routes,
 middleware, protocol handlers, and event listeners through the public
-<code>app.*</code> API, then call :meth:<code>_register</code> to store <code>self</code> at
+<code>app.*</code> API, then call <code>_register</code> to store <code>self</code> at
 <code>app.extensions[extension_key]</code>.</p>
 
 

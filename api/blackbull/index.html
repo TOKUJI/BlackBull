@@ -1977,6 +1977,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="CORS">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.CORS.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -2560,10 +2577,65 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.WebSocket.close_reason" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        close_reason
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.WebSocket.connection" class="md-nav__link">
     <span class="md-ellipsis">
       
         connection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.WebSocket.headers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        headers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.WebSocket.path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        path
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.WebSocket.path_params" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        path_params
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.WebSocket.query_string" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        query_string
       
     </span>
   </a>
@@ -4311,34 +4383,6 @@
     
   
     blackbull.middleware
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
   
 
     
@@ -6933,6 +6977,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="CORS">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.CORS.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -7516,10 +7577,65 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.WebSocket.close_reason" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        close_reason
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.WebSocket.connection" class="md-nav__link">
     <span class="md-ellipsis">
       
         connection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.WebSocket.headers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        headers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.WebSocket.path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        path
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.WebSocket.path_params" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        path_params
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.WebSocket.query_string" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        query_string
       
     </span>
   </a>
@@ -7947,7 +8063,7 @@ registered with it need no migration.</p>
 
         <p>Immutable, declarative startup configuration for a BlackBull app.</p>
 <p>Every field corresponds one-to-one with a keyword argument of
-:func:<code>blackbull.serve</code> / :meth:<code>blackbull.BlackBull.run</code>.  Fields left
+<a class="autorefs autorefs-internal" title="serve(app, *, certfile=None, keyfile=None, port=0, unix_path=None, inherited_fd=None, listeners=None, workers=None, max_connections=None, stream_queue_depth=None, ws_queue_depth=None, reload=False, reload_paths=None)" href="#blackbull.serve"><code>blackbull.serve</code></a> / <a class="autorefs autorefs-internal" title="run(certfile=None, keyfile=None, port=None, unix_path=None, inherited_fd=None, listeners=None, workers=None, max_connections=None, stream_queue_depth=None, ws_queue_depth=None, reload=None, reload_paths=None)" href="#blackbull.BlackBull.run"><code>blackbull.BlackBull.run</code></a>.  Fields left
 at their sentinel default (<code>None</code>, or <code>0</code> for <code>port</code>, or <code>False</code>
 for <code>reload</code>) defer to <code>serve</code>'s own built-in default unless an
 explicit <code>run(...)</code> argument overrides them.</p>
@@ -8120,7 +8236,12 @@ supplies one once the coroutines run.</p>
 
         <p>The ASGI 3.0 callable, and the app's only native/ASGI boundary.</p>
 <p>Everything below this method threads a
-:class:<code>~blackbull.connection.Connection</code>, in both modes.  An ASGI
+<a class="autorefs autorefs-internal" title="Connection
+
+
+  
+      dataclass
+  " href="connection/#blackbull.connection.Connection"><code>Connection</code></a>, in both modes.  An ASGI
 scope dict arrives only from an external host (uvicorn,
 <code>httpx.ASGITransport</code>) or under <code>BB_FORCE_ASGI_SCOPE=1</code>, and is
 converted here, once; the same edge wraps the host's <code>send</code> with the
@@ -8369,7 +8490,7 @@ boundary in both directions.</p>
 
         <p>Register an extension and return it (for decorator chaining).</p>
 <p><em>ext</em> is any object exposing <code>init_app(app)</code>; subclassing
-:class:<code>~blackbull.extension.Extension</code> is optional.  <code>init_app</code> is called immediately to wire the
+<a class="autorefs autorefs-internal" href="extension/#blackbull.extension.Extension"><code>Extension</code></a> is optional.  <code>init_app</code> is called immediately to wire the
 extension's routes / middleware / protocol handlers / events through
 the public <code>app.*</code> API.  Optional async <code>startup(app)</code> /
 <code>shutdown(app)</code> methods are wired into the <code>app_startup</code> /
@@ -8433,7 +8554,7 @@ Nothing is cancelled; call again with a longer budget.</p>
 such requests are dispatched to the registry's handlers (returning
 <code>grpc-status</code> trailers) instead of the HTTP router, while REST and
 WebSocket traffic on the same port is unaffected.</p>
-<p><code>registry</code> is a :class:<code>blackbull.grpc.GrpcServiceRegistry</code>.  gRPC
+<p><code>registry</code> is a <a class="autorefs autorefs-internal" title="GrpcServiceRegistry" href="grpc/#blackbull.grpc.GrpcServiceRegistry"><code>blackbull.grpc.GrpcServiceRegistry</code></a>.  gRPC
 requires HTTP/2, so run the app with TLS+ALPN (or h2c) for real
 clients.  Protobuf is not pulled in — handlers exchange raw message
 bytes; see <code>blackbull.grpc</code> for the handler contract.</p>
@@ -8492,7 +8613,7 @@ assert app.extensions['openapi'] is ext
     <div class="doc doc-contents ">
 
         <p>Return a snapshot of all registered routes.</p>
-<p>Each entry is a :class:<code>~blackbull.router.RouteInfo</code> named tuple
+<p>Each entry is a <a class="autorefs autorefs-internal" href="router/#blackbull.router.RouteInfo"><code>RouteInfo</code></a> named tuple
 <code>(method, path, name)</code>.  Routes are returned in registration
 order, one entry per HTTP method.  The list is a shallow copy and
 may be freely sorted, filtered, or mutated without affecting the
@@ -8640,7 +8761,7 @@ event's completion — most notably <code>scope_completed</code> (close a
 per-request DB session, delete a temp file).</p>
 <p>Either way the handler's exceptions are isolated: they are caught and
 logged and never propagate to the emitter or affect other handlers.
-(For a hook that <em>may</em> affect the request, use :meth:<code>intercept</code>.)</p>
+(For a hook that <em>may</em> affect the request, use <a class="autorefs autorefs-internal" title="intercept(event_name)" href="app/#blackbull.app.BlackBull.intercept"><code>intercept</code></a>.)</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -8753,7 +8874,7 @@ logged and never propagate to the emitter or affect other handlers.
     <div class="doc doc-contents ">
 
         <p>Register a custom error handler for an HTTPStatus or exception class.</p>
-<p><code>key</code> may be an :class:<code>HTTPStatus</code>, a plain <code>int</code> status code
+<p><code>key</code> may be an <code>HTTPStatus</code>, a plain <code>int</code> status code
 (coerced to <code>HTTPStatus</code>), or an exception class.</p>
 <p>Usage::</p>
 <pre><code>@app.on_error(HTTPStatus.FORBIDDEN)
@@ -8984,9 +9105,17 @@ binds.</p>
 <p>Hooks receive the <code>app</code> and must do <strong>pure warming only</strong> — drive hot
 code paths, prime codecs/TLS — and acquire <strong>no</strong> per-worker resources
 (DB pools, sockets, live connections); those belong in
-<a class="autorefs autorefs-internal" title="on_startup(fn)" href="app/#blackbull.app.BlackBull.on_startup"><code>on_startup</code></a>.  Use :meth:<code>warm_request</code> to exercise the ASGI
+<a class="autorefs autorefs-internal" title="on_startup(fn)" href="app/#blackbull.app.BlackBull.on_startup"><code>on_startup</code></a>.  Use <a class="autorefs autorefs-internal" title="warm_request(conn, *, body=b'', n=1)
+
+  
+      async
+  " href="app/#blackbull.app.BlackBull.warm_request"><code>warm_request</code></a> to exercise the ASGI
 dispatch/handler path in-process, and
-:func:<code>blackbull.server.warmup.warm_tls</code> to prime the TLS handshake.</p>
+<a class="autorefs autorefs-internal" title="warm_tls(ssl_context, *, n=_DEFAULT_TLS_N)
+
+  
+      async
+  " href="server/warmup/#blackbull.server.warmup.warm_tls"><code>blackbull.server.warmup.warm_tls</code></a> to prime the TLS handshake.</p>
 <p>Warm-up is best-effort: a hook's exception is logged and swallowed
 (the master degrades to a cold start), and total warm-up time is capped
 by <code>BB_WARMUP_BUDGET_S</code> (default 60 s).  Multiple hooks run in
@@ -9245,7 +9374,7 @@ a request body.  When set, the route's responses carry an
 media types), and QUERY requests are Content-Type-enforced: a missing
 media type is answered <code>400</code>, an unaccepted one <code>415</code> (with the
 <code>Accept-Query</code> header so the client can correct).  A handler may raise
-:class:<code>~blackbull.UnprocessableQuery</code> for <code>422</code> on a well-formed but
+<a class="autorefs autorefs-internal" href="#blackbull.UnprocessableQuery"><code>UnprocessableQuery</code></a> for <code>422</code> on a well-formed but
 unprocessable query.  Enforcement applies only to QUERY requests; other
 methods on the same route still receive the <code>Accept-Query</code> header.</p>
 
@@ -9272,16 +9401,21 @@ For <code>workers &gt; 1</code> <em>or</em> <code>reload=True</code> the master 
 sockets, forks workers, and blocks until SIGTERM / SIGINT.</p>
 <p>An argument left unset falls back to a <code>BLACKBULL_*</code> environment
 variable, then to a <code>.env</code> file, then to the bound
-:class:<code>~blackbull.AppConfig</code>; the Configuration guide gives the order
+<a class="autorefs autorefs-internal" title="AppConfig
+
+
+  
+      dataclass
+  " href="#blackbull.AppConfig"><code>AppConfig</code></a>; the Configuration guide gives the order
 in full and names every variable.  Server-tuning knobs keep their
 <code>BB_*</code> names — <code>BLACKBULL_*</code> is the deployment namespace.  The
 provenance of each non-default setting is logged once at startup on
 the <code>blackbull.config</code> logger.</p>
 <p>For embedded use under an existing event loop, or for pre-binding
 a socket before forking a test subprocess, instantiate
-:class:<code>blackbull.server.ASGIServer</code> directly.  Any external
+<code>blackbull.server.ASGIServer</code> directly.  Any external
 ASGI server (uvicorn / hypercorn / granian / …) can drive the
-:class:<code>BlackBull</code> instance via its ASGI 3.0 <code>__call__</code>.</p>
+<a class="autorefs autorefs-internal" href="app/#blackbull.app.BlackBull"><code>BlackBull</code></a> instance via its ASGI 3.0 <code>__call__</code>.</p>
 <p>Example::</p>
 <pre><code>app.run(port=8000)
 app.run(port=8443, certfile='cert.pem', keyfile='key.pem', workers=4)
@@ -9405,7 +9539,12 @@ it the app is wired for BlackBull's own native server.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Invoke this app in-process <em>n</em> times with a :class:<code>Connection</code> to
+        <p>Invoke this app in-process <em>n</em> times with a <a class="autorefs autorefs-internal" title="Connection
+
+
+  
+      dataclass
+  " href="connection/#blackbull.connection.Connection"><code>Connection</code></a> to
 warm the request path.</p>
 <p>A warm-up primitive: drives the full <strong>native</strong> <code>__call__</code> →
 middleware → <code>_dispatch</code> chain (HTTP, gRPC, whatever <em>conn</em> routes to)
@@ -9592,6 +9731,28 @@ app.use(CORS(
 
 
 
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.CORS.__init__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="fm">__init__</span><span class="p">(</span><span class="n">allow_origins</span><span class="o">=</span><span class="s1">'*'</span><span class="p">,</span> <span class="n">allow_methods</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">allow_headers</span><span class="o">=</span><span class="s1">'*'</span><span class="p">,</span> <span class="n">allow_credentials</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">expose_headers</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">max_age</span><span class="o">=</span><span class="mi">600</span><span class="p">)</span></code>
+
+<a href="#blackbull.CORS.__init__" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Build the middleware.</p>
+<p><code>allow_credentials=True</code> cannot be combined with
+<code>allow_origins=['*']</code>: the pair raises <code>ValueError</code>.  A wildcard
+origin with credentials is what the CORS specification forbids, not
+something this middleware chooses to refuse.</p>
+
+
+    </div>
+
+</div>
+
 
 
   </div>
@@ -9621,7 +9782,11 @@ app.use(CORS(
 <p>ASGI signals a mid-body disconnect with an <code>http.disconnect</code> event that
 carries no <code>body</code>/<code>more_body</code> keys.  Treating it as end-of-message
 would return a <em>truncated</em> upload as if it were whole, so
-:func:<code>read_body</code> raises this instead — the handler must not process a
+<a class="autorefs autorefs-internal" title="read_body(receive)
+
+  
+      async
+  " href="request/#blackbull.request.read_body"><code>read_body</code></a> raises this instead — the handler must not process a
 partial body as complete.  The <code>partial</code> attribute holds whatever body
 bytes had arrived before the disconnect.</p>
 
@@ -9676,7 +9841,7 @@ bytes had arrived before the disconnect.</p>
         <p>One HTTP (or WebSocket) request — the single internal representation.</p>
 <p>Built by the protocol actor, consumed by the router, dispatcher,
 middleware, and handlers. The ASGI <code>scope</code> dict is a <em>derived</em> view
-(:meth:<code>as_scope</code>). <code>Request</code> is a deprecated alias of this class.</p>
+(<a class="autorefs autorefs-internal" title="as_scope()" href="connection/#blackbull.connection.Connection.as_scope"><code>as_scope</code></a>). <code>Request</code> is a deprecated alias of this class.</p>
 
 
 
@@ -9735,19 +9900,20 @@ middleware, and handlers. The ASGI <code>scope</code> dict is a <em>derived</em>
     <div class="doc doc-contents ">
 
         <p>True once the client dropped mid-request.</p>
-<p>The named form of the state the module-level :func:<code>disconnected</code>
-helper also reports.  A long-running
-handler polls this to abandon work whose answer nobody is waiting for::</p>
+<p>A long-running handler polls this to abandon work whose answer nobody
+is waiting for::</p>
 <pre><code>for row in rows:
     if conn.disconnected:
         break
 </code></pre>
-<p>Set by the actor's disconnect-detecting receive wrapper, so it goes
-true when the <em>server</em> notices — at the next <code>receive()</code> — rather
-than the instant the peer's FIN lands.</p>
-<p>The module-level :func:<code>disconnected</code> remains the form to use at the
-two ASGI boundaries, where the same state may live on a <code>scope</code>
-dict instead of a :class:<code>Connection</code>.</p>
+<p>It goes true when the <em>server</em> notices, at the next <code>receive()</code>,
+rather than the instant the peer's FIN lands.  The module-level
+<a class="autorefs autorefs-internal" title="disconnected
+
+  
+      property
+  " href="connection/#blackbull.connection.Connection.disconnected"><code>disconnected</code></a> reads the same state at the two ASGI boundaries,
+where it may live on a <code>scope</code> dict instead.</p>
 
     </div>
 
@@ -9823,7 +9989,11 @@ answers a malformed value with 400 rather than a silent fallback).</p>
 
         <p>Query params keeping <strong>every</strong> value, parsed once and cached.</p>
 <p>The full <code>parse_qsl</code> result: <code>?tag=a&amp;tag=b</code> gives
-<code>{'tag': ['a', 'b']}</code>.  Unlike :attr:<code>query</code>, which folds repeats to
+<code>{'tag': ['a', 'b']}</code>.  Unlike <a class="autorefs autorefs-internal" title="query
+
+  
+      property
+  " href="connection/#blackbull.connection.Connection.query"><code>query</code></a>, which folds repeats to
 the last value, this is what list-valued keys need.  The backing dict
 is created lazily on first access, so handlers that never read a query
 param allocate nothing.</p>
@@ -9898,9 +10068,21 @@ buffering middleware's writes reach the handler.</p>
     <div class="doc doc-contents ">
 
         <p>Return the complete request body, draining <code>receive</code> at most once.</p>
-<p>Repeated calls (and :meth:<code>json</code> / :meth:<code>text</code>) return the cached
-bytes. A mid-body disconnect raises :class:<code>ClientDisconnected</code>. Raises
-:class:<code>RuntimeError</code> if :meth:<code>stream</code> already consumed the body — the
+<p>Repeated calls (and <a class="autorefs autorefs-internal" title="json()
+
+  
+      async
+  " href="connection/#blackbull.connection.Connection.json"><code>json</code></a> / <a class="autorefs autorefs-internal" title="text(encoding='utf-8')
+
+  
+      async
+  " href="connection/#blackbull.connection.Connection.text"><code>text</code></a>) return the cached
+bytes. A mid-body disconnect raises <a class="autorefs autorefs-internal" href="request/#blackbull.request.ClientDisconnected"><code>ClientDisconnected</code></a>. Raises
+<code>RuntimeError</code> if <a class="autorefs autorefs-internal" title="stream()
+
+  
+      async
+  " href="connection/#blackbull.connection.Connection.stream"><code>stream</code></a> already consumed the body — the
 channel is a single drain, so there is nothing left to buffer.</p>
 
 
@@ -9924,11 +10106,27 @@ channel is a single drain, so there is nothing left to buffer.</p>
     <div class="doc doc-contents ">
 
         <p><code>application/x-www-form-urlencoded</code> body, parsed once and cached.</p>
-<p>Reads the body through :meth:<code>body</code>, so a later :meth:<code>json</code> /
-:meth:<code>text</code> call reuses the cached bytes.  On a non-form
+<p>Reads the body through <a class="autorefs autorefs-internal" title="body()
+
+  
+      async
+  " href="connection/#blackbull.connection.Connection.body"><code>body</code></a>, so a later <a class="autorefs autorefs-internal" title="json()
+
+  
+      async
+  " href="connection/#blackbull.connection.Connection.json"><code>json</code></a> /
+<a class="autorefs autorefs-internal" title="text(encoding='utf-8')
+
+  
+      async
+  " href="connection/#blackbull.connection.Connection.text"><code>text</code></a> call reuses the cached bytes.  On a non-form
 <code>Content-Type</code> (or no body) it returns <code>{}</code> rather than raising,
 and does not touch the body.  Multipart uploads are out of scope — use
-:meth:<code>stream</code> and parse them manually.</p>
+<a class="autorefs autorefs-internal" title="stream()
+
+  
+      async
+  " href="connection/#blackbull.connection.Connection.stream"><code>stream</code></a> and parse them manually.</p>
 
 
     </div>
@@ -9997,7 +10195,11 @@ fall back to the field defaults.</p>
     <div class="doc doc-contents ">
 
         <p>Yield the request body one chunk at a time, draining <code>receive</code> once.</p>
-<p>The streaming counterpart to :meth:<code>body</code>.  Use it when the handler only
+<p>The streaming counterpart to <a class="autorefs autorefs-internal" title="body()
+
+  
+      async
+  " href="connection/#blackbull.connection.Connection.body"><code>body</code></a>.  Use it when the handler only
 needs to <em>process</em> the body incrementally — count/hash/forward a large
 upload — so the working set stays one chunk instead of the whole
 payload::</p>
@@ -10005,11 +10207,23 @@ payload::</p>
 async for chunk in conn.stream():
     total += len(chunk)
 </code></pre>
-<p>Mutually exclusive with :meth:<code>body</code>/:meth:<code>json</code>/:meth:<code>text</code>, which
+<p>Mutually exclusive with <a class="autorefs autorefs-internal" title="body()
+
+  
+      async
+  " href="connection/#blackbull.connection.Connection.body"><code>body</code></a>/<a class="autorefs autorefs-internal" title="json()
+
+  
+      async
+  " href="connection/#blackbull.connection.Connection.json"><code>json</code></a>/<a class="autorefs autorefs-internal" title="text(encoding='utf-8')
+
+  
+      async
+  " href="connection/#blackbull.connection.Connection.text"><code>text</code></a>, which
 buffer: the body is a single-drain stream, so mixing the two on one
-request raises :class:<code>RuntimeError</code> rather than silently returning a
+request raises <code>RuntimeError</code> rather than silently returning a
 partial or empty body.  A mid-body disconnect raises
-:class:<code>ClientDisconnected</code>.</p>
+<a class="autorefs autorefs-internal" href="request/#blackbull.request.ClientDisconnected"><code>ClientDisconnected</code></a>.</p>
 
 
     </div>
@@ -10050,26 +10264,40 @@ partial or empty body.  A mid-body disconnect raises
     <div class="doc doc-contents ">
 
         <p>Materialize the ASGI scope the dispatch pipeline consumes, with this
-typed :class:<code>Connection</code> stashed on it for zero-reconversion reads.</p>
+typed <a class="autorefs autorefs-internal" title="Connection
+
+
+  
+      dataclass
+  " href="connection/#blackbull.connection.Connection"><code>Connection</code></a> stashed on it for zero-reconversion reads.</p>
 <p>The single canonical <em>Connection → dispatch-ready scope</em> bridge shared
 by the H/1.1 <code>run()</code> and H/2 <code>_conn_to_scope</code> seams, which would
 otherwise each hand-roll the same five steps:</p>
 <ol>
-<li>derive the ASGI scope via :meth:<code>as_scope</code> (the one native→ASGI point);</li>
+<li>derive the ASGI scope via <a class="autorefs autorefs-internal" title="as_scope()" href="connection/#blackbull.connection.Connection.as_scope"><code>as_scope</code></a> (the one native→ASGI point);</li>
 <li>when <code>force_asgi</code> (the §4.3 <code>BB_FORCE_ASGI_SCOPE</code> dual-path lane),
-   round-trip through :meth:<code>from_scope</code> so both the derived scope <em>and</em>
+   round-trip through <a class="autorefs autorefs-internal" title="from_scope(scope, receive=None)
+
+  
+      classmethod
+  " href="connection/#blackbull.connection.Connection.from_scope"><code>from_scope</code></a> so both the derived scope <em>and</em>
    the Connection the consumers read are rebuilt from scratch on every
    request, keeping the compat conversion from bitrotting.  <code>_asterisk_form</code>
    is Connection-only (not in the scope), so carry it across the rebuild;</li>
-<li>restore <code>scope['headers']</code> to the rich :class:<code>Headers</code> object
+<li>restore <code>scope['headers']</code> to the rich <a class="autorefs autorefs-internal" href="headers/#blackbull.headers.Headers"><code>Headers</code></a> object
    (<code>as_scope</code> emits the ASGI <code>list[tuple]</code> form; internal <code>.get()</code>
    callers want the object);</li>
 <li>re-expose the H/1.1 <code>_asterisk_form</code> OPTIONS marker on the envelope;</li>
-<li>stash the Connection under :data:<code>CONNECTION_STASH_KEY</code>.</li>
+<li>stash the Connection under <code>CONNECTION_STASH_KEY</code>.</li>
 </ol>
 <p>Protocol-specific augmentation (the websocket-only <code>subprotocols</code> key)
 is layered on by the caller <em>after</em> this returns — it is not a
-:class:<code>Connection</code> field (proposal §2.1).</p>
+<a class="autorefs autorefs-internal" title="Connection
+
+
+  
+      dataclass
+  " href="connection/#blackbull.connection.Connection"><code>Connection</code></a> field (proposal §2.1).</p>
 <p>The default (<code>force_asgi=False</code>) native path builds
 the scope by <strong>direct attribute access</strong>, placing the rich <code>Headers</code>
 object straight in (no <code>list(headers)</code> that the old code computed via
@@ -10270,9 +10498,7 @@ supported in v1), or is a sync generator function.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Arbitrary per-event data.  <code>detail</code> is used (rather than
-<code>payload</code>) to avoid colliding with HTTP/2 and WebSocket
-protocol terminology already used in the codebase.</p>
+                <p>Arbitrary per-event data.</p>
               </div>
             </td>
           </tr>
@@ -11000,7 +11226,7 @@ await send(Response(b'data', status=HTTPStatus.NOT_FOUND))
     <div class="doc doc-contents ">
 
         <p>Drive this response as an ASGI app: emit <code>start</code> then <code>body</code>.</p>
-<p>Mirrors :class:<code>StreamingResponse</code> so every BlackBull response type
+<p>Mirrors <a class="autorefs autorefs-internal" href="response/#blackbull.response.StreamingResponse"><code>StreamingResponse</code></a> so every BlackBull response type
 shares one protocol — <code>await response(conn, receive, send)</code> —
 whether returned from a simplified handler, invoked explicitly by a
 full-form handler, or normalised by <code>_wrap_send_native</code>.  Keeping the
@@ -11025,9 +11251,9 @@ for turning a Response into ASGI events.</p>
 
         <p>Convert this response to the unified native message (one send).</p>
 <p>The native-path serialiser: a complete <code>Response</code> becomes a single
-:class:<code>~blackbull.native.NativeResponse</code> carrying status, headers,
+<a class="autorefs autorefs-internal" href="native/#blackbull.native.NativeResponse"><code>NativeResponse</code></a> carrying status, headers,
 and body — one object, one <code>send</code>.  Symmetric with
-:meth:<code>NativeResponse.to_asgi</code> (the boundary conversion); streaming
+<a class="autorefs autorefs-internal" title="to_asgi()" href="native/#blackbull.native.NativeResponse.to_asgi"><code>NativeResponse.to_asgi</code></a> (the boundary conversion); streaming
 response types drive themselves and are not converted here.</p>
 
 
@@ -11157,7 +11383,7 @@ response types drive themselves and are not converted here.</p>
 
 
         <p>Immutable snapshot of a single registered route entry.</p>
-<p>Returned by :meth:<code>BlackBull.get_routes</code>.  One entry is produced per
+<p>Returned by <a class="autorefs autorefs-internal" title="get_routes()" href="app/#blackbull.app.BlackBull.get_routes"><code>BlackBull.get_routes</code></a>.  One entry is produced per
 <code>(route, method)</code> pair — a route registered with
 <code>methods=[GET, POST]</code> yields two <code>RouteInfo</code> records.</p>
 
@@ -11509,7 +11735,7 @@ app.use(TrustedProxyMiddleware(['127.0.0.1', '::1']))
 <p>Raise this from a QUERY handler when the request media type was accepted
 (so 400/415 do not apply) but the query itself is semantically invalid —
 references an unknown field, violates a constraint, etc.  The dispatcher
-answers <code>422 Unprocessable Content</code> and, being an :class:<code>HTTPException</code>
+answers <code>422 Unprocessable Content</code> and, being an <a class="autorefs autorefs-internal" href="router/#blackbull.router.HTTPException"><code>HTTPException</code></a>
 subclass, it flows through the normal error-router path and quiet 4xx
 logging.</p>
 
@@ -11563,8 +11789,20 @@ annotation (<code>ws: WebSocket</code>) or by name (<code>ws</code> / <code>webs
 handler that takes the raw <code>(conn, receive, send)</code> triplet keeps
 receiving exactly that, and this object is never built for it.</p>
 <p>The handshake is explicit: the connection is not live until
-:meth:<code>accept</code> returns, and sending before that is an error.  To reject a
-connection, call :meth:<code>close</code> instead of :meth:<code>accept</code>.</p>
+<a class="autorefs autorefs-internal" title="accept(subprotocol=None, *, headers=None)
+
+  
+      async
+  " href="websocket/#blackbull.websocket.WebSocket.accept"><code>accept</code></a> returns, and sending before that is an error.  To reject a
+connection, call <a class="autorefs autorefs-internal" title="close(code=_NORMAL_CLOSURE, reason=None)
+
+  
+      async
+  " href="websocket/#blackbull.websocket.WebSocket.close"><code>close</code></a> instead of <a class="autorefs autorefs-internal" title="accept(subprotocol=None, *, headers=None)
+
+  
+      async
+  " href="websocket/#blackbull.websocket.WebSocket.accept"><code>accept</code></a>.</p>
 
 
 
@@ -11600,7 +11838,11 @@ connection, call :meth:<code>close</code> instead of :meth:<code>accept</code>.<
 
     <div class="doc doc-contents ">
 
-        <p>True once :meth:<code>accept</code> has completed the handshake.</p>
+        <p>True once <a class="autorefs autorefs-internal" title="accept(subprotocol=None, *, headers=None)
+
+  
+      async
+  " href="websocket/#blackbull.websocket.WebSocket.accept"><code>accept</code></a> has completed the handshake.</p>
 
     </div>
 
@@ -11679,6 +11921,28 @@ flip.  Use it to break out of a send-only loop that also receives.</p>
 
 
 
+<h4 id="blackbull.WebSocket.close_reason" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">close_reason</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#blackbull.WebSocket.close_reason" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>The peer's close reason, or <code>None</code> until a close has been seen.</p>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
 <h4 id="blackbull.WebSocket.connection" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">connection</span></code>
 
@@ -11691,10 +11955,103 @@ flip.  Use it to break out of a send-only loop that also receives.</p>
 
     <div class="doc doc-contents ">
 
-        <p>The underlying :class:<code>~blackbull.connection.Connection</code>.</p>
+        <p>The underlying <a class="autorefs autorefs-internal" title="Connection
+
+
+  
+      dataclass
+  " href="connection/#blackbull.connection.Connection"><code>Connection</code></a>.</p>
 <p>Everything the handshake carried — headers, cookies, TLS state, the
 client address — is reachable through it.  The shortcuts below cover
 the fields WebSocket handlers actually reach for.</p>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.WebSocket.headers" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">headers</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#blackbull.WebSocket.headers" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>The handshake request headers.  Keys are lowercase <code>bytes</code>.</p>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.WebSocket.path" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">path</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#blackbull.WebSocket.path" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>The request path the handshake arrived on.</p>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.WebSocket.path_params" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">path_params</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#blackbull.WebSocket.path_params" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Path converters captured by the route that matched.</p>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.WebSocket.query_string" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">query_string</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#blackbull.WebSocket.query_string" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>The raw query string, undecoded, without the leading <code>?</code>.</p>
 
     </div>
 
@@ -11761,11 +12118,15 @@ is just <code>async for message in ws:</code>.</p>
     <div class="doc doc-contents ">
 
         <p>Complete the handshake.</p>
-<p><em>subprotocol</em> names the one being accepted from :attr:<code>subprotocols</code>;
+<p><em>subprotocol</em> names the one being accepted from <a class="autorefs autorefs-internal" title="subprotocols
+
+  
+      property
+  " href="websocket/#blackbull.websocket.WebSocket.subprotocols"><code>subprotocols</code></a>;
 leaving it <code>None</code> keeps the server's automatic negotiation, exactly
 as sending <code>{'type': 'websocket.accept', 'subprotocol': None}</code> does
 on the raw path.  <em>headers</em> are extra response headers for the 101.</p>
-<p>Raises :class:<code>WebSocketDisconnect</code> if the peer abandoned the
+<p>Raises <a class="autorefs autorefs-internal" href="websocket/#blackbull.websocket.WebSocketDisconnect"><code>WebSocketDisconnect</code></a> if the peer abandoned the
 handshake before it could be completed.</p>
 <p>When middleware already accepted for you
 (<code>blackbull.middleware.websocket</code>), a bare <code>accept()</code> is a no-op
@@ -11795,7 +12156,11 @@ out and cannot carry them.</p>
     <div class="doc doc-contents ">
 
         <p>Close the connection, or reject the handshake.</p>
-<p>Called before :meth:<code>accept</code>, this rejects the connection — the
+<p>Called before <a class="autorefs autorefs-internal" title="accept(subprotocol=None, *, headers=None)
+
+  
+      async
+  " href="websocket/#blackbull.websocket.WebSocket.accept"><code>accept</code></a>, this rejects the connection — the
 client's <code>connect()</code> fails rather than opening and immediately
 closing.  Idempotent, and a no-op once the peer has already gone, so
 a <code>finally: await ws.close()</code> is always safe.</p>
@@ -11823,7 +12188,7 @@ a <code>finally: await ws.close()</code> is always safe.</p>
         <p>Await one complete message — <code>str</code> for text, <code>bytes</code> for binary.</p>
 <p>Fragmented messages have already been reassembled, so what comes back
 is always a whole application message.</p>
-<p>Raises :class:<code>WebSocketDisconnect</code> when the peer closes.  Prefer
+<p>Raises <a class="autorefs autorefs-internal" href="websocket/#blackbull.websocket.WebSocketDisconnect"><code>WebSocketDisconnect</code></a> when the peer closes.  Prefer
 <code>async for</code> unless you need the close code.</p>
 
 
@@ -12013,7 +12378,11 @@ is always a whole application message.</p>
 
 
         <p>The peer closed the connection.</p>
-<p>Raised by :meth:<code>WebSocket.receive</code> and its typed variants.  Iterating
+<p>Raised by <a class="autorefs autorefs-internal" title="receive()
+
+  
+      async
+  " href="websocket/#blackbull.websocket.WebSocket.receive"><code>WebSocket.receive</code></a> and its typed variants.  Iterating
 with <code>async for</code> handles this for you — the loop simply ends — so catch
 it only when you call <code>receive()</code> directly and need the close code.</p>
 <p><code>code</code> is the RFC 6455 close code the peer sent, or 1005 when it sent
@@ -12088,7 +12457,12 @@ none.  <code>reason</code> is its optional UTF-8 explanation.</p>
 
         <p>Lazy, deprecated attribute access — <code>blackbull.Request</code>.</p>
 <p><code>Request</code> was the opt-in HTTP context object; it has been merged
-into :class:<code>Connection</code> and the name demoted to an alias. Resolving it
+into <a class="autorefs autorefs-internal" title="Connection
+
+
+  
+      dataclass
+  " href="connection/#blackbull.connection.Connection"><code>Connection</code></a> and the name demoted to an alias. Resolving it
 through the module <code>__getattr__</code> (PEP 562) means the <code>DeprecationWarning</code>
 fires only if code actually touches <code>Request</code> — importing the package
 stays warning-free — and the alias still evaluates to <code>Connection</code> so
@@ -12175,10 +12549,14 @@ the next handler with no extra wrapping.</p>
 
         <p>Parse the <code>Cookie</code> header(s) into a dict, straight from a headers
 object/iterable — no ASGI scope dict involved.</p>
-<p>This is the native core: :meth:<code>Connection.cookies</code> calls it directly on
-<code>conn.headers</code>; :func:<code>parse_cookies</code> is the ASGI-scope-shaped wrapper kept
+<p>This is the native core: <a class="autorefs autorefs-internal" title="cookies
+
+  
+      property
+  " href="connection/#blackbull.connection.Connection.cookies"><code>Connection.cookies</code></a> calls it directly on
+<code>conn.headers</code>; <a class="autorefs autorefs-internal" title="parse_cookies(source)" href="request/#blackbull.request.parse_cookies"><code>parse_cookies</code></a> is the ASGI-scope-shaped wrapper kept
 for external callers that hold a scope dict. Accepts a
-:class:<code>blackbull.headers.Headers</code> instance (uses <code>getlist</code>) or a plain
+<a class="autorefs autorefs-internal" title="Headers" href="headers/#blackbull.headers.Headers"><code>blackbull.headers.Headers</code></a> instance (uses <code>getlist</code>) or a plain
 iterable of <code>(name, value)</code> bytes tuples (the ASGI 3.0 form).</p>
 
 
@@ -12210,7 +12588,7 @@ parsing, so both wire formats produce the same result.</p>
 <li>A plain list/iterable of <code>(name, value)</code> bytes tuples — the
   standard ASGI 3.0 form, used by external servers (uvicorn,
   hypercorn, <code>httpx.ASGITransport</code>).</li>
-<li>A :class:<code>blackbull.headers.Headers</code> instance — what BlackBull's
+<li>A <a class="autorefs autorefs-internal" title="Headers" href="headers/#blackbull.headers.Headers"><code>blackbull.headers.Headers</code></a> instance — what BlackBull's
   own server attaches as a handler ergonomics enhancement.</li>
 </ul>
 
@@ -12260,10 +12638,7 @@ widening the public union.</p>
     <div class="doc doc-contents ">
 
         <p>Read the complete request body from the ASGI receive channel.</p>
-<p>Collects chunks in a list and joins once, rather than the O(n²) <code>+=</code>
-growth.  A single-chunk body (the common case) is returned directly with
-no intermediate copy at all.</p>
-<p>Raises :class:<code>ClientDisconnected</code> if an <code>http.disconnect</code> arrives
+<p>Raises <a class="autorefs autorefs-internal" href="request/#blackbull.request.ClientDisconnected"><code>ClientDisconnected</code></a> if an <code>http.disconnect</code> arrives
 before the body is complete, so a truncated upload is never silently
 returned as if whole.</p>
 
@@ -12299,8 +12674,12 @@ if data is None:
     return
 </code></pre>
 <p>Note that a literal JSON <code>null</code> body also parses to <code>None</code>; if that
-distinction matters, read the body yourself with :func:<code>read_body</code>.</p>
-<p>A mid-body client disconnect propagates as :class:<code>ClientDisconnected</code>
+distinction matters, read the body yourself with <a class="autorefs autorefs-internal" title="read_body(receive)
+
+  
+      async
+  " href="request/#blackbull.request.read_body"><code>read_body</code></a>.</p>
+<p>A mid-body client disconnect propagates as <a class="autorefs autorefs-internal" href="request/#blackbull.request.ClientDisconnected"><code>ClientDisconnected</code></a>
 rather than being reported as invalid JSON — a truncated body is a
 transport failure, not a parse error.</p>
 
@@ -12329,7 +12708,7 @@ transport failure, not a parse error.</p>
 raising — a malformed body never crashes the handler.  Override
 <em>encoding</em> for non-UTF-8 payloads.</p>
 <p>A mid-body client disconnect still propagates as
-:class:<code>ClientDisconnected</code>: a truncated upload must not be decoded and
+<a class="autorefs autorefs-internal" href="request/#blackbull.request.ClientDisconnected"><code>ClientDisconnected</code></a>: a truncated upload must not be decoded and
 returned as if it were the complete text.</p>
 
 
@@ -12349,24 +12728,29 @@ returned as if it were the complete text.</p>
     <div class="doc doc-contents ">
 
         <p>Synchronous entry point for any ASGI 3.0 callable.</p>
-<p>Works for a :class:<code>BlackBull</code> instance <em>and</em> for any plain ASGI
+<p>Works for a <a class="autorefs autorefs-internal" href="app/#blackbull.app.BlackBull"><code>BlackBull</code></a> instance <em>and</em> for any plain ASGI
 callable (uvicorn/hypercorn-style <code>async def app(scope, receive,
 send): …</code>).  This is what the <code>blackbull</code> console script calls
-after resolving <code>module:attr</code>; :meth:<code>BlackBull.serve</code> is a thin
+after resolving <code>module:attr</code>; <a class="autorefs autorefs-internal" title="run(certfile=None, keyfile=None, port=None, unix_path=None, inherited_fd=None, listeners=None, workers=None, max_connections=None, stream_queue_depth=None, ws_queue_depth=None, reload=None, reload_paths=None)" href="app/#blackbull.app.BlackBull.run"><code>BlackBull.run</code></a> is a thin
 shim around it.</p>
 <p>For <code>workers=1</code> without reload the server runs in the current
 process via <code>asyncio.run</code>.  For <code>workers &gt; 1</code> <em>or</em>
 <code>reload=True</code> the master pre-binds sockets, forks workers, and
 blocks until SIGTERM / SIGINT — or in reload mode, until a
 watched file changes (master then re-execs itself, see
-:mod:<code>blackbull.server.reload</code>).</p>
+<a class="autorefs autorefs-internal" href="server/reload/#blackbull.server.reload"><code>blackbull.server.reload</code></a>).</p>
 <p><em>listeners</em> states the sockets directly — one
-:class:<code>~blackbull.server.listener.Listener</code> each, saying where it is,
+<a class="autorefs autorefs-internal" title="Listener
+
+
+  
+      dataclass
+  " href="server/listener/#blackbull.server.listener.Listener"><code>Listener</code></a> each, saying where it is,
 what speaks there and whether TLS terminates there.  It replaces <em>port</em>,
 <em>unix_path</em> and <em>inherited_fd</em> rather than joining them, so passing both
 is refused.</p>
 <p>All integer parameters default to their corresponding <code>BB_*</code>
-environment variables (see :mod:<code>blackbull.env</code>).</p>
+environment variables (see <a class="autorefs autorefs-internal" href="env/#blackbull.env"><code>blackbull.env</code></a>).</p>
 
 
     </div>

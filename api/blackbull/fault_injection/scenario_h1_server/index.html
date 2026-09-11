@@ -3390,34 +3390,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -5952,24 +5924,25 @@
     <div class="doc doc-contents first">
 
         <p>Programmable HTTP/1.1 <strong>server-side</strong> scenario model.</p>
-<p>A :class:<code>ScenarioH1Server</code> is a sequence of typed <em>steps</em> that
-:class:<code>~blackbull.fault_injection.h1_server.H1FaultServer</code> walks in order
+<p>A <a class="autorefs autorefs-internal" title="ScenarioH1Server
+
+
+  
+      dataclass
+  " href="#blackbull.fault_injection.scenario_h1_server.ScenarioH1Server"><code>ScenarioH1Server</code></a> is a sequence of typed <em>steps</em> that
+<a class="autorefs autorefs-internal" href="../h1_server/#blackbull.fault_injection.h1_server.H1FaultServer"><code>H1FaultServer</code></a> walks in order
 against a connected client.  This is the server-side half of the HTTP/1.1
 toolkit: a programmable server that drives a target <em>client</em> through
 deliberate misbehaviour — a status line delivered a byte at a time, a
 <code>Content-Length</code> that overstates the body, a chunked body that stops
 mid-chunk, a connection dropped mid-response.</p>
 <p>The symmetric client-side half — a programmable <em>client</em> driving a real
-server — is :mod:<code>blackbull.fault_injection.scenario_h1</code>.  Its vocabulary
-looks similar and is <strong>not</strong> reusable here: <code>ReadResponse</code> and
-<code>SendBytes</code> name the other end of the wire.  Two vocabularies, because
-there are two roles.</p>
-<p>Everything a scenario emits is <strong>raw bytes</strong>, deliberately.  There is no
-typed <code>SendResponse</code> step, because a response object would be built by
-the production response path, and a fault server that shares the
-production serialiser cannot produce a fault that serialiser has.  The
-HTTP/2 half made the same choice for the same reason (it carries its own
-frame encoder rather than calling <code>FrameBase.save()</code>).</p>
+server — is <a class="autorefs autorefs-internal" href="../scenario_h1/#blackbull.fault_injection.scenario_h1"><code>blackbull.fault_injection.scenario_h1</code></a>.  Its vocabulary
+looks similar and is <strong>not</strong> reusable here: <code>ReadResponse</code> names the
+other end of the wire.  Two vocabularies, because there are two roles.</p>
+<p>Everything a scenario emits is raw bytes; there is no typed
+<code>SendResponse</code> step.  <code>docs/guide/fault_injection.md</code> says why that is
+load-bearing.</p>
 
 
 
@@ -6061,9 +6034,13 @@ frame encoder rather than calling <code>FrameBase.save()</code>).</p>
 
 
         <p>Close cleanly (FIN) after whatever has been written.</p>
-<p>Terminal.  The difference from :class:<code>Abort</code> is what the client sees
-— an orderly EOF mid-body rather than a reset — and clients do not
-always treat the two alike, which is the point of having both.</p>
+<p>Terminal.  What the client sees is an orderly EOF mid-body, not the
+reset <a class="autorefs autorefs-internal" title="Abort
+
+
+  
+      dataclass
+  " href="#blackbull.fault_injection.scenario_h1_server.Abort"><code>Abort</code></a> sends.</p>
 
 
 
@@ -6218,18 +6195,12 @@ never finishes.</p>
 
         <p>Read one request head and record whether it matched.</p>
 <p>A guard, not a filter: nothing is skipped and the connection stays in
-step.  It answers a different question from :class:<code>WaitForRequest</code> —
-<em>is the client under test behaving as this scenario assumes?</em>  A
-scenario that stages a fault against <code>Expect: 100-continue</code> is testing
-nothing at all if the client never sent that header, and without this
-the run would look like a pass.</p>
+step.  It asks whether the client under test is behaving as the
+scenario assumes — a fault staged against <code>Expect: 100-continue</code> tests
+nothing if the client never sent that header.</p>
 <p>A mismatch is <strong>recorded, not raised</strong>:
 <code>ScenarioH1ServerResult.expectations</code> collects one
-<code>(match, matched)</code> pair per step, so a scenario reports what it
-assumed alongside what it got.</p>
-<p>Deliberately not called <code>WaitForRequest(match=...)</code> even though the
-grammar is the same: reusing a name for a different meaning is the
-thing the 107+108 consistency sweep was run to prevent.</p>
+<code>(match, matched)</code> pair per step.</p>
 
 
 
@@ -6280,13 +6251,9 @@ thing the 107+108 consistency sweep was run to prevent.</p>
 
 
         <p>Shut down the sending direction only (FIN), keep reading.</p>
-<p>Neither :class:<code>Abort</code> nor a full close says this.  <code>Abort</code> sends RST,
-which discards whatever is buffered and leaves nothing to read; a full
-close ends both directions at once.  A half-close is the ordinary end of
-a non-keep-alive exchange — "I have finished sending, I am still waiting
-for your answer" — and it is a distinct code path on the peer.</p>
-<p><strong>Not terminal</strong>: later steps still run, because continuing to read is
-the whole point.</p>
+<p><strong>Not terminal</strong> — later steps still run, which is the whole point.
+<code>Abort</code> is not a substitute: it sends RST, discarding what is buffered
+and leaving nothing to read.</p>
 
 
 
@@ -6337,7 +6304,12 @@ the whole point.</p>
 
 
         <p>An ordered sequence of steps, plus a name for test parametrisation.</p>
-<p><code>steps</code> is a <strong>tuple</strong>, as on :class:<code>ScenarioH2</code>: a frozen dataclass
+<p><code>steps</code> is a <strong>tuple</strong>, as on <a class="autorefs autorefs-internal" title="ScenarioH2
+
+
+  
+      dataclass
+  " href="../scenario_h2/#blackbull.fault_injection.scenario_h2.ScenarioH2"><code>ScenarioH2</code></a>: a frozen dataclass
 holding a mutable list is a frozen container of mutable contents.</p>
 
 
@@ -6389,7 +6361,12 @@ holding a mutable list is a frozen container of mutable contents.</p>
 
 
         <p>What the executor observed while running a scenario.</p>
-<p>Field names match :class:<code>~blackbull.fault_injection.scenario_h2.ScenarioH2Result</code>
+<p>Field names match <a class="autorefs autorefs-internal" title="ScenarioH2Result
+
+
+  
+      dataclass
+  " href="../scenario_h2/#blackbull.fault_injection.scenario_h2.ScenarioH2Result"><code>ScenarioH2Result</code></a>
 wherever the two mean the same thing, so a harness that reports on one
 half does not need a second spelling for the other.</p>
 
@@ -6604,12 +6581,10 @@ way.</p>
 
 
         <p>Emit a status line, field by field.</p>
-<p>Added by the 107+108 consistency sweep.  Nothing validates: a status
-line with no reason phrase, an impossible version, or a three-digit
-code that is not a status are all faults worth staging, and a typed
-step that refused them would be useless here.  What it buys over raw
-bytes is that the <em>shape</em> is legible — a reader sees which field the
-scenario is bending.</p>
+<p>Nothing validates: a status line with no reason phrase, an impossible
+version, or a three-digit code that is not a status are all faults
+worth staging.  What it buys over raw bytes is that the <em>shape</em> is
+legible — a reader sees which field the scenario is bending.</p>
 
 
 
@@ -6760,25 +6735,19 @@ a client's own response deadline is measured against.</p>
 
 
         <p>Block until a request head arrives, optionally one that matches.</p>
-<p>A scenario that writes before the request is read is testing a
-different thing — an unsolicited response — and can simply omit this
-step.  On <code>timeout</code> expiry the executor records the miss and
-proceeds, matching <code>WaitForClientFrame</code> on the HTTP/2 side.</p>
-<p>With <code>match</code> set, heads that do not match are <strong>read and skipped</strong>,
-and the step keeps waiting — the same filter-over-a-stream meaning
-<code>WaitForClientFrame</code> has.  On HTTP/1.1 that stream is a pipeline
-(RFC 9112 §9.3.2), so this is how a scenario misbehaves at one request
-among several: answer the GET normally, break on the POST.</p>
-<p><strong>Skipping desyncs the connection, and that is not hidden.</strong>  HTTP/1.1
-responses are positional — a skipped request is one the scenario can
-no longer answer, so everything after it is off by one.  On HTTP/2 the
-equivalent is harmless because streams are independent; here it is a
-fault in its own right, staged deliberately or not at all.  The count
-lands on <code>ScenarioH1ServerResult.requests_skipped</code> so a scenario
-author reads it from the result rather than deducing it.</p>
-<p>Use :class:<code>ExpectRequest</code> when the question is "did the client send
-what this scenario assumes" — that one reads a single head and skips
-nothing.</p>
+<p>A filter: with <code>match</code> set, heads that do not match are <strong>read and
+skipped</strong> and the step keeps waiting, which on a pipelined connection
+(RFC 9112 §9.3.2) is how a scenario breaks the POST and not the GET.
+On <code>timeout</code> expiry the executor records the miss and proceeds.</p>
+<p><strong>Skipping desyncs the connection</strong>, because HTTP/1.1 responses are
+positional: a head passed over is one the scenario can no longer
+answer.  The count is on <code>ScenarioH1ServerResult.requests_skipped</code>.</p>
+<p><a class="autorefs autorefs-internal" title="ExpectRequest
+
+
+  
+      dataclass
+  " href="#blackbull.fault_injection.scenario_h1_server.ExpectRequest"><code>ExpectRequest</code></a> is the guard that skips nothing.</p>
 
 
 
@@ -6893,12 +6862,11 @@ nothing.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Split a request head into the fields :func:<code>request_matches</code> reads.</p>
-<p>Deliberately lenient: this parses what a <em>client under test</em> actually
-sent, including things a conforming parser would reject, because a
-scenario may well be waiting for exactly that.  A malformed request
-line yields empty strings rather than raising — a scenario matching on
-<code>method</code> simply will not match it.</p>
+        <p>Split a request head into the fields <a class="autorefs autorefs-internal" title="request_matches(head, match)" href="#blackbull.fault_injection.scenario_h1_server.request_matches"><code>request_matches</code></a> reads.</p>
+<p>Lenient by necessity: it parses what a <em>client under test</em> actually
+sent, including what a conforming parser would reject.  A malformed
+request line yields empty strings rather than raising, so a scenario
+matching on <code>method</code> simply will not match it.</p>
 
 
     </div>
@@ -6941,7 +6909,12 @@ presence alone.  <code>header_absent</code> takes a name.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Parse JSON Lines back to a :class:<code>ScenarioH1Server</code>.</p>
+        <p>Parse JSON Lines back to a <a class="autorefs autorefs-internal" title="ScenarioH1Server
+
+
+  
+      dataclass
+  " href="#blackbull.fault_injection.scenario_h1_server.ScenarioH1Server"><code>ScenarioH1Server</code></a>.</p>
 
 
     </div>
@@ -6960,12 +6933,10 @@ presence alone.  <code>header_absent</code> takes a name.</p>
     <div class="doc doc-contents ">
 
         <p>Serialise <em>scenario</em> to JSON Lines (one step per line).</p>
-<p>The name sits on the first line under the op <code>HEADER</code>, so the file is
-one line-oriented stream with no out-of-band metadata — the convention
-:func:<code>blackbull.fault_injection.scenario_h2.scenario_to_json</code> set.</p>
-<p>Payloads are hex rather than base64 or an escaped string: a fault
-scenario's bytes are frequently <em>not</em> valid UTF-8 and are meant to be
-read by a human comparing them against a packet capture.</p>
+<p>The name sits on the first line under the op <code>HEADER</code>, keeping the
+file one line-oriented stream with no out-of-band metadata.</p>
+<p>Payloads are hex, not base64: a fault scenario's bytes are frequently
+not valid UTF-8 and are read against a packet capture by eye.</p>
 
 
     </div>

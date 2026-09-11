@@ -3220,34 +3220,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -5612,23 +5584,23 @@
     <div class="doc doc-contents first">
 
         <p>Programmable HTTP/2 server that emits deliberate misbehaviour.</p>
-<p>:class:<code>H2FaultServer</code> listens on <code>127.0.0.1:&lt;random&gt;</code>, accepts one
+<p><a class="autorefs autorefs-internal" href="#blackbull.fault_injection.h2_server.H2FaultServer"><code>H2FaultServer</code></a> listens on <code>127.0.0.1:&lt;random&gt;</code>, accepts one
 HTTP/2 (h2c plaintext) connection at a time, and walks a
-:class:<code>~blackbull.fault_injection.scenario_h2.ScenarioH2</code> against it.
+<a class="autorefs autorefs-internal" title="ScenarioH2
+
+
+  
+      dataclass
+  " href="../scenario_h2/#blackbull.fault_injection.scenario_h2.ScenarioH2"><code>ScenarioH2</code></a> against it.
 It is designed for client-library / proxy / security-research test
 suites that need to exercise a client against a server that
 <strong>deliberately</strong> does the wrong thing — half-closed streams, exhausted
 flow-control windows, illegal SETTINGS, weird frame sequences.</p>
-<p>The server is an opt-in testing instrument.  It refuses to start in a
-production context — when the framework's <code>BLACKBULL_ENV=production</code>
-signal (or the explicit <code>BB_PRODUCTION</code> override) is set — so a
-deliberate-misbehaviour code path cannot accidentally fire on a production
-deployment.  This is the isolated, hard-opt-in design called out in the
-project's out-of-scope list as the only acceptable form for fault-injection
-machinery inside a correctness-focused framework.</p>
+<p>The server is an opt-in testing instrument: it refuses to start when
+<code>BLACKBULL_ENV=production</code> or <code>BB_PRODUCTION</code> is set, and refuses a
+non-loopback bind without <code>allow_remote=True</code>.</p>
 <p>Tutorial: <code>docs/guide/fault_injection.md</code>.</p>
 <h4 id="blackbull.fault_injection.h2_server--quick-start">Quick start<a class="headerlink" href="#blackbull.fault_injection.h2_server--quick-start" title="Permanent link">&para;</a></h4>
-<p>.. code-block:: python</p>
 <pre><code>import pytest
 from blackbull.fault_injection import H2FaultServer
 from blackbull.fault_injection.catalogue import half_closed_stream_no_data
@@ -5678,13 +5650,23 @@ async def test_client_times_out_on_stalled_stream(fault_server):
 
 
 
-        <p>Programmable HTTP/2 server emitting a :class:<code>ScenarioH2</code>.</p>
+        <p>Programmable HTTP/2 server emitting a <a class="autorefs autorefs-internal" title="ScenarioH2
+
+
+  
+      dataclass
+  " href="../scenario_h2/#blackbull.fault_injection.scenario_h2.ScenarioH2"><code>ScenarioH2</code></a>.</p>
 <p>Async context manager: enter to bind + start accepting, exit to
 shut down.  <code>self.url</code> is set after enter and gives the URL a
 real h2c client can dial.</p>
 <h5 id="blackbull.fault_injection.h2_server.H2FaultServer--parameters">Parameters<a class="headerlink" href="#blackbull.fault_injection.h2_server.H2FaultServer--parameters" title="Permanent link">&para;</a></h5>
 <p>scenario:
-    The :class:<code>ScenarioH2</code> the executor walks for each accepted
+    The <a class="autorefs autorefs-internal" title="ScenarioH2
+
+
+  
+      dataclass
+  " href="../scenario_h2/#blackbull.fault_injection.scenario_h2.ScenarioH2"><code>ScenarioH2</code></a> the executor walks for each accepted
     connection.
 host:
     Bind host.  Defaults to <code>'127.0.0.1'</code> — binding to a
@@ -5695,7 +5677,7 @@ port:
 allow_remote:
     Bypass the localhost-only safety check.  Off by default.
 ssl_context:
-    Optional :class:<code>ssl.SSLContext</code>.  When provided, the server
+    Optional <code>ssl.SSLContext</code>.  When provided, the server
     terminates TLS and <code>self.url</code> is <code>https://...</code>; ALPN must
     offer <code>h2</code> so clients negotiating H/2 over TLS (httpx, curl
     <code>--http2</code>, …) connect cleanly.  When <code>None</code> (default), the
@@ -5706,7 +5688,12 @@ ssl_context:
     <code>http://&lt;host&gt;:&lt;port&gt;/</code> after start, or <code>https://...</code> when
     a TLS context is provided.
 last_result:
-    :class:<code>ScenarioH2Result</code> from the most recently completed
+    <a class="autorefs autorefs-internal" title="ScenarioH2Result
+
+
+  
+      dataclass
+  " href="../scenario_h2/#blackbull.fault_injection.scenario_h2.ScenarioH2Result"><code>ScenarioH2Result</code></a> from the most recently completed
     connection.  <code>None</code> before any client has connected.</p>
 
 
@@ -5807,10 +5794,15 @@ production signal (<code>BLACKBULL_ENV=production</code>) — or the explicit
 
     <div class="doc doc-contents ">
 
-        <p>Convert a :class:<code>FrameBase</code> instance to wire bytes.</p>
+        <p>Convert a <code>FrameBase</code> instance to wire bytes.</p>
 <p>Restricted to the frame types this server emits: SETTINGS,
 WINDOW_UPDATE, RST_STREAM, GOAWAY, PING, DATA.  Anything else
-must go through :class:<code>SendRawBytes</code> instead.</p>
+must go through <a class="autorefs autorefs-internal" title="SendRawBytes
+
+
+  
+      dataclass
+  " href="../scenario_h2/#blackbull.fault_injection.scenario_h2.SendRawBytes"><code>SendRawBytes</code></a> instead.</p>
 
 
     </div>

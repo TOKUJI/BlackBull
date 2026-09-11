@@ -3071,34 +3071,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -3803,6 +3775,17 @@
     <span class="md-ellipsis">
       
         __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.protocol.frame.FrameFactory.create" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        create
       
     </span>
   </a>
@@ -5529,6 +5512,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.protocol.frame.FrameFactory.create" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        create
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.protocol.frame.FrameFactory.goaway" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5683,7 +5677,14 @@ from the wire.  Frame-type definitions live in <code>frame_types</code>.</p>
 
 
 
-        <p>docstring for FrameFactory</p>
+        <p>Builds outbound HTTP/2 frames and parses inbound ones for one connection.</p>
+<p>The factory owns the connection's HPACK encoder and decoder, which is why
+it is per-connection rather than shared: HPACK state is connection-wide, so
+a frame built or parsed with the wrong codec corrupts every later header
+block on that connection.</p>
+<p><a class="autorefs autorefs-internal" title="create(type_, flags, stream_id, *, data=b'', **kwds)" href="#blackbull.protocol.frame.FrameFactory.create"><code>create</code></a> builds any frame
+type from its registry; the named helpers below are the shorthands for the
+control frames a server sends most. <code>load</code> is the inbound direction.</p>
 
 
 
@@ -5721,6 +5722,28 @@ from the wire.  Frame-type definitions live in <code>frame_types</code>.</p>
 connection will accept (RFC 9113 §6.5.2).  <code>None</code> leaves hpack's
 own default in force; a caller that advertises the value to its peer
 passes the same number here, so advice and defence cannot disagree.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.protocol.frame.FrameFactory.create" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">create</span><span class="p">(</span><span class="n">type_</span><span class="p">,</span> <span class="n">flags</span><span class="p">,</span> <span class="n">stream_id</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="sa">b</span><span class="s1">''</span><span class="p">,</span> <span class="o">**</span><span class="n">kwds</span><span class="p">)</span></code>
+
+<a href="#blackbull.protocol.frame.FrameFactory.create" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Build the frame class registered for <em>type_</em>, ready to <code>save()</code>.</p>
+<p><em>data</em> is the payload as it goes on the wire; <em>flags</em> accepts the
+type's flag enum or a raw int.  The frame receives this connection's
+HPACK codecs, so a HEADERS built here shares decoder state with every
+other frame on the connection.</p>
 
 
     </div>

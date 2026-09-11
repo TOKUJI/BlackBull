@@ -3071,34 +3071,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -5545,14 +5517,13 @@
 
     <div class="doc doc-contents first">
 
-        <p>AsyncAPI 3.0 documentation for the MQTT broker — :class:<code>AsyncAPIExtension</code>.</p>
-<p>OpenAPI documents BlackBull's HTTP surface; it has no vocabulary for topics,
-QoS, retain, or the publish/subscribe direction, so the MQTT broker is — by
-design — invisible to it.  <strong>AsyncAPI</strong> (https://www.asyncapi.com/) is the
-messaging-world counterpart, and this extension emits an AsyncAPI 3.0 document
-describing the topic taps the application registered via
-<code>MQTTExtension.on_message</code>, served over HTTP exactly as <code>/openapi.json</code> is.</p>
-<p>It is a normal :class:<code>~blackbull.extension.Extension</code>, parallel to
+        <p>AsyncAPI 3.0 documentation for the MQTT broker — <a class="autorefs autorefs-internal" href="#blackbull.mqtt.asyncapi.AsyncAPIExtension"><code>AsyncAPIExtension</code></a>.</p>
+<p>OpenAPI has no vocabulary for topics, QoS, retain, or the publish/subscribe
+direction, so the broker is invisible to it.  <strong>AsyncAPI</strong>
+(https://www.asyncapi.com/) is the messaging-world counterpart, and this
+extension emits an AsyncAPI 3.0 document for the taps registered via
+<code>MQTTExtension.on_message</code>, served as <code>/openapi.json</code> is.</p>
+<p>It is a normal <a class="autorefs autorefs-internal" href="../../extension/#blackbull.extension.Extension"><code>Extension</code></a>, parallel to
 <code>OpenAPIExtension</code> and coexisting with it::</p>
 <pre><code>app = BlackBull()
 mqtt = app.add_extension(MQTTExtension(port=1883))
@@ -5563,16 +5534,9 @@ async def on_temp(msg, room): ...
 </code></pre>
 <p>After <code>app.run()</code> the document is at <code>/asyncapi.json</code> and an HTML viewer at
 <code>/asyncapi</code>.</p>
-<p>Honest caveats (also stated in the document's <code>info.description</code>):</p>
-<ol>
-<li>It documents the <strong>application's taps</strong>, not "the broker's API".  A broker
-   accepts any topic from any client; <code>on_message</code> filters describe only what
-   <em>this</em> app observes.</li>
-<li><strong>QoS / retain are not captured</strong> — <code>on_message</code> taps regardless of QoS,
-   so MQTT channel bindings are omitted until the tap API carries that metadata.</li>
-<li><strong>Payloads are opaque bytes</strong> (<code>application/octet-stream</code>) until an
-   optional <code>schema=</code> on <code>on_message</code> lands (a deliberate fast-follow).</li>
-</ol>
+<p>What it documents is the application's taps and not the broker's API, without
+QoS or retain, over opaque payloads.  The emitted <code>info.description</code> says so
+to whoever reads the document, and <code>docs/guide/mqtt.md</code> says why.</p>
 
 
 

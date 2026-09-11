@@ -3071,34 +3071,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../middleware/cache/" class="md-nav__link">
         
   
@@ -4106,6 +4078,28 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.Server.certfile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        certfile
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.Server.keyfile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        keyfile
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.Server.ssl_context" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4121,6 +4115,17 @@
     <span class="md-ellipsis">
       
         client_connected_cb
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.Server.configure_mtls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        configure_mtls
       
     </span>
   </a>
@@ -5523,6 +5528,28 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.Server.certfile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        certfile
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.Server.keyfile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        keyfile
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.Server.ssl_context" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5538,6 +5565,17 @@
     <span class="md-ellipsis">
       
         client_connected_cb
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.Server.configure_mtls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        configure_mtls
       
     </span>
   </a>
@@ -5655,6 +5693,18 @@
 
     <div class="doc doc-contents first">
 
+        <p>BlackBull's own server: the socket layer beneath <code>BlackBull.run()</code>.</p>
+<p><a class="autorefs autorefs-internal" href="server/#blackbull.server.server.Server"><code>Server</code></a> — exported as <code>ASGIServer</code> as
+well — binds the listeners, accepts connections, and hands each one to a
+<a class="autorefs autorefs-internal" href="connection_actor/#blackbull.server.connection_actor.ConnectionActor"><code>ConnectionActor</code></a>, which
+detects the protocol off the connection's own buffer and spawns the actor that
+speaks it.  The rest of the package is that machinery: readers and recipients
+on the way in, senders on the way out, and the limits, deadlines and access
+logging around both.</p>
+<p>Construct a <a class="autorefs autorefs-internal" href="server/#blackbull.server.server.Server"><code>Server</code></a> directly to embed the
+server under an event loop you already own, or to bind a socket before forking
+a worker.</p>
+
 
 
 
@@ -5690,10 +5740,10 @@
 
 
         <p>An asyncio socket server that dispatches each connection through the
-app's :class:<code>~blackbull.server.protocol_registry.ProtocolRegistry</code>.</p>
+app's <a class="autorefs autorefs-internal" href="protocol_registry/#blackbull.server.protocol_registry.ProtocolRegistry"><code>ProtocolRegistry</code></a>.</p>
 <p>The shared HTTP listener detects HTTP/1.1 vs HTTP/2 (and upgrades to
 WebSocket); port-bound non-ASGI protocols registered via
-:meth:<code>BlackBull.raw_handler</code> get their own listening socket.
+<a class="autorefs autorefs-internal" title="raw_handler(name, *, port=None, detector=None, tls=False, stateful=True)" href="../app/#blackbull.app.BlackBull.raw_handler"><code>BlackBull.raw_handler</code></a> get their own listening socket.
 When ssl_context or certfile is set, the HTTP listener runs as HTTPS.</p>
 <p><code>ASGIServer</code> is an alias of this class.</p>
 
@@ -5714,6 +5764,56 @@ When ssl_context or certfile is set, the HTTP listener runs as HTTPS.</p>
 
 
 
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.server.Server.certfile" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">certfile</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+      <small class="doc doc-label doc-label-writable"><code>writable</code></small>
+  </span>
+
+<a href="#blackbull.server.Server.certfile" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>The TLS certificate path, or <code>None</code>.</p>
+<p>Assigning a path that is not a file raises <code>FileNotFoundError</code> there
+and then, rather than at handshake time.</p>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.server.Server.keyfile" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">keyfile</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+      <small class="doc doc-label doc-label-writable"><code>writable</code></small>
+  </span>
+
+<a href="#blackbull.server.Server.keyfile" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>The TLS private-key path, or <code>None</code>.</p>
+<p>Assigning a path that is not a file raises <code>FileNotFoundError</code> there
+and then, rather than at handshake time.</p>
+
+    </div>
+
+</div>
 
 <div class="doc doc-object doc-attribute">
 
@@ -5772,6 +5872,26 @@ between "the server's" and "its own".</p>
 <div class="doc doc-object doc-function">
 
 
+<h4 id="blackbull.server.Server.configure_mtls" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">configure_mtls</span><span class="p">(</span><span class="n">ca_cert</span><span class="p">)</span></code>
+
+<a href="#blackbull.server.Server.configure_mtls" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Require a client certificate signed by <em>ca_cert</em>.</p>
+<p>TLS must already be configured; on a plaintext server this raises
+<code>RuntimeError</code> rather than silently serving without mTLS.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h4 id="blackbull.server.Server.connection_protocol_factory" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">connection_protocol_factory</span><span class="p">(</span><span class="n">bound_binding</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
@@ -5781,13 +5901,9 @@ between "the server's" and "its own".</p>
     <div class="doc doc-contents ">
 
         <p>Factory for <code>loop.create_server</code> — one buffered protocol per accept.</p>
-<p>Replaces the <code>start_server</code> callback pair: instead of a StreamReader
-and StreamWriter over asyncio's own buffering, the connection owns a
-single buffer the kernel writes into, and the actor reads by cursor.</p>
-<p>The protocol spawns the serving task itself because a protocol factory
-is synchronous.  <code>connection_made</code> fires after the TLS handshake on
-an SSL transport, so ALPN is already decided by the time the task runs
-— same ordering the callback form relied on.</p>
+<p>The protocol spawns the serving task itself, a protocol factory being
+synchronous.  On an SSL transport <code>connection_made</code> fires after the
+handshake, so ALPN is already decided when that task runs.</p>
 
 
     </div>

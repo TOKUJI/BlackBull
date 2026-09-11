@@ -3264,34 +3264,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -5699,10 +5671,10 @@
 
     <div class="doc doc-contents first">
 
-        <p>Deprecation shim — moved to :mod:<code>blackbull.fault_injection</code>.</p>
+        <p>Deprecation shim — moved to <a class="autorefs autorefs-internal" href="../../fault_injection/#blackbull.fault_injection"><code>blackbull.fault_injection</code></a>.</p>
 <p>Groups the HTTP/1.1 client-side scenario model and the
 HTTP/2 server-side fault-injection surface under
-:mod:<code>blackbull.fault_injection</code>.  Import from there going forward::</p>
+<a class="autorefs autorefs-internal" href="../../fault_injection/#blackbull.fault_injection"><code>blackbull.fault_injection</code></a>.  Import from there going forward::</p>
 <pre><code>from blackbull.fault_injection import Scenario, SendBytes  # ...
 </code></pre>
 <p>This shim re-exports the names that used to live here and will be
@@ -5804,7 +5776,12 @@ executor stops walking the scenario after an Abort.</p>
         <p>Read one HTTP/1.1 response from the connection.</p>
 <p><code>timeout</code> bounds the entire status-line + headers + body read.
 On timeout the executor records the outcome on the
-:class:<code>ScenarioResult</code> and does <em>not</em> raise — the caller decides
+<a class="autorefs autorefs-internal" title="ScenarioResult
+
+
+  
+      dataclass
+  " href="../../fault_injection/scenario_h1/#blackbull.fault_injection.scenario_h1.ScenarioResult"><code>ScenarioResult</code></a> and does <em>not</em> raise — the caller decides
 whether to treat that as a transport-fail or normal outcome.</p>
 
 
@@ -5948,12 +5925,16 @@ per-iteration fuzz throughput.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Parse JSON Lines back to a :class:<code>Scenario</code>.</p>
+        <p>Parse JSON Lines back to a <a class="autorefs autorefs-internal" title="Scenario
+
+
+  
+      dataclass
+  " href="../../fault_injection/scenario_h1/#blackbull.fault_injection.scenario_h1.Scenario"><code>Scenario</code></a>.</p>
 <p>Skips blank lines so files that end with a trailing newline
 (the conventional git-friendly shape) parse cleanly.</p>
-<p>A <code>HEADER</code> line carries the name.  It is optional on the way in:
-corpus files written before the header existed have no such line
-and still parse, yielding an unnamed scenario.</p>
+<p>A <code>HEADER</code> line carries the name and is optional on the way in:
+a file without one parses to an unnamed scenario.</p>
 
 
     </div>
@@ -5974,7 +5955,7 @@ and still parse, yielding an unnamed scenario.</p>
         <p>Serialise to JSON Lines: one <code>{"op": ..., ...}</code> per line.</p>
 <p>Bytes payloads are base64-encoded so the result round-trips
 through stdout / git / json.loads without escape ambiguity.
-Round-tripped by :meth:<code>from_json</code>.</p>
+Round-tripped by <code>from_json</code>.</p>
 <p>The scenario's name rides the first line under the op <code>HEADER</code>,
 the convention the other three vocabularies use, so the file stays
 one line-oriented stream with no out-of-band metadata.  Without it
@@ -6038,12 +6019,11 @@ HTTP/1.1 differential suite.</p>
 
 
 
-        <p>Outcome of one :meth:<code>HTTP1Client.execute_scenario</code> call.</p>
+        <p>Outcome of one <code>HTTP1Client.execute_scenario</code> call.</p>
 <p>Exactly one of <code>response</code> / <code>exception</code> / <code>timed_out</code> /
 <code>aborted</code> is the meaningful field; the others are <code>None</code> /
-<code>False</code>.  The executor never raises, so callers (differential
-test, fuzz harness) categorise on this object instead of writing
-try/except boilerplate per scenario.</p>
+<code>False</code>.  The executor never raises, so a caller categorises on this
+object rather than on an exception.</p>
 
 
 

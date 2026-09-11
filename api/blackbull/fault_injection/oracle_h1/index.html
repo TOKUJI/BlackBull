@@ -3192,34 +3192,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -5557,24 +5529,43 @@
 
         <p>Differential oracle for HTTP/1.1 implementation comparison.</p>
 <p>Public surface for differentially comparing two HTTP/1.1
-implementations against the same :class:<code>~blackbull.fault_injection.Scenario</code>
+implementations against the same <a class="autorefs autorefs-internal" title="Scenario
+
+
+  
+      dataclass
+  " href="../#blackbull.fault_injection.Scenario"><code>Scenario</code></a>
 — typically a reference (e.g. nginx) against a target under test.</p>
 <p>Useful externally for client-library / proxy authors who want to
 assert behavioural parity between two implementations under
 wire-level fault injection.</p>
 <p>Components:</p>
 <ul>
-<li>:class:<code>Category</code> — the 9-way enum that buckets each example.</li>
-<li>:data:<code>ACCEPTED_CATEGORIES</code> — pass-through set (<code>OK</code>,
+<li><a class="autorefs autorefs-internal" href="#blackbull.fault_injection.oracle_h1.Category"><code>Category</code></a> — the 9-way enum that buckets each example.</li>
+<li><code>ACCEPTED_CATEGORIES</code> — pass-through set (<code>OK</code>,
     <code>BOTH_REJECTED</code>); divergences sit outside.</li>
-<li>:class:<code>SideOutcome</code> — what one server returned (response, or
+<li><a class="autorefs autorefs-internal" title="SideOutcome
+
+
+  
+      dataclass
+  " href="#blackbull.fault_injection.oracle_h1.SideOutcome"><code>SideOutcome</code></a> — what one server returned (response, or
     exception / timeout) in normalised form.</li>
-<li>:func:<code>normalize_response</code>, :func:<code>categorize</code> — the pure
+<li><a class="autorefs autorefs-internal" title="normalize_response(resp)" href="#blackbull.fault_injection.oracle_h1.normalize_response"><code>normalize_response</code></a>, <a class="autorefs autorefs-internal" title="categorize(ng, bb)" href="#blackbull.fault_injection.oracle_h1.categorize"><code>categorize</code></a> — the pure
     functions that compare the two sides.</li>
-<li>:func:<code>run_scenario</code> — the async wrapper that drives a
-    :class:<code>~blackbull.fault_injection.Scenario</code> against
+<li><a class="autorefs autorefs-internal" title="run_scenario(host, port, scenario)
+
+  
+      async
+  " href="#blackbull.fault_injection.oracle_h1.run_scenario"><code>run_scenario</code></a> — the async wrapper that drives a
+    <a class="autorefs autorefs-internal" title="Scenario
+
+
+  
+      dataclass
+  " href="../#blackbull.fault_injection.Scenario"><code>Scenario</code></a> against
     <code>(host, port)</code> and returns <code>(SideOutcome, wire_bytes)</code>.</li>
-<li>:data:<code>PER_REQUEST_TIMEOUT_S</code> — wall budget cap per side.</li>
+<li><code>PER_REQUEST_TIMEOUT_S</code> — wall budget cap per side.</li>
 </ul>
 <p>Test-suite-specific glue (fixtures, Hypothesis strategies, corpus
 capture, <code>DiffContext</code>) continues to live in the conformance
@@ -5670,7 +5661,7 @@ and keeps <code>assert ctx.category == 'OK'</code>-style sites readable.</p>
 
         <p>One side's response in a differential pair.</p>
 <p>Exactly one of (response, exception) is populated.  <code>timed_out</code>
-is True if the failure was an :class:<code>asyncio.TimeoutError</code> from
+is True if the failure was an <code>asyncio.TimeoutError</code> from
 the per-example wait_for; we record it separately because timeouts
 are semantically distinct from other transport errors.</p>
 
@@ -5715,7 +5706,7 @@ are semantically distinct from other transport errors.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Bucket a differential example into a :class:<code>Category</code>.</p>
+        <p>Bucket a differential example into a <a class="autorefs autorefs-internal" href="#blackbull.fault_injection.oracle_h1.Category"><code>Category</code></a>.</p>
 <p>Order of the checks matters: both-rejected wins over individual
 transport failures so we don't flag inputs that nginx also
 refused.</p>
@@ -5759,7 +5750,7 @@ refused.</p>
     <div class="doc doc-contents ">
 
         <p>Execute <em>scenario</em> against (host, port) and return (outcome, wire_bytes).</p>
-<p>Drives the scenario through :meth:<code>HTTP1Client.execute_scenario</code>,
+<p>Drives the scenario through <code>HTTP1Client.execute_scenario</code>,
 which itself never raises; this wrapper only adds an outer
 <code>asyncio.wait_for</code> so a runaway scenario (e.g. trickled bytes
 plus a long read timeout) can't blow the per-side budget.</p>

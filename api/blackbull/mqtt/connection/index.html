@@ -3071,34 +3071,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -5602,14 +5574,27 @@
     <div class="doc doc-contents first">
 
         <p>MQTT 5.0 per-connection actor and its raw-protocol entry point.</p>
-<p>:class:<code>MQTT5Actor</code> is one per connection. Its <strong>inbox carries only
-outbound packets</strong> (:class:<code>~blackbull.mqtt.broker.Send</code> from the broker, plus
+<p><a class="autorefs autorefs-internal" href="#blackbull.mqtt.connection.MQTT5Actor"><code>MQTT5Actor</code></a> is one per connection. Its <strong>inbox carries only
+outbound packets</strong> (<a class="autorefs autorefs-internal" title="Send
+
+
+  
+      dataclass
+  " href="../broker/#blackbull.mqtt.broker.Send"><code>Send</code></a> from the broker, plus
 local transport refusals). <code>Close</code> sets terminal state
 without needing a queue slot. Its <code>run()</code> — draining that inbox — is the
 <em>sole writer</em> to the socket, so there are no cross-task write races.  A sibling
-reader loop decodes the wire (via :class:<code>PacketFramer</code>) and <code>send</code>s control
-messages to the broker.  :func:<code>serve_connection</code> is the
-:data:<code>~blackbull.server.protocol_registry.RawProtocolHandler</code> body that wires
+reader loop decodes the wire (via <a class="autorefs autorefs-internal" href="#blackbull.mqtt.connection.PacketFramer"><code>PacketFramer</code></a>) and <code>send</code>s control
+messages to the broker.  <a class="autorefs autorefs-internal" title="serve_connection(reader, writer, ctx, broker, *, app_handlers=None, tap=None)
+
+  
+      async
+  " href="#blackbull.mqtt.connection.serve_connection"><code>serve_connection</code></a> is the
+<a class="autorefs autorefs-internal" title="RawProtocolHandler = Callable[['AbstractReader', 'AbstractWriter', 'ProtocolContext'], Awaitable[None]]
+
+  
+      module-attribute
+  " href="../../server/protocol_registry/#blackbull.server.protocol_registry.RawProtocolHandler"><code>RawProtocolHandler</code></a> body that wires
 the two together.</p>
 
 
@@ -5649,7 +5634,7 @@ the two together.</p>
 
 
         <p>One per MQTT 5.0 connection; the sole writer to its socket.</p>
-<p>Tap dispatch is selected at construction: pass a running :class:<code>TapActor</code>
+<p>Tap dispatch is selected at construction: pass a running <a class="autorefs autorefs-internal" href="../tap/#blackbull.mqtt.tap.TapActor"><code>TapActor</code></a>
 as <em>tap</em> for decoupled (actor-mode) dispatch, or <em>app_handlers</em> for inline
 dispatch on this connection.</p>
 
@@ -5723,24 +5708,23 @@ merely idle, in which case we poll.  Either way the loop ends on EOF
 
 
         <p>Incremental MQTT packet de-framer.</p>
-<p>Fed raw bytes with :meth:<code>feed</code>, it yields each fully decoded packet on
+<p>Fed raw bytes with <code>feed</code>, it yields each fully decoded packet on
 iteration and retains any trailing partial packet for the next feed.  The
 framing/resync state machine lives here rather than inline in the read loop:</p>
 <ul>
 <li>an <strong>incomplete</strong> packet simply ends the current iteration — the partial
-  bytes stay buffered for the next :meth:<code>feed</code> (TCP will deliver the rest),</li>
+  bytes stay buffered for the next <code>feed</code> (TCP will deliver the rest),</li>
 <li>a <strong>hard decode error</strong> (reserved flag bits, unknown type — the junk a
   desynchronised stream produces) resyncs to the next plausible header,</li>
 <li>a packet whose <strong>declared</strong> size exceeds <em>max_packet_size</em> raises
-  :class:<code>PacketTooLarge</code> from the fixed header, before its body is
+  <a class="autorefs autorefs-internal" href="#blackbull.mqtt.connection.PacketTooLarge"><code>PacketTooLarge</code></a> from the fixed header, before its body is
   waited for.  MQTT 5 lets a peer declare 268,435,455 bytes and then
   dribble them; a framer that judged the packet only once it was
   complete would already have paid for the attack.</li>
 </ul>
-<p>This replaces explicit <code>stalled_len</code> bookkeeping.  The <code>bytes(...)</code>
-snapshot at the decode boundary stays because the codec's input contract is
-deliberately <code>bytes</code>; a zero-copy framer would mean widening that contract
-to the buffer protocol (deferred).</p>
+<p>The <code>bytes(...)</code> snapshot at the decode boundary is the price of the
+codec taking <code>bytes</code>: going zero-copy would widen that contract to the
+buffer protocol.</p>
 
 
 
@@ -5864,7 +5848,7 @@ fixed header, so there is nothing buffered to report.</p>
 <p>Spawns the connection actor's inbox-drain (<code>run</code>) alongside the reader loop,
 and guarantees the broker sees a <code>Detach</code> when the connection ends — so a
 Will fires on an abnormal (cancelled) close.  Pass <em>tap</em> for decoupled tap
-dispatch or <em>app_handlers</em> for inline dispatch (see :mod:<code>blackbull.mqtt.tap</code>).</p>
+dispatch or <em>app_handlers</em> for inline dispatch (see <a class="autorefs autorefs-internal" href="../tap/#blackbull.mqtt.tap"><code>blackbull.mqtt.tap</code></a>).</p>
 
 
     </div>

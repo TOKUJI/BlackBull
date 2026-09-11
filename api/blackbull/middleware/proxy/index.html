@@ -3073,34 +3073,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../cache/" class="md-nav__link">
         
   
@@ -5466,6 +5438,18 @@
 <a href="#blackbull.middleware.proxy" class="headerlink" title="Permanent link">&para;</a></h2>
 
     <div class="doc doc-contents first">
+
+        <p>Recovering the real client from behind a reverse proxy.</p>
+<p>Once a proxy sits in front of the server the TCP peer <em>is</em> the proxy, and every
+request appears to come from it.
+<a class="autorefs autorefs-internal" href="#blackbull.middleware.proxy.TrustedProxy"><code>TrustedProxy</code></a> restores the client
+address, scheme and mount prefix from the headers the proxy set — but only when
+the peer that set them is one you named as trusted, since any client can send
+those headers itself.</p>
+<p>Nothing here is honoured off the wire by default: the parser ignores
+<code>X-Forwarded-Prefix</code>, and client and scheme keep whatever the socket
+reported, until this middleware decides the hop is trustworthy.</p>
+<p>See <code>docs/deployment/behind-reverse-proxy.md</code> for the deployment shape.</p>
 
 
 

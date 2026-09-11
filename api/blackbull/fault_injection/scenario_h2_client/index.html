@@ -3335,34 +3335,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -5842,29 +5814,69 @@
     <div class="doc doc-contents first">
 
         <p>Programmable HTTP/2 <strong>client-side</strong> scenario model.</p>
-<p>A :class:<code>ScenarioH2Client</code> is a sequence of typed <em>steps</em> that
-:meth:<code>blackbull.client.http2.HTTP2Client.execute_scenario</code> walks in order
+<p>A <a class="autorefs autorefs-internal" title="ScenarioH2Client
+
+
+  
+      dataclass
+  " href="#blackbull.fault_injection.scenario_h2_client.ScenarioH2Client"><code>ScenarioH2Client</code></a> is a sequence of typed <em>steps</em> that
+<a class="autorefs autorefs-internal" title="execute_scenario(scenario)
+
+  
+      async
+  " href="../../client/http2/#blackbull.client.http2.HTTP2Client.execute_scenario"><code>blackbull.client.http2.HTTP2Client.execute_scenario</code></a> walks in order
 against a live connection.  This is the client-side half of the HTTP/2
 toolkit: a programmable client that drives a target <em>server</em> through
 deliberate misbehaviour — a preface that never arrives, a header block
 opened and abandoned, a Rapid Reset burst, a window never opened.</p>
-<p>Its twin is :mod:<code>blackbull.fault_injection.scenario_h1</code>, the client-side
+<p>Its twin is <a class="autorefs autorefs-internal" href="../scenario_h1/#blackbull.fault_injection.scenario_h1"><code>blackbull.fault_injection.scenario_h1</code></a>, the client-side
 vocabulary one protocol over, and this module takes that twin's names
-wherever the two mean the same thing: :class:<code>SendRawBytes</code>,
-:class:<code>ReadResponse</code>, :class:<code>Sleep</code>, :class:<code>Abort</code>, and the fields of
-:class:<code>ScenarioH2ClientResult</code>.  That matters more than it looks: a
-vocabulary written from the <em>protocol</em> rather than from its twin drifts
-away from it, and the drift is found by someone asking rather than by
-reading the code.</p>
-<p>Two steps have no HTTP/1.1 counterpart, and both earn it:</p>
+wherever the two mean the same thing: <a class="autorefs autorefs-internal" title="SendRawBytes
+
+
+  
+      dataclass
+  " href="#blackbull.fault_injection.scenario_h2_client.SendRawBytes"><code>SendRawBytes</code></a>,
+<a class="autorefs autorefs-internal" title="ReadResponse
+
+
+  
+      dataclass
+  " href="#blackbull.fault_injection.scenario_h2_client.ReadResponse"><code>ReadResponse</code></a>, <a class="autorefs autorefs-internal" title="Sleep
+
+
+  
+      dataclass
+  " href="#blackbull.fault_injection.scenario_h2_client.Sleep"><code>Sleep</code></a>, <a class="autorefs autorefs-internal" title="Abort
+
+
+  
+      dataclass
+  " href="#blackbull.fault_injection.scenario_h2_client.Abort"><code>Abort</code></a>, and the fields of
+<a class="autorefs autorefs-internal" title="ScenarioH2ClientResult
+
+
+  
+      dataclass
+  " href="#blackbull.fault_injection.scenario_h2_client.ScenarioH2ClientResult"><code>ScenarioH2ClientResult</code></a>.</p>
+<p>Two steps have no HTTP/1.1 counterpart:</p>
 <ul>
-<li>:class:<code>SendPreface</code> — HTTP/1.1 has no connection preface.</li>
-<li>:class:<code>SendFrame</code> — HTTP/2 is framed where HTTP/1.1 is a byte stream, so
+<li><a class="autorefs autorefs-internal" title="SendPreface
+
+
+  
+      dataclass
+  " href="#blackbull.fault_injection.scenario_h2_client.SendPreface"><code>SendPreface</code></a> — HTTP/1.1 has no connection preface.</li>
+<li><a class="autorefs autorefs-internal" title="SendFrame
+
+
+  
+      dataclass
+  " href="#blackbull.fault_injection.scenario_h2_client.SendFrame"><code>SendFrame</code></a> — HTTP/2 is framed where HTTP/1.1 is a byte stream, so
   the typed step builds a frame rather than a blob.</li>
 </ul>
-<p>As on the server side, the bytes are assembled here rather than by the
-production send path: a breaker that shares the production serialiser
-cannot emit a fault that serialiser has.</p>
+<p>The bytes are assembled here and not by the production send path;
+<code>docs/guide/fault_injection.md</code> says why.</p>
 
 
 
@@ -5958,7 +5970,12 @@ cannot emit a fault that serialiser has.</p>
         <p>Read one frame and record whether it matched.</p>
 <p>A <strong>guard</strong>, not a filter: nothing is skipped and the executor moves
 on either way.  Twin of
-:class:<code>~blackbull.fault_injection.scenario_h2.ExpectClientFrame</code>.</p>
+<a class="autorefs autorefs-internal" title="ExpectClientFrame
+
+
+  
+      dataclass
+  " href="../scenario_h2/#blackbull.fault_injection.scenario_h2.ExpectClientFrame"><code>ExpectClientFrame</code></a>.</p>
 
 
 
@@ -6009,13 +6026,9 @@ on either way.  Twin of
 
 
         <p>Shut down the sending direction only (FIN), keep reading.</p>
-<p>Neither :class:<code>Abort</code> nor a full close says this.  <code>Abort</code> sends RST,
-which discards whatever is buffered and leaves nothing to read; a full
-close ends both directions at once.  A half-close is the ordinary end of
-a non-keep-alive exchange — "I have finished sending, I am still waiting
-for your answer" — and it is a distinct code path on the peer.</p>
-<p><strong>Not terminal</strong>: later steps still run, because continuing to read is
-the whole point.</p>
+<p><strong>Not terminal</strong> — later steps still run, which is the whole point.
+<code>Abort</code> is not a substitute: it sends RST, discarding what is buffered
+and leaving nothing to read.</p>
 
 
 
@@ -6165,9 +6178,14 @@ the whole point.</p>
 
 
 
-        <p>Outcome of one :meth:<code>HTTP2Client.execute_scenario</code> call.</p>
+        <p>Outcome of one <code>HTTP2Client.execute_scenario</code> call.</p>
 <p>Field names come from
-:class:<code>~blackbull.fault_injection.scenario_h1.ScenarioResult</code>, its
+<a class="autorefs autorefs-internal" title="ScenarioResult
+
+
+  
+      dataclass
+  " href="../scenario_h1/#blackbull.fault_injection.scenario_h1.ScenarioResult"><code>ScenarioResult</code></a>, its
 twin, so a harness reporting on one does not need a second spelling for
 the other.</p>
 
@@ -6221,14 +6239,13 @@ the other.</p>
 
         <p>Emit one frame, built here rather than by the production sender.</p>
 <p><code>payload</code> is the frame payload; the 9-byte header is assembled from
-the other fields.  Deliberately low-level: a fault scenario wants to
-set a length that disagrees with the payload, or a flag combination the
-typed frame classes refuse, and a step that went through
-<code>FrameFactory</code> could not.</p>
+the other fields.  Low-level on purpose: a length that disagrees with
+the payload, or a flag combination the typed frame classes refuse, is
+unreachable through <code>FrameFactory</code>.</p>
 <p><code>declared_length</code> overrides the header's length field without
 changing the bytes actually written — the direct way to express "the
 peer lied about how much is coming".</p>
-<p><code>frame_type</code> is the raw type byte: a :class:<code>~blackbull.protocol.frame_types.FrameTypes</code>
+<p><code>frame_type</code> is the raw type byte: a <a class="autorefs autorefs-internal" href="../../protocol/frame_types/#blackbull.protocol.frame_types.FrameTypes"><code>FrameTypes</code></a>
 member (which <em>is</em> a one-byte <code>bytes</code>), or an <code>int</code> for a type the
 enum does not name — an unregistered type being itself a fault worth
 staging.</p>
@@ -6282,11 +6299,6 @@ staging.</p>
 
 
         <p>Emit a HEADERS frame, with the header block built for you.</p>
-<p>Added by the 107+108 consistency sweep, which found that every
-header-field fault — a malformed HPACK block, a missing or duplicated
-pseudo-header, a connection-specific header HTTP/2 forbids — could only
-be written as hand-assembled hex.  Three of the sweep's rows moved from
-<em>raw-bytes-only</em> to <em>typed</em> with this step.</p>
 <p><code>pseudo</code> and <code>headers</code> are encoded with HPACK in the order given, so
 a scenario can put <code>:path</code> after a regular field (RFC 9113 §8.3
 forbids it) simply by saying so.  Nothing here validates: the whole
@@ -6345,10 +6357,9 @@ Huffman string that does not decode.  When set, <code>pseudo</code> and
 
 
         <p>Write the client connection preface (RFC 9113 §3.4).</p>
-<p>A step rather than a scenario flag, unlike <code>ScenarioH2.send_preface</code>
-on the server side: a <em>client</em> scenario's whole point may be to delay
-the preface, split it, or never send it, and a boolean cannot say
-"after 30 seconds".</p>
+<p>A step, not the boolean <code>ScenarioH2.send_preface</code> the server side
+has: delaying or splitting the preface is the fault, and a flag cannot
+say "after 30 seconds".</p>
 
 
 
@@ -6552,7 +6563,12 @@ with that delay.</p>
         <p>Read frames until one satisfies <code>match</code>, or the timeout wins.</p>
 <p>A <strong>filter</strong>: non-matching frames are read, counted in
 <code>wait_skipped</code>, and passed over.  Twin of
-:class:<code>~blackbull.fault_injection.scenario_h2.WaitForClientFrame</code>.</p>
+<a class="autorefs autorefs-internal" title="WaitForClientFrame
+
+
+  
+      dataclass
+  " href="../scenario_h2/#blackbull.fault_injection.scenario_h2.WaitForClientFrame"><code>WaitForClientFrame</code></a>.</p>
 <p>This is what makes an HTTP/2 client scenario able to observe a
 <em>verdict</em>.  A single <code>ReadResponse</code> cannot: the first frame any
 correct server sends is its handshake SETTINGS, so a GOAWAY or
@@ -6603,8 +6619,8 @@ written against one server.</p>
 
         <p>PEP 562 — warn when the deprecated spelling is actually used.</p>
 <p>A module-level assignment would alias silently; going through
-<code>__getattr__</code> means a reader who never touches <code>SendRawBytes</code> never
-sees a warning, and one who does gets it at their own call site.</p>
+<code>__getattr__</code> means only a caller who reaches for <code>SendBytes</code> is
+warned, and is warned at their own call site.</p>
 
 
     </div>
@@ -6623,10 +6639,9 @@ sees a warning, and one who does gets it at their own call site.</p>
     <div class="doc doc-contents ">
 
         <p>Assemble one frame's wire bytes from <em>step</em>.</p>
-<p>Here rather than in <code>FrameBase.save()</code> on purpose — the same rule the
-fault servers follow.  It is also what makes <code>declared_length</code>
-possible: a header whose length disagrees with the payload is exactly
-the fault, and a serialiser that computed the length could not say it.</p>
+<p>Here and not in <code>FrameBase.save()</code>, which is what makes
+<code>declared_length</code> possible: a serialiser that computed the length
+could not state one that disagrees with the payload.</p>
 
 
     </div>
@@ -6667,7 +6682,12 @@ produce.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Parse JSON Lines back to a :class:<code>ScenarioH2Client</code>.</p>
+        <p>Parse JSON Lines back to a <a class="autorefs autorefs-internal" title="ScenarioH2Client
+
+
+  
+      dataclass
+  " href="#blackbull.fault_injection.scenario_h2_client.ScenarioH2Client"><code>ScenarioH2Client</code></a>.</p>
 
 
     </div>

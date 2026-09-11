@@ -3306,34 +3306,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../middleware/cache/" class="md-nav__link">
         
   
@@ -5785,6 +5757,18 @@
 
     <div class="doc doc-contents first">
 
+        <p>Where an actor's internal message becomes an application-facing event.</p>
+<p>BlackBull has two event levels, and they do not meet by accident.  Level A is
+actor-to-actor traffic that application code cannot subscribe to; Level B is
+what <code>@app.on</code> and <code>@app.intercept</code> see.
+<a class="autorefs autorefs-internal" href="#blackbull.event_aggregator.EventAggregator"><code>EventAggregator</code></a> is the single
+seam between them: an actor calls the <code>on_*</code> method for what happened, and
+the aggregator decides the Level B event's name and detail shape.</p>
+<p>That indirection is why the detail dict a listener receives is stable across
+transports — an HTTP/1.1 request, an HTTP/2 stream and an external ASGI host
+reach the same method here and produce the same keys.</p>
+<p><code>docs/guide/events.md</code> lists the events and what each detail carries.</p>
+
 
 
 
@@ -6094,9 +6078,14 @@ the compat lane).</p>
     <div class="doc doc-contents ">
 
         <p>Fire Level B <code>request_disconnected</code>.</p>
-<p><em>conn</em> is the native :class:<code>~blackbull.connection.Connection</code> on the
+<p><em>conn</em> is the native <a class="autorefs autorefs-internal" title="Connection
+
+
+  
+      dataclass
+  " href="../connection/#blackbull.connection.Connection"><code>Connection</code></a> on the
 self-hosted path, or an ASGI scope dict only on the <code>BB_FORCE_ASGI_SCOPE</code>
-/ external compat lane — :func:<code>_request_fields</code> reads either.</p>
+/ external compat lane — <code>_request_fields</code> reads either.</p>
 
 
     </div>

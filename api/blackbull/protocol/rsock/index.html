@@ -3071,34 +3071,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -5555,6 +5527,27 @@
 
     <div class="doc doc-contents first">
 
+        <p>Bound, listening sockets for the server to accept on.</p>
+<p>Everything here hands back sockets already through <code>bind()</code> and <code>listen()</code>
+— the caller passes them to the event loop and never binds again.  A bind that
+fails is reported as <code>None</code> (or an absence from the returned list) rather
+than raised, so check what you got back.  Which function to call depends on
+where the socket comes from:</p>
+<ul>
+<li><a class="autorefs autorefs-internal" title="create_dual_stack_sockets(port, backlog=_DEFAULT_BACKLOG, reuseport=False, sndbuf=0, rcvbuf=0, keepalive=True, user_timeout_ms=0, host=None)" href="#blackbull.protocol.rsock.create_dual_stack_sockets"><code>create_dual_stack_sockets</code></a>
+  for a TCP port, one socket per family so both stacks are reached portably.</li>
+<li><a class="autorefs autorefs-internal" title="create_unix_socket(path, backlog=_DEFAULT_BACKLOG, sndbuf=0, rcvbuf=0, mode=432)" href="#blackbull.protocol.rsock.create_unix_socket"><code>create_unix_socket</code></a> for an
+  <code>AF_UNIX</code> path.</li>
+<li><a class="autorefs autorefs-internal" title="adopt_listening_fd(fd)" href="#blackbull.protocol.rsock.adopt_listening_fd"><code>adopt_listening_fd</code></a> when a
+  supervisor bound it — systemd socket activation, or <code>--bind fd://N</code>.</li>
+<li><a class="autorefs autorefs-internal" title="adopt_inherited_sockets()" href="#blackbull.protocol.rsock.adopt_inherited_sockets"><code>adopt_inherited_sockets</code></a>
+  when the master re-exec'd itself and passed its own listeners across.</li>
+</ul>
+<p>The last two return sockets that are <em>already</em> listening; binding them again
+is an error.  <code>SO_REUSEPORT</code> is how several workers share one port, and the
+module constant <code>REUSEPORT_SUPPORTED</code> says whether this host offers it.</p>
+<p>See <code>docs/deployment/unix-and-fd.md</code> for the deployment shapes these serve.</p>
+
 
 
 
@@ -5586,7 +5579,7 @@
 
     <div class="doc doc-contents ">
 
-        <p>Build :class:<code>socket.socket</code> objects from fds inherited across exec.</p>
+        <p>Build <code>socket.socket</code> objects from fds inherited across exec.</p>
 <p>Returns <code>None</code> when no inherited fds are advertised (the normal
 cold-start path).  Returns a list of bound, listening sockets when
 the master process has re-exec'd itself for an auto-reload — the
@@ -5613,7 +5606,7 @@ this process do not also try to adopt the same fds.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Build a :class:<code>socket.socket</code> from an already-bound listening fd.</p>
+        <p>Build a <code>socket.socket</code> from an already-bound listening fd.</p>
 <p>Used for systemd socket-activation (<code>--bind fd://N</code>) and any other
 out-of-process socket hand-off where the supervisor binds and listens
 on the user's behalf.</p>
@@ -5681,7 +5674,7 @@ which is what callers expect.</p>
 <p>The <em>host</em> in <em>address</em> determines the address family:
 an IPv6 literal (e.g. <code>'::'</code>) opens an <code>AF_INET6</code> socket;
 anything else opens an <code>AF_INET</code> socket.</p>
-<p>Prefer :func:<code>create_dual_stack_sockets</code> for new code.</p>
+<p>Prefer <a class="autorefs autorefs-internal" title="create_dual_stack_sockets(port, backlog=_DEFAULT_BACKLOG, reuseport=False, sndbuf=0, rcvbuf=0, keepalive=True, user_timeout_ms=0, host=None)" href="#blackbull.protocol.rsock.create_dual_stack_sockets"><code>create_dual_stack_sockets</code></a> for new code.</p>
 
 
     </div>

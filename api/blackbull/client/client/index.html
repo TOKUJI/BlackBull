@@ -3148,34 +3148,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -5468,12 +5440,6 @@
     <div class="doc doc-contents first">
 
         <p>ALPN-dispatching front door.</p>
-<p><code>Client</code> opens a TCP/TLS connection, inspects the negotiated ALPN
-protocol, and hands off to <code>HTTP2Client</code> (when the server advertises
-<code>h2</code>) or <code>HTTP1Client</code> (otherwise).</p>
-<p>WebSocket is intentionally <strong>not</strong> part of ALPN dispatch — it is an
-HTTP/1.1 upgrade and the caller picks it explicitly via
-:class:<code>blackbull.client.WebSocketClient</code>.</p>
 
 
 
@@ -5509,15 +5475,12 @@ HTTP/1.1 upgrade and the caller picks it explicitly via
 
 
 
-        <p>ALPN-negotiating client.</p>
-<p>Picks <code>HTTP2Client</code> if the server advertises <code>h2</code>, else <code>HTTP1Client</code>.
-With <code>ssl=None</code> (the default), no ALPN is performed and HTTP/1.1 is used
-— h2c (HTTP/2 over plaintext) is supported by <code>HTTP2Client</code> directly,
-but the dispatcher only triggers it when ALPN selects <code>h2</code>.</p>
+        <p>ALPN-negotiating client: <code>HTTP2Client</code> on <code>h2</code>, else <code>HTTP1Client</code>.</p>
+<p>With <code>ssl=None</code> (the default) there is no ALPN to read, so the answer is
+always HTTP/1.1.  WebSocket is never dispatched to; name its client.</p>
 <p>Use as an async context manager::</p>
 <pre><code>async with Client('localhost', 8000) as c:
     res = await c.request(HTTPMethod.GET, '/')
-    # `c` is an HTTP1Client when ssl=None, or whichever the ALPN handshake chose.
 </code></pre>
 
 

@@ -3073,34 +3073,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../cache/" class="md-nav__link">
         
   
@@ -3236,6 +3208,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="CORS">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.middleware.cors.CORS.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
         
@@ -5425,6 +5414,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="CORS">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.middleware.cors.CORS.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
       </ul>
@@ -5466,6 +5472,14 @@
 <a href="#blackbull.middleware.cors" class="headerlink" title="Permanent link">&para;</a></h2>
 
     <div class="doc doc-contents first">
+
+        <p>Cross-Origin Resource Sharing.</p>
+<p><a class="autorefs autorefs-internal" href="#blackbull.middleware.cors.CORS"><code>CORS</code></a> answers preflight <code>OPTIONS</code> requests
+itself and attaches the headers a browser needs before it will hand a
+cross-origin response to page script.  A request with no <code>Origin</code>, or an
+<code>Origin</code> the configuration does not allow, passes through untouched — this
+middleware never refuses a request, because the enforcement happens in the
+browser.</p>
 
 
 
@@ -5647,6 +5661,28 @@ app.use(CORS(
 
 
 
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.middleware.cors.CORS.__init__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="fm">__init__</span><span class="p">(</span><span class="n">allow_origins</span><span class="o">=</span><span class="s1">'*'</span><span class="p">,</span> <span class="n">allow_methods</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">allow_headers</span><span class="o">=</span><span class="s1">'*'</span><span class="p">,</span> <span class="n">allow_credentials</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">expose_headers</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">max_age</span><span class="o">=</span><span class="mi">600</span><span class="p">)</span></code>
+
+<a href="#blackbull.middleware.cors.CORS.__init__" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Build the middleware.</p>
+<p><code>allow_credentials=True</code> cannot be combined with
+<code>allow_origins=['*']</code>: the pair raises <code>ValueError</code>.  A wildcard
+origin with credentials is what the CORS specification forbids, not
+something this middleware chooses to refuse.</p>
+
+
+    </div>
+
+</div>
 
 
 

@@ -3071,34 +3071,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../middleware/cache/" class="md-nav__link">
         
   
@@ -5939,7 +5911,7 @@ await send(Response(b'data', status=HTTPStatus.NOT_FOUND))
     <div class="doc doc-contents ">
 
         <p>Drive this response as an ASGI app: emit <code>start</code> then <code>body</code>.</p>
-<p>Mirrors :class:<code>StreamingResponse</code> so every BlackBull response type
+<p>Mirrors <a class="autorefs autorefs-internal" href="#blackbull.response.StreamingResponse"><code>StreamingResponse</code></a> so every BlackBull response type
 shares one protocol — <code>await response(conn, receive, send)</code> —
 whether returned from a simplified handler, invoked explicitly by a
 full-form handler, or normalised by <code>_wrap_send_native</code>.  Keeping the
@@ -5964,9 +5936,9 @@ for turning a Response into ASGI events.</p>
 
         <p>Convert this response to the unified native message (one send).</p>
 <p>The native-path serialiser: a complete <code>Response</code> becomes a single
-:class:<code>~blackbull.native.NativeResponse</code> carrying status, headers,
+<a class="autorefs autorefs-internal" href="../native/#blackbull.native.NativeResponse"><code>NativeResponse</code></a> carrying status, headers,
 and body — one object, one <code>send</code>.  Symmetric with
-:meth:<code>NativeResponse.to_asgi</code> (the boundary conversion); streaming
+<a class="autorefs autorefs-internal" title="to_asgi()" href="../native/#blackbull.native.NativeResponse.to_asgi"><code>NativeResponse.to_asgi</code></a> (the boundary conversion); streaming
 response types drive themselves and are not converted here.</p>
 
 
@@ -6096,7 +6068,7 @@ async def handler(conn, receive, send):
 
         <p>Handler-facing send adapter: every accepted shape → NativeResponse.</p>
 <p><strong>Every</strong> accepted shape becomes a
-:class:<code>~blackbull.native.NativeResponse</code>, so everything above the route
+<a class="autorefs autorefs-internal" href="../native/#blackbull.native.NativeResponse"><code>NativeResponse</code></a>, so everything above the route
 handler — route-header injection, middleware, access log, sender —
 observes one representation on the H1 path.  The handler boundary and
 <code>as_middleware</code>'s <code>call_next</code> both wrap through here, so global and

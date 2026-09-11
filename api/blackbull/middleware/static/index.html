@@ -3073,34 +3073,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../cache/" class="md-nav__link">
         
   
@@ -5501,6 +5473,17 @@
 
     <div class="doc doc-contents first">
 
+        <p>Serving files off the filesystem.</p>
+<p><a class="autorefs autorefs-internal" href="#blackbull.middleware.static.StaticFiles"><code>StaticFiles</code></a> is the whole public
+surface: conditional requests, byte ranges, precompressed siblings and the
+optional in-memory cache all live behind it.  <code>docs/guide/static-files.md</code>
+is where to read about when to turn each of those on.</p>
+<p>Importing this module has one effect beyond defining that class: it registers
+<code>.woff</code>, <code>.woff2</code>, <code>.webp</code>, <code>.avif</code> and <code>.wasm</code> with the standard
+<code>mimetypes</code> module, which slim container images often lack.  The
+registration is process-wide and benefits every caller of
+<code>mimetypes.guess_type</code>, not only this middleware.</p>
+
 
 
 
@@ -5534,6 +5517,30 @@
     <div class="doc doc-contents ">
 
 
+
+        <p>Serve files from one directory, as route middleware or on its own.</p>
+<p><code>app.static(url_prefix, root_dir)</code> attaches it to a route; called with
+three arguments instead of four it is a plain ASGI app that can be mounted
+anywhere.  The difference shows up on a miss: with a <code>call_next</code> the
+request continues down the chain, and without one it is answered 404.</p>
+<p>Only <code>GET</code> and <code>HEAD</code> are served.  A resolved path outside the root is
+a 400, checked after symlinks are followed, so a link pointing out of the
+tree does not escape it.  Under <code>BLACKBULL_ENV=production</code> nothing is
+served at all — a production deployment is expected to have a proxy or CDN
+in front, and two things serving the same files is the problem being
+avoided.</p>
+<p>What a hit produces depends on the request and on what is on disk.  ETag
+and Last-Modified are emitted unless <code>conditional</code> is off, and a matching
+<code>If-None-Match</code> / <code>If-Modified-Since</code> gets a 304 without the body being
+read.  A <code>Range</code> request gets a 206, or a 416 when the range is
+unsatisfiable.  A precompressed sibling (<code>app.js.br</code>, <code>.zst</code>, <code>.gz</code>)
+is served in place of the original when the client accepts that encoding
+and the request is not a range request; those responses carry
+<code>Vary: Accept-Encoding</code>.  Files larger than four megabytes stream in
+chunks rather than being read whole, so peak memory does not follow file
+size.</p>
+<p><code>docs/guide/static-files.md</code> covers the choices this leaves open — the
+opt-in cache in particular, and why it is off by default.</p>
 
 
 
@@ -5574,18 +5581,11 @@ served that file from inside the directory if it exists.  Left off, a
 request that resolves to a directory is not served at all; the
 <code>blackbull serve</code> CLI turns it on to match <code>python -m
 http.server</code>'s directory-index behaviour.</p>
-<p><code>cache</code> (default <code>False</code>): when <code>True</code>, file bodies up to
-<code>_CACHE_MAX_BYTES_PER_FILE</code> are held in an in-memory
-<code>OrderedDict</code> (capped at <code>_CACHE_MAX_ENTRIES</code>), and the
-per-request <code>stat()</code> syscall is throttled by
-<code>_STAT_TTL_S</code>.  When <code>False</code> (the default), every request
-does a fresh <code>stat()</code> and reads the body from disk — matching
-the behaviour of Starlette / FastAPI / Flask static serving and
-the requirement HttpArena's standard-mode rules place on static
-profiles ("read files from disk on every request, no in-memory
-caching").  Set <code>cache=True</code> only for standalone deployments
-where BlackBull terminates static traffic directly (i.e. no
-nginx / CDN in front).</p>
+<p><code>cache</code> (default <code>False</code>): when <code>True</code>, small file bodies are
+held in a bounded in-memory <code>OrderedDict</code> and the <code>stat()</code>
+syscall is throttled.  When <code>False</code>, every request stats and
+reads afresh.  Turn it on only where BlackBull terminates static
+traffic itself, with no nginx or CDN in front.</p>
 <p><code>conditional</code> (default <code>True</code>): emit <code>ETag</code> + <code>Last-Modified</code>
 validators and honour <code>If-None-Match</code> / <code>If-Modified-Since</code> with a
 304.  Set <code>False</code> to suppress validators (e.g. the <code>blackbull

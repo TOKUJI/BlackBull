@@ -3280,34 +3280,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../api/blackbull/middleware/cache/" class="md-nav__link">
         
   
@@ -6232,14 +6204,16 @@ the fault they stage; what ends those is your server's own deadline.</p>
 <p>Two locks ensure the deliberate-misbehaviour code path is unreachable
 from a production process:</p>
 <ol>
-<li><code>BB_PRODUCTION=1</code> in the environment causes <code>H2FaultServer</code>'s
-   constructor to raise <code>H2FaultServerError</code>.</li>
+<li><code>BB_PRODUCTION=1</code> (or <code>BLACKBULL_ENV=production</code>) in the environment
+   causes the constructor of <code>H2FaultServer</code> and of <code>H1FaultServer</code> to
+   raise.</li>
 <li>Binding to a non-localhost interface raises unless
    <code>allow_remote=True</code> is passed.  The misbehaviour mode is for
    local-loop tests.</li>
 </ol>
-<p>The HTTP/1.1 client-side scenario is benign by construction (it is a
-client, not a server-side code path) and carries no equivalent lock.</p>
+<p>Both locks are on both fault <em>servers</em>.  The two client-side scenario
+models are benign by construction — they are clients, not a server-side
+code path — and carry no equivalent lock.</p>
 <h2 id="examples">Examples<a class="headerlink" href="#examples" title="Permanent link">&para;</a></h2>
 <p>One walkthrough ships with the framework and covers the whole grid:</p>
 <p><a href="https://github.com/TOKUJI/BlackBull/blob/master/examples/fault_injection.py"><code>examples/fault_injection.py</code></a></p>

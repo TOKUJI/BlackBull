@@ -3071,34 +3071,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -5611,13 +5583,13 @@
 </li>
 <li>
 <p><strong>Per-connection state</strong>: hold the streaming inflate/deflate state plus
-   the <code>*_no_context_takeover</code> flags so :class:<code>WebSocketRecipient</code> can
-   decompress inbound messages and :class:<code>WebSocketSender</code> can compress
+   the <code>*_no_context_takeover</code> flags so <code>WebSocketRecipient</code> can
+   decompress inbound messages and <code>WebSocketSender</code> can compress
    outbound ones.</p>
 </li>
 </ol>
-<p>The actual wire-level use of RSV1 happens in :mod:<code>ws_codec</code> and
-:mod:<code>recipient</code>; this module just owns the policy + state.</p>
+<p>The actual wire-level use of RSV1 happens in <a class="autorefs autorefs-internal" title="blackbull.server.ws_codec" href="../ws_codec/#blackbull.server.ws_codec"><code>ws_codec</code></a> and
+<a class="autorefs autorefs-internal" title="blackbull.server.recipient" href="../recipient/#blackbull.server.recipient"><code>recipient</code></a>; this module just owns the policy + state.</p>
 
 
 
@@ -5748,7 +5720,7 @@ without ever being built.  Asking for <code>max_length + 1</code> is what
 makes "exactly at the bound" and "one byte over" distinguishable
 in a single call — zlib stops at the byte it was given, so a
 return of exactly <code>max_length</code> bytes is ambiguous on its own.</p>
-<p>Raises :class:<code>MessageTooLarge</code> when the peer's message inflates
+<p>Raises <a class="autorefs autorefs-internal" href="../ws_codec/#blackbull.server.ws_codec.MessageTooLarge"><code>MessageTooLarge</code></a> when the peer's message inflates
 past the bound.  <code>unconsumed_tail</code> is the other half of that
 check: zlib stops early when it hits the limit, so leftover input
 means there was more to come even if the output landed on the
@@ -5783,7 +5755,7 @@ boundary.</p>
 
 
         <p>Streaming compressor for outbound permessage-deflate messages.</p>
-<p>Symmetric to :class:<code>InboundDecompressor</code>: the <code>no_context_takeover</code> flag
+<p>Symmetric to <a class="autorefs autorefs-internal" href="#blackbull.server.permessage_deflate.InboundDecompressor"><code>InboundDecompressor</code></a>: the <code>no_context_takeover</code> flag
 that matters here is <code>server_no_context_takeover</code> (we are the server),
 deciding whether to reset the deflater between messages.</p>
 
@@ -5849,7 +5821,12 @@ deciding whether to reset the deflater between messages.</p>
         <p>Decide whether to accept permessage-deflate based on the client's offer.</p>
 <p>Returns <code>(params, response_value)</code> where:</p>
 <ul>
-<li><code>params</code> is the :class:<code>DeflateParams</code> to install on the connection
+<li><code>params</code> is the <a class="autorefs autorefs-internal" title="DeflateParams
+
+
+  
+      dataclass
+  " href="#blackbull.server.permessage_deflate.DeflateParams"><code>DeflateParams</code></a> to install on the connection
   (or <code>None</code> to decline).</li>
 <li><code>response_value</code> is the bytes to put after
   <code>Sec-WebSocket-Extensions:</code> in the 101 response (or <code>None</code> when

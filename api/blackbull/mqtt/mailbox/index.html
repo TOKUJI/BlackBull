@@ -3071,34 +3071,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -3562,6 +3534,17 @@
   
     <nav class="md-nav" aria-label="mailbox">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.mailbox.Mailbox" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mailbox
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#blackbull.mqtt.mailbox.MailboxClosed" class="md-nav__link">
@@ -5428,6 +5411,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.mqtt.mailbox.Mailbox" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mailbox
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.mqtt.mailbox.MailboxClosed" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5512,6 +5506,75 @@ room for a sentinel. No task is created for a blocked admission.</p>
 
 
 
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.mqtt.mailbox.Mailbox" class="doc doc-heading">
+            <code>Mailbox</code>
+
+
+<a href="#blackbull.mqtt.mailbox.Mailbox" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="asyncio.Queue">Queue</span>[<a class="autorefs autorefs-internal" title="Message
+
+
+  
+      dataclass
+   (blackbull.actor.Message)" href="../../actor/#blackbull.actor.Message">Message</a>]</code></p>
+
+
+
+        <p>An actor inbox bounded by both message count and queued wire bytes.</p>
+<p><em>maxsize</em> and <em>max_bytes</em> must both be positive; <em>size_of</em> charges each
+message its wire size, and <code>queued_bytes</code> is the running total of what
+is waiting.  A message is admitted only if it fits under both budgets, so
+a mailbox can be full on bytes while nearly empty on count.</p>
+<p>Which of the three refusals you get says what to do about it.
+<code>MailboxTooLarge</code> means the message cannot fit <em>any</em> state of this
+mailbox — draining will not help, and the sender is misconfigured against
+the byte budget.  <code>asyncio.QueueFull</code> from <code>put_nowait</code> means it would
+fit an empty mailbox but not this one; <code>put</code> waits for that room instead
+of raising.  <code>MailboxClosed</code> means the owner has stopped, from
+<code>put</code>/<code>put_nowait</code> at once and from <code>get</code> once what was queued has
+been handed out.</p>
+<p><code>close</code> wakes every waiter without needing room for a sentinel; pass
+<code>discard=True</code> to drop what is still queued rather than let it drain.</p>
+<p><code>docs/about/mqtt-actor-design.md</code> covers which side of an MQTT
+connection waits on space and which side refuses instead.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
 
 <div class="doc doc-object doc-class">
 

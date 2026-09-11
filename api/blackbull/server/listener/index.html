@@ -3071,34 +3071,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -5556,7 +5528,12 @@
     <div class="doc doc-contents first">
 
         <p>The sockets a deployment wants, said once each.</p>
-<p>A :class:<code>Listener</code> is one listening socket: where it is, what speaks there,
+<p>A <a class="autorefs autorefs-internal" title="Listener
+
+
+  
+      dataclass
+  " href="#blackbull.server.listener.Listener"><code>Listener</code></a> is one listening socket: where it is, what speaks there,
 whether TLS terminates there, and how many workers own it.  <code>Server</code> binds a
 list of them, so no port is privileged over another and HTTP is a value rather
 than the absence of a raw handler.</p>
@@ -5597,7 +5574,7 @@ detection, and TLS h1 versus h2 is ALPN, both already handled downstream.</p>
 
     <div class="doc doc-contents ">
 
-        <p>What :attr:<code>Listener.speaks</code> names for the detecting HTTP stack.</p>
+        <p>What <code>Listener.speaks</code> names for the detecting HTTP stack.</p>
 
     </div>
 

@@ -3185,34 +3185,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../middleware/cache/" class="md-nav__link">
         
   
@@ -5543,6 +5515,28 @@
 
     <div class="doc doc-contents first">
 
+        <p>The two base types every BlackBull actor is built from.</p>
+<p><a class="autorefs autorefs-internal" href="#blackbull.actor.Actor"><code>Actor</code></a> owns a queue and a loop that drains it;
+<a class="autorefs autorefs-internal" title="Message
+
+
+  
+      dataclass
+  " href="#blackbull.actor.Message"><code>Message</code></a> is what goes in the queue.  Together they
+are the whole mechanism: state lives inside one actor and is mutated only by
+that actor's own loop, so any coordination between two of them is a message,
+never a shared object or a lock.</p>
+<p>To write one, subclass <code>Actor</code>, override <code>_handle</code>, and declare each
+message a subclass of <code>Message</code>.  A subclass is a plain dataclass, so its
+fields are ordinary dataclass fields; <code>sender</code> is inherited and left out of
+equality, which lets two messages with the same payload compare equal
+regardless of who sent them.</p>
+<p>An actor's inbox does not exist until first use and is created on the loop
+that touches it, so an <code>Actor</code> may be constructed before the event loop is
+running.</p>
+<p><code>docs/about/internals.md</code> has the actor hierarchy the server assembles from
+these — which actor owns a connection, a stream, a request.</p>
+
 
 
 
@@ -5580,11 +5574,15 @@
         <p>Base class for all BlackBull Actors.</p>
 <p>Each Actor owns an <code>asyncio.Queue</code> inbox and is expected to run as an
 <code>asyncio.Task</code> started by its Supervisor.  Actors communicate
-exclusively via :meth:<code>send</code>; they never share mutable state.</p>
-<p>Subclasses must override :meth:<code>_handle</code>.</p>
+exclusively via <a class="autorefs autorefs-internal" title="send(msg)
+
+  
+      async
+  " href="#blackbull.actor.Actor.send"><code>send</code></a>; they never share mutable state.</p>
+<p>Subclasses must override <code>_handle</code>.</p>
 <p>Pass <code>inbox_maxsize</code> to bound the inbox (<code>0</code> — the default — is
-unbounded, matching :class:<code>asyncio.Queue</code>).  A bounded inbox lets an actor
-apply back-pressure or, with :meth:<code>asyncio.Queue.put_nowait</code>, an explicit
+unbounded, matching <code>asyncio.Queue</code>).  A bounded inbox lets an actor
+apply back-pressure or, with <code>asyncio.Queue.put_nowait</code>, an explicit
 overflow policy.</p>
 
 

@@ -13,7 +13,7 @@
         <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/middleware/cache/">
       
       
-        <link rel="prev" href="../base/">
+        <link rel="prev" href="../">
       
       
         <link rel="next" href="../compression/">
@@ -3070,34 +3070,6 @@
                 
   
   
-  
-  
-    <li class="md-nav__item">
-      <a href="../base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
     
   
   
@@ -5468,43 +5440,20 @@
     <div class="doc doc-contents first">
 
         <p>Response caching middleware (RFC 9111 — HTTP Caching).</p>
-<p>Caches successful GET/HEAD responses in a per-worker, in-memory LRU.
-Subsequent matching requests are served directly from the cache without
-running the handler.  Supports:</p>
-<ul>
-<li><strong>TTL</strong> — server-side <code>max_age</code> (default 300 s), overridable by the
-  response's <code>Cache-Control: max-age=…</code> directive (or, when present,
-  <code>s-maxage=…</code> which takes precedence for shared caches).</li>
-<li><strong>ETag</strong> — auto-generated as <code>W/"&lt;sha256-prefix&gt;"</code> over the response
-  body when the application does not supply one.  The client's
-  <code>If-None-Match</code> header is honoured: a match yields a 304 Not
-  Modified with no body, regardless of the cached entry's TTL.</li>
-<li><strong>Cache-Control respect</strong> — responses carrying <code>no-store</code>, <code>private</code>,
-  or <code>no-cache</code> are passed through and not stored.  Requests carrying
-  <code>no-store</code> skip the cache lookup too.</li>
-<li><strong>Authorization header</strong> — by default, requests with an
-  <code>Authorization</code> header are NOT served from cache and their
-  responses are NOT stored (RFC 9111 §3.5).  Override with
-  <code>cache_authenticated=True</code>.</li>
-</ul>
-<p>Variant-aware: the response <code>Vary</code> header is honoured (RFC 9110
-§12.5.5).  When a stored response carries e.g. <code>Vary: Accept-Encoding</code>,
-the varied request-header values are folded into the cache key so a
-brotli variant is never replayed to an <code>identity</code> client.  A response
-with <code>Vary: *</code> is passed through and not stored.</p>
-<p>What it doesn't do (yet):</p>
-<ul>
-<li>No server-side invalidation API.  Restart the worker (or wait for
-  TTL) to clear.</li>
-<li>No cross-worker sharing.  The cache is per-process — each worker has
-  its own.  Documented limitation.</li>
-</ul>
-<p>The store is keyed by <code>(method, origin, path, query_string)</code> → a per-URL bucket
-that holds the response's <code>Vary</code> field names alongside its variant entries
-(one per distinct set of <code>(field, request-value)</code> pairs named by <code>Vary</code>).
-Keeping the vary fields inside the bucket means they can never be evicted
-independently of the entries they key (which the earlier two-LRU design
-allowed — orphaning the entries).</p>
+<p>Caches successful GET/HEAD responses in a per-worker, in-memory LRU and
+replays them without running the handler.  It honours <code>Cache-Control</code> in
+both directions, generates a weak ETag when the handler supplies none,
+answers <code>If-None-Match</code> with a 304, keys variants by <code>Vary</code>, and
+refuses anything carrying <code>Authorization</code> unless
+<code>cache_authenticated=True</code> (RFC 9111 §3.5).  <code>docs/guide/middleware.md</code>
+states each of those rules and tabulates the constructor.</p>
+<p>Two things it does not do: there is no invalidation API (restart the
+worker, or wait out the TTL), and nothing is shared between workers.</p>
+<p>The store is keyed by <code>(method, origin, path, query_string)</code> → a per-URL
+bucket holding the response's <code>Vary</code> field names alongside its variant
+entries.  The field names live <em>inside</em> the bucket so they cannot be
+evicted independently of the entries they key, which is what a second LRU
+beside the first would allow.</p>
 <p>Usage::</p>
 <pre><code>from blackbull.middleware import Cache
 

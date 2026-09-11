@@ -3071,34 +3071,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../middleware/cache/" class="md-nav__link">
         
   
@@ -5432,6 +5404,17 @@
 <a href="#blackbull.protocol" class="headerlink" title="Permanent link">&para;</a></h2>
 
     <div class="doc doc-contents first">
+
+        <p>Wire-format machinery: HTTP/2 frames, structured fields, listening sockets.</p>
+<p>Four things share this package, and they are independent of one another.
+<a class="autorefs autorefs-internal" title="blackbull.protocol.frame_types" href="frame_types/#blackbull.protocol.frame_types"><code>frame_types</code></a>, <code>frame</code> and
+<code>hpack_fastpath</code> are the HTTP/2 frame hierarchy and its codec; <code>stream</code>
+holds per-stream state; <code>structured_fields</code> is the RFC 9651 parser the
+header layer uses, which HTTP/1.1 reaches for just as much;
+<a class="autorefs autorefs-internal" title="blackbull.protocol.rsock" href="rsock/#blackbull.protocol.rsock"><code>rsock</code></a> creates the bound, listening sockets a
+server is started on.</p>
+<p>Nothing is re-exported here — import the submodule you want, and pay for
+only that one.</p>
 
 
 

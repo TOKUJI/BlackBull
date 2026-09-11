@@ -3071,34 +3071,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -5866,7 +5838,12 @@ record waited in the logging queue.  Idempotent; returns <code>self</code>.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Build directly from a :class:<code>~blackbull.connection.Connection</code>
+        <p>Build directly from a <a class="autorefs autorefs-internal" title="Connection
+
+
+  
+      dataclass
+  " href="../../connection/#blackbull.connection.Connection"><code>Connection</code></a>
 so the self-hosted actor never materializes the ASGI
 scope just to record the access line.</p>
 
@@ -5933,7 +5910,7 @@ tracing is disabled, so callers don't need to guard themselves.</p>
     <div class="doc doc-contents ">
 
         <p>Finish a request's record and emit it.  A no-op when there is none.</p>
-<p>Paired with :func:<code>open_record</code>, so a caller that opened a record does not
+<p>Paired with <a class="autorefs autorefs-internal" title="open_record(conn, aggregator, loop_start=None)" href="#blackbull.server.access_log.open_record"><code>open_record</code></a>, so a caller that opened a record does not
 also have to remember the final <code>mark</code> or repeat the <code>is not None</code>
 guard at every dispatch exit.</p>
 
@@ -5955,10 +5932,10 @@ guard at every dispatch exit.</p>
 
         <p>Finish a WebSocket session's record and emit it.  A no-op when there is
 none — a session that never opened a record (no consumer, per
-:func:<code>request_record_needed</code>) must not crash its close path.</p>
+<a class="autorefs autorefs-internal" title="request_record_needed(aggregator)" href="#blackbull.server.access_log.request_record_needed"><code>request_record_needed</code></a>) must not crash its close path.</p>
 <p>A session is not a request dispatch: it has no <code>dispatch_done</code> phase,
 and what it reports instead is the close code the peer or the server
-ended on.  Separate from :func:<code>close_record</code> for that reason, so neither
+ended on.  Separate from <a class="autorefs autorefs-internal" title="close_record(record)" href="#blackbull.server.access_log.close_record"><code>close_record</code></a> for that reason, so neither
 protocol actor has to know which terminal field belongs to which shape.</p>
 
 
@@ -5978,12 +5955,11 @@ protocol actor has to know which terminal field belongs to which shape.</p>
     <div class="doc doc-contents ">
 
         <p>Whether the disconnect-detecting receive wrapper is observed.</p>
-<p>The wrapper (a per-request closure) exists to (a) emit <code>request_disconnected</code>
-and (b) <code>mark_disconnected</code> so <code>request_completed</code> can suppress itself on
-a dropped request. With neither listener present nothing observes either
-effect, so the actor dispatches the raw <code>receive</code> directly and saves the
-closure. Body-level disconnect detection (<code>conn.body()</code> →
-<code>ClientDisconnected</code>) is independent of this wrapper and unaffected.</p>
+<p>The wrapper emits <code>request_disconnected</code> and marks the request so
+<code>request_completed</code> can suppress itself on a dropped one.  With neither
+listener present nothing observes either effect and the actor dispatches
+the raw <code>receive</code> instead.  Body-level disconnect detection
+(<code>conn.body()</code> → <code>ClientDisconnected</code>) does not go through it.</p>
 
 
     </div>
@@ -6002,28 +5978,19 @@ closure. Body-level disconnect detection (<code>conn.body()</code> →
     <div class="doc doc-contents ">
 
         <p>Emit <em>record</em> on the access logger if INFO is enabled.</p>
-<p>The isEnabledFor gate matters: <code>record.as_extra()</code> is evaluated
-before <code>logger.info</code> decides to discard the call.  Profiling at
--R 5000 with BB_ACCESS_LOG=0 showed these calls still costing ~1.2%
-of CPU.  Peers (uvicorn / granian / daphne) skip the work entirely
-when access logging is disabled; gating here matches that behaviour.</p>
-<p>The <em>record itself</em> is the message (it is self-formatting via <code>__str__</code>),
-so the expensive <code>format()</code> string build is deferred to the logging
-listener thread instead of running on the event loop.  <code>finalize()</code>
-snapshots the duration first so that deferred format still reports the
-request's real duration, not duration + queue latency.  The structured
-<code>extra</code> fields stay eager — they are the documented public access-log
-API, held by <code>tests/integration/test_access_log.py</code>.</p>
-<p>When async logging is active <em>and</em> the access logger has not been customised,
-the record is enqueued directly onto the listener queue via
-:func:<code>~blackbull.logger.enqueue_access_log</code>, which bypasses
-<code>logging.Logger._log</code> — ~93% of the loop-side emit cost lives in that
-stdlib machinery.  The fast path is skipped (and the standard synchronous
-<code>logger.info</code> path used) when async logging is off <em>or</em> the user has
-attached their own handlers/filters to <code>blackbull.access</code> — those would be
-bypassed by a direct enqueue, so we defer to the full path to keep the
-documented "extend the access log via a custom handler/filter" pattern
-working (see docs/guide/logging.md).</p>
+<p>The <code>isEnabledFor</code> gate matters because <code>record.as_extra()</code> is
+evaluated before <code>logger.info</code> decides to discard the call — measured at
+~1.2% of CPU under <code>-R 5000</code> with <code>BB_ACCESS_LOG=0</code>.</p>
+<p>The record is its own message (self-formatting via <code>__str__</code>), so the
+<code>format()</code> build runs on the logging listener thread; <code>finalize()</code>
+snapshots the duration first, so a deferred format still reports the
+request's real duration rather than duration + queue latency.  The
+structured <code>extra</code> fields stay eager — they are the documented public
+access-log API, held by <code>tests/integration/test_access_log.py</code>.</p>
+<p>A default access logger is enqueued directly, skipping the stdlib
+<code>logging.Logger._log</code> machinery that is ~93% of the loop-side emit cost.
+User handlers or filters on <code>blackbull.access</code> would be bypassed by that,
+so their presence takes the standard <code>logger.info</code> path instead.</p>
 
 
     </div>
@@ -6071,16 +6038,18 @@ That sharing is the contract <code>BlackBull._dispatch</code> relies on to sourc
 
     <div class="doc doc-contents ">
 
-        <p>Whether the per-request :class:<code>AccessLogRecord</code> will be consumed.</p>
-<p>The record (and the <code>conn.state['access_log']</code> write it forces, plus the
-<code>emit</code> at request end) exists only for three consumers: the access log
-(<code>blackbull.access</code> at INFO), phase tracing, and the <code>request_completed</code>
-event's wire fields. When none is active the record is dead weight on every
-request — a per-request allocation the v0.60.0 Connection graph makes more
-costly under concurrency (extra live objects for the cyclic GC to scan) —
-so the actor skips building it. Consumers already tolerate its absence: the
-sender guards <code>if self._log_record is not None</code> and <code>request_completed</code>
-reads <code>conn.state.get('access_log')</code> with <code>'-'</code>/<code>0</code> placeholders.</p>
+        <p>Whether the per-request <a class="autorefs autorefs-internal" title="AccessLogRecord
+
+
+  
+      dataclass
+  " href="#blackbull.server.access_log.AccessLogRecord"><code>AccessLogRecord</code></a> will be consumed.</p>
+<p>Three consumers, and no others: the access log (<code>blackbull.access</code> at
+INFO), phase tracing, and the <code>request_completed</code> event's wire fields.
+With none of them active the actor skips building the record at all, so
+every consumer must tolerate its absence — <code>conn.state['access_log']</code>
+reads back as <code>None</code>, and <code>request_completed</code> substitutes <code>'-'</code>/<code>0</code>
+placeholders.</p>
 
 
     </div>
@@ -6099,11 +6068,9 @@ reads <code>conn.state.get('access_log')</code> with <code>'-'</code>/<code>0</c
     <div class="doc doc-contents ">
 
         <p>Build and publish a record unconditionally.</p>
-<p>For the paths whose consumer analysis is not the per-request one:
-a WebSocket session's record spans the connection and carries
-<code>close_code</code>, and a pushed response needs one for the sender's inline
-capture.  Both want a record regardless of what
-:func:<code>request_record_needed</code> says about ordinary requests.</p>
+<p>For the two paths <a class="autorefs autorefs-internal" title="request_record_needed(aggregator)" href="#blackbull.server.access_log.request_record_needed"><code>request_record_needed</code></a> cannot answer for: a
+WebSocket session's record spans the connection and carries <code>close_code</code>,
+and a pushed response needs one for the sender's inline capture.</p>
 
 
     </div>

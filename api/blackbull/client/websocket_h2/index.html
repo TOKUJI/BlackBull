@@ -3226,34 +3226,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -5624,17 +5596,17 @@
     <div class="doc doc-contents first">
 
         <p>WebSocket-over-HTTP/2 client (RFC 8441).</p>
-<p>Mirrors the HTTP/1.1 :class:<code>blackbull.client.WebSocketClient</code> /
-:class:<code>blackbull.client.WebSocketSession</code> pair: the <em>Client</em> owns the
+<p>Mirrors the HTTP/1.1 <a class="autorefs autorefs-internal" title="WebSocketClient" href="../#blackbull.client.WebSocketClient"><code>blackbull.client.WebSocketClient</code></a> /
+<a class="autorefs autorefs-internal" title="WebSocketSession" href="../#blackbull.client.WebSocketSession"><code>blackbull.client.WebSocketSession</code></a> pair: the <em>Client</em> owns the
 TLS + HTTP/2 transport and runs the Extended CONNECT handshake; the
 <em>Session</em> owns the post-handshake WebSocket frame loop on one H2 stream.</p>
 <p>Flow control: outgoing WS frames are dispatched as
 <code>http.response.body</code> events through the per-stream
-:class:<code>blackbull.server.sender.HTTP2Sender</code>, which splits payloads
+<a class="autorefs autorefs-internal" title="HTTP2Sender" href="../../server/sender/#blackbull.server.sender.HTTP2Sender"><code>blackbull.server.sender.HTTP2Sender</code></a>, which splits payloads
 across multiple DATA frames at <code>max_frame_size</code> and respects send
 windows.  Incoming DATA payloads are tracked per stream + at the
 connection level; <code>WINDOW_UPDATE</code> frames are emitted when received
-bytes accumulate past :data:<code>_WINDOW_UPDATE_THRESHOLD</code>.</p>
+bytes accumulate past <code>_WINDOW_UPDATE_THRESHOLD</code>.</p>
 <p>Example::</p>
 <pre><code>import ssl
 from blackbull.client import WebSocketH2Client
@@ -5693,7 +5665,11 @@ default-on.</p>
         <p>Async WebSocket-over-HTTP/2 client (RFC 8441).</p>
 <p>Owns the TLS + HTTP/2 connection; performs the Extended CONNECT
 handshake (<code>:method=CONNECT</code>, <code>:protocol=websocket</code>) on
-:meth:<code>connect</code> and returns a :class:<code>WebSocketH2Session</code> for
+<a class="autorefs autorefs-internal" title="connect(path='/', *, response_timeout=5.0)
+
+  
+      async
+  " href="#blackbull.client.websocket_h2.WebSocketH2Client.connect"><code>connect</code></a> and returns a <a class="autorefs autorefs-internal" href="#blackbull.client.websocket_h2.WebSocketH2Session"><code>WebSocketH2Session</code></a> for
 post-handshake frame I/O.</p>
 <p>The peer server must advertise <code>SETTINGS_ENABLE_CONNECT_PROTOCOL=1</code>;
 BlackBull's server does so when <code>BB_H2_ENABLE_WEBSOCKET=1</code>.</p>
@@ -5733,7 +5709,11 @@ BlackBull's server does so when <code>BB_H2_ENABLE_WEBSOCKET=1</code>.</p>
     <div class="doc doc-contents ">
 
         <p><code>:status</code> from the last Extended CONNECT response, or <code>None</code>
-if :meth:<code>connect</code> has not run yet.</p>
+if <a class="autorefs autorefs-internal" title="connect(path='/', *, response_timeout=5.0)
+
+  
+      async
+  " href="#blackbull.client.websocket_h2.WebSocketH2Client.connect"><code>connect</code></a> has not run yet.</p>
 
     </div>
 
@@ -5762,7 +5742,7 @@ connection one dynamic table in each direction.  Reading the context
 from the connection is what keeps the CONNECT's header block and
 every other block on the wire encoded against the same table the
 peer's single decoder is building.</p>
-<p>Raises :class:<code>RuntimeError</code> before <code>__aenter__</code>: the context comes
+<p>Raises <code>RuntimeError</code> before <code>__aenter__</code>: the context comes
 into being with the connection, so there is none to hand out yet.</p>
 
     </div>
@@ -5788,9 +5768,9 @@ into being with the connection, so there is none to hand out yet.</p>
     <div class="doc doc-contents ">
 
         <p>Run the RFC 8441 Extended CONNECT handshake on this connection.</p>
-<p>Returns a :class:<code>WebSocketH2Session</code> bound to the new H2 stream.
-Raises :class:<code>HandshakeError</code> on a non-200 <code>:status</code> response
-or :class:<code>TimeoutError</code> if no response arrives within
+<p>Returns a <a class="autorefs autorefs-internal" href="#blackbull.client.websocket_h2.WebSocketH2Session"><code>WebSocketH2Session</code></a> bound to the new H2 stream.
+Raises <a class="autorefs autorefs-internal" href="../exceptions/#blackbull.client.exceptions.HandshakeError"><code>HandshakeError</code></a> on a non-200 <code>:status</code> response
+or <code>TimeoutError</code> if no response arrives within
 <em>response_timeout</em>.</p>
 
 
@@ -5824,7 +5804,7 @@ or :class:<code>TimeoutError</code> if no response arrives within
         <p>Frame-level WebSocket session over one HTTP/2 stream.</p>
 <p>Outgoing frames are masked (RFC 6455 §5.1) and wrapped in H2 DATA
 frames.  Incoming DATA payloads feed the shared
-<code>WebSocketRecipient</code> stack through :class:<code>_H2QueueReader</code> —
+<code>WebSocketRecipient</code> stack through <code>_H2QueueReader</code> —
 fragmentation reassembly, FIN/RSV/mask
 validation, UTF-8 checks, and auto-PONG all come from the same
 codec the server and the H1 client use.</p>
@@ -5869,7 +5849,11 @@ codec the server and the H1 client use.</p>
 frame), await the peer's echoed CLOSE bounded by <em>drain_timeout</em>,
 and stop the recipient's reader task.  Idempotent.</p>
 <p>Same close discipline as the H1
-client's :meth:<code>WebSocketSession.close</code>.</p>
+client's <a class="autorefs autorefs-internal" title="close(code=_CLOSE_CODE_NORMAL, *, drain_timeout=5.0)
+
+  
+      async
+  " href="../websocket/#blackbull.client.websocket.WebSocketSession.close"><code>WebSocketSession.close</code></a>.</p>
 
 
     </div>
@@ -5894,9 +5878,9 @@ client's :meth:<code>WebSocketSession.close</code>.</p>
         <p>Return <code>(opcode, payload)</code> for the next complete WebSocket
 <strong>message</strong> on this stream (fragmented messages are reassembled;
 PING is answered transparently).</p>
-<p>Raises :class:<code>TimeoutError</code> if no message arrives within
+<p>Raises <code>TimeoutError</code> if no message arrives within
 <em>timeout</em>.  Returned opcodes match
-:class:<code>blackbull.server.ws_codec.WSOpcode</code>; a peer CLOSE (or
+<a class="autorefs autorefs-internal" title="WSOpcode" href="../../server/ws_codec/#blackbull.server.ws_codec.WSOpcode"><code>blackbull.server.ws_codec.WSOpcode</code></a>; a peer CLOSE (or
 stream end) is surfaced as <code>(WSOpcode.CLOSE, 2-byte code)</code>.</p>
 
 

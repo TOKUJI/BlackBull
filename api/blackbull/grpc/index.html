@@ -3037,6 +3037,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.grpc.GrpcStatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GrpcStatus
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.grpc.decode_messages" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3349,34 +3360,6 @@
     
   
     blackbull.middleware
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
   
 
     
@@ -5837,6 +5820,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.grpc.GrpcStatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GrpcStatus
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.grpc.decode_messages" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5913,11 +5907,15 @@
 <p>gRPC runs on HTTP/2; BlackBull already ships a complete HTTP/2 implementation,
 so this package adds only the gRPC-specific pieces:</p>
 <ul>
-<li>:mod:<code>~blackbull.grpc.codec</code> — Length-Prefixed-Message framing.</li>
-<li>:mod:<code>~blackbull.grpc.compression</code> — gzip message compression (<code>grpc-encoding</code>).</li>
-<li>:class:<code>~blackbull.grpc.registry.GrpcServiceRegistry</code> — <code>/Service/Method</code> → handler.</li>
-<li>:class:<code>~blackbull.grpc.status.GrpcStatus</code> / :class:<code>GrpcError</code> — canonical codes.</li>
-<li>:func:<code>~blackbull.grpc.asgi.serve_grpc</code> + :class:<code>GrpcContext</code> — the ASGI bridge.</li>
+<li><a class="autorefs autorefs-internal" title="blackbull.grpc.codec" href="codec/#blackbull.grpc.codec"><code>codec</code></a> — Length-Prefixed-Message framing.</li>
+<li><a class="autorefs autorefs-internal" title="blackbull.grpc.compression" href="compression/#blackbull.grpc.compression"><code>compression</code></a> — gzip message compression (<code>grpc-encoding</code>).</li>
+<li><a class="autorefs autorefs-internal" href="registry/#blackbull.grpc.registry.GrpcServiceRegistry"><code>GrpcServiceRegistry</code></a> — <code>/Service/Method</code> → handler.</li>
+<li><a class="autorefs autorefs-internal" href="status/#blackbull.grpc.status.GrpcStatus"><code>GrpcStatus</code></a> / <a class="autorefs autorefs-internal" href="status/#blackbull.grpc.status.GrpcError"><code>GrpcError</code></a> — canonical codes.</li>
+<li><a class="autorefs autorefs-internal" title="serve_grpc(registry, conn, receive, send)
+
+  
+      async
+  " href="asgi/#blackbull.grpc.asgi.serve_grpc"><code>serve_grpc</code></a> + <a class="autorefs autorefs-internal" href="asgi/#blackbull.grpc.asgi.GrpcContext"><code>GrpcContext</code></a> — the ASGI bridge.</li>
 </ul>
 <p>Wire it into an app with <code>app.enable_grpc(registry)</code>; gRPC requests
 (<code>content-type: application/grpc</code>) are then multiplexed onto the same
@@ -5968,9 +5966,16 @@ output, <code>protobuf</code>, or hand-rolled).</p>
 and lets the handler set the outgoing status, a human-readable message,
 leading/trailing metadata, or abort the call outright — the subset of
 grpcio's <code>ServicerContext</code> that a raw-bytes transport can honour.</p>
-<p>The response-start machinery (<code>_send</code> … <code>_started</code>) is bound by
-:func:<code>serve_grpc</code> just before the handler runs; handlers touch it only via
-:meth:<code>send_initial_metadata</code>.</p>
+<p><a class="autorefs autorefs-internal" title="send_initial_metadata(metadata)
+
+  
+      async
+  " href="asgi/#blackbull.grpc.asgi.GrpcContext.send_initial_metadata"><code>send_initial_metadata</code></a> is the only door to the response-start
+machinery <a class="autorefs autorefs-internal" title="serve_grpc(registry, conn, receive, send)
+
+  
+      async
+  " href="asgi/#blackbull.grpc.asgi.serve_grpc"><code>serve_grpc</code></a> binds before the handler runs.</p>
 
 
 
@@ -6004,7 +6009,7 @@ grpcio's <code>ServicerContext</code> that a raw-bytes transport can honour.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Raise :class:<code>GrpcError</code> to end the call with a non-OK status.</p>
+        <p>Raise <a class="autorefs autorefs-internal" href="status/#blackbull.grpc.status.GrpcError"><code>GrpcError</code></a> to end the call with a non-OK status.</p>
 
 
     </div>
@@ -6091,7 +6096,7 @@ before the first response message — grpcio's
 (just before the first message, or with the trailers for an empty
 response).  Calling it flushes them early with <em>metadata</em> attached — used
 to hand the client leading metadata (auth challenges, stream ids) up
-front.  Raises :class:<code>ValueError</code> once the HEADERS have already gone
+front.  Raises <code>ValueError</code> once the HEADERS have already gone
 out (grpcio's "initial metadata no longer allowed").</p>
 
 
@@ -6131,10 +6136,8 @@ finish in time.</p>
 
     <div class="doc doc-contents ">
 
-        <p>The trailing metadata set so far (a copy) — lets helpers compose
-with, rather than clobber, what the handler already set (e.g.
-blackbull-protobuf's <code>abort_with_details</code> appending
-<code>grpc-status-details-bin</code>).</p>
+        <p>The trailing metadata set so far, as a copy — so a helper composes
+with what the handler already set instead of clobbering it.</p>
 
 
     </div>
@@ -6282,18 +6285,11 @@ a non-OK status.  <code>serve_grpc</code> translates it into <code>grpc-status</
 
         <p>Register <em>handler</em> for the fully-qualified method <em>path</em>
 (<code>/package.Service/Method</code> or <code>package.Service/Method</code>).</p>
-<p><em>streaming</em> is the <strong>response</strong> axis — server-streaming (the handler is
-an async generator that yields response messages).  When <code>None</code> (the
-default) it is auto-detected with :func:<code>inspect.isasyncgenfunction</code>;
-pass <code>True</code> to force it for a handler whose async-generator nature is
-hidden behind a wrapper, or <code>False</code> to force a single response.
-Forcing <code>False</code> on an async-generator function is a contradiction and
-raises <code>ValueError</code>.</p>
-<p><em>client_streaming</em> is the <strong>request</strong> axis — the handler takes an async
-iterator of request messages (first parameter <code>request_iter</code> /
-<code>requests</code> / <code>request_iterator</code> / <code>request_stream</code>) instead of a
-single <code>request: bytes</code>.  When <code>None</code> it is auto-detected from that
-first parameter name; pass an explicit bool to override.</p>
+<p>Both streaming axes default to <code>None</code>, meaning auto-detection —
+see <a class="autorefs autorefs-internal" href="registry/#blackbull.grpc.registry.GrpcMethod"><code>GrpcMethod</code></a> for what each axis is.  Pass a bool to
+override it for a handler whose nature a wrapper hides.  Forcing
+<em>streaming</em> <code>False</code> on an async-generator function is a
+contradiction and raises <code>ValueError</code>.</p>
 
 
     </div>
@@ -6333,7 +6329,7 @@ fully-qualified <em>service</em> name (e.g. <code>"helloworld.Greeter"</code>).<
 
         <p>Return the handler for <em>path</em>, or <code>None</code> if unregistered.</p>
 <p>Backwards-compatible accessor (returns just the callable); use
-:meth:<code>lookup_method</code> when the streaming flag is needed.</p>
+<a class="autorefs autorefs-internal" title="lookup_method(path)" href="registry/#blackbull.grpc.registry.GrpcServiceRegistry.lookup_method"><code>lookup_method</code></a> when the streaming flag is needed.</p>
 
 
     </div>
@@ -6351,7 +6347,7 @@ fully-qualified <em>service</em> name (e.g. <code>"helloworld.Greeter"</code>).<
 
     <div class="doc doc-contents ">
 
-        <p>Return the :class:<code>GrpcMethod</code> for <em>path</em>, or <code>None</code> if
+        <p>Return the <a class="autorefs autorefs-internal" href="registry/#blackbull.grpc.registry.GrpcMethod"><code>GrpcMethod</code></a> for <em>path</em>, or <code>None</code> if
 unregistered.</p>
 
 
@@ -6370,7 +6366,7 @@ unregistered.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Decorator form of :meth:<code>add_method</code>.</p>
+        <p>Decorator form of <a class="autorefs autorefs-internal" title="add_method(path, handler, *, streaming=None, client_streaming=None)" href="registry/#blackbull.grpc.registry.GrpcServiceRegistry.add_method"><code>add_method</code></a>.</p>
 
 
     </div>
@@ -6403,6 +6399,59 @@ unregistered.</p>
 
 </div>
 
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.grpc.GrpcStatus" class="doc doc-heading">
+            <code>GrpcStatus</code>
+
+
+<a href="#blackbull.grpc.GrpcStatus" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="enum.IntEnum">IntEnum</span></code></p>
+
+
+
+        <p>The canonical gRPC status codes, as the <code>grpc-status</code> trailer carries
+them.</p>
+<p><code>OK</code> (0) is success; every other member ends the RPC.  Raise one through
+<a class="autorefs autorefs-internal" href="status/#blackbull.grpc.status.GrpcError"><code>GrpcError</code></a> — that is the typed contract
+a handler is checked against, so a bare integer is a caller error rather
+than an unnamed code.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
 
 <div class="doc doc-object doc-function">
 
@@ -6418,7 +6467,7 @@ unregistered.</p>
         <p>Parse <em>data</em> into a list of <code>(compressed, payload)</code> messages.</p>
 <p>A single DATA buffer may contain zero, one, or many framed messages
 (gRPC permits multiple messages per stream and does not align them to
-DATA-frame boundaries).  Raises :class:<code>GrpcDecodeError</code> on a truncated
+DATA-frame boundaries).  Raises <a class="autorefs autorefs-internal" href="codec/#blackbull.grpc.codec.GrpcDecodeError"><code>GrpcDecodeError</code></a> on a truncated
 prefix or a message body shorter than its declared length.</p>
 
 

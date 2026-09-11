@@ -3071,34 +3071,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -5539,8 +5511,8 @@
 matching change it SIGTERMs the workers, marks the listening sockets
 inheritable, and <code>os.execvp</code>\ s itself with the original argv — the
 fresh process adopts the inherited fds and re-forks workers from the
-new code.  See :mod:<code>blackbull.server.reload</code>.</p>
-<p>The worker entry point is :func:<code>blackbull.server.worker.run_worker</code>.
+new code.  See <a class="autorefs autorefs-internal" href="../reload/#blackbull.server.reload"><code>blackbull.server.reload</code></a>.</p>
+<p>The worker entry point is <a class="autorefs autorefs-internal" title="run_worker(app, bound_listeners, ssl_context, worker_id, max_connections, stream_queue_depth=64, ws_queue_depth=_WS_READ_INLINE, disowned=())" href="../worker/#blackbull.server.worker.run_worker"><code>blackbull.server.worker.run_worker</code></a>.
 Each worker runs its own asyncio event loop and its own ASGI lifespan cycle.</p>
 <p>Usage::</p>
 <pre><code>from blackbull.server.multiworker import MultiWorkerServer
@@ -5594,7 +5566,7 @@ ssl_context:
 workers:
     Number of worker processes to maintain.
 max_connections:
-    Per-worker connection limit forwarded to :class:<code>ASGIServer</code>.
+    Per-worker connection limit forwarded to <code>ASGIServer</code>.
 shutdown_timeout:
     Seconds to wait for graceful shutdown before sending SIGKILL.</p>
 
@@ -5633,7 +5605,7 @@ shutdown_timeout:
         <p>Spawn workers and block until a shutdown signal is received.</p>
 <p>When <code>reload</code> is enabled the master also runs a file watcher and
 re-execs itself on any matching change — see
-:mod:<code>blackbull.server.reload</code>.</p>
+<a class="autorefs autorefs-internal" href="../reload/#blackbull.server.reload"><code>blackbull.server.reload</code></a>.</p>
 
 
     </div>

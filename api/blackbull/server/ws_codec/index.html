@@ -3071,34 +3071,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../middleware/cache/" class="md-nav__link">
         
   
@@ -4872,10 +4844,32 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.ws_codec.WSFrameBits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WSFrameBits
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.ws_codec.WSFrameHeader" class="md-nav__link">
     <span class="md-ellipsis">
       
         WSFrameHeader
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.ws_codec.WSOpcode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WSOpcode
       
     </span>
   </a>
@@ -5516,10 +5510,32 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.ws_codec.WSFrameBits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WSFrameBits
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.ws_codec.WSFrameHeader" class="md-nav__link">
     <span class="md-ellipsis">
       
         WSFrameHeader
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.ws_codec.WSOpcode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WSOpcode
       
     </span>
   </a>
@@ -5662,7 +5678,11 @@ module-level functions directly.</p>
 
 
 
-        <p>Raised by :func:<code>read_payload</code> when <em>max_length</em> is set and the
+        <p>Raised by <a class="autorefs autorefs-internal" title="read_payload(reader, masked, length, *, max_length=None)
+
+  
+      async
+  " href="#blackbull.server.ws_codec.read_payload"><code>read_payload</code></a> when <em>max_length</em> is set and the
 declared payload length exceeds it.  The caller is responsible for
 translating this into a WebSocket-level CLOSE (RFC 6455 §7.4.1
 code 1009 MESSAGE_TOO_BIG) — the codec stays protocol-agnostic.</p>
@@ -5714,7 +5734,7 @@ code 1009 MESSAGE_TOO_BIG) — the codec stays protocol-agnostic.</p>
 
 
         <p>Raised when a <em>message</em> outgrows its bound.</p>
-<p>Sibling of :class:<code>FramePayloadTooLarge</code>, one layer up: that one is
+<p>Sibling of <a class="autorefs autorefs-internal" href="#blackbull.server.ws_codec.FramePayloadTooLarge"><code>FramePayloadTooLarge</code></a>, one layer up: that one is
 about a frame on the wire, this one about what the application would
 be handed once fragments are joined and permessage-deflate has
 inflated.  A frame small enough to pass the frame cap can still
@@ -5724,6 +5744,57 @@ CLOSE 1009 (RFC 6455 §7.4.1); the codec stays protocol-agnostic.</p>
 <p><em>produced</em> is what the message had reached when the bound tripped,
 not what it would eventually have been — nothing here ever computes
 the size of a payload it refused to build.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.server.ws_codec.WSFrameBits" class="doc doc-heading">
+            <code>WSFrameBits</code>
+
+
+<a href="#blackbull.server.ws_codec.WSFrameBits" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="enum.IntEnum">IntEnum</span></code></p>
+
+
+
+        <p>Bit masks for the two-byte WebSocket frame header (RFC 6455 §5.2).</p>
+<p>RSV1 marks a message compressed with permessage-deflate, and is set on the
+first frame of it only (RFC 7692 §7).  RSV2 and RSV3 have no negotiated
+meaning, so a peer setting either is a protocol error.</p>
 
 
 
@@ -5777,6 +5848,58 @@ the size of a payload it refused to build.</p>
   <code>WebSocketRecipient</code> raises <code>ValueError</code> on an unmasked client frame.
 - Server → client frames MUST NOT be masked; <code>WebSocketSender</code> never sets
   the mask bit.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.server.ws_codec.WSOpcode" class="doc doc-heading">
+            <code>WSOpcode</code>
+
+
+<a href="#blackbull.server.ws_codec.WSOpcode" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="enum.IntEnum">IntEnum</span></code></p>
+
+
+
+        <p>WebSocket frame opcodes (RFC 6455 §5.2).</p>
+<p><code>CONTINUATION</code>, <code>TEXT</code> and <code>BINARY</code> are data frames and may be
+fragmented across several frames.  <code>CLOSE</code>, <code>PING</code> and <code>PONG</code> are
+control frames: §5.5 caps their payload at 125 bytes and forbids
+fragmenting them, and one may arrive between the fragments of a message.</p>
 
 
 
@@ -5931,7 +6054,7 @@ Raises <code>asyncio.IncompleteReadError</code> on EOF.</p>
 Raises <code>asyncio.IncompleteReadError</code> on EOF.</p>
 <p>When <em>max_length</em> is set and the declared payload size — resolved
 from the 16-bit or 64-bit extended-length field per RFC 6455
-§5.2 — exceeds it, raises :class:<code>FramePayloadTooLarge</code> <em>before</em>
+§5.2 — exceeds it, raises <a class="autorefs autorefs-internal" href="#blackbull.server.ws_codec.FramePayloadTooLarge"><code>FramePayloadTooLarge</code></a> <em>before</em>
 reading any body bytes off the wire.  Defends against
 post-handshake OOM where the peer advertises a 2**63 - 1 payload
 and the server tries to buffer it.</p>

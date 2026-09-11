@@ -3194,34 +3194,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../middleware/base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../../middleware/cache/" class="md-nav__link">
         
   
@@ -5558,13 +5530,14 @@
     <div class="doc doc-contents first">
 
         <p>Four named HTTP/2 misbehaviour scenarios.</p>
-<p>See :mod:<code>blackbull.fault_injection.catalogue</code> for the catalogue
+<p>See <a class="autorefs autorefs-internal" href="../#blackbull.fault_injection.catalogue"><code>blackbull.fault_injection.catalogue</code></a> for the catalogue
 overview and the four spec-grade categories.</p>
-<p>Each builder returns a :class:<code>~blackbull.fault_injection.ScenarioH2</code>.
-The scenarios are deliberately tight: just enough state for the named
-pathology, nothing more.  Real client / proxy / security-research
-suites can stack <code>parametrize</code> over the catalogue to assert
-resilience across all four categories with a few lines of test code.</p>
+<p>Each builder returns a <a class="autorefs autorefs-internal" title="ScenarioH2
+
+
+  
+      dataclass
+  " href="../../#blackbull.fault_injection.ScenarioH2"><code>ScenarioH2</code></a>.</p>
 
 
 

@@ -3073,34 +3073,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../base/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    base
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../cache/" class="md-nav__link">
         
   
@@ -5466,6 +5438,19 @@
 <a href="#blackbull.middleware.compression" class="headerlink" title="Permanent link">&para;</a></h2>
 
     <div class="doc doc-contents first">
+
+        <p>Negotiated response-body compression.</p>
+<p><a class="autorefs autorefs-internal" href="#blackbull.middleware.compression.Compression"><code>Compression</code></a> is the only name
+a caller needs here; the rest of the module is codec detection and the <code>Vary</code>
+bookkeeping that stops a shared cache replaying an encoded body to a client
+that never asked for one.</p>
+<p>brotli and zstandard are optional installs.  Whichever is present joins the
+negotiable set, so the same middleware quietly offers fewer codecs on a smaller
+install rather than failing.  Built from settings, its defaults come from
+<code>BB_COMPRESSION_MIN_SIZE</code>, <code>BB_COMPRESSION_EXECUTOR_THRESHOLD</code>,
+<code>BB_COMPRESSION_MAX_INFLIGHT</code> and <code>BB_BROTLI_QUALITY</code>, all of which
+<code>docs/reference/env-vars.md</code> describes; constructing it yourself takes those
+same four as arguments.</p>
 
 
 
