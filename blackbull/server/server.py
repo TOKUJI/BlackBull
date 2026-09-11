@@ -144,7 +144,7 @@ async def SocketManager(socket_cb_pairs, ssl_context):
     *socket_cb_pairs* is an iterable of ``(sock, protocol_factory)`` — each
     socket is served by its own factory.  The shared HTTP listener and each
     port-bound non-ASGI protocol both come from
-    :meth:`Server.connection_protocol_factory`, differing only in whether a
+    [`Server.connection_protocol_factory`][Server.connection_protocol_factory], differing only in whether a
     binding is pre-committed.
 
     On enter: wraps each socket in ``loop.create_server`` (TCP) or
@@ -204,11 +204,11 @@ def _max_connections_report(resolved: int) -> tuple[str, str]:
 
 class Server:
     """An asyncio socket server that dispatches each connection through the
-    app's :class:`~blackbull.server.protocol_registry.ProtocolRegistry`.
+    app's [`ProtocolRegistry`][blackbull.server.protocol_registry.ProtocolRegistry].
 
     The shared HTTP listener detects HTTP/1.1 vs HTTP/2 (and upgrades to
     WebSocket); port-bound non-ASGI protocols registered via
-    :meth:`BlackBull.raw_handler` get their own listening socket.
+    [`BlackBull.raw_handler`][BlackBull.raw_handler] get their own listening socket.
     When ssl_context or certfile is set, the HTTP listener runs as HTTPS.
 
     ``ASGIServer`` is an alias of this class.
@@ -429,7 +429,7 @@ class Server:
 
     async def _serve_connection(self, reader, writer, *, bound_binding=None,
                                 transport=None):
-        """Wrap the transport and run one :class:`ConnectionActor`.
+        """Wrap the transport and run one ``ConnectionActor``.
 
         *bound_binding* is set for port-bound non-ASGI protocols: the
         connection skips HTTP detection and goes straight to the raw handler.
@@ -616,9 +616,9 @@ class Server:
     def _bind_protocol_sockets(self, _cfg):
         """Bind a listening socket per port-bound non-ASGI protocol.
 
-        Each :class:`RawBinding` registered with a ``port`` gets its own
-        dual-stack socket set, recorded in :attr:`protocol_ports`.  Sockets are
-        bound bare here; :meth:`run` layers TLS onto the listeners whose
+        Each [`RawBinding`][] registered with a ``port`` gets its own
+        dual-stack socket set, recorded in [`protocol_ports`][].  Sockets are
+        bound bare here; [`run`][] layers TLS onto the listeners whose
         binding set ``tls=True``, cleartext otherwise.  These ports get no
         ``SO_REUSEPORT``: a stateful protocol needs a single owning worker.
         """
@@ -770,7 +770,7 @@ class Server:
     async def _drain(self, drain_timeout: float) -> None:
         """Let the connections already being served finish.  Idempotent.
 
-        Called by :meth:`stop`, and again by :meth:`run` on its way out: a
+        Called by [`stop`][], and again by [`run`][] on its way out: a
         drain started from a signal handler is racing its caller's teardown,
         and returning into ``asyncio.run()`` would cancel both the drain and
         the request it is protecting.  Whichever arrives second finds nothing

@@ -3,7 +3,7 @@
 One of these per accepted connection, created before the protocol is known —
 the shared listener detects HTTP/1.1, h2c, and MQTT off the same resident
 bytes, so the buffer belongs to the *connection*, not to any one protocol.
-:class:`BufferReader` presents the :class:`~.recipient.AbstractReader` surface,
+[`BufferReader`][] presents the ``AbstractReader`` surface,
 so the body recipient and the WebSocket/h2c successors work unchanged.
 
 ``docs/about/internals.md`` §Who decides, and who acts argues the split between
@@ -38,14 +38,14 @@ _HIGH_WATER = 128 * 1024
 _LOW_WATER = 32 * 1024
 
 #: Fully-consumed *small* messages a grown buffer must survive before
-#: :meth:`BufferReader._at_boundary` returns it to the floor.  The hysteresis is
+#: [`BufferReader._at_boundary`][BufferReader._at_boundary] returns it to the floor.  The hysteresis is
 #: what lets a connection repeating a large message reuse its allocation
 #: instead of churning grow+shrink per message (F6 follow-up).
 _RELEASE_HYSTERESIS = 4
 
 
 class BufferReader(AbstractReader):
-    """`AbstractReader` over a :class:`ReadBuffer` fed by :class:`ConnectionProtocol`.
+    """`AbstractReader` over a [`ReadBuffer`][] fed by [`ConnectionProtocol`][].
 
     Every method serves from resident bytes first and only parks when it needs
     more, so a pipelined or keep-alive peer's next head usually completes
@@ -53,7 +53,7 @@ class BufferReader(AbstractReader):
     Internals page says why.
 
     Those decisions are deliberately not on
-    :class:`~.recipient.AbstractReader`: two of its three implementations have
+    ``AbstractReader``: two of its three implementations have
     no transport to pause, so promoting the competence to the interface would
     force a no-op onto them.
     """
@@ -128,7 +128,7 @@ class BufferReader(AbstractReader):
         WebSocket frame, or a ``chunked`` chunk whose size the peer chose.
 
         Parking is also the only moment a recv-size demand can be consulted, so
-        a caller that has one writes :attr:`read_offer` around its call.  Not a
+        a caller that has one writes ``read_offer`` around its call.  Not a
         *want* argument here: the readers that park without a size would pay a
         pair of stores to declare nothing, which measured as the header path
         funding what the body path saves.
@@ -276,7 +276,7 @@ class BufferReader(AbstractReader):
     # -- the one-scan header read ------------------------------------------
 
     async def _read_head_unbounded(self) -> bytes:
-        """:meth:`read_head` with no byte budget."""
+        """[`read_head`][] with no byte budget."""
         while True:
             if not self._buf.available:
                 if self._proto.peer_closed:
@@ -296,9 +296,9 @@ class BufferReader(AbstractReader):
             await self.wait_for_data()
 
     async def _read_head_bounded(self, limit: int) -> bytes:
-        """:meth:`read_head` under a byte budget, found in one scan.
+        """[`read_head`][] under a byte budget, found in one scan.
 
-        Contract as documented on :meth:`AbstractReader.read_head` — an idle
+        Contract as documented on [`AbstractReader.read_head`][AbstractReader.read_head] — an idle
         close returns ``b''`` and a truncated one raises with the partial.
         """
         while True:
@@ -336,7 +336,7 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
     The transport half of the receive path: it owns the socket callbacks, the
     callback↔coroutine rendezvous, and the two flow-control calls — but none of
     the judgement about when to make them.  Those belong to
-    :class:`BufferReader`, which is the only object that knows what has been
+    [`BufferReader`][], which is the only object that knows what has been
     asked for; this class executes what it is told.  Its one comparison — the
     byte-level high-water threshold — is a transport fact, not a judgement:
     whether a crossing pauses the peer is the Reader's call.
@@ -351,8 +351,8 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
         self._exc: BaseException | None = None
         # Cleartext until connection_made says otherwise.
         self._half_close_is_honoured = True
-        #: The transport is not reading.  Written only by :meth:`pause_reading`
-        #: / :meth:`resume_reading`; the reader polls it on the consuming path.
+        #: The transport is not reading.  Written only by [`pause_reading`][]
+        #: / [`resume_reading`][]; the reader polls it on the consuming path.
         self.reading_paused = False
         self._drain_waiter: asyncio.Future[None] | None = None
 
@@ -363,7 +363,7 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
         """The transport signalled EOF: the peer will send nothing more.
 
         A fact about the socket, which is why it lives here.  It is **not**
-        the same question as :meth:`BufferReader.at_eof` — bytes already
+        the same question as ``BufferReader.at_eof`` — bytes already
         delivered are still there to be served after the peer has gone, so a
         reader is at EOF only when this is true *and* its buffer is empty.
         One name for both questions made every call site a guess about which
@@ -376,7 +376,7 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
     def connection_made(self, transport) -> None:
         self.transport = transport
         # Whether a half-close can leave the write half open, resolved once —
-        # see :meth:`eof_received`.
+        # see [`eof_received`][].
         self._half_close_is_honoured = (
             transport.get_extra_info('ssl_object') is None)
 
@@ -444,7 +444,7 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
         """Vectored write — the upper branch of the send-path size gate.
 
         Delegated to the transport, never joined here.  A backing object that
-        offers only :meth:`write` serves small responses and fails large ones;
+        offers only ``write`` serves small responses and fails large ones;
         ``docs/about/internals.md`` §Send-path invariant is the obligation.
         """
         if self.transport is not None:
@@ -519,7 +519,7 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
         """Park until the next arrival, EOF, or connection loss.
 
         The bare rendezvous; the decision to wait, and the backpressure release
-        that goes with it, are :meth:`BufferReader.wait_for_data`'s.
+        that goes with it, are [`BufferReader.wait_for_data`][BufferReader.wait_for_data]'s.
 
         One waiter only: a connection is driven by a single actor coroutine, so
         a second concurrent reader is a bug rather than a case to support.

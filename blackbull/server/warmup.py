@@ -11,7 +11,7 @@ storm turns the transient into an ``ECONNREFUSED`` collapse.  The empirical
 tell is that the *second* run of the same process is always clean: warmth, not
 structure, is the differentiator.
 
-Warm-up registered via :meth:`BlackBull.on_warmup` therefore runs here, once,
+Warm-up registered via [`BlackBull.on_warmup`][BlackBull.on_warmup] therefore runs here, once,
 before the listening socket exists:
 
 * **Before bind + fork** (multi-worker): forked workers inherit the warmed heap
@@ -25,10 +25,10 @@ Safety
 ------
 Warm-up is best-effort and must never crash the master: every failure is logged
 and swallowed, degrading to a cold start.  It uses only in-process ASGI drives
-and in-memory (:class:`ssl.MemoryBIO`) handshakes — never a socket, a live
+and in-memory (``ssl.MemoryBIO``) handshakes — never a socket, a live
 connection, or a lingering event loop that a subsequent ``fork()`` could
 inherit (the classic ``preload_app`` hazard).  The temporary loop
-:func:`run_warmup` uses is closed before it returns.
+[`run_warmup`][] uses is closed before it returns.
 """
 import asyncio
 import gc
@@ -73,7 +73,7 @@ def _name(fn) -> str:
 def run_warmup(app, ssl_context=None) -> None:
     """Synchronous pre-fork entry point (called from ``serve`` before bind/fork).
 
-    No-op when *app* registered no :meth:`BlackBull.on_warmup` hooks.  Otherwise
+    No-op when *app* registered no [`BlackBull.on_warmup`][BlackBull.on_warmup] hooks.  Otherwise
     runs the hooks (plus the built-in TLS warm-up when *ssl_context* is set) in a
     **temporary** event loop that is closed before returning, so a subsequent
     ``fork()`` never inherits a live loop.  Ends with ``gc.collect()`` +
@@ -96,7 +96,7 @@ def run_warmup(app, ssl_context=None) -> None:
 async def warmup_inline(app, ssl_context=None) -> None:
     """Async warm-up used by the single-worker path (runs on the serving loop).
 
-    Same behaviour as :func:`run_warmup` minus the temporary-loop management:
+    Same behaviour as [`run_warmup`][] minus the temporary-loop management:
     the single-worker process never forks, so warming on the loop that will go
     on to serve is both correct and cheaper.  Never raises.
     """
@@ -147,7 +147,7 @@ async def warm_tls(ssl_context, *, n: int = _DEFAULT_TLS_N) -> None:
     """Prime the TLS handshake path with *n* in-memory handshakes (no socket).
 
     Drives full handshakes between the server *ssl_context* and a throwaway
-    client context over paired :class:`ssl.MemoryBIO` buffers, faulting in the
+    client context over paired ``ssl.MemoryBIO`` buffers, faulting in the
     OpenSSL / RSA / ALPN code the TLS benchmark profiles hit cold on run-1.
     Self-contained: creates no listener and no file descriptor.
     """

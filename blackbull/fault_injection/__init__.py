@@ -2,19 +2,19 @@
 
 A single namespace for the two directions of protocol fault injection:
 
-* **Client-side, HTTP/1.1** — :mod:`blackbull.fault_injection.scenario_h1`
+* **Client-side, HTTP/1.1** — [`blackbull.fault_injection.scenario_h1`][blackbull.fault_injection.scenario_h1]
   ships a programmable client (driven through
-  :meth:`blackbull.client.HTTP1Client.execute_scenario`) that emits
+  [`blackbull.client.HTTP1Client.execute_scenario`][blackbull.client.HTTP1Client.execute_scenario]) that emits
   deliberately bad HTTP/1.1 against a target *server*: trickled bytes,
   partial headers, mid-request idle, abrupt RST.
-  :mod:`blackbull.fault_injection.oracle_h1` adds a differential oracle
+  [`blackbull.fault_injection.oracle_h1`][blackbull.fault_injection.oracle_h1] adds a differential oracle
   for comparing two HTTP/1.1 implementations under the same scenario.
 
-* **Server-side, HTTP/2** — :mod:`blackbull.fault_injection.h2_server`
+* **Server-side, HTTP/2** — [`blackbull.fault_injection.h2_server`][blackbull.fault_injection.h2_server]
   ships a programmable server that emits deliberately bad HTTP/2 toward
   a target *client*: half-closed streams, exhausted windows, illegal
   SETTINGS, weird frame sequences.  A canned-misbehaviour catalogue
-  lives at :mod:`blackbull.fault_injection.catalogue`.
+  lives at [`blackbull.fault_injection.catalogue`][blackbull.fault_injection.catalogue].
 
 This module is an opt-in testing instrument.  Both fault servers refuse to
 start when ``BLACKBULL_ENV=production`` or ``BB_PRODUCTION`` is set, and

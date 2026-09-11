@@ -125,7 +125,7 @@ def __getattr__(name):
     """Lazy, deprecated attribute access — ``blackbull.Request``.
 
     ``Request`` was the opt-in HTTP context object; it has been merged
-    into :class:`Connection` and the name demoted to an alias. Resolving it
+    into [`Connection`][] and the name demoted to an alias. Resolving it
     through the module ``__getattr__`` (PEP 562) means the ``DeprecationWarning``
     fires only if code actually touches ``Request`` — importing the package
     stays warning-free — and the alias still evaluates to ``Connection`` so

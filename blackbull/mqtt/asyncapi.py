@@ -1,4 +1,4 @@
-"""AsyncAPI 3.0 documentation for the MQTT broker — :class:`AsyncAPIExtension`.
+"""AsyncAPI 3.0 documentation for the MQTT broker — [`AsyncAPIExtension`][].
 
 OpenAPI has no vocabulary for topics, QoS, retain, or the publish/subscribe
 direction, so the broker is invisible to it.  **AsyncAPI**
@@ -6,7 +6,7 @@ direction, so the broker is invisible to it.  **AsyncAPI**
 extension emits an AsyncAPI 3.0 document for the taps registered via
 ``MQTTExtension.on_message``, served as ``/openapi.json`` is.
 
-It is a normal :class:`~blackbull.extension.Extension`, parallel to
+It is a normal [`Extension`][blackbull.extension.Extension], parallel to
 ``OpenAPIExtension`` and coexisting with it::
 
     app = BlackBull()

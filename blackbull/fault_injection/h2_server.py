@@ -1,8 +1,8 @@
 """Programmable HTTP/2 server that emits deliberate misbehaviour.
 
-:class:`H2FaultServer` listens on ``127.0.0.1:<random>``, accepts one
+[`H2FaultServer`][] listens on ``127.0.0.1:<random>``, accepts one
 HTTP/2 (h2c plaintext) connection at a time, and walks a
-:class:`~blackbull.fault_injection.scenario_h2.ScenarioH2` against it.
+[`ScenarioH2`][blackbull.fault_injection.scenario_h2.ScenarioH2] against it.
 It is designed for client-library / proxy / security-research test
 suites that need to exercise a client against a server that
 **deliberately** does the wrong thing — half-closed streams, exhausted
@@ -124,11 +124,11 @@ def _encode_frame_header(length: int, type_byte: bytes, flags: int,
 
 
 def serialize_frame(frame) -> bytes:
-    """Convert a :class:`FrameBase` instance to wire bytes.
+    """Convert a ``FrameBase`` instance to wire bytes.
 
     Restricted to the frame types this server emits: SETTINGS,
     WINDOW_UPDATE, RST_STREAM, GOAWAY, PING, DATA.  Anything else
-    must go through :class:`SendRawBytes` instead.
+    must go through [`SendRawBytes`][] instead.
     """
     name = type(frame).__name__
     flags = int(getattr(frame, 'flags', 0) or 0)
@@ -189,7 +189,7 @@ def serialize_frame(frame) -> bytes:
 
 
 class H2FaultServer:
-    """Programmable HTTP/2 server emitting a :class:`ScenarioH2`.
+    """Programmable HTTP/2 server emitting a [`ScenarioH2`][].
 
     Async context manager: enter to bind + start accepting, exit to
     shut down.  ``self.url`` is set after enter and gives the URL a
@@ -198,7 +198,7 @@ class H2FaultServer:
     Parameters
     ----------
     scenario:
-        The :class:`ScenarioH2` the executor walks for each accepted
+        The [`ScenarioH2`][] the executor walks for each accepted
         connection.
     host:
         Bind host.  Defaults to ``'127.0.0.1'`` — binding to a
@@ -209,7 +209,7 @@ class H2FaultServer:
     allow_remote:
         Bypass the localhost-only safety check.  Off by default.
     ssl_context:
-        Optional :class:`ssl.SSLContext`.  When provided, the server
+        Optional ``ssl.SSLContext``.  When provided, the server
         terminates TLS and ``self.url`` is ``https://...``; ALPN must
         offer ``h2`` so clients negotiating H/2 over TLS (httpx, curl
         ``--http2``, …) connect cleanly.  When ``None`` (default), the
@@ -222,7 +222,7 @@ class H2FaultServer:
         ``http://<host>:<port>/`` after start, or ``https://...`` when
         a TLS context is provided.
     last_result:
-        :class:`ScenarioH2Result` from the most recently completed
+        [`ScenarioH2Result`][] from the most recently completed
         connection.  ``None`` before any client has connected.
     """
 

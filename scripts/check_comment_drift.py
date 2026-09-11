@@ -119,6 +119,15 @@ RULES: list[Rule] = [
                     re.I),
          _is_timeline_scope,
          'a decision date; state what was decided, and git log owns when'),
+    # mkdocstrings does not resolve Sphinx roles: they render as the literal
+    # text ":meth:" with no link, and nothing fails, so they accumulate.  The
+    # native form is shorter and a target that does not resolve fails
+    # ``just docs-build`` with a file and line.
+    Rule(re.compile(r':(?:meth|func|class|attr|data|mod|obj|exc):`'),
+         _is_shipped_source,
+         'a Sphinx role, which renders as literal text and links to nothing; '
+         'write [`name`][] instead, or [`name`][full.dotted.target] when the '
+         'target is elsewhere'),
     Rule(re.compile(r'\bBLA-(?:A-)?\d+'),
          lambda p: _is_shipped_source(p) or _is_public_doc(p),
          'a private tracker id in shipped source or a public document.  State '

@@ -15,15 +15,15 @@ framework code.
 
 Surface:
 
-- :func:`log_cap_hit` — the single emission point.  Call from any
+- [`log_cap_hit`][] — the single emission point.  Call from any
   cap-rejection site with the cap name, requested value, and limit.
-- :class:`CapHitCounter` — per-connection state for the "first hit
+- [`CapHitCounter`][] — per-connection state for the "first hit
   per cap logs in full; later hits silently counted; summary on
-  :meth:`~CapHitCounter.flush`" rate-limit pattern.
-- :meth:`CapHitCounter.bind` — context manager that installs the
-  counter on a :class:`~contextvars.ContextVar`.  All
-  :func:`log_cap_hit` calls inside the ``with`` block (including
-  those in child tasks created via :class:`asyncio.TaskGroup`, which
+  [`flush`][CapHitCounter.flush]" rate-limit pattern.
+- [`CapHitCounter.bind`][CapHitCounter.bind] — context manager that installs the
+  counter on a ``ContextVar``.  All
+  [`log_cap_hit`][] calls inside the ``with`` block (including
+  those in child tasks created via ``asyncio.TaskGroup``, which
   inherit context) automatically pick up the counter.  Zero
   plumbing through actor constructors.
 
@@ -35,7 +35,7 @@ clients behind a NAT.
 
 The counter also runs two dirty-flush triggers so a connection
 torn down by RST (or any abnormal path that skips graceful
-:meth:`flush`) still emits a summary for any suppressed hits:
+``flush``) still emits a summary for any suppressed hits:
 
 - **Threshold trigger**: after ``flush_threshold`` suppressed hits
   on any single cap, emit an intermediate summary and reset counts.
@@ -65,7 +65,7 @@ def _gen_connection_id() -> str:
     """Cheap opaque per-connection id (fallback when the accept path did
     not supply one).
 
-    Delegates to :func:`~blackbull.server.conn_id.new_connection_id` —
+    Delegates to [`new_connection_id`][blackbull.server.conn_id.new_connection_id] —
     process-prefix + monotonic sequence, collision-free within a process.
     The previous 4-byte ``os.urandom`` form was NOT collision-resistant at
     churn: 32-bit random ids collide with ~1.2 % probability at 10 k
@@ -80,14 +80,14 @@ class CapHitCounter:
     """Per-connection state for cap-hit rate limiting.
 
     Construct one instance per connection (typically in
-    :class:`~blackbull.server.connection_actor.ConnectionActor`),
+    [`ConnectionActor`][blackbull.server.connection_actor.ConnectionActor]),
     install it as the ambient counter for the duration of the
-    connection via the :meth:`bind` context manager, and call
-    :meth:`flush` once when the connection closes so a single
+    connection via the [`bind`][] context manager, and call
+    ``flush`` once when the connection closes so a single
     summary record reports any suppressed hits.
 
     Two dirty-flush triggers fire intermediate summaries even when
-    :meth:`flush` is never called (e.g. RST close that skips the
+    ``flush`` is never called (e.g. RST close that skips the
     graceful path):
 
     - ``flush_threshold`` (default 100) — after this many suppressed
@@ -137,7 +137,7 @@ class CapHitCounter:
         for every subsequent call.  After incrementing, dispatches to
         the dirty-flush triggers so a long-lived (or abnormally
         terminated) connection still gets aggregate visibility
-        without :meth:`flush`.
+        without ``flush``.
         """
         if cap in self._suppressed:
             was_zero = self._suppressed[cap] == 0
@@ -156,7 +156,7 @@ class CapHitCounter:
     def _maybe_dirty_flush(self) -> None:
         """Threshold-driven intermediate summary.
 
-        If any cap's suppressed count has reached :attr:`_flush_threshold`,
+        If any cap's suppressed count has reached [`_flush_threshold`][],
         emit one summary per cap with non-zero counts, then reset all
         counts to 0 and cancel the interval timer (a fresh hit will
         re-arm it).
@@ -199,8 +199,8 @@ class CapHitCounter:
         """Sleep ``flush_interval`` then emit + reset if anything pending.
 
         Cancellation is the normal exit path (threshold trigger or
-        :meth:`flush` will cancel us); swallow the
-        :class:`asyncio.CancelledError` so it never propagates out of
+        ``flush`` will cancel us); swallow the
+        [`asyncio.CancelledError`][asyncio.CancelledError] so it never propagates out of
         the background task.
         """
         try:
@@ -245,7 +245,7 @@ class CapHitCounter:
     def _emit_intermediate_summary(self) -> None:
         """Dirty-flush emission — does not clear state.
 
-        The caller (:meth:`_maybe_dirty_flush` or :meth:`_timer_run`)
+        The caller ([`_maybe_dirty_flush`][] or [`_timer_run`][])
         resets the counts immediately afterwards, so this method just
         emits without touching state.
         """
@@ -289,7 +289,7 @@ class CapHitCounter:
 
 
 class _LazyCapHitCounter:
-    """Deferred :class:`CapHitCounter` bound once per connection.
+    """Deferred [`CapHitCounter`][] bound once per connection.
 
     The accept path runs once per TCP connection, but a cap is hit only on
     abuse/misconfiguration — so the overwhelming majority of connections build
@@ -298,7 +298,7 @@ class _LazyCapHitCounter:
     pay-for-what-you-use: nothing is constructed until the first cap actually
     fires.
 
-    Bound on the ambient contextvar by :class:`ConnectionActor`; TaskGroup
+    Bound on the ambient contextvar by ``ConnectionActor``; TaskGroup
     children inherit the *same* holder by reference, so whichever task hits the
     first cap materialises the real counter for all of them — identical
     cross-task propagation to an eager counter.
@@ -332,7 +332,7 @@ class _LazyCapHitCounter:
 
 
 class _CapHitCounterScope:
-    """Context manager bound to a single :class:`CapHitCounter` or holder."""
+    """Context manager bound to a single [`CapHitCounter`][] or holder."""
 
     __slots__ = ('_counter', '_token')
 
@@ -380,15 +380,15 @@ def log_cap_hit(
     Resolution order for the rate-limit counter:
 
     1. The explicit *counter* keyword argument, if given.
-    2. The active :class:`CapHitCounter` from the ambient
-       :class:`~contextvars.ContextVar` (set via
-       :meth:`CapHitCounter.bind`).
+    2. The active [`CapHitCounter`][] from the ambient
+       ``ContextVar`` (set via
+       [`CapHitCounter.bind`][CapHitCounter.bind]).
     3. ``None`` — every call emits, no rate limiting.
 
     ``connection_id`` resolution mirrors the counter chain:
 
     1. The explicit ``connection_id`` keyword argument, if given.
-    2. The active counter's :attr:`CapHitCounter.connection_id`.
+    2. The active counter's [`CapHitCounter.connection_id`][CapHitCounter.connection_id].
     3. ``None`` — record carries ``connection_id=None``.
 
     The first call per ``(counter, cap)`` emits a full record;

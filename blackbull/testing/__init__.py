@@ -1,12 +1,12 @@
 """Test clients for BlackBull applications — three instruments, three layers.
 
-:mod:`blackbull.testing.native` drives application logic, its
-:class:`~blackbull.testing.native.NativeTestServer` drives the full stack on
-a loopback socket, and :class:`TestClient` drives the ASGI compatibility
+[`blackbull.testing.native`][blackbull.testing.native] drives application logic, its
+[`NativeTestServer`][blackbull.testing.native.NativeTestServer] drives the full stack on
+a loopback socket, and [`TestClient`][] drives the ASGI compatibility
 boundary.  ``docs/guide/testing.md`` tabulates which to reach for; a defect
 on one layer is invisible to the others.
 
-:class:`TestClient` is not the everyday one.  It reaches the app through
+[`TestClient`][] is not the everyday one.  It reaches the app through
 ``httpx.ASGITransport`` → ASGI scope dict → ``from_scope()``, never taking
 the ``isinstance(conn, Connection)`` branch of ``BlackBull.__call__``.  What
 it uniquely covers is that conversion chain, where a coercion bug surfaces
@@ -209,13 +209,13 @@ class _LifespanManager:
 class WebSocketTestSession:
     """Synchronous WebSocket session against an ASGI application.
 
-    Open via :meth:`TestClient.websocket_connect` as a context manager::
+    Open via [`TestClient.websocket_connect`][TestClient.websocket_connect] as a context manager::
 
         with client.websocket_connect('/ws') as ws:
             ws.send_text('ping')
             assert ws.receive_text() == 'pong'
 
-    Raises :class:`WebSocketDisconnect` when the server closes (or
+    Raises [`WebSocketDisconnect`][] when the server closes (or
     rejects) the connection.
     """
 
@@ -337,7 +337,7 @@ class WebSocketTestSession:
     def receive_text(self) -> str:
         """The next text message.
 
-        Raises :class:`WebSocketDisconnect` if the server closed instead, and
+        Raises [`WebSocketDisconnect`][] if the server closed instead, and
         ``RuntimeError`` if what arrived was a binary message.
         """
         event = self._recv_event()
@@ -352,7 +352,7 @@ class WebSocketTestSession:
     def receive_bytes(self) -> bytes:
         """The next binary message.
 
-        Raises :class:`WebSocketDisconnect` if the server closed instead, and
+        Raises [`WebSocketDisconnect`][] if the server closed instead, and
         ``RuntimeError`` if what arrived was a text message.
         """
         event = self._recv_event()
@@ -373,7 +373,7 @@ class WebSocketTestSession:
         """Yield successive text messages from the server until the WebSocket closes.
 
         Stops cleanly when the server emits a ``websocket.close`` — the
-        :class:`WebSocketDisconnect` raised by the underlying receive
+        [`WebSocketDisconnect`][] raised by the underlying receive
         is caught and converted into normal iterator termination, so
         the test can write::
 
@@ -392,7 +392,7 @@ class WebSocketTestSession:
     def iter_bytes(self):
         """Yield successive binary messages from the server until the WebSocket closes.
 
-        Mirror of :meth:`iter_text` for binary frames.
+        Mirror of [`iter_text`][] for binary frames.
         """
         try:
             while True:
@@ -632,7 +632,7 @@ class TestClient:
         """Open a WebSocket session against the application.
 
         ``url`` is a path (relative to the app), e.g. ``/ws`` or
-        ``/ws?token=abc``.  Returns a :class:`WebSocketTestSession`
+        ``/ws?token=abc``.  Returns a [`WebSocketTestSession`][]
         that should itself be used as a context manager.
         """
         return WebSocketTestSession(

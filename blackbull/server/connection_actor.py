@@ -125,7 +125,7 @@ class ConnectionActor(Actor):
         ``detect_prefix_len`` bytes (or the peer has closed): until then we must
         not let a lower-priority catch-all (``http1``) claim a connection the
         higher-priority protocol might still own.  A binding that can rule the
-        bytes out cheaply (:meth:`ProtocolBinding.prefix_possible` returning
+        bytes out cheaply ([`ProtocolBinding.prefix_possible`][ProtocolBinding.prefix_possible] returning
         False) is skipped instead, so the http1 catch-all claims a plain HTTP
         request on its first byte rather than after a full 16-byte peek.
         """
@@ -255,7 +255,7 @@ class ConnectionActor(Actor):
 
         Records the (protocol-agnostic) slowloris cap hit, then delegates the
         wire response to the binding's
-        :meth:`~ProtocolBinding.on_detect_timeout` — HTTP writes a 408, other
+        [`on_detect_timeout`][ProtocolBinding.on_detect_timeout] — HTTP writes a 408, other
         protocols close silently.
         """
         from .cap_log import log_cap_hit  # noqa: PLC0415

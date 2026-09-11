@@ -24,7 +24,7 @@ and no MQTT client::
         assert captured == [('room1', b'21.5')]
 
 Taps run inline and a failing one raises, so a test is deterministic
-whatever the extension's ``tap_mode`` says — see :meth:`MQTTTestBroker.publish`.
+whatever the extension's ``tap_mode`` says — see [`MQTTTestBroker.publish`][MQTTTestBroker.publish].
 
 Only the tap pipeline is exercised.  Broker routing, QoS flows and retained
 messages belong to the conformance suite, not to this helper.
@@ -49,7 +49,7 @@ class MQTTTestBroker:
     **Async-only**: taps are coroutines and ``publish`` awaits them on the
     caller's event loop, so tests are written as ``async def``.  A
     synchronous façade of the
-    :class:`blackbull.testing.native.NativeClient` kind would have no
+    [`blackbull.testing.native.NativeClient`][blackbull.testing.native.NativeClient] kind would have no
     socket, broker or background loop to bridge to.
 
     ``async with`` is supported for a consistent test idiom, but the broker
@@ -92,7 +92,7 @@ class MQTTTestBroker:
         isolates a raising tap; ``publish`` deliberately does not.
 
         ``qos``, ``retain`` and ``properties`` are passed through to the
-        :class:`~blackbull.mqtt.Message` without validation, so a test may
+        [`Message`][blackbull.mqtt.Message] without validation, so a test may
         exercise values the wire layer would reject.  Wire-level QoS
         validation is the conformance suite's territory, not this helper's.
         """

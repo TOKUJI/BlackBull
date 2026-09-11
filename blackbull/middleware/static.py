@@ -253,7 +253,7 @@ class StaticFiles:
     @property
     def _root(self) -> Path:
         """Backwards-compat: callers and tests may inspect
-        ``staticfiles._root`` as a :class:`Path`.  Built on demand so
+        ``staticfiles._root`` as a [`Path`][].  Built on demand so
         the hot path keeps its plain-string representation."""
         return Path(self._root_str)
 

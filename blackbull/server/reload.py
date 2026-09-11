@@ -13,7 +13,7 @@ The reload model is **master re-exec**:
      via ``BB_INHERIT_FDS``, and ``os.execvp``\\ s ``sys.executable``
      with the original argv.
   6. The fresh master process adopts the inherited sockets
-     (see :func:`blackbull.protocol.rsock.adopt_inherited_sockets`)
+     (see [`blackbull.protocol.rsock.adopt_inherited_sockets`][blackbull.protocol.rsock.adopt_inherited_sockets])
      and re-forks workers — now running the *new* code.
 
 Picking up new code requires the master itself to re-import, which is

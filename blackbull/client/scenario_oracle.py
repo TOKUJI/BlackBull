@@ -1,7 +1,7 @@
-"""Deprecation shim — moved to :mod:`blackbull.fault_injection`.
+"""Deprecation shim — moved to [`blackbull.fault_injection`][blackbull.fault_injection].
 
 Groups the HTTP/1.1 differential oracle alongside the
-scenario model under :mod:`blackbull.fault_injection`.  Import from
+scenario model under [`blackbull.fault_injection`][blackbull.fault_injection].  Import from
 there going forward::
 
     from blackbull.fault_injection import Category, run_scenario  # ...

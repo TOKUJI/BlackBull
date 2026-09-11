@@ -23,7 +23,7 @@ class RateWindow:
     """Count events per fixed window; report when the budget is spent.
 
     ``limit`` events are permitted per ``window`` seconds.  A ``limit`` of
-    ``0`` disables the meter entirely — :meth:`hit` then never reports an
+    ``0`` disables the meter entirely — [`hit`][] then never reports an
     overrun, which is how every cap knob in this server spells "off".
 
     One instance per *thing being counted*, per connection: separate
@@ -71,7 +71,7 @@ class RateWindow:
 class ByteRateFloor:
     """Minimum sustained *byte* rate over a rolling window.
 
-    :class:`RateWindow` counts events; this weighs octets against the time
+    [`RateWindow`][] counts events; this weighs octets against the time
     spent waiting for them, which is the other half of the same defence and a
     different question.  A rate, not a deadline, because a one-byte drip
     satisfies every per-read timeout ever set (Kestrel's
@@ -81,7 +81,7 @@ class ByteRateFloor:
     peer that ran ahead and then stalled is judged on the stall.  Nothing is
     judged before a grace period of waiting has accumulated.
 
-    Both arguments to :meth:`record` are the caller's to define, and the
+    Both arguments to [`record`][] are the caller's to define, and the
     difference between them is the whole design.  *waited* should be every
     second the caller sat on the transport, including reads that delivered
     nothing countable — otherwise a peer stalls before the parts that are not

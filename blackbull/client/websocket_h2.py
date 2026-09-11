@@ -1,17 +1,17 @@
 """WebSocket-over-HTTP/2 client (RFC 8441).
 
-Mirrors the HTTP/1.1 :class:`blackbull.client.WebSocketClient` /
-:class:`blackbull.client.WebSocketSession` pair: the *Client* owns the
+Mirrors the HTTP/1.1 [`blackbull.client.WebSocketClient`][blackbull.client.WebSocketClient] /
+[`blackbull.client.WebSocketSession`][blackbull.client.WebSocketSession] pair: the *Client* owns the
 TLS + HTTP/2 transport and runs the Extended CONNECT handshake; the
 *Session* owns the post-handshake WebSocket frame loop on one H2 stream.
 
 Flow control: outgoing WS frames are dispatched as
 ``http.response.body`` events through the per-stream
-:class:`blackbull.server.sender.HTTP2Sender`, which splits payloads
+[`blackbull.server.sender.HTTP2Sender`][blackbull.server.sender.HTTP2Sender], which splits payloads
 across multiple DATA frames at ``max_frame_size`` and respects send
 windows.  Incoming DATA payloads are tracked per stream + at the
 connection level; ``WINDOW_UPDATE`` frames are emitted when received
-bytes accumulate past :data:`_WINDOW_UPDATE_THRESHOLD`.
+bytes accumulate past ``_WINDOW_UPDATE_THRESHOLD``.
 
 Example::
 
@@ -124,7 +124,7 @@ class WebSocketH2Session:
 
     Outgoing frames are masked (RFC 6455 §5.1) and wrapped in H2 DATA
     frames.  Incoming DATA payloads feed the shared
-    ``WebSocketRecipient`` stack through :class:`_H2QueueReader` —
+    ``WebSocketRecipient`` stack through ``_H2QueueReader`` —
     fragmentation reassembly, FIN/RSV/mask
     validation, UTF-8 checks, and auto-PONG all come from the same
     codec the server and the H1 client use.
@@ -181,9 +181,9 @@ class WebSocketH2Session:
         **message** on this stream (fragmented messages are reassembled;
         PING is answered transparently).
 
-        Raises :class:`TimeoutError` if no message arrives within
+        Raises ``TimeoutError`` if no message arrives within
         *timeout*.  Returned opcodes match
-        :class:`blackbull.server.ws_codec.WSOpcode`; a peer CLOSE (or
+        [`blackbull.server.ws_codec.WSOpcode`][blackbull.server.ws_codec.WSOpcode]; a peer CLOSE (or
         stream end) is surfaced as ``(WSOpcode.CLOSE, 2-byte code)``.
         """
         try:
@@ -210,7 +210,7 @@ class WebSocketH2Session:
         and stop the recipient's reader task.  Idempotent.
 
         Same close discipline as the H1
-        client's :meth:`WebSocketSession.close`.
+        client's [`WebSocketSession.close`][WebSocketSession.close].
         """
         if self._closed:
             return
@@ -252,7 +252,7 @@ class WebSocketH2Session:
     async def _credit_returned(self, n: int) -> None:
         """Account for *n* bytes consumed off the receive buffer and
         emit ``WINDOW_UPDATE`` at stream + connection level when the
-        accumulated credit crosses :data:`_WINDOW_UPDATE_THRESHOLD`.
+        accumulated credit crosses ``_WINDOW_UPDATE_THRESHOLD``.
         """
         self._unacked_stream += n
         self._unacked_conn += n
@@ -277,7 +277,7 @@ class WebSocketH2Client:
 
     Owns the TLS + HTTP/2 connection; performs the Extended CONNECT
     handshake (``:method=CONNECT``, ``:protocol=websocket``) on
-    :meth:`connect` and returns a :class:`WebSocketH2Session` for
+    [`connect`][] and returns a [`WebSocketH2Session`][] for
     post-handshake frame I/O.
 
     The peer server must advertise ``SETTINGS_ENABLE_CONNECT_PROTOCOL=1``;
@@ -323,7 +323,7 @@ class WebSocketH2Client:
     @property
     def connect_status(self) -> int | None:
         """``:status`` from the last Extended CONNECT response, or ``None``
-        if :meth:`connect` has not run yet."""
+        if [`connect`][] has not run yet."""
         return self._connect_status
 
     @property
@@ -337,7 +337,7 @@ class WebSocketH2Client:
         every other block on the wire encoded against the same table the
         peer's single decoder is building.
 
-        Raises :class:`RuntimeError` before ``__aenter__``: the context comes
+        Raises ``RuntimeError`` before ``__aenter__``: the context comes
         into being with the connection, so there is none to hand out yet.
         """
         return self._require_client().frame_factory
@@ -346,9 +346,9 @@ class WebSocketH2Client:
                       *, response_timeout: float = 5.0) -> WebSocketH2Session:
         """Run the RFC 8441 Extended CONNECT handshake on this connection.
 
-        Returns a :class:`WebSocketH2Session` bound to the new H2 stream.
-        Raises :class:`HandshakeError` on a non-200 ``:status`` response
-        or :class:`TimeoutError` if no response arrives within
+        Returns a [`WebSocketH2Session`][] bound to the new H2 stream.
+        Raises [`HandshakeError`][] on a non-200 ``:status`` response
+        or ``TimeoutError`` if no response arrives within
         *response_timeout*.
         """
         client = self._require_client()

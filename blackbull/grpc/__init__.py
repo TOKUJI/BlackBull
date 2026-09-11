@@ -3,11 +3,11 @@
 gRPC runs on HTTP/2; BlackBull already ships a complete HTTP/2 implementation,
 so this package adds only the gRPC-specific pieces:
 
-- :mod:`~blackbull.grpc.codec` — Length-Prefixed-Message framing.
-- :mod:`~blackbull.grpc.compression` — gzip message compression (``grpc-encoding``).
-- :class:`~blackbull.grpc.registry.GrpcServiceRegistry` — ``/Service/Method`` → handler.
-- :class:`~blackbull.grpc.status.GrpcStatus` / :class:`GrpcError` — canonical codes.
-- :func:`~blackbull.grpc.asgi.serve_grpc` + :class:`GrpcContext` — the ASGI bridge.
+- [`codec`][blackbull.grpc.codec] — Length-Prefixed-Message framing.
+- [`compression`][blackbull.grpc.compression] — gzip message compression (``grpc-encoding``).
+- [`GrpcServiceRegistry`][blackbull.grpc.registry.GrpcServiceRegistry] — ``/Service/Method`` → handler.
+- [`GrpcStatus`][blackbull.grpc.status.GrpcStatus] / [`GrpcError`][] — canonical codes.
+- [`serve_grpc`][blackbull.grpc.asgi.serve_grpc] + [`GrpcContext`][] — the ASGI bridge.
 
 Wire it into an app with ``app.enable_grpc(registry)``; gRPC requests
 (``content-type: application/grpc``) are then multiplexed onto the same

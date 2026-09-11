@@ -5,7 +5,7 @@ Provides ``HTTP1Client`` plus the lower-level ``HTTP1RequestSender`` /
 on the wire.
 
 Symmetric with the server-side ``HTTP1Sender`` / ``HTTP1Recipient`` in
-:mod:`blackbull.server.sender` and :mod:`blackbull.server.recipient`,
+[`blackbull.server.sender`][blackbull.server.sender] and [`blackbull.server.recipient`][blackbull.server.recipient],
 but reversed: the client *writes* request lines + request headers + request
 body, and *reads* status lines + response headers + response body.
 """
@@ -178,7 +178,7 @@ class HTTP1RequestSender:
         return cls._build_start(method_text, path, headers), body, True
 
     async def send_prepared(self, prepared: _PreparedRequest) -> None:
-        """Write a request returned by :meth:`prepare`."""
+        """Write a request returned by [`prepare`][]."""
         head, body, chunked = prepared
         await self._writer.write(head)
         if not chunked:
@@ -317,7 +317,7 @@ class HTTP1ResponseRecipient:
         #: peer is thinking, not dripping, and the floor is not watching.
         self._body_open = False
         #: A short window seen on a read that delivered no payload.  Not yet a
-        #: verdict — see :meth:`_body_read`.
+        #: verdict — see [`_body_read`][].
         self._unpaid_framing = False
         #: Set when the message just read was delimited by the connection
         #: close (RFC 9112 §6.3 item 8).  Nothing is desynced — the body ended
@@ -1075,7 +1075,7 @@ def _record_response(result, response) -> None:
 class HTTP1UpgradeSession:
     """Bidirectional transport after CONNECT or an HTTP 101 switch.
 
-    Obtain one with :meth:`HTTP1Client.handoff`.  The handoff is one-shot:
+    Obtain one with [`HTTP1Client.handoff`][HTTP1Client.handoff].  The handoff is one-shot:
     once returned, this session owns transport closure and the originating
     HTTP client can no longer read or write the connection.
     """
@@ -1124,8 +1124,8 @@ class HTTP1Client:
 
     The connection persists across multiple ``request()`` calls when HTTP
     version, Connection options, and body framing permit it.  A successful
-    CONNECT or 101 can be transferred with :meth:`handoff`; after that, the
-    returned :class:`HTTP1UpgradeSession` owns transport closure.  Pass
+    CONNECT or 101 can be transferred with [`handoff`][]; after that, the
+    returned [`HTTP1UpgradeSession`][] owns transport closure.  Pass
     ``ssl=`` to use TLS.
 
     The ``Host`` header is injected automatically when the caller omits it.
@@ -1154,7 +1154,7 @@ class HTTP1Client:
         # an unbounded wait per TestOneInput.  None opts out, leaving the
         # caller to impose their own deadline.
         self._connect_timeout = connect_timeout
-        #: Set once a response read stopped part-way.  See :meth:`_abandon`.
+        #: Set once a response read stopped part-way.  See [`_abandon`][].
         self._framing_broken = False
         #: A successful close-delimited response and a successful CONNECT
         #: switch protocols at EOF / the HTTP tunnel boundary.  They are not
@@ -1240,7 +1240,7 @@ class HTTP1Client:
         request the server answered differently.  The server answers the same
         situation by closing rather than by keep-aliving a desynced stream.
 
-        Deliberately not applied to :meth:`read_response`, the fault-injection
+        Deliberately not applied to [`read_response`][], the fault-injection
         primitive: driving a misbehaving peer and then looking at what else it
         sent is what that method is for.
         """
@@ -1418,7 +1418,7 @@ class HTTP1Client:
         """Bytes sent so far by the low-level primitives in this session.
 
         Empty unless the client was constructed with
-        ``record_wire_bytes=True``.  Reset with :meth:`reset_wire_buffer`.
+        ``record_wire_bytes=True``.  Reset with [`reset_wire_buffer`][].
         """
         return bytes(self._wire_buffer)
 
@@ -1485,7 +1485,7 @@ class HTTP1Client:
                               byte_interval: float = 0.0) -> None:
         """Send body octets to the peer.
 
-        Same semantics as :meth:`send_raw`, kept separate for readability
+        Same semantics as [`send_raw`][], kept separate for readability
         at call sites that frame headers separately from the body."""
         await self.send_raw(data, byte_interval=byte_interval)
 
@@ -1493,8 +1493,8 @@ class HTTP1Client:
         """Send one ``Transfer-Encoding: chunked`` chunk.
 
         Caller must have already emitted ``Transfer-Encoding: chunked``
-        via :meth:`send_header_line` and called :meth:`end_headers`.
-        Finish the chunked stream with :meth:`end_chunked`."""
+        via [`send_header_line`][] and called [`end_headers`][].
+        Finish the chunked stream with [`end_chunked`][]."""
         await self.send_raw(f'{len(data):x}'.encode() + _CRLF + data + _CRLF)
 
     async def end_chunked(self) -> None:
@@ -1508,7 +1508,7 @@ class HTTP1Client:
         """Read one HTTP/1.1 response from the connection.
 
         Optional ``timeout`` bounds the entire read (status line + headers
-        + body).  Raises :class:`asyncio.TimeoutError` if the deadline is
+        + body).  Raises ``asyncio.TimeoutError`` if the deadline is
         hit; the caller decides whether to treat that as a transport-
         fail or a normal protocol outcome."""
         if self._closed:
@@ -1544,8 +1544,8 @@ class HTTP1Client:
 
     # ---- Scenario executor -----------------------------------------------
     #
-    # Glue over the primitives above: walk a :class:`Scenario`'s steps, dispatch
-    # each, fold the outcome into a :class:`ScenarioResult` without raising.
+    # Glue over the primitives above: walk a [`Scenario`][]'s steps, dispatch
+    # each, fold the outcome into a [`ScenarioResult`][] without raising.
     # The vocabulary is ``docs/guide/fault_injection.md``.
 
     async def execute_scenario(
@@ -1555,14 +1555,14 @@ class HTTP1Client:
 
         Never raises.  Every outcome (response, timeout, transport
         failure, hard-abort) is folded into the returned
-        :class:`ScenarioResult` so callers can categorise without
+        [`ScenarioResult`][] so callers can categorise without
         try/except boilerplate per scenario.
 
         Step dispatch:
-          * :class:`SendBytes`   → :meth:`send_raw`
-          * :class:`Sleep`       → :func:`asyncio.sleep`
-          * :class:`ReadResponse` → :meth:`read_response`
-          * :class:`Abort`       → ``transport.abort()`` (RST on Linux);
+          * [`SendBytes`][]   → [`send_raw`][]
+          * [`Sleep`][]       → ``asyncio.sleep``
+          * [`ReadResponse`][] → [`read_response`][]
+          * [`Abort`][]       → ``transport.abort()`` (RST on Linux);
                                    walks no further steps.
         """
         import time as _time  # noqa: PLC0415

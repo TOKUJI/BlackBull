@@ -59,7 +59,7 @@ _HTTP2_STREAM_QUEUE_DEPTH = 64
 _WS_EVENT_QUEUE_DEPTH = 256     # a deferred reader's depth when the knob is 0
 _WS_READ_INLINE = 0
 
-# What :meth:`HTTP1Recipient.after_dispatch` answers.  Plain ints rather than an
+# What [`HTTP1Recipient.after_dispatch`][HTTP1Recipient.after_dispatch] answers.  Plain ints rather than an
 # Enum: read once per request on every keep-alive connection, and compared with
 # ``is`` on small values the interpreter interns.
 CONNECTION_REUSABLE = 0
@@ -121,7 +121,7 @@ class ReadLimitExceeded(Exception):
     """A bounded reader operation was given a byte budget and passed it.
 
     Belongs to the reader contract, not to any protocol: the reader hands back
-    what it :attr:`saw` and the protocol decides which status that becomes.
+    what it ``saw`` and the protocol decides which status that becomes.
     ``docs/about/internals.md`` §One breach, two verdicts is that decision.
     """
 
@@ -346,7 +346,7 @@ class AbstractReader(ABC):
     def peek(self, n: int) -> bytes:
         """Up to *n* buffered bytes without consuming them.
 
-        Returns whatever the default :meth:`fill` parked, so detection can
+        Returns whatever the default [`fill`][] parked, so detection can
         inspect it; a reader that owns its buffer overrides this to read
         straight out of it.
         """
@@ -360,10 +360,10 @@ class AbstractReader(ABC):
         eating the bytes it inspected.  A reader that owns its buffer
         overrides this and genuinely consumes nothing.
 
-        The default cannot: it has only :meth:`read`, so it *does* consume,
-        and parks what it took in :attr:`_ahead`.  :meth:`take_ahead` hands
+        The default cannot: it has only ``read``, so it *does* consume,
+        and parks what it took in ``_ahead``.  [`take_ahead`][] hands
         that back to the caller, which restores the stream by wrapping this
-        reader in a :class:`PrefixReader`.  Same outcome, one indirection more
+        reader in a [`PrefixReader`][].  Same outcome, one indirection more
         — and it keeps every reader, including test doubles, usable for
         detection without each one reimplementing pushback.
         """
@@ -391,7 +391,7 @@ class AbstractReader(ABC):
     def take_ahead(self) -> bytes:
         """Bytes this reader consumed while filling, cleared.
 
-        Empty for a reader whose :meth:`fill` truly peeks — which is the whole
+        Empty for a reader whose [`fill`][] truly peeks — which is the whole
         point: the caller wraps only when there is something to replay.
         """
         buf = self.__dict__.get('_ahead_buf')
@@ -437,7 +437,7 @@ class AbstractReader(ABC):
         return bytes(buf)
 
     async def readexactly(self, n: int) -> bytes:
-        """Read exactly *n* bytes.  Default: accumulate via :meth:`read`.
+        """Read exactly *n* bytes.  Default: accumulate via ``read``.
         Concrete transport readers override this."""
         buf = bytearray()
         while len(buf) < n:
@@ -454,11 +454,11 @@ class AbstractReader(ABC):
 
         * a complete head → returned;
         * EOF before a single byte of it → ``b''``, an idle close;
-        * EOF part-way through → :class:`IncompleteReadError` carrying the
+        * EOF part-way through → [`IncompleteReadError`][] carrying the
           partial, which is a truncated request and not an idle close.
 
         *limit* bounds the whole head and is what stops an unbounded read; 0
-        disables it, and an overrun raises :class:`ReadLimitExceeded`.
+        disables it, and an overrun raises [`ReadLimitExceeded`][].
 
         The Internals page argues why this is a contract every reader meets
         rather than a capability the caller sniffs for.
@@ -549,7 +549,7 @@ class AsyncioReader(AbstractReader):
 
     Pass-through by design: every method delegates to the stream's own native,
     buffered implementation with nothing layered on top.  It cannot peek, so
-    detection's pushback goes through :class:`PrefixReader`.
+    detection's pushback goes through [`PrefixReader`][].
     """
 
     def __init__(self, stream_reader):
@@ -708,7 +708,7 @@ class AsyncioReader(AbstractReader):
 
 
 class PrefixReader(AbstractReader):
-    """An :class:`AbstractReader` that replays an already-read *prefix*.
+    """An ``AbstractReader`` that replays an already-read *prefix*.
 
     Connection detection peeks the first bytes of a stream to decide which
     protocol owns it; wrapping the underlying reader in a ``PrefixReader`` hands
@@ -842,7 +842,7 @@ class FragmentAssembler:
 
     *max_total* bounds the reassembled message; ``0`` disables it.  The
     check runs **before** the append, so the frame that crosses the bound is
-    refused rather than paid for.  Raises :class:`MessageTooLarge`, which the
+    refused rather than paid for.  Raises [`MessageTooLarge`][], which the
     caller turns into CLOSE 1009.  Note this bounds the *compressed* bytes
     when permessage-deflate is in play; the inflated size is bounded
     separately, because only one of the two is knowable here.
@@ -932,7 +932,7 @@ class HTTP1Recipient(BaseRecipient):
     """Reads an HTTP/1.1 request body and emits a single ``http.request`` event.
 
     Body bytes are read lazily on the first ``__call__`` using the
-    Content-Length or Transfer-Encoding header of the :class:`Connection` it is
+    Content-Length or Transfer-Encoding header of the [`Connection`][] it is
     bound to.  Subsequent calls return ``{'type': 'http.disconnect'}``.
     """
 
@@ -1019,9 +1019,9 @@ class HTTP1Recipient(BaseRecipient):
         # window's width and purpose are ``BB_MIN_BODY_RATE`` in env-vars.md.
         self._rate_window_wait = 0.0
         self._rate_window_seen = 0
-        # Over the size cap or below the rate floor; see :attr:`must_close`.
+        # Over the size cap or below the rate floor; see [`must_close`][].
         self._body_refused = False
-        # A chunked-framing violation; see :attr:`must_close`.
+        # A chunked-framing violation; see [`must_close`][].
         self.framing_broken = False
         return self
 
@@ -1046,7 +1046,7 @@ class HTTP1Recipient(BaseRecipient):
         Content-Length, not chunked) never needs draining.
 
         Kept as the named question it is, for tests and for a directly-driven
-        recipient; the actor asks :meth:`after_dispatch` instead, which answers
+        recipient; the actor asks [`after_dispatch`][] instead, which answers
         this and ``must_close`` in one call.
         """
         if self.framing_broken or self._body_refused:
@@ -1075,7 +1075,7 @@ class HTTP1Recipient(BaseRecipient):
         close the connection rather than keep it alive.
         """
         # Lazily, once per drain rather than per chunk: ``router`` cannot be
-        # imported at module scope here (see :func:`_bad_request`).
+        # imported at module scope here (see [`_bad_request`][]).
         from ..router import HTTPException  # noqa: PLC0415
         drained = 0
         while not self._done:
@@ -1178,7 +1178,7 @@ class HTTP1Recipient(BaseRecipient):
 
         Every delivered octet passes through here on both framings, so the
         limits belong to the recipient rather than to whichever caller drives it.
-        Both verdicts are permanent for the connection (:attr:`must_close`).
+        Both verdicts are permanent for the connection ([`must_close`][]).
 
         They answer differently, and that is the point: too large is a judgement
         about the *request*, which the peer is entitled to hear — 413.  Too slow
@@ -1240,7 +1240,7 @@ class HTTP1Recipient(BaseRecipient):
         """The next body chunk, or ``None`` once the body is complete.
 
         ``None``, not ``b''`` — an empty body is a real body.  Asking again past the end keeps answering ``None``.  A peer that
-        vanishes mid-body raises :class:`ClientDisconnected` — a truncated
+        vanishes mid-body raises [`ClientDisconnected`][] — a truncated
         upload must never read as a complete one — and so does a body-read
         timeout, which is recorded as a cap hit first.
 
@@ -1320,7 +1320,7 @@ class HTTP1Recipient(BaseRecipient):
         The only place the ``http.request`` dict is built, for whoever wants
         that encoding — a full-form handler calling ``receive()``, or an
         external host.  ``Connection.body()`` / ``stream()`` take
-        :meth:`next_chunk` and skip the per-chunk dict.
+        [`next_chunk`][] and skip the per-chunk dict.
 
         A Content-Length body ends on its last data event; a chunked body ends
         on a separate empty one.
@@ -1346,8 +1346,8 @@ class HTTP2Recipient(BaseRecipient):
     hiding the concurrency from both sides.
 
     For GET-style requests (END_STREAM on HEADERS, no DATA frames), the caller
-    invokes :meth:`mark_end_of_stream_on_headers` instead of pre-queuing an
-    empty ``http.request`` event, which :meth:`__call__` then synthesizes
+    invokes [`mark_end_of_stream_on_headers`][] instead of pre-queuing an
+    empty ``http.request`` event, which ``__call__`` then synthesizes
     lazily — no queue is allocated unless the handler reads.
 
     **Consume-based inbound flow control**: when constructed with
@@ -1441,7 +1441,7 @@ class HTTP2Recipient(BaseRecipient):
 
         The pair the two channels need and nothing else, so neither pays for
         the other's encoding: ``__call__`` builds an ASGI event from it,
-        :meth:`next_chunk` hands the bytes straight over.
+        [`next_chunk`][] hands the bytes straight over.
         """
         return frame.payload, bool(frame.end_stream)
 
@@ -1653,7 +1653,7 @@ class HTTP2Recipient(BaseRecipient):
         """The next body chunk, or ``None`` once the stream has ended.
 
         The H2 half of the native receive channel — same contract as
-        :meth:`HTTP1Recipient.next_chunk`, so ``Connection.body()`` /
+        [`HTTP1Recipient.next_chunk`][HTTP1Recipient.next_chunk], so ``Connection.body()`` /
         ``stream()`` read one protocol and get both.
         """
         if self._end_of_stream_on_headers and not self._initial_consumed:
@@ -1929,7 +1929,7 @@ class WebSocketRecipient(BaseRecipient):
         return False
 
     async def _drive_once(self) -> bool:
-        """One :meth:`_read_step` under the shared error handling.
+        """One [`_read_step`][] under the shared error handling.
 
         Every failure path is terminal and emits exactly one thing for the app
         — a disconnect event or the exception itself — so both drivers can
@@ -2189,7 +2189,7 @@ class WebSocketRecipient(BaseRecipient):
     def _frame_bytes_needed(self) -> int | None:
         """Bytes required for the next *complete* frame, or None when it is not
         fully buffered.  The non-blocking guarantee of
-        :meth:`service_available_control_frames` rests on this."""
+        [`service_available_control_frames`][] rests on this."""
         buffered = self._reader.buffered_len()
         if buffered < 2:
             return None
@@ -2463,8 +2463,8 @@ class WebSocketRecipient(BaseRecipient):
         The raw ``(conn, receive, send)`` form reads a ``websocket.connect``
         dict for this; the object form has no use for the envelope, so the
         native channel just records that the handshake was taken.  A peer that
-        gave up mid-handshake raises :class:`WebSocketDisconnect`, the same
-        signal :meth:`next_message` gives.
+        gave up mid-handshake raises [`WebSocketDisconnect`][], the same
+        signal [`next_message`][] gives.
         """
         self._refresh_listeners()
         if not self._connect_sent:
@@ -2481,11 +2481,11 @@ class WebSocketRecipient(BaseRecipient):
         The native receive channel.  Fragments are already reassembled
         (RFC 6455 §5.4), so what comes back is always a whole message, and the
         Python type *is* the text/binary discriminator — the same contract
-        :meth:`blackbull.websocket.WebSocket.receive` publishes.
+        [`blackbull.websocket.WebSocket.receive`][blackbull.websocket.WebSocket.receive] publishes.
 
-        Raises :class:`~blackbull.websocket.WebSocketDisconnect` when the peer
+        Raises [`WebSocketDisconnect`][blackbull.websocket.WebSocketDisconnect] when the peer
         closes, carrying the RFC 6455 §7.4 status code, and re-raises a
-        :class:`ProtocolError` the read side recorded.
+        [`ProtocolError`][] the read side recorded.
         """
         self._refresh_listeners()
         if not self._connect_sent:
@@ -2504,7 +2504,7 @@ class WebSocketRecipient(BaseRecipient):
 
         The only place a ``websocket.*`` receive dict is built, for whoever
         wants that encoding — a raw ``(conn, receive, send)`` handler, or an
-        external host.  The object form is :meth:`next_message`.
+        external host.  The object form is [`next_message`][].
         """
         self._refresh_listeners()
         if not self._connect_sent:

@@ -41,7 +41,7 @@ class HTTP2WSReader(AbstractReader):
     HTTP/2 actor to skip the per-frame ``WINDOW_UPDATE`` emission.  The
     bytes are *still* buffered (the peer's window debited on the wire
     the moment the frame arrived; dropping them would be silent data
-    loss).  As soon as :meth:`readexactly` drains the buffer back under
+    loss).  As soon as ``readexactly`` drains the buffer back under
     ``max_buffer``, the reader replays the withheld credit through
     ``credit_callback``, opening the peer's window again.
     """

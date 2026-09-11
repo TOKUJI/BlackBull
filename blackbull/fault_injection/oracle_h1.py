@@ -1,7 +1,7 @@
 """Differential oracle for HTTP/1.1 implementation comparison.
 
 Public surface for differentially comparing two HTTP/1.1
-implementations against the same :class:`~blackbull.fault_injection.Scenario`
+implementations against the same [`Scenario`][blackbull.fault_injection.Scenario]
 — typically a reference (e.g. nginx) against a target under test.
 
 Useful externally for client-library / proxy authors who want to
@@ -10,17 +10,17 @@ wire-level fault injection.
 
 Components:
 
-  * :class:`Category` — the 9-way enum that buckets each example.
-  * :data:`ACCEPTED_CATEGORIES` — pass-through set (``OK``,
+  * [`Category`][] — the 9-way enum that buckets each example.
+  * ``ACCEPTED_CATEGORIES`` — pass-through set (``OK``,
     ``BOTH_REJECTED``); divergences sit outside.
-  * :class:`SideOutcome` — what one server returned (response, or
+  * [`SideOutcome`][] — what one server returned (response, or
     exception / timeout) in normalised form.
-  * :func:`normalize_response`, :func:`categorize` — the pure
+  * [`normalize_response`][], [`categorize`][] — the pure
     functions that compare the two sides.
-  * :func:`run_scenario` — the async wrapper that drives a
-    :class:`~blackbull.fault_injection.Scenario` against
+  * [`run_scenario`][] — the async wrapper that drives a
+    [`Scenario`][blackbull.fault_injection.Scenario] against
     ``(host, port)`` and returns ``(SideOutcome, wire_bytes)``.
-  * :data:`PER_REQUEST_TIMEOUT_S` — wall budget cap per side.
+  * ``PER_REQUEST_TIMEOUT_S`` — wall budget cap per side.
 
 Test-suite-specific glue (fixtures, Hypothesis strategies, corpus
 capture, ``DiffContext``) continues to live in the conformance
@@ -70,7 +70,7 @@ class SideOutcome:
     """One side's response in a differential pair.
 
     Exactly one of (response, exception) is populated.  ``timed_out``
-    is True if the failure was an :class:`asyncio.TimeoutError` from
+    is True if the failure was an ``asyncio.TimeoutError`` from
     the per-example wait_for; we record it separately because timeouts
     are semantically distinct from other transport errors.
     """
@@ -131,7 +131,7 @@ def _is_error_status(resp: dict) -> bool:
 
 
 def categorize(ng: SideOutcome, bb: SideOutcome) -> Category:
-    """Bucket a differential example into a :class:`Category`.
+    """Bucket a differential example into a [`Category`][].
 
     Order of the checks matters: both-rejected wins over individual
     transport failures so we don't flag inputs that nginx also
@@ -175,7 +175,7 @@ async def run_scenario(host: str, port: int,
                        scenario: Scenario) -> tuple[SideOutcome, bytes]:
     """Execute *scenario* against (host, port) and return (outcome, wire_bytes).
 
-    Drives the scenario through :meth:`HTTP1Client.execute_scenario`,
+    Drives the scenario through ``HTTP1Client.execute_scenario``,
     which itself never raises; this wrapper only adds an outer
     ``asyncio.wait_for`` so a runaway scenario (e.g. trickled bytes
     plus a long read timeout) can't blow the per-side budget.

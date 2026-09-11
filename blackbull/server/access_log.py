@@ -54,7 +54,7 @@ def open_record(conn, aggregator: 'EventAggregator | None',
 def start_record(conn) -> 'AccessLogRecord':
     """Build and publish a record unconditionally.
 
-    For the two paths :func:`request_record_needed` cannot answer for: a
+    For the two paths [`request_record_needed`][] cannot answer for: a
     WebSocket session's record spans the connection and carries ``close_code``,
     and a pushed response needs one for the sender's inline capture.
     """
@@ -69,7 +69,7 @@ def start_record(conn) -> 'AccessLogRecord':
 def close_record(record: "AccessLogRecord | None") -> None:
     """Finish a request's record and emit it.  A no-op when there is none.
 
-    Paired with :func:`open_record`, so a caller that opened a record does not
+    Paired with [`open_record`][], so a caller that opened a record does not
     also have to remember the final ``mark`` or repeat the ``is not None``
     guard at every dispatch exit.
     """
@@ -82,11 +82,11 @@ def close_record(record: "AccessLogRecord | None") -> None:
 def close_ws_record(record: 'AccessLogRecord | None', close_code) -> None:
     """Finish a WebSocket session's record and emit it.  A no-op when there is
     none — a session that never opened a record (no consumer, per
-    :func:`request_record_needed`) must not crash its close path.
+    [`request_record_needed`][]) must not crash its close path.
 
     A session is not a request dispatch: it has no ``dispatch_done`` phase,
     and what it reports instead is the close code the peer or the server
-    ended on.  Separate from :func:`close_record` for that reason, so neither
+    ended on.  Separate from [`close_record`][] for that reason, so neither
     protocol actor has to know which terminal field belongs to which shape.
     """
     if record is None:
@@ -123,7 +123,7 @@ def emit_access_log(record: 'AccessLogRecord') -> None:
 
 
 def request_record_needed(aggregator: EventAggregator | None) -> bool:
-    """Whether the per-request :class:`AccessLogRecord` will be consumed.
+    """Whether the per-request [`AccessLogRecord`][] will be consumed.
 
     Three consumers, and no others: the access log (``blackbull.access`` at
     INFO), phase tracing, and the ``request_completed`` event's wire fields.
@@ -177,7 +177,7 @@ class AccessLogRecord:
     # name → (perf_counter_seconds, process_time_seconds).  Only written
     # when PHASE_TRACE is on; empty otherwise.
     phases: dict[str, tuple[float, float]] = field(default_factory=dict, repr=False)
-    # None until :meth:`finalize`.
+    # None until [`finalize`][].
     _duration_ms_snapshot: float | None = field(default=None, repr=False)
     # Filled on first ``str()``, on the listener thread.
     _formatted: str | None = field(default=None, repr=False)
@@ -209,7 +209,7 @@ class AccessLogRecord:
 
     @classmethod
     def from_conn(cls, conn) -> 'AccessLogRecord':
-        """Build directly from a :class:`~blackbull.connection.Connection`
+        """Build directly from a [`Connection`][blackbull.connection.Connection]
         so the self-hosted actor never materializes the ASGI
         scope just to record the access line."""
         client = conn.client or ('-',)

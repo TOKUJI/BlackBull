@@ -7,12 +7,12 @@ This module is small on purpose.  It does two things:
    ``Sec-WebSocket-Extensions`` header value.
 
 2. **Per-connection state**: hold the streaming inflate/deflate state plus
-   the ``*_no_context_takeover`` flags so :class:`WebSocketRecipient` can
-   decompress inbound messages and :class:`WebSocketSender` can compress
+   the ``*_no_context_takeover`` flags so ``WebSocketRecipient`` can
+   decompress inbound messages and ``WebSocketSender`` can compress
    outbound ones.
 
-The actual wire-level use of RSV1 happens in :mod:`ws_codec` and
-:mod:`recipient`; this module just owns the policy + state.
+The actual wire-level use of RSV1 happens in [`ws_codec`][] and
+[`recipient`][]; this module just owns the policy + state.
 """
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ def negotiate(offer_header: bytes | None) -> tuple[DeflateParams | None, bytes |
 
     Returns ``(params, response_value)`` where:
 
-    * ``params`` is the :class:`DeflateParams` to install on the connection
+    * ``params`` is the [`DeflateParams`][] to install on the connection
       (or ``None`` to decline).
     * ``response_value`` is the bytes to put after
       ``Sec-WebSocket-Extensions:`` in the 101 response (or ``None`` when
@@ -108,7 +108,7 @@ def _split_offers(header: bytes) -> list[bytes]:
 
     Multiple extensions are separated by ``,``; offer parameters by ``;``.
     We keep this lexical and don't try to validate the whole RFC 7230 grammar
-    — the offers we actually accept go through :func:`_parse_offer` next.
+    — the offers we actually accept go through [`_parse_offer`][] next.
     """
     return [p.strip() for p in header.split(b',') if p.strip()]
 
@@ -187,7 +187,7 @@ class InboundDecompressor:
         in a single call — zlib stops at the byte it was given, so a
         return of exactly ``max_length`` bytes is ambiguous on its own.
 
-        Raises :class:`MessageTooLarge` when the peer's message inflates
+        Raises [`MessageTooLarge`][] when the peer's message inflates
         past the bound.  ``unconsumed_tail`` is the other half of that
         check: zlib stops early when it hits the limit, so leftover input
         means there was more to come even if the output landed on the
@@ -213,7 +213,7 @@ class InboundDecompressor:
 class OutboundCompressor:
     """Streaming compressor for outbound permessage-deflate messages.
 
-    Symmetric to :class:`InboundDecompressor`: the ``no_context_takeover`` flag
+    Symmetric to [`InboundDecompressor`][]: the ``no_context_takeover`` flag
     that matters here is ``server_no_context_takeover`` (we are the server),
     deciding whether to reset the deflater between messages.
     """

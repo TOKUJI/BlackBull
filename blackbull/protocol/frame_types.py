@@ -18,7 +18,7 @@ from ..logger import log, debug_gate
 logger = logging.getLogger(__name__)
 #: Read once at import: a disabled ``logger.debug`` on a per-request path
 #: costs 24 executed instructions to emit nothing.  Same bargain as
-#: ``@log`` — see :func:`blackbull.logger.debug_gate`.
+#: ``@log`` — see [`blackbull.logger.debug_gate`][blackbull.logger.debug_gate].
 _DEBUG = debug_gate(logger)
 
 
@@ -639,7 +639,7 @@ class PushPromise(FrameBase):
         connection-wide HPACK table is the point, and RFC 9113 §4.3 requires
         it even though the client acts on no push.
 
-        Splitting works as in :meth:`Headers.parse_payload`.
+        Splitting works as in [`Headers.parse_payload`][Headers.parse_payload].
         """
         if self.decoder is None:
             raise no_hpack_context(self, 'decoder')

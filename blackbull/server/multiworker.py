@@ -11,9 +11,9 @@ When ``reload=True`` the master additionally runs a file watcher; on any
 matching change it SIGTERMs the workers, marks the listening sockets
 inheritable, and ``os.execvp``\\ s itself with the original argv — the
 fresh process adopts the inherited fds and re-forks workers from the
-new code.  See :mod:`blackbull.server.reload`.
+new code.  See [`blackbull.server.reload`][blackbull.server.reload].
 
-The worker entry point is :func:`blackbull.server.worker.run_worker`.
+The worker entry point is [`blackbull.server.worker.run_worker`][blackbull.server.worker.run_worker].
 Each worker runs its own asyncio event loop and its own ASGI lifespan cycle.
 
 Usage::
@@ -44,7 +44,7 @@ def _settle_stateful_bindings(app, workers: int) -> None:
     """Decide how a stateful raw protocol is reachable once workers multiply.
 
     Why a stateful binding stops claiming the shared listener is
-    :meth:`RawBinding.claims`.  What is decided *here* is the case it cannot
+    [`RawBinding.claims`][RawBinding.claims].  What is decided *here* is the case it cannot
     cover: a binding whose only route is the shared port has no owner to fall
     back to, so it is refused — before the fork, making the failure one
     message rather than one per worker.
@@ -84,7 +84,7 @@ class MultiWorkerServer:
     workers:
         Number of worker processes to maintain.
     max_connections:
-        Per-worker connection limit forwarded to :class:`ASGIServer`.
+        Per-worker connection limit forwarded to ``ASGIServer``.
     shutdown_timeout:
         Seconds to wait for graceful shutdown before sending SIGKILL.
     """
@@ -174,7 +174,7 @@ class MultiWorkerServer:
 
         When ``reload`` is enabled the master also runs a file watcher and
         re-execs itself on any matching change — see
-        :mod:`blackbull.server.reload`.
+        [`blackbull.server.reload`][blackbull.server.reload].
         """
         self._install_signal_handlers()
         self._spawn_all()

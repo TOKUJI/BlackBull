@@ -43,7 +43,7 @@ from .http1_actor import RequestActor
 
 logger = logging.getLogger(__name__)
 #: Read once at import; the cost this buys is measured in
-#: :func:`blackbull.logger.debug_gate`.
+#: [`blackbull.logger.debug_gate`][blackbull.logger.debug_gate].
 _DEBUG = debug_gate(logger)
 
 
@@ -1005,7 +1005,7 @@ class HTTP2Actor(Actor):
     ) -> None:
         """Spawn the StreamActor that runs one stream's app dispatch.
 
-        *conn* is always the native :class:`Connection`; the compat lane's ASGI
+        *conn* is always the native [`Connection`][]; the compat lane's ASGI
         scope is derived beyond here, at the app boundary, and nowhere else.
 
         A ``BB_REQUEST_TIMEOUT`` expiry sends RST_STREAM CANCEL and lets the
@@ -1071,7 +1071,7 @@ class HTTP2Actor(Actor):
                                        conn: Connection) -> None:
         """Resolve stream priority and attach the H/2 request extensions.
 
-        Writes to the native :class:`Connection` on every lane; the compat
+        Writes to the native [`Connection`][] on every lane; the compat
         lane's scope picks the dict up by reference when it is derived.
         """
         priority = _resolve_priority(stream, conn)

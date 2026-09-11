@@ -1,6 +1,6 @@
 """The high-level WebSocket handler object.
 
-A :class:`WebSocket` wraps the raw ``(conn, receive, send)`` triplet so a
+A [`WebSocket`][] wraps the raw ``(conn, receive, send)`` triplet so a
 handler works in **data and methods** instead of event dicts::
 
     @app.route(path='/chat', scheme=Scheme.websocket)
@@ -43,7 +43,7 @@ __all__ = ['WebSocket', 'WebSocketDisconnect',
            'handshake_accepted', 'mark_handshake_accepted',
            'handshake_closed', 'mark_handshake_closed']
 
-#: RFC 6455 §7.4.1 normal closure — the default for :meth:`WebSocket.close`.
+#: RFC 6455 §7.4.1 normal closure — the default for [`WebSocket.close`][WebSocket.close].
 #: Spelled out rather than imported from ``blackbull.server.constants``: this
 #: is a user-facing handler object, and the public package should not have to
 #: reach into the server stack for two integers.
@@ -69,7 +69,7 @@ _NO_STATUS = 1005
 # The state lives in the connection's WebSocket bag (``conn._ws``), which
 # already exists for exactly this kind of handshake internal (``send_101``,
 # ``auto_subprotocol``, the negotiated deflate params).  Plain dicts are
-# accepted too, mirroring :func:`blackbull.connection.disconnected` — the
+# accepted too, mirroring [`blackbull.connection.disconnected`][blackbull.connection.disconnected] — the
 # middleware is unit-tested against a bare ``{}`` connection, and the
 # ``BB_FORCE_ASGI_SCOPE`` boundary threads a scope dict.
 
@@ -119,7 +119,7 @@ def mark_connect_consumed(conn) -> None:
 
     For middleware that pops the connect event *without* answering it — an
     auth layer that wants the option to reject with a close code, say.  A
-    handler-side :class:`WebSocket` then knows not to wait for a handshake
+    handler-side [`WebSocket`][] then knows not to wait for a handshake
     offer that is already gone, but still sends the accept itself.
     """
     bag = _ws_bag(conn, create=True)
@@ -136,7 +136,7 @@ def handshake_accepted(conn) -> bool:
 def mark_handshake_accepted(conn) -> None:
     """Record that ``websocket.accept`` has been sent for *conn*.
 
-    Implies :func:`connect_consumed` — the offer must have been read before
+    Implies [`connect_consumed`][] — the offer must have been read before
     it could be answered.
     """
     bag = _ws_bag(conn, create=True)
@@ -161,7 +161,7 @@ def mark_handshake_closed(conn) -> None:
 class WebSocketDisconnect(Exception):
     """The peer closed the connection.
 
-    Raised by :meth:`WebSocket.receive` and its typed variants.  Iterating
+    Raised by [`WebSocket.receive`][WebSocket.receive] and its typed variants.  Iterating
     with ``async for`` handles this for you — the loop simply ends — so catch
     it only when you call ``receive()`` directly and need the close code.
 
@@ -185,8 +185,8 @@ class WebSocket:
     receiving exactly that, and this object is never built for it.
 
     The handshake is explicit: the connection is not live until
-    :meth:`accept` returns, and sending before that is an error.  To reject a
-    connection, call :meth:`close` instead of :meth:`accept`.
+    [`accept`][] returns, and sending before that is an error.  To reject a
+    connection, call [`close`][] instead of [`accept`][].
     """
 
     __slots__ = ('_conn', '_receive', '_send', '_connect_seen', '_accepted',
@@ -229,7 +229,7 @@ class WebSocket:
 
     @property
     def connection(self) -> Connection:
-        """The underlying :class:`~blackbull.connection.Connection`.
+        """The underlying [`Connection`][blackbull.connection.Connection].
 
         Everything the handshake carried — headers, cookies, TLS state, the
         client address — is reachable through it.  The shortcuts below cover
@@ -271,7 +271,7 @@ class WebSocket:
 
     @property
     def accepted(self) -> bool:
-        """True once :meth:`accept` has completed the handshake."""
+        """True once [`accept`][] has completed the handshake."""
         return self._accepted
 
     @property
@@ -346,12 +346,12 @@ class WebSocket:
                      headers: list[tuple[bytes, bytes]] | None = None) -> None:
         """Complete the handshake.
 
-        *subprotocol* names the one being accepted from :attr:`subprotocols`;
+        *subprotocol* names the one being accepted from [`subprotocols`][];
         leaving it ``None`` keeps the server's automatic negotiation, exactly
         as sending ``{'type': 'websocket.accept', 'subprotocol': None}`` does
         on the raw path.  *headers* are extra response headers for the 101.
 
-        Raises :class:`WebSocketDisconnect` if the peer abandoned the
+        Raises [`WebSocketDisconnect`][] if the peer abandoned the
         handshake before it could be completed.
 
         When middleware already accepted for you
@@ -391,7 +391,7 @@ class WebSocket:
                     reason: str | None = None) -> None:
         """Close the connection, or reject the handshake.
 
-        Called before :meth:`accept`, this rejects the connection — the
+        Called before [`accept`][], this rejects the connection — the
         client's ``connect()`` fails rather than opening and immediately
         closing.  Idempotent, and a no-op once the peer has already gone, so
         a ``finally: await ws.close()`` is always safe.
@@ -474,7 +474,7 @@ class WebSocket:
         Fragmented messages have already been reassembled, so what comes back
         is always a whole application message.
 
-        Raises :class:`WebSocketDisconnect` when the peer closes.  Prefer
+        Raises [`WebSocketDisconnect`][] when the peer closes.  Prefer
         ``async for`` unless you need the close code.
         """
         if self._disconnected:

@@ -54,7 +54,7 @@ class _Entry:
     """One stored cache hit — the response as *data*, not as a message.
 
     Held as ``(status, header, body)`` rather than a ready-made
-    :class:`~blackbull.native.NativeResponse` so every replay can build a
+    [`NativeResponse`][blackbull.native.NativeResponse] so every replay can build a
     fresh object over a fresh header list.  Middleware below the cache — CORS,
     the route header injector — append to ``_header`` **in place**; handing
     out one shared object would grow the stored entry on every hit.
@@ -95,7 +95,7 @@ class _Bucket:
     vary fields cannot outlive their entries, so no orphan is possible.
 
     ``entries`` is a per-variant LRU keyed by the variant tuple from
-    :func:`_vary_key` (``()`` for a non-varying response).
+    [`_vary_key`][] (``()`` for a non-varying response).
     """
     __slots__ = ('vary_fields', 'entries')
 
@@ -130,7 +130,7 @@ class Cache:
         self._generate_etag = generate_etag
         # base_key → _Bucket.  OrderedDict gives O(1) move-to-end on access +
         # popitem(last=False) for LRU eviction — same pattern as
-        # :func:`functools.lru_cache`.  ``_max_entries`` bounds the number of
+        # [`functools.lru_cache`][functools.lru_cache].  ``_max_entries`` bounds the number of
         # distinct URLs (base keys); each bucket LRU-bounds its own variants.
         self._store: OrderedDict[tuple, _Bucket] = OrderedDict()
 

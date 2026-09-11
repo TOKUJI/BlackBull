@@ -205,8 +205,8 @@ class _PendingResponse:
     #: connection, ``__aexit__`` — inherits the disarm by going through
     #: ``_drop_pending`` as it already does.
     deadline: asyncio.TimerHandle | None = None
-    #: Which phase :attr:`deadline` is timing, so a handover re-stamps
-    #: :attr:`opened_at` and a re-arm within one phase does not.
+    #: Which phase [`deadline`][] is timing, so a handover re-stamps
+    #: [`opened_at`][] and a re-arm within one phase does not.
     phase: _Phase | None = None
     #: The request body still going up, if any.  A refusal has to cancel it:
     #: ``request()`` awaits the upload *before* it awaits this future, and
@@ -526,7 +526,7 @@ class HTTP2Client:
                 # Splitting and flow control are ``_write_data``'s; the
                 # credit it waits on arrives via ``_on_window_update``.  Run
                 # as a task so the refusal can reach it — ``upload`` on
-                # :class:`_PendingResponse` says why that matters, and this
+                # [`_PendingResponse`][] says why that matters, and this
                 # await is the one it would otherwise park on.
                 upload = asyncio.ensure_future(
                     sender._write_data(body, end_stream=True))
@@ -591,7 +591,7 @@ class HTTP2Client:
         """Walk ``scenario.steps`` against the connected socket.
 
         The HTTP/2 counterpart of
-        :meth:`blackbull.client.http1.HTTP1Client.execute_scenario`, and
+        [`blackbull.client.http1.HTTP1Client.execute_scenario`][blackbull.client.http1.HTTP1Client.execute_scenario], and
         deliberately the same shape: every *outcome* — a frame read, a
         timeout, a transport failure, a hard-abort — is folded into the
         returned result, so callers categorise without a try/except per
@@ -607,7 +607,7 @@ class HTTP2Client:
             production sender (which is what lets a scenario declare a
             length its payload does not match)
           * ``SendBytes``    → arbitrary bytes, optionally one at a time
-          * ``Sleep``        → :func:`asyncio.sleep`
+          * ``Sleep``        → ``asyncio.sleep``
           * ``ReadResponse`` → one frame, or a recorded timeout
           * ``Abort``        → ``transport.abort()``; walks no further steps
         """
@@ -840,7 +840,7 @@ class HTTP2Client:
 
         ENHANCE_YOUR_CALM (RFC 9113 §7) — the peer is generating load faster
         than the registrant consumes it — which is also why
-        :meth:`_refuse_stream` sends it for the header-aggregate breach.
+        [`_refuse_stream`][] sends it for the header-aggregate breach.
         """
         stream_id = frame.stream_id
         queue = self._raw_streams[stream_id]
@@ -1342,7 +1342,7 @@ class HTTP2Client:
         """No frame for this stream within the deadline.
 
         A timer callback cannot await, so this hands off to a task; the
-        re-check that the resulting gap needs is :meth:`_refuse_stream`'s,
+        re-check that the resulting gap needs is [`_refuse_stream`][]'s,
         and checking only here reset streams that had already succeeded.
 
         The phase is read from the pending rather than passed: a timer that
@@ -1551,7 +1551,7 @@ class HTTP2Client:
         """Return *n* bytes of flow-control credit for received DATA.
 
         Accumulates per-stream and per-connection and emits WINDOW_UPDATE
-        once either crosses :data:`_WINDOW_UPDATE_THRESHOLD`.  Stream-level
+        once either crosses ``_WINDOW_UPDATE_THRESHOLD``.  Stream-level
         credit is skipped on the final DATA frame (the stream is about to
         close, so the peer no longer needs it); connection-level credit is
         always returned because the connection window is shared across
@@ -1567,7 +1567,7 @@ class HTTP2Client:
     async def _credit_connection(self, n: int) -> None:
         """Return *n* bytes of connection-level credit.
 
-        Split out from :meth:`_credit_received` because it is owed for every
+        Split out from [`_credit_received`][] because it is owed for every
         DATA octet that arrived, including octets for a stream this client
         no longer tracks — that path has no per-stream state to accumulate
         against but consumed the shared window all the same.

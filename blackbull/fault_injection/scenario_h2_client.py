@@ -1,22 +1,22 @@
 """Programmable HTTP/2 **client-side** scenario model.
 
-A :class:`ScenarioH2Client` is a sequence of typed *steps* that
-:meth:`blackbull.client.http2.HTTP2Client.execute_scenario` walks in order
+A [`ScenarioH2Client`][] is a sequence of typed *steps* that
+[`blackbull.client.http2.HTTP2Client.execute_scenario`][blackbull.client.http2.HTTP2Client.execute_scenario] walks in order
 against a live connection.  This is the client-side half of the HTTP/2
 toolkit: a programmable client that drives a target *server* through
 deliberate misbehaviour — a preface that never arrives, a header block
 opened and abandoned, a Rapid Reset burst, a window never opened.
 
-Its twin is :mod:`blackbull.fault_injection.scenario_h1`, the client-side
+Its twin is [`blackbull.fault_injection.scenario_h1`][blackbull.fault_injection.scenario_h1], the client-side
 vocabulary one protocol over, and this module takes that twin's names
-wherever the two mean the same thing: :class:`SendRawBytes`,
-:class:`ReadResponse`, :class:`Sleep`, :class:`Abort`, and the fields of
-:class:`ScenarioH2ClientResult`.
+wherever the two mean the same thing: [`SendRawBytes`][],
+[`ReadResponse`][], [`Sleep`][], [`Abort`][], and the fields of
+[`ScenarioH2ClientResult`][].
 
 Two steps have no HTTP/1.1 counterpart:
 
-* :class:`SendPreface` — HTTP/1.1 has no connection preface.
-* :class:`SendFrame` — HTTP/2 is framed where HTTP/1.1 is a byte stream, so
+* [`SendPreface`][] — HTTP/1.1 has no connection preface.
+* [`SendFrame`][] — HTTP/2 is framed where HTTP/1.1 is a byte stream, so
   the typed step builds a frame rather than a blob.
 
 The bytes are assembled here and not by the production send path;
@@ -70,7 +70,7 @@ class SendFrame:
     changing the bytes actually written — the direct way to express "the
     peer lied about how much is coming".
 
-    ``frame_type`` is the raw type byte: a :class:`~blackbull.protocol.frame_types.FrameTypes`
+    ``frame_type`` is the raw type byte: a [`FrameTypes`][blackbull.protocol.frame_types.FrameTypes]
     member (which *is* a one-byte ``bytes``), or an ``int`` for a type the
     enum does not name — an unregistered type being itself a fault worth
     staging.
@@ -153,7 +153,7 @@ class WaitForServerFrame:
 
     A **filter**: non-matching frames are read, counted in
     ``wait_skipped``, and passed over.  Twin of
-    :class:`~blackbull.fault_injection.scenario_h2.WaitForClientFrame`.
+    [`WaitForClientFrame`][blackbull.fault_injection.scenario_h2.WaitForClientFrame].
 
     This is what makes an HTTP/2 client scenario able to observe a
     *verdict*.  A single ``ReadResponse`` cannot: the first frame any
@@ -172,7 +172,7 @@ class ExpectServerFrame:
 
     A **guard**, not a filter: nothing is skipped and the executor moves
     on either way.  Twin of
-    :class:`~blackbull.fault_injection.scenario_h2.ExpectClientFrame`.
+    [`ExpectClientFrame`][blackbull.fault_injection.scenario_h2.ExpectClientFrame].
     """
     match: dict = field(default_factory=dict)
     timeout: float = 5.0
@@ -202,10 +202,10 @@ class ScenarioH2Client:
 
 @dataclass
 class ScenarioH2ClientResult:
-    """Outcome of one :meth:`HTTP2Client.execute_scenario` call.
+    """Outcome of one ``HTTP2Client.execute_scenario`` call.
 
     Field names come from
-    :class:`~blackbull.fault_injection.scenario_h1.ScenarioResult`, its
+    [`ScenarioResult`][blackbull.fault_injection.scenario_h1.ScenarioResult], its
     twin, so a harness reporting on one does not need a second spelling for
     the other.
     """
@@ -326,7 +326,7 @@ def scenario_to_json(scenario: ScenarioH2Client) -> str:
 
 
 def scenario_from_json(src: str) -> ScenarioH2Client:
-    """Parse JSON Lines back to a :class:`ScenarioH2Client`."""
+    """Parse JSON Lines back to a [`ScenarioH2Client`][]."""
     name = ''
     steps: list = []
     for line in src.splitlines():

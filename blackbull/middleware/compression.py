@@ -501,7 +501,7 @@ def _make_default_compress() -> 'Compression':
 
     Kept as a module-level helper so the legacy ``from blackbull.middleware
     import compress`` import (which exposes a pre-built instance) keeps
-    working through the deprecation alias in :mod:`blackbull.middleware`.
+    working through the deprecation alias in [`blackbull.middleware`][blackbull.middleware].
     """
     try:
         from ..env import get_settings as _get_settings  # noqa: PLC0415

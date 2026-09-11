@@ -49,7 +49,7 @@ from ..logger import debug_gate  # noqa: E402
 logger = logging.getLogger(__name__)
 #: Read once at import: a disabled ``logger.debug`` on a per-request path
 #: costs 24 executed instructions to emit nothing.  Same bargain as
-#: ``@log`` — see :func:`blackbull.logger.debug_gate`.
+#: ``@log`` — see [`blackbull.logger.debug_gate`][blackbull.logger.debug_gate].
 _DEBUG = debug_gate(logger)
 
 
@@ -513,7 +513,7 @@ class BaseSender(ABC):
         Once a write hits ``ConnectionResetError`` / ``BrokenPipeError`` / SSL
         EOF the sender marks itself closed and subsequent writes silently drop;
         unguarded, those surface as tracebacks under sustained load.  The
-        discovery is published to :attr:`AbstractWriter.peer_gone` so that no
+        discovery is published to [`AbstractWriter.peer_gone`][AbstractWriter.peer_gone] so that no
         other sender on the connection has to rediscover it.
         """
         if self._closed or self._writer.peer_gone:
@@ -1023,7 +1023,7 @@ class ConnectionWindow:
     """Shared HTTP/2 connection-level (stream 0) send flow-control window.
 
     One instance per connection, referenced by every stream's
-    :class:`HTTP2Sender`, so all senders debit and await a single budget.
+    [`HTTP2Sender`][], so all senders debit and await a single budget.
 
     Without sharing each sender held a *private copy* of the
     connection window and debited only that copy, while the actor-level total
@@ -1052,7 +1052,7 @@ class HTTP2Sender(BaseSender):
       ``await sender(body_bytes, HTTPStatus.OK, headers=[...])``
       Sends a HEADERS frame followed by a DATA frame.
 
-    **Native** (:class:`~blackbull.native.NativeResponse`):
+    **Native** ([`NativeResponse`][blackbull.native.NativeResponse]):
       ``await sender(NativeResponse(status=..., header=..., body=...))``
       One object may carry header, body, and/or trailers; the sender buffers
       the header arm exactly like the dict start and delegates body/trailers
@@ -1089,7 +1089,7 @@ class HTTP2Sender(BaseSender):
         self._stream_id = stream_id
         self._push_callback = push_callback
         # A sender built without one gets a private window, which is correct
-        # only for a lone stream (:class:`ConnectionWindow`).
+        # only for a lone stream ([`ConnectionWindow`][]).
         self._conn_window = conn_window if conn_window is not None else ConnectionWindow()
         # A plain int, not a per-stream mapping: one sender serves one stream,
         # and keying it would invite a reader to hunt for multi-stream
@@ -1132,7 +1132,7 @@ class HTTP2Sender(BaseSender):
     def connection_window_size(self) -> int:
         """The shared connection-level send window.
 
-        A property over :class:`ConnectionWindow`, not a per-sender field:
+        A property over [`ConnectionWindow`][], not a per-sender field:
         every sender on the connection reads and writes the same value.
         """
         return self._conn_window.size
@@ -1261,7 +1261,7 @@ class HTTP2Sender(BaseSender):
         Per RFC 7540 §6.9.1, only DATA frames are subject to flow control;
         HEADERS and control frames (SETTINGS, PING, WINDOW_UPDATE, RST_STREAM,
         GOAWAY, CONTINUATION) are not.  Flow-controlled writes go through
-        :meth:`_write_data`.
+        [`_write_data`][].
         """
         await super()._write(data)
 
@@ -1654,7 +1654,7 @@ class WebSocketSender(BaseSender):
 
     def __init__(self, writer: AbstractWriter, *, compressor=None):
         super().__init__(writer)
-        # An :class:`OutboundCompressor` when permessage-deflate is negotiated;
+        # An [`OutboundCompressor`][] when permessage-deflate is negotiated;
         # ``None`` sends outbound frames verbatim (RSV1=0).
         self._compressor = compressor
 
@@ -1667,7 +1667,7 @@ class WebSocketSender(BaseSender):
         compressing and building a header are pure computation — and when this
         was an ``async def`` every send allocated and awaited a coroutine that
         never yielded, for 67 ns on a ~700 ns send.  The caller awaits
-        :meth:`_write_many`, which is the only part that can block.
+        [`_write_many`][], which is the only part that can block.
 
         The pair is written vectored, so the payload is never copied into a
         concatenated frame buffer (the join ``encode_frame`` would allocate).

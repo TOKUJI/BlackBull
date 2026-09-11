@@ -6,7 +6,7 @@ the ASGI compatibility boundary passes, because that boundary never takes
 the ``isinstance(conn, Connection)`` branch every production request does.
 Two tiers close that gap.
 
-**Tier 1** — :func:`request` and the verb helpers build a ``Connection`` and
+**Tier 1** — [`request`][] and the verb helpers build a ``Connection`` and
 call ``app(conn, receive, send)`` directly.  No socket, no protocol actor:
 everything from ``Connection`` inward (dispatcher, middleware chain, router,
 handlers, DI, events, response serialisation).  The equivalent of actix-web's
@@ -15,8 +15,8 @@ handlers, DI, events, response serialisation).  The equivalent of actix-web's
     resp = await native.get(app, '/hello')
     assert resp.status == 200
 
-**Tier 2** — :class:`NativeTestServer` binds a real loopback socket and runs
-BlackBull's own :class:`~blackbull.server.server.Server`, so a request
+**Tier 2** — [`NativeTestServer`][] binds a real loopback socket and runs
+BlackBull's own [`Server`][blackbull.server.server.Server], so a request
 travels accept → ``HTTP1Actor`` parse → ``Connection`` → native dispatch →
 wire bytes.  The equivalent of aiohttp's ``TestServer`` or Go's
 ``httptest.NewServer``::
@@ -26,7 +26,7 @@ wire bytes.  The equivalent of aiohttp's ``TestServer`` or Go's
 
 Both tiers are async-first, because the app entry point is a coroutine and a
 handler runs on the caller's event loop, as it does in production.
-:class:`NativeClient` and the synchronous form of :class:`NativeTestServer`
+[`NativeClient`][] and the synchronous form of [`NativeTestServer`][]
 wrap them for tests written as plain ``def``, each owning one background
 event loop for its whole lifetime rather than one per request.
 
@@ -80,7 +80,7 @@ def _header_pairs(headers: _HeaderInput) -> list[tuple[bytes, bytes]]:
     """Normalise caller-supplied headers to lowercase byte pairs.
 
     Accepts what a test naturally writes — a ``dict`` of ``str`` or ``bytes``,
-    a list of pairs, or a :class:`Headers` — because the alternative is every
+    a list of pairs, or a [`Headers`][] — because the alternative is every
     call site spelling ``{b'x-probe': b'seen'}`` by hand.  Names are
     lowercased to match the parser's index (``headers.get(b'content-type')``).
     """
@@ -126,7 +126,7 @@ def build_connection(
     client: tuple[str, int | None] | None = _TEST_CLIENT_ADDR,
     server: tuple[str, int | None] | None = _TEST_SERVER_ADDR,
 ) -> Connection:
-    """Build the :class:`Connection` an H/1.1 request line would have produced.
+    """Build the [`Connection`][] an H/1.1 request line would have produced.
 
     The field derivations mirror the HTTP/1.1 parser's, so a Tier 1 test and
     a real request agree on what the handler sees:
@@ -180,7 +180,7 @@ async def request(
 ) -> NativeTestResponse:
     """Call ``app(conn, receive, send)`` and collect the response.
 
-    The full-control form: build (or mutate) a :class:`Connection` yourself and
+    The full-control form: build (or mutate) a [`Connection`][] yourself and
     drive the app with it.  The verb helpers below are thin wrappers over this.
 
     The receive channel delivers *body* as one ``http.request`` event and then
@@ -261,9 +261,9 @@ async def request(
 
 
 #: Deprecated alias.  ``NativeResponse`` used to name *this* class, which
-#: collided with :class:`blackbull.native.NativeResponse` — the framework's
+#: collided with [`blackbull.native.NativeResponse`][blackbull.native.NativeResponse] — the framework's
 #: send message — so the two were indistinguishable in a traceback or an
-#: ``isinstance`` check.  Prefer :class:`NativeTestResponse`.
+#: ``isinstance`` check.  Prefer [`NativeTestResponse`][].
 NativeResponse = NativeTestResponse
 
 
@@ -294,7 +294,7 @@ async def head(app: Any, path: str, **kwargs: Any) -> NativeTestResponse:
 
     The handler sees ``HEAD``: rewriting it to ``GET`` and stripping the body
     is the H/1.1 actor's job (RFC 9110 §9.3.2), which is below this tier.  Use
-    :class:`NativeTestServer` to assert HEAD's *wire* behaviour.
+    [`NativeTestServer`][] to assert HEAD's *wire* behaviour.
     """
     return await _verb(app, 'HEAD', path, **kwargs)
 
@@ -387,7 +387,7 @@ class NativeClient:
         return self._loop_thread.run_coro(fn(self.app, *args, **kwargs))
 
     def request(self, conn: Connection, *, body: bytes | str = b'') -> NativeTestResponse:
-        """Full-control form — see :func:`request`."""
+        """Full-control form — see [`request`][]."""
         return self._run(request, conn, body=body)
 
     def get(self, path: str, **kwargs: Any) -> NativeTestResponse:
@@ -593,7 +593,7 @@ class NativeTestServer:
 
 
 class _SyncServerClient:
-    """Blocking façade over :class:`NativeTestServer`'s ``httpx.AsyncClient``.
+    """Blocking façade over [`NativeTestServer`][]'s ``httpx.AsyncClient``.
 
     Each call is scheduled on the server's own loop thread, so the request and
     the server it talks to share one loop — the same arrangement the async form

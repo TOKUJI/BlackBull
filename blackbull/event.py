@@ -54,7 +54,7 @@ class EventDispatcher:
     exceptions are caught and logged — they never reach the emitter.
 
     Observer tasks are tracked so they can be drained at shutdown via
-    :meth:`aclose`.  The drain timeout is configured at construction time
+    [`aclose`][].  The drain timeout is configured at construction time
     (``shutdown_timeout``); any task still running after the timeout is
     logged at WARNING and cancelled.
     """
@@ -121,7 +121,7 @@ class EventDispatcher:
            return until they finish, so cleanup registered here is guaranteed
            to complete within the event's lifetime.
         3. **Detached observers** — scheduled as independent tasks (isolated),
-           tracked so they can be drained at shutdown via :meth:`aclose`.
+           tracked so they can be drained at shutdown via [`aclose`][].
         """
         for h in self._interceptors.get(event.name, []):
             await h(event)
@@ -145,7 +145,7 @@ class EventDispatcher:
 
         Returns ``True`` on quiescence, ``False`` if *timeout* ran out
         first.  **Nothing is cancelled either way** — that is the whole
-        difference from :meth:`aclose`, which is a shutdown operation and
+        difference from [`aclose`][], which is a shutdown operation and
         kills what overruns.  A test helper that cancelled the work it was
         asked to observe would make the side-effect it exists to reveal
         unobservable.
@@ -173,7 +173,7 @@ class EventDispatcher:
         tasks still running after the timeout are logged at WARNING and
         cancelled.
 
-        Drains to quiescence through :meth:`drain`, so an observer that emits
+        Drains to quiescence through [`drain`][], so an observer that emits
         is waited for too.
 
         The cost is that a pathological observer chain can hold shutdown for

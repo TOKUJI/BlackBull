@@ -4,21 +4,21 @@ Level-A (pure-data) layer for the ``blackbull-mqtt`` broker sidecar: the 15
 MQTT 5.0 control packets as frozen dataclasses, a wire encoder/decoder, the
 MQTT 5.0 property system, reason codes, and the topic-filter matching
 algorithm.  No I/O and no broker state live here — that is the job of
-:mod:`blackbull.mqtt.broker` and :mod:`blackbull.mqtt.connection`.
+[`blackbull.mqtt.broker`][blackbull.mqtt.broker] and [`blackbull.mqtt.connection`][blackbull.mqtt.connection].
 
 Reference: MQTT Version 5.0, OASIS Standard
   https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html
 
 Decoder return contract
 -----------------------
-:func:`decode_packet` returns the decoded message object.  Every message also
+[`decode_packet`][] returns the decoded message object.  Every message also
 unpacks into ``(message, bytes_consumed)`` so a caller walking a buffer of
 concatenated packets can advance its offset::
 
     msg = decode_packet(buf)            # attribute access / isinstance
     msg, consumed = decode_packet(buf)  # buffer-walking
 
-This dual ergonomics is provided by :meth:`MQTTMessage.__iter__`; the consumed
+This dual ergonomics is provided by ``MQTTMessage.__iter__``; the consumed
 count is recorded on the instance during decode.
 """
 from __future__ import annotations
@@ -90,7 +90,7 @@ class PublishFlags(NamedTuple):
 # Protocol level & flag-byte bit definitions — so the bitwise codec below
 # reads in MQTT 5.0 spec terms rather than raw hex (§3.1.2.2, §3.1.2.3,
 # §3.3.1, §3.8.3.1).  A two-bit QoS / Retain-Handling subfield is expressed
-# as a (shift, mask) pair; single bits are :class:`~enum.IntFlag` members.
+# as a (shift, mask) pair; single bits are [`IntFlag`][enum.IntFlag] members.
 # ---------------------------------------------------------------------------
 
 class ProtocolLevel(IntEnum):
@@ -103,8 +103,8 @@ class ProtocolLevel(IntEnum):
 class ConnectFlags(IntFlag):
     """Single-bit flags in the CONNECT flags byte (§3.1.2.3).
 
-    The Will QoS field is the two-bit subfield at :data:`WILL_QOS_SHIFT`
-    (mask :data:`WILL_QOS_MASK`), not a flag here.
+    The Will QoS field is the two-bit subfield at ``WILL_QOS_SHIFT``
+    (mask ``WILL_QOS_MASK``), not a flag here.
     """
     CLEAN_START = 0x02
     WILL_FLAG = 0x04
@@ -120,7 +120,7 @@ WILL_QOS_MASK = 0x03
 class PublishFlagBits(IntFlag):
     """Single-bit flags in the PUBLISH fixed header (§3.3.1).
 
-    QoS is the two-bit subfield at :data:`PUBLISH_QOS_SHIFT`.
+    QoS is the two-bit subfield at ``PUBLISH_QOS_SHIFT``.
     """
     RETAIN = 0x01
     DUP = 0x08
@@ -251,7 +251,7 @@ class MQTTReasonCode(int):
 class ReasonCode(IntEnum):
     """The subset of §2.4 reason codes the broker references by name.
 
-    The single definition of these *values*; :class:`MQTTReasonCode` carries
+    The single definition of these *values*; [`MQTTReasonCode`][] carries
     the full §2.4 registry and the human-readable names.  Naming a member
     here is what keeps a code from drifting between modules.
     """
@@ -417,7 +417,7 @@ _PROP_ID_TO_KEY: dict[int, str] = {
 
 
 def get_property_info(identifier: int) -> PropertyInfo | None:
-    """Return the :class:`PropertyInfo` for a property identifier, or None."""
+    """Return the [`PropertyInfo`][] for a property identifier, or None."""
     return _PROP_BY_ID.get(identifier)
 
 
@@ -511,7 +511,7 @@ class MQTTMessage:
 
     Provides the dual decode contract: a decoded message unpacks into
     ``(message, bytes_consumed)``.  The byte count is set by
-    :func:`decode_packet` via :meth:`_set_consumed`; messages built by hand
+    [`decode_packet`][] via ``_set_consumed``; messages built by hand
     report ``0``.
     """
 
@@ -1145,8 +1145,8 @@ def decode_packet(data: bytes) -> MQTTMessage:
     """Decode the first MQTT control packet in *data*.
 
     Returns the message; it also unpacks into ``(message, bytes_consumed)``.
-    Raises :class:`IncompletePacket` if the buffer is short, or
-    :class:`MQTTDecodeError` if the bytes are not a valid packet.
+    Raises [`IncompletePacket`][] if the buffer is short, or
+    [`MQTTDecodeError`][] if the bytes are not a valid packet.
     """
     if len(data) < 2:
         raise IncompletePacket('Need at least a 2-byte fixed header')
@@ -1258,7 +1258,7 @@ def validate_topic_name(topic: str) -> bool:
 def validate_topic_filter(filter_str: str) -> bool:
     """§4.7.1 — Validate a subscription Topic *Filter*.
 
-    Returns True when valid; raises :class:`ValueError` describing the first
+    Returns True when valid; raises ``ValueError`` describing the first
     rule violated.  Enforces single-``#`` / terminal-``#`` / whole-level
     wildcard rules (§4.7.1.2-3) and the ``$share`` share-name rule (§4.8.2).
     """

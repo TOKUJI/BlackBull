@@ -18,7 +18,7 @@ observes completion — which is why this runs over a real socket rather than
 in process.  ``docs/guide/grpc.md`` argues it under "Why not the in-process
 test client".
 
-The gRPC analogue of :class:`~blackbull.testing.native.NativeTestServer`,
+The gRPC analogue of [`NativeTestServer`][blackbull.testing.native.NativeTestServer],
 and the same shape: a real server on a loopback port, the whole dispatch
 path exercised, and the port left public so anything else can drive it.
 """
@@ -111,7 +111,7 @@ class GrpcTestServer:
 
 
 def _read_reply(response) -> GrpcReply:
-    """Fold one ``ClientResponse`` into a :class:`GrpcReply`.
+    """Fold one ``ClientResponse`` into a [`GrpcReply`][].
 
     ``grpc-status`` is absent on some error paths that fail before the
     handler runs; absent is treated as ``OK`` because that is what the

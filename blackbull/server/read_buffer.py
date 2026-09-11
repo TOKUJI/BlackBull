@@ -1,20 +1,20 @@
 """The single owned buffer for the H/1.1 inbound path.
 
 One `bytearray` per connection, written **directly by the kernel** through
-:meth:`ReadBuffer.get_buffer` and read by cursor.  Every inbound byte is
+[`ReadBuffer.get_buffer`][ReadBuffer.get_buffer] and read by cursor.  Every inbound byte is
 materialised once: the head is sliced out for the parser, the body is handed
 out as a `memoryview`, and a keep-alive peer's next request is simply the bytes
 that were already sitting between the cursors.
 
 Deliberately free of HTTP semantics.  It reports an over-budget head with
-:data:`LIMIT_EXCEEDED` rather than raising, because the 431 belongs to the
+``LIMIT_EXCEEDED`` rather than raising, because the 431 belongs to the
 actor; it distinguishes "EOF with nothing" from "EOF mid-head" only by leaving
-:attr:`available` intact, because deciding between a silent close and a 400 is
+``available`` intact, because deciding between a silent close and a 400 is
 also the actor's job.
 
 Free of *receive* policy for the same reason: it grows on demand, reports a
 drained message boundary, tracks the message's peak resident bytes, and offers
-:meth:`release_to_floor`, but takes none of those decisions.  The Internals
+``release_to_floor``, but takes none of those decisions.  The Internals
 page says which object does.
 
 Not thread-safe and not concurrency-safe — one connection, one buffer, one
@@ -40,7 +40,7 @@ _MIN_READ = 4096
 #: second stops a large resident body being shuffled while it is consumed.
 _COMPACT_MIN = 4096
 
-#: Size at or above which :meth:`ReadBuffer.take` copies through a memoryview
+#: Size at or above which [`ReadBuffer.take`][ReadBuffer.take] copies through a memoryview
 #: instead of a `bytearray` slice — the measured crossover, tabulated on
 #: ``take``.  Deliberately not configurable: a property of the interpreter's
 #: copy costs, not of a deployment.
@@ -63,11 +63,11 @@ class ReadBuffer:
         'peak_avail',
     )
 
-    #: :meth:`find_head_end` result meaning "the byte budget ran out before the
+    #: [`find_head_end`][] result meaning "the byte budget ran out before the
     #: terminator appeared".  Returned rather than raised — see module docstring.
     LIMIT_EXCEEDED = -2
 
-    #: The size :meth:`release_to_floor` returns to.  Public because the
+    #: The size ``release_to_floor`` returns to.  Public because the
     #: reader's release policy compares a message's peak against it.
     FLOOR = _INITIAL
 
@@ -83,7 +83,7 @@ class ReadBuffer:
         #: consuming read, written only where the buffer resizes.
         self.grown = False
         #: A compaction left the buffer empty.  Raised here and cleared by
-        #: :meth:`consume_boundary`; this object never reads it.
+        #: [`consume_boundary`][]; this object never reads it.
         self.drained_boundary = False
         #: Peak resident bytes since the last boundary — accounting for the
         #: reader's release hysteresis, kept here because the write path
@@ -151,7 +151,7 @@ class ReadBuffer:
         return self._view
 
     def buffer_updated(self, nbytes: int) -> int:
-        """Declare how much of the last :meth:`get_buffer` was written.
+        """Declare how much of the last [`get_buffer`][] was written.
 
         Returns the new resident count, and updates ``peak_avail`` on the
         way — but only for a grown buffer, since a floor-sized one can never
@@ -195,7 +195,7 @@ class ReadBuffer:
         """Length of the message head, terminator included, or a sentinel.
 
         Returns ``-1`` when the terminator has not arrived yet and
-        :data:`LIMIT_EXCEEDED` when *limit* (0 = unbounded) is passed without
+        ``LIMIT_EXCEEDED`` when *limit* (0 = unbounded) is passed without
         one.
 
         The scan resumes from where the last call stopped, backed off by three
@@ -223,7 +223,7 @@ class ReadBuffer:
     def find(self, sep: bytes, start: int = 0) -> int:
         """Offset of *sep* within the resident bytes, or ``-1``.
 
-        Scans from the read cursor every call, unlike :meth:`find_head_end`:
+        Scans from the read cursor every call, unlike [`find_head_end`][]:
         its callers change the search target between calls, so a carried scan
         offset would be wrong rather than merely wasteful.  *start* is a
         relative offset for a caller resuming its own scan on a separator that
@@ -292,7 +292,7 @@ class ReadBuffer:
         return memoryview(self._buf)[self._r:self._r + n]
 
     def consume(self, n: int) -> None:
-        """Advance past *n* bytes handed out by :meth:`view`."""
+        """Advance past *n* bytes handed out by [`view`][]."""
         self._r += n
         self._reset_scan()
 
@@ -302,7 +302,7 @@ class ReadBuffer:
         Called on message boundaries.  Without it the cursors walk forward for
         the life of a keep-alive connection and the allocation grows to every
         byte ever received on it.  Compacting to empty is the one moment a
-        message is provably gone, so it raises :attr:`drained_boundary`.
+        message is provably gone, so it raises ``drained_boundary``.
         """
         self._drop_view()
         r = self._r
@@ -324,7 +324,7 @@ class ReadBuffer:
     def consume_boundary(self) -> None:
         """Take the raised boundary, and start the next message's accounting.
 
-        The reader polls :attr:`drained_boundary` and calls this when it is
+        The reader polls ``drained_boundary`` and calls this when it is
         set.  Clearing the flag and the peak has to happen here rather than at
         the call site: a consumer resetting them itself makes an edge-triggered
         signal whose edge goes to whichever consumer reaches it first.
@@ -340,7 +340,7 @@ class ReadBuffer:
         its peak allocation for the rest of its keep-alive life.
 
         Refuses while bytes are resident.  That is the one invariant this
-        container owes its caller, not a policy check — :attr:`drained_boundary`
+        container owes its caller, not a policy check — ``drained_boundary``
         is also raised on the *arrival* path, where a delivery lands
         immediately afterwards and reallocating would discard bytes the
         transport has already handed over.

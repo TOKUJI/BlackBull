@@ -1,7 +1,7 @@
 """Runtime configuration sourced from environment variables.
 
-All server settings live in :class:`Settings`.  Retrieve the current
-configuration with :func:`get_settings`, which reads environment variables
+All server settings live in [`Settings`][].  Retrieve the current
+configuration with [`get_settings`][], which reads environment variables
 once and returns an immutable snapshot.
 
 Environment variables
@@ -450,7 +450,7 @@ BB_MQTT_MAX_SESSIONS
     only.  ``0`` disables the cap.  Default: ``10000``.
 BB_COMPRESSION_MIN_SIZE
     Minimum response body size in bytes below which
-    :class:`~blackbull.middleware.compression.Compression` skips
+    [`Compression`][blackbull.middleware.compression.Compression] skips
     compression entirely.  Raising this threshold under load reduces CPU
     pressure at the cost of slightly larger small responses.
     Default: ``100``.
@@ -497,7 +497,7 @@ BB_UVLOOP
     not importable.  Default: ``false``.
 BB_FORCE_ASGI_SCOPE
     Dual-path conformance lane.  When enabled, every request round-trips the
-    native :class:`~blackbull.connection.Connection` through ``as_scope()`` +
+    native [`Connection`][blackbull.connection.Connection] through ``as_scope()`` +
     ``from_scope()`` before dispatch, so the ASGI compat conversion is
     exercised on the self-hosted path and cannot silently bitrot.  Enabled in
     CI; off in normal operation, where the native path skips the round-trip.
@@ -524,7 +524,7 @@ The ``BB_CLIENT_*`` block below bounds the **async client**, not the server.
 The two are held apart deliberately: a server is addressed by anyone, while a
 client picks its peer, so the same shape of limit gets a different default on
 each side.  Each entry states what it bounds; the trade-off behind each number
-lives on the matching :class:`Settings` field.
+lives on the matching [`Settings`][] field.
 
 BB_CLIENT_HEAD_MAX_TOTAL
     Maximum total bytes in a response head the client will read (status line
@@ -753,14 +753,14 @@ def _bool_env(name: str, default: bool) -> bool:
 class Settings:
     """Immutable snapshot of all runtime settings.
 
-    Construct via :func:`get_settings` rather than directly so that
+    Construct via [`get_settings`][] rather than directly so that
     environment variables are read at the right time.
     """
 
     env: Environment = Environment.DEVELOPMENT
     workers: int = 1
 
-    #: ``auto`` is what ships: :func:`resolve_max_connections` derives
+    #: ``auto`` is what ships: [`resolve_max_connections`][] derives
     #: the cap from ``RLIMIT_NOFILE``.  This literal reaches only a
     #: directly-constructed ``Settings``, and leaves it uncapped rather
     #: than derived so it is not capped by whichever host it runs on.
@@ -861,7 +861,7 @@ class Settings:
 
 @_functools.cache
 def get_settings() -> Settings:
-    """Read environment variables and return an immutable :class:`Settings`.
+    """Read environment variables and return an immutable [`Settings`][].
 
     Cached: first call parses env vars and builds the dataclass; subsequent
     calls return the same instance.  Settings are server-process-wide
@@ -871,7 +871,7 @@ def get_settings() -> Settings:
     before this cache.
 
     Tests that mutate environment between cases must call
-    :func:`reset_settings_cache` in their teardown.
+    [`reset_settings_cache`][] in their teardown.
     """
     raw_env = _str_env('BLACKBULL_ENV', 'development').lower()
     try:
@@ -983,10 +983,10 @@ def get_settings() -> Settings:
 
 
 def reset_settings_cache() -> None:
-    """Clear the cached :class:`Settings`.
+    """Clear the cached [`Settings`][].
 
     Call this in test teardown if the test mutated env vars that
-    :func:`get_settings` reads.  Without this, the cached settings reflect
+    [`get_settings`][] reads.  Without this, the cached settings reflect
     whatever environment was visible the first time ``get_settings()`` ran
     in the process.
     """

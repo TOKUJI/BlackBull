@@ -19,7 +19,7 @@ from blackbull.event import Event, EventDispatcher
 
 def _request_fields(conn):
     """Read the common request identity fields for a Level B event detail from
-    either a native :class:`~blackbull.connection.Connection` (the ``app(conn, …)``
+    either a native [`Connection`][blackbull.connection.Connection] (the ``app(conn, …)``
     path) or an ASGI scope dict (only the ``BB_FORCE_ASGI_SCOPE`` / external-server
     compat lane). Returns ``(client, method, path, http_version)``."""
     from blackbull.connection import Connection  # noqa: PLC0415 — avoid import cycle
@@ -32,7 +32,7 @@ def _request_fields(conn):
 def _ws_fields(conn):
     """Read ``(client, connection_id, path)`` for a WebSocket event detail.
 
-    *conn* is the native :class:`~blackbull.connection.Connection` the
+    *conn* is the native [`Connection`][blackbull.connection.Connection] the
     WebSocket actor holds — the convenience keys on a WS event detail are
     lifted off the same object the listener gets as ``detail['conn']``.
     """
@@ -94,9 +94,9 @@ class EventAggregator:
     async def on_request_disconnected(self, conn) -> None:
         """Fire Level B ``request_disconnected``.
 
-        *conn* is the native :class:`~blackbull.connection.Connection` on the
+        *conn* is the native [`Connection`][blackbull.connection.Connection] on the
         self-hosted path, or an ASGI scope dict only on the ``BB_FORCE_ASGI_SCOPE``
-        / external compat lane — :func:`_request_fields` reads either."""
+        / external compat lane — ``_request_fields`` reads either."""
         if not self._dispatcher.has_listeners('request_disconnected'):
             return
         client, method, path, http_version = _request_fields(conn)

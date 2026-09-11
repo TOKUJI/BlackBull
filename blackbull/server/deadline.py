@@ -1,8 +1,8 @@
 """Per-connection rescheduled deadline.
 
 No per-connection asyncio timer.  One singleton ``TimerHandle`` per
-process re-arms itself every :data:`_TICK_S` and walks the registry of
-armed :class:`ConnectionDeadline` instances for expirations, so arming
+process re-arms itself every ``_TICK_S`` and walks the registry of
+armed [`ConnectionDeadline`][] instances for expirations, so arming
 costs a ``loop.time()``, a comparison and a set insertion — ~0.34 µs
 against the ~1.7 µs of a ``TimerHandle`` plus heap push plus cancel.
 
@@ -82,8 +82,8 @@ class ConnectionDeadline:
     task is cancelled — the cancellation propagates into whichever
     ``reader.readuntil`` / ``read`` / ``readexactly`` is currently
     awaiting.  Call sites translate the cancellation into
-    ``TimeoutError`` via :meth:`guard` (the common case) or manually
-    by checking :attr:`fired`.
+    ``TimeoutError`` via [`guard`][] (the common case) or manually
+    by checking ``fired``.
     """
 
     __slots__ = ('_loop', '_task', '_deadline_at', '_fired',
@@ -100,7 +100,7 @@ class ConnectionDeadline:
     def arm(self, seconds: float) -> None:
         """(Re-)set the deadline; ``seconds <= 0`` disables it.
 
-        Safe to call repeatedly.  Resets :attr:`fired` so a recovered
+        Safe to call repeatedly.  Resets ``fired`` so a recovered
         deadline can be reused across phases on the same connection.
         """
         self._fired = False
@@ -124,7 +124,7 @@ class ConnectionDeadline:
             self._registered = False
 
     def _fire_from_scanner(self) -> None:
-        """Invoked by :func:`_tick` when ``_deadline_at`` has passed."""
+        """Invoked by [`_tick`][] when ``_deadline_at`` has passed."""
         self._fired = True
         self._deadline_at = _INF
         self._registered = False
@@ -178,8 +178,8 @@ class ConnectionDeadline:
 class WriteDeadline:
     """Bounds a drain on a connection's writer, via the same scanner.
 
-    Rides in :data:`_Scanner._REGISTRY` alongside
-    :class:`ConnectionDeadline` — the scanner only needs
+    Rides in ``_Scanner._REGISTRY`` alongside
+    [`ConnectionDeadline`][] — the scanner only needs
     ``_deadline_at`` and ``_fire_from_scanner``.  Two differences from
     that class, both forced by the write path:
 
@@ -218,7 +218,7 @@ class WriteDeadline:
         return self._fired
 
     def _fire_from_scanner(self) -> None:
-        """Invoked by :func:`_tick` when ``_deadline_at`` has passed."""
+        """Invoked by [`_tick`][] when ``_deadline_at`` has passed."""
         self._fired = True
         self._deadline_at = _INF
         self._registered = False
@@ -275,7 +275,7 @@ class WsIdleWatchdog:
     callback services buffered control frames / starts the deferred reader.
 
     Registry state plus a callback, under this module's no-per-connection-timer
-    rule, re-armed on every fire so it keeps watching until :meth:`disarm`.
+    rule, re-armed on every fire so it keeps watching until [`disarm`][].
     ``touch()`` on each receive/send keeps an actively-driven connection from
     ever firing.
     """
@@ -298,7 +298,7 @@ class WsIdleWatchdog:
             self._registered = True
 
     def _fire_from_scanner(self) -> None:
-        """Invoked by :func:`_tick` when the connection has been idle."""
+        """Invoked by [`_tick`][] when the connection has been idle."""
         # Re-arm first: the callback may schedule work, but this watchdog
         # keeps watching (once per tick) until disarm().
         self._deadline_at = self._loop.time() + self._idle_s

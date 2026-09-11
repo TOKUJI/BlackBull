@@ -22,17 +22,17 @@ Design invariants (validated in ``bench/scratch/send-model-c.py``):
 - **``to_asgi()`` is the boundary conversion** — 1 object → ASGI event list,
   used only at conversion boundaries: the external ASGI edge (``asgi=True``
   / external hosts) and the middleware native-read arms (symmetric with
-  :meth:`Connection.as_scope`).
+  [`Connection.as_scope`][Connection.as_scope]).
 """
 from __future__ import annotations
 
 
 class _HeaderView:
-    """Zero-copy view over a :class:`NativeResponse` header list.
+    """Zero-copy view over a [`NativeResponse`][] header list.
 
     Mutations (``append``) are visible to anything reading the response
     afterwards (the sender, ``to_asgi``).  Models the DX of
-    :class:`blackbull.headers.Headers` without a copy — lookups are
+    [`blackbull.headers.Headers`][blackbull.headers.Headers] without a copy — lookups are
     case-insensitive (RFC 9110 §5.1), matching ``Headers``.
     """
 
@@ -81,16 +81,16 @@ class _HeaderView:
 class NativeWSMessage:
     """One message on the native WebSocket send channel.
 
-    The WS counterpart of :class:`NativeResponse`, and it exists for the same
+    The WS counterpart of [`NativeResponse`][], and it exists for the same
     reason.  HTTP has a native send message and the sender a native arm;
     WebSocket would otherwise be native only in the sense that "conn is
     native, no scope" while its *event channel* stayed ASGI-shaped — so
     ``websocket.*`` dicts would travel object → middleware → actor → sender
     on BlackBull's own path.
-    The handler never saw them (that is the :class:`~blackbull.websocket.WebSocket`
+    The handler never saw them (that is the [`WebSocket`][blackbull.websocket.WebSocket]
     object's whole point), but everything under it did.
 
-    Three kinds, discriminated by :attr:`kind` rather than by which of seven
+    Three kinds, discriminated by ``kind`` rather than by which of seven
     fields happens to be set — the variants carry disjoint payloads, so a tag
     reads better here than the presence test that suits ``NativeResponse``'s
     combinable arms:
@@ -101,7 +101,7 @@ class NativeWSMessage:
 
     ``data`` rather than ``bytes``: the ASGI key is ``bytes``, but a slot of
     that name shadows the builtin at every use site inside the class.
-    :meth:`to_asgi` maps it back for the boundary.
+    [`to_asgi`][] maps it back for the boundary.
     """
 
     ACCEPT = 'accept'
@@ -151,7 +151,7 @@ class NativeWSMessage:
 
         Used only at conversion boundaries — the external ASGI edge and the
         raw ``(conn, receive, send)`` compat surface — exactly like
-        :meth:`NativeResponse.to_asgi` on the HTTP side.
+        [`NativeResponse.to_asgi`][NativeResponse.to_asgi] on the HTTP side.
         """
         if self.kind == self.ACCEPT:
             event: dict = {'type': 'websocket.accept',

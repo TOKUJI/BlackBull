@@ -2,7 +2,7 @@
 
 Strips the accept/close boilerplate from a raw-triplet handler.  It works
 with either handler form: the handshake is recorded on the connection, so a
-:class:`~blackbull.websocket.WebSocket` built downstream adopts that state
+[`WebSocket`][blackbull.websocket.WebSocket] built downstream adopts that state
 instead of waiting for a ``websocket.connect`` already consumed.
 
 The object form makes it redundant — ``await ws.accept()`` is the line it

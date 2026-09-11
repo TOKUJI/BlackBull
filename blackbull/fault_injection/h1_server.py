@@ -18,7 +18,7 @@ assert that the client survives what a real server can do wrong::
 ``tests/unit/test_fault_injection_h1_server.py::TestTheBreakerIsIndependent``
 pins that, because the property is invisible until the day it matters.
 
-Two safety locks, the same pair :class:`H2FaultServer` carries and both in
+Two safety locks, the same pair [`H2FaultServer`][] carries and both in
 scope for security reports per ``SECURITY.md``: it refuses to start in a
 production context, and it refuses a non-loopback bind without an explicit
 ``allow_remote=True``.
@@ -93,7 +93,7 @@ def _refuse_in_production() -> None:
 
 
 class H1FaultServer:
-    """Serves one :class:`ScenarioH1Server` to each connecting client."""
+    """Serves one [`ScenarioH1Server`][] to each connecting client."""
 
     def __init__(
         self,

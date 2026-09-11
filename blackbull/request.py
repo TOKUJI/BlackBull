@@ -10,11 +10,11 @@ Provides:
 - `parse_cookies`: the ASGI-scope-shaped wrapper of the above, for external
   callers that hold a scope dict.
 
-The opt-in HTTP context object is :class:`blackbull.connection.Connection`;
+The opt-in HTTP context object is [`blackbull.connection.Connection`][blackbull.connection.Connection];
 ``Request`` is a **deprecated** alias of it, resolved through
 ``blackbull.__getattr__``, and will be removed no earlier than 2027-08-01.
 This module holds only the transport-agnostic free functions, which
-:class:`Connection` builds on.
+[`Connection`][] builds on.
 """
 import json
 from typing import Any, AsyncIterator
@@ -28,7 +28,7 @@ class ClientDisconnected(Exception):
     ASGI signals a mid-body disconnect with an ``http.disconnect`` event that
     carries no ``body``/``more_body`` keys.  Treating it as end-of-message
     would return a *truncated* upload as if it were whole, so
-    :func:`read_body` raises this instead — the handler must not process a
+    [`read_body`][] raises this instead — the handler must not process a
     partial body as complete.  The ``partial`` attribute holds whatever body
     bytes had arrived before the disconnect.
     """
@@ -41,7 +41,7 @@ class ClientDisconnected(Exception):
 async def read_body(receive: ASGIReceiveCallable) -> bytes:
     """Read the complete request body from the ASGI receive channel.
 
-    Raises :class:`ClientDisconnected` if an ``http.disconnect`` arrives
+    Raises [`ClientDisconnected`][] if an ``http.disconnect`` arrives
     before the body is complete, so a truncated upload is never silently
     returned as if whole.
     """
@@ -81,19 +81,19 @@ async def read_body(receive: ASGIReceiveCallable) -> bytes:
 async def stream_body(receive: ASGIReceiveCallable) -> AsyncIterator[bytes]:
     """Yield the request body one ``http.request`` chunk at a time.
 
-    The streaming counterpart to :func:`read_body`: it never accumulates the
+    The streaming counterpart to [`read_body`][]: it never accumulates the
     whole payload, so a handler that only needs to *process* the body (count
     bytes, hash it, forward it, parse incrementally) holds one chunk at a time
     instead of the entire upload.
 
     Empty chunks are skipped.  A peer that vanishes mid-body raises
-    :class:`ClientDisconnected` (with no ``partial`` — chunks already yielded
+    [`ClientDisconnected`][] (with no ``partial`` — chunks already yielded
     are the caller's to keep), so a truncated upload is never silently treated
     as complete.
     """
     next_chunk = getattr(receive, 'next_chunk', None)
     if next_chunk is not None:
-        # Native channel — see :func:`read_body`.  ``None`` ends the body;
+        # Native channel — see [`read_body`][].  ``None`` ends the body;
         # the disconnect propagates as it is raised.
         while (chunk := await next_chunk()) is not None:
             if chunk:
@@ -125,9 +125,9 @@ async def read_json(receive: ASGIReceiveCallable) -> Any:
             return
 
     Note that a literal JSON ``null`` body also parses to ``None``; if that
-    distinction matters, read the body yourself with :func:`read_body`.
+    distinction matters, read the body yourself with [`read_body`][].
 
-    A mid-body client disconnect propagates as :class:`ClientDisconnected`
+    A mid-body client disconnect propagates as [`ClientDisconnected`][]
     rather than being reported as invalid JSON — a truncated body is a
     transport failure, not a parse error.
     """
@@ -153,7 +153,7 @@ async def read_text(receive: ASGIReceiveCallable, encoding: str = 'utf-8') -> st
     *encoding* for non-UTF-8 payloads.
 
     A mid-body client disconnect still propagates as
-    :class:`ClientDisconnected`: a truncated upload must not be decoded and
+    [`ClientDisconnected`][]: a truncated upload must not be decoded and
     returned as if it were the complete text.
     """
     body = await read_body(receive)
@@ -176,7 +176,7 @@ def parse_cookies(source) -> dict[str, str]:
     - A plain list/iterable of ``(name, value)`` bytes tuples — the
       standard ASGI 3.0 form, used by external servers (uvicorn,
       hypercorn, ``httpx.ASGITransport``).
-    - A :class:`blackbull.headers.Headers` instance — what BlackBull's
+    - A [`blackbull.headers.Headers`][blackbull.headers.Headers] instance — what BlackBull's
       own server attaches as a handler ergonomics enhancement.
     """
     return cookies_from_headers(source.get('headers', ()))
@@ -186,10 +186,10 @@ def cookies_from_headers(headers) -> dict[str, str]:
     """Parse the ``Cookie`` header(s) into a dict, straight from a headers
     object/iterable — no ASGI scope dict involved.
 
-    This is the native core: :meth:`Connection.cookies` calls it directly on
-    ``conn.headers``; :func:`parse_cookies` is the ASGI-scope-shaped wrapper kept
+    This is the native core: [`Connection.cookies`][Connection.cookies] calls it directly on
+    ``conn.headers``; [`parse_cookies`][] is the ASGI-scope-shaped wrapper kept
     for external callers that hold a scope dict. Accepts a
-    :class:`blackbull.headers.Headers` instance (uses ``getlist``) or a plain
+    [`blackbull.headers.Headers`][blackbull.headers.Headers] instance (uses ``getlist``) or a plain
     iterable of ``(name, value)`` bytes tuples (the ASGI 3.0 form)."""
     getlist = getattr(headers, 'getlist', None)
     if getlist is not None:

@@ -1,7 +1,7 @@
 """Programmable HTTP/1.1 **server-side** scenario model.
 
-A :class:`ScenarioH1Server` is a sequence of typed *steps* that
-:class:`~blackbull.fault_injection.h1_server.H1FaultServer` walks in order
+A [`ScenarioH1Server`][] is a sequence of typed *steps* that
+[`H1FaultServer`][blackbull.fault_injection.h1_server.H1FaultServer] walks in order
 against a connected client.  This is the server-side half of the HTTP/1.1
 toolkit: a programmable server that drives a target *client* through
 deliberate misbehaviour — a status line delivered a byte at a time, a
@@ -9,7 +9,7 @@ deliberate misbehaviour — a status line delivered a byte at a time, a
 mid-chunk, a connection dropped mid-response.
 
 The symmetric client-side half — a programmable *client* driving a real
-server — is :mod:`blackbull.fault_injection.scenario_h1`.  Its vocabulary
+server — is [`blackbull.fault_injection.scenario_h1`][blackbull.fault_injection.scenario_h1].  Its vocabulary
 looks similar and is **not** reusable here: ``ReadResponse`` names the
 other end of the wire.  Two vocabularies, because there are two roles.
 
@@ -53,7 +53,7 @@ class WaitForRequest:
     positional: a head passed over is one the scenario can no longer
     answer.  The count is on ``ScenarioH1ServerResult.requests_skipped``.
 
-    :class:`ExpectRequest` is the guard that skips nothing.
+    [`ExpectRequest`][] is the guard that skips nothing.
     """
     match: dict = field(default_factory=dict)
     timeout: float = 5.0
@@ -174,7 +174,7 @@ class CloseGracefully:
     """Close cleanly (FIN) after whatever has been written.
 
     Terminal.  What the client sees is an orderly EOF mid-body, not the
-    reset :class:`Abort` sends.
+    reset [`Abort`][] sends.
     """
 
 
@@ -197,7 +197,7 @@ Step = (WaitForRequest | ExpectRequest | SendStatusLine | SendHeader | EndHeader
 class ScenarioH1Server:
     """An ordered sequence of steps, plus a name for test parametrisation.
 
-    ``steps`` is a **tuple**, as on :class:`ScenarioH2`: a frozen dataclass
+    ``steps`` is a **tuple**, as on [`ScenarioH2`][]: a frozen dataclass
     holding a mutable list is a frozen container of mutable contents.
     """
     steps: tuple[Step, ...] = ()
@@ -210,7 +210,7 @@ class ScenarioH1Server:
 
 
 def parse_request_head(head: bytes) -> dict:
-    """Split a request head into the fields :func:`request_matches` reads.
+    """Split a request head into the fields [`request_matches`][] reads.
 
     Lenient by necessity: it parses what a *client under test* actually
     sent, including what a conforming parser would reject.  A malformed
@@ -278,7 +278,7 @@ def request_matches(head: bytes, match: dict) -> bool:
 class ScenarioH1ServerResult:
     """What the executor observed while running a scenario.
 
-    Field names match :class:`~blackbull.fault_injection.scenario_h2.ScenarioH2Result`
+    Field names match [`ScenarioH2Result`][blackbull.fault_injection.scenario_h2.ScenarioH2Result]
     wherever the two mean the same thing, so a harness that reports on one
     half does not need a second spelling for the other.
     """
@@ -306,7 +306,7 @@ class ScenarioH1ServerResult:
     #: counts the same thing under the same name; there it is harmless,
     #: because streams are independent.)
     wait_skipped: int = 0
-    #: One ``(match, matched)`` pair per :class:`ExpectRequest` step, in
+    #: One ``(match, matched)`` pair per [`ExpectRequest`][] step, in
     #: order — what the scenario assumed, and whether it held.
     expectations: list = field(default_factory=list)
     #: True when a ``HalfClose`` step actually shut down the write side.
@@ -395,7 +395,7 @@ def scenario_to_json(scenario: ScenarioH1Server) -> str:
 
 
 def scenario_from_json(src: str) -> ScenarioH1Server:
-    """Parse JSON Lines back to a :class:`ScenarioH1Server`."""
+    """Parse JSON Lines back to a [`ScenarioH1Server`][]."""
     name = ''
     steps: list = []
     for line in src.splitlines():

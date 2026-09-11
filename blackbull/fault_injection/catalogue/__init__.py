@@ -1,7 +1,7 @@
 """Canned-misbehaviour catalogue for HTTP/2 client testing.
 
-Each function returns a :class:`~blackbull.fault_injection.ScenarioH2`
-that drives :class:`~blackbull.fault_injection.H2FaultServer` through
+Each function returns a [`ScenarioH2`][blackbull.fault_injection.ScenarioH2]
+that drives [`H2FaultServer`][blackbull.fault_injection.H2FaultServer] through
 one well-known misbehaviour pattern: one named pathology per scenario,
 so a suite can ``parametrize`` over the set.  The four spec-grade
 categories they cover — half-closed streams, exhausted flow-control

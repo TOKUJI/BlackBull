@@ -41,13 +41,13 @@ class Actor:
 
     Each Actor owns an ``asyncio.Queue`` inbox and is expected to run as an
     ``asyncio.Task`` started by its Supervisor.  Actors communicate
-    exclusively via :meth:`send`; they never share mutable state.
+    exclusively via [`send`][]; they never share mutable state.
 
-    Subclasses must override :meth:`_handle`.
+    Subclasses must override ``_handle``.
 
     Pass ``inbox_maxsize`` to bound the inbox (``0`` — the default — is
-    unbounded, matching :class:`asyncio.Queue`).  A bounded inbox lets an actor
-    apply back-pressure or, with :meth:`asyncio.Queue.put_nowait`, an explicit
+    unbounded, matching ``asyncio.Queue``).  A bounded inbox lets an actor
+    apply back-pressure or, with ``asyncio.Queue.put_nowait``, an explicit
     overflow policy.
     """
 

@@ -101,7 +101,7 @@ class CORS:
         """Wrap *send* so the response's header arm gains *cors_hdrs*.
 
         On the H1 native path the event is a
-        :class:`~blackbull.native.NativeResponse` whose header arm gets the
+        [`NativeResponse`][blackbull.native.NativeResponse] whose header arm gets the
         CORS headers appended (a zero-copy mutation visible to the sender);
         on the H2 / ASGI path it is a ``http.response.start`` dict, appended
         to a copy of the event's own list — the downstream handler's headers

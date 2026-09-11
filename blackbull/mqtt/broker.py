@@ -1,11 +1,11 @@
 """MQTT 5.0 broker — the routing/session state owner (actor model).
 
-:class:`BrokerActor` is one per app/worker, supervisor/lifespan-owned. It owns
+[`BrokerActor`][] is one per app/worker, supervisor/lifespan-owned. It owns
 *all* routing state (subscriptions, sessions, retained messages, the live
 connection registry) and processes its inbox serially, so there are no locks
 and no shared mutable state. Per-connection actors (see
-:mod:`blackbull.mqtt.connection`) ``send`` it the Level A messages defined here
-and receive :class:`Send` / :class:`Close` back.
+[`blackbull.mqtt.connection`][blackbull.mqtt.connection]) ``send`` it the Level A messages defined here
+and receive [`Send`][] / [`Close`][] back.
 
 Because the broker outlives every connection actor, a Will (LWT) routes to live
 subscribers during a peer's teardown with no special-casing.
@@ -191,7 +191,7 @@ def _input_size(msg: ActorMessage) -> int:
 
 
 def _valid_filter(topic_filter: str) -> bool:
-    """Bool wrapper over :func:`validate_topic_filter`.
+    """Bool wrapper over [`validate_topic_filter`][].
 
     The validator has a mixed contract — it returns ``False`` for a null char
     but *raises* ``ValueError`` for structural violations.  The broker only
@@ -207,7 +207,7 @@ def _parse_share(topic_filter: str) -> tuple[str, str] | None:
     """§4.8.2 — split ``$share/{ShareName}/{filter}`` into ``(share, filter)``.
 
     Returns ``None`` for a non-shared filter or one too malformed to carry a
-    filter portion at all (validation proper is :func:`validate_topic_filter`;
+    filter portion at all (validation proper is [`validate_topic_filter`][];
     this only extracts the group key).
     """
     if not topic_filter.startswith('$share/'):

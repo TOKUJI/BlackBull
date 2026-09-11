@@ -7,7 +7,7 @@ Three rules, argued in ``docs/deployment/workers.md`` §CPU pinning:
   ``sched_getaffinity``, so ``taskset``, ``numactl`` and a cpuset are inputs
   rather than obstacles.
 * **Never pin the thread pool.**  Linux threads inherit the creating thread's
-  mask; :func:`make_offload_executor` hands each pool thread the full one back.
+  mask; [`make_offload_executor`][] hands each pool thread the full one back.
 * **Always be switchable off** — ``BB_CPU_PINNING=off``.
 """
 from __future__ import annotations
@@ -98,7 +98,7 @@ def resolve_worker_cpus(spec: str, worker_id: int,
 def apply_worker_affinity(worker_id: int, spec: str) -> frozenset[int] | None:
     """Pin this thread for worker *worker_id*; return the mask it had before.
 
-    The return value is what :func:`make_offload_executor` needs — the
+    The return value is what [`make_offload_executor`][] needs — the
     placement the operator gave us, which offloaded work should keep even
     though the event loop no longer does.  ``None`` means nothing was pinned
     and no executor override is warranted.
