@@ -1678,6 +1678,50 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.BlackBull.available_ws_protocols" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        available_ws_protocols
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.BlackBull.loop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        loop
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.BlackBull.__call__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __call__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.BlackBull.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.BlackBull.add_extension" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6590,6 +6634,50 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.BlackBull.available_ws_protocols" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        available_ws_protocols
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.BlackBull.loop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        loop
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.BlackBull.__call__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __call__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.BlackBull.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.BlackBull.add_extension" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -7908,6 +7996,43 @@ explicit <code>run(...)</code> argument overrides them.</p>
 
 
 
+        <p>The application: a router, its error handlers, and the ASGI callable.</p>
+<p>Register routes with <a class="autorefs autorefs-internal" title="route(methods=[HTTPMethod.GET], path='/', scheme=Scheme.http, functions=[], middlewares=[], name=None, accept_query=None)" href="app/#blackbull.app.BlackBull.route"><code>route</code></a>, or with <a class="autorefs autorefs-internal" title="group(middlewares=[])" href="app/#blackbull.app.BlackBull.group"><code>group</code></a> when several
+should share a middleware prefix; global middleware with <a class="autorefs autorefs-internal" title="use(mw)" href="app/#blackbull.app.BlackBull.use"><code>use</code></a>;
+lifecycle hooks with <a class="autorefs autorefs-internal" title="on_startup(fn)" href="app/#blackbull.app.BlackBull.on_startup"><code>on_startup</code></a>, <a class="autorefs autorefs-internal" title="on_shutdown(fn)" href="app/#blackbull.app.BlackBull.on_shutdown"><code>on_shutdown</code></a> and
+<a class="autorefs autorefs-internal" title="on_warmup(fn)" href="app/#blackbull.app.BlackBull.on_warmup"><code>on_warmup</code></a>.  <a class="autorefs autorefs-internal" title="run(certfile=None, keyfile=None, port=None, unix_path=None, inherited_fd=None, listeners=None, workers=None, max_connections=None, stream_queue_depth=None, ws_queue_depth=None, reload=None, reload_paths=None)" href="app/#blackbull.app.BlackBull.run"><code>run</code></a> serves the app on BlackBull's own server,
+and the instance is itself a plain ASGI 3.0 callable, so an external host
+can drive it instead.</p>
+<p>Protocols other than HTTP and WebSocket attach through
+<a class="autorefs autorefs-internal" title="add_extension(ext)" href="app/#blackbull.app.BlackBull.add_extension"><code>add_extension</code></a> or <a class="autorefs autorefs-internal" title="register_protocol_handler(name, handler, *, detector=None, port=None, tls=False, stateful=True)" href="app/#blackbull.app.BlackBull.register_protocol_handler"><code>register_protocol_handler</code></a>; nothing here
+is added by subclassing.</p>
+
+
+<p><span class="doc-section-title">Attributes:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td><code><span title="blackbull.BlackBull.extensions">extensions</span></code></td>
+            <td>
+                  <code><span title="dict">dict</span>[<span title="str">str</span>, <span title="object">object</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Installed extensions by name.  The Extensions guide says
+what an extension puts there and how to reach it.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
 
 
 
@@ -7926,8 +8051,310 @@ explicit <code>run(...)</code> argument overrides them.</p>
 
 
 
+<div class="doc doc-object doc-attribute">
 
 
+
+<h4 id="blackbull.BlackBull.available_ws_protocols" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">available_ws_protocols</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+      <small class="doc doc-label doc-label-writable"><code>writable</code></small>
+  </span>
+
+<a href="#blackbull.BlackBull.available_ws_protocols" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>WebSocket subprotocols this app offers, as bytes.</p>
+<p>Assigning a list of <code>str</code> encodes each entry.</p>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.BlackBull.loop" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">loop</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#blackbull.BlackBull.loop" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>The bound event loop, or <code>None</code> when none is running yet.</p>
+<p>Read from synchronous setup code this answers <code>None</code> rather than
+raising, so a caller that does not need a loop still works; asyncio
+supplies one once the coroutines run.</p>
+
+    </div>
+
+</div>
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.BlackBull.__call__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="fm">__call__</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.BlackBull.__call__" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>The ASGI 3.0 callable, and the app's only native/ASGI boundary.</p>
+<p>Everything below this method threads a
+:class:<code>~blackbull.connection.Connection</code>, in both modes.  An ASGI
+scope dict arrives only from an external host (uvicorn,
+<code>httpx.ASGITransport</code>) or under <code>BB_FORCE_ASGI_SCOPE=1</code>, and is
+converted here, once; the same edge wraps the host's <code>send</code> with the
+native→ASGI conversion, while BlackBull's own server passes a
+native-capable send through untouched.  Lifespan is the one scope that
+is never a request and never becomes a <code>Connection</code>.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>conn</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="Connection
+
+
+  
+      dataclass
+   (blackbull.connection.Connection)" href="connection/#blackbull.connection.Connection">Connection</a> | <span title="dict">dict</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A <code>Connection</code>, or an ASGI scope dict from a host.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>receive</code>
+            </td>
+            <td>
+                  <code><span title="blackbull.asgi.ASGIReceiveCallable">ASGIReceiveCallable</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Optional because a handler that never reads a body never
+touches it — the router guards on a missing receive and
+dispatch completes normally.  A conforming ASGI host always
+passes a callable; the tolerance is for direct drives.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>send</code>
+            </td>
+            <td>
+                  <code><span title="blackbull.asgi.ASGISendCallable">ASGISendCallable</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The host's send callable.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.BlackBull.__init__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="fm">__init__</span><span class="p">(</span><span class="n">loop</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">observer_shutdown_timeout</span><span class="o">=</span><span class="mf">5.0</span><span class="p">,</span> <span class="n">trusted_proxies</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">config</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">cache_max</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">asgi</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
+
+<a href="#blackbull.BlackBull.__init__" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Build an application.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>loop</code>
+            </td>
+            <td>
+                  <code><span title="asyncio.AbstractEventLoop">AbstractEventLoop</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Event loop to bind to.  Left unset,
+<a class="autorefs autorefs-internal" title="loop
+
+  
+      property
+  " href="app/#blackbull.app.BlackBull.loop"><code>loop</code></a> picks up the running
+loop once there is one.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>observer_shutdown_timeout</code>
+            </td>
+            <td>
+                  <code><span title="float">float</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Seconds to wait at shutdown for
+detached <code>@app.on</code> observers to finish.</p>
+              </div>
+            </td>
+            <td>
+                  <code>5.0</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>trusted_proxies</code>
+            </td>
+            <td>
+                  <code><span title="list">list</span>[<span title="str">str</span>] | <span title="str">str</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Addresses or CIDRs whose forwarded headers are
+honoured; installs
+<a class="autorefs autorefs-internal" href="middleware/proxy/#blackbull.middleware.proxy.TrustedProxy"><code>TrustedProxy</code></a>.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>config</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="AppConfig
+
+
+  
+      dataclass
+   (blackbull.config.AppConfig)" href="config/#blackbull.config.AppConfig">AppConfig</a> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Deploy settings <a class="autorefs autorefs-internal" title="run(certfile=None, keyfile=None, port=None, unix_path=None, inherited_fd=None, listeners=None, workers=None, max_connections=None, stream_queue_depth=None, ws_queue_depth=None, reload=None, reload_paths=None)" href="app/#blackbull.app.BlackBull.run"><code>run</code></a>
+falls back to.  The Configuration guide gives the resolution
+order.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>cache_max</code>
+            </td>
+            <td>
+                  <code><span title="int">int</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Route-resolution cache size.  <code>None</code> keeps the
+router's own default.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>asgi</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Mark the app as driven by an external ASGI host, so
+<a class="autorefs autorefs-internal" title="__call__(conn, receive, send)
+
+  
+      async
+  " href="app/#blackbull.app.BlackBull.__call__"><code>__call__</code></a> converts at the
+boundary in both directions.</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
 
 <div class="doc doc-object doc-function">
 
@@ -8551,13 +8978,13 @@ the remaining handlers and withholds that acknowledgement.</p>
 
         <p>Register a coroutine to warm the app <strong>before it binds or forks</strong>.</p>
 <p>The hook runs once in the master, before the listening socket is
-created and before workers fork; :meth:<code>on_startup</code> runs per worker,
+created and before workers fork; <a class="autorefs autorefs-internal" title="on_startup(fn)" href="app/#blackbull.app.BlackBull.on_startup"><code>on_startup</code></a> runs per worker,
 after both.  In single-worker mode the one process is warmed before it
 binds.</p>
 <p>Hooks receive the <code>app</code> and must do <strong>pure warming only</strong> — drive hot
 code paths, prime codecs/TLS — and acquire <strong>no</strong> per-worker resources
 (DB pools, sockets, live connections); those belong in
-:meth:<code>on_startup</code>.  Use :meth:<code>warm_request</code> to exercise the ASGI
+<a class="autorefs autorefs-internal" title="on_startup(fn)" href="app/#blackbull.app.BlackBull.on_startup"><code>on_startup</code></a>.  Use :meth:<code>warm_request</code> to exercise the ASGI
 dispatch/handler path in-process, and
 :func:<code>blackbull.server.warmup.warm_tls</code> to prime the TLS handshake.</p>
 <p>Warm-up is best-effort: a hook's exception is logged and swallowed
@@ -8582,7 +9009,7 @@ explains what makes a warmed master's heap survive the fork.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Decorator form of :meth:<code>register_protocol_handler</code>.</p>
+        <p>Decorator form of <a class="autorefs autorefs-internal" title="register_protocol_handler(name, handler, *, detector=None, port=None, tls=False, stateful=True)" href="app/#blackbull.app.BlackBull.register_protocol_handler"><code>register_protocol_handler</code></a>.</p>
 <p>::</p>
 <pre><code>@app.raw_handler('echo', port=9000)
 async def echo(reader, writer, ctx):
@@ -8985,7 +9412,7 @@ middleware → <code>_dispatch</code> chain (HTTP, gRPC, whatever <em>conn</em> 
 with a synthetic <code>receive</code> that yields <em>body</em> once and a <code>send</code> that
 discards output.  Faults in code pages and trips PEP 659 specialization
 on the dispatch + handler + codec — no socket, no wire I/O.  Intended
-for use from an :meth:<code>on_warmup</code> hook; safe to call anytime.</p>
+for use from an <a class="autorefs autorefs-internal" title="on_warmup(fn)" href="app/#blackbull.app.BlackBull.on_warmup"><code>on_warmup</code></a> hook; safe to call anytime.</p>
 <p>Each iteration runs on a fresh copy of <em>conn</em> (its own body cache,
 <code>state</code> and receive binding), so the one template drives all <em>n</em> runs
 cleanly.</p>

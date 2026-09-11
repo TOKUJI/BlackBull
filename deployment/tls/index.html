@@ -5571,6 +5571,13 @@ need it.</p>
 <div class="highlight"><pre><span></span><code>blackbull<span class="w"> </span>myapp:app<span class="w"> </span>--bind<span class="w"> </span><span class="m">0</span>.0.0.0:8443<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>--certfile<span class="w"> </span>cert.pem<span class="w"> </span>--keyfile<span class="w"> </span>key.pem
 </code></pre></div>
+<p>Those are the two direct ways.  A certificate can also come from an
+<code>AppConfig</code>, <code>BLACKBULL_CERT</code> / <code>BLACKBULL_KEY</code>, a <code>.env</code> file or a
+TOML config file — <a href="../../guide/configuration/">Configuration</a> gives
+the order they resolve in.  Wherever it came from, the resolved path
+is logged once at startup on the <code>blackbull.config</code> logger, which is
+how you check which certificate a running process actually loaded.
+The application object holds no copy of it.</p>
 <p>That single listener serves:</p>
 <ul>
 <li><strong>HTTP/1.1</strong> to any client that negotiates <code>http/1.1</code> (or
