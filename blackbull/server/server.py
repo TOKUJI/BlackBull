@@ -336,14 +336,9 @@ class Server:
     def connection_protocol_factory(self, bound_binding=None):
         """Factory for `loop.create_server` — one buffered protocol per accept.
 
-        Replaces the ``start_server`` callback pair: instead of a StreamReader
-        and StreamWriter over asyncio's own buffering, the connection owns a
-        single buffer the kernel writes into, and the actor reads by cursor.
-
-        The protocol spawns the serving task itself because a protocol factory
-        is synchronous.  ``connection_made`` fires after the TLS handshake on
-        an SSL transport, so ALPN is already decided by the time the task runs
-        — same ordering the callback form relied on.
+        The protocol spawns the serving task itself, a protocol factory being
+        synchronous.  On an SSL transport ``connection_made`` fires after the
+        handshake, so ALPN is already decided when that task runs.
         """
         from .connection_protocol import ConnectionProtocol  # noqa: PLC0415
         from .sender import AsyncioWriter  # noqa: PLC0415

@@ -165,10 +165,10 @@ def parse_headers(frame) -> Connection | None:
     Also performs request-level pseudo-header presence checks (RFC 9113
     §8.3.1); field-level checks already happened in ``parse_payload``.
 
-    A module-level function rather than a ``ParserFactory`` product: this runs
-    on every request, and the factory's dict lookup and parser allocation
-    would be paid per request for nothing.  The Internals page states why the
-    read path threads a :class:`Connection` rather than an ASGI scope dict.
+    A module-level function and not a ``ParserFactory`` product: nothing here
+    is per-instance, so a factory would charge every request for a dict lookup
+    and an allocation.  The Internals page states why the read path threads a
+    :class:`Connection` rather than an ASGI scope dict.
     """
     # Short-circuit if the frame parser already flagged this malformed.
     if getattr(frame, 'malformed', False):

@@ -3,17 +3,16 @@ binds a listening socket or forks workers, so every worker is born warm.
 
 Motivation
 ----------
-BlackBull runs one asyncio event loop per worker; that loop services both
-``accept()`` and request processing.  A **cold** CPU-bound coroutine (a fresh
-gRPC codec encoding thousands of streams, or a burst of cold TLS handshakes)
-can hold the loop long enough that the ``accept`` reader callback never runs,
-the kernel listen backlog overflows, and a colocated load generator's redial
-storm turns a cold-start transient into an ``ECONNREFUSED`` collapse.  The
-empirical tell is that the *second* run of the same process is always clean —
-warmth, not structure, is the differentiator.
+One asyncio event loop per worker services both ``accept()`` and request
+processing, so a **cold** CPU-bound coroutine — a fresh gRPC codec encoding
+thousands of streams, a burst of cold TLS handshakes — can hold the loop until
+the kernel listen backlog overflows and a colocated load generator's redial
+storm turns the transient into an ``ECONNREFUSED`` collapse.  The empirical
+tell is that the *second* run of the same process is always clean: warmth, not
+structure, is the differentiator.
 
-The fix is to reach that warmth *before the listening socket exists*.  Warm-up
-registered via :meth:`BlackBull.on_warmup` runs here, once, in the master:
+Warm-up registered via :meth:`BlackBull.on_warmup` therefore runs here, once,
+before the listening socket exists:
 
 * **Before bind + fork** (multi-worker): forked workers inherit the warmed heap
   via copy-on-write.  PEP 659's adaptive specialization lives in the code
@@ -25,11 +24,11 @@ registered via :meth:`BlackBull.on_warmup` runs here, once, in the master:
 Safety
 ------
 Warm-up is best-effort and must never crash the master: every failure is logged
-and swallowed, degrading to today's cold start.  It uses only in-process ASGI
-drives and in-memory (:class:`ssl.MemoryBIO`) handshakes — it never creates a
-socket, a live connection, or a lingering event loop that a subsequent
-``fork()`` could inherit (the classic ``preload_app`` hazard).  The temporary
-loop used by :func:`run_warmup` is closed before it returns.
+and swallowed, degrading to a cold start.  It uses only in-process ASGI drives
+and in-memory (:class:`ssl.MemoryBIO`) handshakes — never a socket, a live
+connection, or a lingering event loop that a subsequent ``fork()`` could
+inherit (the classic ``preload_app`` hazard).  The temporary loop
+:func:`run_warmup` uses is closed before it returns.
 """
 import asyncio
 import gc
