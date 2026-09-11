@@ -1,3 +1,21 @@
+"""The send side: what a handler produced, as protocol bytes.
+
+An [`AbstractWriter`][blackbull.server.sender.AbstractWriter] is a
+protocol-agnostic async byte sink; a
+[`BaseSender`][blackbull.server.sender.BaseSender] turns a bytes body, an ASGI
+send event, or a [`NativeResponse`][blackbull.native.NativeResponse] into wire
+format, one subclass per protocol —
+[`HTTP1Sender`][blackbull.server.sender.HTTP1Sender],
+[`HTTP2Sender`][blackbull.server.sender.HTTP2Sender] and
+[`WebSocketSender`][blackbull.server.sender.WebSocketSender].
+[`SenderFactory`][blackbull.server.sender.SenderFactory] builds the right one
+over a raw asyncio stream writer.
+
+A sender never picks between joining its parts and writing them vectored: it
+hands them to ``BaseSender._write_many`` and a size gate decides.  The
+Internals page states that threshold, and what anything backing
+[`AsyncioWriter`][blackbull.server.sender.AsyncioWriter] therefore owes it.
+"""
 import asyncio
 import os
 import time

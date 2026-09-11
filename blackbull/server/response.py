@@ -1,3 +1,20 @@
+"""Server-side responders: what an incoming HTTP/2 control frame makes happen.
+
+One ``Responder`` subclass per frame type, each declaring its ``FRAME_TYPE``.
+``__init_subclass__`` registers it, so
+[`ResponderFactory`][blackbull.server.response.ResponderFactory] dispatches by
+dict lookup, and ``respond(handler)`` reaches back into the owning
+``HTTP2Actor`` for state rather than keeping any of its own.
+
+Only the connection-management half of RFC 9113 arrives here — PING, SETTINGS,
+WINDOW_UPDATE, PRIORITY, PRIORITY_UPDATE and RST_STREAM.  HEADERS,
+CONTINUATION, DATA and GOAWAY drive the request lifecycle and stay in the
+actor's own frame loop; ``docs/about/rfc9113-implementation.md`` says where
+each frame type is dispatched.
+
+A responder also owns the validation its frame type owes, because a malformed
+control frame is a connection or stream error before it is anything else.
+"""
 from ..protocol.stream import StreamState
 from ..protocol.frame_types import (
     ErrorCodes, FrameTypes, PingFrameFlags, SettingFrameFlags,
@@ -10,6 +27,13 @@ logger = logging.getLogger(__name__)
 
 
 class ResponderFactory:
+    """Builds the responder registered for a frame's type.
+
+    Raises ``ValueError`` for a type no responder claims.  The server
+    dispatches only the control frames it acts on, so an unclaimed type is the
+    caller's decision rather than a default to fall through to — unlike the
+    client-side factory of the same name, which drops what it does not handle.
+    """
 
     @staticmethod
     def create(frame):
@@ -55,6 +79,11 @@ class Responder:
 
 
 class PingResponder(Responder):
+    """Answers a PING with PING(ACK) carrying the same payload (RFC 9113 §6.7).
+
+    A PING that already carries ACK is the answer to one of ours and is
+    dropped; a PING on any stream but 0 is a connection PROTOCOL_ERROR.
+    """
     async def respond(self, handler):
         # RFC 9113 §6.7 — PING with non-zero stream identifier is a connection
         # error of type PROTOCOL_ERROR.
@@ -80,6 +109,14 @@ class PingResponder(Responder):
 
 
 class WindowUpdateResponder(Responder):
+    """Credits a flow-control window and wakes what was blocked on it.
+
+    RFC 9113 §6.9.  Stream 0 credits the one shared connection window and every
+    blocked stream sender re-checks; any other identifier credits that stream's
+    sender alone.  A window is 31 bits, so an increment that would overflow it
+    — and likewise an increment of zero — is an error at the level it arrived
+    on: fatal to the connection on stream 0, a RST_STREAM on a stream.
+    """
     # RFC 9113 §6.9.1 — flow-control windows are 31-bit; exceeding this is a
     # FLOW_CONTROL_ERROR, at whichever level the overflow happened.
     _MAX_FLOW_WINDOW = 2**31 - 1
@@ -135,6 +172,15 @@ class WindowUpdateResponder(Responder):
 
 
 class SettingsResponder(Responder):
+    """Validates the peer's SETTINGS, applies them, and ACKs (RFC 9113 §6.5).
+
+    Nothing is applied until every parameter has passed its range check, so a
+    frame carrying one bad value leaves connection state untouched rather than
+    half-updated.  A changed ``SETTINGS_INITIAL_WINDOW_SIZE`` reaches open
+    streams as a delta (§6.9.2), which may leave an already drained send window
+    negative — later credit adds to the negative value before DATA may go out.
+    A SETTINGS that is itself an ACK is not answered.
+    """
     # RFC 9113 §6.5.2 — SETTINGS parameter ranges.
     _MAX_FLOW_WINDOW = 2**31 - 1           # SETTINGS_INITIAL_WINDOW_SIZE
     _MIN_MAX_FRAME_SIZE = 16384            # SETTINGS_MAX_FRAME_SIZE lower bound
@@ -286,6 +332,14 @@ class PriorityUpdateResponder(Responder):
 
 
 class RstStreamResponder(Responder):
+    """Tears down the stream a RST_STREAM names, and frees what it held.
+
+    Cancels the handler task, drops the stream's sender and recipient, and
+    replays to the connection window the inbound credit the cancelled handler
+    never consumed, so later streams are not starved by it.  The identifier is
+    recorded as closed-via-RST, so a frame arriving on it afterwards is
+    answered STREAM_CLOSED rather than opening a new stream.
+    """
 
     @log
     async def respond(self, handler):
