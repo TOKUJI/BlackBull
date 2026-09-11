@@ -247,6 +247,16 @@ class WebSocketTestSession:
         cookies: dict[str, str] | None = None,
         timeout: float = 5.0,
     ):
+        """Prepare a session; the handshake runs on ``__enter__``.
+
+        Args:
+            app: The ASGI application to connect to.
+            path: Request path, including any query string.
+            subprotocols: Offered in ``Sec-WebSocket-Protocol``.
+            headers: Extra request headers, as ``(name, value)`` string pairs.
+            cookies: Sent as a single ``Cookie`` header.
+            timeout: Seconds any one receive will wait before giving up.
+        """
         self.app = app
         self.timeout = timeout
         if '?' in path:
@@ -301,6 +311,11 @@ class WebSocketTestSession:
         self._accepted = False
 
     def __enter__(self) -> 'WebSocketTestSession':
+        """Run the handshake and return the connected session.
+
+        Raises [`WebSocketDisconnect`][blackbull.testing.WebSocketDisconnect]
+        if the application rejects the connection instead of accepting it.
+        """
         self._loop_thread.start()
 
         async def _spawn():
@@ -328,19 +343,28 @@ class WebSocketTestSession:
         return self
 
     def __exit__(self, *exc_info) -> None:
+        """Close the session, whether the block left normally or by exception."""
         self.close()
 
     def send_text(self, text: str) -> None:
+        """Send *text* to the application as a text message."""
         self._send_client_event({'type': 'websocket.receive', 'text': text})
 
     def send_bytes(self, data: bytes) -> None:
+        """Send *data* to the application as a binary message."""
         self._send_client_event({'type': 'websocket.receive', 'bytes': data})
 
     def send_json(self, data: Any) -> None:
+        """Serialise *data* as JSON and send it as a text message."""
         import json
         self.send_text(json.dumps(data))
 
     def receive_text(self) -> str:
+        """The next text message.
+
+        Raises :class:`WebSocketDisconnect` if the server closed instead, and
+        ``RuntimeError`` if what arrived was a binary message.
+        """
         event = self._recv_event()
         if event['type'] == 'websocket.close':
             raise WebSocketDisconnect(code=event.get('code', 1000), reason=event.get('reason', ''))
@@ -351,6 +375,11 @@ class WebSocketTestSession:
         return event['text']
 
     def receive_bytes(self) -> bytes:
+        """The next binary message.
+
+        Raises :class:`WebSocketDisconnect` if the server closed instead, and
+        ``RuntimeError`` if what arrived was a text message.
+        """
         event = self._recv_event()
         if event['type'] == 'websocket.close':
             raise WebSocketDisconnect(code=event.get('code', 1000), reason=event.get('reason', ''))
@@ -361,6 +390,7 @@ class WebSocketTestSession:
         return event['bytes']
 
     def receive_json(self) -> Any:
+        """The next text message, parsed as JSON."""
         import json
         return json.loads(self.receive_text())
 
@@ -396,6 +426,11 @@ class WebSocketTestSession:
             return
 
     def close(self, code: int = 1000) -> None:
+        """Disconnect with *code* and tear the session down.
+
+        Idempotent, and safe on a session whose handshake never completed.
+        ``__exit__`` calls it, so a ``with`` block needs no explicit close.
+        """
         if self._loop_thread.loop is None:
             return
         if self._accepted:
@@ -482,6 +517,18 @@ class TestClient:
         headers: Any | None = None,
         follow_redirects: bool = False,
     ) -> None:
+        """Prepare a client; the loop thread and lifespan start on ``__enter__``.
+
+        Args:
+            app: The ASGI application under test.
+            base_url: Prefix for relative request URLs.
+            raise_app_exceptions: Re-raise an exception from the application
+                instead of turning it into a 500 response.
+            root_path: ASGI ``root_path`` for every request.
+            cookies: Initial cookie jar.
+            headers: Default headers for every request.
+            follow_redirects: Follow 3xx responses automatically.
+        """
         self.app = app
         self.base_url = base_url
         self._raise_app_exceptions = raise_app_exceptions
@@ -494,6 +541,7 @@ class TestClient:
         self._async_client: httpx.AsyncClient | None = None
 
     def __enter__(self) -> 'TestClient':
+        """Start the background loop and run the application's lifespan startup."""
         self._loop_thread.start()
         self._async_client = httpx.AsyncClient(
             transport=httpx.ASGITransport(
@@ -515,6 +563,7 @@ class TestClient:
         return self
 
     def __exit__(self, *exc_info) -> None:
+        """Run the application's lifespan shutdown and stop the loop thread."""
         try:
             if self._lifespan is not None:
                 self._lifespan.shutdown()
@@ -528,6 +577,12 @@ class TestClient:
     # ----- HTTP methods -----------------------------------------------------
 
     def request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
+        """Send *method* to *url* and return the response.
+
+        Keyword arguments go to ``httpx.AsyncClient.request``.  Raises
+        ``RuntimeError`` if the client is used outside its ``with`` block,
+        since the loop thread and lifespan are what that block owns.
+        """
         if self._async_client is None:
             raise RuntimeError(
                 'TestClient must be used as a context manager: '
@@ -563,24 +618,31 @@ class TestClient:
         return self._async_client.headers
 
     def get(self, url: str, **kwargs: Any) -> httpx.Response:
+        """``GET`` *url* through [`request`][blackbull.testing.TestClient.request]."""
         return self.request('GET', url, **kwargs)
 
     def head(self, url: str, **kwargs: Any) -> httpx.Response:
+        """``HEAD`` *url* through [`request`][blackbull.testing.TestClient.request]. Response carries headers only."""
         return self.request('HEAD', url, **kwargs)
 
     def options(self, url: str, **kwargs: Any) -> httpx.Response:
+        """``OPTIONS`` *url* through [`request`][blackbull.testing.TestClient.request]."""
         return self.request('OPTIONS', url, **kwargs)
 
     def post(self, url: str, **kwargs: Any) -> httpx.Response:
+        """``POST`` *url* through [`request`][blackbull.testing.TestClient.request]."""
         return self.request('POST', url, **kwargs)
 
     def put(self, url: str, **kwargs: Any) -> httpx.Response:
+        """``PUT`` *url* through [`request`][blackbull.testing.TestClient.request]."""
         return self.request('PUT', url, **kwargs)
 
     def patch(self, url: str, **kwargs: Any) -> httpx.Response:
+        """``PATCH`` *url* through [`request`][blackbull.testing.TestClient.request]."""
         return self.request('PATCH', url, **kwargs)
 
     def delete(self, url: str, **kwargs: Any) -> httpx.Response:
+        """``DELETE`` *url* through [`request`][blackbull.testing.TestClient.request]."""
         return self.request('DELETE', url, **kwargs)
 
     # ----- WebSocket --------------------------------------------------------
