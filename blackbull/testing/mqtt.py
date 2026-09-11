@@ -57,6 +57,12 @@ class MQTTTestBroker:
     """
 
     def __init__(self, app: Any) -> None:
+        """Bind to *app*'s MQTT extension.
+
+        The extension must already be registered on the app; without it this
+        raises ``RuntimeError`` at construction rather than failing later on a
+        publish.
+        """
         ext = app.extensions.get(MQTTExtension.extension_key)
         if not isinstance(ext, MQTTExtension):
             raise RuntimeError(

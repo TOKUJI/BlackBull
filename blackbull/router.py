@@ -2004,6 +2004,12 @@ class ErrorRouter:
         self._default = default
 
     def __setitem__(self, key: HTTPStatus | Type[BaseException], fn: Callable):
+        """Register *fn* as the handler for a status or an exception class.
+
+        The status must be 4xx or 5xx: the annotation admits any
+        ``HTTPStatus``, but registering a handler for, say, ``200`` raises
+        ``ValueError``.
+        """
         if isinstance(key, HTTPStatus):
             if not is_client_error(key) and not is_server_error(key):
                 raise ValueError(f"{key} is not an error status (4xx/5xx).")

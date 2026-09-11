@@ -75,6 +75,11 @@ class MQTTExtension(Extension):
 
     def __init__(self, *, port: int = 1883, tls: bool = False,
                  tap_mode: str = 'actor', tap_queue_size: int = 1024) -> None:
+        """Configure the broker extension.
+
+        *tap_mode* is ``'actor'`` or ``'inline'`` — any other value raises
+        ``ValueError``.  The annotation cannot say so, which is why this does.
+        """
         if tap_mode not in ('actor', 'inline'):
             raise ValueError(f"tap_mode must be 'actor' or 'inline', got {tap_mode!r}")
         self.port = port

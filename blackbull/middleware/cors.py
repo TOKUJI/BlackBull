@@ -50,6 +50,13 @@ class CORS:
         expose_headers: list[str] | None = None,
         max_age: int | None = 600,
     ) -> None:
+        """Build the middleware.
+
+        ``allow_credentials=True`` cannot be combined with
+        ``allow_origins=['*']``: the pair raises ``ValueError``.  A wildcard
+        origin with credentials is what the CORS specification forbids, not
+        something this middleware chooses to refuse.
+        """
         if isinstance(allow_origins, str):
             allow_origins = [allow_origins]
         if isinstance(allow_headers, str):

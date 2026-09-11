@@ -284,6 +284,11 @@ class Server:
 
     @property
     def keyfile(self):
+        """The TLS private-key path, or ``None``.
+
+        Assigning a path that is not a file raises ``FileNotFoundError`` there
+        and then, rather than at handshake time.
+        """
         return self._keyfile if hasattr(self, '_keyfile') else None
 
     @keyfile.setter
@@ -295,6 +300,11 @@ class Server:
 
     @property
     def certfile(self):
+        """The TLS certificate path, or ``None``.
+
+        Assigning a path that is not a file raises ``FileNotFoundError`` there
+        and then, rather than at handshake time.
+        """
         return self._certfile if hasattr(self, '_certfile') else None
 
     @certfile.setter
@@ -328,6 +338,11 @@ class Server:
             pass
 
     def configure_mtls(self, ca_cert: str) -> None:
+        """Require a client certificate signed by *ca_cert*.
+
+        TLS must already be configured; on a plaintext server this raises
+        ``RuntimeError`` rather than silently serving without mTLS.
+        """
         if self.ssl_context is None:
             raise RuntimeError('configure_mtls() requires TLS to be configured first.')
         self.ssl_context.verify_mode = ssl.CERT_REQUIRED
