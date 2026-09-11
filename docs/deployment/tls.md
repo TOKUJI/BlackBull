@@ -22,6 +22,14 @@ blackbull myapp:app --bind 0.0.0.0:8443 \
     --certfile cert.pem --keyfile key.pem
 ```
 
+Those are the two direct ways.  A certificate can also come from an
+`AppConfig`, `BLACKBULL_CERT` / `BLACKBULL_KEY`, a `.env` file or a
+TOML config file — [Configuration](../guide/configuration.md) gives
+the order they resolve in.  Wherever it came from, the resolved path
+is logged once at startup on the `blackbull.config` logger, which is
+how you check which certificate a running process actually loaded.
+The application object holds no copy of it.
+
 That single listener serves:
 
 - **HTTP/1.1** to any client that negotiates `http/1.1` (or

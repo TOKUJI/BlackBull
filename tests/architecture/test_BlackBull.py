@@ -368,14 +368,18 @@ def test_loop_property_sync_context():
     assert app.loop is None
 
 
-def test_certfile_property():
-    app = BlackBull()
-    assert app.certfile is None
+def test_app_carries_no_tls_state():
+    """TLS is a deploy setting, and the application object holds none of it.
 
-
-def test_keyfile_property():
+    Nine entry points can name a certificate — ``run()``, ``AppConfig``,
+    ``BLACKBULL_CERT`` / ``BLACKBULL_KEY``, a ``.env`` file, the CLI flags, a
+    TOML config file, ``serve()``, ``Server()`` and an ``ssl_context`` — and
+    every one of them resolves into ``Server``.  A copy on the app would be a
+    tenth place to look that no resolution writes to.
+    """
     app = BlackBull()
-    assert app.keyfile is None
+    assert not hasattr(app, 'certfile')
+    assert not hasattr(app, 'keyfile')
 
 
 def test_ws_protocols_setter_encodes_strings():
