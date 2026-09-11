@@ -354,6 +354,7 @@ class NativeClient:
     __test__ = False        # not a pytest container despite the name shape
 
     def __init__(self, app: Any) -> None:
+        """Prepare a client for *app*; the loop thread starts on ``__enter__``."""
         self.app = app
         # Imported here rather than at module scope: ``blackbull.testing``
         # imports this module, so a top-level import would be circular.
@@ -364,6 +365,7 @@ class NativeClient:
         self._entered = False
 
     def __enter__(self) -> 'NativeClient':
+        """Start the background loop and run the application's lifespan startup."""
         self._loop_thread.start()
         self._lifespan = self._lifespan_cls(self.app, self._loop_thread)
         try:
@@ -375,6 +377,7 @@ class NativeClient:
         return self
 
     def __exit__(self, *exc_info) -> None:
+        """Run the application's lifespan shutdown and stop the loop thread."""
         self._entered = False
         try:
             if self._lifespan is not None:
@@ -397,24 +400,31 @@ class NativeClient:
         return self._run(request, conn, body=body)
 
     def get(self, path: str, **kwargs: Any) -> NativeTestResponse:
+        """``GET`` *path* on the app's own dispatch, no socket involved."""
         return self._run(get, path, **kwargs)
 
     def head(self, path: str, **kwargs: Any) -> NativeTestResponse:
+        """``HEAD`` *path* on the app's own dispatch, no socket involved."""
         return self._run(head, path, **kwargs)
 
     def options(self, path: str, **kwargs: Any) -> NativeTestResponse:
+        """``OPTIONS`` *path* on the app's own dispatch, no socket involved."""
         return self._run(options, path, **kwargs)
 
     def post(self, path: str, **kwargs: Any) -> NativeTestResponse:
+        """``POST`` *path* on the app's own dispatch, no socket involved."""
         return self._run(post, path, **kwargs)
 
     def put(self, path: str, **kwargs: Any) -> NativeTestResponse:
+        """``PUT`` *path* on the app's own dispatch, no socket involved."""
         return self._run(put, path, **kwargs)
 
     def patch(self, path: str, **kwargs: Any) -> NativeTestResponse:
+        """``PATCH`` *path* on the app's own dispatch, no socket involved."""
         return self._run(patch, path, **kwargs)
 
     def delete(self, path: str, **kwargs: Any) -> NativeTestResponse:
+        """``DELETE`` *path* on the app's own dispatch, no socket involved."""
         return self._run(delete, path, **kwargs)
 
 

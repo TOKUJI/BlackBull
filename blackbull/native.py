@@ -286,12 +286,14 @@ class NativeResponse:
     # --- header: DX view, or None when absent -----------------------------
     @property
     def header(self) -> _HeaderView | None:
+        """The header arm as a mutable view, or ``None`` when there is none."""
         if self._header is None:
             return None
         return _HeaderView(self._header)
 
     @header.setter
     def header(self, value) -> None:
+        """Set or clear the header arm; accepts a view, a list of pairs, or ``None``."""
         if value is None:
             self._header = None
         elif isinstance(value, _HeaderView):
@@ -302,22 +304,30 @@ class NativeResponse:
     # --- body: plain bytes; DX via helper properties -----------------------
     @property
     def body(self) -> bytes | None:
+        """The body arm, or ``None`` when there is none.  ``b''`` is a real body."""
         return self._body
 
     @body.setter
     def body(self, value: bytes | None) -> None:
+        """Set or clear the body arm."""
         self._body = value
 
     @property
     def content_length(self) -> int:
+        """Octets in the body arm; ``0`` when there is no body."""
         return len(self._body) if self._body is not None else 0
 
     @property
     def is_empty(self) -> bool:
+        """True when the body arm is absent *or* zero-length.
+
+        Distinct from ``body is None``, which separates the two.
+        """
         return self._body is None or self._body == b''
 
     @property
     def content_type(self) -> bytes:
+        """The ``content-type`` header value, or ``b''`` if unset or headerless."""
         hv = self.header
         return hv.get(b'content-type') if hv is not None else b''
 

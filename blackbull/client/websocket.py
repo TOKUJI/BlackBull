@@ -100,12 +100,15 @@ class WebSocketSession:
     # ---- public API ------------------------------------------------------
 
     async def send_text(self, text: str) -> None:
+        """Send *text* as a UTF-8 text message."""
         await self._send_frame(text.encode('utf-8'), WSOpcode.TEXT)
 
     async def send_bytes(self, data: bytes) -> None:
+        """Send *data* as a binary message."""
         await self._send_frame(data, WSOpcode.BINARY)
 
     async def ping(self, data: bytes = b'') -> None:
+        """Send a PING carrying *data*; the peer's PONG arrives on the read path."""
         await self._send_frame(data, WSOpcode.PING)
 
     async def receive(self) -> WebSocketReceiveEvent | WebSocketDisconnectEvent:
@@ -167,9 +170,11 @@ class WebSocketSession:
     # ---- async context manager (optional usage) --------------------------
 
     async def __aenter__(self) -> 'WebSocketSession':
+        """Return the already-connected session; the handshake ran before this."""
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
+        """Close the session, whether the block left normally or by exception."""
         await self.close()
 
 

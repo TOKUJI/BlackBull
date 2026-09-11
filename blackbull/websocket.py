@@ -239,18 +239,22 @@ class WebSocket:
 
     @property
     def path(self) -> str:
+        """The request path the handshake arrived on."""
         return self._conn.path
 
     @property
     def headers(self) -> Headers:
+        """The handshake request headers.  Keys are lowercase ``bytes``."""
         return self._conn.headers
 
     @property
     def path_params(self) -> dict[str, Any]:
+        """Path converters captured by the route that matched."""
         return self._conn.path_params
 
     @property
     def query_string(self) -> bytes:
+        """The raw query string, undecoded, without the leading ``?``."""
         return self._conn.query_string
 
     @property
@@ -287,6 +291,7 @@ class WebSocket:
 
     @property
     def close_reason(self) -> str | None:
+        """The peer's close reason, or ``None`` until a close has been seen."""
         return self._close_reason
 
     # ---- handshake -------------------------------------------------------
