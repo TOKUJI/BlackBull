@@ -1,3 +1,26 @@
+"""Bound, listening sockets for the server to accept on.
+
+Everything here hands back sockets already through ``bind()`` and ``listen()``
+— the caller passes them to the event loop and never binds again.  A bind that
+fails is reported as ``None`` (or an absence from the returned list) rather
+than raised, so check what you got back.  Which function to call depends on
+where the socket comes from:
+
+- [`create_dual_stack_sockets`][blackbull.protocol.rsock.create_dual_stack_sockets]
+  for a TCP port, one socket per family so both stacks are reached portably.
+- [`create_unix_socket`][blackbull.protocol.rsock.create_unix_socket] for an
+  ``AF_UNIX`` path.
+- [`adopt_listening_fd`][blackbull.protocol.rsock.adopt_listening_fd] when a
+  supervisor bound it — systemd socket activation, or ``--bind fd://N``.
+- [`adopt_inherited_sockets`][blackbull.protocol.rsock.adopt_inherited_sockets]
+  when the master re-exec'd itself and passed its own listeners across.
+
+The last two return sockets that are *already* listening; binding them again
+is an error.  ``SO_REUSEPORT`` is how several workers share one port, and the
+module constant ``REUSEPORT_SUPPORTED`` says whether this host offers it.
+
+See ``docs/deployment/unix-and-fd.md`` for the deployment shapes these serve.
+"""
 import os
 import socket
 

@@ -66,6 +66,8 @@ class _NullResponder(Responder):
 
 
 class HeaderResponder(Responder):
+    """HEADERS — the response head (or its trailers) for one stream."""
+
     FRAME_TYPE = FrameTypes.HEADERS
 
     async def respond(self, client) -> None:
@@ -73,6 +75,9 @@ class HeaderResponder(Responder):
 
 
 class DataResponder(Responder):
+    """DATA — a body chunk, which the client also credits back to the
+    flow-control window even when the stream is no longer tracked."""
+
     FRAME_TYPE = FrameTypes.DATA
 
     async def respond(self, client) -> None:
@@ -80,6 +85,9 @@ class DataResponder(Responder):
 
 
 class PingResponder(Responder):
+    """PING — answered with an ACK echoing the payload, unless it is itself
+    the ACK to a ping this client sent."""
+
     FRAME_TYPE = FrameTypes.PING
 
     async def respond(self, client) -> None:
@@ -93,6 +101,9 @@ class PingResponder(Responder):
 
 
 class SettingsResponder(Responder):
+    """SETTINGS — applies the peer's parameters and acknowledges them; an ACK
+    from the peer instead completes this client's own settings exchange."""
+
     FRAME_TYPE = FrameTypes.SETTINGS
 
     async def respond(self, client) -> None:
@@ -124,6 +135,9 @@ class PushPromiseResponder(Responder):
 
 
 class WindowUpdateResponder(Responder):
+    """WINDOW_UPDATE — flow-control credit, released to the connection or to
+    one stream's sender depending on the frame's stream id."""
+
     FRAME_TYPE = FrameTypes.WINDOW_UPDATE
 
     async def respond(self, client) -> None:
@@ -131,6 +145,9 @@ class WindowUpdateResponder(Responder):
 
 
 class GoAwayResponder(Responder):
+    """GOAWAY — the peer is closing the connection; pending streams above the
+    last-processed id it names are failed, since it never handled them."""
+
     FRAME_TYPE = FrameTypes.GOAWAY
 
     async def respond(self, client) -> None:
@@ -138,6 +155,9 @@ class GoAwayResponder(Responder):
 
 
 class RstStreamResponder(Responder):
+    """RST_STREAM — one stream was terminated by the peer; its waiter is
+    failed while the connection carries on."""
+
     FRAME_TYPE = FrameTypes.RST_STREAM
 
     async def respond(self, client) -> None:

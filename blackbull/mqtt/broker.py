@@ -54,16 +54,30 @@ class Attach(ActorMessage):
 
 @dataclass
 class ClientSubscribe(ActorMessage):
+    """A SUBSCRIBE arrived; record its filters and reply with SUBACK."""
+
     subscribe: MQTTSubscribe | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass
 class ClientUnsubscribe(ActorMessage):
+    """An UNSUBSCRIBE arrived; drop its filters and reply with UNSUBACK."""
+
     unsubscribe: MQTTUnsubscribe | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass
 class ClientPublish(ActorMessage):
+    """A PUBLISH arrived; route it to matching subscribers.
+
+    ``admitted`` is an optional future the broker resolves with whether the
+    sender still held a session when this packet reached the front of the
+    inbox.  A reader may pipeline PUBLISH ahead of CONNACK, and only the
+    broker's own FIFO knows whether a rejection or a takeover overtook it, so
+    a caller that must act after the packet is accepted awaits this rather
+    than assuming the send succeeded.
+    """
+
     publish: MQTTPublish | None = field(default=None, compare=False, repr=False)
     admitted: asyncio.Future[bool] | None = field(default=None, compare=False, repr=False)
 
@@ -85,21 +99,33 @@ class ClientProtocolError(ActorMessage):
 
 @dataclass
 class ClientPuback(ActorMessage):
+    """The client's PUBACK; the outbound QoS 1 message for this packet id is
+    delivered and its slot is free."""
+
     packet_id: int | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass
 class ClientPubrec(ActorMessage):
+    """The client's PUBREC for an outbound QoS 2 message; the broker answers
+    with PUBREL for the same packet id."""
+
     packet_id: int | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass
 class ClientPubrel(ActorMessage):
+    """The client's PUBREL for an inbound QoS 2 message; the broker releases
+    the held message and answers with PUBCOMP."""
+
     packet_id: int | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass
 class ClientPubcomp(ActorMessage):
+    """The client's PUBCOMP; the outbound QoS 2 exchange for this packet id is
+    finished and its slot is free."""
+
     packet_id: int | None = field(default=None, compare=False, repr=False)
 
 
