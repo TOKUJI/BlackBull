@@ -41,10 +41,6 @@ class ClientDisconnected(Exception):
 async def read_body(receive: ASGIReceiveCallable) -> bytes:
     """Read the complete request body from the ASGI receive channel.
 
-    Collects chunks in a list and joins once, rather than the O(n²) ``+=``
-    growth.  A single-chunk body (the common case) is returned directly with
-    no intermediate copy at all.
-
     Raises :class:`ClientDisconnected` if an ``http.disconnect`` arrives
     before the body is complete, so a truncated upload is never silently
     returned as if whole.
@@ -88,10 +84,7 @@ async def stream_body(receive: ASGIReceiveCallable) -> AsyncIterator[bytes]:
     The streaming counterpart to :func:`read_body`: it never accumulates the
     whole payload, so a handler that only needs to *process* the body (count
     bytes, hash it, forward it, parse incrementally) holds one chunk at a time
-    instead of the entire upload.  For a 20 MB upload this is the difference
-    between a ~64 KiB and a ~20 MB working set — and, because ``read_body``
-    additionally ``b''.join``s the chunk list, several times the throughput
-    under concurrency (the join is a full-payload memcpy plus GC pressure).
+    instead of the entire upload.
 
     Empty chunks are skipped.  A peer that vanishes mid-body raises
     :class:`ClientDisconnected` (with no ``partial`` — chunks already yielded

@@ -203,15 +203,11 @@ def bind_receive_channel(target, receive) -> None:
     """Bind the **raw** body-receive channel onto the request's Connection so
     lazy ``conn.body()`` / ``request.body()`` drain the right stream once.
 
-    Called by the protocol actor with the *unwrapped* recipient — never with a
-    disconnect-detecting wrapper. Storing the wrapper would form a per-request
-    reference cycle: ``conn._receive`` → wrapper → (closure captures) ``conn``.
-    The refcount of a cyclic group never reaches zero when the request's local
-    refs drop, so reclamation is deferred to the generational cyclic GC — whose
-    periodic pauses are a measured tail-latency cost on this path. The raw
-    recipient does **not** reference ``conn`` (HTTP/1.1 keeps only the path
-    string; HTTP/2 keeps none), so ``conn`` → recipient is an acyclic chain that
-    refcounting frees the instant the request ends.
+    Pass the *unwrapped* recipient, never a disconnect-detecting wrapper: the
+    wrapper's closure captures ``conn``, so storing it makes ``conn`` →
+    wrapper → ``conn`` a cycle that only the generational GC can free, and its
+    pauses are a measured tail-latency cost here.  The raw recipient holds no
+    reference back, so refcounting frees the chain when the request ends.
 
     Idempotent — binds only when unset, so the external-ASGI path (uvicorn /
     ``httpx.ASGITransport``), where :meth:`Connection.from_scope` already bound
@@ -308,21 +304,17 @@ class Connection:
     def disconnected(self) -> bool:
         """True once the client dropped mid-request.
 
-        The named form of the state the module-level :func:`disconnected`
-        helper also reports.  A long-running
-        handler polls this to abandon work whose answer nobody is waiting for::
+        A long-running handler polls this to abandon work whose answer nobody
+        is waiting for::
 
             for row in rows:
                 if conn.disconnected:
                     break
 
-        Set by the actor's disconnect-detecting receive wrapper, so it goes
-        true when the *server* notices — at the next ``receive()`` — rather
-        than the instant the peer's FIN lands.
-
-        The module-level :func:`disconnected` remains the form to use at the
-        two ASGI boundaries, where the same state may live on a ``scope``
-        dict instead of a :class:`Connection`.
+        It goes true when the *server* notices, at the next ``receive()``,
+        rather than the instant the peer's FIN lands.  The module-level
+        :func:`disconnected` reads the same state at the two ASGI boundaries,
+        where it may live on a ``scope`` dict instead.
         """
         return self._disconnected
 
