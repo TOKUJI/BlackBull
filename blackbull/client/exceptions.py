@@ -20,7 +20,7 @@ class ConnectionError(ClientError):  # noqa: A001 — shadows builtin intentiona
 class ResponseTooLarge(ClientError):
     """The peer's response head passed a byte budget the client set.
 
-    Distinct from :class:`ProtocolError`: the response was well-formed as far
+    Distinct from [`ProtocolError`][]: the response was well-formed as far
     as it was read.  What failed is a limit this client chose, so a caller that
     wants the peer's output anyway can raise the budget rather than conclude
     the peer is broken.

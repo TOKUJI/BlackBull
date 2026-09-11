@@ -1,3 +1,26 @@
+"""Bound, listening sockets for the server to accept on.
+
+Everything here hands back sockets already through ``bind()`` and ``listen()``
+— the caller passes them to the event loop and never binds again.  A bind that
+fails is reported as ``None`` (or an absence from the returned list) rather
+than raised, so check what you got back.  Which function to call depends on
+where the socket comes from:
+
+- [`create_dual_stack_sockets`][blackbull.protocol.rsock.create_dual_stack_sockets]
+  for a TCP port, one socket per family so both stacks are reached portably.
+- [`create_unix_socket`][blackbull.protocol.rsock.create_unix_socket] for an
+  ``AF_UNIX`` path.
+- [`adopt_listening_fd`][blackbull.protocol.rsock.adopt_listening_fd] when a
+  supervisor bound it — systemd socket activation, or ``--bind fd://N``.
+- [`adopt_inherited_sockets`][blackbull.protocol.rsock.adopt_inherited_sockets]
+  when the master re-exec'd itself and passed its own listeners across.
+
+The last two return sockets that are *already* listening; binding them again
+is an error.  ``SO_REUSEPORT`` is how several workers share one port, and the
+module constant ``REUSEPORT_SUPPORTED`` says whether this host offers it.
+
+See ``docs/deployment/unix-and-fd.md`` for the deployment shapes these serve.
+"""
 import os
 import socket
 
@@ -10,12 +33,12 @@ _DEFAULT_BACKLOG = 1024
 REUSEPORT_SUPPORTED = hasattr(socket, 'SO_REUSEPORT')
 
 #: Env var holding a comma-separated list of fds the master has handed
-#: to itself across ``os.execvp`` — see :func:`adopt_inherited_sockets`.
+#: to itself across ``os.execvp`` — see [`adopt_inherited_sockets`][].
 _INHERIT_FDS_ENV = 'BB_INHERIT_FDS'
 
 
 def adopt_inherited_sockets() -> list[socket.socket] | None:
-    """Build :class:`socket.socket` objects from fds inherited across exec.
+    """Build ``socket.socket`` objects from fds inherited across exec.
 
     Returns ``None`` when no inherited fds are advertised (the normal
     cold-start path).  Returns a list of bound, listening sockets when
@@ -135,7 +158,7 @@ def create_socket(address, backlog: int = _DEFAULT_BACKLOG):
     an IPv6 literal (e.g. ``'::'``) opens an ``AF_INET6`` socket;
     anything else opens an ``AF_INET`` socket.
 
-    Prefer :func:`create_dual_stack_sockets` for new code.
+    Prefer [`create_dual_stack_sockets`][] for new code.
     """
     host, port = address
 
@@ -154,7 +177,7 @@ _SD_LISTEN_FDS_START = 3
 
 
 def adopt_listening_fd(fd: int) -> socket.socket:
-    """Build a :class:`socket.socket` from an already-bound listening fd.
+    """Build a ``socket.socket`` from an already-bound listening fd.
 
     Used for systemd socket-activation (``--bind fd://N``) and any other
     out-of-process socket hand-off where the supervisor binds and listens

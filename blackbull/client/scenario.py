@@ -1,8 +1,8 @@
-"""Deprecation shim — moved to :mod:`blackbull.fault_injection`.
+"""Deprecation shim — moved to [`blackbull.fault_injection`][blackbull.fault_injection].
 
 Groups the HTTP/1.1 client-side scenario model and the
 HTTP/2 server-side fault-injection surface under
-:mod:`blackbull.fault_injection`.  Import from there going forward::
+[`blackbull.fault_injection`][blackbull.fault_injection].  Import from there going forward::
 
     from blackbull.fault_injection import Scenario, SendBytes  # ...
 

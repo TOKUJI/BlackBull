@@ -1,13 +1,10 @@
 """Per-connection rescheduled deadline.
 
-Replaces ``async with asyncio.timeout(...)`` on the per-request hot
-path, and the per-connection ``loop.call_later`` ``TimerHandle`` that
-had to be cancelled and rescheduled at every phase transition.
-Instead, a per-process tick scanner: one singleton ``TimerHandle``
-re-arms itself
-every :data:`_TICK_S` and walks the registry of armed
-:class:`ConnectionDeadline` instances for expirations.  Per-arm cost
-is ~0.34 µs rather than ~1.7 µs.
+No per-connection asyncio timer.  One singleton ``TimerHandle`` per
+process re-arms itself every ``_TICK_S`` and walks the registry of
+armed [`ConnectionDeadline`][] instances for expirations, so arming
+costs a ``loop.time()``, a comparison and a set insertion — ~0.34 µs
+against the ~1.7 µs of a ``TimerHandle`` plus heap push plus cancel.
 
 Trade-off: a fired deadline lands within ``[now, now + _TICK_S]``
 rather than at the exact requested instant.  At the default
@@ -85,14 +82,8 @@ class ConnectionDeadline:
     task is cancelled — the cancellation propagates into whichever
     ``reader.readuntil`` / ``read`` / ``readexactly`` is currently
     awaiting.  Call sites translate the cancellation into
-    ``TimeoutError`` via :meth:`guard` (the common case) or manually
-    by checking :attr:`fired`.
-
-    Why a scanner instead of one ``call_later`` per arm?  At
-    saturation the per-arm path costs ~1.7 µs (TimerHandle + heap
-    push + cancel).  The scanner replaces that with one
-    ``loop.time()`` call + one comparison + one set membership check
-    on the registry (~0.34 µs) — an ~80 % per-call reduction.
+    ``TimeoutError`` via [`guard`][] (the common case) or manually
+    by checking ``fired``.
     """
 
     __slots__ = ('_loop', '_task', '_deadline_at', '_fired',
@@ -109,7 +100,7 @@ class ConnectionDeadline:
     def arm(self, seconds: float) -> None:
         """(Re-)set the deadline; ``seconds <= 0`` disables it.
 
-        Safe to call repeatedly.  Resets :attr:`fired` so a recovered
+        Safe to call repeatedly.  Resets ``fired`` so a recovered
         deadline can be reused across phases on the same connection.
         """
         self._fired = False
@@ -133,7 +124,7 @@ class ConnectionDeadline:
             self._registered = False
 
     def _fire_from_scanner(self) -> None:
-        """Invoked by :func:`_tick` when ``_deadline_at`` has passed."""
+        """Invoked by [`_tick`][] when ``_deadline_at`` has passed."""
         self._fired = True
         self._deadline_at = _INF
         self._registered = False
@@ -154,14 +145,13 @@ class ConnectionDeadline:
                 await reader.readuntil(...)
 
         Matches the observable behaviour of ``async with asyncio.timeout(d):``
-        — a fired deadline manifests as ``TimeoutError``.  The
-        same-loop-iteration race where the underlying read completes
-        *and* the deadline fires in the same tick is treated as a
-        timeout (same convention as ``asyncio.timeout``).
+        — a fired deadline manifests as ``TimeoutError``, and a read that
+        completes in the same tick the deadline fires is a timeout, which is
+        ``asyncio.timeout``'s convention too.
 
-        Returns ``self`` rather than allocating a wrapper object.  Safe
-        because each connection owns its own ``ConnectionDeadline``
-        and uses it sequentially from a single task.
+        ``self`` *is* the context manager, so guards cannot nest or overlap:
+        each connection owns one of these and uses it sequentially from the
+        single task that constructed it.
         """
         self._pending = seconds
         return self
@@ -188,8 +178,8 @@ class ConnectionDeadline:
 class WriteDeadline:
     """Bounds a drain on a connection's writer, via the same scanner.
 
-    Rides in :data:`_Scanner._REGISTRY` alongside
-    :class:`ConnectionDeadline` — the scanner only needs
+    Rides in ``_Scanner._REGISTRY`` alongside
+    [`ConnectionDeadline`][] — the scanner only needs
     ``_deadline_at`` and ``_fire_from_scanner``.  Two differences from
     that class, both forced by the write path:
 
@@ -228,7 +218,7 @@ class WriteDeadline:
         return self._fired
 
     def _fire_from_scanner(self) -> None:
-        """Invoked by :func:`_tick` when ``_deadline_at`` has passed."""
+        """Invoked by [`_tick`][] when ``_deadline_at`` has passed."""
         self._fired = True
         self._deadline_at = _INF
         self._registered = False
@@ -284,14 +274,10 @@ class WsIdleWatchdog:
     the scanner fires the connection's callback roughly every tick, and the
     callback services buffered control frames / starts the deferred reader.
 
-    The design constraint is the same one that built
-    :class:`ConnectionDeadline`: no per-connection asyncio timers.  One
-    ``TimerHandle`` serves every connection; this object is just registry
-    state plus a callback, re-armed on every fire so it keeps watching until
-    :meth:`disarm`.  ``touch()`` is called on each receive/send, which keeps
-    an actively-driven connection from ever firing (the common case — so the
-    default hot path pays a ``loop.time()`` + one comparison per message and
-    no scanner work at all).
+    Registry state plus a callback, under this module's no-per-connection-timer
+    rule, re-armed on every fire so it keeps watching until [`disarm`][].
+    ``touch()`` on each receive/send keeps an actively-driven connection from
+    ever firing.
     """
 
     __slots__ = ('_loop', '_idle_s', '_deadline_at', '_callback', '_registered')
@@ -312,7 +298,7 @@ class WsIdleWatchdog:
             self._registered = True
 
     def _fire_from_scanner(self) -> None:
-        """Invoked by :func:`_tick` when the connection has been idle."""
+        """Invoked by [`_tick`][] when the connection has been idle."""
         # Re-arm first: the callback may schedule work, but this watchdog
         # keeps watching (once per tick) until disarm().
         self._deadline_at = self._loop.time() + self._idle_s

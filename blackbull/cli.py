@@ -1,17 +1,17 @@
 """``blackbull`` console-script entry point.
 
 Resolves a ``module:attribute`` import path to an ASGI 3.0 callable
-(typically a :class:`blackbull.BlackBull` instance, but any ASGI app
-works) and serves it via :func:`blackbull.app.serve`.
+(typically a [`blackbull.BlackBull`][blackbull.BlackBull] instance, but any ASGI app
+works) and serves it via [`blackbull.app.serve`][blackbull.app.serve].
 
 Usage::
 
     blackbull myapp:app --bind 0.0.0.0:8443 \\
               --certfile cert.pem --keyfile key.pem --workers 4
 
-Flags mirror :func:`blackbull.app.serve` kwargs; anything left
+Flags mirror [`blackbull.app.serve`][blackbull.app.serve] kwargs; anything left
 unspecified falls back to the matching ``BB_*`` environment variable
-(see :mod:`blackbull.env`).
+(see [`blackbull.env`][blackbull.env]).
 
 This module is registered as the ``blackbull`` console script via
 ``[project.scripts]`` in ``pyproject.toml``.  The in-Python entry
@@ -88,10 +88,10 @@ def _load_config(path: str) -> dict[str, str]:
     and keys are silently ignored so future TOML keys don't break old
     binaries.  Values are converted to their string representation because
     ``os.environ`` only accepts strings; the existing ``_int_env`` /
-    ``_bool_env`` helpers in :mod:`blackbull.env` parse them back.
+    ``_bool_env`` helpers in [`blackbull.env`][blackbull.env] parse them back.
 
     *path* errors (missing file, permission denied, invalid TOML) raise
-    :class:`SystemExit` via the caller.
+    [`SystemExit`][] via the caller.
 
     The special ``[tls] cert`` and ``[tls] key`` keys are returned under the
     synthetic names ``_certfile`` and ``_keyfile`` (leading underscore marks
@@ -153,9 +153,9 @@ def _split_bind(spec: str):
       bind() error reaches the user.
     * ``fd://N`` → ``('fd', N)``.  Adopts the inherited listening
       socket on file descriptor *N* (systemd-style activation; see
-      :func:`blackbull.protocol.rsock.adopt_listening_fd`).
+      [`blackbull.protocol.rsock.adopt_listening_fd`][blackbull.protocol.rsock.adopt_listening_fd]).
 
-    Raises :class:`ValueError` with a focused message on syntactic
+    Raises ``ValueError`` with a focused message on syntactic
     problems.
     """
     if spec.startswith('fd://'):
@@ -203,7 +203,7 @@ def _import_app(spec: str) -> Any:
 
     Mirrors uvicorn / hypercorn / granian convention.  The attribute
     may be any ASGI callable; we don't introspect or wrap.  Raises
-    :class:`SystemExit` (via the caller's ``main`` wrapper) on import
+    [`SystemExit`][] (via the caller's ``main`` wrapper) on import
     or attribute failure with a focused message — argparse's own error
     output is reserved for syntactic problems.
     """
@@ -362,9 +362,9 @@ def _build_serve_parser() -> argparse.ArgumentParser:
 
 def _build_static_app(directory: str, *, etag: bool, cache: bool,
                       index: str | None):
-    """Build a :class:`blackbull.BlackBull` app that serves *directory*.
+    """Build a [`blackbull.BlackBull`][blackbull.BlackBull] app that serves *directory*.
 
-    Raises :class:`FileNotFoundError` / :class:`NotADirectoryError` when
+    Raises [`FileNotFoundError`][] / [`NotADirectoryError`][] when
     *directory* is not a usable directory so the caller can report a
     focused error rather than starting a server that 404s everything.
     """
@@ -444,7 +444,7 @@ def main(argv: list[str] | None = None) -> int:
     Two forms are dispatched here:
 
     * ``blackbull serve [DIR] …`` — the zero-code static file server
-      (see :func:`_serve_static`);
+      (see ``_serve_static``);
     * ``blackbull module:attr …`` — run an ASGI 3.0 application.
 
     Returns a process exit code.  argparse handles ``--help`` and

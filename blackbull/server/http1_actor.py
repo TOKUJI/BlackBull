@@ -205,7 +205,7 @@ _DEFAULT_LINES = _build_default_lines()
 
 
 class BadRequestError(Exception):
-    """Raised by :meth:`HTTP1Actor._parse` on an RFC 9112 framing violation.
+    """Raised by ``HTTP1Actor._parse`` on an RFC 9112 framing violation.
 
     The actor's keep-alive loop catches this and sends a 400 Bad Request
     before closing the connection — never tries to dispatch the malformed
@@ -218,7 +218,7 @@ class HeaderTooLargeError(Exception):
     the configured limit (``BB_HEADER_MAX_LINE`` / ``BB_HEADER_MAX_TOTAL``).
 
     The actor answers with 431 Request Header Fields Too Large (RFC 6585
-    §5) and closes the connection.  Distinct from :class:`BadRequestError`
+    §5) and closes the connection.  Distinct from [`BadRequestError`][]
     because the response status differs.
     """
 
@@ -226,7 +226,7 @@ class HeaderTooLargeError(Exception):
 class NotImplementedFramingError(Exception):
     """RFC 9112 §6.1 — the request used a Transfer-Encoding the server
     does not implement.  Answered with 501 Not Implemented (a separate
-    response code from :class:`BadRequestError`'s 400)."""
+    response code from [`BadRequestError`][]'s 400)."""
 
 
 class UnsupportedVersionError(Exception):
@@ -234,7 +234,7 @@ class UnsupportedVersionError(Exception):
     ``HTTP/x.y`` version whose major version the server does not support
     (RFC9112-2.3-INVALID-VERSION).  Answered with 505 HTTP Version Not
     Supported and the connection is closed.  Distinct from
-    :class:`BadRequestError`: the request *grammar* was valid."""
+    [`BadRequestError`][]: the request *grammar* was valid."""
 
 
 def _reject_oversized_head(head: bytes, max_total: int) -> None:
@@ -262,7 +262,7 @@ def _declares_content(headers: 'Headers') -> bool:
     still buffered?"): this one is asked *before* a recipient exists, on the
     upgrade path, where the answer decides whether to switch protocols at all.
 
-    Assumes :func:`_validate_message_framing` has already run, so CL/TE
+    Assumes [`_validate_message_framing`][] has already run, so CL/TE
     conflicts and malformed values cannot reach here — a bare ``chunked`` or a
     single well-formed ``Content-Length`` is all that is left to classify.
     """
@@ -290,7 +290,7 @@ def _validate_message_framing(headers: 'Headers') -> int:
     * §6.1 — unknown ``Transfer-Encoding`` codings → 501 Not Implemented.
       We accept exactly ``chunked``; anything else (``gzip``, the
       ``identity, chunked`` multi-coding form, etc.) raises
-      :class:`NotImplementedFramingError`.
+      [`NotImplementedFramingError`][].
 
     Returns the declared body length — the validated ``Content-Length``, or 0
     when the message declares none (``chunked`` included: that framing
@@ -433,8 +433,8 @@ class RequestActor(Actor):
     """Owns one request's app boundary: what the app is called with.
 
     Shared by both protocol actors — H/1 reuses one instance per connection
-    via :meth:`bind`; H/2 builds one per stream.  Owns the app-facing
-    representation (the native :class:`Connection` on the default lane, the
+    via [`bind`][]; H/2 builds one per stream.  Owns the app-facing
+    representation (the native [`Connection`][] on the default lane, the
     materialized ASGI scope on ``BB_FORCE_ASGI_SCOPE=1``), binds the raw
     recipient before any wrapper exists, and calls the app.
 
@@ -470,9 +470,8 @@ class RequestActor(Actor):
 
         HTTP/1.1 dispatches one request at a time per connection, so the
         instance is free between requests and rebinding it is indistinguishable
-        from building a new one — except for the allocation, which the keep-alive
-        loop would otherwise pay on every request.  ``app``, ``aggregator`` and
-        ``force_asgi`` are per-connection and stay put.
+        from building a new one.  ``app``, ``aggregator`` and ``force_asgi``
+        are per-connection and stay put.
 
         Deliberately **not** available to HTTP/2, whose streams are concurrent:
         two live requests sharing one actor would interleave their fields.
@@ -538,7 +537,7 @@ class HTTP1Actor(Actor):
     _line_cache_bytes: int = 0
     _max_line: int | None = None
     #: Body length the current request declares, as validated by
-    #: :func:`_validate_message_framing`; 0 when it declares none.
+    #: [`_validate_message_framing`][]; 0 when it declares none.
     _declared_body_len: int = 0
 
     def __init__(
@@ -808,10 +807,10 @@ class HTTP1Actor(Actor):
         )
 
     def _parse(self, data: bytes) -> Connection:
-        """Parse raw HTTP/1.1 request bytes into a native :class:`Connection`.
+        """Parse raw HTTP/1.1 request bytes into a native [`Connection`][].
 
-        Raises :class:`BadRequestError` on an RFC 9112 framing violation the
-        caller should answer with 400, and :class:`HeaderTooLargeError` when a
+        Raises [`BadRequestError`][] on an RFC 9112 framing violation the
+        caller should answer with 400, and [`HeaderTooLargeError`][] when a
         single line exceeds ``BB_HEADER_MAX_LINE``.  The whole-block limit
         (``BB_HEADER_MAX_TOTAL``) is enforced in ``run()``, which sees the
         accumulating buffer; per-line is cheaper here, post-split.
@@ -1207,9 +1206,9 @@ class HTTP1Actor(Actor):
         Protocol-side preparation only: the access-log record, the sender's
         per-request reset, the Expect/100-continue answer, the HEAD→GET
         rewrite, and the recipient.  Everything app-facing is delegated to
-        :class:`RequestActor`, the shared app boundary.
+        [`RequestActor`][], the shared app boundary.
 
-        The HEAD→GET rewrite must run before :class:`RequestActor` snapshots
+        The HEAD→GET rewrite must run before [`RequestActor`][] snapshots
         the app argument; reversed, the compat lane freezes ``method='HEAD'``,
         the router finds no HEAD route, and the dual-path lane answers 405
         where the native lane answers 200 (COMP-HEAD-NO-BODY).

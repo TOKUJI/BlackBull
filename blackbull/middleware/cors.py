@@ -1,3 +1,12 @@
+"""Cross-Origin Resource Sharing.
+
+[`CORS`][blackbull.middleware.cors.CORS] answers preflight ``OPTIONS`` requests
+itself and attaches the headers a browser needs before it will hand a
+cross-origin response to page script.  A request with no ``Origin``, or an
+``Origin`` the configuration does not allow, passes through untouched — this
+middleware never refuses a request, because the enforcement happens in the
+browser.
+"""
 from ..asgi import ASGIEvent
 from ..native import NativeResponse
 from ..connection import Connection
@@ -41,6 +50,13 @@ class CORS:
         expose_headers: list[str] | None = None,
         max_age: int | None = 600,
     ) -> None:
+        """Build the middleware.
+
+        ``allow_credentials=True`` cannot be combined with
+        ``allow_origins=['*']``: the pair raises ``ValueError``.  A wildcard
+        origin with credentials is what the CORS specification forbids, not
+        something this middleware chooses to refuse.
+        """
         if isinstance(allow_origins, str):
             allow_origins = [allow_origins]
         if isinstance(allow_headers, str):
@@ -92,7 +108,7 @@ class CORS:
         """Wrap *send* so the response's header arm gains *cors_hdrs*.
 
         On the H1 native path the event is a
-        :class:`~blackbull.native.NativeResponse` whose header arm gets the
+        [`NativeResponse`][blackbull.native.NativeResponse] whose header arm gets the
         CORS headers appended (a zero-copy mutation visible to the sender);
         on the H2 / ASGI path it is a ``http.response.start`` dict, appended
         to a copy of the event's own list — the downstream handler's headers

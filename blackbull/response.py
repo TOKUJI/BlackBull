@@ -25,7 +25,7 @@ def _normalize_headers(headers) -> list[tuple[bytes, bytes]]:
 
     Accepts either
 
-    * a :class:`~collections.abc.Mapping` (``dict``-like) — matching the
+    * a [`Mapping`][collections.abc.Mapping] (``dict``-like) — matching the
       FastAPI / Starlette / httpx convention, iterated by ``.items()``; or
     * an iterable of ``(name, value)`` pairs (BlackBull's original shape).
 
@@ -71,7 +71,7 @@ async def _emit_response(send, body: bytes, status, headers) -> None:
 
     The single source of truth for the ``http.response.start`` /
     ``http.response.body`` event pair used by every non-streaming response
-    path — :meth:`Response.__call__`, the app's ``send(body, status, headers)``
+    path — [`Response.__call__`][Response.__call__], the app's ``send(body, status, headers)``
     convenience form (``_wrap_send_native``), and the default error handler.  *status*
     may be an ``int`` or an ``HTTPStatus`` (coerced to ``int`` for the wire);
     *headers* is any iterable of ``(bytes, bytes)`` pairs (copied defensively).
@@ -110,7 +110,7 @@ class Response:
     async def __call__(self, conn, receive, send) -> None:
         """Drive this response as an ASGI app: emit ``start`` then ``body``.
 
-        Mirrors :class:`StreamingResponse` so every BlackBull response type
+        Mirrors [`StreamingResponse`][] so every BlackBull response type
         shares one protocol — ``await response(conn, receive, send)`` —
         whether returned from a simplified handler, invoked explicitly by a
         full-form handler, or normalised by ``_wrap_send_native``.  Keeping the
@@ -123,9 +123,9 @@ class Response:
         """Convert this response to the unified native message (one send).
 
         The native-path serialiser: a complete ``Response`` becomes a single
-        :class:`~blackbull.native.NativeResponse` carrying status, headers,
+        [`NativeResponse`][blackbull.native.NativeResponse] carrying status, headers,
         and body — one object, one ``send``.  Symmetric with
-        :meth:`NativeResponse.to_asgi` (the boundary conversion); streaming
+        [`NativeResponse.to_asgi`][NativeResponse.to_asgi] (the boundary conversion); streaming
         response types drive themselves and are not converted here.
         """
         return NativeResponse.complete(int(self.status), list(self.headers),
@@ -229,7 +229,7 @@ def _format_sse_event(event) -> bytes:
       string; ``retry`` to int milliseconds.  Unknown keys are ignored.
 
     Returns the encoded UTF-8 bytes; the caller pushes them down a
-    :class:`StreamingResponse` (or any ASGI body sink) directly.
+    [`StreamingResponse`][] (or any ASGI body sink) directly.
     """
     if isinstance(event, bytes):
         text = event.decode('utf-8')
@@ -341,7 +341,7 @@ def wrap_native_send(raw_send):
     """Handler-facing send adapter: every accepted shape → NativeResponse.
 
     **Every** accepted shape becomes a
-    :class:`~blackbull.native.NativeResponse`, so everything above the route
+    [`NativeResponse`][blackbull.native.NativeResponse], so everything above the route
     handler — route-header injection, middleware, access log, sender —
     observes one representation on the H1 path.  The handler boundary and
     ``as_middleware``'s ``call_next`` both wrap through here, so global and
@@ -408,7 +408,7 @@ def wrap_native_send(raw_send):
 
 
 async def _stream_and_convert(stream, raw_send) -> None:
-    """Drive a :class:`StreamingResponse` through the native conversion.
+    """Drive a [`StreamingResponse`][] through the native conversion.
 
     Streaming emits only ``http.response.start`` / ``http.response.body``
     dicts; each is converted to a ``NativeResponse`` before reaching

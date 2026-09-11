@@ -1,30 +1,30 @@
 """Unified protocol registry.
 
 BlackBull dispatches every accepted connection through a single
-:class:`ProtocolRegistry`.  ``http1`` and ``http2`` are built-in *bindings*;
+[`ProtocolRegistry`][].  ``http1`` and ``http2`` are built-in *bindings*;
 non-HTTP protocols (raw TCP, and later MQTT/Redis) register their own bindings
-via :meth:`BlackBull.raw_handler` / :meth:`BlackBull.register_protocol_handler`.
+via [`BlackBull.raw_handler`][BlackBull.raw_handler] / [`BlackBull.register_protocol_handler`][BlackBull.register_protocol_handler].
 
 A *binding* owns protocol selection, *its own* framing reads, and Actor
 construction.  ``ConnectionActor`` peeks only a tiny protocol-agnostic
 discriminator prefix; the 24-byte
 HTTP/2 preface read and the HTTP/1.1 request-line read live in
-:class:`Http2Binding` / :class:`Http1Binding`, reached through the single
-:meth:`ProtocolBinding.serve` entry point.
+[`Http2Binding`][] / [`Http1Binding`][], reached through the single
+[`ProtocolBinding.serve`][ProtocolBinding.serve] entry point.
 
 Two dispatch routes:
 
 * **Detection** (the shared HTTP listener): ``ConnectionActor`` peeks the
-  discriminator and asks each :class:`ProtocolBinding` via :meth:`claims` — ALPN
+  discriminator and asks each [`ProtocolBinding`][] via ``claims`` — ALPN
   first, then the ordered cleartext chain (``http2`` preface, ``http1``
-  fallback) — then calls the winner's :meth:`serve`.
+  fallback) — then calls the winner's ``serve``.
 * **Port-bound** (raw protocols): a binding registered with ``port=`` gets its
   own listening socket; connections there skip detection entirely.
 
 Note:
     Do not export the internal classes from ``blackbull/__init__.py``; the
-    public surface is :meth:`BlackBull.raw_handler` and
-    :meth:`BlackBull.register_protocol_handler`.
+    public surface is [`BlackBull.raw_handler`][BlackBull.raw_handler] and
+    [`BlackBull.register_protocol_handler`][BlackBull.register_protocol_handler].
 """
 from __future__ import annotations
 
@@ -61,7 +61,7 @@ RawProtocolHandler = Callable[
 class ProtocolContext:
     """Context passed to a non-ASGI protocol handler.
 
-    Carries connection metadata and the shared :class:`EventAggregator`
+    Carries connection metadata and the shared [`EventAggregator`][]
     without exposing any ASGI concept (no ``scope`` / ``receive`` / ``send``).
     """
     peername: tuple[str, int] | None
@@ -76,9 +76,9 @@ class ProtocolContext:
 
 @dataclass
 class ConnectionView:
-    """Everything a :class:`ProtocolBinding` needs to build its Actor.
+    """Everything a [`ProtocolBinding`][] needs to build its Actor.
 
-    Assembled once per connection by :class:`ConnectionActor` and handed to the
+    Assembled once per connection by ``ConnectionActor`` and handed to the
     selected binding's ``serve_*`` method.  Keeps the binding API narrow and
     decouples bindings from ``ConnectionActor``'s internals.
     """
@@ -103,10 +103,9 @@ class ConnectionView:
 class ProtocolDetector(ABC):
     """Inspects the first bytes of a connection to identify the protocol.
 
-    Stateless — one instance is shared across all connections.  Used for
-    first-byte sniffing on *shared* ports (e.g. MQTT + HTTP on one port);
-    consulted by ``ConnectionActor._dispatch()`` after ALPN detection and
-    before the http1 cleartext fallback.
+    Stateless — one instance is shared across all connections.  First-byte
+    sniffing on *shared* ports (MQTT + HTTP on one port, say), reached only
+    when ALPN did not already name the protocol.
     """
 
     @abstractmethod
@@ -127,17 +126,16 @@ class ProtocolBinding:
     """One connection-level protocol.
 
     A binding declares how many leading bytes it needs to recognise a
-    connection (:attr:`detect_prefix_len`) and whether it :meth:`claims` a given
-    peeked prefix; the winner's single :meth:`serve` then performs *its own*
+    connection (``detect_prefix_len``) and whether it ``claims`` a given
+    peeked prefix; the winner's single ``serve`` then performs *its own*
     protocol reads from a reader still positioned at the first byte, because
     detection peeks without consuming.  Only a reader that cannot peek hands
     back what it took, and there a
-    :class:`~blackbull.server.recipient.PrefixReader` restores the stream.
+    [`PrefixReader`][blackbull.server.recipient.PrefixReader] restores the stream.
 
-    One ``serve(conn)`` rather than a per-transport trio is what lets
-    ``ConnectionActor`` stay protocol-agnostic: the ``24``-byte HTTP/2 preface
-    read and the HTTP/1.1 ``\\r\\n`` request-line read live in the
-    bindings, not in the dispatcher.
+    Every protocol-specific read is the binding's, never the dispatcher's —
+    the ``24``-byte HTTP/2 preface and the HTTP/1.1 ``\\r\\n`` request line
+    alike — which is what keeps ``ConnectionActor`` protocol-agnostic.
     """
 
     name: str = ''
@@ -173,8 +171,8 @@ class ProtocolBinding:
 
         The single selection seam for cleartext + shared-port dispatch.
         Default delegates to
-        :meth:`matches_cleartext`; :class:`RawBinding` overrides it to consult
-        its :class:`ProtocolDetector`.  ``alpn`` is accepted so a future binding
+        [`matches_cleartext`][]; [`RawBinding`][] overrides it to consult
+        its [`ProtocolDetector`][].  ``alpn`` is accepted so a future binding
         can claim on the negotiated token, not just the wire prefix.
         """
         return self.matches_cleartext(prefix)
@@ -318,10 +316,9 @@ class RawBinding(ProtocolBinding):
         recognises the first bytes.  Port-bound bindings (no detector) never
         claim via detection — they own their own listening socket instead.
 
-        A stateful binding stops claiming once the shared listener is served
-        by more than one worker: whichever worker accepted would answer, and
-        the ones that never saw the earlier exchange would answer wrongly.
-        Its dedicated port is unaffected — that is where it stays reachable.
+        A stateful binding stops claiming once more than one worker serves the
+        shared listener: a worker that never saw the earlier exchange would
+        answer wrongly.  Its dedicated port is where it stays reachable.
         """
         if not self._shared_dispatch:
             return False
@@ -380,7 +377,7 @@ class ProtocolRegistry:
         """Register a non-ASGI protocol handler.  Raises on duplicate name.
 
         A ``detector`` enables shared-port sniffing (see
-        :class:`ProtocolDetector`).  When several registered detectors could
+        [`ProtocolDetector`][]).  When several registered detectors could
         match the same first bytes, dispatch picks the **first registered**
         one — ``raw_bindings`` preserves insertion order.  ``tls=True`` serves
         the binding's own port through the server's TLS machinery.
@@ -399,8 +396,7 @@ class ProtocolRegistry:
         """Bindings consulted during cleartext detection, in priority order:
         registered raw detectors first (shared-port protocols such as MQTT),
         then the ordered cleartext chain (``http2`` preface, ``http1``
-        fallback).  Cached — rebuilt only by :meth:`register`, so an
-        HTTP-only app pays no per-connection allocation for it.
+        fallback).  Cached, and rebuilt only by [`register`][].
         """
         return self._detection_order
 

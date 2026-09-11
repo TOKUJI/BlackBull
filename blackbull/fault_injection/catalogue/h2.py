@@ -1,13 +1,9 @@
 """Four named HTTP/2 misbehaviour scenarios.
 
-See :mod:`blackbull.fault_injection.catalogue` for the catalogue
+See [`blackbull.fault_injection.catalogue`][blackbull.fault_injection.catalogue] for the catalogue
 overview and the four spec-grade categories.
 
-Each builder returns a :class:`~blackbull.fault_injection.ScenarioH2`.
-The scenarios are deliberately tight: just enough state for the named
-pathology, nothing more.  Real client / proxy / security-research
-suites can stack ``parametrize`` over the catalogue to assert
-resilience across all four categories with a few lines of test code.
+Each builder returns a [`ScenarioH2`][blackbull.fault_injection.ScenarioH2].
 """
 from __future__ import annotations
 

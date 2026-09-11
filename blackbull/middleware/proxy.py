@@ -1,3 +1,18 @@
+"""Recovering the real client from behind a reverse proxy.
+
+Once a proxy sits in front of the server the TCP peer *is* the proxy, and every
+request appears to come from it.
+[`TrustedProxy`][blackbull.middleware.proxy.TrustedProxy] restores the client
+address, scheme and mount prefix from the headers the proxy set — but only when
+the peer that set them is one you named as trusted, since any client can send
+those headers itself.
+
+Nothing here is honoured off the wire by default: the parser ignores
+``X-Forwarded-Prefix``, and client and scheme keep whatever the socket
+reported, until this middleware decides the hop is trustworthy.
+
+See ``docs/deployment/behind-reverse-proxy.md`` for the deployment shape.
+"""
 import ipaddress
 
 from ..connection import CONNECTION_STASH_KEY, Connection
@@ -72,7 +87,7 @@ class TrustedProxy:
         return any(addr in net for net in self._networks)
 
     async def __call__(self, conn, receive, send, call_next) -> None:
-        # HTTP and WebSocket both arrive as a native :class:`Connection`; the
+        # HTTP and WebSocket both arrive as a native [`Connection`][]; the
         # dict branch is defensive against a raw ASGI scope dict (only reachable
         # outside BlackBull's own dispatch). Read/write off whichever we got.
         is_conn = isinstance(conn, Connection)

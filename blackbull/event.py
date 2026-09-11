@@ -35,9 +35,7 @@ class Event:
 
     Attributes:
         name: The event name (e.g. ``"app_startup"``).
-        detail: Arbitrary per-event data.  ``detail`` is used (rather than
-            ``payload``) to avoid colliding with HTTP/2 and WebSocket
-            protocol terminology already used in the codebase.
+        detail: Arbitrary per-event data.
     """
 
     name: str
@@ -56,7 +54,7 @@ class EventDispatcher:
     exceptions are caught and logged — they never reach the emitter.
 
     Observer tasks are tracked so they can be drained at shutdown via
-    :meth:`aclose`.  The drain timeout is configured at construction time
+    [`aclose`][].  The drain timeout is configured at construction time
     (``shutdown_timeout``); any task still running after the timeout is
     logged at WARNING and cancelled.
     """
@@ -106,12 +104,8 @@ class EventDispatcher:
     def has_listeners(self, event_name: str) -> bool:
         """Return True if any interceptor or observer is registered for ``event_name``.
 
-        Hot path: callers use this to skip detail-dict / ``Event`` construction
-        when no one will receive the event, and there is one such call site per
-        lifecycle event per request.  Answered from the registration index, so
-        the common "nobody is listening" verdict costs one set lookup instead
-        of three dict probes — and, like the ``defaultdict.get`` form it
-        replaces, it never inserts an empty list for an unknown name.
+        One set lookup, and it never inserts an entry for a name nobody has
+        registered, so a caller may ask on every event.
         """
         return event_name in self._registered
 
@@ -127,7 +121,7 @@ class EventDispatcher:
            return until they finish, so cleanup registered here is guaranteed
            to complete within the event's lifetime.
         3. **Detached observers** — scheduled as independent tasks (isolated),
-           tracked so they can be drained at shutdown via :meth:`aclose`.
+           tracked so they can be drained at shutdown via [`aclose`][].
         """
         for h in self._interceptors.get(event.name, []):
             await h(event)
@@ -151,21 +145,14 @@ class EventDispatcher:
 
         Returns ``True`` on quiescence, ``False`` if *timeout* ran out
         first.  **Nothing is cancelled either way** — that is the whole
-        difference from :meth:`aclose`, which is a shutdown operation and
+        difference from [`aclose`][], which is a shutdown operation and
         kills what overruns.  A test helper that cancelled the work it was
         asked to observe would make the side-effect it exists to reveal
         unobservable.
 
-        Drains to *quiescence*, not to a snapshot.  An observer may itself
-        emit, so the pending set can refill while it is being awaited;
-        waiting on one ``list(self._pending_tasks)`` returns while that
-        second generation is still running.  The loop re-reads the set
-        after every wait for exactly that reason.
-
-        Intended for tests.  ``@app.intercept`` and
-        ``@app.on(..., blocking=True)`` are awaited inline and need no
-        seam; ``@app.on(name)`` is detached by design, which is what makes
-        a side-effect assertion after a request a race.
+        Drains to *quiescence*, not to a snapshot: an observer may itself
+        emit, so the set is re-read after every wait and a second generation
+        is waited for too.
         """
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
@@ -186,13 +173,8 @@ class EventDispatcher:
         tasks still running after the timeout are logged at WARNING and
         cancelled.
 
-        Drains to *quiescence* via :meth:`drain`, not to a snapshot of the
-        pending set.  An observer may itself ``emit``, and the task for that
-        second observer is created while the wait is already in progress —
-        so awaiting one ``list(self._pending_tasks)`` returns, and reports a
-        clean drain, with the second generation still running.  Nothing is
-        logged in that case either, because the overrun warning below only
-        covers tasks that were in the set being awaited.
+        Drains to quiescence through [`drain`][], so an observer that emits
+        is waited for too.
 
         The cost is that a pathological observer chain can hold shutdown for
         the full budget rather than returning early.  Returning early is the

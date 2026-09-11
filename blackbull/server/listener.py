@@ -1,6 +1,6 @@
 """The sockets a deployment wants, said once each.
 
-A :class:`Listener` is one listening socket: where it is, what speaks there,
+A [`Listener`][] is one listening socket: where it is, what speaks there,
 whether TLS terminates there, and how many workers own it.  ``Server`` binds a
 list of them, so no port is privileged over another and HTTP is a value rather
 than the absence of a raw handler.
@@ -68,7 +68,7 @@ class InheritedFd:
 Address = Tcp | Unix | InheritedFd
 
 HTTP = 'http'
-"""What :attr:`Listener.speaks` names for the detecting HTTP stack."""
+"""What ``Listener.speaks`` names for the detecting HTTP stack."""
 
 
 @dataclass(frozen=True, slots=True)

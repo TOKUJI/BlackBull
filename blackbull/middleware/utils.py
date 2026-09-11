@@ -19,7 +19,7 @@ def _declares_asgi_scope(fn, *, is_method: bool) -> bool:
     """True when *fn*'s first request parameter is literally named ``scope``.
 
     The name **is** the declaration.  Everywhere else in BlackBull ``scope``
-    means a genuine ASGI scope dict and never a :class:`Connection` — the
+    means a genuine ASGI scope dict and never a [`Connection`][] — the
     router *rejects* the name for simplified handlers on exactly that ground.
     Here it is honoured rather than rejected: a middleware that asks for
     ``scope`` was written against ASGI, so it is handed a real scope dict and
@@ -43,7 +43,7 @@ def _to_asgi_send(inner_send):
     """Expand native emissions to ASGI event dicts for a scope-declared
     middleware's own ``send`` wrapper.
 
-    The inverse of :func:`_normalize_send`, and the reason the pair is safe:
+    The inverse of [`_normalize_send`][], and the reason the pair is safe:
     an ASGI-written middleware inspects ``event['type']``, so what reaches it
     from below must be dicts — on the WebSocket path as much as the HTTP one.
     The dict form is created here and consumed again at the same middleware's
@@ -59,7 +59,7 @@ def _adapt(conn, send, wants_scope: bool):
 
     Returns ``(request_arg, outward_send, inner_normaliser)``.
 
-    Native middleware (the default) get the :class:`Connection` untouched, an
+    Native middleware (the default) get the [`Connection`][] untouched, an
     unwrapped ``send``, and a native inner normaliser — no adaptation at all,
     so the single-world path pays nothing for this feature.
 
@@ -80,7 +80,7 @@ def _normalize_send(inner_send: ASGISendCallable | None):
     """Return a wrapper around *inner_send* converting every shape to native.
 
     The native-path normalisation (shared with the app's handler-boundary
-    adapter via :func:`blackbull.response.wrap_native_send`): ``Response`` /
+    adapter via [`blackbull.response.wrap_native_send`][blackbull.response.wrap_native_send]): ``Response`` /
     ``StreamingResponse`` / 3-arg / ASGI dict / NativeResponse all become a
     single native representation before reaching ``inner_send``, so middleware
     observes one contract on the HTTP path.  The H2 sender has a native arm

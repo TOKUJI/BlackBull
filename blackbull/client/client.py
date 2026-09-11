@@ -1,13 +1,4 @@
-"""ALPN-dispatching front door.
-
-``Client`` opens a TCP/TLS connection, inspects the negotiated ALPN
-protocol, and hands off to ``HTTP2Client`` (when the server advertises
-``h2``) or ``HTTP1Client`` (otherwise).
-
-WebSocket is intentionally **not** part of ALPN dispatch — it is an
-HTTP/1.1 upgrade and the caller picks it explicitly via
-:class:`blackbull.client.WebSocketClient`.
-"""
+"""ALPN-dispatching front door."""
 import ssl as _ssl
 from typing import Union
 
@@ -24,18 +15,15 @@ NegotiatedClient = Union[HTTP1Client, HTTP2Client]
 
 
 class Client:
-    """ALPN-negotiating client.
+    """ALPN-negotiating client: ``HTTP2Client`` on ``h2``, else ``HTTP1Client``.
 
-    Picks ``HTTP2Client`` if the server advertises ``h2``, else ``HTTP1Client``.
-    With ``ssl=None`` (the default), no ALPN is performed and HTTP/1.1 is used
-    — h2c (HTTP/2 over plaintext) is supported by ``HTTP2Client`` directly,
-    but the dispatcher only triggers it when ALPN selects ``h2``.
+    With ``ssl=None`` (the default) there is no ALPN to read, so the answer is
+    always HTTP/1.1.  WebSocket is never dispatched to; name its client.
 
     Use as an async context manager::
 
         async with Client('localhost', 8000) as c:
             res = await c.request(HTTPMethod.GET, '/')
-            # `c` is an HTTP1Client when ssl=None, or whichever the ALPN handshake chose.
     """
 
     def __init__(self, host: str, port: int, *,

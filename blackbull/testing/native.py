@@ -1,18 +1,12 @@
 """Native-path test client — the two tiers that drive BlackBull's *own*
 request path rather than the ASGI compatibility boundary.
 
-BlackBull threads a typed :class:`~blackbull.connection.Connection` end to
-end; the ASGI ``scope`` dict survives only at two boundaries.  The
-compatibility client in :mod:`blackbull.testing` reaches the app through
-``httpx.ASGITransport`` → scope dict → ``Connection.from_scope()``, so the
-``isinstance(conn, Connection)`` branch of ``BlackBull.__call__`` — the branch
-every production request takes — is never exercised by it.  A defect can
-therefore live on the native path while the whole compat-driven suite passes.
+A defect can live on the native path while a suite driven entirely through
+the ASGI compatibility boundary passes, because that boundary never takes
+the ``isinstance(conn, Connection)`` branch every production request does.
+Two tiers close that gap.
 
-Two tiers close that, mirroring what every framework that owns its protocol
-stack provides:
-
-**Tier 1** — :func:`request` and the verb helpers build a ``Connection`` and
+**Tier 1** — [`request`][] and the verb helpers build a ``Connection`` and
 call ``app(conn, receive, send)`` directly.  No socket, no protocol actor:
 everything from ``Connection`` inward (dispatcher, middleware chain, router,
 handlers, DI, events, response serialisation).  The equivalent of actix-web's
@@ -21,8 +15,8 @@ handlers, DI, events, response serialisation).  The equivalent of actix-web's
     resp = await native.get(app, '/hello')
     assert resp.status == 200
 
-**Tier 2** — :class:`NativeTestServer` binds a real loopback socket and runs
-BlackBull's own :class:`~blackbull.server.server.Server`, so a request
+**Tier 2** — [`NativeTestServer`][] binds a real loopback socket and runs
+BlackBull's own [`Server`][blackbull.server.server.Server], so a request
 travels accept → ``HTTP1Actor`` parse → ``Connection`` → native dispatch →
 wire bytes.  The equivalent of aiohttp's ``TestServer`` or Go's
 ``httptest.NewServer``::
@@ -30,15 +24,13 @@ wire bytes.  The equivalent of aiohttp's ``TestServer`` or Go's
     async with NativeTestServer(app) as server:
         resp = await server.client.get('/hello')
 
-Both tiers are async-first because the app entry point is a coroutine and a
-handler runs on the caller's event loop — which is also what production does.
-:class:`NativeClient` and the synchronous form of :class:`NativeTestServer`
+Both tiers are async-first, because the app entry point is a coroutine and a
+handler runs on the caller's event loop, as it does in production.
+[`NativeClient`][] and the synchronous form of [`NativeTestServer`][]
 wrap them for tests written as plain ``def``, each owning one background
-event loop for its whole lifetime rather than per request.
+event loop for its whole lifetime rather than one per request.
 
-Which instrument to reach for is documented in ``docs/guide/testing.md``:
-Tier 1 for application logic, Tier 2 for anything whose answer depends on the
-wire, and :class:`~blackbull.testing.TestClient` for the ASGI boundary itself.
+``docs/guide/testing.md`` says which instrument answers which question.
 """
 
 from __future__ import annotations
@@ -88,7 +80,7 @@ def _header_pairs(headers: _HeaderInput) -> list[tuple[bytes, bytes]]:
     """Normalise caller-supplied headers to lowercase byte pairs.
 
     Accepts what a test naturally writes — a ``dict`` of ``str`` or ``bytes``,
-    a list of pairs, or a :class:`Headers` — because the alternative is every
+    a list of pairs, or a [`Headers`][] — because the alternative is every
     call site spelling ``{b'x-probe': b'seen'}`` by hand.  Names are
     lowercased to match the parser's index (``headers.get(b'content-type')``).
     """
@@ -134,9 +126,9 @@ def build_connection(
     client: tuple[str, int | None] | None = _TEST_CLIENT_ADDR,
     server: tuple[str, int | None] | None = _TEST_SERVER_ADDR,
 ) -> Connection:
-    """Build the :class:`Connection` an H/1.1 request line would have produced.
+    """Build the [`Connection`][] an H/1.1 request line would have produced.
 
-    The field derivations mirror :meth:`HTTP1Actor._parse` so a Tier 1 test and
+    The field derivations mirror the HTTP/1.1 parser's, so a Tier 1 test and
     a real request agree on what the handler sees:
 
     - the query string is split off ``path`` and carried in ``query_string``,
@@ -188,7 +180,7 @@ async def request(
 ) -> NativeTestResponse:
     """Call ``app(conn, receive, send)`` and collect the response.
 
-    The full-control form: build (or mutate) a :class:`Connection` yourself and
+    The full-control form: build (or mutate) a [`Connection`][] yourself and
     drive the app with it.  The verb helpers below are thin wrappers over this.
 
     The receive channel delivers *body* as one ``http.request`` event and then
@@ -269,9 +261,9 @@ async def request(
 
 
 #: Deprecated alias.  ``NativeResponse`` used to name *this* class, which
-#: collided with :class:`blackbull.native.NativeResponse` — the framework's
+#: collided with [`blackbull.native.NativeResponse`][blackbull.native.NativeResponse] — the framework's
 #: send message — so the two were indistinguishable in a traceback or an
-#: ``isinstance`` check.  Prefer :class:`NativeTestResponse`.
+#: ``isinstance`` check.  Prefer [`NativeTestResponse`][].
 NativeResponse = NativeTestResponse
 
 
@@ -302,7 +294,7 @@ async def head(app: Any, path: str, **kwargs: Any) -> NativeTestResponse:
 
     The handler sees ``HEAD``: rewriting it to ``GET`` and stripping the body
     is the H/1.1 actor's job (RFC 9110 §9.3.2), which is below this tier.  Use
-    :class:`NativeTestServer` to assert HEAD's *wire* behaviour.
+    [`NativeTestServer`][] to assert HEAD's *wire* behaviour.
     """
     return await _verb(app, 'HEAD', path, **kwargs)
 
@@ -354,6 +346,7 @@ class NativeClient:
     __test__ = False        # not a pytest container despite the name shape
 
     def __init__(self, app: Any) -> None:
+        """Prepare a client for *app*; the loop thread starts on ``__enter__``."""
         self.app = app
         # Imported here rather than at module scope: ``blackbull.testing``
         # imports this module, so a top-level import would be circular.
@@ -364,6 +357,7 @@ class NativeClient:
         self._entered = False
 
     def __enter__(self) -> 'NativeClient':
+        """Start the background loop and run the application's lifespan startup."""
         self._loop_thread.start()
         self._lifespan = self._lifespan_cls(self.app, self._loop_thread)
         try:
@@ -393,28 +387,35 @@ class NativeClient:
         return self._loop_thread.run_coro(fn(self.app, *args, **kwargs))
 
     def request(self, conn: Connection, *, body: bytes | str = b'') -> NativeTestResponse:
-        """Full-control form — see :func:`request`."""
+        """Full-control form — see [`request`][]."""
         return self._run(request, conn, body=body)
 
     def get(self, path: str, **kwargs: Any) -> NativeTestResponse:
+        """``GET`` *path* on the app's own dispatch, no socket involved."""
         return self._run(get, path, **kwargs)
 
     def head(self, path: str, **kwargs: Any) -> NativeTestResponse:
+        """``HEAD`` *path* on the app's own dispatch, no socket involved."""
         return self._run(head, path, **kwargs)
 
     def options(self, path: str, **kwargs: Any) -> NativeTestResponse:
+        """``OPTIONS`` *path* on the app's own dispatch, no socket involved."""
         return self._run(options, path, **kwargs)
 
     def post(self, path: str, **kwargs: Any) -> NativeTestResponse:
+        """``POST`` *path* on the app's own dispatch, no socket involved."""
         return self._run(post, path, **kwargs)
 
     def put(self, path: str, **kwargs: Any) -> NativeTestResponse:
+        """``PUT`` *path* on the app's own dispatch, no socket involved."""
         return self._run(put, path, **kwargs)
 
     def patch(self, path: str, **kwargs: Any) -> NativeTestResponse:
+        """``PATCH`` *path* on the app's own dispatch, no socket involved."""
         return self._run(patch, path, **kwargs)
 
     def delete(self, path: str, **kwargs: Any) -> NativeTestResponse:
+        """``DELETE`` *path* on the app's own dispatch, no socket involved."""
         return self._run(delete, path, **kwargs)
 
 
@@ -592,7 +593,7 @@ class NativeTestServer:
 
 
 class _SyncServerClient:
-    """Blocking façade over :class:`NativeTestServer`'s ``httpx.AsyncClient``.
+    """Blocking façade over [`NativeTestServer`][]'s ``httpx.AsyncClient``.
 
     Each call is scheduled on the server's own loop thread, so the request and
     the server it talks to share one loop — the same arrangement the async form

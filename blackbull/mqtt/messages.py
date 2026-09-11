@@ -4,21 +4,21 @@ Level-A (pure-data) layer for the ``blackbull-mqtt`` broker sidecar: the 15
 MQTT 5.0 control packets as frozen dataclasses, a wire encoder/decoder, the
 MQTT 5.0 property system, reason codes, and the topic-filter matching
 algorithm.  No I/O and no broker state live here — that is the job of
-:mod:`blackbull.mqtt.broker` and :mod:`blackbull.mqtt.connection`.
+[`blackbull.mqtt.broker`][blackbull.mqtt.broker] and [`blackbull.mqtt.connection`][blackbull.mqtt.connection].
 
 Reference: MQTT Version 5.0, OASIS Standard
   https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html
 
 Decoder return contract
 -----------------------
-:func:`decode_packet` returns the decoded message object.  Every message also
+[`decode_packet`][] returns the decoded message object.  Every message also
 unpacks into ``(message, bytes_consumed)`` so a caller walking a buffer of
 concatenated packets can advance its offset::
 
     msg = decode_packet(buf)            # attribute access / isinstance
     msg, consumed = decode_packet(buf)  # buffer-walking
 
-This dual ergonomics is provided by :meth:`MQTTMessage.__iter__`; the consumed
+This dual ergonomics is provided by ``MQTTMessage.__iter__``; the consumed
 count is recorded on the instance during decode.
 """
 from __future__ import annotations
@@ -90,7 +90,7 @@ class PublishFlags(NamedTuple):
 # Protocol level & flag-byte bit definitions — so the bitwise codec below
 # reads in MQTT 5.0 spec terms rather than raw hex (§3.1.2.2, §3.1.2.3,
 # §3.3.1, §3.8.3.1).  A two-bit QoS / Retain-Handling subfield is expressed
-# as a (shift, mask) pair; single bits are :class:`~enum.IntFlag` members.
+# as a (shift, mask) pair; single bits are [`IntFlag`][enum.IntFlag] members.
 # ---------------------------------------------------------------------------
 
 class ProtocolLevel(IntEnum):
@@ -103,8 +103,8 @@ class ProtocolLevel(IntEnum):
 class ConnectFlags(IntFlag):
     """Single-bit flags in the CONNECT flags byte (§3.1.2.3).
 
-    The Will QoS field is the two-bit subfield at :data:`WILL_QOS_SHIFT`
-    (mask :data:`WILL_QOS_MASK`), not a flag here.
+    The Will QoS field is the two-bit subfield at ``WILL_QOS_SHIFT``
+    (mask ``WILL_QOS_MASK``), not a flag here.
     """
     CLEAN_START = 0x02
     WILL_FLAG = 0x04
@@ -120,7 +120,7 @@ WILL_QOS_MASK = 0x03
 class PublishFlagBits(IntFlag):
     """Single-bit flags in the PUBLISH fixed header (§3.3.1).
 
-    QoS is the two-bit subfield at :data:`PUBLISH_QOS_SHIFT`.
+    QoS is the two-bit subfield at ``PUBLISH_QOS_SHIFT``.
     """
     RETAIN = 0x01
     DUP = 0x08
@@ -251,11 +251,9 @@ class MQTTReasonCode(int):
 class ReasonCode(IntEnum):
     """The subset of §2.4 reason codes the broker references by name.
 
-    This is the single definition of these *values*; their human-readable
-    names live once in :data:`_REASON_CODE_NAMES` (the full §2.4 registry used
-    by :class:`MQTTReasonCode`).  Importers (`blackbull.mqtt.broker`,
-    `blackbull.mqtt.connection`) use these members instead of redeclaring raw
-    hex, so a code can never drift between modules.
+    The single definition of these *values*; [`MQTTReasonCode`][] carries
+    the full §2.4 registry and the human-readable names.  Naming a member
+    here is what keeps a code from drifting between modules.
     """
     SUCCESS = 0x00
     DISCONNECT_WITH_WILL = 0x04
@@ -419,7 +417,7 @@ _PROP_ID_TO_KEY: dict[int, str] = {
 
 
 def get_property_info(identifier: int) -> PropertyInfo | None:
-    """Return the :class:`PropertyInfo` for a property identifier, or None."""
+    """Return the [`PropertyInfo`][] for a property identifier, or None."""
     return _PROP_BY_ID.get(identifier)
 
 
@@ -513,7 +511,7 @@ class MQTTMessage:
 
     Provides the dual decode contract: a decoded message unpacks into
     ``(message, bytes_consumed)``.  The byte count is set by
-    :func:`decode_packet` via :meth:`_set_consumed`; messages built by hand
+    [`decode_packet`][] via ``_set_consumed``; messages built by hand
     report ``0``.
     """
 
@@ -539,6 +537,17 @@ class MQTTMessage:
 
 @dataclass(frozen=True)
 class MQTTConnect(MQTTMessage):
+    """CONNECT — the client's opening packet (§3.1).
+
+    Carries the session identity (``client_id``, ``clean_start``), the
+    keep-alive interval in seconds, optional credentials, and the Will the
+    broker publishes if the connection ends without a DISCONNECT.
+
+    Construction rejects two shapes the spec forbids: a ``client_id``
+    containing a null character (§1.5.4.2), and a ``password`` without a
+    ``username`` (§3.1.2.9).
+    """
+
     packet_type: ClassVar[MQTTPacketType] = MQTTPacketType.CONNECT
     client_id: str
     clean_start: bool
@@ -565,6 +574,13 @@ class MQTTConnect(MQTTMessage):
 
 @dataclass(frozen=True)
 class MQTTConnack(MQTTMessage):
+    """CONNACK — the broker's answer to CONNECT (§3.2).
+
+    ``session_present`` tells the client whether the broker resumed its
+    stored session or started a fresh one; a non-zero ``reason_code`` means
+    the connection was refused and the broker closes it.
+    """
+
     packet_type: ClassVar[MQTTPacketType] = MQTTPacketType.CONNACK
     session_present: bool = False
     reason_code: int = 0
@@ -573,6 +589,18 @@ class MQTTConnack(MQTTMessage):
 
 @dataclass(frozen=True)
 class MQTTPublish(MQTTMessage):
+    """PUBLISH — an application message on a topic (§3.3).
+
+    ``qos`` selects the delivery handshake that follows: none for 0, PUBACK
+    for 1, PUBREC/PUBREL/PUBCOMP for 2.  ``retain`` asks the broker to keep
+    this message as the topic's last known value; ``dup`` marks a redelivery.
+
+    Construction enforces what the payload and properties must agree on: a
+    QoS 1 or 2 packet needs a ``packet_id`` (§3.3.2-2), a ``topic_alias`` of 0
+    is prohibited (§3.3.2.3.4), and ``payload_format_indicator`` 1 requires
+    the payload to decode as UTF-8 (§3.3.2.3.2).
+    """
+
     packet_type: ClassVar[MQTTPacketType] = MQTTPacketType.PUBLISH
     topic: str
     payload: bytes
@@ -611,26 +639,49 @@ class _PacketIdAck(MQTTMessage):
 
 @dataclass(frozen=True)
 class MQTTPuback(_PacketIdAck):
+    """PUBACK — the QoS 1 acknowledgement that completes a delivery (§3.4)."""
+
     packet_type: ClassVar[MQTTPacketType] = MQTTPacketType.PUBACK
 
 
 @dataclass(frozen=True)
 class MQTTPubrec(_PacketIdAck):
+    """PUBREC — first leg of the QoS 2 handshake: the PUBLISH was received
+    and a PUBREL is now expected for that packet id (§3.5)."""
+
     packet_type: ClassVar[MQTTPacketType] = MQTTPacketType.PUBREC
 
 
 @dataclass(frozen=True)
 class MQTTPubrel(_PacketIdAck):
+    """PUBREL — second leg of the QoS 2 handshake: release the packet id, to
+    be answered with PUBCOMP (§3.6)."""
+
     packet_type: ClassVar[MQTTPacketType] = MQTTPacketType.PUBREL
 
 
 @dataclass(frozen=True)
 class MQTTPubcomp(_PacketIdAck):
+    """PUBCOMP — the QoS 2 handshake is finished and the packet id is free to
+    reuse (§3.7)."""
+
     packet_type: ClassVar[MQTTPacketType] = MQTTPacketType.PUBCOMP
 
 
 @dataclass(frozen=True)
 class MQTTSubscribe(MQTTMessage):
+    """SUBSCRIBE — ask for one or more topic filters (§3.8).
+
+    ``subscriptions`` pairs each filter with its maximum QoS.  ``packet_id``
+    defaults to ``None`` only so the field can be passed by keyword; §3.8.2
+    requires one, and construction without it raises.
+
+    ``subscription_options`` is the §3.8.3.1 per-entry options — ``no_local``,
+    ``retain_as_published``, ``retain_handling`` — as one dict per entry in
+    ``subscriptions``.  Decoding always fills it; hand-built packets may leave
+    it ``None`` to take the defaults.
+    """
+
     packet_type: ClassVar[MQTTPacketType] = MQTTPacketType.SUBSCRIBE
     packet_id: int | None = None
     subscriptions: list[tuple[str, int]] = field(default_factory=list)
@@ -647,6 +698,10 @@ class MQTTSubscribe(MQTTMessage):
 
 @dataclass(frozen=True)
 class MQTTSuback(MQTTMessage):
+    """SUBACK — one reason code per SUBSCRIBE filter, in the order they were
+    requested; a code of 0-2 is the granted QoS and anything higher is a
+    refusal of that filter alone (§3.9)."""
+
     packet_type: ClassVar[MQTTPacketType] = MQTTPacketType.SUBACK
     packet_id: int
     reason_codes: list[int]
@@ -655,6 +710,14 @@ class MQTTSuback(MQTTMessage):
 
 @dataclass(frozen=True)
 class MQTTUnsubscribe(MQTTMessage):
+    """UNSUBSCRIBE — drop the listed topic filters (§3.10).
+
+    ``topics`` holds the filters as subscribed, matched literally rather than
+    by wildcard expansion.  ``packet_id`` defaults to ``None`` only so the
+    field can be passed by keyword; §3.10.2 requires one, and construction
+    without it raises.
+    """
+
     packet_type: ClassVar[MQTTPacketType] = MQTTPacketType.UNSUBSCRIBE
     packet_id: int | None = None
     topics: list[str] = field(default_factory=list)
@@ -667,6 +730,9 @@ class MQTTUnsubscribe(MQTTMessage):
 
 @dataclass(frozen=True)
 class MQTTUnsuback(MQTTMessage):
+    """UNSUBACK — one reason code per UNSUBSCRIBE filter, in the order they
+    were listed (§3.11)."""
+
     packet_type: ClassVar[MQTTPacketType] = MQTTPacketType.UNSUBACK
     packet_id: int
     reason_codes: list[int]
@@ -675,16 +741,28 @@ class MQTTUnsuback(MQTTMessage):
 
 @dataclass(frozen=True)
 class MQTTPingreq(MQTTMessage):
+    """PINGREQ — the client's keep-alive probe; two octets, no body (§3.12)."""
+
     packet_type: ClassVar[MQTTPacketType] = MQTTPacketType.PINGREQ
 
 
 @dataclass(frozen=True)
 class MQTTPingresp(MQTTMessage):
+    """PINGRESP — the broker's answer to PINGREQ; two octets, no body
+    (§3.13)."""
+
     packet_type: ClassVar[MQTTPacketType] = MQTTPacketType.PINGRESP
 
 
 @dataclass(frozen=True)
 class MQTTDisconnect(MQTTMessage):
+    """DISCONNECT — either side announcing the connection is ending (§3.14).
+
+    Sent by a client, it also suppresses the Will unless the reason code says
+    otherwise.  ``reason_code`` of ``None`` with no properties encodes as an
+    empty body, which the spec reads as Normal disconnection (0).
+    """
+
     packet_type: ClassVar[MQTTPacketType] = MQTTPacketType.DISCONNECT
     reason_code: int | None = None
     properties: dict[str, Any] = field(default_factory=dict)
@@ -692,6 +770,14 @@ class MQTTDisconnect(MQTTMessage):
 
 @dataclass(frozen=True)
 class MQTTAuth(MQTTMessage):
+    """AUTH — one exchange of an enhanced-authentication conversation (§3.15).
+
+    The method and any challenge or response data travel in ``properties``;
+    the reason code says whether authentication is complete or another round
+    is expected.  ``None`` with no properties encodes as an empty body, which
+    the spec reads as Success (0).
+    """
+
     packet_type: ClassVar[MQTTPacketType] = MQTTPacketType.AUTH
     reason_code: int | None = None
     properties: dict[str, Any] = field(default_factory=dict)
@@ -1059,8 +1145,8 @@ def decode_packet(data: bytes) -> MQTTMessage:
     """Decode the first MQTT control packet in *data*.
 
     Returns the message; it also unpacks into ``(message, bytes_consumed)``.
-    Raises :class:`IncompletePacket` if the buffer is short, or
-    :class:`MQTTDecodeError` if the bytes are not a valid packet.
+    Raises [`IncompletePacket`][] if the buffer is short, or
+    [`MQTTDecodeError`][] if the bytes are not a valid packet.
     """
     if len(data) < 2:
         raise IncompletePacket('Need at least a 2-byte fixed header')
@@ -1172,7 +1258,7 @@ def validate_topic_name(topic: str) -> bool:
 def validate_topic_filter(filter_str: str) -> bool:
     """§4.7.1 — Validate a subscription Topic *Filter*.
 
-    Returns True when valid; raises :class:`ValueError` describing the first
+    Returns True when valid; raises ``ValueError`` describing the first
     rule violated.  Enforces single-``#`` / terminal-``#`` / whole-level
     wildcard rules (§4.7.1.2-3) and the ``$share`` share-name rule (§4.8.2).
     """

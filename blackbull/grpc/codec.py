@@ -10,7 +10,7 @@ carries each message inside an HTTP/2 DATA stream as:
 ``Compressed-Flag`` is 0 for an uncompressed message and 1 when the message
 body is compressed with the algorithm named in the ``grpc-encoding`` header.
 This module is pure framing: it carries the flag but does not (de)compress —
-:mod:`~blackbull.grpc.compression` holds the gzip codec and the ASGI bridge
+[`compression`][blackbull.grpc.compression] holds the gzip codec and the ASGI bridge
 sets/reads the flag around it.
 
 This module is pure binary framing — no protobuf dependency.  Protobuf
@@ -49,7 +49,7 @@ def decode_messages(data: bytes) -> list[tuple[bool, bytes]]:
 
     A single DATA buffer may contain zero, one, or many framed messages
     (gRPC permits multiple messages per stream and does not align them to
-    DATA-frame boundaries).  Raises :class:`GrpcDecodeError` on a truncated
+    DATA-frame boundaries).  Raises [`GrpcDecodeError`][] on a truncated
     prefix or a message body shorter than its declared length.
     """
     messages: list[tuple[bool, bytes]] = []

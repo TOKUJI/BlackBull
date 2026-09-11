@@ -1,7 +1,7 @@
-"""Declarative application configuration — :class:`AppConfig`.
+"""Declarative application configuration — [`AppConfig`][].
 
 ``AppConfig`` is a small, typed, immutable holder for the server-facing
-settings that :meth:`blackbull.BlackBull.run` (and :func:`blackbull.serve`)
+settings that [`blackbull.BlackBull.run`][blackbull.BlackBull.run] (and [`blackbull.serve`][blackbull.serve])
 already accept as keyword arguments.  It lets an application declare those
 settings once::
 
@@ -17,8 +17,8 @@ settings once::
     if __name__ == '__main__':
         app.run()          # picks up the config; no flags to thread through
 
-Resolution precedence in :meth:`BlackBull.run` is, highest to lowest
-(see :func:`resolve_run_config`):
+Resolution precedence in [`BlackBull.run`][BlackBull.run] is, highest to lowest
+(see [`resolve_run_config`][]):
 
 1.  an explicit keyword argument to ``run(...)`` — ``app.run(port=9000)``
     always wins;
@@ -27,18 +27,18 @@ Resolution precedence in :meth:`BlackBull.run` is, highest to lowest
 3.  the same ``BLACKBULL_*`` key in a ``.env`` file in the working directory
     (requires the ``[dotenv]`` extra; absent it, only the real environment is
     consulted);
-4.  the value declared on the bound :class:`AppConfig` (if any);
-5.  the built-in default baked into :func:`blackbull.serve`.
+4.  the value declared on the bound [`AppConfig`][] (if any);
+5.  the built-in default baked into [`blackbull.serve`][blackbull.serve].
 
 ``AppConfig`` deliberately mirrors *only* the parameters ``serve`` already
 exposes — it is not a general-purpose settings store.  Per-request and
 server-tuning knobs (window sizes, timeouts, queue depths beyond the two
 listed here, ``workers``, ``max_connections``, …) continue to live in
-:mod:`blackbull.env` and are sourced from ``BB_*`` environment variables —
+[`blackbull.env`][blackbull.env] and are sourced from ``BB_*`` environment variables —
 ``BLACKBULL_*`` is the deployment namespace, ``BB_*`` the tuning one.
 
 ``host`` is intentionally absent: BlackBull's socket layer binds dual-stack
-on all interfaces (see :meth:`blackbull.server.ASGIServer.open_socket`), so
+on all interfaces (see ``blackbull.server.ASGIServer.open_socket``), so
 a per-interface ``host`` field would silently do nothing.  Use ``unix_path``
 or ``inherited_fd`` for non-TCP binds.
 """
@@ -58,7 +58,7 @@ class AppConfig:
     """Immutable, declarative startup configuration for a BlackBull app.
 
     Every field corresponds one-to-one with a keyword argument of
-    :func:`blackbull.serve` / :meth:`blackbull.BlackBull.run`.  Fields left
+    [`blackbull.serve`][blackbull.serve] / [`blackbull.BlackBull.run`][blackbull.BlackBull.run].  Fields left
     at their sentinel default (``None``, or ``0`` for ``port``, or ``False``
     for ``reload``) defer to ``serve``'s own built-in default unless an
     explicit ``run(...)`` argument overrides them.
@@ -112,7 +112,7 @@ def _parse_bool(value: str) -> bool:
 # Deploy-time ``run()`` settings resolvable from ``BLACKBULL_*`` environment
 # variables: ``{field: (env var, coercer)}``.  Server-tuning knobs (``workers``,
 # ``max_connections``, the queue depths, timeouts, window sizes) are sourced
-# from ``BB_*`` in :mod:`blackbull.env` and are deliberately *not* duplicated
+# from ``BB_*`` in [`blackbull.env`][blackbull.env] and are deliberately *not* duplicated
 # here — ``BLACKBULL_*`` is the deployment namespace, ``BB_*`` the tuning one.
 _ENV_VARS: dict[str, tuple[str, Callable[[str], Any]]] = {
     'certfile':  ('BLACKBULL_CERT', str),
@@ -159,9 +159,9 @@ def resolve_run_config(
 
     1. an explicit ``run(...)`` keyword argument (anything not ``None``);
     2. a ``BLACKBULL_*`` environment variable (for the deploy-time settings in
-       :data:`_ENV_VARS`);
+       ``_ENV_VARS``);
     3. a ``BLACKBULL_*`` entry in a ``.env`` file (``[dotenv]`` extra);
-    4. the bound :class:`AppConfig` field, if declared (non-default);
+    4. the bound [`AppConfig`][] field, if declared (non-default);
     5. the built-in default.
 
     Returns ``(resolved, sources)`` where *resolved* maps each ``run()``
@@ -204,7 +204,7 @@ def log_config_sources(resolved: dict[str, Any], sources: dict[str, str]) -> Non
     """Log one INFO line per deploy setting that was configured non-trivially.
 
     Only the ``BLACKBULL_*``-resolvable deploy settings whose value came from
-    an environment variable, ``.env``, or an :class:`AppConfig` are reported —
+    an environment variable, ``.env``, or an [`AppConfig`][] are reported —
     explicit call-site arguments (the author already knows them) and plain
     defaults are left silent to keep startup quiet.  Paths are logged; secrets
     are not (a ``keyfile`` path is configuration, its contents never touch the

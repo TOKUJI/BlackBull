@@ -1,6 +1,6 @@
 """gRPC service registry — maps ``/package.Service/Method`` to a handler.
 
-This is the gRPC analogue of :class:`blackbull.router.Router`: it holds the
+This is the gRPC analogue of [`blackbull.router.Router`][blackbull.router.Router]: it holds the
 table of method paths and the coroutine that serves each one.
 
 A **unary** handler is::
@@ -18,7 +18,7 @@ In both cases ``request`` is the (already de-framed) request message body and
 the yielded / returned value is a response message body.  Protobuf
 (de)serialisation is the handler's responsibility — the framework stays
 dependency-free.  Handlers signal a non-OK result by raising
-:class:`GrpcError` or calling ``context.abort(...)``.
+[`GrpcError`][] or calling ``context.abort(...)``.
 
 A **client-streaming** or **bidirectional** handler takes an async iterator of
 request messages instead of a single ``request``::
@@ -32,7 +32,7 @@ request messages instead of a single ``request``::
             yield ...
 
 Response-streaming is detected automatically at registration via
-:func:`inspect.isasyncgenfunction`; request-streaming is detected from the first
+``inspect.isasyncgenfunction``; request-streaming is detected from the first
 parameter name (``request_iter`` / ``requests`` / ``request_iterator`` /
 ``request_stream``).  Pass ``streaming=`` / ``client_streaming=`` explicitly to
 override when a decorator hides the handler's nature.
@@ -76,11 +76,10 @@ class GrpcMethod(NamedTuple):
     ``request: bytes``).  The four combinations are unary, server-streaming,
     client-streaming, and bidirectional.
 
-    *handler* is annotated as a bare :class:`~collections.abc.Callable` rather
-    than :data:`GrpcHandler`: a response-streaming handler is an async generator
-    function (its call returns an async iterator, not an ``Awaitable``), and a
-    plain ``Callable`` is the one form that stays runtime-isinstanceable for the
-    NamedTuple field check (see memory ``beartype-namedtuple-callable-alias``).
+    *handler* is annotated as a bare ``Callable`` and
+    not ``GrpcHandler``, which would break the runtime NamedTuple field
+    check: a response-streaming handler is an async generator function, so
+    calling it returns an async iterator rather than an ``Awaitable``.
     """
     handler: Callable[..., object]
     streaming: bool
@@ -104,19 +103,11 @@ class GrpcServiceRegistry:
         """Register *handler* for the fully-qualified method *path*
         (``/package.Service/Method`` or ``package.Service/Method``).
 
-        *streaming* is the **response** axis — server-streaming (the handler is
-        an async generator that yields response messages).  When ``None`` (the
-        default) it is auto-detected with :func:`inspect.isasyncgenfunction`;
-        pass ``True`` to force it for a handler whose async-generator nature is
-        hidden behind a wrapper, or ``False`` to force a single response.
-        Forcing ``False`` on an async-generator function is a contradiction and
-        raises ``ValueError``.
-
-        *client_streaming* is the **request** axis — the handler takes an async
-        iterator of request messages (first parameter ``request_iter`` /
-        ``requests`` / ``request_iterator`` / ``request_stream``) instead of a
-        single ``request: bytes``.  When ``None`` it is auto-detected from that
-        first parameter name; pass an explicit bool to override.
+        Both streaming axes default to ``None``, meaning auto-detection —
+        see [`GrpcMethod`][] for what each axis is.  Pass a bool to
+        override it for a handler whose nature a wrapper hides.  Forcing
+        *streaming* ``False`` on an async-generator function is a
+        contradiction and raises ``ValueError``.
         """
         key = _normalise(path)
         if key in self._methods:
@@ -135,7 +126,7 @@ class GrpcServiceRegistry:
     def method(self, path: str, *, streaming: bool | None = None,
                client_streaming: bool | None = None
                ) -> Callable[[GrpcHandler], GrpcHandler]:
-        """Decorator form of :meth:`add_method`."""
+        """Decorator form of [`add_method`][]."""
         def decorator(handler: GrpcHandler) -> GrpcHandler:
             self.add_method(path, handler, streaming=streaming,
                             client_streaming=client_streaming)
@@ -154,12 +145,12 @@ class GrpcServiceRegistry:
         """Return the handler for *path*, or ``None`` if unregistered.
 
         Backwards-compatible accessor (returns just the callable); use
-        :meth:`lookup_method` when the streaming flag is needed."""
+        [`lookup_method`][] when the streaming flag is needed."""
         method = self._methods.get(_normalise(path))
         return method.handler if method is not None else None
 
     def lookup_method(self, path: str) -> GrpcMethod | None:
-        """Return the :class:`GrpcMethod` for *path*, or ``None`` if
+        """Return the [`GrpcMethod`][] for *path*, or ``None`` if
         unregistered."""
         return self._methods.get(_normalise(path))
 

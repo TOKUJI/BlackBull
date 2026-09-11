@@ -1,34 +1,34 @@
 """Programmable HTTP/1.1 wire-level scenario model.
 
-A :class:`Scenario` is a sequence of typed *steps* that the
-:meth:`blackbull.client.HTTP1Client.execute_scenario` executor walks
+A [`Scenario`][] is a sequence of typed *steps* that the
+[`blackbull.client.HTTP1Client.execute_scenario`][blackbull.client.HTTP1Client.execute_scenario] executor walks
 in order against a live socket.  This is the *client-side* half of
-the :mod:`blackbull.fault_injection` toolkit: a programmable client
+the [`blackbull.fault_injection`][blackbull.fault_injection] toolkit: a programmable client
 that drives a target HTTP/1.1 server through deliberate misbehaviour
 — slowloris trickle, mid-request idle, abrupt RST, partial reads —
 expressed as data, not procedural test code.
 
 The symmetric *server-side* half (programmable HTTP/2 server emitting
 deliberate misbehaviour toward a client) lives in
-:mod:`blackbull.fault_injection.h2_server`.
+[`blackbull.fault_injection.h2_server`][blackbull.fault_injection.h2_server].
 
 Use cases:
 
   * Conformance differential testing — Hypothesis generates scenarios
-    and :mod:`blackbull.fault_injection.oracle_h1` compares the target
+    and [`blackbull.fault_injection.oracle_h1`][blackbull.fault_injection.oracle_h1] compares the target
     server's response to a reference (e.g. nginx).
   * Coverage-guided fuzzing — atheris's byte mutations decode into
-    scenarios via :meth:`Scenario.from_bytes`.
+    scenarios via [`Scenario.from_bytes`][Scenario.from_bytes].
   * **External callers** — server-library authors, proxy authors, and
     security researchers driving their server through programmable
     misbehaviour from a pytest suite.
 
 Two serialisations are supported:
 
-  * :meth:`Scenario.to_json` / :meth:`Scenario.from_json` — JSON Lines,
+  * [`Scenario.to_json`][Scenario.to_json] / [`Scenario.from_json`][Scenario.from_json] — JSON Lines,
     one step per line.  Diff-friendly in git; readable when failures
     are pasted into reports.
-  * :meth:`Scenario.from_bytes` — a *total* opcode-tagged decoder.
+  * [`Scenario.from_bytes`][Scenario.from_bytes] — a *total* opcode-tagged decoder.
     Every byte string maps to a valid scenario, so atheris's byte-level
     mutations never crash on input parsing — each mutation produces a
     distinct execution path against the server.
@@ -81,7 +81,7 @@ class ReadResponse:
 
     ``timeout`` bounds the entire status-line + headers + body read.
     On timeout the executor records the outcome on the
-    :class:`ScenarioResult` and does *not* raise — the caller decides
+    [`ScenarioResult`][] and does *not* raise — the caller decides
     whether to treat that as a transport-fail or normal outcome.
     """
     timeout: float = 5.0
@@ -106,7 +106,7 @@ class WaitForResponse:
 
     A **filter**: non-matching responses are read, counted in
     ``wait_skipped``, and passed over.  The role-axis twin of
-    :class:`~blackbull.fault_injection.scenario_h1_server.WaitForRequest`,
+    [`WaitForRequest`][blackbull.fault_injection.scenario_h1_server.WaitForRequest],
     and it exists for the same reason — a scenario that has to know
     exactly how many messages precede the interesting one is a scenario
     written against a particular peer.
@@ -129,7 +129,7 @@ class ExpectResponse:
     otherwise look like a pass.
 
     Twin of
-    :class:`~blackbull.fault_injection.scenario_h1_server.ExpectRequest`.
+    [`ExpectRequest`][blackbull.fault_injection.scenario_h1_server.ExpectRequest].
     """
     match: dict = field(default_factory=dict)
     timeout: float = 5.0
@@ -139,14 +139,9 @@ class ExpectResponse:
 class HalfClose:
     """Shut down the sending direction only (FIN), keep reading.
 
-    Neither :class:`Abort` nor a full close says this.  ``Abort`` sends RST,
-    which discards whatever is buffered and leaves nothing to read; a full
-    close ends both directions at once.  A half-close is the ordinary end of
-    a non-keep-alive exchange — "I have finished sending, I am still waiting
-    for your answer" — and it is a distinct code path on the peer.
-
-    **Not terminal**: later steps still run, because continuing to read is
-    the whole point.
+    **Not terminal** — later steps still run, which is the whole point.
+    ``Abort`` is not a substitute: it sends RST, discarding what is buffered
+    and leaving nothing to read.
     """
 
 
@@ -159,8 +154,7 @@ class Scenario:
     """A sequence of steps the executor walks against one connection."""
     steps: tuple[Step, ...]
     #: For test parametrisation and reporting, as the other three scenario
-    #: types carry.  Added by the 107+108 consistency sweep: a scenario a
-    #: failing CI run can point at by name is worth two lines.
+    #: types carry — so a failing CI run can name the scenario that broke.
     name: str = ''
 
     # ------------------------------------------------------------------
@@ -188,7 +182,7 @@ class Scenario:
 
         Bytes payloads are base64-encoded so the result round-trips
         through stdout / git / json.loads without escape ambiguity.
-        Round-tripped by :meth:`from_json`.
+        Round-tripped by ``from_json``.
 
         The scenario's name rides the first line under the op ``HEADER``,
         the convention the other three vocabularies use, so the file stays
@@ -203,14 +197,13 @@ class Scenario:
 
     @classmethod
     def from_json(cls, src: str) -> 'Scenario':
-        """Parse JSON Lines back to a :class:`Scenario`.
+        """Parse JSON Lines back to a [`Scenario`][].
 
         Skips blank lines so files that end with a trailing newline
         (the conventional git-friendly shape) parse cleanly.
 
-        A ``HEADER`` line carries the name.  It is optional on the way in:
-        corpus files written before the header existed have no such line
-        and still parse, yielding an unnamed scenario.
+        A ``HEADER`` line carries the name and is optional on the way in:
+        a file without one parses to an unnamed scenario.
         """
         name = ''
         steps: list[Step] = []
@@ -326,13 +319,12 @@ _TIMEOUT_TABLE: tuple[float, ...] = (0.5, 1.0, 2.0, 5.0)
 
 @dataclass
 class ScenarioResult:
-    """Outcome of one :meth:`HTTP1Client.execute_scenario` call.
+    """Outcome of one ``HTTP1Client.execute_scenario`` call.
 
     Exactly one of ``response`` / ``exception`` / ``timed_out`` /
     ``aborted`` is the meaningful field; the others are ``None`` /
-    ``False``.  The executor never raises, so callers (differential
-    test, fuzz harness) categorise on this object instead of writing
-    try/except boilerplate per scenario.
+    ``False``.  The executor never raises, so a caller categorises on this
+    object rather than on an exception.
     """
 
     # Populated when a ReadResponse step received a full HTTP/1.1
@@ -508,7 +500,7 @@ def scenario_to_json(scenario: Scenario) -> str:
 
 
 def scenario_from_json(src: str) -> Scenario:
-    """Parse what :func:`scenario_to_json` produced.  Twin of the other three."""
+    """Parse what [`scenario_to_json`][] produced.  Twin of the other three."""
     return Scenario.from_json(src)
 
 
@@ -529,28 +521,15 @@ __all__ = [
     'StepOp',
 ]
 
-# ---------------------------------------------------------------------------
-# Naming: ``SendRawBytes`` is the canonical spelling across all four
-# vocabularies
-# ---------------------------------------------------------------------------
-#
-# The two server-side vocabularies have always called this ``SendRawBytes``
-# and the two client-side ones ``SendRawBytes`` — the same step, the same two
-# fields, the name split by *role* rather than by anything a reader could
-# predict.  The consistency sweep at the 107+108 close found it, and with a
-# typed alternative now present on every half, "raw" is the word that earns
-# its place.
-#
-# ``SendRawBytes`` is the name to use.  ``SendRawBytes`` keeps working and is
-# **deprecated**: removal no earlier than 2027-08-19, and at an arbitrary
-# time after that, following the deprecation window ASGI uses.
+# ``SendRawBytes`` is the canonical spelling in all four scenario
+# vocabularies; ``SendBytes`` is the deprecated client-side one.
 
 def __getattr__(name: str):
     """PEP 562 — warn when the deprecated spelling is actually used.
 
     A module-level assignment would alias silently; going through
-    ``__getattr__`` means a reader who never touches ``SendRawBytes`` never
-    sees a warning, and one who does gets it at their own call site.
+    ``__getattr__`` means only a caller who reaches for ``SendBytes`` is
+    warned, and is warned at their own call site.
     """
     if name == 'SendBytes':
         import warnings  # noqa: PLC0415

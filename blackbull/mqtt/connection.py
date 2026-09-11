@@ -1,13 +1,13 @@
 """MQTT 5.0 per-connection actor and its raw-protocol entry point.
 
-:class:`MQTT5Actor` is one per connection. Its **inbox carries only
-outbound packets** (:class:`~blackbull.mqtt.broker.Send` from the broker, plus
+[`MQTT5Actor`][] is one per connection. Its **inbox carries only
+outbound packets** ([`Send`][blackbull.mqtt.broker.Send] from the broker, plus
 local transport refusals). ``Close`` sets terminal state
 without needing a queue slot. Its ``run()`` — draining that inbox — is the
 *sole writer* to the socket, so there are no cross-task write races.  A sibling
-reader loop decodes the wire (via :class:`PacketFramer`) and ``send``s control
-messages to the broker.  :func:`serve_connection` is the
-:data:`~blackbull.server.protocol_registry.RawProtocolHandler` body that wires
+reader loop decodes the wire (via [`PacketFramer`][]) and ``send``s control
+messages to the broker.  [`serve_connection`][] is the
+[`RawProtocolHandler`][blackbull.server.protocol_registry.RawProtocolHandler] body that wires
 the two together.
 """
 from __future__ import annotations
@@ -69,24 +69,23 @@ class PacketTooLarge(Exception):
 class PacketFramer:
     """Incremental MQTT packet de-framer.
 
-    Fed raw bytes with :meth:`feed`, it yields each fully decoded packet on
+    Fed raw bytes with ``feed``, it yields each fully decoded packet on
     iteration and retains any trailing partial packet for the next feed.  The
     framing/resync state machine lives here rather than inline in the read loop:
 
     * an **incomplete** packet simply ends the current iteration — the partial
-      bytes stay buffered for the next :meth:`feed` (TCP will deliver the rest),
+      bytes stay buffered for the next ``feed`` (TCP will deliver the rest),
     * a **hard decode error** (reserved flag bits, unknown type — the junk a
       desynchronised stream produces) resyncs to the next plausible header,
     * a packet whose **declared** size exceeds *max_packet_size* raises
-      :class:`PacketTooLarge` from the fixed header, before its body is
+      [`PacketTooLarge`][] from the fixed header, before its body is
       waited for.  MQTT 5 lets a peer declare 268,435,455 bytes and then
       dribble them; a framer that judged the packet only once it was
       complete would already have paid for the attack.
 
-    This replaces explicit ``stalled_len`` bookkeeping.  The ``bytes(...)``
-    snapshot at the decode boundary stays because the codec's input contract is
-    deliberately ``bytes``; a zero-copy framer would mean widening that contract
-    to the buffer protocol (deferred).
+    The ``bytes(...)`` snapshot at the decode boundary is the price of the
+    codec taking ``bytes``: going zero-copy would widen that contract to the
+    buffer protocol.
     """
 
     def __init__(self, max_packet_size: int = 0) -> None:
@@ -182,7 +181,7 @@ class PacketFramer:
 class MQTT5Actor(Actor):
     """One per MQTT 5.0 connection; the sole writer to its socket.
 
-    Tap dispatch is selected at construction: pass a running :class:`TapActor`
+    Tap dispatch is selected at construction: pass a running [`TapActor`][]
     as *tap* for decoupled (actor-mode) dispatch, or *app_handlers* for inline
     dispatch on this connection.
     """
@@ -428,8 +427,8 @@ class MQTT5Actor(Actor):
     async def _dispatch_taps(self, publish: MQTTPublish) -> None:
         """Route an inbound PUBLISH to the application taps.
 
-        In actor mode the :class:`Message` is *offered* to the shared
-        :class:`TapActor` and we return at once (a slow tap never back-pressures
+        In actor mode the [`Message`][] is *offered* to the shared
+        [`TapActor`][] and we return at once (a slow tap never back-pressures
         this connection or the broker).  In inline mode the matching callbacks
         run here, sequentially, with isolated exceptions.
         """
@@ -452,7 +451,7 @@ async def serve_connection(reader: AbstractReader, writer: AbstractWriter,
     Spawns the connection actor's inbox-drain (`run`) alongside the reader loop,
     and guarantees the broker sees a ``Detach`` when the connection ends — so a
     Will fires on an abnormal (cancelled) close.  Pass *tap* for decoupled tap
-    dispatch or *app_handlers* for inline dispatch (see :mod:`blackbull.mqtt.tap`).
+    dispatch or *app_handlers* for inline dispatch (see [`blackbull.mqtt.tap`][blackbull.mqtt.tap]).
     """
     conn = MQTT5Actor(writer, broker, ctx, app_handlers=app_handlers, tap=tap)
     conn._close_requested = asyncio.get_running_loop().create_future()

@@ -1,4 +1,4 @@
-"""User-facing wiring for the MQTT 5 broker — detector + :class:`MQTTExtension`."""
+"""User-facing wiring for the MQTT 5 broker — detector + [`MQTTExtension`][]."""
 from __future__ import annotations
 
 import asyncio
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class Subscription(NamedTuple):
     """A read-only view of one registered ``on_message`` tap.
 
-    Yielded by :meth:`MQTTExtension.iter_subscriptions` so documentation tools
+    Yielded by [`MQTTExtension.iter_subscriptions`][MQTTExtension.iter_subscriptions] so documentation tools
     (``AsyncAPIExtension``) can describe an app's taps without reaching into the
     private ``_handlers`` list.  ``topic`` is the filter as the application
     wrote it (``{name}`` captures restored); ``callback`` is the registered
@@ -47,7 +47,7 @@ class MQTTProtocolDetector(ProtocolDetector):
 class MQTTExtension(Extension):
     """Wires the MQTT 5 broker into a BlackBull app as a non-ASGI protocol.
 
-    Register it once and tap the broker's routing with :meth:`on_message`::
+    Register it once and tap the broker's routing with [`on_message`][]::
 
         from blackbull.mqtt import MQTTExtension, Message
 
@@ -61,24 +61,25 @@ class MQTTExtension(Extension):
     Will delivery) runs whether or not any handler is registered; handlers are
     an application-level tap on top of normal broker routing.
 
-    This instance owns a single :class:`BrokerActor` and a single
-    :class:`TapActor` (both started on app startup, stopped on shutdown) — one
-    broker and one tap consumer per worker, no module globals.  The class is
-    self-contained and importable from a future ``blackbull-mqtt`` package
-    without touching the core.
+    This instance owns one [`BrokerActor`][] and one [`TapActor`][],
+    started on app startup and stopped on shutdown — one of each per worker.
 
     ``tap_mode`` selects how taps are dispatched: ``'actor'`` (default) runs
-    them on the decoupled :class:`TapActor` so a slow tap never back-pressures
-    delivery; ``'inline'`` uses the connection-actor dispatch directly
-    and exists mainly so ``bench/mqtt/tap_throughput.py`` can compare the two on
-    one build.  ``tap_queue_size`` bounds the actor-mode inbox (drop-newest on
-    overflow).
+    them on the decoupled [`TapActor`][], so a slow tap never
+    back-pressures delivery; ``'inline'`` dispatches on the connection actor
+    itself.  ``tap_queue_size`` bounds the actor-mode inbox (drop-newest on
+    overflow), and ``docs/about/mqtt-actor-design.md`` covers the choice.
     """
 
     extension_key = 'mqtt'
 
     def __init__(self, *, port: int = 1883, tls: bool = False,
                  tap_mode: str = 'actor', tap_queue_size: int = 1024) -> None:
+        """Configure the broker extension.
+
+        *tap_mode* is ``'actor'`` or ``'inline'`` — any other value raises
+        ``ValueError``.  The annotation cannot say so, which is why this does.
+        """
         if tap_mode not in ('actor', 'inline'):
             raise ValueError(f"tap_mode must be 'actor' or 'inline', got {tap_mode!r}")
         self.port = port
@@ -97,33 +98,31 @@ class MQTTExtension(Extension):
         """Decorator: register an async ``(message, **captures) -> None`` tap for
         every PUBLISH whose topic matches *topic* (an MQTT topic filter, so ``+``
         and ``#`` wildcards apply, plus ``{name}`` capture segments).  The
-        callback receives a :class:`~blackbull.mqtt.Message`."""
+        callback receives a [`Message`][blackbull.mqtt.Message]."""
         def decorator(callback):
             self._handlers.append(compile_tap(topic, callback))
             return callback
         return decorator
 
     def iter_subscriptions(self) -> Iterator[Subscription]:
-        """Yield a :class:`Subscription` for each registered ``on_message`` tap.
+        """Yield a [`Subscription`][] for each registered ``on_message`` tap.
 
-        A stable, public, read-only accessor over the compiled handlers — the
-        seam ``AsyncAPIExtension`` reads instead of touching ``_handlers``.
-        Reflects the handlers registered *at call time*, so a documentation
-        endpoint that calls this per request picks up taps added after the
-        documenting extension was wired in.
+        A read-only view of the compiled handlers *at call time*, so a
+        documentation endpoint calling it per request picks up taps
+        registered after that endpoint was wired in.
         """
         for tap in self._handlers:
             yield Subscription(topic=tap.display_filter, callback=tap.callback)
 
     def iter_taps(self) -> Iterator[Tap]:
-        """Yield the compiled :class:`Tap` for each registered ``on_message`` handler.
+        """Yield the compiled [`Tap`][] for each registered ``on_message`` handler.
 
-        The dispatch-side counterpart of :meth:`iter_subscriptions`: that
+        The dispatch-side counterpart of [`iter_subscriptions`][]: that
         method yields the *display* form (``topic`` as the application wrote
         it, ``{name}`` captures restored) for documentation tools; this yields
-        the already-compiled :class:`Tap` objects, so a dispatch consumer
+        the already-compiled [`Tap`][] objects, so a dispatch consumer
         (``MQTTTestBroker``) can feed them straight to
-        :func:`blackbull.mqtt.tap.run_taps` without re-parsing the filters.
+        [`blackbull.mqtt.tap.run_taps`][blackbull.mqtt.tap.run_taps] without re-parsing the filters.
         Both reflect the handlers registered *at call time*.
         """
         yield from self._handlers

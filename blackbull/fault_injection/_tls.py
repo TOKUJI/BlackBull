@@ -1,7 +1,7 @@
 """Self-signed TLS helpers for the fault-injection example + tests.
 
-The :class:`~blackbull.fault_injection.H2FaultServer` accepts an
-:class:`ssl.SSLContext` so it can negotiate HTTP/2 over TLS with real
+The [`H2FaultServer`][blackbull.fault_injection.H2FaultServer] accepts an
+``ssl.SSLContext`` so it can negotiate HTTP/2 over TLS with real
 clients (httpx, curl, ...) that use ALPN.  This module exists so the
 example and the unit tests don't each have to roll their own
 self-signed cert generation.
@@ -27,7 +27,7 @@ def make_self_signed_h2_context() -> ssl.SSLContext:
 
     The returned context loads an ephemeral RSA self-signed cert from
     a tempdir and advertises ``h2`` (and ``http/1.1`` as a fallback)
-    in the ALPN protocol list.  Use it with :class:`H2FaultServer`'s
+    in the ALPN protocol list.  Use it with [`H2FaultServer`][]'s
     ``ssl_context=`` parameter.
 
     The certificate path is attached to the returned object as

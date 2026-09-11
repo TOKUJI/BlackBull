@@ -31,7 +31,7 @@ _DEBUG = debug_gate(logger)
 
 
 def _wrap_send_native(raw_send: ASGISendCallable):
-    """Install :func:`blackbull.response.wrap_native_send` at the handler
+    """Install [`blackbull.response.wrap_native_send`][blackbull.response.wrap_native_send] at the handler
     boundary, which is the innermost wrap.
     """
     return wrap_native_send(raw_send)
@@ -40,7 +40,7 @@ def _wrap_send_native(raw_send: ASGISendCallable):
 def _to_asgi_boundary(send: ASGISendCallable):
     """Wrap an external ASGI host's ``send`` with native→ASGI conversion.
 
-    :meth:`BlackBull.__call__` decides when to install it.
+    [`BlackBull.__call__`][BlackBull.__call__] decides when to install it.
     """
     from .native import asgi_send_boundary  # noqa: PLC0415
 
@@ -108,7 +108,7 @@ async def _default_error_handler(conn, receive, send):  # noqa: ARG001
 
     Reads ``error_status`` / ``error_exception`` / ``allowed_methods`` off
     ``conn.state`` and renders per ``BLACKBULL_ENV`` and ``Accept``.  The
-    dev/prod matrix, and why a 4xx :class:`HTTPException` keeps its detail
+    dev/prod matrix, and why a 4xx [`HTTPException`][] keeps its detail
     line but not its traceback, are in ``docs/guide/error-handling.md``.
     """
     # Imported here to avoid a circular import at module load (env -> app).
@@ -168,7 +168,7 @@ class RouteGroup:
               accept_query: Iterable[str] | None = None):
         """Register a route on this group, prepending the group middlewares.
 
-        Same parameters as :meth:`BlackBull.route`.  ``accept_query`` is the
+        Same parameters as [`BlackBull.route`][BlackBull.route].  ``accept_query`` is the
         RFC 10008 list of request **media types** the route accepts (the
         ``Accept-Query`` response header + Content-Type enforcement) — it is a
         content-negotiation policy, **not** a switch for the QUERY *method*
@@ -352,9 +352,9 @@ class BlackBull:
         Hooks receive the ``app`` and must do **pure warming only** — drive hot
         code paths, prime codecs/TLS — and acquire **no** per-worker resources
         (DB pools, sockets, live connections); those belong in
-        [`on_startup`][blackbull.app.BlackBull.on_startup].  Use :meth:`warm_request` to exercise the ASGI
+        [`on_startup`][blackbull.app.BlackBull.on_startup].  Use [`warm_request`][] to exercise the ASGI
         dispatch/handler path in-process, and
-        :func:`blackbull.server.warmup.warm_tls` to prime the TLS handshake.
+        [`blackbull.server.warmup.warm_tls`][blackbull.server.warmup.warm_tls] to prime the TLS handshake.
 
         Warm-up is best-effort: a hook's exception is logged and swallowed
         (the master degrades to a cold start), and total warm-up time is capped
@@ -367,7 +367,7 @@ class BlackBull:
 
     async def warm_request(self, conn: Connection, *, body: bytes = b'', n: int = 1
                            ) -> None:
-        """Invoke this app in-process *n* times with a :class:`Connection` to
+        """Invoke this app in-process *n* times with a [`Connection`][] to
         warm the request path.
 
         A warm-up primitive: drives the full **native** ``__call__`` →
@@ -419,7 +419,7 @@ class BlackBull:
 
         Either way the handler's exceptions are isolated: they are caught and
         logged and never propagate to the emitter or affect other handlers.
-        (For a hook that *may* affect the request, use :meth:`intercept`.)
+        (For a hook that *may* affect the request, use [`intercept`][].)
 
         Args:
             event_name: Name of the event to observe (e.g. ``'scope_completed'``).
@@ -734,7 +734,7 @@ class BlackBull:
         """The ASGI 3.0 callable, and the app's only native/ASGI boundary.
 
         Everything below this method threads a
-        :class:`~blackbull.connection.Connection`, in both modes.  An ASGI
+        [`Connection`][blackbull.connection.Connection], in both modes.  An ASGI
         scope dict arrives only from an external host (uvicorn,
         ``httpx.ASGITransport``) or under ``BB_FORCE_ASGI_SCOPE=1``, and is
         converted here, once; the same edge wraps the host's ``send`` with the
@@ -865,7 +865,7 @@ class BlackBull:
         media types), and QUERY requests are Content-Type-enforced: a missing
         media type is answered ``400``, an unaccepted one ``415`` (with the
         ``Accept-Query`` header so the client can correct).  A handler may raise
-        :class:`~blackbull.UnprocessableQuery` for ``422`` on a well-formed but
+        [`UnprocessableQuery`][blackbull.UnprocessableQuery] for ``422`` on a well-formed but
         unprocessable query.  Enforcement applies only to QUERY requests; other
         methods on the same route still receive the ``Accept-Query`` header.
         """
@@ -923,7 +923,7 @@ class BlackBull:
     def _is_route_free(self, path: str, methods) -> bool:
         """True when *path* has no route registered for any of *methods*.
 
-        Used by :meth:`static` before it claims the bare mount prefix, since
+        Used by [`static`][] before it claims the bare mount prefix, since
         registering an already-registered path replaces it silently.
         """
         for method in methods:
@@ -999,7 +999,7 @@ class BlackBull:
     def on_error(self, key):
         """Register a custom error handler for an HTTPStatus or exception class.
 
-        ``key`` may be an :class:`HTTPStatus`, a plain ``int`` status code
+        ``key`` may be an ``HTTPStatus``, a plain ``int`` status code
         (coerced to ``HTTPStatus``), or an exception class.
 
         Usage::
@@ -1033,7 +1033,7 @@ class BlackBull:
     def get_routes(self) -> 'list[RouteInfo]':
         """Return a snapshot of all registered routes.
 
-        Each entry is a :class:`~blackbull.router.RouteInfo` named tuple
+        Each entry is a [`RouteInfo`][blackbull.router.RouteInfo] named tuple
         ``(method, path, name)``.  Routes are returned in registration
         order, one entry per HTTP method.  The list is a shallow copy and
         may be freely sorted, filtered, or mutated without affecting the
@@ -1053,7 +1053,7 @@ class BlackBull:
         ``grpc-status`` trailers) instead of the HTTP router, while REST and
         WebSocket traffic on the same port is unaffected.
 
-        ``registry`` is a :class:`blackbull.grpc.GrpcServiceRegistry`.  gRPC
+        ``registry`` is a [`blackbull.grpc.GrpcServiceRegistry`][blackbull.grpc.GrpcServiceRegistry].  gRPC
         requires HTTP/2, so run the app with TLS+ALPN (or h2c) for real
         clients.  Protobuf is not pulled in — handlers exchange raw message
         bytes; see ``blackbull.grpc`` for the handler contract.
@@ -1168,7 +1168,7 @@ class BlackBull:
         """Register an extension and return it (for decorator chaining).
 
         *ext* is any object exposing ``init_app(app)``; subclassing
-        :class:`~blackbull.extension.Extension` is optional.  ``init_app`` is called immediately to wire the
+        [`Extension`][blackbull.extension.Extension] is optional.  ``init_app`` is called immediately to wire the
         extension's routes / middleware / protocol handlers / events through
         the public ``app.*`` API.  Optional async ``startup(app)`` /
         ``shutdown(app)`` methods are wired into the ``app_startup`` /
@@ -1220,7 +1220,7 @@ class BlackBull:
 
         An argument left unset falls back to a ``BLACKBULL_*`` environment
         variable, then to a ``.env`` file, then to the bound
-        :class:`~blackbull.AppConfig`; the Configuration guide gives the order
+        [`AppConfig`][blackbull.AppConfig]; the Configuration guide gives the order
         in full and names every variable.  Server-tuning knobs keep their
         ``BB_*`` names — ``BLACKBULL_*`` is the deployment namespace.  The
         provenance of each non-default setting is logged once at startup on
@@ -1228,9 +1228,9 @@ class BlackBull:
 
         For embedded use under an existing event loop, or for pre-binding
         a socket before forking a test subprocess, instantiate
-        :class:`blackbull.server.ASGIServer` directly.  Any external
+        ``blackbull.server.ASGIServer`` directly.  Any external
         ASGI server (uvicorn / hypercorn / granian / …) can drive the
-        :class:`BlackBull` instance via its ASGI 3.0 ``__call__``.
+        [`BlackBull`][] instance via its ASGI 3.0 ``__call__``.
 
         Example::
 
@@ -1275,10 +1275,10 @@ def serve(app, *,
           reload_paths: list | None = None) -> None:
     """Synchronous entry point for any ASGI 3.0 callable.
 
-    Works for a :class:`BlackBull` instance *and* for any plain ASGI
+    Works for a [`BlackBull`][] instance *and* for any plain ASGI
     callable (uvicorn/hypercorn-style ``async def app(scope, receive,
     send): …``).  This is what the ``blackbull`` console script calls
-    after resolving ``module:attr``; :meth:`BlackBull.serve` is a thin
+    after resolving ``module:attr``; [`BlackBull.run`][BlackBull.run] is a thin
     shim around it.
 
     For ``workers=1`` without reload the server runs in the current
@@ -1286,16 +1286,16 @@ def serve(app, *,
     ``reload=True`` the master pre-binds sockets, forks workers, and
     blocks until SIGTERM / SIGINT — or in reload mode, until a
     watched file changes (master then re-execs itself, see
-    :mod:`blackbull.server.reload`).
+    [`blackbull.server.reload`][blackbull.server.reload]).
 
     *listeners* states the sockets directly — one
-    :class:`~blackbull.server.listener.Listener` each, saying where it is,
+    [`Listener`][blackbull.server.listener.Listener] each, saying where it is,
     what speaks there and whether TLS terminates there.  It replaces *port*,
     *unix_path* and *inherited_fd* rather than joining them, so passing both
     is refused.
 
     All integer parameters default to their corresponding ``BB_*``
-    environment variables (see :mod:`blackbull.env`).
+    environment variables (see [`blackbull.env`][blackbull.env]).
     """
     if listeners and (port or unix_path is not None or inherited_fd is not None):
         raise TypeError(
@@ -1437,7 +1437,7 @@ def _serve_single_worker(
 async def _run_single(app, *, certfile, keyfile, port, unix_path, inherited_fd,
                       listeners, max_connections, stream_queue_depth,
                       ws_queue_depth):
-    """Single-worker server loop — invoked from :func:`serve`."""
+    """Single-worker server loop — invoked from ``serve``."""
     from .server import ASGIServer  # noqa: PLC0415
     server = ASGIServer(app, certfile=certfile, keyfile=keyfile,
                         max_connections=max_connections,

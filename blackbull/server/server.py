@@ -1,3 +1,22 @@
+"""The listening server: binds sockets, accepts connections, drives lifespan.
+
+[`Server`][blackbull.server.server.Server] — ``ASGIServer`` is an alias — is
+the object under ``BlackBull.run()``.  It resolves its
+[`Listener`][blackbull.server.listener.Listener] set into bound sockets, groups
+them by TLS context so a listener terminates the certificate it names, and
+serves each group through
+[`SocketManager`][blackbull.server.server.SocketManager].  Every accepted
+connection becomes a buffered protocol and, from there, one
+[`ConnectionActor`][blackbull.server.connection_actor.ConnectionActor].
+[`LifespanManager`][blackbull.server.server.LifespanManager] drives the ASGI
+lifespan handshake around all of it.
+
+``run()`` blocks until ``stop()``.  ``stop()`` closes the listeners first, then
+lets the requests already in flight finish inside a drain budget instead of
+cancelling them, because a cancelled handler leaves a client holding a
+half-written response.  ``open_socket()`` binds without serving — what the
+multi-worker master, and a test that needs a port before it forks, both use.
+"""
 import asyncio
 import contextlib
 
@@ -125,7 +144,7 @@ async def SocketManager(socket_cb_pairs, ssl_context):
     *socket_cb_pairs* is an iterable of ``(sock, protocol_factory)`` — each
     socket is served by its own factory.  The shared HTTP listener and each
     port-bound non-ASGI protocol both come from
-    :meth:`Server.connection_protocol_factory`, differing only in whether a
+    [`Server.connection_protocol_factory`][Server.connection_protocol_factory], differing only in whether a
     binding is pre-committed.
 
     On enter: wraps each socket in ``loop.create_server`` (TCP) or
@@ -185,11 +204,11 @@ def _max_connections_report(resolved: int) -> tuple[str, str]:
 
 class Server:
     """An asyncio socket server that dispatches each connection through the
-    app's :class:`~blackbull.server.protocol_registry.ProtocolRegistry`.
+    app's [`ProtocolRegistry`][blackbull.server.protocol_registry.ProtocolRegistry].
 
     The shared HTTP listener detects HTTP/1.1 vs HTTP/2 (and upgrades to
     WebSocket); port-bound non-ASGI protocols registered via
-    :meth:`BlackBull.raw_handler` get their own listening socket.
+    [`BlackBull.raw_handler`][BlackBull.raw_handler] get their own listening socket.
     When ssl_context or certfile is set, the HTTP listener runs as HTTPS.
 
     ``ASGIServer`` is an alias of this class.
@@ -265,6 +284,11 @@ class Server:
 
     @property
     def keyfile(self):
+        """The TLS private-key path, or ``None``.
+
+        Assigning a path that is not a file raises ``FileNotFoundError`` there
+        and then, rather than at handshake time.
+        """
         return self._keyfile if hasattr(self, '_keyfile') else None
 
     @keyfile.setter
@@ -276,6 +300,11 @@ class Server:
 
     @property
     def certfile(self):
+        """The TLS certificate path, or ``None``.
+
+        Assigning a path that is not a file raises ``FileNotFoundError`` there
+        and then, rather than at handshake time.
+        """
         return self._certfile if hasattr(self, '_certfile') else None
 
     @certfile.setter
@@ -309,6 +338,11 @@ class Server:
             pass
 
     def configure_mtls(self, ca_cert: str) -> None:
+        """Require a client certificate signed by *ca_cert*.
+
+        TLS must already be configured; on a plaintext server this raises
+        ``RuntimeError`` rather than silently serving without mTLS.
+        """
         if self.ssl_context is None:
             raise RuntimeError('configure_mtls() requires TLS to be configured first.')
         self.ssl_context.verify_mode = ssl.CERT_REQUIRED
@@ -317,14 +351,9 @@ class Server:
     def connection_protocol_factory(self, bound_binding=None):
         """Factory for `loop.create_server` — one buffered protocol per accept.
 
-        Replaces the ``start_server`` callback pair: instead of a StreamReader
-        and StreamWriter over asyncio's own buffering, the connection owns a
-        single buffer the kernel writes into, and the actor reads by cursor.
-
-        The protocol spawns the serving task itself because a protocol factory
-        is synchronous.  ``connection_made`` fires after the TLS handshake on
-        an SSL transport, so ALPN is already decided by the time the task runs
-        — same ordering the callback form relied on.
+        The protocol spawns the serving task itself, a protocol factory being
+        synchronous.  On an SSL transport ``connection_made`` fires after the
+        handshake, so ALPN is already decided when that task runs.
         """
         from .connection_protocol import ConnectionProtocol  # noqa: PLC0415
         from .sender import AsyncioWriter  # noqa: PLC0415
@@ -415,7 +444,7 @@ class Server:
 
     async def _serve_connection(self, reader, writer, *, bound_binding=None,
                                 transport=None):
-        """Wrap the transport and run one :class:`ConnectionActor`.
+        """Wrap the transport and run one ``ConnectionActor``.
 
         *bound_binding* is set for port-bound non-ASGI protocols: the
         connection skips HTTP detection and goes straight to the raw handler.
@@ -602,9 +631,9 @@ class Server:
     def _bind_protocol_sockets(self, _cfg):
         """Bind a listening socket per port-bound non-ASGI protocol.
 
-        Each :class:`RawBinding` registered with a ``port`` gets its own
-        dual-stack socket set, recorded in :attr:`protocol_ports`.  Sockets are
-        bound bare here; :meth:`run` layers TLS onto the listeners whose
+        Each [`RawBinding`][] registered with a ``port`` gets its own
+        dual-stack socket set, recorded in [`protocol_ports`][].  Sockets are
+        bound bare here; [`run`][] layers TLS onto the listeners whose
         binding set ``tls=True``, cleartext otherwise.  These ports get no
         ``SO_REUSEPORT``: a stateful protocol needs a single owning worker.
         """
@@ -756,7 +785,7 @@ class Server:
     async def _drain(self, drain_timeout: float) -> None:
         """Let the connections already being served finish.  Idempotent.
 
-        Called by :meth:`stop`, and again by :meth:`run` on its way out: a
+        Called by [`stop`][], and again by [`run`][] on its way out: a
         drain started from a signal handler is racing its caller's teardown,
         and returning into ``asyncio.run()`` would cancel both the drain and
         the request it is protecting.  Whichever arrives second finds nothing

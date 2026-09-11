@@ -1,3 +1,24 @@
+"""The two base types every BlackBull actor is built from.
+
+[`Actor`][blackbull.actor.Actor] owns a queue and a loop that drains it;
+[`Message`][blackbull.actor.Message] is what goes in the queue.  Together they
+are the whole mechanism: state lives inside one actor and is mutated only by
+that actor's own loop, so any coordination between two of them is a message,
+never a shared object or a lock.
+
+To write one, subclass ``Actor``, override ``_handle``, and declare each
+message a subclass of ``Message``.  A subclass is a plain dataclass, so its
+fields are ordinary dataclass fields; ``sender`` is inherited and left out of
+equality, which lets two messages with the same payload compare equal
+regardless of who sent them.
+
+An actor's inbox does not exist until first use and is created on the loop
+that touches it, so an ``Actor`` may be constructed before the event loop is
+running.
+
+``docs/about/internals.md`` has the actor hierarchy the server assembles from
+these — which actor owns a connection, a stream, a request.
+"""
 import asyncio
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -20,13 +41,13 @@ class Actor:
 
     Each Actor owns an ``asyncio.Queue`` inbox and is expected to run as an
     ``asyncio.Task`` started by its Supervisor.  Actors communicate
-    exclusively via :meth:`send`; they never share mutable state.
+    exclusively via [`send`][]; they never share mutable state.
 
-    Subclasses must override :meth:`_handle`.
+    Subclasses must override ``_handle``.
 
     Pass ``inbox_maxsize`` to bound the inbox (``0`` — the default — is
-    unbounded, matching :class:`asyncio.Queue`).  A bounded inbox lets an actor
-    apply back-pressure or, with :meth:`asyncio.Queue.put_nowait`, an explicit
+    unbounded, matching ``asyncio.Queue``).  A bounded inbox lets an actor
+    apply back-pressure or, with ``asyncio.Queue.put_nowait``, an explicit
     overflow policy.
     """
 

@@ -57,7 +57,7 @@ class WebSocketActor(Actor):
         self._sockname = sockname
         self._ssl = ssl
         # permessage-deflate (RFC 7692) — when the handshake negotiated it,
-        # the Connection's WS bag carries a :class:`DeflateParams`.  Instantiate
+        # the Connection's WS bag carries a [`DeflateParams`][].  Instantiate
         # the streaming inflater + deflater so the recipient/sender don't need
         # to know about negotiation logic.
         ws_bag = conn._ws or {}

@@ -1,14 +1,14 @@
 """Application taps on broker routing — the ``on_message`` observability layer.
 
 A *tap* is an async ``(message, **captures) -> None`` callback registered via
-:meth:`blackbull.mqtt.MQTTExtension.on_message` for a topic filter.  Taps are
+[`blackbull.mqtt.MQTTExtension.on_message`][blackbull.mqtt.MQTTExtension.on_message] for a topic filter.  Taps are
 best-effort observers on top of normal broker routing; the broker runs whether
 or not any tap is registered.
 
-Two dispatch engines share one code path (:func:`run_taps`):
+Two dispatch engines share one code path ([`run_taps`][]):
 
-* **actor** (default) — :class:`TapActor` is a single, lifespan-owned consumer.
-  A connection actor hands it a :class:`Message` with :meth:`TapActor.offer`
+* **actor** (default) — [`TapActor`][] is a single, lifespan-owned consumer.
+  A connection actor hands it a [`Message`][] with [`TapActor.offer`][TapActor.offer]
   (non-blocking) and returns immediately, so a slow tap can never back-pressure
   the connection or the broker.  Its inbox is **bounded**; on overflow the
   *newest* message is dropped and a running dropped-count is logged (taps are
@@ -40,11 +40,10 @@ _DEFAULT_TAP_QUEUE = 1024
 class Message:
     """A published message handed to an ``on_message`` tap.
 
-    The user-facing read-model — a plain, immutable view of one PUBLISH,
-    deliberately distinct from the wire codec ``MQTTPublish`` (which carries the
-    ``__iter__``/``__getitem__`` tuple-magic) and from the actor inbox
-    ``Message`` base.  Named ``Message`` for ecosystem consistency (aiomqtt,
-    paho): users write ``from blackbull.mqtt import Message``.
+    A plain, immutable read-model of one PUBLISH — neither the wire codec
+    ``MQTTPublish`` nor the actor inbox ``Message`` base, both of which it
+    sits between.  It takes the bare name anyway, because ``Message`` is
+    what aiomqtt and paho call this and what users reach for.
     """
     topic: str
     payload: bytes
@@ -58,7 +57,7 @@ class Tap:
     """A compiled ``on_message`` registration.
 
     ``match_filter`` is the topic filter with each ``{name}`` segment rewritten
-    to ``+`` (so the validated :func:`topic_matches_filter` does the matching);
+    to ``+`` (so the validated [`topic_matches_filter`][] does the matching);
     ``captures`` records the ``(level_index, name)`` of each ``{name}`` segment
     for binding once a topic matches.
     """
@@ -81,9 +80,7 @@ class Tap:
         restored (``match_filter`` rewrites each to ``+`` for matching).
 
         ``'sensors/{room}/temperature'`` round-trips back to itself; a plain
-        ``'sensors/+/temperature'`` stays as ``'sensors/+/temperature'``.  Used
-        by documentation tooling (``AsyncAPIExtension``) that wants to show the
-        filter the application declared rather than the internal match form.
+        ``'sensors/+/temperature'`` stays as ``'sensors/+/temperature'``.
         """
         if not self.captures:
             return self.match_filter
@@ -95,7 +92,7 @@ class Tap:
 
 
 def compile_tap(topic: str, callback: Any) -> Tap:
-    """Compile a topic filter (possibly with ``{name}`` captures) into a :class:`Tap`."""
+    """Compile a topic filter (possibly with ``{name}`` captures) into a [`Tap`][]."""
     captures = []
     out_levels = []
     for index, level in enumerate(topic.split('/')):
@@ -109,7 +106,7 @@ def compile_tap(topic: str, callback: Any) -> Tap:
 
 
 def compile_taps(handlers) -> list[Tap]:
-    """Normalise a handler list to :class:`Tap` objects.
+    """Normalise a handler list to [`Tap`][] objects.
 
     Accepts already-compiled ``Tap`` objects or ``(topic, callback)`` pairs, so
     direct callers (tests, benchmarks) can keep the lightweight tuple form.
@@ -130,9 +127,8 @@ async def run_taps(taps: Iterable[Tap], message: Message, *,
 
     A handler exception is logged and isolated by default — taps are
     best-effort observers, and one raising handler must not stop the others
-    (nor the broker).  Pass ``raise_exceptions=True`` to propagate the first
-    exception instead: the mode test instrumentation wants, where a failing
-    tap should fail the test rather than vanish into a log line.
+    (nor the broker).  ``raise_exceptions=True`` propagates the first one
+    instead, so a failing tap fails a test rather than a log line.
     """
     for tap in taps:
         captures = tap.bind(message.topic)
@@ -149,14 +145,14 @@ async def run_taps(taps: Iterable[Tap], message: Message, *,
 
 @dataclass
 class TapDeliver(ActorMessage):
-    """Hand a published :class:`Message` to the :class:`TapActor`."""
+    """Hand a published [`Message`][] to the [`TapActor`][]."""
     message: Message | None = field(default=None, compare=False, repr=False)
 
 
 class TapActor(Actor):
     """Decoupled, lifespan-owned consumer of ``on_message`` taps.
 
-    Producers call :meth:`offer` (non-blocking); a single consumer task drains
+    Producers call [`offer`][] (non-blocking); a single consumer task drains
     the bounded inbox and runs the matching taps, so FIFO order of *accepted*
     messages is preserved and tap latency never reaches the connection or broker.
     """

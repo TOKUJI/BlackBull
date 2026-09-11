@@ -1,12 +1,12 @@
 """Named HTTP/1.1 server-side misbehaviour cases.
 
-The HTTP/1.1 twin of :mod:`blackbull.fault_injection.catalogue.h2`: each
+The HTTP/1.1 twin of [`blackbull.fault_injection.catalogue.h2`][blackbull.fault_injection.catalogue.h2]: each
 entry is one thing a real server does wrong, named so a suite can
 ``parametrize`` over the set and report which case broke a client.
 
 Every case is raw bytes.  The server assembles its own output rather than
 going through the production send path — see
-:mod:`blackbull.fault_injection.h1_server` for why that is load-bearing.
+[`blackbull.fault_injection.h1_server`][blackbull.fault_injection.h1_server] for why that is load-bearing.
 """
 from __future__ import annotations
 

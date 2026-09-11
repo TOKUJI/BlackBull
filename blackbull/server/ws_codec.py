@@ -10,6 +10,13 @@ from typing import NamedTuple
 
 
 class WSOpcode(IntEnum):
+    """WebSocket frame opcodes (RFC 6455 §5.2).
+
+    ``CONTINUATION``, ``TEXT`` and ``BINARY`` are data frames and may be
+    fragmented across several frames.  ``CLOSE``, ``PING`` and ``PONG`` are
+    control frames: §5.5 caps their payload at 125 bytes and forbids
+    fragmenting them, and one may arrive between the fragments of a message.
+    """
     CONTINUATION = 0x0
     TEXT         = 0x1
     BINARY       = 0x2
@@ -19,6 +26,12 @@ class WSOpcode(IntEnum):
 
 
 class WSFrameBits(IntEnum):
+    """Bit masks for the two-byte WebSocket frame header (RFC 6455 §5.2).
+
+    RSV1 marks a message compressed with permessage-deflate, and is set on the
+    first frame of it only (RFC 7692 §7).  RSV2 and RSV3 have no negotiated
+    meaning, so a peer setting either is a protocol error.
+    """
     FIN         = 0x80  # FIN bit in byte 0
     RSV1        = 0x40  # RSV1 bit in byte 0 (per-message deflate, RFC 7692)
     RSV2        = 0x20  # RSV2 bit in byte 0 (reserved)
@@ -131,7 +144,7 @@ async def read_frame_header(reader) -> WSFrameHeader:
 
 
 class FramePayloadTooLarge(Exception):
-    """Raised by :func:`read_payload` when *max_length* is set and the
+    """Raised by [`read_payload`][] when *max_length* is set and the
     declared payload length exceeds it.  The caller is responsible for
     translating this into a WebSocket-level CLOSE (RFC 6455 §7.4.1
     code 1009 MESSAGE_TOO_BIG) — the codec stays protocol-agnostic.
@@ -147,7 +160,7 @@ class FramePayloadTooLarge(Exception):
 class MessageTooLarge(Exception):
     """Raised when a *message* outgrows its bound.
 
-    Sibling of :class:`FramePayloadTooLarge`, one layer up: that one is
+    Sibling of [`FramePayloadTooLarge`][], one layer up: that one is
     about a frame on the wire, this one about what the application would
     be handed once fragments are joined and permessage-deflate has
     inflated.  A frame small enough to pass the frame cap can still
@@ -177,7 +190,7 @@ async def read_payload(
 
     When *max_length* is set and the declared payload size — resolved
     from the 16-bit or 64-bit extended-length field per RFC 6455
-    §5.2 — exceeds it, raises :class:`FramePayloadTooLarge` *before*
+    §5.2 — exceeds it, raises [`FramePayloadTooLarge`][] *before*
     reading any body bytes off the wire.  Defends against
     post-handshake OOM where the peer advertises a 2**63 - 1 payload
     and the server tries to buffer it.

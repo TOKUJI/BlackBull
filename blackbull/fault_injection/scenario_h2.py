@@ -1,9 +1,9 @@
 """Programmable HTTP/2 wire-level scenario model.
 
-A :class:`ScenarioH2` is a sequence of typed *steps* that the
-:class:`blackbull.fault_injection.h2_server.H2FaultServer` executor
+A [`ScenarioH2`][] is a sequence of typed *steps* that the
+[`blackbull.fault_injection.h2_server.H2FaultServer`][blackbull.fault_injection.h2_server.H2FaultServer] executor
 walks in order against a connected HTTP/2 client.  This is the
-*server-side* half of the :mod:`blackbull.fault_injection` toolkit:
+*server-side* half of the [`blackbull.fault_injection`][blackbull.fault_injection] toolkit:
 a programmable server that emits deliberate misbehaviour toward a
 client — half-closed streams, exhausted flow-control windows,
 illegal SETTINGS, weird frame sequences — expressed as data, not
@@ -11,7 +11,7 @@ procedural test code.
 
 The symmetric *client-side* half (programmable HTTP/1.1 client
 driving deliberate misbehaviour toward a server) lives in
-:mod:`blackbull.fault_injection.scenario_h1`.
+[`blackbull.fault_injection.scenario_h1`][blackbull.fault_injection.scenario_h1].
 
 Use cases:
 
@@ -25,13 +25,13 @@ Use cases:
 Steps
 -----
 
-* :class:`SendFrame` — emit one parsed :class:`FrameBase` instance.
+* [`SendFrame`][] — emit one parsed ``FrameBase`` instance.
   The executor handles serialisation through the existing
-  :class:`~blackbull.protocol.frame.FrameFactory`.
-* :class:`SendRawBytes` — escape hatch for bytes the framework's
+  [`FrameFactory`][blackbull.protocol.frame.FrameFactory].
+* [`SendRawBytes`][] — escape hatch for bytes the framework's
   ``FrameFactory`` cannot construct (e.g. illegal frame types,
   oversized frames, malformed length fields).
-* :class:`WaitForClientFrame` — pause until an inbound frame from
+* [`WaitForClientFrame`][] — pause until an inbound frame from
   the client matches the *declarative match dict*.  Fields supported:
 
   ===============  =========================================
@@ -41,21 +41,21 @@ Steps
   ``flags_unset``  List of flag names that must be unset.
   ===============  =========================================
 
-* :class:`Sleep` — idle without sending or reading.
-* :class:`Abort` — hard-close the underlying transport (RST on
+* [`Sleep`][] — idle without sending or reading.
+* [`Abort`][] — hard-close the underlying transport (RST on
   Linux).
-* :class:`CloseGracefully` — send a GOAWAY frame, then close
+* [`CloseGracefully`][] — send a GOAWAY frame, then close
   cleanly.
 
 Serialisation
 -------------
 
-:meth:`ScenarioH2.to_json` / :meth:`ScenarioH2.from_json` round-trip
-through JSON Lines.  Because :class:`SendFrame` carries a frame
+[`scenario_to_json`][] / [`scenario_from_json`][] round-trip
+through JSON Lines.  Because [`SendFrame`][] carries a frame
 object, round-tripping requires the frame to be reconstructable from
 its serialised form — currently SETTINGS, WINDOW_UPDATE, RST_STREAM,
 GOAWAY, PING, and a typed-payload form of HEADERS / DATA.  For ad-hoc
-frames the caller passes through :class:`SendRawBytes`, which is
+frames the caller passes through [`SendRawBytes`][], which is
 always round-trippable.
 """
 from __future__ import annotations
@@ -88,16 +88,14 @@ class StepOpH2(str, enum.Enum):
 class SendFrame:
     """Emit one parsed frame onto the connection.
 
-    Routed through :class:`~blackbull.protocol.frame.FrameFactory` so
+    Routed through [`FrameFactory`][blackbull.protocol.frame.FrameFactory] so
     the on-wire serialisation matches the framework's normal output.
-    Use :class:`SendRawBytes` for frames the factory cannot construct.
+    Use [`SendRawBytes`][] for frames the factory cannot construct.
 
     ``declared_length`` overrides the header's length field without
     changing the bytes actually written — "the peer lied about how much is
-    coming", which a serialiser that computes the length cannot say.  The
-    client-side vocabulary had this from the start; the consistency sweep
-    at the 107+108 close found the server side could not express the same
-    fault.  Leave it ``None`` (the default) and nothing changes.
+    coming", which a serialiser that computes the length cannot say.
+    Leave it ``None`` (the default) and nothing changes.
     """
     frame: Frame
     declared_length: int | None = None
@@ -109,7 +107,7 @@ class SendRawBytes:
 
     Escape hatch for malformed frames (illegal type byte, length
     exceeding ``SETTINGS_MAX_FRAME_SIZE``, etc.) that the typed
-    :class:`SendFrame` path will not produce.
+    [`SendFrame`][] path will not produce.
 
     ``byte_interval > 0`` transmits one byte at a time with that
     delay — useful for stalled-handshake patterns where the client
@@ -129,7 +127,7 @@ class WaitForClientFrame:
     not advance this step.
 
     On ``timeout`` expiry the executor records the miss on
-    :class:`ScenarioH2Result` and proceeds to the next step.
+    [`ScenarioH2Result`][] and proceeds to the next step.
     """
     match: dict = field(default_factory=dict)
     timeout: float = 5.0
@@ -141,7 +139,7 @@ class ExpectClientFrame:
 
     A guard, not a filter: nothing is skipped and the executor moves on
     either way.  It answers a different question from
-    :class:`WaitForClientFrame` — *is the client under test behaving as
+    [`WaitForClientFrame`][] — *is the client under test behaving as
     this scenario assumes?* — and a scenario whose premise silently failed
     would otherwise look like a pass.
 
@@ -168,8 +166,8 @@ class CloseGracefully:
     """Send a GOAWAY then close cleanly.
 
     Subsequent scenario steps short-circuit (this is a terminator
-    just like :class:`Abort`).  ``error_code`` is one of the
-    :class:`~blackbull.protocol.frame_types.ErrorCodes` values;
+    just like [`Abort`][]).  ``error_code`` is one of the
+    [`ErrorCodes`][blackbull.protocol.frame_types.ErrorCodes] values;
     ``last_stream_id`` advertises the last stream the server is
     willing to process — pass ``0`` to refuse all client streams,
     or the highest accepted stream ID otherwise.
@@ -182,14 +180,9 @@ class CloseGracefully:
 class HalfClose:
     """Shut down the sending direction only (FIN), keep reading.
 
-    Neither :class:`Abort` nor a full close says this.  ``Abort`` sends RST,
-    which discards whatever is buffered and leaves nothing to read; a full
-    close ends both directions at once.  A half-close is the ordinary end of
-    a non-keep-alive exchange — "I have finished sending, I am still waiting
-    for your answer" — and it is a distinct code path on the peer.
-
-    **Not terminal**: later steps still run, because continuing to read is
-    the whole point.
+    **Not terminal** — later steps still run, which is the whole point.
+    ``Abort`` is not a substitute: it sends RST, discarding what is buffered
+    and leaving nothing to read.
     """
 
 
@@ -233,7 +226,7 @@ class ScenarioH2:
     send_preface: bool = True
     initial_settings: tuple[tuple[int, int], ...] = ()
     #: For test parametrisation and for the JSON header line, as
-    #: :class:`~blackbull.fault_injection.scenario_h1_server.ScenarioH1Server`
+    #: [`ScenarioH1Server`][blackbull.fault_injection.scenario_h1_server.ScenarioH1Server]
     #: has.  A scenario that can be reported on by name is one a failing CI
     #: run can point at.
     name: str = ''
@@ -241,9 +234,9 @@ class ScenarioH2:
 
 @dataclass
 class ScenarioH2Result:
-    """Outcome of one :class:`ScenarioH2` run.
+    """Outcome of one [`ScenarioH2`][] run.
 
-    Mirrors :class:`~blackbull.fault_injection.scenario_h1.ScenarioResult`'s
+    Mirrors [`ScenarioResult`][blackbull.fault_injection.scenario_h1.ScenarioResult]'s
     shape so callers can write uniform pytest assertions across
     protocols.
     """
@@ -474,7 +467,7 @@ def _frame_to_dict(frame: Frame) -> dict:
     typed-payload form of DATA (headers stay opt-out — sending real
     HEADERS frames usually wants the executor's HPACK encoder, not
     a serialised one).  For anything else, the caller should pass
-    through :class:`SendRawBytes`, which is always round-trippable.
+    through [`SendRawBytes`][], which is always round-trippable.
     """
     name = type(frame).__name__
     base = {
@@ -506,7 +499,7 @@ def _frame_to_dict(frame: Frame) -> dict:
 
 
 def _frame_from_dict(d: dict) -> Frame:
-    """Reconstruct a frame from :func:`_frame_to_dict`'s output."""
+    """Reconstruct a frame from [`_frame_to_dict`][]'s output."""
     from blackbull.protocol import frame_types  # local; avoids import-time cost
 
     name = d['class']
@@ -534,11 +527,8 @@ def _frame_from_dict(d: dict) -> Frame:
         f.error_code = int(d.get('error_code', 0))
         return f
     if name == 'Ping':
-        # ``data`` is required on ``Ping`` alone among the frame classes it
-        # is constructed with here, and omitting it raised ``TypeError`` —
-        # so an HTTP/2 scenario containing a PING could be serialised and
-        # never read back.  Found by the 107+108 consistency sweep; present
-        # since the serialiser was written.
+        # ``Ping`` alone among the frame classes built here requires
+        # ``data``; omitting it makes a serialised PING unreadable back.
         payload = base64.b64decode(d.get('payload', ''))
         f = frame_types.Ping(length=len(payload),
                              type_=frame_types.FrameTypes.PING,
@@ -571,7 +561,7 @@ def scenario_to_json(scenario: ScenarioH2) -> str:
 
 
 def scenario_from_json(src: str) -> ScenarioH2:
-    """Parse JSON Lines back to a :class:`ScenarioH2`."""
+    """Parse JSON Lines back to a [`ScenarioH2`][]."""
     name = ''
     send_preface = True
     initial_settings: tuple[tuple[int, int], ...] = ()

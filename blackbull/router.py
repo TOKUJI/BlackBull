@@ -7,7 +7,7 @@ exception classes.  ``_register_chain`` composes per-route middlewares with
 ``functools.partial`` so each middleware receives ``call_next`` bound to the
 next link.
 
-``RouteGroup`` is defined in :mod:`blackbull.app` to avoid a circular
+``RouteGroup`` is defined in [`blackbull.app`][blackbull.app] to avoid a circular
 import; this module re-exports it lazily through ``__getattr__``.
 """
 from collections import OrderedDict
@@ -177,7 +177,7 @@ class _RouteTrie:
         n = len(segments)
 
         # Iterative depth-first walk for the hit case: the priority order of
-        # :meth:`_lookup`, with cross-level backtracking on an explicit stack
+        # [`_lookup`][], with cross-level backtracking on an explicit stack
         # instead of recursion frames and per-level set allocations.  The stack
         # is created lazily — an unambiguous walk allocates nothing.  A miss
         # falls through to the recursive walk, whose remaining job is
@@ -329,7 +329,7 @@ class UnprocessableQuery(HTTPException):
     Raise this from a QUERY handler when the request media type was accepted
     (so 400/415 do not apply) but the query itself is semantically invalid —
     references an unknown field, violates a constraint, etc.  The dispatcher
-    answers ``422 Unprocessable Content`` and, being an :class:`HTTPException`
+    answers ``422 Unprocessable Content`` and, being an [`HTTPException`][]
     subclass, it flows through the normal error-router path and quiet 4xx
     logging.
     """
@@ -358,7 +358,7 @@ class _RouteInfo:
 class RouteInfo(NamedTuple):
     """Immutable snapshot of a single registered route entry.
 
-    Returned by :meth:`BlackBull.get_routes`.  One entry is produced per
+    Returned by [`BlackBull.get_routes`][BlackBull.get_routes].  One entry is produced per
     ``(route, method)`` pair — a route registered with
     ``methods=[GET, POST]`` yields two ``RouteInfo`` records.
 
@@ -521,7 +521,7 @@ def _instantiate_dataclass(cls: Any, data: dict) -> Any:
     """Construct *cls* (a dataclass) from a JSON-parsed ``dict``.
 
     Resolves forward references via ``typing.get_type_hints`` and recurses
-    into dataclass / generic-container fields via :func:`_coerce_value`.
+    into dataclass / generic-container fields via [`_coerce_value`][].
     Unknown keys raise ``TypeError`` rather than being silently dropped —
     if a client sends ``{"titel": ...}`` we want them to know.
     """
@@ -553,7 +553,7 @@ def _decode_json_body(cls: Any, raw: bytes, handler_name: str) -> Any:
     field that fails type coercion are all *client* errors — they must surface
     as ``400 Bad Request``, not a generic ``500``.  ``_instantiate_dataclass``
     signals these with ``JSONDecodeError`` / ``TypeError`` / ``ValueError``,
-    which this wrapper re-raises as :class:`HTTPException`.
+    which this wrapper re-raises as [`HTTPException`][].
     """
     try:
         data = json.loads(raw)
@@ -640,7 +640,7 @@ async def _send_converted(value, conn, receive, send) -> None:
     """Serialise a converter's output and send it.
 
     A converter must return a *natively supported* sendable (see
-    :func:`_send_native`).  Anything else raises here — the intended loud
+    [`_send_native`][]).  Anything else raises here — the intended loud
     failure — rather than silently dropping the response.
     """
     if await _send_native(value, conn, receive, send):
@@ -728,8 +728,8 @@ _QUERY_MISSING = object()
 class _ParamKind(Enum):
     """Classification of one simplified-handler parameter (registration-time).
 
-    Emitted by :func:`_handler_param_plan` (HTTP) and
-    :func:`_websocket_param_plan` (WS).  A plain ``Enum``, not a ``StrEnum``,
+    Emitted by [`_handler_param_plan`][] (HTTP) and
+    [`_websocket_param_plan`][] (WS).  A plain ``Enum``, not a ``StrEnum``,
     so that a stringly-typed comparison like ``kind == 'query'`` fails loudly
     rather than silently passing.
     """
@@ -748,9 +748,9 @@ def _handler_param_plan(fn, path_param_names: set) -> tuple:
     registration time.
 
     Returns ``(params, annotations, categories)`` where *categories* maps
-    parameter name → ``(kind, payload)``: a :class:`_ParamKind` plus, for
-    ``DEPENDS``, the :class:`~blackbull.di.Depends` instance and, for
-    ``QUERY``, the :class:`_QuerySpec`.  The ``elif`` chain below *is* the
+    parameter name → ``(kind, payload)``: a [`_ParamKind`][] plus, for
+    ``DEPENDS``, the [`Depends`][blackbull.di.Depends] instance and, for
+    ``QUERY``, the [`_QuerySpec`][].  The ``elif`` chain below *is* the
     precedence, in order; ``QUERY`` is the fallback category, so every branch
     ahead of it claims its names before a leftover becomes a query param.
 
@@ -847,20 +847,20 @@ def _handler_param_plan(fn, path_param_names: set) -> tuple:
 
 
 def _conn_of(target, receive):
-    """Return the :class:`Connection` for this request.
+    """Return the [`Connection`][] for this request.
 
-    *target* is the threaded dispatch object: a :class:`Connection` on the
+    *target* is the threaded dispatch object: a [`Connection`][] on the
     self-hosted and external paths alike, or a hand-built ASGI scope dict on a
     direct unit-test drive of a wrapper.  The self-hosted path reuses the
     ``Connection`` the protocol actor stashed on the scope envelope under
-    :data:`~blackbull.connection.CONNECTION_STASH_KEY` with **no**
+    ``CONNECTION_STASH_KEY`` with **no**
     re-conversion; under an external ASGI server (uvicorn,
     ``httpx.ASGITransport``) there is no stash, so one is built via
-    :meth:`Connection.from_scope` — the single ASGI→native conversion point.
+    [`Connection.from_scope`][Connection.from_scope] — the single ASGI→native conversion point.
 
     ``_receive`` is bound to the caller's channel **only when unset**, because
     on the self-hosted path the actor has already bound the *raw* recipient via
-    :func:`~blackbull.connection.bind_receive_channel`.  The ``receive``
+    [`bind_receive_channel`][blackbull.connection.bind_receive_channel].  The ``receive``
     threaded here is the disconnect-detecting *wrapper*, which captures
     ``conn``; overwriting the raw binding with it re-forms the per-request
     reference cycle the actor binding exists to avoid.  Only a hand-built scope
@@ -881,7 +881,7 @@ def _conn_of(target, receive):
 
 
 def _set_path_params(target, receive, params: dict) -> None:
-    """Record matched URL path params on the request's :class:`Connection`,
+    """Record matched URL path params on the request's [`Connection`][],
     where the handler reads them back as ``conn.path_params``.
 
     The no-param fast return keeps a no-param route from ever touching
@@ -937,7 +937,7 @@ def _websocket_param_plan(fn, path_param_names: set = frozenset()) -> tuple[tupl
     registration time.
 
     Returns ``(name, kind, payload)`` per parameter, in signature order, with
-    the same payloads :func:`_handler_param_plan` uses.  Annotation wins over
+    the same payloads [`_handler_param_plan`][] uses.  Annotation wins over
     name, so an explicitly annotated parameter always means what it says;
     after that the ``elif`` chain is the precedence, as on the HTTP side.
 
@@ -1014,7 +1014,7 @@ def _websocket_param_plan(fn, path_param_names: set = frozenset()) -> tuple[tupl
 
 def _adapt_websocket_handler(fn, path: str = ''):
     """Wrap an object-form WebSocket handler in a ``(conn, receive, send)``
-    coroutine, building the :class:`~blackbull.websocket.WebSocket` per
+    coroutine, building the [`WebSocket`][blackbull.websocket.WebSocket] per
     connection.
 
     The plan is resolved once here, at registration; the wrapper itself only
@@ -1215,9 +1215,9 @@ def _make_extended_wrapper(fn, annotations: dict, plan: tuple, depends_plan: tup
 def _adapt_handler(fn, path: str, converters: dict | None = None):
     """Wrap a simplified handler in a ``(conn, receive, send)`` coroutine.
 
-    Parameters are classified once by :func:`_handler_param_plan`, which owns
+    Parameters are classified once by [`_handler_param_plan`][], which owns
     the categories and their precedence; return values are serialised by
-    :func:`_send_native`, which owns the supported shapes.  *converters* is
+    [`_send_native`][], which owns the supported shapes.  *converters* is
     ``Router._converters``, consulted only for a return value none of those
     shapes matched.
     """
@@ -1348,7 +1348,7 @@ def _to_tuple(value: Any) -> tuple:
 #   ``_bb_response_headers`` — headers appended to every response the route
 #       produces, the centrally-rendered error included.
 #   ``_bb_request_guard`` — a ``(conn) -> None`` callable run before the
-#       handler, raising :class:`HTTPException` to reject pre-dispatch.
+#       handler, raising [`HTTPException`][] to reject pre-dispatch.
 #
 # Both are method-agnostic by construction: ``BlackBull._dispatch`` applies
 # them without naming a method or a feature, so all of ``accept_query``'s
@@ -1363,7 +1363,7 @@ def _copy_route_hooks(dst: Callable, src: Callable) -> None:
     """Propagate any route hooks from *src* onto *dst*.
 
     Used when the router re-wraps a handler (e.g. the path-param ``_inject``
-    closure in :meth:`Router._resolve`) so the hooks survive to the
+    closure in [`Router._resolve`][Router._resolve]) so the hooks survive to the
     dispatcher.
     """
     for attr in _ROUTE_HOOK_ATTRS:
@@ -1374,9 +1374,9 @@ def _copy_route_hooks(dst: Callable, src: Callable) -> None:
 
 def _accept_query_hooks(media_types: Iterable[str]):
     """Build the ``(response_headers, request_guard)`` hooks implementing the
-    ``accept_query`` route option, whose contract is on :meth:`BlackBull.route`.
+    ``accept_query`` route option, whose contract is on [`BlackBull.route`][BlackBull.route].
 
-    Serialising the header through :func:`serialize_list` is what validates
+    Serialising the header through [`serialize_list`][] is what validates
     each media type, so an invalid entry raises ``ValueError`` at registration
     rather than producing a malformed header per response.
     """
@@ -1574,7 +1574,7 @@ class Router:
         """
         key: (path: str, method: str | HTTPMethod, scheme: Scheme)
 
-        The query→miss→resolve→store flow; :meth:`_resolve` does the matching.
+        The query→miss→resolve→store flow; ``_resolve`` does the matching.
         A repeat of the same key skips resolution entirely after the first hit.
         """
         hit, result = self._cache_get(key)
@@ -1705,7 +1705,7 @@ class Router:
                  accept_query: Iterable[str] | None = None):
         """Return a decorator that registers the decorated handler.
 
-        See :meth:`BlackBull.route` for ``accept_query``.
+        See [`BlackBull.route`][BlackBull.route] for ``accept_query``.
         """
         logger.debug('Router.route_fn() is called.')
         methods = _to_tuple(methods)
@@ -1742,7 +1742,7 @@ class Router:
         """Build a middleware chain from *functions* and register it.
 
         ``accept_query``'s hooks attach to the chain wrapper, not to the inner
-        handler; see :meth:`BlackBull.route` for what the option means.
+        handler; see [`BlackBull.route`][BlackBull.route] for what the option means.
         """
         if not isinstance(functions, Iterable):
             raise TypeError(f'{functions} is not iterable.')
@@ -1821,7 +1821,7 @@ class Router:
         return self._param_pattern.sub(lambda m: str(params[m.group(1)]), template)
 
     def get_routes(self) -> list[RouteInfo]:
-        """Return a snapshot of all registered routes as :class:`RouteInfo`.
+        """Return a snapshot of all registered routes as [`RouteInfo`][].
 
         Routes are returned in registration order.  A route registered with
         multiple methods (e.g. ``methods=[GET, POST]``) produces one entry
@@ -1849,10 +1849,10 @@ class Router:
         - Every path param appears in the handler signature (simplified handlers).
         - Converter output type matches the handler's annotation.
 
-        Raises :class:`ConfigurationError` listing all violations found.
+        Raises [`ConfigurationError`][] listing all violations found.
         Sets ``self._frozen = True`` on success so no further routes can
-        be added.  Called once at app boot from :meth:`BlackBull.run` /
-        :meth:`BlackBull.serve` — handler bugs that violate the contract
+        be added.  Called once at app boot from [`BlackBull.run`][BlackBull.run]
+        or [`serve`][blackbull.app.serve] — handler bugs that violate the contract
         surface before the first request is served, not after.
         """
         from beartype.door import die_if_unbearable
@@ -1925,7 +1925,7 @@ class Router:
            appended to the middleware list before the chain is registered.
 
         ``name`` registers the route for use with ``url_path_for()``.
-        ``accept_query`` is documented on :meth:`BlackBull.route`, which
+        ``accept_query`` is documented on [`BlackBull.route`][BlackBull.route], which
         delegates here.
         """
         logger.debug('Router.route() is called. functions=%r middlewares=%r', functions, middlewares)
@@ -2004,6 +2004,12 @@ class ErrorRouter:
         self._default = default
 
     def __setitem__(self, key: HTTPStatus | Type[BaseException], fn: Callable):
+        """Register *fn* as the handler for a status or an exception class.
+
+        The status must be 4xx or 5xx: the annotation admits any
+        ``HTTPStatus``, but registering a handler for, say, ``200`` raises
+        ``ValueError``.
+        """
         if isinstance(key, HTTPStatus):
             if not is_client_error(key) and not is_server_error(key):
                 raise ValueError(f"{key} is not an error status (4xx/5xx).")

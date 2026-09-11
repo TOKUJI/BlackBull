@@ -1,35 +1,16 @@
 """Test clients for BlackBull applications — three instruments, three layers.
 
-BlackBull threads a typed :class:`~blackbull.connection.Connection` end to
-end and keeps the ASGI ``scope`` dict at two boundaries only.  That is why
-there is more than one test client here, and why picking the right one
-matters: each drives a different layer, and a defect on one is invisible to
-the others.
+[`blackbull.testing.native`][blackbull.testing.native] drives application logic, its
+[`NativeTestServer`][blackbull.testing.native.NativeTestServer] drives the full stack on
+a loopback socket, and [`TestClient`][] drives the ASGI compatibility
+boundary.  ``docs/guide/testing.md`` tabulates which to reach for; a defect
+on one layer is invisible to the others.
 
-============================  =============================================
-Instrument                    What it exercises
-============================  =============================================
-:mod:`blackbull.testing.native`   Application logic — routing, middleware,
-                              handlers, DI, events — through the *native*
-                              ``app(conn, receive, send)`` entry point that
-                              every production request takes.  The default
-                              choice for everyday tests.
-:class:`~blackbull.testing.native.NativeTestServer`
-                              The full stack on a real loopback socket:
-                              protocol parsing, framing, keep-alive,
-                              connection lifecycle, wire bytes.
-:class:`TestClient`           The **ASGI compatibility boundary** — the
-                              ``as_scope()`` / ``from_scope()`` round-trip,
-                              driven the way an external ASGI host
-                              (uvicorn, ``httpx.ASGITransport``) drives it.
-============================  =============================================
-
-:class:`TestClient` is deliberately *not* the default.  It reaches the app
-through ``httpx.ASGITransport`` → ASGI scope dict → ``from_scope()``, so the
-``isinstance(conn, Connection)`` branch of ``BlackBull.__call__`` is never
-taken by it.  What it uniquely covers is the conversion chain itself: a
-missing ``_CONNECTION_FIELDS`` entry or a ``from_scope`` coercion bug shows
-up here and nowhere else in the suite, which is exactly why it stays.
+[`TestClient`][] is not the everyday one.  It reaches the app through
+``httpx.ASGITransport`` → ASGI scope dict → ``from_scope()``, never taking
+the ``isinstance(conn, Connection)`` branch of ``BlackBull.__call__``.  What
+it uniquely covers is that conversion chain, where a coercion bug surfaces
+here and nowhere else in the suite.
 
 ``TestClient`` usage — a boundary-conformance instrument::
 
@@ -228,13 +209,13 @@ class _LifespanManager:
 class WebSocketTestSession:
     """Synchronous WebSocket session against an ASGI application.
 
-    Open via :meth:`TestClient.websocket_connect` as a context manager::
+    Open via [`TestClient.websocket_connect`][TestClient.websocket_connect] as a context manager::
 
         with client.websocket_connect('/ws') as ws:
             ws.send_text('ping')
             assert ws.receive_text() == 'pong'
 
-    Raises :class:`WebSocketDisconnect` when the server closes (or
+    Raises [`WebSocketDisconnect`][] when the server closes (or
     rejects) the connection.
     """
 
@@ -247,6 +228,16 @@ class WebSocketTestSession:
         cookies: dict[str, str] | None = None,
         timeout: float = 5.0,
     ):
+        """Prepare a session; the handshake runs on ``__enter__``.
+
+        Args:
+            app: The ASGI application to connect to.
+            path: Request path, including any query string.
+            subprotocols: Offered in ``Sec-WebSocket-Protocol``.
+            headers: Extra request headers, as ``(name, value)`` string pairs.
+            cookies: Sent as a single ``Cookie`` header.
+            timeout: Seconds any one receive will wait before giving up.
+        """
         self.app = app
         self.timeout = timeout
         if '?' in path:
@@ -331,16 +322,24 @@ class WebSocketTestSession:
         self.close()
 
     def send_text(self, text: str) -> None:
+        """Send *text* to the application as a text message."""
         self._send_client_event({'type': 'websocket.receive', 'text': text})
 
     def send_bytes(self, data: bytes) -> None:
+        """Send *data* to the application as a binary message."""
         self._send_client_event({'type': 'websocket.receive', 'bytes': data})
 
     def send_json(self, data: Any) -> None:
+        """Serialise *data* as JSON and send it as a text message."""
         import json
         self.send_text(json.dumps(data))
 
     def receive_text(self) -> str:
+        """The next text message.
+
+        Raises [`WebSocketDisconnect`][] if the server closed instead, and
+        ``RuntimeError`` if what arrived was a binary message.
+        """
         event = self._recv_event()
         if event['type'] == 'websocket.close':
             raise WebSocketDisconnect(code=event.get('code', 1000), reason=event.get('reason', ''))
@@ -351,6 +350,11 @@ class WebSocketTestSession:
         return event['text']
 
     def receive_bytes(self) -> bytes:
+        """The next binary message.
+
+        Raises [`WebSocketDisconnect`][] if the server closed instead, and
+        ``RuntimeError`` if what arrived was a text message.
+        """
         event = self._recv_event()
         if event['type'] == 'websocket.close':
             raise WebSocketDisconnect(code=event.get('code', 1000), reason=event.get('reason', ''))
@@ -361,6 +365,7 @@ class WebSocketTestSession:
         return event['bytes']
 
     def receive_json(self) -> Any:
+        """The next text message, parsed as JSON."""
         import json
         return json.loads(self.receive_text())
 
@@ -368,7 +373,7 @@ class WebSocketTestSession:
         """Yield successive text messages from the server until the WebSocket closes.
 
         Stops cleanly when the server emits a ``websocket.close`` — the
-        :class:`WebSocketDisconnect` raised by the underlying receive
+        [`WebSocketDisconnect`][] raised by the underlying receive
         is caught and converted into normal iterator termination, so
         the test can write::
 
@@ -387,7 +392,7 @@ class WebSocketTestSession:
     def iter_bytes(self):
         """Yield successive binary messages from the server until the WebSocket closes.
 
-        Mirror of :meth:`iter_text` for binary frames.
+        Mirror of [`iter_text`][] for binary frames.
         """
         try:
             while True:
@@ -396,6 +401,11 @@ class WebSocketTestSession:
             return
 
     def close(self, code: int = 1000) -> None:
+        """Disconnect with *code* and tear the session down.
+
+        Idempotent, and safe on a session whose handshake never completed.
+        ``__exit__`` calls it, so a ``with`` block needs no explicit close.
+        """
         if self._loop_thread.loop is None:
             return
         if self._accepted:
@@ -482,6 +492,18 @@ class TestClient:
         headers: Any | None = None,
         follow_redirects: bool = False,
     ) -> None:
+        """Prepare a client; the loop thread and lifespan start on ``__enter__``.
+
+        Args:
+            app: The ASGI application under test.
+            base_url: Prefix for relative request URLs.
+            raise_app_exceptions: Re-raise an exception from the application
+                instead of turning it into a 500 response.
+            root_path: ASGI ``root_path`` for every request.
+            cookies: Initial cookie jar.
+            headers: Default headers for every request.
+            follow_redirects: Follow 3xx responses automatically.
+        """
         self.app = app
         self.base_url = base_url
         self._raise_app_exceptions = raise_app_exceptions
@@ -494,6 +516,7 @@ class TestClient:
         self._async_client: httpx.AsyncClient | None = None
 
     def __enter__(self) -> 'TestClient':
+        """Start the background loop and run the application's lifespan startup."""
         self._loop_thread.start()
         self._async_client = httpx.AsyncClient(
             transport=httpx.ASGITransport(
@@ -528,6 +551,12 @@ class TestClient:
     # ----- HTTP methods -----------------------------------------------------
 
     def request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
+        """Send *method* to *url* and return the response.
+
+        Keyword arguments go to ``httpx.AsyncClient.request``.  Raises
+        ``RuntimeError`` if the client is used outside its ``with`` block,
+        since the loop thread and lifespan are what that block owns.
+        """
         if self._async_client is None:
             raise RuntimeError(
                 'TestClient must be used as a context manager: '
@@ -563,24 +592,31 @@ class TestClient:
         return self._async_client.headers
 
     def get(self, url: str, **kwargs: Any) -> httpx.Response:
+        """``GET`` *url* through [`request`][blackbull.testing.TestClient.request]."""
         return self.request('GET', url, **kwargs)
 
     def head(self, url: str, **kwargs: Any) -> httpx.Response:
+        """``HEAD`` *url* through [`request`][blackbull.testing.TestClient.request]. Response carries headers only."""
         return self.request('HEAD', url, **kwargs)
 
     def options(self, url: str, **kwargs: Any) -> httpx.Response:
+        """``OPTIONS`` *url* through [`request`][blackbull.testing.TestClient.request]."""
         return self.request('OPTIONS', url, **kwargs)
 
     def post(self, url: str, **kwargs: Any) -> httpx.Response:
+        """``POST`` *url* through [`request`][blackbull.testing.TestClient.request]."""
         return self.request('POST', url, **kwargs)
 
     def put(self, url: str, **kwargs: Any) -> httpx.Response:
+        """``PUT`` *url* through [`request`][blackbull.testing.TestClient.request]."""
         return self.request('PUT', url, **kwargs)
 
     def patch(self, url: str, **kwargs: Any) -> httpx.Response:
+        """``PATCH`` *url* through [`request`][blackbull.testing.TestClient.request]."""
         return self.request('PATCH', url, **kwargs)
 
     def delete(self, url: str, **kwargs: Any) -> httpx.Response:
+        """``DELETE`` *url* through [`request`][blackbull.testing.TestClient.request]."""
         return self.request('DELETE', url, **kwargs)
 
     # ----- WebSocket --------------------------------------------------------
@@ -596,7 +632,7 @@ class TestClient:
         """Open a WebSocket session against the application.
 
         ``url`` is a path (relative to the app), e.g. ``/ws`` or
-        ``/ws?token=abc``.  Returns a :class:`WebSocketTestSession`
+        ``/ws?token=abc``.  Returns a [`WebSocketTestSession`][]
         that should itself be used as a context manager.
         """
         return WebSocketTestSession(

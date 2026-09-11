@@ -35,7 +35,7 @@ def _cleanup_after_bare_yield(provider) -> bool:
     """True when *provider* has cleanup code that an exception would skip.
 
     An async-generator provider is driven through
-    :func:`~contextlib.asynccontextmanager`, so an exception in the handler is
+    [`asynccontextmanager`][contextlib.asynccontextmanager], so an exception in the handler is
     re-raised **at the yield**.  Statements written after a bare ``yield``
     therefore never run on that path — the resource leaks precisely when
     something went wrong.  A WebSocket makes this bite harder than HTTP,

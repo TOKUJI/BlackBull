@@ -57,6 +57,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   rather than onto the app.  To ask which certificate a process loaded, read
   the startup line on the `blackbull.config` logger; to declare one, use any
   of the paths the Configuration guide lists.  The TLS page now says so.
+- The API reference no longer opens blank pages, and no longer argues with the
+  guides.  Every published module and class now says what it is — 69 of them
+  rendered as a heading and nothing else, including `BlackBull` itself — and
+  the test clients now list the methods they are used through, which
+  `show_if_no_docstring` had been hiding entirely.  In the other direction,
+  docstrings that restated an argument already made by the Configuration,
+  Workers, WebSocket, MQTT, fault-injection or Internals pages now state their
+  contract and name the page, so the argument has one home.  Corrections found
+  along the way: a published deprecation shim named the wrong spelling as the
+  one that warns, a fault-injection page said the HTTP/1.1 server carries no
+  production lock when it carries two, four `HalfClose` entries described an
+  HTTP/1 keep-alive exchange on HTTP/2 vocabularies, and a docstring pointed
+  readers at a file that is not shipped.  `blackbull/middleware/base.py`, which
+  defined nothing and only recorded its own removal, is gone.
 
 ## Versioning
 

@@ -3,14 +3,11 @@
 gRPC is HTTP/2 with a fixed request shape (``POST /package.Service/Method``,
 ``content-type: application/grpc``) and a Length-Prefixed-Message body, where
 the call result is reported in ``grpc-status`` / ``grpc-message`` *trailers*.
-BlackBull's HTTP/2 sender already emits trailers via the
-``http.response.trailers`` ASGI event, and ``HTTP2Recipient`` already delivers
-request DATA as incremental ``http.request`` events, so all four RPC kinds —
-unary, server-, client-, and bidirectional-streaming — map cleanly onto the
-existing (scope, receive, send) bridge; no new protocol Actor is needed.
+All four RPC kinds — unary, server-, client-, and bidirectional-streaming —
+ride the existing (scope, receive, send) bridge; no new protocol Actor.
 
-``serve_grpc`` is dispatched from :meth:`BlackBull._dispatch` when the request
-content-type is ``application/grpc`` and a registry was installed via
+``serve_grpc`` is dispatched when the request content-type is
+``application/grpc`` and a registry was installed via
 ``app.enable_grpc(...)``.
 """
 from __future__ import annotations
@@ -125,7 +122,7 @@ def _decompress_message(message: bytes, encoding: bytes) -> bytes:
     """Decompress a request message whose LPM Compressed-Flag is set, using the
     request's ``grpc-encoding``.
 
-    Raises :class:`GrpcError`: UNIMPLEMENTED for an unsupported / absent
+    Raises [`GrpcError`][]: UNIMPLEMENTED for an unsupported / absent
     encoding (the server's ``grpc-accept-encoding`` is advertised on the
     response so the client can retry uncompressed), RESOURCE_EXHAUSTED for a
     decompression bomb, INTERNAL for a corrupt stream."""
@@ -161,7 +158,7 @@ def _frame_response(payload: bytes, compress: bool) -> bytes:
 
 def _req_field(conn, name, default=None):
     """Read a request field from either a native
-    :class:`~blackbull.connection.Connection` (the ``serve_grpc(conn, …)`` path)
+    [`Connection`][blackbull.connection.Connection] (the ``serve_grpc(conn, …)`` path)
     or an ASGI ``scope`` dict — the field names (``headers``/``client``/``path``)
     coincide with the Connection attributes."""
     if isinstance(conn, dict):
@@ -177,9 +174,8 @@ class GrpcContext:
     leading/trailing metadata, or abort the call outright — the subset of
     grpcio's ``ServicerContext`` that a raw-bytes transport can honour.
 
-    The response-start machinery (``_send`` … ``_started``) is bound by
-    :func:`serve_grpc` just before the handler runs; handlers touch it only via
-    :meth:`send_initial_metadata`.
+    [`send_initial_metadata`][] is the only door to the response-start
+    machinery [`serve_grpc`][] binds before the handler runs.
     """
 
     __slots__ = ('conn', 'code', 'details', '_trailing', '_deadline',
@@ -202,9 +198,9 @@ class GrpcContext:
 
     def _bind(self, send, content_type: bytes, response_encoding: bytes | None,
               deadline: float | None) -> None:
-        """Wire the response side (called by :func:`serve_grpc`).  *deadline* is
+        """Wire the response side (called by [`serve_grpc`][]).  *deadline* is
         a duration in seconds; it is stored as an absolute loop time so
-        :meth:`time_remaining` counts down from here."""
+        [`time_remaining`][] counts down from here."""
         self._send = send
         self._content_type = content_type
         self._response_encoding = response_encoding
@@ -262,10 +258,8 @@ class GrpcContext:
         self._trailing = [(k, v) for k, v in metadata]
 
     def trailing_metadata(self) -> list[tuple[bytes, bytes]]:
-        """The trailing metadata set so far (a copy) — lets helpers compose
-        with, rather than clobber, what the handler already set (e.g.
-        blackbull-protobuf's ``abort_with_details`` appending
-        ``grpc-status-details-bin``)."""
+        """The trailing metadata set so far, as a copy — so a helper composes
+        with what the handler already set instead of clobbering it."""
         return list(self._trailing)
 
     async def send_initial_metadata(self, metadata) -> None:
@@ -277,7 +271,7 @@ class GrpcContext:
         (just before the first message, or with the trailers for an empty
         response).  Calling it flushes them early with *metadata* attached — used
         to hand the client leading metadata (auth challenges, stream ids) up
-        front.  Raises :class:`ValueError` once the HEADERS have already gone
+        front.  Raises ``ValueError`` once the HEADERS have already gone
         out (grpcio's "initial metadata no longer allowed")."""
         if self._started:
             raise ValueError('initial metadata already sent')
@@ -286,7 +280,7 @@ class GrpcContext:
 
     async def _start_response(self) -> None:
         """Emit the response HEADERS exactly once (idempotent).  All response
-        writers funnel through here so :meth:`send_initial_metadata` and the
+        writers funnel through here so [`send_initial_metadata`][] and the
         lazy first-message path can't double-send the start event."""
         if self._started:
             return
@@ -295,7 +289,7 @@ class GrpcContext:
             self._content_type, self._response_encoding, self._initial_metadata))
 
     def abort(self, status: GrpcStatus, details: str = '') -> None:
-        """Raise :class:`GrpcError` to end the call with a non-OK status."""
+        """Raise [`GrpcError`][] to end the call with a non-OK status."""
         raise GrpcError(status, details)
 
 
@@ -360,7 +354,7 @@ async def _read_unary_request(receive, encoding: bytes) -> bytes:
     streams), so unary and server-streaming share this.  A compressed message
     (Compressed-Flag = 1) is decompressed with the request's *encoding* (the
     ``grpc-encoding`` header); the per-message size limit applies to the
-    decompressed output.  Raises :class:`GrpcError` on a malformed /
+    decompressed output.  Raises [`GrpcError`][] on a malformed /
     multi-message / unsupported-encoding / oversized request."""
     try:
         body = await read_body(receive)
@@ -402,7 +396,7 @@ async def _iter_request_messages(receive, encoding: bytes):
     messages don't align to DATA-frame boundaries, so a message may straddle
     several events or several messages may share one.  A residual buffer holds
     the partial tail between events.  A compressed message (Compressed-Flag = 1)
-    is decompressed with the request's *encoding*.  Raises :class:`GrpcError` on
+    is decompressed with the request's *encoding*.  Raises [`GrpcError`][] on
     an oversized / unsupported-encoding / truncated message, matching
     ``_read_unary_request`` (RESOURCE_EXHAUSTED / UNIMPLEMENTED / INTERNAL)."""
     buf = bytearray()
@@ -444,7 +438,7 @@ async def _iter_request_messages(receive, encoding: bytes):
 
 
 def _validate_response_message(response) -> bytes:
-    """Return *response* as ``bytes`` or raise :class:`GrpcError` (INTERNAL for
+    """Return *response* as ``bytes`` or raise [`GrpcError`][] (INTERNAL for
     a wrong type, RESOURCE_EXHAUSTED when it exceeds the per-message limit)."""
     if not isinstance(response, (bytes, bytearray)):
         raise GrpcError(
@@ -464,7 +458,7 @@ def _response_headers(content_type: bytes,
                       ) -> list[tuple[bytes, bytes]]:
     """The response header list, without deciding what object carries it.
 
-    Split from :func:`_response_start` so the unary path can fold these
+    Split from [`_response_start`][] so the unary path can fold these
     headers into the same object as its body and trailers.
     """
     headers = [(b'content-type', content_type),

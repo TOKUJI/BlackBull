@@ -1,3 +1,16 @@
+"""Serving files off the filesystem.
+
+[`StaticFiles`][blackbull.middleware.static.StaticFiles] is the whole public
+surface: conditional requests, byte ranges, precompressed siblings and the
+optional in-memory cache all live behind it.  ``docs/guide/static-files.md``
+is where to read about when to turn each of those on.
+
+Importing this module has one effect beyond defining that class: it registers
+``.woff``, ``.woff2``, ``.webp``, ``.avif`` and ``.wasm`` with the standard
+``mimetypes`` module, which slim container images often lack.  The
+registration is process-wide and benefits every caller of
+``mimetypes.guess_type``, not only this middleware.
+"""
 import asyncio
 import mimetypes
 import os
@@ -118,6 +131,35 @@ def _not_modified(headers, etag: bytes, mtime_ns: int) -> bool:
 
 
 class StaticFiles:
+    """Serve files from one directory, as route middleware or on its own.
+
+    ``app.static(url_prefix, root_dir)`` attaches it to a route; called with
+    three arguments instead of four it is a plain ASGI app that can be mounted
+    anywhere.  The difference shows up on a miss: with a ``call_next`` the
+    request continues down the chain, and without one it is answered 404.
+
+    Only ``GET`` and ``HEAD`` are served.  A resolved path outside the root is
+    a 400, checked after symlinks are followed, so a link pointing out of the
+    tree does not escape it.  Under ``BLACKBULL_ENV=production`` nothing is
+    served at all — a production deployment is expected to have a proxy or CDN
+    in front, and two things serving the same files is the problem being
+    avoided.
+
+    What a hit produces depends on the request and on what is on disk.  ETag
+    and Last-Modified are emitted unless ``conditional`` is off, and a matching
+    ``If-None-Match`` / ``If-Modified-Since`` gets a 304 without the body being
+    read.  A ``Range`` request gets a 206, or a 416 when the range is
+    unsatisfiable.  A precompressed sibling (``app.js.br``, ``.zst``, ``.gz``)
+    is served in place of the original when the client accepts that encoding
+    and the request is not a range request; those responses carry
+    ``Vary: Accept-Encoding``.  Files larger than four megabytes stream in
+    chunks rather than being read whole, so peak memory does not follow file
+    size.
+
+    ``docs/guide/static-files.md`` covers the choices this leaves open — the
+    opt-in cache in particular, and why it is off by default.
+    """
+
     # Files at or below this size are read once and held in memory.
     # Static assets in the wild (CSS/JS/manifest/small images) cluster
     # well under this; larger files fall through to streaming.
@@ -155,18 +197,11 @@ class StaticFiles:
         ``blackbull serve`` CLI turns it on to match ``python -m
         http.server``'s directory-index behaviour.
 
-        ``cache`` (default ``False``): when ``True``, file bodies up to
-        ``_CACHE_MAX_BYTES_PER_FILE`` are held in an in-memory
-        ``OrderedDict`` (capped at ``_CACHE_MAX_ENTRIES``), and the
-        per-request ``stat()`` syscall is throttled by
-        ``_STAT_TTL_S``.  When ``False`` (the default), every request
-        does a fresh ``stat()`` and reads the body from disk — matching
-        the behaviour of Starlette / FastAPI / Flask static serving and
-        the requirement HttpArena's standard-mode rules place on static
-        profiles ("read files from disk on every request, no in-memory
-        caching").  Set ``cache=True`` only for standalone deployments
-        where BlackBull terminates static traffic directly (i.e. no
-        nginx / CDN in front).
+        ``cache`` (default ``False``): when ``True``, small file bodies are
+        held in a bounded in-memory ``OrderedDict`` and the ``stat()``
+        syscall is throttled.  When ``False``, every request stats and
+        reads afresh.  Turn it on only where BlackBull terminates static
+        traffic itself, with no nginx or CDN in front.
 
         ``conditional`` (default ``True``): emit ``ETag`` + ``Last-Modified``
         validators and honour ``If-None-Match`` / ``If-Modified-Since`` with a
@@ -218,7 +253,7 @@ class StaticFiles:
     @property
     def _root(self) -> Path:
         """Backwards-compat: callers and tests may inspect
-        ``staticfiles._root`` as a :class:`Path`.  Built on demand so
+        ``staticfiles._root`` as a [`Path`][].  Built on demand so
         the hot path keeps its plain-string representation."""
         return Path(self._root_str)
 

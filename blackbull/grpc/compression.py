@@ -1,6 +1,6 @@
 """gRPC message compression (the ``grpc-encoding`` header + LPM Compressed-Flag).
 
-Only ``gzip`` is implemented, via the stdlib :mod:`zlib` in gzip-framing mode
+Only ``gzip`` is implemented, via the stdlib ``zlib`` in gzip-framing mode
 (RFC 1952); ``identity`` (no compression) needs no code.  gzip is the encoding
 grpcio and grpc-go negotiate by default, so it covers the real interop cases.
 
@@ -11,7 +11,7 @@ it is entangled with framing, not a whole-body byte transform a ``send``-wrapper
 could apply.  A second codec (deflate, snappy, …) is the one anticipated
 extension of *this* module: lift ``SUPPORTED`` to a
 ``{grpc-encoding-name: (compress, decompress)}`` registry and route it through
-the two negotiation points already in :mod:`~blackbull.grpc.asgi` (the request
+the two negotiation points already in [`asgi`][blackbull.grpc.asgi] (the request
 ``grpc-encoding`` lookup and the response ``grpc-accept-encoding`` selection).
 Deferred until a real second codec is needed — YAGNI, gzip is the interop floor.
 
@@ -23,7 +23,7 @@ health, rich errors) are the Track B package; new wire protocols attach via the
 framework Extension mechanism.  Keep the problem's scope where it belongs.
 
 This module is pure compression, with **no** gRPC-status dependency (mirroring
-:mod:`~blackbull.grpc.codec`): callers translate :class:`DecompressionError`
+[`codec`][blackbull.grpc.codec]): callers translate [`DecompressionError`][]
 into the appropriate gRPC status.
 """
 from __future__ import annotations
@@ -71,12 +71,12 @@ def decompress_gzip(data: bytes, max_output: int) -> bytes:
 
     The gRPC 4-byte length prefix bounds only the *compressed* transfer size;
     a small compressed payload can inflate to gigabytes.  Decompression is
-    therefore capped: :meth:`zlib.decompressobj.decompress` is given a
+    therefore capped: ``zlib.decompressobj.decompress`` is given a
     ``max_length`` so it stops at the limit and parks any unprocessed input in
     ``unconsumed_tail`` — a non-empty tail (or an output past *max_output*)
     means the message would exceed the cap and raises
-    :class:`DecompressionBombError`.  A corrupt stream (bad header or trailing
-    CRC) raises :class:`DecompressionError` via the final :func:`flush`.
+    [`DecompressionBombError`][].  A corrupt stream (bad header or trailing
+    CRC) raises [`DecompressionError`][] via the final ``flush``.
     """
     d = zlib.decompressobj(wbits=_GZIP_WBITS)
     try:

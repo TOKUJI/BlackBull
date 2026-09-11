@@ -1,3 +1,18 @@
+"""HTTP/2 request parsing: a HEADERS frame becomes a native ``Connection``.
+
+[`parse_headers`][blackbull.server.parser.parse_headers] is the whole surface.
+Given a parsed HEADERS frame it returns the
+[`Connection`][blackbull.connection.Connection] the router and the application
+see — typed ``http`` for a request, ``websocket`` for an RFC 8441 Extended
+CONNECT — or ``None`` when the request is malformed, having marked the frame so
+the actor answers RST_STREAM.
+
+The request-level pseudo-header rules (RFC 9113 §8.3.1) live here: which
+pseudo-headers must be present, that ``:status`` may not appear in a request,
+and the ``:authority`` / ``Host`` authority grammar that decides the ``host``
+a handler sees.  Field-level validation already happened when the frame parsed
+its payload.
+"""
 from urllib.parse import unquote, urlsplit
 
 from ..protocol.frame_types import PseudoHeaders
@@ -22,13 +37,13 @@ _EMPTY_H2_EXTENSIONS: dict = {}
 def _build_h2_connection(method: str, path: str, raw_path: bytes,
                          query_string: bytes, headers: Headers,
                          scheme: str) -> Connection:
-    """Lean constructor for the plain-HTTP/2 :func:`parse_headers` return.
+    """Lean constructor for the plain-HTTP/2 [`parse_headers`][] return.
 
     Bypasses the dataclass-generated ``Connection.__init__`` (type-call +
     default-binding machinery, ~200 ns/req) via ``object.__new__`` + explicit
     slot stores.  ``tests/architecture/test_h2_connection_builder.py`` pins it
     field-for-field against the dataclass and must be kept in sync with any
-    change to :class:`Connection`'s field set.
+    change to [`Connection`][]'s field set.
 
     The RFC 8441 WebSocket branch is cold — one Extended CONNECT per session,
     not one per request — and keeps the plain constructor.
@@ -139,21 +154,21 @@ def _request_headers_with_host(frame, *, require_present: bool) -> list | None:
 
 
 def parse_headers(frame) -> Connection | None:
-    """Build a native :class:`Connection` (``http`` or ``websocket``) from a
+    """Build a native [`Connection`][] (``http`` or ``websocket``) from a
     HEADERS frame, or ``None`` when the request is malformed.
 
     ``result is None`` if and only if ``frame.malformed``.  Every early-out
-    returns ``None`` rather than a half-built :class:`Connection`, so a caller
+    returns ``None`` rather than a half-built [`Connection`][], so a caller
     checks ``frame.malformed`` and never reads a partial object, and nothing
     is constructed on the error path.
 
     Also performs request-level pseudo-header presence checks (RFC 9113
     §8.3.1); field-level checks already happened in ``parse_payload``.
 
-    A module-level function rather than a ``ParserFactory`` product: this runs
-    on every request, and the factory's dict lookup and parser allocation
-    would be paid per request for nothing.  The Internals page states why the
-    read path threads a :class:`Connection` rather than an ASGI scope dict.
+    A module-level function and not a ``ParserFactory`` product: nothing here
+    is per-instance, so a factory would charge every request for a dict lookup
+    and an allocation.  The Internals page states why the read path threads a
+    [`Connection`][] rather than an ASGI scope dict.
     """
     # Short-circuit if the frame parser already flagged this malformed.
     if getattr(frame, 'malformed', False):

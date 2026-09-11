@@ -5,13 +5,13 @@ BlackBull is a multi-protocol server that owns both sides of the wire on its
 self-hosted path; the ASGI ``scope`` dict is therefore an *internal
 data-format choice*, not an interoperability contract — and a poor one
 (untyped, string-keyed, carrying private ``_``-prefixed keys). This module
-makes a typed :class:`Connection` the internal model; the ASGI scope becomes
-a **derived** view produced by :meth:`Connection.as_scope` and consumed by
-:meth:`Connection.from_scope`, used only where external compatibility needs
+makes a typed [`Connection`][] the internal model; the ASGI scope becomes
+a **derived** view produced by [`Connection.as_scope`][Connection.as_scope] and consumed by
+[`Connection.from_scope`][Connection.from_scope], used only where external compatibility needs
 it (uvicorn, ``httpx.ASGITransport``/TestClient, third-party ASGI middleware).
 
 The `_CONNECTION_FIELDS` registry is the single source of truth from which
-both conversions are generated: adding a field to :class:`Connection` without
+both conversions are generated: adding a field to [`Connection`][] without
 a registry entry is a test failure (proposal §4.2 / §9.5), which mechanically
 prevents the two representations from drifting apart.
 """
@@ -31,7 +31,7 @@ __all__ = ['Connection', 'ClientDisconnected', 'CONNECTION_STASH_KEY',
 
 def disconnected(target) -> bool:
     """True if the client disconnected mid-request. Accepts either a native
-    :class:`Connection` (the ``app(conn, …)`` path) or an ASGI ``scope`` dict
+    [`Connection`][] (the ``app(conn, …)`` path) or an ASGI ``scope`` dict
     (the ``BB_FORCE_ASGI_SCOPE`` / external-server path)."""
     if isinstance(target, Connection):
         return target._disconnected
@@ -39,15 +39,15 @@ def disconnected(target) -> bool:
 
 
 def mark_disconnected(target) -> None:
-    """Record a mid-request client disconnect on a :class:`Connection` or an
-    ASGI ``scope`` dict (idempotent — caller guards on :func:`disconnected`)."""
+    """Record a mid-request client disconnect on a [`Connection`][] or an
+    ASGI ``scope`` dict (idempotent — caller guards on [`disconnected`][])."""
     if isinstance(target, Connection):
         target._disconnected = True
     else:
         target['_disconnected'] = True
 
 
-#: Envelope key under which a protocol actor stashes the typed :class:`Connection`
+#: Envelope key under which a protocol actor stashes the typed [`Connection`][]
 #: it parsed, so the self-hosted dispatch path (dispatcher, router, handlers, and
 #: ``TrustedProxy``) reads it back with **zero** re-conversion.
 #: A single named constant instead of a bare ``'_connection'`` literal repeated
@@ -165,19 +165,19 @@ def _scope_fields() -> list[_FieldSpec]:
 
 
 def stashed_connection(target, receive) -> tuple['Connection', bool]:
-    """Return the typed :class:`Connection` for this request, plus whether it
+    """Return the typed [`Connection`][] for this request, plus whether it
     was freshly built.
 
-    *target* is the threaded dispatch object — a :class:`Connection` on the
+    *target* is the threaded dispatch object — a [`Connection`][] on the
     native path, or an ASGI scope dict on the external/compat lane.
 
     The one *ASGI-scope → Connection* accessor shared by the dispatcher
     (``app._connection_of``) and the router (``router._conn_of``).
     BlackBull's own protocol actors stash the ``Connection`` they parsed on the
-    scope envelope under :data:`CONNECTION_STASH_KEY`, so the self-hosted path
+    scope envelope under ``CONNECTION_STASH_KEY``, so the self-hosted path
     reads it back with **no** re-conversion. Under an external ASGI server
     (uvicorn, ``httpx.ASGITransport``) there is no stash, so build one via
-    :meth:`Connection.from_scope` — the single ASGI→native point — and stash it
+    [`Connection.from_scope`][Connection.from_scope] — the single ASGI→native point — and stash it
     so later accessors in the same request reuse the one object.
 
     Returns ``(conn, built)`` where *built* is ``True`` only on the external
@@ -203,18 +203,14 @@ def bind_receive_channel(target, receive) -> None:
     """Bind the **raw** body-receive channel onto the request's Connection so
     lazy ``conn.body()`` / ``request.body()`` drain the right stream once.
 
-    Called by the protocol actor with the *unwrapped* recipient — never with a
-    disconnect-detecting wrapper. Storing the wrapper would form a per-request
-    reference cycle: ``conn._receive`` → wrapper → (closure captures) ``conn``.
-    The refcount of a cyclic group never reaches zero when the request's local
-    refs drop, so reclamation is deferred to the generational cyclic GC — whose
-    periodic pauses are a measured tail-latency cost on this path. The raw
-    recipient does **not** reference ``conn`` (HTTP/1.1 keeps only the path
-    string; HTTP/2 keeps none), so ``conn`` → recipient is an acyclic chain that
-    refcounting frees the instant the request ends.
+    Pass the *unwrapped* recipient, never a disconnect-detecting wrapper: the
+    wrapper's closure captures ``conn``, so storing it makes ``conn`` →
+    wrapper → ``conn`` a cycle that only the generational GC can free, and its
+    pauses are a measured tail-latency cost here.  The raw recipient holds no
+    reference back, so refcounting frees the chain when the request ends.
 
     Idempotent — binds only when unset, so the external-ASGI path (uvicorn /
-    ``httpx.ASGITransport``), where :meth:`Connection.from_scope` already bound
+    ``httpx.ASGITransport``), where [`Connection.from_scope`][Connection.from_scope] already bound
     the host's own receive channel, keeps that binding.
     """
     conn = target if isinstance(target, Connection) else (
@@ -233,7 +229,7 @@ class Connection:
 
     Built by the protocol actor, consumed by the router, dispatcher,
     middleware, and handlers. The ASGI ``scope`` dict is a *derived* view
-    (:meth:`as_scope`). ``Request`` is a deprecated alias of this class.
+    ([`as_scope`][]). ``Request`` is a deprecated alias of this class.
     """
 
     # -- request identity (always set by the parser) ----------------------
@@ -308,21 +304,17 @@ class Connection:
     def disconnected(self) -> bool:
         """True once the client dropped mid-request.
 
-        The named form of the state the module-level :func:`disconnected`
-        helper also reports.  A long-running
-        handler polls this to abandon work whose answer nobody is waiting for::
+        A long-running handler polls this to abandon work whose answer nobody
+        is waiting for::
 
             for row in rows:
                 if conn.disconnected:
                     break
 
-        Set by the actor's disconnect-detecting receive wrapper, so it goes
-        true when the *server* notices — at the next ``receive()`` — rather
-        than the instant the peer's FIN lands.
-
-        The module-level :func:`disconnected` remains the form to use at the
-        two ASGI boundaries, where the same state may live on a ``scope``
-        dict instead of a :class:`Connection`.
+        It goes true when the *server* notices, at the next ``receive()``,
+        rather than the instant the peer's FIN lands.  The module-level
+        [`disconnected`][] reads the same state at the two ASGI boundaries,
+        where it may live on a ``scope`` dict instead.
         """
         return self._disconnected
 
@@ -393,27 +385,27 @@ class Connection:
 
     def to_asgi_scope(self, *, force_asgi: bool = False) -> dict:
         """Materialize the ASGI scope the dispatch pipeline consumes, with this
-        typed :class:`Connection` stashed on it for zero-reconversion reads.
+        typed [`Connection`][] stashed on it for zero-reconversion reads.
 
         The single canonical *Connection → dispatch-ready scope* bridge shared
         by the H/1.1 ``run()`` and H/2 ``_conn_to_scope`` seams, which would
         otherwise each hand-roll the same five steps:
 
-        1. derive the ASGI scope via :meth:`as_scope` (the one native→ASGI point);
+        1. derive the ASGI scope via [`as_scope`][] (the one native→ASGI point);
         2. when ``force_asgi`` (the §4.3 ``BB_FORCE_ASGI_SCOPE`` dual-path lane),
-           round-trip through :meth:`from_scope` so both the derived scope *and*
+           round-trip through [`from_scope`][] so both the derived scope *and*
            the Connection the consumers read are rebuilt from scratch on every
            request, keeping the compat conversion from bitrotting.  ``_asterisk_form``
            is Connection-only (not in the scope), so carry it across the rebuild;
-        3. restore ``scope['headers']`` to the rich :class:`Headers` object
+        3. restore ``scope['headers']`` to the rich [`Headers`][] object
            (``as_scope`` emits the ASGI ``list[tuple]`` form; internal ``.get()``
            callers want the object);
         4. re-expose the H/1.1 ``_asterisk_form`` OPTIONS marker on the envelope;
-        5. stash the Connection under :data:`CONNECTION_STASH_KEY`.
+        5. stash the Connection under ``CONNECTION_STASH_KEY``.
 
         Protocol-specific augmentation (the websocket-only ``subprotocols`` key)
         is layered on by the caller *after* this returns — it is not a
-        :class:`Connection` field (proposal §2.1).
+        [`Connection`][] field (proposal §2.1).
 
         The default (``force_asgi=False``) native path builds
         the scope by **direct attribute access**, placing the rich ``Headers``
@@ -430,7 +422,7 @@ class Connection:
             # then does ``scope → Connection`` via ``from_scope`` at dispatch,
             # exercising *both* conversion directions on every request. ``headers``
             # stays the ASGI list-of-tuples form (``as_scope``); the app normalizes
-            # it to :class:`Headers` at its entry, as it does for real uvicorn input.
+            # it to [`Headers`][] at its entry, as it does for real uvicorn input.
             scope = self.as_scope()
             if self._asterisk_form:
                 scope['_asterisk_form'] = True
@@ -446,7 +438,7 @@ class Connection:
         the stashed-Connection key. Direct attribute access (no registry
         indirection); ``state``/``extensions`` are shared by reference so a
         buffering middleware's writes reach the handler; ``headers`` is the rich
-        :class:`Headers` object (internal ``.get()`` callers want it). The one
+        [`Headers`][] object (internal ``.get()`` callers want it). The one
         place a dispatch scope's key/values are assembled, used by
         ``to_asgi_scope`` for the ``BB_FORCE_ASGI_SCOPE`` / external boundary."""
         client = self.client
@@ -476,9 +468,9 @@ class Connection:
     async def body(self) -> bytes:
         """Return the complete request body, draining ``receive`` at most once.
 
-        Repeated calls (and :meth:`json` / :meth:`text`) return the cached
-        bytes. A mid-body disconnect raises :class:`ClientDisconnected`. Raises
-        :class:`RuntimeError` if :meth:`stream` already consumed the body — the
+        Repeated calls (and [`json`][] / [`text`][]) return the cached
+        bytes. A mid-body disconnect raises [`ClientDisconnected`][]. Raises
+        ``RuntimeError`` if [`stream`][] already consumed the body — the
         channel is a single drain, so there is nothing left to buffer.
         """
         if not self._body_read:
@@ -494,7 +486,7 @@ class Connection:
     async def stream(self) -> AsyncIterator[bytes]:
         """Yield the request body one chunk at a time, draining ``receive`` once.
 
-        The streaming counterpart to :meth:`body`.  Use it when the handler only
+        The streaming counterpart to [`body`][].  Use it when the handler only
         needs to *process* the body incrementally — count/hash/forward a large
         upload — so the working set stays one chunk instead of the whole
         payload::
@@ -503,11 +495,11 @@ class Connection:
             async for chunk in conn.stream():
                 total += len(chunk)
 
-        Mutually exclusive with :meth:`body`/:meth:`json`/:meth:`text`, which
+        Mutually exclusive with [`body`][]/[`json`][]/[`text`][], which
         buffer: the body is a single-drain stream, so mixing the two on one
-        request raises :class:`RuntimeError` rather than silently returning a
+        request raises ``RuntimeError`` rather than silently returning a
         partial or empty body.  A mid-body disconnect raises
-        :class:`ClientDisconnected`.
+        [`ClientDisconnected`][].
         """
         if self._body_read:
             raise RuntimeError(
@@ -541,7 +533,7 @@ class Connection:
         """Query params keeping **every** value, parsed once and cached.
 
         The full ``parse_qsl`` result: ``?tag=a&tag=b`` gives
-        ``{'tag': ['a', 'b']}``.  Unlike :attr:`query`, which folds repeats to
+        ``{'tag': ['a', 'b']}``.  Unlike [`query`][], which folds repeats to
         the last value, this is what list-valued keys need.  The backing dict
         is created lazily on first access, so handlers that never read a query
         param allocate nothing.
@@ -570,11 +562,11 @@ class Connection:
     async def form(self) -> dict[str, str]:
         """``application/x-www-form-urlencoded`` body, parsed once and cached.
 
-        Reads the body through :meth:`body`, so a later :meth:`json` /
-        :meth:`text` call reuses the cached bytes.  On a non-form
+        Reads the body through [`body`][], so a later [`json`][] /
+        [`text`][] call reuses the cached bytes.  On a non-form
         ``Content-Type`` (or no body) it returns ``{}`` rather than raising,
         and does not touch the body.  Multipart uploads are out of scope — use
-        :meth:`stream` and parse them manually.
+        [`stream`][] and parse them manually.
         """
         if self._form is None:
             if _is_urlencoded(self.headers):

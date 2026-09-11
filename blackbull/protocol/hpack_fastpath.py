@@ -79,7 +79,7 @@ def pseudo_fast_bytes(name, value) -> bytes | None:
     """Return the precomputed wire bytes for any static-indexed
     ``(name, value)`` pair, else ``None``.
 
-    Used by :meth:`PushPromise.save` to fast-path the request-side
+    Used by ``PushPromise.save`` to fast-path the request-side
     pseudo-headers (``:method``, ``:scheme``, ``:path``).  ``name`` and
     ``value`` may be ``str`` (the ASGI shape) or ``bytes``.
     """

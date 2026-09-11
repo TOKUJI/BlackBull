@@ -1,28 +1,21 @@
 """The single owned buffer for the H/1.1 inbound path.
 
 One `bytearray` per connection, written **directly by the kernel** through
-:meth:`ReadBuffer.get_buffer` and read by cursor.  Every inbound byte is
+[`ReadBuffer.get_buffer`][ReadBuffer.get_buffer] and read by cursor.  Every inbound byte is
 materialised once: the head is sliced out for the parser, the body is handed
 out as a `memoryview`, and a keep-alive peer's next request is simply the bytes
 that were already sitting between the cursors.
 
-This replaces reading through `asyncio.StreamReader`.  The distinction that
-matters is *ownership*, not buffering — a buffer layered over a reader that is
-already buffering is a third copy, which measured slower than the per-line
-`readuntil` loop it was meant to beat.  The buffer only pays when it is the
-only one.
-
 Deliberately free of HTTP semantics.  It reports an over-budget head with
-:data:`LIMIT_EXCEEDED` rather than raising, because the 431 belongs to the
+``LIMIT_EXCEEDED`` rather than raising, because the 431 belongs to the
 actor; it distinguishes "EOF with nothing" from "EOF mid-head" only by leaving
-:attr:`available` intact, because deciding between a silent close and a 400 is
+``available`` intact, because deciding between a silent close and a 400 is
 also the actor's job.
 
-Free of *receive* policy for the same reason.  It grows on demand, reports a
-drained message boundary, tracks the message's peak resident bytes (accounting
-— the release *policy* consumes it), and offers :meth:`release_to_floor` — but
-when the allocation is actually given back is the reader's call, because only
-the reader knows what the connection has been asked to deliver.
+Free of *receive* policy for the same reason: it grows on demand, reports a
+drained message boundary, tracks the message's peak resident bytes, and offers
+``release_to_floor``, but takes none of those decisions.  The Internals
+page says which object does.
 
 Not thread-safe and not concurrency-safe — one connection, one buffer, one
 actor loop, per the actor model.
@@ -47,7 +40,7 @@ _MIN_READ = 4096
 #: second stops a large resident body being shuffled while it is consumed.
 _COMPACT_MIN = 4096
 
-#: Size at or above which :meth:`ReadBuffer.take` copies through a memoryview
+#: Size at or above which [`ReadBuffer.take`][ReadBuffer.take] copies through a memoryview
 #: instead of a `bytearray` slice — the measured crossover, tabulated on
 #: ``take``.  Deliberately not configurable: a property of the interpreter's
 #: copy costs, not of a deployment.
@@ -70,11 +63,11 @@ class ReadBuffer:
         'peak_avail',
     )
 
-    #: :meth:`find_head_end` result meaning "the byte budget ran out before the
+    #: [`find_head_end`][] result meaning "the byte budget ran out before the
     #: terminator appeared".  Returned rather than raised — see module docstring.
     LIMIT_EXCEEDED = -2
 
-    #: The size :meth:`release_to_floor` returns to.  Public because the
+    #: The size ``release_to_floor`` returns to.  Public because the
     #: reader's release policy compares a message's peak against it.
     FLOOR = _INITIAL
 
@@ -90,7 +83,7 @@ class ReadBuffer:
         #: consuming read, written only where the buffer resizes.
         self.grown = False
         #: A compaction left the buffer empty.  Raised here and cleared by
-        #: :meth:`consume_boundary`; this object never reads it.
+        #: [`consume_boundary`][]; this object never reads it.
         self.drained_boundary = False
         #: Peak resident bytes since the last boundary — accounting for the
         #: reader's release hysteresis, kept here because the write path
@@ -123,10 +116,10 @@ class ReadBuffer:
         """Cumulative bytes the head scan has looked at on this connection.
 
         Exposed so the linear-scan invariant is assertable rather than merely
-        intended: a scan that restarted from the front on every arrival would
-        make this quadratic in the number of segments, which is a peer-chosen
-        CPU cost.  Overlap of up to three bytes per resumption is expected —
-        that is the straddled-terminator back-off.
+        intended: a scan restarting from the front on every arrival would make
+        this quadratic in the number of segments, a peer-chosen CPU cost.
+        Overlap of up to three bytes per resumption is the straddled-terminator
+        back-off, not a restart.
         """
         return self._examined
 
@@ -138,24 +131,15 @@ class ReadBuffer:
     def get_buffer(self, sizehint: int, *, want: int = 0) -> memoryview:
         """Space for the transport to read into.
 
-        asyncio passes ``-1`` when it has no preference, and the protocol
-        contract requires a non-empty buffer — returning an empty one stalls
-        the connection permanently.
+        The returned buffer is never empty — an empty one stalls the connection
+        permanently — even though asyncio passes ``sizehint = -1`` when it has
+        no preference.
 
-        The *sizehint* is what the transport would *like* to read in one
-        recv, not what it needs: uvloop's cleartext path passes libuv's fixed
-        64 KiB on every call, so honouring it would grow every connection's
-        buffer to 64 KiB on its first request and the reader's release policy
-        would give it back at the message boundary — a 64 KiB alloc/free
-        churn per request (the F5 read-path finding).  Growth is therefore
-        driven by bytes actually arriving (the ``_w`` cursor) and by the
-        *demand* the caller passes in — the reader's pending read size, via
-        :class:`ConnectionProtocol` — never by the hint.  A parked read of
-        *n* gets a free span of up to ``min(n, high-water)`` so one recv
-        feeds most of it: the arrival granularity follows the demand, not the
-        idle floor, which is what keeps a transport-paced (up-to-n) read from
-        collapsing to floor-sized deliveries.  Idle (``want = 0``) stays at
-        the floor span.
+        *sizehint* is advisory and is never honoured; the Internals page says
+        why.  Growth follows arriving bytes and *want*, the caller's pending
+        read size: a parked read of *n* gets a span of up to
+        ``min(n, high-water)`` so one recv feeds most of it, and ``want = 0``
+        stays at the floor.
         """
         self._drop_view()
         target = want if want > _MIN_READ else _MIN_READ
@@ -167,13 +151,11 @@ class ReadBuffer:
         return self._view
 
     def buffer_updated(self, nbytes: int) -> int:
-        """Declare how much of the last :meth:`get_buffer` was written.
+        """Declare how much of the last [`get_buffer`][] was written.
 
-        Returns the new resident count so the caller — the reader's arrival
-        decision — need not re-read it.  Tracks the message's peak resident
-        bytes while it is at it, but only once the buffer has grown past the
-        floor; a floor-sized buffer can never need the hysteresis decision,
-        so the common case costs one compare.
+        Returns the new resident count, and updates ``peak_avail`` on the
+        way — but only for a grown buffer, since a floor-sized one can never
+        reach the release decision that reads it.
         """
         self._w += nbytes
         if self.grown and self._w - self._r > self.peak_avail:
@@ -213,7 +195,7 @@ class ReadBuffer:
         """Length of the message head, terminator included, or a sentinel.
 
         Returns ``-1`` when the terminator has not arrived yet and
-        :data:`LIMIT_EXCEEDED` when *limit* (0 = unbounded) is passed without
+        ``LIMIT_EXCEEDED`` when *limit* (0 = unbounded) is passed without
         one.
 
         The scan resumes from where the last call stopped, backed off by three
@@ -241,13 +223,11 @@ class ReadBuffer:
     def find(self, sep: bytes, start: int = 0) -> int:
         """Offset of *sep* within the resident bytes, or ``-1``.
 
-        Unlike :meth:`find_head_end` this scans from the read cursor every
-        call: its callers are the generic `readuntil` paths (chunk-size lines,
-        WebSocket framing), where the search target changes between calls so a
-        carried scan offset would be wrong rather than merely wasteful.
-
-        *start* is a relative offset used by one ``readuntil`` call to resume
-        its scan while a fixed separator is still pending.
+        Scans from the read cursor every call, unlike [`find_head_end`][]:
+        its callers change the search target between calls, so a carried scan
+        offset would be wrong rather than merely wasteful.  *start* is a
+        relative offset for a caller resuming its own scan on a separator that
+        is still pending.
         """
         idx = self._buf.find(sep, self._r + start, self._w)
         return -1 if idx < 0 else idx - self._r
@@ -312,7 +292,7 @@ class ReadBuffer:
         return memoryview(self._buf)[self._r:self._r + n]
 
     def consume(self, n: int) -> None:
-        """Advance past *n* bytes handed out by :meth:`view`."""
+        """Advance past *n* bytes handed out by [`view`][]."""
         self._r += n
         self._reset_scan()
 
@@ -321,13 +301,8 @@ class ReadBuffer:
 
         Called on message boundaries.  Without it the cursors walk forward for
         the life of a keep-alive connection and the allocation grows to every
-        byte ever received on it.
-
-        Compacting to empty is the one moment a message is provably gone, so it
-        raises :attr:`drained_boundary` for the reader's release policy.  The
-        flag is a report, not a decision: this object does not know whether a
-        connection that has just finished a large message is about to serve
-        another one.
+        byte ever received on it.  Compacting to empty is the one moment a
+        message is provably gone, so it raises ``drained_boundary``.
         """
         self._drop_view()
         r = self._r
@@ -349,17 +324,10 @@ class ReadBuffer:
     def consume_boundary(self) -> None:
         """Take the raised boundary, and start the next message's accounting.
 
-        The reader polls :attr:`drained_boundary` on every consuming read —
-        cheap, and true only rarely — and calls this when it is set.  Clearing
-        it here rather than at the call site is the whole point: the flag and
-        the peak are this object's state, so the transition that ends a
-        message's accounting is this object's to make.  A consumer that reset
-        them itself would be an edge-triggered signal with the reset on the
-        wrong side, and the edge would go to whichever consumer reached it
-        first.
-
-        Called only on a real boundary, so the cost is a rare call rather than
-        a per-read one — the same shape as the reader's own ``maybe_pause``.
+        The reader polls ``drained_boundary`` and calls this when it is
+        set.  Clearing the flag and the peak has to happen here rather than at
+        the call site: a consumer resetting them itself makes an edge-triggered
+        signal whose edge goes to whichever consumer reaches it first.
         """
         self.drained_boundary = False
         self.peak_avail = 0
@@ -367,18 +335,14 @@ class ReadBuffer:
     def release_to_floor(self) -> bool:
         """Hand a grown allocation back.  ``True`` when it was given up.
 
-        A single large upload must not leave every connection that served one
-        holding its peak allocation for the rest of its keep-alive life — that
-        is the idle-memory floor the read window is also sized against.  *When*
-        to do that is hysteretic and belongs to the reader, which is the only
-        object that knows what the connection has been asked for; this is the
-        mechanism it calls.
+        The mechanism behind the reader's hysteretic release policy: a single
+        large upload must not leave every connection that served one holding
+        its peak allocation for the rest of its keep-alive life.
 
-        Refuses while bytes are resident, and that is not a policy check but
-        the one invariant the container owes its caller: the boundary flag is
-        raised inside :meth:`compact`, including the compaction
-        :meth:`_make_room` does on the *arrival* path, where a delivery lands
-        immediately afterwards.  Reallocating there would discard bytes the
+        Refuses while bytes are resident.  That is the one invariant this
+        container owes its caller, not a policy check — ``drained_boundary``
+        is also raised on the *arrival* path, where a delivery lands
+        immediately afterwards and reallocating would discard bytes the
         transport has already handed over.
         """
         if not self.grown or self._w != self._r:

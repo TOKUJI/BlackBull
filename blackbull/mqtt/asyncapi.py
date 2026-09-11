@@ -1,13 +1,12 @@
-"""AsyncAPI 3.0 documentation for the MQTT broker — :class:`AsyncAPIExtension`.
+"""AsyncAPI 3.0 documentation for the MQTT broker — [`AsyncAPIExtension`][].
 
-OpenAPI documents BlackBull's HTTP surface; it has no vocabulary for topics,
-QoS, retain, or the publish/subscribe direction, so the MQTT broker is — by
-design — invisible to it.  **AsyncAPI** (https://www.asyncapi.com/) is the
-messaging-world counterpart, and this extension emits an AsyncAPI 3.0 document
-describing the topic taps the application registered via
-``MQTTExtension.on_message``, served over HTTP exactly as ``/openapi.json`` is.
+OpenAPI has no vocabulary for topics, QoS, retain, or the publish/subscribe
+direction, so the broker is invisible to it.  **AsyncAPI**
+(https://www.asyncapi.com/) is the messaging-world counterpart, and this
+extension emits an AsyncAPI 3.0 document for the taps registered via
+``MQTTExtension.on_message``, served as ``/openapi.json`` is.
 
-It is a normal :class:`~blackbull.extension.Extension`, parallel to
+It is a normal [`Extension`][blackbull.extension.Extension], parallel to
 ``OpenAPIExtension`` and coexisting with it::
 
     app = BlackBull()
@@ -20,15 +19,9 @@ It is a normal :class:`~blackbull.extension.Extension`, parallel to
 After ``app.run()`` the document is at ``/asyncapi.json`` and an HTML viewer at
 ``/asyncapi``.
 
-Honest caveats (also stated in the document's ``info.description``):
-
-1. It documents the **application's taps**, not "the broker's API".  A broker
-   accepts any topic from any client; ``on_message`` filters describe only what
-   *this* app observes.
-2. **QoS / retain are not captured** — ``on_message`` taps regardless of QoS,
-   so MQTT channel bindings are omitted until the tap API carries that metadata.
-3. **Payloads are opaque bytes** (``application/octet-stream``) until an
-   optional ``schema=`` on ``on_message`` lands (a deliberate fast-follow).
+What it documents is the application's taps and not the broker's API, without
+QoS or retain, over opaque payloads.  The emitted ``info.description`` says so
+to whoever reads the document, and ``docs/guide/mqtt.md`` says why.
 """
 from __future__ import annotations
 

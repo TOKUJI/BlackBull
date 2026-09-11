@@ -5,19 +5,14 @@ to send and obliges the server to do a small piece of work per frame.  A
 PING costs an ACK write, a SETTINGS costs an ACK write, a zero-length
 CONTINUATION costs a parse and a loop turn, a WebSocket PING costs a PONG.
 None of them is large, so no byte budget sees them; each is unbounded in
-*count*, which is the axis that matters.
+*count*, which is the axis this meters.
 
-This module exists so that answer is written once.  BlackBull already
-metered exactly one frame type — inbound RST_STREAM, from the Rapid Reset
-work (CVE-2023-44487) — with the window inlined in the frame loop.  Four
-more sites needed the same logic, and four more copies of it would have
-been the first duplicated check in this server's defences.
-
-Deliberately not a token bucket: a fixed window is what the Rapid Reset
-counter already was, its constants are calibrated against real traffic,
-and a burst-tolerant refill curve would change the meaning of limits that
-were chosen by observation.  If a site ever needs smoothing, it gets a
-second primitive with its own name, not a quietly different `hit()`.
+Deliberately not a token bucket.  The constants its callers pass are
+calibrated against observed traffic — the inbound RST_STREAM window
+answering Rapid Reset (CVE-2023-44487) among them — and a burst-tolerant
+refill curve would change what those limits mean.  A site that needs
+smoothing gets a second primitive with its own name, not a quietly
+different `hit()`.
 """
 from __future__ import annotations
 
@@ -28,7 +23,7 @@ class RateWindow:
     """Count events per fixed window; report when the budget is spent.
 
     ``limit`` events are permitted per ``window`` seconds.  A ``limit`` of
-    ``0`` disables the meter entirely — :meth:`hit` then never reports an
+    ``0`` disables the meter entirely — [`hit`][] then never reports an
     overrun, which is how every cap knob in this server spells "off".
 
     One instance per *thing being counted*, per connection: separate
@@ -76,23 +71,17 @@ class RateWindow:
 class ByteRateFloor:
     """Minimum sustained *byte* rate over a rolling window.
 
-    :class:`RateWindow` counts events; this weighs octets against the time
+    [`RateWindow`][] counts events; this weighs octets against the time
     spent waiting for them, which is the other half of the same defence and a
-    different question.  The module docstring's rule applies: a site needing
-    different arithmetic gets a second primitive with its own name rather than
-    a quietly different ``hit()``.
-
-    Why a rate and not a deadline: a per-read timeout returns on *any*
-    arrival, so it degrades from "deliver a slice in N seconds" to "send
-    something every N seconds", which a one-byte drip always satisfies.  A
-    rate is what a drip cannot fake (Kestrel's ``MinRequestBodyDataRate``).
+    different question.  A rate, not a deadline, because a one-byte drip
+    satisfies every per-read timeout ever set (Kestrel's
+    ``MinRequestBodyDataRate`` is the same answer).
 
     The window is one grace period wide and rolls when it is satisfied, so a
-    burst buys the window it happened in and not the whole message: a peer
-    that ran ahead and then stalled is judged on the stall.  Nothing is judged
-    before a grace period of waiting has accumulated.
+    peer that ran ahead and then stalled is judged on the stall.  Nothing is
+    judged before a grace period of waiting has accumulated.
 
-    Both arguments to :meth:`record` are the caller's to define, and the
+    Both arguments to [`record`][] are the caller's to define, and the
     difference between them is the whole design.  *waited* should be every
     second the caller sat on the transport, including reads that delivered
     nothing countable — otherwise a peer stalls before the parts that are not

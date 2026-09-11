@@ -1,11 +1,11 @@
 """MQTT 5.0 broker — the routing/session state owner (actor model).
 
-:class:`BrokerActor` is one per app/worker, supervisor/lifespan-owned. It owns
+[`BrokerActor`][] is one per app/worker, supervisor/lifespan-owned. It owns
 *all* routing state (subscriptions, sessions, retained messages, the live
 connection registry) and processes its inbox serially, so there are no locks
 and no shared mutable state. Per-connection actors (see
-:mod:`blackbull.mqtt.connection`) ``send`` it the Level A messages defined here
-and receive :class:`Send` / :class:`Close` back.
+[`blackbull.mqtt.connection`][blackbull.mqtt.connection]) ``send`` it the Level A messages defined here
+and receive [`Send`][] / [`Close`][] back.
 
 Because the broker outlives every connection actor, a Will (LWT) routes to live
 subscribers during a peer's teardown with no special-casing.
@@ -54,16 +54,30 @@ class Attach(ActorMessage):
 
 @dataclass
 class ClientSubscribe(ActorMessage):
+    """A SUBSCRIBE arrived; record its filters and reply with SUBACK."""
+
     subscribe: MQTTSubscribe | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass
 class ClientUnsubscribe(ActorMessage):
+    """An UNSUBSCRIBE arrived; drop its filters and reply with UNSUBACK."""
+
     unsubscribe: MQTTUnsubscribe | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass
 class ClientPublish(ActorMessage):
+    """A PUBLISH arrived; route it to matching subscribers.
+
+    ``admitted`` is an optional future the broker resolves with whether the
+    sender still held a session when this packet reached the front of the
+    inbox.  A reader may pipeline PUBLISH ahead of CONNACK, and only the
+    broker's own FIFO knows whether a rejection or a takeover overtook it, so
+    a caller that must act after the packet is accepted awaits this rather
+    than assuming the send succeeded.
+    """
+
     publish: MQTTPublish | None = field(default=None, compare=False, repr=False)
     admitted: asyncio.Future[bool] | None = field(default=None, compare=False, repr=False)
 
@@ -85,21 +99,33 @@ class ClientProtocolError(ActorMessage):
 
 @dataclass
 class ClientPuback(ActorMessage):
+    """The client's PUBACK; the outbound QoS 1 message for this packet id is
+    delivered and its slot is free."""
+
     packet_id: int | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass
 class ClientPubrec(ActorMessage):
+    """The client's PUBREC for an outbound QoS 2 message; the broker answers
+    with PUBREL for the same packet id."""
+
     packet_id: int | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass
 class ClientPubrel(ActorMessage):
+    """The client's PUBREL for an inbound QoS 2 message; the broker releases
+    the held message and answers with PUBCOMP."""
+
     packet_id: int | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass
 class ClientPubcomp(ActorMessage):
+    """The client's PUBCOMP; the outbound QoS 2 exchange for this packet id is
+    finished and its slot is free."""
+
     packet_id: int | None = field(default=None, compare=False, repr=False)
 
 
@@ -165,7 +191,7 @@ def _input_size(msg: ActorMessage) -> int:
 
 
 def _valid_filter(topic_filter: str) -> bool:
-    """Bool wrapper over :func:`validate_topic_filter`.
+    """Bool wrapper over [`validate_topic_filter`][].
 
     The validator has a mixed contract — it returns ``False`` for a null char
     but *raises* ``ValueError`` for structural violations.  The broker only
@@ -181,7 +207,7 @@ def _parse_share(topic_filter: str) -> tuple[str, str] | None:
     """§4.8.2 — split ``$share/{ShareName}/{filter}`` into ``(share, filter)``.
 
     Returns ``None`` for a non-shared filter or one too malformed to carry a
-    filter portion at all (validation proper is :func:`validate_topic_filter`;
+    filter portion at all (validation proper is [`validate_topic_filter`][];
     this only extracts the group key).
     """
     if not topic_filter.startswith('$share/'):
