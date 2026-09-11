@@ -61,18 +61,14 @@ class MQTTExtension(Extension):
     Will delivery) runs whether or not any handler is registered; handlers are
     an application-level tap on top of normal broker routing.
 
-    This instance owns a single :class:`BrokerActor` and a single
-    :class:`TapActor` (both started on app startup, stopped on shutdown) — one
-    broker and one tap consumer per worker, no module globals.  The class is
-    self-contained and importable from a future ``blackbull-mqtt`` package
-    without touching the core.
+    This instance owns one :class:`BrokerActor` and one :class:`TapActor`,
+    started on app startup and stopped on shutdown — one of each per worker.
 
     ``tap_mode`` selects how taps are dispatched: ``'actor'`` (default) runs
-    them on the decoupled :class:`TapActor` so a slow tap never back-pressures
-    delivery; ``'inline'`` uses the connection-actor dispatch directly
-    and exists mainly so ``bench/mqtt/tap_throughput.py`` can compare the two on
-    one build.  ``tap_queue_size`` bounds the actor-mode inbox (drop-newest on
-    overflow).
+    them on the decoupled :class:`TapActor`, so a slow tap never
+    back-pressures delivery; ``'inline'`` dispatches on the connection actor
+    itself.  ``tap_queue_size`` bounds the actor-mode inbox (drop-newest on
+    overflow), and ``docs/about/mqtt-actor-design.md`` covers the choice.
     """
 
     extension_key = 'mqtt'
@@ -106,11 +102,9 @@ class MQTTExtension(Extension):
     def iter_subscriptions(self) -> Iterator[Subscription]:
         """Yield a :class:`Subscription` for each registered ``on_message`` tap.
 
-        A stable, public, read-only accessor over the compiled handlers — the
-        seam ``AsyncAPIExtension`` reads instead of touching ``_handlers``.
-        Reflects the handlers registered *at call time*, so a documentation
-        endpoint that calls this per request picks up taps added after the
-        documenting extension was wired in.
+        A read-only view of the compiled handlers *at call time*, so a
+        documentation endpoint calling it per request picks up taps
+        registered after that endpoint was wired in.
         """
         for tap in self._handlers:
             yield Subscription(topic=tap.display_filter, callback=tap.callback)

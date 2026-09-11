@@ -139,14 +139,9 @@ class ExpectResponse:
 class HalfClose:
     """Shut down the sending direction only (FIN), keep reading.
 
-    Neither :class:`Abort` nor a full close says this.  ``Abort`` sends RST,
-    which discards whatever is buffered and leaves nothing to read; a full
-    close ends both directions at once.  A half-close is the ordinary end of
-    a non-keep-alive exchange — "I have finished sending, I am still waiting
-    for your answer" — and it is a distinct code path on the peer.
-
-    **Not terminal**: later steps still run, because continuing to read is
-    the whole point.
+    **Not terminal** — later steps still run, which is the whole point.
+    ``Abort`` is not a substitute: it sends RST, discarding what is buffered
+    and leaving nothing to read.
     """
 
 
@@ -159,8 +154,7 @@ class Scenario:
     """A sequence of steps the executor walks against one connection."""
     steps: tuple[Step, ...]
     #: For test parametrisation and reporting, as the other three scenario
-    #: types carry.  Added by the 107+108 consistency sweep: a scenario a
-    #: failing CI run can point at by name is worth two lines.
+    #: types carry — so a failing CI run can name the scenario that broke.
     name: str = ''
 
     # ------------------------------------------------------------------
@@ -208,9 +202,8 @@ class Scenario:
         Skips blank lines so files that end with a trailing newline
         (the conventional git-friendly shape) parse cleanly.
 
-        A ``HEADER`` line carries the name.  It is optional on the way in:
-        corpus files written before the header existed have no such line
-        and still parse, yielding an unnamed scenario.
+        A ``HEADER`` line carries the name and is optional on the way in:
+        a file without one parses to an unnamed scenario.
         """
         name = ''
         steps: list[Step] = []
@@ -330,9 +323,8 @@ class ScenarioResult:
 
     Exactly one of ``response`` / ``exception`` / ``timed_out`` /
     ``aborted`` is the meaningful field; the others are ``None`` /
-    ``False``.  The executor never raises, so callers (differential
-    test, fuzz harness) categorise on this object instead of writing
-    try/except boilerplate per scenario.
+    ``False``.  The executor never raises, so a caller categorises on this
+    object rather than on an exception.
     """
 
     # Populated when a ReadResponse step received a full HTTP/1.1
@@ -529,28 +521,15 @@ __all__ = [
     'StepOp',
 ]
 
-# ---------------------------------------------------------------------------
-# Naming: ``SendRawBytes`` is the canonical spelling across all four
-# vocabularies
-# ---------------------------------------------------------------------------
-#
-# The two server-side vocabularies have always called this ``SendRawBytes``
-# and the two client-side ones ``SendRawBytes`` — the same step, the same two
-# fields, the name split by *role* rather than by anything a reader could
-# predict.  The consistency sweep at the 107+108 close found it, and with a
-# typed alternative now present on every half, "raw" is the word that earns
-# its place.
-#
-# ``SendRawBytes`` is the name to use.  ``SendRawBytes`` keeps working and is
-# **deprecated**: removal no earlier than 2027-08-19, and at an arbitrary
-# time after that, following the deprecation window ASGI uses.
+# ``SendRawBytes`` is the canonical spelling in all four scenario
+# vocabularies; ``SendBytes`` is the deprecated client-side one.
 
 def __getattr__(name: str):
     """PEP 562 — warn when the deprecated spelling is actually used.
 
     A module-level assignment would alias silently; going through
-    ``__getattr__`` means a reader who never touches ``SendRawBytes`` never
-    sees a warning, and one who does gets it at their own call site.
+    ``__getattr__`` means only a caller who reaches for ``SendBytes`` is
+    warned, and is warned at their own call site.
     """
     if name == 'SendBytes':
         import warnings  # noqa: PLC0415

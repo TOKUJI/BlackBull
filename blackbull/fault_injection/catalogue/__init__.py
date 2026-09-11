@@ -2,24 +2,11 @@
 
 Each function returns a :class:`~blackbull.fault_injection.ScenarioH2`
 that drives :class:`~blackbull.fault_injection.H2FaultServer` through
-one well-known misbehaviour pattern.  Catalogue scenarios are
-deliberately small — one named pathology per scenario — so test
-suites can stack ``parametrize`` over the catalogue to assert
-client-side resilience across the four spec-grade categories the
-roadmap calls out:
-
-  * **Half-closed streams** — server stops mid-stream without
-    END_STREAM / RST_STREAM; client must time out or give up.
-  * **Exhausted flow-control windows** — server advertises a
-    zero-byte window then refuses to grant WINDOW_UPDATE; client
-    must respect backpressure rather than spin.
-  * **Custom / illegal SETTINGS** — server advertises a value
-    below the RFC-mandated minimum or an unknown setting id;
-    client must treat as PROTOCOL_ERROR per RFC 9113 §6.5.2.
-  * **Weird frame sequences** — server emits frames in an
-    out-of-order or unfinished pattern (HEADERS without
-    END_HEADERS and no CONTINUATION, DATA on stream 0); client
-    must close the connection with PROTOCOL_ERROR.
+one well-known misbehaviour pattern: one named pathology per scenario,
+so a suite can ``parametrize`` over the set.  The four spec-grade
+categories they cover — half-closed streams, exhausted flow-control
+windows, illegal SETTINGS, weird frame sequences — are tabulated in
+``docs/guide/fault_injection.md`` against the builder for each.
 
 Catalogue entries are pure builders.  They allocate nothing at
 import time, take no I/O, and the returned scenario is immutable;

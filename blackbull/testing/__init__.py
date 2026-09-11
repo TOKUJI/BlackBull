@@ -1,35 +1,16 @@
 """Test clients for BlackBull applications — three instruments, three layers.
 
-BlackBull threads a typed :class:`~blackbull.connection.Connection` end to
-end and keeps the ASGI ``scope`` dict at two boundaries only.  That is why
-there is more than one test client here, and why picking the right one
-matters: each drives a different layer, and a defect on one is invisible to
-the others.
+:mod:`blackbull.testing.native` drives application logic, its
+:class:`~blackbull.testing.native.NativeTestServer` drives the full stack on
+a loopback socket, and :class:`TestClient` drives the ASGI compatibility
+boundary.  ``docs/guide/testing.md`` tabulates which to reach for; a defect
+on one layer is invisible to the others.
 
-============================  =============================================
-Instrument                    What it exercises
-============================  =============================================
-:mod:`blackbull.testing.native`   Application logic — routing, middleware,
-                              handlers, DI, events — through the *native*
-                              ``app(conn, receive, send)`` entry point that
-                              every production request takes.  The default
-                              choice for everyday tests.
-:class:`~blackbull.testing.native.NativeTestServer`
-                              The full stack on a real loopback socket:
-                              protocol parsing, framing, keep-alive,
-                              connection lifecycle, wire bytes.
-:class:`TestClient`           The **ASGI compatibility boundary** — the
-                              ``as_scope()`` / ``from_scope()`` round-trip,
-                              driven the way an external ASGI host
-                              (uvicorn, ``httpx.ASGITransport``) drives it.
-============================  =============================================
-
-:class:`TestClient` is deliberately *not* the default.  It reaches the app
-through ``httpx.ASGITransport`` → ASGI scope dict → ``from_scope()``, so the
-``isinstance(conn, Connection)`` branch of ``BlackBull.__call__`` is never
-taken by it.  What it uniquely covers is the conversion chain itself: a
-missing ``_CONNECTION_FIELDS`` entry or a ``from_scope`` coercion bug shows
-up here and nowhere else in the suite, which is exactly why it stays.
+:class:`TestClient` is not the everyday one.  It reaches the app through
+``httpx.ASGITransport`` → ASGI scope dict → ``from_scope()``, never taking
+the ``isinstance(conn, Connection)`` branch of ``BlackBull.__call__``.  What
+it uniquely covers is that conversion chain, where a coercion bug surfaces
+here and nowhere else in the suite.
 
 ``TestClient`` usage — a boundary-conformance instrument::
 
@@ -311,11 +292,6 @@ class WebSocketTestSession:
         self._accepted = False
 
     def __enter__(self) -> 'WebSocketTestSession':
-        """Run the handshake and return the connected session.
-
-        Raises [`WebSocketDisconnect`][blackbull.testing.WebSocketDisconnect]
-        if the application rejects the connection instead of accepting it.
-        """
         self._loop_thread.start()
 
         async def _spawn():

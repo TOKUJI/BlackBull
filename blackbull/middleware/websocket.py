@@ -1,15 +1,13 @@
 """Handshake middleware — accepts the connection before the handler runs.
 
-Predates the high-level :class:`~blackbull.websocket.WebSocket` object and
-exists to strip the accept/close boilerplate from raw-triplet handlers.  It
-works with either handler form: it records the handshake on the connection,
-so a ``WebSocket`` object built downstream adopts that state instead of
-waiting for a ``websocket.connect`` that has already been consumed.
+Strips the accept/close boilerplate from a raw-triplet handler.  It works
+with either handler form: the handshake is recorded on the connection, so a
+:class:`~blackbull.websocket.WebSocket` built downstream adopts that state
+instead of waiting for a ``websocket.connect`` already consumed.
 
-With the object form the middleware is largely redundant — ``await
-ws.accept()`` is the line it was removing — but combining them is supported
-rather than refused, because a route's middleware list and its handler
-signature are usually changed by different people at different times.
+The object form makes it redundant — ``await ws.accept()`` is the line it
+removes — but the two combine rather than conflict, so a route need not
+change its middleware list and its handler signature together.
 """
 import logging
 

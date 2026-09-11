@@ -1,16 +1,10 @@
 """Native-path test client — the two tiers that drive BlackBull's *own*
 request path rather than the ASGI compatibility boundary.
 
-BlackBull threads a typed :class:`~blackbull.connection.Connection` end to
-end; the ASGI ``scope`` dict survives only at two boundaries.  The
-compatibility client in :mod:`blackbull.testing` reaches the app through
-``httpx.ASGITransport`` → scope dict → ``Connection.from_scope()``, so the
-``isinstance(conn, Connection)`` branch of ``BlackBull.__call__`` — the branch
-every production request takes — is never exercised by it.  A defect can
-therefore live on the native path while the whole compat-driven suite passes.
-
-Two tiers close that, mirroring what every framework that owns its protocol
-stack provides:
+A defect can live on the native path while a suite driven entirely through
+the ASGI compatibility boundary passes, because that boundary never takes
+the ``isinstance(conn, Connection)`` branch every production request does.
+Two tiers close that gap.
 
 **Tier 1** — :func:`request` and the verb helpers build a ``Connection`` and
 call ``app(conn, receive, send)`` directly.  No socket, no protocol actor:
@@ -30,15 +24,13 @@ wire bytes.  The equivalent of aiohttp's ``TestServer`` or Go's
     async with NativeTestServer(app) as server:
         resp = await server.client.get('/hello')
 
-Both tiers are async-first because the app entry point is a coroutine and a
-handler runs on the caller's event loop — which is also what production does.
+Both tiers are async-first, because the app entry point is a coroutine and a
+handler runs on the caller's event loop, as it does in production.
 :class:`NativeClient` and the synchronous form of :class:`NativeTestServer`
 wrap them for tests written as plain ``def``, each owning one background
-event loop for its whole lifetime rather than per request.
+event loop for its whole lifetime rather than one per request.
 
-Which instrument to reach for is documented in ``docs/guide/testing.md``:
-Tier 1 for application logic, Tier 2 for anything whose answer depends on the
-wire, and :class:`~blackbull.testing.TestClient` for the ASGI boundary itself.
+``docs/guide/testing.md`` says which instrument answers which question.
 """
 
 from __future__ import annotations
@@ -136,7 +128,7 @@ def build_connection(
 ) -> Connection:
     """Build the :class:`Connection` an H/1.1 request line would have produced.
 
-    The field derivations mirror :meth:`HTTP1Actor._parse` so a Tier 1 test and
+    The field derivations mirror the HTTP/1.1 parser's, so a Tier 1 test and
     a real request agree on what the handler sees:
 
     - the query string is split off ``path`` and carried in ``query_string``,

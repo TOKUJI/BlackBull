@@ -10,16 +10,12 @@ mid-chunk, a connection dropped mid-response.
 
 The symmetric client-side half — a programmable *client* driving a real
 server — is :mod:`blackbull.fault_injection.scenario_h1`.  Its vocabulary
-looks similar and is **not** reusable here: ``ReadResponse`` and
-``SendBytes`` name the other end of the wire.  Two vocabularies, because
-there are two roles.
+looks similar and is **not** reusable here: ``ReadResponse`` names the
+other end of the wire.  Two vocabularies, because there are two roles.
 
-Everything a scenario emits is **raw bytes**, deliberately.  There is no
-typed ``SendResponse`` step, because a response object would be built by
-the production response path, and a fault server that shares the
-production serialiser cannot produce a fault that serialiser has.  The
-HTTP/2 half made the same choice for the same reason (it carries its own
-frame encoder rather than calling ``FrameBase.save()``).
+Everything a scenario emits is raw bytes; there is no typed
+``SendResponse`` step.  ``docs/guide/fault_injection.md`` says why that is
+load-bearing.
 """
 from __future__ import annotations
 
@@ -48,28 +44,16 @@ class StepOpH1Server(str, enum.Enum):
 class WaitForRequest:
     """Block until a request head arrives, optionally one that matches.
 
-    A scenario that writes before the request is read is testing a
-    different thing — an unsolicited response — and can simply omit this
-    step.  On ``timeout`` expiry the executor records the miss and
-    proceeds, matching ``WaitForClientFrame`` on the HTTP/2 side.
+    A filter: with ``match`` set, heads that do not match are **read and
+    skipped** and the step keeps waiting, which on a pipelined connection
+    (RFC 9112 §9.3.2) is how a scenario breaks the POST and not the GET.
+    On ``timeout`` expiry the executor records the miss and proceeds.
 
-    With ``match`` set, heads that do not match are **read and skipped**,
-    and the step keeps waiting — the same filter-over-a-stream meaning
-    ``WaitForClientFrame`` has.  On HTTP/1.1 that stream is a pipeline
-    (RFC 9112 §9.3.2), so this is how a scenario misbehaves at one request
-    among several: answer the GET normally, break on the POST.
+    **Skipping desyncs the connection**, because HTTP/1.1 responses are
+    positional: a head passed over is one the scenario can no longer
+    answer.  The count is on ``ScenarioH1ServerResult.requests_skipped``.
 
-    **Skipping desyncs the connection, and that is not hidden.**  HTTP/1.1
-    responses are positional — a skipped request is one the scenario can
-    no longer answer, so everything after it is off by one.  On HTTP/2 the
-    equivalent is harmless because streams are independent; here it is a
-    fault in its own right, staged deliberately or not at all.  The count
-    lands on ``ScenarioH1ServerResult.requests_skipped`` so a scenario
-    author reads it from the result rather than deducing it.
-
-    Use :class:`ExpectRequest` when the question is "did the client send
-    what this scenario assumes" — that one reads a single head and skips
-    nothing.
+    :class:`ExpectRequest` is the guard that skips nothing.
     """
     match: dict = field(default_factory=dict)
     timeout: float = 5.0
@@ -80,20 +64,13 @@ class ExpectRequest:
     """Read one request head and record whether it matched.
 
     A guard, not a filter: nothing is skipped and the connection stays in
-    step.  It answers a different question from :class:`WaitForRequest` —
-    *is the client under test behaving as this scenario assumes?*  A
-    scenario that stages a fault against `Expect: 100-continue` is testing
-    nothing at all if the client never sent that header, and without this
-    the run would look like a pass.
+    step.  It asks whether the client under test is behaving as the
+    scenario assumes — a fault staged against `Expect: 100-continue` tests
+    nothing if the client never sent that header.
 
     A mismatch is **recorded, not raised**:
     ``ScenarioH1ServerResult.expectations`` collects one
-    ``(match, matched)`` pair per step, so a scenario reports what it
-    assumed alongside what it got.
-
-    Deliberately not called ``WaitForRequest(match=...)`` even though the
-    grammar is the same: reusing a name for a different meaning is the
-    thing the 107+108 consistency sweep was run to prevent.
+    ``(match, matched)`` pair per step.
     """
     match: dict = field(default_factory=dict)
     timeout: float = 5.0
@@ -117,12 +94,10 @@ class SendRawBytes:
 class SendStatusLine:
     """Emit a status line, field by field.
 
-    Added by the 107+108 consistency sweep.  Nothing validates: a status
-    line with no reason phrase, an impossible version, or a three-digit
-    code that is not a status are all faults worth staging, and a typed
-    step that refused them would be useless here.  What it buys over raw
-    bytes is that the *shape* is legible — a reader sees which field the
-    scenario is bending.
+    Nothing validates: a status line with no reason phrase, an impossible
+    version, or a three-digit code that is not a status are all faults
+    worth staging.  What it buys over raw bytes is that the *shape* is
+    legible — a reader sees which field the scenario is bending.
     """
     code: int = 200
     reason: str = 'OK'
@@ -198,9 +173,8 @@ class Abort:
 class CloseGracefully:
     """Close cleanly (FIN) after whatever has been written.
 
-    Terminal.  The difference from :class:`Abort` is what the client sees
-    — an orderly EOF mid-body rather than a reset — and clients do not
-    always treat the two alike, which is the point of having both.
+    Terminal.  What the client sees is an orderly EOF mid-body, not the
+    reset :class:`Abort` sends.
     """
 
 
@@ -208,14 +182,9 @@ class CloseGracefully:
 class HalfClose:
     """Shut down the sending direction only (FIN), keep reading.
 
-    Neither :class:`Abort` nor a full close says this.  ``Abort`` sends RST,
-    which discards whatever is buffered and leaves nothing to read; a full
-    close ends both directions at once.  A half-close is the ordinary end of
-    a non-keep-alive exchange — "I have finished sending, I am still waiting
-    for your answer" — and it is a distinct code path on the peer.
-
-    **Not terminal**: later steps still run, because continuing to read is
-    the whole point.
+    **Not terminal** — later steps still run, which is the whole point.
+    ``Abort`` is not a substitute: it sends RST, discarding what is buffered
+    and leaving nothing to read.
     """
 
 
@@ -243,11 +212,10 @@ class ScenarioH1Server:
 def parse_request_head(head: bytes) -> dict:
     """Split a request head into the fields :func:`request_matches` reads.
 
-    Deliberately lenient: this parses what a *client under test* actually
-    sent, including things a conforming parser would reject, because a
-    scenario may well be waiting for exactly that.  A malformed request
-    line yields empty strings rather than raising — a scenario matching on
-    ``method`` simply will not match it.
+    Lenient by necessity: it parses what a *client under test* actually
+    sent, including what a conforming parser would reject.  A malformed
+    request line yields empty strings rather than raising, so a scenario
+    matching on ``method`` simply will not match it.
     """
     lines = head.split(b'\r\n')
     request_line = lines[0] if lines else b''
@@ -414,13 +382,11 @@ def _step_from_dict(d: dict):
 def scenario_to_json(scenario: ScenarioH1Server) -> str:
     """Serialise *scenario* to JSON Lines (one step per line).
 
-    The name sits on the first line under the op ``HEADER``, so the file is
-    one line-oriented stream with no out-of-band metadata — the convention
-    :func:`blackbull.fault_injection.scenario_h2.scenario_to_json` set.
+    The name sits on the first line under the op ``HEADER``, keeping the
+    file one line-oriented stream with no out-of-band metadata.
 
-    Payloads are hex rather than base64 or an escaped string: a fault
-    scenario's bytes are frequently *not* valid UTF-8 and are meant to be
-    read by a human comparing them against a packet capture.
+    Payloads are hex, not base64: a fault scenario's bytes are frequently
+    not valid UTF-8 and are read against a packet capture by eye.
     """
     lines = [json.dumps({'op': 'HEADER', 'name': scenario.name})]
     for step in scenario.steps:

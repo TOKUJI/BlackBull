@@ -251,11 +251,9 @@ class MQTTReasonCode(int):
 class ReasonCode(IntEnum):
     """The subset of §2.4 reason codes the broker references by name.
 
-    This is the single definition of these *values*; their human-readable
-    names live once in :data:`_REASON_CODE_NAMES` (the full §2.4 registry used
-    by :class:`MQTTReasonCode`).  Importers (`blackbull.mqtt.broker`,
-    `blackbull.mqtt.connection`) use these members instead of redeclaring raw
-    hex, so a code can never drift between modules.
+    The single definition of these *values*; :class:`MQTTReasonCode` carries
+    the full §2.4 registry and the human-readable names.  Naming a member
+    here is what keeps a code from drifting between modules.
     """
     SUCCESS = 0x00
     DISCONNECT_WITH_WILL = 0x04

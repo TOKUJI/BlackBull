@@ -1430,12 +1430,10 @@ class HTTP1Client:
                        byte_interval: float = 0.0) -> None:
         """Push arbitrary bytes onto the underlying socket.
 
-        When ``byte_interval > 0`` the bytes are transmitted one at a time
-        with ``byte_interval`` seconds between writes — the primitive
-        slowloris-style stall the differential tests rely on.  Each per-
-        byte write is followed by ``drain()`` (inherited from
-        :class:`AsyncioWriter`), so the bytes actually leave the socket
-        on schedule rather than accumulating in the asyncio send buffer.
+        With ``byte_interval > 0`` the bytes go out one at a time, that many
+        seconds apart — the primitive a slowloris-style stall is built from.
+        Each write is drained, so the pacing is on the wire and not in the
+        asyncio send buffer.
         """
         if self._transport_handed_off:
             raise ConnectionError('transport ownership was handed off')

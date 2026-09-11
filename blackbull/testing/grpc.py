@@ -12,19 +12,15 @@ tests repeat — serve the app on an ephemeral h2c port, POST with
     assert reply.status is GrpcStatus.OK
     assert reply.message == b'hi world'
 
-**Why a seam is needed at all.**  Every gRPC response reports its status in
-trailing headers — success and error alike — so a transport with no
-``http.response.trailers`` support never observes completion.  That is why
-the framework's own gRPC tests moved off the in-process ``TestClient`` and
-onto :class:`~blackbull.client.http2.HTTP2Client` over a real socket:
-``HTTP2Client`` handles trailers natively and folds them into
-``res.headers``.  An application developer testing a servicer needs the
-same thing, and until now had to rediscover it.
+Every gRPC response reports its status in trailing headers, success and
+error alike, so a transport without ``http.response.trailers`` never
+observes completion — which is why this runs over a real socket rather than
+in process.  ``docs/guide/grpc.md`` argues it under "Why not the in-process
+test client".
 
 The gRPC analogue of :class:`~blackbull.testing.native.NativeTestServer`,
-and deliberately the same shape: a real server on a loopback port, the
-whole dispatch path exercised, and the port left public so anything else
-can drive it too.
+and the same shape: a real server on a loopback port, the whole dispatch
+path exercised, and the port left public so anything else can drive it.
 """
 from __future__ import annotations
 

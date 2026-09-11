@@ -94,10 +94,8 @@ class SendFrame:
 
     ``declared_length`` overrides the header's length field without
     changing the bytes actually written — "the peer lied about how much is
-    coming", which a serialiser that computes the length cannot say.  The
-    client-side vocabulary had this from the start; the consistency sweep
-    at the 107+108 close found the server side could not express the same
-    fault.  Leave it ``None`` (the default) and nothing changes.
+    coming", which a serialiser that computes the length cannot say.
+    Leave it ``None`` (the default) and nothing changes.
     """
     frame: Frame
     declared_length: int | None = None
@@ -182,14 +180,9 @@ class CloseGracefully:
 class HalfClose:
     """Shut down the sending direction only (FIN), keep reading.
 
-    Neither :class:`Abort` nor a full close says this.  ``Abort`` sends RST,
-    which discards whatever is buffered and leaves nothing to read; a full
-    close ends both directions at once.  A half-close is the ordinary end of
-    a non-keep-alive exchange — "I have finished sending, I am still waiting
-    for your answer" — and it is a distinct code path on the peer.
-
-    **Not terminal**: later steps still run, because continuing to read is
-    the whole point.
+    **Not terminal** — later steps still run, which is the whole point.
+    ``Abort`` is not a substitute: it sends RST, discarding what is buffered
+    and leaving nothing to read.
     """
 
 
@@ -534,11 +527,8 @@ def _frame_from_dict(d: dict) -> Frame:
         f.error_code = int(d.get('error_code', 0))
         return f
     if name == 'Ping':
-        # ``data`` is required on ``Ping`` alone among the frame classes it
-        # is constructed with here, and omitting it raised ``TypeError`` —
-        # so an HTTP/2 scenario containing a PING could be serialised and
-        # never read back.  Found by the 107+108 consistency sweep; present
-        # since the serialiser was written.
+        # ``Ping`` alone among the frame classes built here requires
+        # ``data``; omitting it makes a serialised PING unreadable back.
         payload = base64.b64decode(d.get('payload', ''))
         f = frame_types.Ping(length=len(payload),
                              type_=frame_types.FrameTypes.PING,

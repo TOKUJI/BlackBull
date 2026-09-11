@@ -1,12 +1,9 @@
 """MQTT 5 broker — a non-core "bridge" protocol shipped with BlackBull.
 
-BlackBull's *core* protocols are the HTTP family (HTTP/1.1, HTTP/2, and — as
-they land — gRPC and HTTP/3), which share the from-scratch HTTP stack the
-framework exists to implement.  MQTT is a **bridge protocol**: an independent
-protocol family that rides the Non-ASGI bridge but shares none of the HTTP
-protocol logic.  It lives in its own subpackage so the boundary is explicit and
-so it can be extracted to a standalone ``blackbull-mqtt`` distribution later
-without touching the core (see ``docs/guide/mqtt.md``).
+A **bridge protocol**: it rides the Non-ASGI bridge and shares none of the
+HTTP stack the framework exists to implement.  Its own subpackage keeps that
+boundary explicit and leaves it extractable as a standalone
+``blackbull-mqtt`` distribution.  See ``docs/guide/mqtt.md``.
 
 Wire it in through the generic extension seam::
 

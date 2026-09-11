@@ -197,18 +197,11 @@ class StaticFiles:
         ``blackbull serve`` CLI turns it on to match ``python -m
         http.server``'s directory-index behaviour.
 
-        ``cache`` (default ``False``): when ``True``, file bodies up to
-        ``_CACHE_MAX_BYTES_PER_FILE`` are held in an in-memory
-        ``OrderedDict`` (capped at ``_CACHE_MAX_ENTRIES``), and the
-        per-request ``stat()`` syscall is throttled by
-        ``_STAT_TTL_S``.  When ``False`` (the default), every request
-        does a fresh ``stat()`` and reads the body from disk — matching
-        the behaviour of Starlette / FastAPI / Flask static serving and
-        the requirement HttpArena's standard-mode rules place on static
-        profiles ("read files from disk on every request, no in-memory
-        caching").  Set ``cache=True`` only for standalone deployments
-        where BlackBull terminates static traffic directly (i.e. no
-        nginx / CDN in front).
+        ``cache`` (default ``False``): when ``True``, small file bodies are
+        held in a bounded in-memory ``OrderedDict`` and the ``stat()``
+        syscall is throttled.  When ``False``, every request stats and
+        reads afresh.  Turn it on only where BlackBull terminates static
+        traffic itself, with no nginx or CDN in front.
 
         ``conditional`` (default ``True``): emit ``ETag`` + ``Last-Modified``
         validators and honour ``If-None-Match`` / ``If-Modified-Since`` with a
