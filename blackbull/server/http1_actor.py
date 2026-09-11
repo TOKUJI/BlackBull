@@ -470,9 +470,8 @@ class RequestActor(Actor):
 
         HTTP/1.1 dispatches one request at a time per connection, so the
         instance is free between requests and rebinding it is indistinguishable
-        from building a new one — except for the allocation, which the keep-alive
-        loop would otherwise pay on every request.  ``app``, ``aggregator`` and
-        ``force_asgi`` are per-connection and stay put.
+        from building a new one.  ``app``, ``aggregator`` and ``force_asgi``
+        are per-connection and stay put.
 
         Deliberately **not** available to HTTP/2, whose streams are concurrent:
         two live requests sharing one actor would interleave their fields.

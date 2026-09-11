@@ -283,21 +283,13 @@ class AsyncioWriter(AbstractWriter):
     ``drain()`` is called inside ``write()`` so the asyncio backpressure
     mechanism is handled transparently and ``BaseSender`` stays runtime-agnostic.
 
-    ``write_timeout`` (seconds, ``0`` = disabled) bounds the time spent
-    in ``drain()`` waiting for the kernel send buffer to flush.  Defends
-    against the slow-read shape of slowloris: a client that reads the
-    response 1 byte/sec fills the send buffer and our drain blocks
-    indefinitely waiting for the peer's TCP window to reopen.  On
-    timeout we close the transport and raise ``ConnectionResetError``
-    so the sender treats the failure the same as a peer-side reset.
-
-    The bound is carried by the per-process deadline scanner rather than
-    an ``asyncio`` timer, because with the timeout enabled *every*
-    response takes this path — one ``loop.call_at`` per write is a
-    per-request cost paid to defend against a case that essentially
-    never happens.  The scanner's granularity (``BB_DEADLINE_TICK_MS``)
-    becomes the slop on when the timeout fires; at the 30 s default that
-    is ~1 %.
+    ``write_timeout`` (seconds, ``0`` = disabled) bounds the time spent in
+    ``drain()`` waiting for the kernel send buffer to flush — the slow-read
+    shape of slowloris, where a peer reading at 1 byte/sec blocks the drain on
+    a TCP window that never reopens.  On timeout the transport is closed and
+    ``ConnectionResetError`` raised, so the sender treats it as a peer-side
+    reset.  The bound rides the shared ``ConnectionDeadline`` scanner,
+    whose ``BB_DEADLINE_TICK_MS`` granularity is the slop on when it fires.
     """
 
     def __init__(self, stream_writer, write_timeout: float = 0.0,
@@ -426,22 +418,18 @@ class AsyncioWriter(AbstractWriter):
         """Zero-copy ``loop.sendfile`` against the underlying transport, in
         bounded chunks.
 
-        Raises ``NotImplementedError`` (propagated from the loop) when
-        the transport is SSL — TLS framing happens in user-space, so
-        the kernel can't see the plaintext to copy.  Callers must catch
-        that and fall back to a read+write loop.  Support is a property of
-        the transport, so it is decided on the first chunk: a later chunk
-        cannot discover that sendfile was unavailable all along.
+        Raises ``NotImplementedError`` (propagated from the loop) when the
+        transport is SSL — TLS framing happens in user-space, so the kernel
+        cannot see the plaintext to copy.  Callers must catch that and fall
+        back to a read+write loop.  Support is a property of the transport, so
+        it is decided on the first chunk: a later chunk cannot discover that
+        sendfile was unavailable all along.
 
-        Drains any pending writes first so headers we already buffered
-        precede the file bytes in wire order — under the write bound, like
-        every other drain, so the header flush cannot stall unwatched.
-
-        One call per ``_SENDFILE_CHUNK`` rather than one for the whole file:
-        each chunk re-arms ``BB_WRITE_TIMEOUT``, which turns "this transfer
-        is stalled" into something expressible without also declaring a
-        legitimately large file to be too slow.  Returns the octets actually
-        sent, which is short of *count* only when the peer stopped accepting.
+        Drains any pending writes first, under the write bound like every
+        other drain, so buffered headers precede the file bytes in wire order.
+        The chunking is what gives ``BB_WRITE_TIMEOUT`` somewhere to re-arm;
+        the Internals page sizes it.  Returns the octets actually sent, short
+        of *count* only when the peer stopped accepting.
         """
         await self._drain_with_timeout()
         loop = asyncio.get_running_loop()
@@ -505,17 +493,12 @@ class BaseSender(ABC):
         reader), so the response it may still be mid-way through writing dies
         quietly rather than as a broken-pipe traceback.
 
-        This is a *control signal between the actor and its sender*, which is
-        why it is a method and not an event.  As an ``http.disconnect`` dict
-        down the send channel it would be the one place the server pushes a
-        receive-side event the wrong way through the pipe, purely because that
-        pipe is already there.  The cost is not the dict but the type: every
-        sender's public event union would have to widen to admit a message no
-        application or middleware may ever legally send, and anyone reading
-        the signature would learn the wrong contract.
-
-        ``http.disconnect`` remains the app-facing spelling on ``receive()``,
-        which is the direction ASGI defines it in.
+        A method and not an ``http.disconnect`` down the send channel: that
+        would widen every sender's public event union to admit a message no
+        application or middleware may legally send, teaching the wrong
+        contract to anyone who reads the signature.  ``http.disconnect``
+        stays the app-facing spelling on ``receive()``, the direction ASGI
+        defines it in.
         """
         self._closed = True
 

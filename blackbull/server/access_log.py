@@ -54,11 +54,9 @@ def open_record(conn, aggregator: 'EventAggregator | None',
 def start_record(conn) -> 'AccessLogRecord':
     """Build and publish a record unconditionally.
 
-    For the paths whose consumer analysis is not the per-request one:
-    a WebSocket session's record spans the connection and carries
-    ``close_code``, and a pushed response needs one for the sender's inline
-    capture.  Both want a record regardless of what
-    :func:`request_record_needed` says about ordinary requests.
+    For the two paths :func:`request_record_needed` cannot answer for: a
+    WebSocket session's record spans the connection and carries ``close_code``,
+    and a pushed response needs one for the sender's inline capture.
     """
     record = AccessLogRecord.from_conn(conn)
     # Written onto ``conn.state`` directly — the same dict the scope exposes
@@ -100,30 +98,21 @@ def close_ws_record(record: 'AccessLogRecord | None', close_code) -> None:
 def emit_access_log(record: 'AccessLogRecord') -> None:
     """Emit *record* on the access logger if INFO is enabled.
 
-    The isEnabledFor gate matters: ``record.as_extra()`` is evaluated
-    before ``logger.info`` decides to discard the call.  Profiling at
-    -R 5000 with BB_ACCESS_LOG=0 showed these calls still costing ~1.2%
-    of CPU.  Peers (uvicorn / granian / daphne) skip the work entirely
-    when access logging is disabled; gating here matches that behaviour.
+    The ``isEnabledFor`` gate matters because ``record.as_extra()`` is
+    evaluated before ``logger.info`` decides to discard the call — measured at
+    ~1.2% of CPU under ``-R 5000`` with ``BB_ACCESS_LOG=0``.
 
-    The *record itself* is the message (it is self-formatting via ``__str__``),
-    so the expensive ``format()`` string build is deferred to the logging
-    listener thread instead of running on the event loop.  ``finalize()``
-    snapshots the duration first so that deferred format still reports the
-    request's real duration, not duration + queue latency.  The structured
-    ``extra`` fields stay eager — they are the documented public access-log
-    API, held by ``tests/integration/test_access_log.py``.
+    The record is its own message (self-formatting via ``__str__``), so the
+    ``format()`` build runs on the logging listener thread; ``finalize()``
+    snapshots the duration first, so a deferred format still reports the
+    request's real duration rather than duration + queue latency.  The
+    structured ``extra`` fields stay eager — they are the documented public
+    access-log API, held by ``tests/integration/test_access_log.py``.
 
-    When async logging is active *and* the access logger has not been customised,
-    the record is enqueued directly onto the listener queue via
-    :func:`~blackbull.logger.enqueue_access_log`, which bypasses
-    ``logging.Logger._log`` — ~93% of the loop-side emit cost lives in that
-    stdlib machinery.  The fast path is skipped (and the standard synchronous
-    ``logger.info`` path used) when async logging is off *or* the user has
-    attached their own handlers/filters to ``blackbull.access`` — those would be
-    bypassed by a direct enqueue, so we defer to the full path to keep the
-    documented "extend the access log via a custom handler/filter" pattern
-    working (see docs/guide/logging.md).
+    A default access logger is enqueued directly, skipping the stdlib
+    ``logging.Logger._log`` machinery that is ~93% of the loop-side emit cost.
+    User handlers or filters on ``blackbull.access`` would be bypassed by that,
+    so their presence takes the standard ``logger.info`` path instead.
     """
     if _access_logger.isEnabledFor(logging.INFO):
         record.finalize()
@@ -136,15 +125,12 @@ def emit_access_log(record: 'AccessLogRecord') -> None:
 def request_record_needed(aggregator: EventAggregator | None) -> bool:
     """Whether the per-request :class:`AccessLogRecord` will be consumed.
 
-    The record (and the ``conn.state['access_log']`` write it forces, plus the
-    ``emit`` at request end) exists only for three consumers: the access log
-    (``blackbull.access`` at INFO), phase tracing, and the ``request_completed``
-    event's wire fields. When none is active the record is dead weight on every
-    request — a per-request allocation the v0.60.0 Connection graph makes more
-    costly under concurrency (extra live objects for the cyclic GC to scan) —
-    so the actor skips building it. Consumers already tolerate its absence: the
-    sender guards ``if self._log_record is not None`` and ``request_completed``
-    reads ``conn.state.get('access_log')`` with ``'-'``/``0`` placeholders."""
+    Three consumers, and no others: the access log (``blackbull.access`` at
+    INFO), phase tracing, and the ``request_completed`` event's wire fields.
+    With none of them active the actor skips building the record at all, so
+    every consumer must tolerate its absence — ``conn.state['access_log']``
+    reads back as ``None``, and ``request_completed`` substitutes ``'-'``/``0``
+    placeholders."""
     if PHASE_TRACE or _access_logger.isEnabledFor(logging.INFO):
         return True
     return aggregator is not None and aggregator.has_request_completed_listeners()
@@ -153,12 +139,11 @@ def request_record_needed(aggregator: EventAggregator | None) -> bool:
 def disconnect_events_observed(aggregator: EventAggregator | None) -> bool:
     """Whether the disconnect-detecting receive wrapper is observed.
 
-    The wrapper (a per-request closure) exists to (a) emit ``request_disconnected``
-    and (b) ``mark_disconnected`` so ``request_completed`` can suppress itself on
-    a dropped request. With neither listener present nothing observes either
-    effect, so the actor dispatches the raw ``receive`` directly and saves the
-    closure. Body-level disconnect detection (``conn.body()`` →
-    ``ClientDisconnected``) is independent of this wrapper and unaffected."""
+    The wrapper emits ``request_disconnected`` and marks the request so
+    ``request_completed`` can suppress itself on a dropped one.  With neither
+    listener present nothing observes either effect and the actor dispatches
+    the raw ``receive`` instead.  Body-level disconnect detection
+    (``conn.body()`` → ``ClientDisconnected``) does not go through it."""
     if aggregator is None:
         return False
     return (aggregator.has_request_disconnected_listeners()

@@ -1,26 +1,14 @@
-"""Per-worker CPU placement.
+"""Per-worker CPU placement: pin a worker's event loop to one core, so the hot
+state it accumulates stays resident in that core's L1/L2.
 
-Pinning a worker's event loop to one core keeps its hot state — the header
-line table, the HPACK dynamic tables, the connection dict — resident in that
-core's L1/L2 instead of following the thread around the machine.  That is the
-whole of the upside, and it is real; the care in this module is all about the
-three ways a naive pin does damage:
+Three rules, argued in ``docs/deployment/workers.md`` §CPU pinning:
 
-**Never widen the mask we were given.**  ``sched_setaffinity`` lets a process
-move itself onto CPUs its own mask excludes, so a pin computed against
-``os.cpu_count()`` silently overrides ``taskset``, ``numactl``, and any
-cpuset the operator placed us in.  Every placement here is drawn from
-``sched_getaffinity`` — an operator's confinement is an input, not an
-obstacle.
-
-**Never pin the thread pool.**  Linux threads inherit the creating thread's
-affinity mask.  Pinning the main thread and then offloading compression or a
-file read to the default executor puts that work on the one core the event
-loop is already saturating, which is precisely backwards.
-:func:`make_offload_executor` hands each pool thread the full mask back.
-
-**Always be switchable off.**  On a shared or externally-orchestrated host the
-right number of pinning decisions for a framework to make is zero.
+* **Never widen the mask we were given.**  Every placement is drawn from
+  ``sched_getaffinity``, so ``taskset``, ``numactl`` and a cpuset are inputs
+  rather than obstacles.
+* **Never pin the thread pool.**  Linux threads inherit the creating thread's
+  mask; :func:`make_offload_executor` hands each pool thread the full one back.
+* **Always be switchable off** — ``BB_CPU_PINNING=off``.
 """
 from __future__ import annotations
 

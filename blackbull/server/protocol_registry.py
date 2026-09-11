@@ -103,10 +103,9 @@ class ConnectionView:
 class ProtocolDetector(ABC):
     """Inspects the first bytes of a connection to identify the protocol.
 
-    Stateless — one instance is shared across all connections.  Used for
-    first-byte sniffing on *shared* ports (e.g. MQTT + HTTP on one port);
-    consulted by ``ConnectionActor._dispatch()`` after ALPN detection and
-    before the http1 cleartext fallback.
+    Stateless — one instance is shared across all connections.  First-byte
+    sniffing on *shared* ports (MQTT + HTTP on one port, say), reached only
+    when ALPN did not already name the protocol.
     """
 
     @abstractmethod
@@ -134,10 +133,9 @@ class ProtocolBinding:
     back what it took, and there a
     :class:`~blackbull.server.recipient.PrefixReader` restores the stream.
 
-    One ``serve(conn)`` rather than a per-transport trio is what lets
-    ``ConnectionActor`` stay protocol-agnostic: the ``24``-byte HTTP/2 preface
-    read and the HTTP/1.1 ``\\r\\n`` request-line read live in the
-    bindings, not in the dispatcher.
+    Every protocol-specific read is the binding's, never the dispatcher's —
+    the ``24``-byte HTTP/2 preface and the HTTP/1.1 ``\\r\\n`` request line
+    alike — which is what keeps ``ConnectionActor`` protocol-agnostic.
     """
 
     name: str = ''
@@ -318,10 +316,9 @@ class RawBinding(ProtocolBinding):
         recognises the first bytes.  Port-bound bindings (no detector) never
         claim via detection — they own their own listening socket instead.
 
-        A stateful binding stops claiming once the shared listener is served
-        by more than one worker: whichever worker accepted would answer, and
-        the ones that never saw the earlier exchange would answer wrongly.
-        Its dedicated port is unaffected — that is where it stays reachable.
+        A stateful binding stops claiming once more than one worker serves the
+        shared listener: a worker that never saw the earlier exchange would
+        answer wrongly.  Its dedicated port is where it stays reachable.
         """
         if not self._shared_dispatch:
             return False
@@ -399,8 +396,7 @@ class ProtocolRegistry:
         """Bindings consulted during cleartext detection, in priority order:
         registered raw detectors first (shared-port protocols such as MQTT),
         then the ordered cleartext chain (``http2`` preface, ``http1``
-        fallback).  Cached — rebuilt only by :meth:`register`, so an
-        HTTP-only app pays no per-connection allocation for it.
+        fallback).  Cached, and rebuilt only by :meth:`register`.
         """
         return self._detection_order
 

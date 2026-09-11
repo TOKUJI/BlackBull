@@ -1,17 +1,15 @@
 """Cheap process-unique connection ids.
 
-Replaces the per-connection ``uuid.uuid4()`` (16 bytes of urandom plus UUID
-formatting, ~2 µs on the accept hot path) and the earlier 4-byte
-``os.urandom`` scheme.  32-bit random ids have real birthday-bound collision
-odds at production churn: ~1.2 % at 10 k concurrent connections, ~50 % at
-65 k.
-
 Format: ``<12-hex process prefix><8-hex sequence>`` (20 hex characters).
 The prefix is drawn once per process and re-drawn in forked children via
 ``os.register_at_fork``, so ids are unique within a process by construction
 (monotonic sequence, no birthday bound) and collide across processes only if
-two 48-bit prefixes collide — ~3×10⁻¹² for a 32-worker fleet.  No entropy
-syscall is paid per connection.
+two 48-bit prefixes collide — ~3×10⁻¹² for a 32-worker fleet.
+
+Neither of the obvious alternatives fits: ``uuid.uuid4()`` costs an entropy
+syscall and ~2 µs per accept, and a 32-bit random id has real birthday-bound
+collision odds at production churn — ~1.2 % at 10 k concurrent connections,
+~50 % at 65 k.
 """
 from __future__ import annotations
 

@@ -3,55 +3,21 @@
 One of these per accepted connection, created before the protocol is known —
 the shared listener detects HTTP/1.1, h2c, and MQTT off the same resident
 bytes, so the buffer belongs to the *connection*, not to any one protocol.
+:class:`BufferReader` presents the :class:`~.recipient.AbstractReader` surface,
+so the body recipient and the WebSocket/h2c successors work unchanged.
 
-This is what replaces `asyncio.StreamReader` on the inbound path.  The
-kernel writes straight into the connection's :class:`~.read_buffer.ReadBuffer`
-through :meth:`ConnectionProtocol.get_buffer`, and the actor's coroutine parks on a
-future that :meth:`ConnectionProtocol.buffer_updated` resolves.
-
-**The actor invariant is intact.**  One coroutine still owns the connection's
-state and processes one request at a time; it is woken by the protocol instead
-of parking inside `readuntil`.  That distinction is the whole design: sanic
-reaches half our read/parse cost with a parked coroutine too, so the cost was
-never the coroutine — it was reading through a second buffer.
-
-:class:`BufferReader` presents the :class:`~.recipient.AbstractReader` surface
-so the body recipient and the WebSocket/h2c successors work unchanged, and adds
-:meth:`BufferReader.read_head` — the one-scan header read the H/1.1 actor uses
-instead of a `readuntil` per line.
-
-**The two classes split decision from execution.**  The reader owns the receive
-competence — whether a high-water crossing should pause, when to wait, when a
-grown buffer goes back, and what to throw away on a lingering close — because
-reading is the only activity that knows both what was asked for and what was
-consumed.  The protocol owns the socket: the transport callbacks, the
-rendezvous future, the two flow-control calls it makes when the reader asks,
-and the byte-level high-water comparison (a threshold, not a judgement — the
-reader decides what a crossing means).  Before the split the stop-reading test
-sat in :meth:`ConnectionProtocol.buffer_updated` and reconstructed the reader's
-state from outside — resident bytes plus a guess at whether anyone was parked.
-
-**Published fields are facts, never shared state.**  Crossing the boundary with
-a *call* is what the arrival path cannot afford — an EC2 /conn A/B measured one
-there at the same order as a whole regression — so the two sides publish the
-few facts the other consults (``BufferReader.read_offer``,
-``ConnectionProtocol.reading_paused``, ``ReadBuffer.drained_boundary``).  That
-trade is only safe under one rule, and the rule is what keeps "published" from
-decaying into "shared":
+``docs/about/internals.md`` §Who decides, and who acts argues the split between
+the two classes: the reader owns the receive decisions, the protocol owns the
+socket.  Three facts cross that boundary as published state rather than as a
+call — ``BufferReader.read_offer``, ``ConnectionProtocol.reading_paused``,
+``ReadBuffer.drained_boundary`` — under one rule:
 
     A published field has exactly one writer — its owner.  Reading it across
     the boundary is free; changing it is a method call on the owner, gated on
     a cheap read so it happens only when a change is actually due.
 
-``maybe_pause`` and :meth:`ReadBuffer.consume_boundary` are that gate: both are
-reached only on the rare edge, so the poll stays an attribute read and the
-transition stays with the object whose state it is.  Encapsulation is normally
-what *enforces* ownership; publishing gives that up, so the rule has to be
-written down and tested — see ``tests/unit/test_receive_decisions.py``.
-
-Because peeked bytes stay resident, protocol detection can decide without
-consuming: there is nothing to replay to the winning binding, which is what
-retires `PrefixReader` on this path.
+Encapsulation normally *enforces* ownership; publishing gives that up, so the
+rule is tested instead — ``tests/unit/test_receive_decisions.py``.
 """
 from __future__ import annotations
 
@@ -82,24 +48,14 @@ class BufferReader(AbstractReader):
     """`AbstractReader` over a :class:`ReadBuffer` fed by :class:`ConnectionProtocol`.
 
     Every method serves from resident bytes first and only parks when it needs
-    more.  A pipelined or keep-alive peer's next head is usually already
-    resident, so those reads complete without a loop turn — which is the claim
-    the layered predecessor made and could not deliver, because it sat on a
-    reader that was buffering underneath it.
+    more, so a pipelined or keep-alive peer's next head usually completes
+    without a loop turn.  This is where the receive decisions live; the
+    Internals page says why.
 
-    **This is where the receive decisions live.**  Reading is the only activity
-    that knows both the demand (``read(n)``, :meth:`read_head`) and the
-    consumption (``take``), so everything that follows from the pair is
-    decided here and merely *executed* on the transport: whether a high-water
-    crossing pauses the peer (:meth:`maybe_pause`), when to let it go again
-    (:meth:`_consumed`), how much the next recv should be able to deliver
-    (the offer published around a park), and when a grown allocation goes back
-    to the floor (:meth:`_at_boundary`).  The protocol below owns the socket,
-    not the judgement about it.
-
-    Deliberately not on :class:`~.recipient.AbstractReader`: two of its three
-    implementations have no transport to pause, so promoting this competence to
-    the interface would force a no-op onto them.
+    Those decisions are deliberately not on
+    :class:`~.recipient.AbstractReader`: two of its three implementations have
+    no transport to pause, so promoting the competence to the interface would
+    force a no-op onto them.
     """
 
     __slots__ = ('_buf', '_proto', '_release_count', '_waiting', 'read_offer')
@@ -123,16 +79,8 @@ class BufferReader(AbstractReader):
     def maybe_pause(self) -> None:
         """A delivery crossed the high-water mark: decide whether to pause.
 
-        Called by the protocol only when the resident count crossed the mark —
-        the byte threshold is compared at the transport, which already holds
-        the count and accounts it, so this reader call is the rare crossing
-        rather than a per-arrival one.
-
-        Not while this reader is waiting: it is starved, not behind, so the
+        Never while this reader is waiting: it is starved, not behind, so the
         condition backpressure exists to prevent is not the one in play.
-        Pausing anyway would cost a ``pause_reading``/``resume_reading`` pair —
-        two ``epoll_ctl`` calls — on every arrival for the whole of a large
-        read, since the next park releases it again.
         """
         if not self._waiting:
             self._proto.pause_reading()
@@ -174,22 +122,16 @@ class BufferReader(AbstractReader):
     async def wait_for_data(self) -> None:
         """Park until more arrives, declaring the wait first.
 
-        Parking releases the high-water pause.  Backpressure exists to stop a
-        fast peer outrunning a handler that is *behind*; a reader about to
-        block is the opposite case — it is starved, and the bytes it waits for
-        are precisely the ones the pause is refusing to read.  Without this,
-        any single read larger than the mark deadlocks: a WebSocket frame, or
-        a ``chunked`` chunk whose size the peer chose.
-        ``asyncio.StreamReader._wait_for_data`` resumes here for the same
-        reason.
+        Parking releases the high-water pause, and must: a starved reader is
+        waiting for precisely the bytes the pause is refusing to read, so
+        without this any single read larger than the mark deadlocks — a
+        WebSocket frame, or a ``chunked`` chunk whose size the peer chose.
 
-        Parking is also the only moment a recv-size demand can be *consulted*,
-        so the two readers that have one publish it immediately around their
-        call to this (see :attr:`read_offer`).  It is not
-        published here, taking a *want* argument, because the readers that park
-        without a size — ``read_head`` on every request, ``readuntil``,
-        ``fill`` — would then pay a pair of stores to declare nothing, which
-        measured as the header path funding what the body path saves.
+        Parking is also the only moment a recv-size demand can be consulted, so
+        a caller that has one writes :attr:`read_offer` around its call.  Not a
+        *want* argument here: the readers that park without a size would pay a
+        pair of stores to declare nothing, which measured as the header path
+        funding what the body path saves.
         """
         proto = self._proto
         if proto.reading_paused:
@@ -283,19 +225,9 @@ class BufferReader(AbstractReader):
     async def discard(self, max_bytes: int, deadline: float) -> int:
         """Read and throw away up to *max_bytes*, until EOF or *deadline*.
 
-        The lingering close needs the peer's remaining bytes gone so the kernel
-        does not answer our close with an RST — which would discard the
-        response we already wrote.  Throwing bytes away is still *reading*
-        them: it has a demand (*max_bytes*) and it consumes, which is exactly
-        the pair that makes a thing this reader's.  Doing it on the protocol
-        with a direct ``ReadBuffer.consume`` gave the connection a second
-        receive path that skipped every decision this one makes.
-
-        ``consume`` rather than ``take``: the bytes are not wanted, so there is
-        no reason to copy them out.  Both bounds are the caller's to set and
-        both matter — an unbounded read hands an attacker the very thing a
-        refused request was declining to read, and a read with no deadline lets
-        a slow peer hold a connection that has already been answered.
+        The read side of the lingering close.  Both bounds are the caller's to
+        set and neither is optional; ``docs/about/internals.md`` §Rejecting
+        requires lingering says what each one refuses.
 
         Returns the number of bytes discarded.  Errors are the caller's to
         absorb: this runs on the teardown path, where the response is already
@@ -334,12 +266,7 @@ class BufferReader(AbstractReader):
         return self._proto.peer_closed and not self._buf.available
 
     async def fill(self, n: int) -> bool:
-        """Wait until *n* bytes are resident, consuming nothing.
-
-        Free here: resident bytes are already the buffer's normal state, so
-        peeking is just not calling ``take``.  It is the reason detection can
-        hand the winning binding this very reader with the stream still whole.
-        """
+        """Wait until *n* bytes are resident, consuming nothing."""
         while self._buf.available < n:
             if self._proto.peer_closed:
                 return False
@@ -514,14 +441,11 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
             self.transport.write(data)
 
     def writelines(self, parts) -> None:
-        """Vectored write — the other half of the send-path size gate.
+        """Vectored write — the upper branch of the send-path size gate.
 
-        ``BaseSender._write_many`` joins below 32 KiB and comes here above it,
-        so a protocol that offers only :meth:`write` serves small responses and
-        fails large ones.  Delegated to the transport rather than joined here:
-        the selector transport reaches ``sendmsg(iovec, …)`` and uvloop does a
-        real vectored write, which is the entire reason the gate has an upper
-        branch.
+        Delegated to the transport, never joined here.  A backing object that
+        offers only :meth:`write` serves small responses and fails large ones;
+        ``docs/about/internals.md`` §Send-path invariant is the obligation.
         """
         if self.transport is not None:
             self.transport.writelines(parts)
@@ -594,9 +518,8 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
     async def wait_for_arrival(self) -> None:
         """Park until the next arrival, EOF, or connection loss.
 
-        The rendezvous itself — a callback↔coroutine handoff, which is why it
-        stays here while the decision to wait, and the backpressure release
-        that goes with it, live on :meth:`BufferReader.wait_for_data`.
+        The bare rendezvous; the decision to wait, and the backpressure release
+        that goes with it, are :meth:`BufferReader.wait_for_data`'s.
 
         One waiter only: a connection is driven by a single actor coroutine, so
         a second concurrent reader is a bug rather than a case to support.
