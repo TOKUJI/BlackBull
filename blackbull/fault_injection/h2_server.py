@@ -8,20 +8,14 @@ suites that need to exercise a client against a server that
 **deliberately** does the wrong thing — half-closed streams, exhausted
 flow-control windows, illegal SETTINGS, weird frame sequences.
 
-The server is an opt-in testing instrument.  It refuses to start in a
-production context — when the framework's ``BLACKBULL_ENV=production``
-signal (or the explicit ``BB_PRODUCTION`` override) is set — so a
-deliberate-misbehaviour code path cannot accidentally fire on a production
-deployment.  This is the isolated, hard-opt-in design called out in the
-project's out-of-scope list as the only acceptable form for fault-injection
-machinery inside a correctness-focused framework.
+The server is an opt-in testing instrument: it refuses to start when
+``BLACKBULL_ENV=production`` or ``BB_PRODUCTION`` is set, and refuses a
+non-loopback bind without ``allow_remote=True``.
 
 Tutorial: ``docs/guide/fault_injection.md``.
 
 Quick start
 -----------
-
-.. code-block:: python
 
     import pytest
     from blackbull.fault_injection import H2FaultServer

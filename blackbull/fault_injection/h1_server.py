@@ -13,20 +13,15 @@ assert that the client survives what a real server can do wrong::
         with pytest.raises(...):
             await my_client.get(f'http://{srv.host}:{srv.port}/')
 
-**It assembles every byte itself.**  Nothing here imports
-``blackbull.server.sender`` or ``blackbull.server.response``, and that is
-load-bearing rather than incidental: a fault server built on the
-production send path cannot emit a fault the production send path has, so
-the one bug class it is least able to find is the one in the code it
-shares.  The HTTP/2 half made the same choice — it carries its own frame
-encoder rather than calling ``FrameBase.save()``.  There is a test for it
-(``tests/unit/test_fault_injection_h1_server.py::TestTheBreakerIsIndependent``)
-because the property is invisible until the day it matters.
+**It assembles every byte itself**, importing nothing from
+``blackbull.server.sender`` or ``blackbull.server.response`` —
+``tests/unit/test_fault_injection_h1_server.py::TestTheBreakerIsIndependent``
+pins that, because the property is invisible until the day it matters.
 
-Two safety locks, the same pair :class:`H2FaultServer` carries and both
-in scope for security reports per ``SECURITY.md``: it refuses to start in
-a production context, and it refuses a non-loopback bind without an
-explicit ``allow_remote=True``.
+Two safety locks, the same pair :class:`H2FaultServer` carries and both in
+scope for security reports per ``SECURITY.md``: it refuses to start in a
+production context, and it refuses a non-loopback bind without an explicit
+``allow_remote=True``.
 """
 from __future__ import annotations
 

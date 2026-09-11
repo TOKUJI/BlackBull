@@ -1,43 +1,21 @@
 """Response caching middleware (RFC 9111 — HTTP Caching).
 
-Caches successful GET/HEAD responses in a per-worker, in-memory LRU.
-Subsequent matching requests are served directly from the cache without
-running the handler.  Supports:
+Caches successful GET/HEAD responses in a per-worker, in-memory LRU and
+replays them without running the handler.  It honours ``Cache-Control`` in
+both directions, generates a weak ETag when the handler supplies none,
+answers ``If-None-Match`` with a 304, keys variants by ``Vary``, and
+refuses anything carrying ``Authorization`` unless
+``cache_authenticated=True`` (RFC 9111 §3.5).  ``docs/guide/middleware.md``
+states each of those rules and tabulates the constructor.
 
-* **TTL** — server-side ``max_age`` (default 300 s), overridable by the
-  response's ``Cache-Control: max-age=…`` directive (or, when present,
-  ``s-maxage=…`` which takes precedence for shared caches).
-* **ETag** — auto-generated as ``W/"<sha256-prefix>"`` over the response
-  body when the application does not supply one.  The client's
-  ``If-None-Match`` header is honoured: a match yields a 304 Not
-  Modified with no body, regardless of the cached entry's TTL.
-* **Cache-Control respect** — responses carrying ``no-store``, ``private``,
-  or ``no-cache`` are passed through and not stored.  Requests carrying
-  ``no-store`` skip the cache lookup too.
-* **Authorization header** — by default, requests with an
-  ``Authorization`` header are NOT served from cache and their
-  responses are NOT stored (RFC 9111 §3.5).  Override with
-  ``cache_authenticated=True``.
+Two things it does not do: there is no invalidation API (restart the
+worker, or wait out the TTL), and nothing is shared between workers.
 
-Variant-aware: the response ``Vary`` header is honoured (RFC 9110
-§12.5.5).  When a stored response carries e.g. ``Vary: Accept-Encoding``,
-the varied request-header values are folded into the cache key so a
-brotli variant is never replayed to an ``identity`` client.  A response
-with ``Vary: *`` is passed through and not stored.
-
-What it doesn't do (yet):
-
-* No server-side invalidation API.  Restart the worker (or wait for
-  TTL) to clear.
-* No cross-worker sharing.  The cache is per-process — each worker has
-  its own.  Documented limitation.
-
-The store is keyed by ``(method, origin, path, query_string)`` → a per-URL bucket
-that holds the response's ``Vary`` field names alongside its variant entries
-(one per distinct set of ``(field, request-value)`` pairs named by ``Vary``).
-Keeping the vary fields inside the bucket means they can never be evicted
-independently of the entries they key (which the earlier two-LRU design
-allowed — orphaning the entries).
+The store is keyed by ``(method, origin, path, query_string)`` → a per-URL
+bucket holding the response's ``Vary`` field names alongside its variant
+entries.  The field names live *inside* the bucket so they cannot be
+evicted independently of the entries they key, which is what a second LRU
+beside the first would allow.
 
 Usage::
 

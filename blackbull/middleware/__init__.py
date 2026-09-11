@@ -1,14 +1,11 @@
 """Public middleware exports.
 
-Names are short nouns by convention — the module path (``blackbull.middleware``)
-supplies the "this is middleware" context, so the type names don't need
-a redundant suffix.  This matches the project's earliest middlewares
-(``CORS``, ``StaticFiles``).
+Names are short nouns: the module path supplies the "this is middleware"
+context, so a suffix would only repeat it.
 
-Deprecated aliases for the previous ``*Middleware``-suffixed names and the
-``compress`` pre-built instance are kept available through PEP 562
-``__getattr__`` so existing user code keeps working with a one-time
-``DeprecationWarning``.  They will be removed in a future release.
+The ``*Middleware``-suffixed spellings and the ``compress`` pre-built
+instance remain reachable through PEP 562 ``__getattr__``, each with a
+one-time ``DeprecationWarning``, and will be removed in a future release.
 """
 from .cache import Cache
 from .compression import Compression, _make_default_compress

@@ -76,11 +76,10 @@ class GrpcMethod(NamedTuple):
     ``request: bytes``).  The four combinations are unary, server-streaming,
     client-streaming, and bidirectional.
 
-    *handler* is annotated as a bare :class:`~collections.abc.Callable` rather
-    than :data:`GrpcHandler`: a response-streaming handler is an async generator
-    function (its call returns an async iterator, not an ``Awaitable``), and a
-    plain ``Callable`` is the one form that stays runtime-isinstanceable for the
-    NamedTuple field check (see memory ``beartype-namedtuple-callable-alias``).
+    *handler* is annotated as a bare :class:`~collections.abc.Callable` and
+    not :data:`GrpcHandler`, which would break the runtime NamedTuple field
+    check: a response-streaming handler is an async generator function, so
+    calling it returns an async iterator rather than an ``Awaitable``.
     """
     handler: Callable[..., object]
     streaming: bool
@@ -104,19 +103,11 @@ class GrpcServiceRegistry:
         """Register *handler* for the fully-qualified method *path*
         (``/package.Service/Method`` or ``package.Service/Method``).
 
-        *streaming* is the **response** axis — server-streaming (the handler is
-        an async generator that yields response messages).  When ``None`` (the
-        default) it is auto-detected with :func:`inspect.isasyncgenfunction`;
-        pass ``True`` to force it for a handler whose async-generator nature is
-        hidden behind a wrapper, or ``False`` to force a single response.
-        Forcing ``False`` on an async-generator function is a contradiction and
-        raises ``ValueError``.
-
-        *client_streaming* is the **request** axis — the handler takes an async
-        iterator of request messages (first parameter ``request_iter`` /
-        ``requests`` / ``request_iterator`` / ``request_stream``) instead of a
-        single ``request: bytes``.  When ``None`` it is auto-detected from that
-        first parameter name; pass an explicit bool to override.
+        Both streaming axes default to ``None``, meaning auto-detection —
+        see :class:`GrpcMethod` for what each axis is.  Pass a bool to
+        override it for a handler whose nature a wrapper hides.  Forcing
+        *streaming* ``False`` on an async-generator function is a
+        contradiction and raises ``ValueError``.
         """
         key = _normalise(path)
         if key in self._methods:

@@ -1,13 +1,8 @@
 """Client-side responders: react to incoming HTTP/2 frames.
 
-Each ``Responder`` subclass handles one ``FrameTypes`` value.  ``respond()``
-delegates the protocol-level state mutation back to the owning
-``HTTP2Client`` via underscore-prefixed callbacks (``_on_response_headers``,
-``_on_response_data``, …) so the client owns its state and the responders
-stay thin dispatchers.
-
-The dispatch table is built once via ``__init_subclass__`` so
-``ResponderFactory.create(frame)`` is O(1).
+Each ``Responder`` subclass handles one ``FrameTypes`` value and mutates no
+protocol state of its own — it hands the frame back to the owning
+``HTTP2Client``, which is what keeps that state in one place.
 """
 from ..protocol.frame_types import FrameTypes, PingFrameFlags, SettingFrameFlags
 import logging
@@ -117,15 +112,11 @@ class SettingsResponder(Responder):
 
 
 class PushPromiseResponder(Responder):
-    """The client consumes no push, but a promise is never merely skipped.
+    """PUSH_PROMISE — dropped, but its field block arrives here decoded.
 
-    Its field block arrives here already decoded — RFC 9113 §4.3 requires
-    that even for a frame to be discarded, because the HPACK table is
-    connection-wide and a block left unread leaves every later block on the
-    connection decoding against a table missing its insertions, which is
-    silent corruption rather than an error.  CONTINUATION never reaches a
-    responder at all: ``HTTP2Client._absorb_field_block`` folds it into the
-    frame that opened the block.
+    RFC 9113 §4.3 requires the decode even for a frame to be discarded.  A
+    responder never sees CONTINUATION: the client folds it into the frame
+    that opened the block.
     """
 
     FRAME_TYPE = FrameTypes.PUSH_PROMISE

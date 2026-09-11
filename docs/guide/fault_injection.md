@@ -435,14 +435,16 @@ the fault they stage; what ends those is your server's own deadline.
 Two locks ensure the deliberate-misbehaviour code path is unreachable
 from a production process:
 
-1. `BB_PRODUCTION=1` in the environment causes `H2FaultServer`'s
-   constructor to raise `H2FaultServerError`.
+1. `BB_PRODUCTION=1` (or `BLACKBULL_ENV=production`) in the environment
+   causes the constructor of `H2FaultServer` and of `H1FaultServer` to
+   raise.
 2. Binding to a non-localhost interface raises unless
    `allow_remote=True` is passed.  The misbehaviour mode is for
    local-loop tests.
 
-The HTTP/1.1 client-side scenario is benign by construction (it is a
-client, not a server-side code path) and carries no equivalent lock.
+Both locks are on both fault *servers*.  The two client-side scenario
+models are benign by construction — they are clients, not a server-side
+code path — and carry no equivalent lock.
 
 ## Examples
 

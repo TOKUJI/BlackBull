@@ -23,19 +23,11 @@ and no MQTT client::
             await broker.publish(topic='sensors/room1/temperature', payload=b'21.5')
         assert captured == [('room1', b'21.5')]
 
-``publish`` dispatches to the matching taps inline and awaits their
-completion, so the test asserts on the side effect the moment ``publish``
-returns.  A tap that raises propagates its exception out of ``publish`` —
-where production logs and isolates a failing tap (taps are best-effort
-observers), a test wants the failure visible.  The extension's own
-``tap_mode`` is irrelevant here: a test wants determinism, not the production
-decoupling.
+Taps run inline and a failing one raises, so a test is deterministic
+whatever the extension's ``tap_mode`` says — see :meth:`MQTTTestBroker.publish`.
 
-This is the application-handler-level counterpart of the conformance suite's
-in-process fake-reader harness (``tests/conformance/mqtt/conftest.py``) — that
-drives the wire codec, this drives the taps.  Only the tap pipeline is
-exercised: broker routing, QoS flows and retained messages are the
-conformance suite's territory, not this helper's.
+Only the tap pipeline is exercised.  Broker routing, QoS flows and retained
+messages belong to the conformance suite, not to this helper.
 """
 from __future__ import annotations
 
@@ -54,12 +46,11 @@ class MQTTTestBroker:
     app:
         The BlackBull app the MQTT extension is registered on.
 
-    The helper is **async-only by design**: taps are coroutines and
-    ``publish`` awaits them on the caller's event loop, so tests are written
-    as ``async def`` (the suite runs with ``asyncio_mode = strict``).  There
-    is no synchronous façade of the
-    :class:`blackbull.testing.native.NativeClient` kind: with no socket,
-    broker or background loop, there would be nothing to bridge to.
+    **Async-only**: taps are coroutines and ``publish`` awaits them on the
+    caller's event loop, so tests are written as ``async def``.  A
+    synchronous façade of the
+    :class:`blackbull.testing.native.NativeClient` kind would have no
+    socket, broker or background loop to bridge to.
 
     ``async with`` is supported for a consistent test idiom, but the broker
     owns no resource, so entering and exiting are no-ops.

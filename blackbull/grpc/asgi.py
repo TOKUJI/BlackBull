@@ -3,14 +3,11 @@
 gRPC is HTTP/2 with a fixed request shape (``POST /package.Service/Method``,
 ``content-type: application/grpc``) and a Length-Prefixed-Message body, where
 the call result is reported in ``grpc-status`` / ``grpc-message`` *trailers*.
-BlackBull's HTTP/2 sender already emits trailers via the
-``http.response.trailers`` ASGI event, and ``HTTP2Recipient`` already delivers
-request DATA as incremental ``http.request`` events, so all four RPC kinds —
-unary, server-, client-, and bidirectional-streaming — map cleanly onto the
-existing (scope, receive, send) bridge; no new protocol Actor is needed.
+All four RPC kinds — unary, server-, client-, and bidirectional-streaming —
+ride the existing (scope, receive, send) bridge; no new protocol Actor.
 
-``serve_grpc`` is dispatched from :meth:`BlackBull._dispatch` when the request
-content-type is ``application/grpc`` and a registry was installed via
+``serve_grpc`` is dispatched when the request content-type is
+``application/grpc`` and a registry was installed via
 ``app.enable_grpc(...)``.
 """
 from __future__ import annotations
@@ -177,9 +174,8 @@ class GrpcContext:
     leading/trailing metadata, or abort the call outright — the subset of
     grpcio's ``ServicerContext`` that a raw-bytes transport can honour.
 
-    The response-start machinery (``_send`` … ``_started``) is bound by
-    :func:`serve_grpc` just before the handler runs; handlers touch it only via
-    :meth:`send_initial_metadata`.
+    :meth:`send_initial_metadata` is the only door to the response-start
+    machinery :func:`serve_grpc` binds before the handler runs.
     """
 
     __slots__ = ('conn', 'code', 'details', '_trailing', '_deadline',
@@ -262,10 +258,8 @@ class GrpcContext:
         self._trailing = [(k, v) for k, v in metadata]
 
     def trailing_metadata(self) -> list[tuple[bytes, bytes]]:
-        """The trailing metadata set so far (a copy) — lets helpers compose
-        with, rather than clobber, what the handler already set (e.g.
-        blackbull-protobuf's ``abort_with_details`` appending
-        ``grpc-status-details-bin``)."""
+        """The trailing metadata set so far, as a copy — so a helper composes
+        with what the handler already set instead of clobbering it."""
         return list(self._trailing)
 
     async def send_initial_metadata(self, metadata) -> None:

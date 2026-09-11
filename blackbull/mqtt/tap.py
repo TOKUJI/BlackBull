@@ -40,11 +40,10 @@ _DEFAULT_TAP_QUEUE = 1024
 class Message:
     """A published message handed to an ``on_message`` tap.
 
-    The user-facing read-model — a plain, immutable view of one PUBLISH,
-    deliberately distinct from the wire codec ``MQTTPublish`` (which carries the
-    ``__iter__``/``__getitem__`` tuple-magic) and from the actor inbox
-    ``Message`` base.  Named ``Message`` for ecosystem consistency (aiomqtt,
-    paho): users write ``from blackbull.mqtt import Message``.
+    A plain, immutable read-model of one PUBLISH — neither the wire codec
+    ``MQTTPublish`` nor the actor inbox ``Message`` base, both of which it
+    sits between.  It takes the bare name anyway, because ``Message`` is
+    what aiomqtt and paho call this and what users reach for.
     """
     topic: str
     payload: bytes
@@ -81,9 +80,7 @@ class Tap:
         restored (``match_filter`` rewrites each to ``+`` for matching).
 
         ``'sensors/{room}/temperature'`` round-trips back to itself; a plain
-        ``'sensors/+/temperature'`` stays as ``'sensors/+/temperature'``.  Used
-        by documentation tooling (``AsyncAPIExtension``) that wants to show the
-        filter the application declared rather than the internal match form.
+        ``'sensors/+/temperature'`` stays as ``'sensors/+/temperature'``.
         """
         if not self.captures:
             return self.match_filter
@@ -130,9 +127,8 @@ async def run_taps(taps: Iterable[Tap], message: Message, *,
 
     A handler exception is logged and isolated by default — taps are
     best-effort observers, and one raising handler must not stop the others
-    (nor the broker).  Pass ``raise_exceptions=True`` to propagate the first
-    exception instead: the mode test instrumentation wants, where a failing
-    tap should fail the test rather than vanish into a log line.
+    (nor the broker).  ``raise_exceptions=True`` propagates the first one
+    instead, so a failing tap fails a test rather than a log line.
     """
     for tap in taps:
         captures = tap.bind(message.topic)

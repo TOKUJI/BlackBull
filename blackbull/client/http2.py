@@ -594,13 +594,12 @@ class HTTP2Client:
         :meth:`blackbull.client.http1.HTTP1Client.execute_scenario`, and
         deliberately the same shape: every *outcome* — a frame read, a
         timeout, a transport failure, a hard-abort — is folded into the
-        returned result so callers categorise without a try/except per
-        scenario.  What is raised instead is the scenario this connection
-        cannot express at all: an unowned step (see
-        :meth:`_check_scenario_ownership`) or a client whose context has
-        exited.  Neither is news about the peer, and folding one would make
-        a closed client indistinguishable in the result from a silent
-        server.
+        returned result, so callers categorise without a try/except per
+        scenario.  Raised instead is the scenario this connection cannot
+        express at all: a step belonging to another vocabulary, or a client
+        whose context has exited.  Neither is news about the peer, and
+        folding one would make a closed client indistinguishable from a
+        silent server.
 
         Step dispatch:
           * ``SendPreface``  → the RFC 9113 §3.4 preface bytes
@@ -611,10 +610,6 @@ class HTTP2Client:
           * ``Sleep``        → :func:`asyncio.sleep`
           * ``ReadResponse`` → one frame, or a recorded timeout
           * ``Abort``        → ``transport.abort()``; walks no further steps
-
-        This lives on the client rather than in ``fault_injection`` because
-        its twin does: a scenario executor needs the connection, and the
-        client is what owns one.
         """
         import time as _time  # noqa: PLC0415
 
@@ -757,9 +752,7 @@ class HTTP2Client:
     async def receive_raw_frame(self) -> _InboundFrame | None:
         """Escape hatch: read one raw frame, bypassing the receive loop's dispatch.
 
-        For negative-path / fault-injection tests and raw-frame clients that
-        need a peer frame ``_receive_loop`` would otherwise route through the
-        normal dispatcher — the read-side twin of :meth:`send_raw_frame`.
+        The read-side twin of ``send_raw_frame``.
 
         Only safe to call when the receive loop is not running (i.e. before
         ``__aenter__`` finishes or after the loop has been cancelled); a
@@ -781,18 +774,11 @@ class HTTP2Client:
 
         Frames arriving on this stream are pushed into the returned
         ``asyncio.Queue`` instead of being routed through the
-        request/response state machine.  Used by
-        :class:`blackbull.client.WebSocketH2Client` to receive
-        WebSocket frames (carried in DATA frames after RFC 8441
-        Extended CONNECT) without racing the receive loop.
+        request/response state machine.
 
-        Returning a fresh queue each call is intentional — registering
-        the same stream twice would be a programming error.
-
-        The depth is ``client_raw_queue_depth``.  Flow control does not
-        substitute for it: most of what lands here is not flow-controlled,
-        and RFC 9113 §6.9.1 charges a DATA frame's payload only, so a
-        zero-length one costs the peer no credit at all.
+        A fresh queue per call: registering the same stream twice is a
+        programming error, not a second subscription.  The depth is
+        ``client_raw_queue_depth``, which flow control cannot stand in for.
         """
         if self._connection_lost:
             raise ConnectionError('connection closed by peer')
@@ -807,10 +793,9 @@ class HTTP2Client:
     def unregister_raw_stream(self, stream_id: int) -> None:
         """Stop routing frames for *stream_id* into its raw-frame queue.
 
-        The one door a closed client still admits, and deliberately: this is
-        teardown, ``WebSocketH2Session.close`` calls it from a ``finally``,
-        and a cleanup path that raises after close turns an orderly shutdown
-        into an error.  Nothing here needs the connection.
+        The one door a closed client still admits: this is teardown, nothing
+        here needs the connection, and a cleanup path that raises after close
+        turns an orderly shutdown into an error.
         """
         self._raw_streams.pop(stream_id, None)
         # A WebSocket-over-H2 session writes through its sender until it

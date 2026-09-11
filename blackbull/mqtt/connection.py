@@ -83,10 +83,9 @@ class PacketFramer:
       dribble them; a framer that judged the packet only once it was
       complete would already have paid for the attack.
 
-    This replaces explicit ``stalled_len`` bookkeeping.  The ``bytes(...)``
-    snapshot at the decode boundary stays because the codec's input contract is
-    deliberately ``bytes``; a zero-copy framer would mean widening that contract
-    to the buffer protocol (deferred).
+    The ``bytes(...)`` snapshot at the decode boundary is the price of the
+    codec taking ``bytes``: going zero-copy would widen that contract to the
+    buffer protocol.
     """
 
     def __init__(self, max_packet_size: int = 0) -> None:

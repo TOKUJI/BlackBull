@@ -16,11 +16,9 @@ A single namespace for the two directions of protocol fault injection:
   SETTINGS, weird frame sequences.  A canned-misbehaviour catalogue
   lives at :mod:`blackbull.fault_injection.catalogue`.
 
-This module is an opt-in testing instrument.  The HTTP/2 server refuses
-to start in a production context — when ``BLACKBULL_ENV=production`` (the
-framework's production signal) or the explicit ``BB_PRODUCTION`` override
-is set — so a deliberate-misbehaviour code path cannot accidentally fire on
-a production deployment.
+This module is an opt-in testing instrument.  Both fault servers refuse to
+start when ``BLACKBULL_ENV=production`` or ``BB_PRODUCTION`` is set, and
+refuse a non-loopback bind without ``allow_remote=True``.
 
 See ``docs/guide/fault_injection.md`` for a tutorial.
 """
