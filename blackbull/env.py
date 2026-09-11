@@ -642,6 +642,19 @@ from enum import StrEnum
 
 
 class Environment(StrEnum):
+    """Which deployment the process thinks it is, read from ``BLACKBULL_ENV``.
+
+    Reachable as ``get_settings().env``.  A value that is not one of these
+    three resolves to ``DEVELOPMENT`` rather than raising, so a misspelled
+    ``production`` gets the *looser* of the two behaviours and says nothing
+    about it — worth asserting on at startup if it matters to you.
+
+    Two behaviours turn on it, and both tighten in ``PRODUCTION``:
+    [`StaticFiles`][blackbull.middleware.static.StaticFiles] declines to serve
+    anything, and the default error handler answers without exception detail.
+    The fault-injection servers refuse to start there at all.
+    """
+
     PRODUCTION  = 'production'
     DEVELOPMENT = 'development'
     TEST        = 'test'

@@ -1,3 +1,30 @@
+"""Keeping logging off the event loop, and the formatters and gates that help.
+
+Nothing here replaces the standard library — BlackBull logs through ordinary
+``logging`` loggers and attaches no handler of its own until asked.  What this
+module adds is the machinery for logging from an event loop without paying for
+it there.
+
+[`setup_async_logging`][blackbull.logger.setup_async_logging] moves every
+handler on the ``blackbull`` hierarchy behind a queue drained by a background
+thread, so a log call on the loop is an enqueue and nothing else; formatting,
+I/O and rotation all happen off the loop until
+[`teardown_async_logging`][blackbull.logger.teardown_async_logging] undoes it.
+[`JsonFormatter`][blackbull.logger.JsonFormatter] and
+[`ColoredFormatter`][blackbull.logger.ColoredFormatter] are the two sink
+formats, and [`BatchWriteHandler`][blackbull.logger.BatchWriteHandler]
+coalesces a burst of records into one write.
+
+[`log`][blackbull.logger.log] and
+[`debug_gate`][blackbull.logger.debug_gate] are the other half: both read the
+logger's level once, at import, and cost nothing afterwards.  That is the one
+thing to know before using them — raising a level at runtime does not switch
+on what they guard, so configure ``DEBUG`` before importing the framework.
+
+``docs/guide/logging.md`` describes the three logger hierarchies
+(``blackbull``, ``blackbull.access``, ``blackbull.caps``) and the fields an
+access record carries.
+"""
 import inspect
 import json
 import logging
@@ -90,6 +117,18 @@ SUFFIX = '\033[0m'
 
 
 class ColoredFormatter(logging.Formatter):
+    """A ``logging.Formatter`` that colours ``%(levelname)s`` by severity.
+
+    Takes the same ``fmt`` / ``datefmt`` / ``style`` arguments as its base and
+    behaves identically except that the level name is wrapped in an ANSI colour
+    sequence.  Only the copy of the record being formatted is coloured, so
+    other handlers on the same record still see the plain name.
+
+    The escape sequences are written unconditionally — this is a terminal
+    format, and pointing it at a file or a pipe puts them in the output.  Use
+    [`JsonFormatter`][blackbull.logger.JsonFormatter] or a plain
+    ``logging.Formatter`` for anything that is not a terminal.
+    """
 
     def __init__(self, fmt=None, datefmt=None,
                  style: Literal['%', '{', '$'] = '%'):

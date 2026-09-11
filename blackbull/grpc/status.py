@@ -10,6 +10,15 @@ from enum import IntEnum
 
 
 class GrpcStatus(IntEnum):
+    """The canonical gRPC status codes, as the ``grpc-status`` trailer carries
+    them.
+
+    ``OK`` (0) is success; every other member ends the RPC.  Raise one through
+    [`GrpcError`][blackbull.grpc.status.GrpcError] — that is the typed contract
+    a handler is checked against, so a bare integer is a caller error rather
+    than an unnamed code.
+    """
+
     OK = 0
     CANCELLED = 1
     UNKNOWN = 2

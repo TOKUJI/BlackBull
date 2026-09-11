@@ -22,6 +22,29 @@ class MailboxTooLarge(ValueError):
 
 
 class Mailbox(asyncio.Queue[Message]):
+    """An actor inbox bounded by both message count and queued wire bytes.
+
+    *maxsize* and *max_bytes* must both be positive; *size_of* charges each
+    message its wire size, and ``queued_bytes`` is the running total of what
+    is waiting.  A message is admitted only if it fits under both budgets, so
+    a mailbox can be full on bytes while nearly empty on count.
+
+    Which of the three refusals you get says what to do about it.
+    ``MailboxTooLarge`` means the message cannot fit *any* state of this
+    mailbox — draining will not help, and the sender is misconfigured against
+    the byte budget.  ``asyncio.QueueFull`` from ``put_nowait`` means it would
+    fit an empty mailbox but not this one; ``put`` waits for that room instead
+    of raising.  ``MailboxClosed`` means the owner has stopped, from
+    ``put``/``put_nowait`` at once and from ``get`` once what was queued has
+    been handed out.
+
+    ``close`` wakes every waiter without needing room for a sentinel; pass
+    ``discard=True`` to drop what is still queued rather than let it drain.
+
+    ``docs/about/mqtt-actor-design.md`` covers which side of an MQTT
+    connection waits on space and which side refuses instead.
+    """
+
     def __init__(self, maxsize: int, max_bytes: int,
                  size_of: Callable[[Message], int]) -> None:
         if maxsize <= 0 or max_bytes <= 0:

@@ -1,3 +1,18 @@
+"""Where an actor's internal message becomes an application-facing event.
+
+BlackBull has two event levels, and they do not meet by accident.  Level A is
+actor-to-actor traffic that application code cannot subscribe to; Level B is
+what ``@app.on`` and ``@app.intercept`` see.
+[`EventAggregator`][blackbull.event_aggregator.EventAggregator] is the single
+seam between them: an actor calls the ``on_*`` method for what happened, and
+the aggregator decides the Level B event's name and detail shape.
+
+That indirection is why the detail dict a listener receives is stable across
+transports — an HTTP/1.1 request, an HTTP/2 stream and an external ASGI host
+reach the same method here and produce the same keys.
+
+``docs/guide/events.md`` lists the events and what each detail carries.
+"""
 from blackbull.asgi import WebSocketReceiveEvent
 from blackbull.event import Event, EventDispatcher
 

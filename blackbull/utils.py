@@ -39,6 +39,18 @@ async def do_nothing(*args, **kwargs):
 
 
 class Scheme(StrEnum):
+    """Which of the two request kinds a route serves.
+
+    Passed to ``@app.route(scheme=...)`` and matched against a request's
+    ``Connection.type``.  It names the shape of the exchange, not the URL
+    scheme: ``http`` covers both plaintext and TLS, and HTTP/1.1, HTTP/2 and
+    gRPC alike, because all of them are one request and one response.
+    ``websocket`` is the long-lived one, which is why it routes separately.
+
+    A ``StrEnum``, so ``Scheme.http == 'http'`` holds and either spelling can
+    be handed to the router.
+    """
+
     http = auto()
     websocket = auto()
 
