@@ -174,7 +174,6 @@ class WebSocketSession:
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
-        """Close the session, whether the block left normally or by exception."""
         await self.close()
 
 

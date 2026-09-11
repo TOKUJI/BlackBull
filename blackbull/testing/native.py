@@ -377,7 +377,6 @@ class NativeClient:
         return self
 
     def __exit__(self, *exc_info) -> None:
-        """Run the application's lifespan shutdown and stop the loop thread."""
         self._entered = False
         try:
             if self._lifespan is not None:

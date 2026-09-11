@@ -293,7 +293,6 @@ class NativeResponse:
 
     @header.setter
     def header(self, value) -> None:
-        """Set or clear the header arm; accepts a view, a list of pairs, or ``None``."""
         if value is None:
             self._header = None
         elif isinstance(value, _HeaderView):
@@ -309,7 +308,6 @@ class NativeResponse:
 
     @body.setter
     def body(self, value: bytes | None) -> None:
-        """Set or clear the body arm."""
         self._body = value
 
     @property

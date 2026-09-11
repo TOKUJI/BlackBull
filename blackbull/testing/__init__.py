@@ -343,7 +343,6 @@ class WebSocketTestSession:
         return self
 
     def __exit__(self, *exc_info) -> None:
-        """Close the session, whether the block left normally or by exception."""
         self.close()
 
     def send_text(self, text: str) -> None:
@@ -563,7 +562,6 @@ class TestClient:
         return self
 
     def __exit__(self, *exc_info) -> None:
-        """Run the application's lifespan shutdown and stop the loop thread."""
         try:
             if self._lifespan is not None:
                 self._lifespan.shutdown()
