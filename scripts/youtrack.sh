@@ -18,13 +18,13 @@ case "${1:-}" in
     query="${*:-project: BLA #Unresolved}"
     api --get "${base}/api/issues" \
       --data-urlencode "query=${query}" \
-      --data-urlencode 'fields=idReadable,summary,priority(name),state(name),assignee(login),links(direction,linkType(name),issues(idReadable))' \
+      --data-urlencode 'fields=idReadable,summary,customFields(name,value(name)),links(direction,linkType(name),issues(idReadable))' \
       --data-urlencode '$top=100' | jq .
     ;;
   show)
     [[ $# -eq 2 ]] || { echo 'usage: just yt-show ISSUE' >&2; exit 2; }
     api "${base}/api/issues/$2" \
-      --get --data-urlencode 'fields=idReadable,summary,description,priority(name),state(name),assignee(login),comments(text,author(login),created),links(direction,linkType(name),issues(idReadable))' | jq .
+      --get --data-urlencode 'fields=idReadable,summary,description,customFields(name,value(name)),comments(text,author(login),created),links(direction,linkType(name),issues(idReadable))' | jq .
     ;;
   create)
     [[ $# -ge 3 ]] || { echo 'usage: just yt-create SUMMARY DESCRIPTION' >&2; exit 2; }
