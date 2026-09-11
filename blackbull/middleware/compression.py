@@ -1,3 +1,18 @@
+"""Negotiated response-body compression.
+
+[`Compression`][blackbull.middleware.compression.Compression] is the only name
+a caller needs here; the rest of the module is codec detection and the ``Vary``
+bookkeeping that stops a shared cache replaying an encoded body to a client
+that never asked for one.
+
+brotli and zstandard are optional installs.  Whichever is present joins the
+negotiable set, so the same middleware quietly offers fewer codecs on a smaller
+install rather than failing.  Built from settings, its defaults come from
+``BB_COMPRESSION_MIN_SIZE``, ``BB_COMPRESSION_EXECUTOR_THRESHOLD``,
+``BB_COMPRESSION_MAX_INFLIGHT`` and ``BB_BROTLI_QUALITY``, all of which
+``docs/reference/env-vars.md`` describes; constructing it yourself takes those
+same four as arguments.
+"""
 import asyncio
 import functools
 import gzip
