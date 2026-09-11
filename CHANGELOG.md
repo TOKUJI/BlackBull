@@ -49,6 +49,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Two pointers a reader could not follow are retired: a `guide.md §14` that
   is not a file, and an `ActorDesign.md` that exists nowhere in the
   repository.
+- **Removed** `BlackBull.certfile` and `BlackBull.keyfile`.  Both were
+  read-only properties that could only ever return `None`: nothing assigned
+  the fields behind them, and TLS reaches the server through `run()`,
+  `AppConfig`, `BLACKBULL_CERT` / `BLACKBULL_KEY`, a `.env` file, the CLI
+  flags or a TOML config file, all of which resolve onto the server object
+  rather than onto the app.  To ask which certificate a process loaded, read
+  the startup line on the `blackbull.config` logger; to declare one, use any
+  of the paths the Configuration guide lists.  The TLS page now says so.
 
 ## Versioning
 

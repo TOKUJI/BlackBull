@@ -239,8 +239,6 @@ class BlackBull:
 
         self._dispatcher = EventDispatcher(shutdown_timeout=observer_shutdown_timeout)
         self._loop = loop
-        self._certfile = None
-        self._keyfile = None
         self._wsprotocols = None
         self._global_middlewares: list = []
         self._static_roots: list[tuple[str, Path]] = []
@@ -274,14 +272,6 @@ class BlackBull:
                 return None
         return self._loop
 
-    @property
-    def certfile(self):
-        return self._certfile
-
-    @property
-    def keyfile(self):
-        return self._keyfile
-    
     @property
     def available_ws_protocols(self) -> list[bytes]:
         """WebSocket subprotocols this app offers, as bytes.
