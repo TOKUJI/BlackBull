@@ -42,7 +42,17 @@ class _UnknownFrame:
 
 
 class FrameFactory:
-    """docstring for FrameFactory"""
+    """Builds outbound HTTP/2 frames and parses inbound ones for one connection.
+
+    The factory owns the connection's HPACK encoder and decoder, which is why
+    it is per-connection rather than shared: HPACK state is connection-wide, so
+    a frame built or parsed with the wrong codec corrupts every later header
+    block on that connection.
+
+    [`create`][blackbull.protocol.frame.FrameFactory.create] builds any frame
+    type from its registry; the named helpers below are the shorthands for the
+    control frames a server sends most. ``load`` is the inbound direction.
+    """
     def __init__(self, *, max_header_list_size: int | None = None):
         """*max_header_list_size* is the decoded field-section total this
         connection will accept (RFC 9113 §6.5.2).  ``None`` leaves hpack's
@@ -56,6 +66,13 @@ class FrameFactory:
         self.encoder = Encoder()
 
     def create(self, type_: FrameTypes, flags: FrameFlags | int, stream_id: int, *, data: bytes = b'', **kwds):
+        """Build the frame class registered for *type_*, ready to ``save()``.
+
+        *data* is the payload as it goes on the wire; *flags* accepts the
+        type's flag enum or a raw int.  The frame receives this connection's
+        HPACK codecs, so a HEADERS built here shares decoder state with every
+        other frame on the connection.
+        """
         # NB: no per-create trace here — create() runs on every outbound frame
         # and every inbound load(), so an eager f-string here is pure overhead
         # on the hottest H2 loop.  The frame's
