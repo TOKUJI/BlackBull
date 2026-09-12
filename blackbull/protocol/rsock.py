@@ -374,3 +374,17 @@ def create_dual_stack_sockets(port, backlog: int = _DEFAULT_BACKLOG,
         logger.error('Failed to bind any socket on port %s.', port)
 
     return sockets
+
+
+def create_configured_sockets(port, cfg, *, reuseport: bool,
+                              host: str | None = None):
+    """[`create_dual_stack_sockets`][] with every option *cfg* carries."""
+    return create_dual_stack_sockets(
+        port,
+        backlog=cfg.socket_backlog,
+        sndbuf=cfg.socket_sndbuf,
+        rcvbuf=cfg.socket_rcvbuf,
+        user_timeout_ms=cfg.tcp_user_timeout_ms,
+        reuseport=reuseport,
+        host=host,
+    )

@@ -27,7 +27,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from blackbull import BlackBull
-from blackbull.server.server import ASGIServer
+from blackbull.server.server import ASGIServer, Server
 from blackbull.server.listener import Listener, Tcp
 from blackbull.server.multiworker import MultiWorkerServer
 
@@ -36,6 +36,22 @@ def as_listeners(socks, speaks='http', workers=None):
     """Wrap already-bound sockets the way the master hands them over."""
     return [(Listener(Tcp(s.getsockname()[1]), speaks=speaks, workers=workers),
              [s]) for s in socks]
+
+
+def socket_options(sock):
+    """(family, SO_SNDBUF, SO_RCVBUF, TCP_USER_TIMEOUT, SO_REUSEPORT)."""
+    return (sock.family.name,
+            sock.getsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF),
+            sock.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF),
+            (sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_USER_TIMEOUT)
+             if hasattr(socket, 'TCP_USER_TIMEOUT') else None),
+            sock.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT))
+
+
+def socket_address(sock):
+    """(family, host, port) as the kernel reports it."""
+    name = sock.getsockname()
+    return (sock.family.name, name[0], name[1])
 
 
 # ---------------------------------------------------------------------------
@@ -552,3 +568,95 @@ def test_a_later_exchange_reaches_the_state_the_earlier_one_left(stateful_broker
         'and it must be the same process every time'
     assert len(http_pids) > 1, \
         f'while HTTP still spreads across workers, saw {http_pids}'
+
+
+# ---------------------------------------------------------------------------
+# The per-worker re-bind repeats what the master bound
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(
+    not hasattr(socket, 'SO_REUSEPORT'),
+    reason='SO_REUSEPORT not supported on this platform',
+)
+class TestPerWorkerListenerConfiguration:
+    """A re-bound worker listener must be the master's listener, again.
+
+    The kernel serves every worker its own accept queue only if the re-bind
+    asks for the same address and the same socket options; a re-bind that asks
+    for less leaves the workers with the kernel's defaults and full
+    reachability, which is invisible to a connection smoke test.
+    """
+
+    @pytest.fixture(params=[None, '127.0.0.1'], ids=['dual-stack', 'named-host'])
+    def master_and_workers(self, request, plain_app, monkeypatch):
+        """The master's read-back, and a constructed 2-worker re-bind of it.
+
+        The read-back is taken before the re-bind because the REUSEPORT branch
+        closes the master's sockets — after it they cannot be asked again.
+        """
+        from blackbull import env as _env
+
+        monkeypatch.setenv('BB_SOCKET_REUSEPORT', '1')
+        monkeypatch.setenv('BB_SOCKET_SNDBUF', '40000')
+        monkeypatch.setenv('BB_SOCKET_RCVBUF', '40000')
+        monkeypatch.setenv('BB_TCP_USER_TIMEOUT_MS', '60000')
+        _env.reset_settings_cache()
+
+        master = Server(plain_app,
+                        listeners=[Listener(Tcp(0, host=request.param))])
+        master.open_socket()
+        master_socks = [sock for _listener, socks in master.bound_listeners
+                        for sock in socks]
+        master_options = {socket_options(sock) for sock in master_socks}
+        master_addresses = {socket_address(sock) for sock in master_socks}
+        mws = None
+        try:
+            mws = MultiWorkerServer(plain_app, master.bound_listeners, None,
+                                    workers=2)
+            yield request.param, master_options, master_addresses, mws
+        finally:
+            if mws is not None:
+                for group in mws._worker_listeners:
+                    for _listener, socks in group:
+                        for sock in socks:
+                            sock.close()
+            master.close_socket()
+
+    def test_every_worker_repeats_the_configured_socket_options(
+            self, master_and_workers):
+        """BB_SOCKET_SNDBUF / RCVBUF / TCP_USER_TIMEOUT_MS reach every worker."""
+        _host, master_options, _master_addresses, mws = master_and_workers
+        worker_sets = [[sock for _listener, socks in group for sock in socks]
+                       for group in mws._worker_listeners]
+
+        assert len(worker_sets) == 2, 'one listener set per worker'
+        for index, socks in enumerate(worker_sets):
+            assert {socket_options(sock) for sock in socks} == master_options, (
+                f'worker {index} does not listen with the master\'s options: '
+                f'{sorted(socket_options(sock) for sock in socks)} != '
+                f'{sorted(master_options)}')
+
+        # Anchored to the request, not to agreement: the defect is both ends
+        # reading the kernel's defaults (16384 / 131072 / 0 here).
+        for _family, sndbuf, rcvbuf, user_timeout, _reuseport in master_options:
+            assert sndbuf in (40000, 80000), f'SO_SNDBUF read back {sndbuf}'
+            assert rcvbuf in (40000, 80000), f'SO_RCVBUF read back {rcvbuf}'
+            if hasattr(socket, 'TCP_USER_TIMEOUT'):
+                assert user_timeout == 60000, (
+                    f'TCP_USER_TIMEOUT read back {user_timeout}')
+
+    def test_every_worker_repeats_the_master_address(self, master_and_workers):
+        """A named host stays named, and the default stays dual-stack."""
+        host, _master_options, master_addresses, mws = master_and_workers
+        if host is None:
+            assert {('AF_INET', '0.0.0.0'), ('AF_INET6', '::')} <= {
+                (family, address) for family, address, _port in master_addresses
+            }, f'the default deployment must bind both stacks: {master_addresses}'
+        worker_sets = [[sock for _listener, socks in group for sock in socks]
+                       for group in mws._worker_listeners]
+
+        for index, socks in enumerate(worker_sets):
+            addresses = {socket_address(sock) for sock in socks}
+            assert addresses == master_addresses, (
+                f'worker {index} listens somewhere else: '
+                f'{sorted(addresses)} != {sorted(master_addresses)}')

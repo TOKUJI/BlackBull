@@ -31,7 +31,7 @@ from pathlib import Path
 import time
 
 from ..protocol.rsock import (
-    create_dual_stack_sockets, create_unix_socket,
+    create_configured_sockets, create_unix_socket,
     adopt_inherited_sockets, adopt_listening_fd,
 )
 from .listener import HTTP, InheritedFd, Listener, Tcp, Unix
@@ -599,16 +599,8 @@ class Server:
                     f'Failed to bind AF_UNIX socket on {where.path!r}.')
             return [sock]
 
-        socks = create_dual_stack_sockets(
-            where.port,
-            backlog=_cfg.socket_backlog,
-            sndbuf=_cfg.socket_sndbuf,
-            rcvbuf=_cfg.socket_rcvbuf,
-            user_timeout_ms=_cfg.tcp_user_timeout_ms,
-            keepalive=False,  # replaced by app-level keep_alive_timeout
-            reuseport=_cfg.socket_reuseport,
-            host=where.host,
-        )
+        socks = create_configured_sockets(
+            where.port, _cfg, reuseport=_cfg.socket_reuseport, host=where.host)
         if not socks:
             # Binding is the availability check.  A connect probe before it was
             # racy, IPv4-localhost only, and hid the OS error.
@@ -648,14 +640,7 @@ class Server:
             if binding.port is None:
                 continue
             port = binding.port
-            socks = create_dual_stack_sockets(
-                port,
-                backlog=_cfg.socket_backlog,
-                sndbuf=_cfg.socket_sndbuf,
-                rcvbuf=_cfg.socket_rcvbuf,
-                user_timeout_ms=_cfg.tcp_user_timeout_ms,
-                keepalive=False,
-            )
+            socks = create_configured_sockets(port, _cfg, reuseport=False)
             if not socks:
                 logger.error('Failed to bind %s on port %d.', binding.name, port)
                 continue

@@ -63,9 +63,16 @@ extension package) explicitly state their per-worker limits — see
 |---|---|---|---|---|---|
 | `BB_SOCKET_BACKLOG` | bounds queue | bounds queue | per-worker queues | creator's, until accepting | bounds queue |
 | `BB_SOCKET_REUSEPORT` | n/a | off | per worker | creator's socket blocks it | not with `> 1` |
-| `BB_SOCKET_SNDBUF`/`RCVBUF` | set | set | not set | creator's value | listener only |
-| `BB_TCP_USER_TIMEOUT_MS` | set | set | not set | creator's value | unsupported |
+| `BB_SOCKET_SNDBUF`/`RCVBUF` | set | set | set on each | creator's value | listener only |
+| `BB_TCP_USER_TIMEOUT_MS` | set | set | set on each | creator's value | unsupported |
 | `BB_MAX_CONNECTIONS` | per worker | ×N | ×N | ×N | ×N |
+
+Each per-worker listener repeats the address the master bound, so a listener on
+a named host stays on that interface instead of widening to every one; an
+adopted fd keeps the address its supervisor bound.  Where the two columns meet
+— an adopted fd under `+ REUSEPORT` — the workers re-bind with BlackBull's own
+options, so their queues carry `BB_SOCKET_BACKLOG` rather than the creator's
+`Backlog=`.
 
 ### CPU pinning
 
