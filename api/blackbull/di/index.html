@@ -5451,12 +5451,9 @@ framework</em> rather than by the request::</p>
 async def get_item(id: int, db=Depends(get_db)):
     return await db.fetch_item(id)
 </code></pre>
-<p>Design: everything is resolved at <strong>registration time</strong> on the
-<code>_adapt_handler</code> seam — a handler that declares no <code>Depends</code> parameter
-compiles to exactly the wrapper it compiled to before this module existed
-(no per-request stack, no empty dependency loop).  Contrast FastAPI, which
-enters two <code>AsyncExitStack</code>s and runs <code>solve_dependencies()</code> on every
-request even with an empty dependency list.</p>
+<p>Everything is resolved at <strong>registration time</strong>, so a handler that declares
+no <code>Depends</code> parameter carries no dependency machinery at all: no
+per-request stack, and no loop over an empty list.</p>
 
 
 

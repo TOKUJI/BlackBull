@@ -5517,37 +5517,14 @@
 
     <div class="doc doc-contents first">
 
-        <p>In-process MQTT test environment — drive <code>on_message</code> taps with no socket.</p>
-<p>Testing a <code>@mqtt.on_message</code> tap otherwise means standing up a real broker
-and a real MQTT client (<code>mosquitto_pub</code>).  This
-module feeds PUBLISHes into the app's registered taps directly — topic
-matching and <code>{name}</code> captures included — with no TCP socket, no CONNECT,
-and no MQTT client::</p>
-<pre><code>from blackbull import BlackBull
-from blackbull.mqtt import MQTTExtension, Message
-from blackbull.testing.mqtt import MQTTTestBroker
-
-app = BlackBull()
-mqtt = app.add_extension(MQTTExtension(port=1883))
-captured = []
-
-@mqtt.on_message(topic='sensors/{room}/temperature')
-async def on_temp(msg: Message, room: str):
-    captured.append((room, msg.payload))
-
-async def test_tap():
-    async with MQTTTestBroker(app) as broker:
-        await broker.publish(topic='sensors/room1/temperature', payload=b'21.5')
-    assert captured == [('room1', b'21.5')]
-</code></pre>
-<p>Taps run inline and a failing one raises, so a test is deterministic
-whatever the extension's <code>tap_mode</code> says — see <a class="autorefs autorefs-internal" title="publish(topic, payload=b'', *, qos=0, retain=False, properties=None)
-
-  
-      async
-  " href="#blackbull.testing.mqtt.MQTTTestBroker.publish"><code>MQTTTestBroker.publish</code></a>.</p>
+        <p>In-process MQTT test environment: drive <code>on_message</code> taps with no socket.</p>
+<p><a class="autorefs autorefs-internal" href="#blackbull.testing.mqtt.MQTTTestBroker"><code>MQTTTestBroker</code></a> feeds PUBLISHes into an app's registered taps directly --
+topic matching and <code>{name}</code> captures included -- with no TCP socket, no
+CONNECT and no MQTT client.  Taps run inline and a failing one raises, so a
+test is deterministic whatever the extension's <code>tap_mode</code> says.</p>
 <p>Only the tap pipeline is exercised.  Broker routing, QoS flows and retained
-messages belong to the conformance suite, not to this helper.</p>
+messages belong to the conformance suite, not to this helper.  The MQTT guide
+shows a test written against it.</p>
 
 
 

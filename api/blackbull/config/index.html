@@ -5481,56 +5481,19 @@
 
     <div class="doc doc-contents first">
 
-        <p>Declarative application configuration — <a class="autorefs autorefs-internal" title="AppConfig
+        <p>Declarative application configuration -- <a class="autorefs autorefs-internal" title="AppConfig
 
 
   
       dataclass
   " href="#blackbull.config.AppConfig"><code>AppConfig</code></a>.</p>
-<p><code>AppConfig</code> is a small, typed, immutable holder for the server-facing
-settings that <a class="autorefs autorefs-internal" title="run(certfile=None, keyfile=None, port=None, unix_path=None, inherited_fd=None, listeners=None, workers=None, max_connections=None, stream_queue_depth=None, ws_queue_depth=None, reload=None, reload_paths=None)" href="../#blackbull.BlackBull.run"><code>blackbull.BlackBull.run</code></a> (and <a class="autorefs autorefs-internal" title="serve(app, *, certfile=None, keyfile=None, port=0, unix_path=None, inherited_fd=None, listeners=None, workers=None, max_connections=None, stream_queue_depth=None, ws_queue_depth=None, reload=False, reload_paths=None)" href="../#blackbull.serve"><code>blackbull.serve</code></a>)
-already accept as keyword arguments.  It lets an application declare those
-settings once::</p>
-<pre><code>from blackbull import BlackBull, AppConfig
-
-app = BlackBull(config=AppConfig(
-    port=8443,
-    certfile='cert.pem',
-    keyfile='key.pem',
-    workers=4,
-))
-
-if __name__ == '__main__':
-    app.run()          # picks up the config; no flags to thread through
-</code></pre>
-<p>Resolution precedence in <a class="autorefs autorefs-internal" title="run(certfile=None, keyfile=None, port=None, unix_path=None, inherited_fd=None, listeners=None, workers=None, max_connections=None, stream_queue_depth=None, ws_queue_depth=None, reload=None, reload_paths=None)" href="../app/#blackbull.app.BlackBull.run"><code>BlackBull.run</code></a> is, highest to lowest
-(see <a class="autorefs autorefs-internal" title="resolve_run_config(explicit, config)" href="#blackbull.config.resolve_run_config"><code>resolve_run_config</code></a>):</p>
-<ol>
-<li>an explicit keyword argument to <code>run(...)</code> — <code>app.run(port=9000)</code>
-    always wins;</li>
-<li>a <code>BLACKBULL_*</code> environment variable, for the deploy-time settings
-    (<code>BLACKBULL_PORT</code> / <code>CERT</code> / <code>KEY</code> / <code>UNIX_PATH</code> / <code>RELOAD</code>);</li>
-<li>the same <code>BLACKBULL_*</code> key in a <code>.env</code> file in the working directory
-    (requires the <code>[dotenv]</code> extra; absent it, only the real environment is
-    consulted);</li>
-<li>the value declared on the bound <a class="autorefs autorefs-internal" title="AppConfig
-
-
-  
-      dataclass
-  " href="#blackbull.config.AppConfig"><code>AppConfig</code></a> (if any);</li>
-<li>the built-in default baked into <a class="autorefs autorefs-internal" title="serve(app, *, certfile=None, keyfile=None, port=0, unix_path=None, inherited_fd=None, listeners=None, workers=None, max_connections=None, stream_queue_depth=None, ws_queue_depth=None, reload=False, reload_paths=None)" href="../#blackbull.serve"><code>blackbull.serve</code></a>.</li>
-</ol>
-<p><code>AppConfig</code> deliberately mirrors <em>only</em> the parameters <code>serve</code> already
-exposes — it is not a general-purpose settings store.  Per-request and
-server-tuning knobs (window sizes, timeouts, queue depths beyond the two
-listed here, <code>workers</code>, <code>max_connections</code>, …) continue to live in
-<a class="autorefs autorefs-internal" href="../env/#blackbull.env"><code>blackbull.env</code></a> and are sourced from <code>BB_*</code> environment variables —
-<code>BLACKBULL_*</code> is the deployment namespace, <code>BB_*</code> the tuning one.</p>
-<p><code>host</code> is intentionally absent: BlackBull's socket layer binds dual-stack
-on all interfaces (see <code>blackbull.server.ASGIServer.open_socket</code>), so
-a per-interface <code>host</code> field would silently do nothing.  Use <code>unix_path</code>
-or <code>inherited_fd</code> for non-TCP binds.</p>
+<p>A small, typed, immutable holder for the server-facing settings that
+<a class="autorefs autorefs-internal" title="run(certfile=None, keyfile=None, port=None, unix_path=None, inherited_fd=None, listeners=None, workers=None, max_connections=None, stream_queue_depth=None, ws_queue_depth=None, reload=None, reload_paths=None)" href="../#blackbull.BlackBull.run"><code>blackbull.BlackBull.run</code></a> and
+<a class="autorefs autorefs-internal" title="serve(app, *, certfile=None, keyfile=None, port=0, unix_path=None, inherited_fd=None, listeners=None, workers=None, max_connections=None, stream_queue_depth=None, ws_queue_depth=None, reload=False, reload_paths=None)" href="../#blackbull.serve"><code>blackbull.serve</code></a> accept as keyword arguments, so an
+application can declare them once instead of threading flags through.</p>
+<p>An explicit argument still wins over the config, and an environment variable
+wins over both; the Configuration guide gives the order in full and shows
+what each source looks like.</p>
 
 
 
