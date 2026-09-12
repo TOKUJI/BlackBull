@@ -5857,7 +5857,7 @@ extension package) explicitly state their per-worker limits — see
 <td><code>BB_SOCKET_SNDBUF</code>/<code>RCVBUF</code></td>
 <td>set</td>
 <td>set</td>
-<td>not set</td>
+<td>set on each</td>
 <td>creator's value</td>
 <td>listener only</td>
 </tr>
@@ -5865,7 +5865,7 @@ extension package) explicitly state their per-worker limits — see
 <td><code>BB_TCP_USER_TIMEOUT_MS</code></td>
 <td>set</td>
 <td>set</td>
-<td>not set</td>
+<td>set on each</td>
 <td>creator's value</td>
 <td>unsupported</td>
 </tr>
@@ -5879,6 +5879,12 @@ extension package) explicitly state their per-worker limits — see
 </tr>
 </tbody>
 </table>
+<p>Each per-worker listener repeats the address the master bound, so a listener on
+a named host stays on that interface instead of widening to every one; an
+adopted fd keeps the address its supervisor bound.  Where the two columns meet
+— an adopted fd under <code>+ REUSEPORT</code> — the workers re-bind with BlackBull's own
+options, so their queues carry <code>BB_SOCKET_BACKLOG</code> rather than the creator's
+<code>Backlog=</code>.</p>
 <h3 id="cpu-pinning">CPU pinning<a class="headerlink" href="#cpu-pinning" title="Permanent link">&para;</a></h3>
 <p>Each worker pins its event loop to one core after forking, so the
 hot state it accumulates — the header line table, the HPACK

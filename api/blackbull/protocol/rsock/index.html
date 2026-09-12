@@ -3865,6 +3865,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.protocol.rsock.create_configured_sockets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        create_configured_sockets
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.protocol.rsock.create_dual_stack_sockets" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5455,6 +5466,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.protocol.rsock.create_configured_sockets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        create_configured_sockets
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.protocol.rsock.create_dual_stack_sockets" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5623,6 +5645,24 @@ on the user's behalf.</p>
 object anyway (useful for non-systemd handoff and for tests).</p>
 <p>The fd is <em>not</em> unset CLOEXEC — workers inherit it via fork, the
 multiworker path already handles set_inheritable as needed.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.protocol.rsock.create_configured_sockets" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">create_configured_sockets</span><span class="p">(</span><span class="n">port</span><span class="p">,</span> <span class="n">cfg</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">reuseport</span><span class="p">,</span> <span class="n">host</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+<a href="#blackbull.protocol.rsock.create_configured_sockets" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p><a class="autorefs autorefs-internal" title="create_dual_stack_sockets(port, backlog=_DEFAULT_BACKLOG, reuseport=False, sndbuf=0, rcvbuf=0, keepalive=True, user_timeout_ms=0, host=None)" href="#blackbull.protocol.rsock.create_dual_stack_sockets"><code>create_dual_stack_sockets</code></a> with every option <em>cfg</em> carries.</p>
 
 
     </div>
