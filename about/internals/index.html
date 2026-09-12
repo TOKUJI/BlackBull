@@ -6279,6 +6279,18 @@ server and under external ASGI hosts.</p>
   <code>StreamActor</code>.</li>
 <li>Owns the connection-level send window; <code>StreamActor</code>s block
   on it when the window is exhausted.</li>
+<li>Retires every per-stream owner through one idempotent transition: the app
+  task, sender, request recipient, stream-tree node, counters, and any
+  unconsumed connection-window credit.  Completed streams survive only as a
+  bounded closed-id record with separate odd peer-stream and even push-stream
+  high-water marks.  Only streams opened by HEADERS/PUSH_PROMISE advance those
+  marks; a reset of an idle priority-hint node or ownerless future identifier
+  remains an exact entry and cannot classify a lower unopened stream as closed.
+  Consume-time connection credit transfers to connection-owned work before the
+  consumer can be cancelled, while stream credit remains stream-owned so reset
+  cancellation cannot emit it after retirement.  Receiving request
+  <code>END_STREAM</code> only closes the request body; the app and response remain live
+  until response completion or a reset.</li>
 <li>Keeps its state <strong>native</strong>: <code>stream.conn</code> is a <code>Connection</code> on
   every lane, and the one place an ASGI scope can come into
   existence is the app boundary in the shared <code>RequestActor.run</code>,
@@ -6287,8 +6299,10 @@ server and under external ASGI hosts.</p>
   <code>PRIORITY_UPDATE</code>, a server push reading its parent — reads
   attributes, never a dict.</li>
 <li>Supervisor strategy: <strong>propagate</strong> — a framing error on the
-  connection is fatal.  <code>HTTP2Actor</code> sends GOAWAY and exits,
-  causing <code>ConnectionActor</code> to close.</li>
+  connection is fatal.  <code>HTTP2Actor</code> retires stream-owned state, cancels pending
+  credit replays, sends GOAWAY, and exits, causing <code>ConnectionActor</code> to close. A
+  GOAWAY received from the peer instead allows already-accepted response work to
+  drain.</li>
 </ul>
 <p>The boundary is a <strong>snapshot</strong>, taken after every pre-dispatch
 mutation of the <code>Connection</code>.  Fields the two share by reference
