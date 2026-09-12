@@ -64,8 +64,8 @@ class ProtocolContext:
     Carries connection metadata and the shared [`EventAggregator`][]
     without exposing any ASGI concept (no ``scope`` / ``receive`` / ``send``).
     """
-    peername: tuple[str, int] | None
-    sockname: tuple[str, int] | None
+    peername: tuple[str, int | None] | None
+    sockname: tuple[str, int | None] | None
     ssl: bool
     aggregator: EventAggregator | None
     connection_id: str
@@ -86,8 +86,8 @@ class ConnectionView:
     writer: AbstractWriter
     app: Callable[..., Awaitable[None]]
     aggregator: EventAggregator | None
-    peername: tuple[str, int] | None
-    sockname: tuple[str, int] | None
+    peername: tuple[str, int | None] | None
+    sockname: tuple[str, int | None] | None
     ssl: bool
     alpn: str | None
     deadline: ConnectionDeadline

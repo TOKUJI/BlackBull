@@ -148,7 +148,8 @@ async def SocketManager(socket_cb_pairs, ssl_context):
     binding is pre-committed.
 
     On enter: wraps each socket in ``loop.create_server`` (TCP) or
-    ``loop.create_unix_server`` (AF_UNIX) and yields the list.  Not
+    ``loop.create_unix_server`` (AF_UNIX) and yields the list.  Accepting does
+    not start here — the caller calls ``start_serving()`` on the servers.  Not
     ``start_server``: that pairs a StreamReader/StreamWriter over asyncio's
     own buffering with every connection, and the whole point of the buffered
     protocol is that the connection owns exactly one buffer.
@@ -168,7 +169,8 @@ async def SocketManager(socket_cb_pairs, ssl_context):
     loop = asyncio.get_running_loop()
     servers = []
     for sock, factory in socket_cb_pairs:
-        kwargs = {'sock': sock, 'ssl': ssl_context, 'backlog': _backlog}
+        kwargs = {'sock': sock, 'ssl': ssl_context, 'backlog': _backlog,
+                  'start_serving': False}
         if ssl_context is not None:
             kwargs['ssl_handshake_timeout'] = 60.0
         if _af_unix is not None and sock.family == _af_unix:
@@ -242,7 +244,7 @@ class Server:
         self._connection_tasks: set = set()
         self._stopping = False
         self._drain_timeout = None
-        self._stopped_event = None
+        self._stopped_event = asyncio.Event()
         # Process-wide singletons: looked up once, not once per accept.
         from ..event_aggregator import EventAggregator as _EA  # noqa: PLC0415
         self._cached_dispatcher = getattr(self.app, '_dispatcher', None)
@@ -724,20 +726,29 @@ class Server:
                 servers += await stack.enter_async_context(
                     SocketManager(pairs, context))
             self._running_servers = servers
+            logger.info('Bound %d server(s); accepting when lifespan startup completes',
+                        len(servers))
             # Nested inside the stack so lifespan shutdown completes before
             # the sockets it may still be answering on are closed.
             async with LifespanManager(self.app):
                 logger.info(f'Server(s) created: {servers}')
-                # Block on our own event, not ``Server.serve_forever()``:
-                # ``create_server`` already started accepting, so that call
-                # only ever blocked, and its cancellation path now calls
-                # ``Server.close_clients()`` — which closes the *accepted*
-                # transports, so a drain finishes the handler and the send path
-                # writes into a transport asyncio already closed.  The client
-                # sees exactly the reset the drain exists to prevent.
+                # Accepting starts here, not in ``SocketManager``: a request
+                # accepted while an ``on_startup`` hook is still running would
+                # be answered by an app that has not finished starting.
+                for srv in servers:
+                    if self._stopping:
+                        # ``stop()`` closed these servers; starting a closed
+                        # one raises from a socket list that is already gone.
+                        break
+                    await srv.start_serving()
+                # Block on our own event, not ``Server.serve_forever()``: its
+                # cancellation path calls ``Server.close_clients()`` — which
+                # closes the *accepted* transports, so a drain finishes the
+                # handler and the send path writes into a transport asyncio
+                # already closed.  The client sees exactly the reset the drain
+                # exists to prevent.
                 # Measured: 3.14.6 lacks the call and passes; 3.14.7 and
                 # 3.13.15 have it and fail.
-                self._stopped_event = asyncio.Event()
                 try:
                     await self._stopped_event.wait()
 
@@ -773,8 +784,7 @@ class Server:
         # Close listeners first, so the drain is over a set that only shrinks.
         for srv in getattr(self, '_running_servers', ()):
             srv.close()
-        if self._stopped_event is not None:
-            self._stopped_event.set()
+        self._stopped_event.set()
 
         await self._drain(drain_timeout)
 
