@@ -468,6 +468,7 @@ async def test_priority_update_new_stream_precreated():
     # The buffer cap (RFC 9218 §7) reads both of these before pre-creating.
     handler.root_stream.children = {}
     handler.max_concurrent_streams = 100
+    handler._is_closed_stream.return_value = (False, None)
 
     responder = PriorityUpdateResponder(frame)
     await responder.respond(handler)

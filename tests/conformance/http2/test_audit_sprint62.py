@@ -121,7 +121,7 @@ def test_closed_streams_record_is_bounded():
         handler._mark_closed(sid, via_rst=False)
     assert len(handler._closed_streams) <= _CLOSED_STREAMS_CAP
     # The high-water mark still recognises an evicted-but-closed id as closed.
-    assert handler._closed_high_water >= _CLOSED_STREAMS_CAP
+    assert handler._closed_peer_high_water >= _CLOSED_STREAMS_CAP
 
 
 def test_closed_stream_watermark_survives_eviction():
@@ -130,7 +130,7 @@ def test_closed_stream_watermark_survives_eviction():
     for sid in range(3, _CLOSED_STREAMS_CAP * 2 + 5, 2):
         handler._mark_closed(sid, via_rst=False)
     assert 1 not in handler._closed_streams          # evicted from exact cache
-    assert 1 <= handler._closed_high_water           # still ≤ watermark → CLOSED
+    assert 1 <= handler._closed_peer_high_water      # retained watermark → CLOSED
 
 
 # ---------------------------------------------------------------------------

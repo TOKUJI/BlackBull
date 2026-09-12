@@ -1124,6 +1124,8 @@ class TestHTTP2PriorityScope:
         exts = (scopes[0]['extensions'] if isinstance(scopes[0], dict)
                 else scopes[0].extensions)
         assert exts.get('http.response.priority') == {'urgency': 1, 'incremental': True}
+        assert handler._last_peer_stream_id == 1
+        assert handler._closed_peer_high_water == 1
 
     async def test_priority_header_fallback_populates_scope(self):
         encoder = Encoder()

@@ -1151,6 +1151,25 @@ class HTTP2Sender(BaseSender):
         self._log_record = None
         self._auto_flush_task = None
 
+    def retire_stream(self) -> None:
+        """Stop this stream's pending and future output without closing its peer.
+
+        HTTP/2 senders share one transport, so stream retirement cannot use the
+        writer's connection-wide ``peer_gone`` flag.  The per-sender closed bit
+        drops later writes, while cancellation and the window wake release work
+        already parked inside this sender.
+        """
+        self._closed = True
+        task = self._auto_flush_task
+        self._auto_flush_task = None
+        if task is not None and not task.done():
+            task.cancel()
+        self._buffered_status = None
+        self._buffered_headers = None
+        self._buffered_body = None
+        self._buffered_trailers = None
+        self.wake_window()
+
     async def _write_response_start_and_body(
         self, body: bytes, end_stream: bool,
         status: HTTPStatus, headers: list[tuple[bytes, bytes]] | None,
@@ -1162,6 +1181,8 @@ class HTTP2Sender(BaseSender):
         auto-flush of a held chunk — which is what the name says and a
         "flush the buffered start" name would not.
         """
+        if self._closed:
+            return
         headers = headers or []
         # END_STREAM rides the DATA frame below, never HEADERS.
         h_bytes = build_response_headers(
@@ -1251,6 +1272,10 @@ class HTTP2Sender(BaseSender):
         the deferred flush, and the stream must stay open bidirectionally for
         the subsequent WebSocket DATA frames.
         """
+        # Encoding mutates the connection-wide HPACK table.  A retired stream
+        # cannot advance it because the peer will never receive this block.
+        if self._closed:
+            return
         await self._write(build_response_headers(
             self._factory.encoder, self._stream_id, status, headers,
             end_stream=False))
@@ -1288,6 +1313,8 @@ class HTTP2Sender(BaseSender):
                 return
             while (self._conn_window.size <= 0 or
                    self.stream_window_size <= 0):
+                if self._closed:
+                    return
                 if self._window_open is None:
                     self._window_open = asyncio.Event()
                 self._window_open.clear()
@@ -1458,6 +1485,8 @@ class HTTP2Sender(BaseSender):
         block.  Encoding trailers before the deferred HEADERS would desync the
         peer's HPACK decoder.
         """
+        if self._closed:
+            return
         if more_trailers:
             if self._buffered_trailers is None:
                 self._buffered_trailers = headers
@@ -1497,8 +1526,9 @@ class HTTP2Sender(BaseSender):
                     await self._write_data(buffered_body, end_stream=False)
                     # Encode only after the credit wait: another stream may
                     # send HEADERS during it, and the HPACK table is shared.
-                    await self._write(build_trailers(
-                        self._factory.encoder, self._stream_id, headers))
+                    if not self._closed:
+                        await self._write(build_trailers(
+                            self._factory.encoder, self._stream_id, headers))
             else:
                 trailer_bytes = build_trailers(
                     self._factory.encoder, self._stream_id, headers)
@@ -1514,6 +1544,9 @@ class HTTP2Sender(BaseSender):
     async def __call__(self, body: _SenderBody | FrameBase,
                        status: HTTPStatus = HTTPStatus.OK,
                        headers: HeaderList = []):
+        if self._closed:
+            return
+        # Control-plane: raw frame object (SETTINGS, PING ACK, WINDOW_UPDATE, …)
         if isinstance(body, FrameBase):
             if _DEBUG:
                 logger.debug('HTTP2Sender raw frame: %r', body)

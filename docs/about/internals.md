@@ -156,6 +156,18 @@ server and under external ASGI hosts.
   `StreamActor`.
 - Owns the connection-level send window; `StreamActor`s block
   on it when the window is exhausted.
+- Retires every per-stream owner through one idempotent transition: the app
+  task, sender, request recipient, stream-tree node, counters, and any
+  unconsumed connection-window credit.  Completed streams survive only as a
+  bounded closed-id record with separate odd peer-stream and even push-stream
+  high-water marks.  Only streams opened by HEADERS/PUSH_PROMISE advance those
+  marks; a reset of an idle priority-hint node or ownerless future identifier
+  remains an exact entry and cannot classify a lower unopened stream as closed.
+  Consume-time connection credit transfers to connection-owned work before the
+  consumer can be cancelled, while stream credit remains stream-owned so reset
+  cancellation cannot emit it after retirement.  Receiving request
+  `END_STREAM` only closes the request body; the app and response remain live
+  until response completion or a reset.
 - Keeps its state **native**: `stream.conn` is a `Connection` on
   every lane, and the one place an ASGI scope can come into
   existence is the app boundary in the shared `RequestActor.run`,
@@ -164,8 +176,10 @@ server and under external ASGI hosts.
   `PRIORITY_UPDATE`, a server push reading its parent — reads
   attributes, never a dict.
 - Supervisor strategy: **propagate** — a framing error on the
-  connection is fatal.  `HTTP2Actor` sends GOAWAY and exits,
-  causing `ConnectionActor` to close.
+  connection is fatal.  `HTTP2Actor` retires stream-owned state, cancels pending
+  credit replays, sends GOAWAY, and exits, causing `ConnectionActor` to close. A
+  GOAWAY received from the peer instead allows already-accepted response work to
+  drain.
 
 The boundary is a **snapshot**, taken after every pre-dispatch
 mutation of the `Connection`.  Fields the two share by reference
