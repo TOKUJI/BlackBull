@@ -39,7 +39,7 @@ Named non-goals — real limits, not oversights:
 |---|---|---|
 | Memory | large or accumulating request bodies, WebSocket messages, MQTT packets and broker state | size and total caps on each path in the table below |
 | Event-loop time | floods of cheap control frames that each oblige a small piece of work | per-type frame-rate meters |
-| Connection slots | opening connections and holding them | `BB_MAX_CONNECTIONS`, plus idle and header deadlines and, on HTTP/2 and WebSocket, a liveness probe |
+| Connection slots | opening connections and holding them | `BB_MAX_CONNECTIONS` — an accept-time admission, so the listener's backlog is the bound until lifespan startup completes ([`BB_SOCKET_BACKLOG`](../reference/env-vars.md#socket-tuning) where BlackBull binds the listener, the creator's where it adopts one) — plus idle and header deadlines and, on HTTP/2 and WebSocket, a liveness probe |
 | Task slots | opening HTTP/2 streams | `BB_H2_MAX_CONCURRENT_STREAMS`, per-connection handler semaphore |
 | Write path | requesting a response and refusing to read it | `BB_WRITE_TIMEOUT`, on the socket drain *and* on the HTTP/2 flow-control wait |
 | Broker state | subscribing without acknowledging; subscribing to endless filters; retaining messages; leaving sessions behind | `BB_MQTT_MAX_QUEUED_MESSAGES`, `BB_MQTT_MAX_SUBSCRIPTIONS`, `BB_MQTT_MAX_RETAINED`, `BB_MQTT_MAX_SESSIONS` |
@@ -213,7 +213,7 @@ Worth setting for an internet-facing deployment:
 | `BB_MAX_CONNECTIONS` | an explicit number bounds event-loop health, which the derived value does not.  Set it to the concurrency the deployment actually expects, particularly when serving WebSocket, where connections are long-lived by design |
 | `BB_WS_MAX_MESSAGE_SIZE` | the default admits 16 MiB so the WebSocket conformance suite passes unconfigured; lower it if you do not serve huge messages |
 | `BB_MAX_BODY_SIZE` | lower it if you accept no uploads |
-| `BB_TCP_USER_TIMEOUT_MS` | evicts dead peers behind NATs without waiting for keepalives |
+| `BB_TCP_USER_TIMEOUT_MS` | evicts dead peers behind NATs without waiting for keepalives — on the listeners BlackBull builds itself, not a supervisor's fd and not the per-worker `BB_SOCKET_REUSEPORT` listeners ([scope](../reference/env-vars.md#socket-tuning)) |
 
 The client's two turn on a different question — not *is this deployment
 internet-facing* but *do I know what this peer should return*. Set

@@ -522,7 +522,13 @@ class Server:
                     logger.debug(
                         '503 write failed for %s (peer disconnected?)',
                         peername)
-            await wrapped_writer.close()
+                # Nothing has read this connection: the request it sent is
+                # still in the kernel queue, and closing over it would answer
+                # the peer with RST and throw the refusal away.
+                await wrapped_writer.reject_close()
+            else:
+                # Nothing was written, so there is no response to protect.
+                await wrapped_writer.close()
             return
 
         self._active_connections += 1

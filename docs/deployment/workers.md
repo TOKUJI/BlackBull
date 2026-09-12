@@ -31,8 +31,12 @@ free.  It is **off by default**: with `BB_SOCKET_REUSEPORT=0`
 (the default) all workers share the master's single socket, and
 every incoming connection wakes every worker's loop, with N−1
 workers `accept()`-ing to EAGAIN — the thundering-herd accept
-race.  See "Workers vs cores under connection churn" below for
-when turning it on helps and when it does not.
+race.  `--reload` shares the master's socket whatever this is
+set to, because the master keeps the listener to hand it across
+its exec — [`BB_SOCKET_REUSEPORT`](../reference/env-vars.md#socket-tuning)
+states the option's whole scope.  See "Workers vs cores under
+connection churn" below for when turning it on helps and when it
+does not.
 
 ### Shared-nothing model
 
@@ -263,7 +267,7 @@ The defaults match Apache's `LimitRequestLine` /
 
 | Limit | Default | Behaviour |
 |---|---|---|
-| `BB_MAX_CONNECTIONS` | `500` per worker | Connections beyond the cap are refused at accept time.  Combine with `BB_SOCKET_BACKLOG` for graceful overload.  `0` = unlimited. |
+| `BB_MAX_CONNECTIONS` | `auto` per worker | Connections beyond the cap are refused at accept time.  Combine with `BB_SOCKET_BACKLOG` for graceful overload.  `0` = unlimited.  The cap is an accept-time admission, so it does not cover connections that arrive while lifespan startup is still running — the listener's backlog is their bound until accepts begin ([`BB_SOCKET_BACKLOG`](../reference/env-vars.md#socket-tuning) where BlackBull binds the listener, the creator's where it adopts one). |
 | `BB_REQUEST_TIMEOUT` | `0` (off) | Per-HTTP/2-stream deadline in seconds.  Set in production (e.g. `30`) so an ASGI handler hung on an upstream call can't keep its stream slot indefinitely.  Stream is cancelled via `RST_STREAM CANCEL`. |
 
 ## Shutdown

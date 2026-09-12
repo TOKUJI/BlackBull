@@ -485,19 +485,24 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
             self.transport.close()
 
     async def linger_close(self, max_bytes: int = 65536,
-                           timeout: float = 0.25) -> None:
+                           timeout: float = 0.25,
+                           *, force: bool = False) -> None:
         """Close after briefly discarding whatever the peer is still sending.
 
         Reads and discards up to *max_bytes* for at most *timeout* seconds,
         then closes.  Skipped when nothing was left unconsumed, so a completed
-        request still gets a bare close.
+        request still gets a bare close — unless *force* is set, which is what
+        a connection closed before it was ever read needs: the bytes the peer
+        sent are in the kernel's receive queue rather than in this buffer, so
+        the self-selection cannot see them, and closing over them answers the
+        peer with RST instead of the response already written.
 
         The Internals page explains why a rejection has to close this way and
         why both bounds are needed.  nginx calls it ``lingering_close``.
         """
         if self.transport is None:
             return
-        if self._eof or not self._rb.available:
+        if not force and (self._eof or not self._rb.available):
             self.close()
             return
         try:

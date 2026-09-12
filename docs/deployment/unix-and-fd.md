@@ -31,7 +31,10 @@ directory at that path (safety check).
 
 TCP-only socket options (`SO_REUSEPORT`, `TCP_USER_TIMEOUT`,
 `IPV6_V6ONLY`) are skipped for `AF_UNIX` sockets — they carry
-no meaning on a domain socket.
+no meaning on a domain socket.  `BB_SOCKET_SNDBUF` and
+`BB_SOCKET_RCVBUF` are not TCP-only and do size the domain
+listener; the connections accepted from it keep the kernel's own
+default ([scope](../reference/env-vars.md#socket-tuning)).
 
 ## fd inheritance — systemd socket activation
 
@@ -70,6 +73,16 @@ environment variables per the `sd_listen_fds(3)` protocol:
 When neither variable is set (non-systemd handoff, tests)
 BlackBull accepts the fd unconditionally.
 
+With more than one worker, `BB_SOCKET_REUSEPORT=1` and no `--reload`, the
+adopted fd is not used: BlackBull closes it and each worker re-binds the
+port itself.  The supervisor's copy still holds the addresses it kept, so
+those re-binds fail — with systemd's dual-stack socket, none of them
+succeed and no worker serves the port.  [`--reload`](hot-reload.md) takes
+the other branch: the master keeps the one adopted listener and hands it to
+every worker, so the port is served and `BB_SOCKET_REUSEPORT` spreads
+nothing — see
+[`BB_SOCKET_REUSEPORT`](../reference/env-vars.md#socket-tuning).
+
 ### What systemd activation buys you
 
 - **Bind privileged ports without running as root.**  systemd
@@ -77,8 +90,16 @@ BlackBull accepts the fd unconditionally.
   `www-data` and inherits the already-bound socket.
 - **Zero-downtime restarts.**  systemd keeps the socket open
   across stop/start cycles — connections that arrive while the
-  new BlackBull is launching queue in the kernel accept buffer
-  instead of being refused.
+  new BlackBull is launching are not refused but queued in the
+  kernel accept buffer.  Where the fd is adopted as it arrives
+  (one worker, `BB_SOCKET_REUSEPORT=0`, or `--reload`), the bound on that
+  queue belongs to the socket's creator, not to BlackBull: the fd
+  arrives already listening, and
+  [`BB_SOCKET_BACKLOG`](../reference/env-vars.md#socket-tuning)
+  is applied only once BlackBull starts accepting, so the window
+  itself is bounded by the `Backlog=` systemd passed to
+  `listen()`.  The excess waits on the client's SYN
+  retransmission budget and is lost if the launch outlasts it.
 - **Lazy activation.**  The socket is ready before BlackBull
   starts; the first connection wakes the service.
 

@@ -257,6 +257,18 @@ class AbstractWriter(ABC):
     async def close(self) -> None:
         """Close the underlying transport. Default: no-op."""
 
+    async def reject_close(self) -> None:
+        """Close a connection refused before anything has read it.
+
+        A refusal is written before the request was read, so whatever the peer
+        sent is still in the kernel's receive queue and a plain close answers
+        it with RST, which can discard the refusal the peer has not read yet.
+        A transport that cannot discard what arrives while closing can only do
+        the ordinary close; ``docs/about/internals.md`` §Rejecting requires
+        lingering is the obligation a transport that can do better meets here.
+        """
+        await self.close()
+
     async def sendfile(self, file, offset: int, count: int) -> int:
         """Send up to *count* bytes from *file* starting at *offset*.
 
@@ -411,6 +423,19 @@ class AsyncioWriter(AbstractWriter):
         # above keeps its zero extra turns.
         if self._linger is not None:
             await self._linger()
+            return
+        self._sw.close()
+
+    async def reject_close(self) -> None:
+        """Close a refused connection without RSTing the refusal away.
+
+        ``close()`` above lingers only for bytes this connection is known to
+        hold unconsumed, which is never the case here: the refusal is written
+        before anything read the request, so the unread bytes are in the
+        kernel queue and the linger has to be forced.
+        """
+        if self._linger is not None:
+            await self._linger(force=True)
             return
         self._sw.close()
 
