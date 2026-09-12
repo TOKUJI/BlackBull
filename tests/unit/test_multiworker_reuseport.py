@@ -11,10 +11,12 @@ from pathlib import Path
 
 import pytest
 
+from blackbull import BlackBull
 from blackbull.server import multiworker
 from blackbull.server.listener import InheritedFd, Listener
 from blackbull.server.multiworker import (
     _PROC_NET, _held_elsewhere, _kernel_listening, _PlannedListener,
+    MultiWorkerServer,
 )
 
 pytestmark = pytest.mark.skipif(
@@ -108,3 +110,37 @@ def test_a_host_that_cannot_name_the_namespace_reads_as_local(monkeypatch):
             assert multiworker._elsewhere_netns(sock) is False
     finally:
         sock.close()
+
+
+def test_a_refusal_releases_the_sockets_it_bound(monkeypatch):
+    """A held ``ReusePort=yes`` creator is the shape whose re-bind succeeds, so
+    the refusal has per-worker sockets of its own to give back."""
+    monkeypatch.setenv('BB_SOCKET_REUSEPORT', '1')
+    creator = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+    creator.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    creator.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+    creator.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+    creator.bind(('::', 0))
+    creator.listen(4096)
+    port = creator.getsockname()[1]
+    creator_inode = os.fstat(creator.fileno()).st_ino
+    adopted = socket.socket(fileno=os.dup(creator.fileno()))
+    listener = Listener(InheritedFd(adopted.fileno()))
+    refusal = None
+    try:
+        try:
+            MultiWorkerServer(BlackBull(), [(listener, [adopted])], None,
+                              workers=2)
+        except RuntimeError as exc:
+            # Kept on purpose: the traceback keeps the failed server reachable,
+            # so a free port is the release's doing, not the collector's.
+            refusal = exc
+        assert refusal is not None, 'the held socket was not refused'
+        assert 'BB_SOCKET_REUSEPORT' in str(refusal)
+        listening = _kernel_listening(port, {socket.AF_INET, socket.AF_INET6})
+        assert listening == {creator_inode}, (
+            'the refusal left its bound sockets listening: '
+            f'{sorted(listening - {creator_inode})}')
+    finally:
+        adopted.close()
+        creator.close()
