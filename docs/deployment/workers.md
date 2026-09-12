@@ -32,7 +32,10 @@ free.  It is **off by default**: with `BB_SOCKET_REUSEPORT=0`
 every incoming connection wakes every worker's loop, with N−1
 workers `accept()`-ing to EAGAIN — the thundering-herd accept
 race.  See "Workers vs cores under connection churn" below for
-when turning it on helps and when it does not.
+when turning it on helps and when it does not.  An adopted fd
+(`--bind fd://N`) is not always the workers' to split — see
+[Unix sockets and fd
+inheritance](unix-and-fd.md#several-workers-behind-an-activated-socket).
 
 ### Shared-nothing model
 

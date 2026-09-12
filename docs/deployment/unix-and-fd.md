@@ -71,8 +71,10 @@ When neither variable is set (non-systemd handoff, tests)
 BlackBull accepts the fd unconditionally.
 
 With `BB_SOCKET_REUSEPORT=1`, several workers and no
-[`--reload`](hot-reload.md), a creator-held dual-stack socket leaves no worker
-serving the port.
+[`--reload`](hot-reload.md), a creator-held dual-stack socket would leave some
+or all connections unserved — startup refuses that shape instead (see
+[Several workers behind an activated
+socket](#several-workers-behind-an-activated-socket)).
 
 ### What systemd activation buys you
 
@@ -85,6 +87,21 @@ serving the port.
   instead of being refused.
 - **Lazy activation.**  The socket is ready before BlackBull
   starts; the first connection wakes the service.
+
+### Several workers behind an activated socket
+
+`systemd-socket-activate` execs the service in place, so the port is
+the workers' to re-bind; a `systemd.socket` unit keeps its own copy for
+the service's whole lifetime, and `ReusePort=yes` leaves that copy in the
+port's reuseport group — the per-worker bind then succeeds while the
+supervisor's copy keeps taking connections no worker accepts on.  A socket
+bound in another network namespace refuses for the same reason: the workers
+would bind where its clients are not.  The namespace comparison needs
+`SO_NETNS_COOKIE` (Linux 5.14+); a host that will not give it reads the
+socket as local, and that refusal is skipped silently.  Where
+`/proc/net/tcp*` cannot be read — or reads empty — a released
+`ReusePort=yes` socket is refused too: there is nothing to tell it apart
+from a kept one.
 
 ## The startup window
 
