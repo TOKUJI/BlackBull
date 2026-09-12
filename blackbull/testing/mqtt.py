@@ -1,33 +1,13 @@
-"""In-process MQTT test environment — drive ``on_message`` taps with no socket.
+"""In-process MQTT test environment: drive ``on_message`` taps with no socket.
 
-Testing a ``@mqtt.on_message`` tap otherwise means standing up a real broker
-and a real MQTT client (``mosquitto_pub``).  This
-module feeds PUBLISHes into the app's registered taps directly — topic
-matching and ``{name}`` captures included — with no TCP socket, no CONNECT,
-and no MQTT client::
-
-    from blackbull import BlackBull
-    from blackbull.mqtt import MQTTExtension, Message
-    from blackbull.testing.mqtt import MQTTTestBroker
-
-    app = BlackBull()
-    mqtt = app.add_extension(MQTTExtension(port=1883))
-    captured = []
-
-    @mqtt.on_message(topic='sensors/{room}/temperature')
-    async def on_temp(msg: Message, room: str):
-        captured.append((room, msg.payload))
-
-    async def test_tap():
-        async with MQTTTestBroker(app) as broker:
-            await broker.publish(topic='sensors/room1/temperature', payload=b'21.5')
-        assert captured == [('room1', b'21.5')]
-
-Taps run inline and a failing one raises, so a test is deterministic
-whatever the extension's ``tap_mode`` says — see [`MQTTTestBroker.publish`][MQTTTestBroker.publish].
+[`MQTTTestBroker`][] feeds PUBLISHes into an app's registered taps directly --
+topic matching and ``{name}`` captures included -- with no TCP socket, no
+CONNECT and no MQTT client.  Taps run inline and a failing one raises, so a
+test is deterministic whatever the extension's ``tap_mode`` says.
 
 Only the tap pipeline is exercised.  Broker routing, QoS flows and retained
-messages belong to the conformance suite, not to this helper.
+messages belong to the conformance suite, not to this helper.  The MQTT guide
+shows a test written against it.
 """
 from __future__ import annotations
 
