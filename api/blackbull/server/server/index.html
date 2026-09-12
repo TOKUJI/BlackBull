@@ -6171,7 +6171,8 @@ port-bound non-ASGI protocol both come from
 <a class="autorefs autorefs-internal" title="connection_protocol_factory(bound_binding=None)" href="#blackbull.server.server.Server.connection_protocol_factory"><code>Server.connection_protocol_factory</code></a>, differing only in whether a
 binding is pre-committed.</p>
 <p>On enter: wraps each socket in <code>loop.create_server</code> (TCP) or
-<code>loop.create_unix_server</code> (AF_UNIX) and yields the list.  Not
+<code>loop.create_unix_server</code> (AF_UNIX) and yields the list.  Accepting does
+not start here — the caller calls <code>start_serving()</code> on the servers.  Not
 <code>start_server</code>: that pairs a StreamReader/StreamWriter over asyncio's
 own buffering with every connection, and the whole point of the buffered
 protocol is that the connection owns exactly one buffer.
