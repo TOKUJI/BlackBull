@@ -5623,7 +5623,7 @@ allocate on a peer's behalf, and each bound has a test named under
 <tr>
 <td>Connection slots</td>
 <td>opening connections and holding them</td>
-<td><code>BB_MAX_CONNECTIONS</code>, plus idle and header deadlines and, on HTTP/2 and WebSocket, a liveness probe</td>
+<td><code>BB_MAX_CONNECTIONS</code> (accept-time: see the <a href="../../deployment/unix-and-fd/#the-startup-window">startup window</a>), plus idle and header deadlines and, on HTTP/2 and WebSocket, a liveness probe</td>
 </tr>
 <tr>
 <td>Task slots</td>
@@ -5986,7 +5986,7 @@ are the difference between the label and the whole truth:</p>
 </tr>
 <tr>
 <td><code>BB_TCP_USER_TIMEOUT_MS</code></td>
-<td>evicts dead peers behind NATs without waiting for keepalives</td>
+<td>evicts dead peers behind NATs without waiting for keepalives — BlackBull's own listeners only (<a href="../../deployment/workers/#socket-options-across-bind-paths">scope</a>)</td>
 </tr>
 </tbody>
 </table>

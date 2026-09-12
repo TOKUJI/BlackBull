@@ -5820,7 +5820,7 @@ on busy production deployments, see
 <tr>
 <td><code>BB_WORKERS</code></td>
 <td><code>1</code></td>
-<td>Pre-fork worker count.  <code>0</code> resolves to <code>os.cpu_count()</code>.  Each worker runs its own asyncio event loop; combine with <code>BB_SOCKET_REUSEPORT=1</code> so the kernel load-balances accepts across workers.</td>
+<td>Pre-fork worker count.  <code>0</code> resolves to <code>os.cpu_count()</code>.  Combine with <code>BB_SOCKET_REUSEPORT=1</code>, except under <code>--reload</code> or on a port-bound non-ASGI protocol, which keep one listener.  See <a href="../../deployment/workers/">Workers</a>.</td>
 </tr>
 <tr>
 <td><code>BB_UVLOOP</code></td>
@@ -5888,7 +5888,7 @@ first-hit-then-summary rate-limit model.</p>
 <tr>
 <td><code>BB_MAX_CONNECTIONS</code></td>
 <td><code>auto</code></td>
-<td>Maximum simultaneous TCP connections <strong>per worker</strong>.  At the cap, new connections receive HTTP/1.1 <code>503 Service Unavailable</code> with <code>Retry-After: 1</code> before close — a well-formed response so load-balancers and health-checks can interpret it correctly.  Accepts <code>auto</code>, <code>0</code> (uncapped), or a number.<br><br><strong><code>auto</code> derives the cap from the process's own <code>RLIMIT_NOFILE</code></strong>, less a 64-descriptor reserve for listeners, the event loop's selector, log files and your application's own descriptors.  A cap above the fd budget would be decorative — <code>accept()</code> fails with <code>EMFILE</code> before the cap is ever consulted, and the peer gets a dropped connection instead of the 503 — so the derived value can only refuse connections the OS was going to refuse anyway.  That is what makes a finite default safe to ship, and it follows your own intent: raising the fd limit is how you say how large this process may become.  The resolved value is logged at startup.<br><br>An explicit number is honoured as given, not clamped to the fd budget.  Note the derived cap bounds <em>descriptor exhaustion</em>, not event-loop health — a ceiling reflecting what one asyncio loop serves well is a policy number that depends on your workload, so set it explicitly; 1024 is a typical single-loop value.  Multi-worker servers multiply the ceiling (<code>workers × max_connections</code>).</td>
+<td>Maximum simultaneous TCP connections <strong>per worker</strong>.  Accepts <code>auto</code>, <code>0</code> (uncapped), or a number.  At the cap, new connections get HTTP/1.1 <code>503 Service Unavailable</code> with <code>Retry-After: 1</code> before close, which a load-balancer can interpret.<br><br>The cap is an <strong>accept-time</strong> decision: what arrives during lifespan startup is bounded by the listener's backlog instead (<a href="../../deployment/unix-and-fd/#the-startup-window">The startup window</a>).  The refusal is best-effort (<a href="../../about/internals/#rejecting-requires-lingering">Rejecting requires lingering</a>).  A refused ALPN-<code>h2</code> or raw-protocol connection gets no response — no framing to write one in; a prior-knowledge <code>h2c</code> one gets the same <code>503</code>.<br><br><strong><code>auto</code> derives the cap from the process's own <code>RLIMIT_NOFILE</code></strong>, less a 64-descriptor reserve.<br><br>An explicit number is honoured as given, not clamped to the fd budget; 1024 is a typical single-loop value.  Multi-worker servers multiply the ceiling (<code>workers × max_connections</code>).</td>
 </tr>
 <tr>
 <td><code>BB_REQUEST_TIMEOUT</code></td>
@@ -5918,7 +5918,7 @@ first-hit-then-summary rate-limit model.</p>
 <tr>
 <td><code>BB_TCP_USER_TIMEOUT_MS</code></td>
 <td><code>0</code></td>
-<td><code>TCP_USER_TIMEOUT</code> socket option (Linux).  Per-connection upper bound on how long an unacknowledged sent segment can linger before the kernel kills the connection.  Useful to evict dead peers behind NATs without waiting for keepalives.  See "Performance recommendations" below for production tuning.  <code>0</code> leaves the kernel default in place.</td>
+<td><code>TCP_USER_TIMEOUT</code> socket option (Linux): per-connection upper bound on how long an unacknowledged sent segment lingers before the kernel kills the connection, evicting dead peers behind NATs without waiting for keepalives.  <code>0</code> keeps the kernel default.  See <a href="../../deployment/workers/#socket-options-across-bind-paths">Per-path scope</a>.</td>
 </tr>
 <tr>
 <td><code>BB_HEADER_MAX_LINE</code></td>
@@ -6202,22 +6202,22 @@ entirely.</p>
 <tr>
 <td><code>BB_SOCKET_BACKLOG</code></td>
 <td><code>1024</code></td>
-<td><code>listen()</code> backlog depth.  A sane default for servers facing connection bursts (128 — the traditional <code>SOMAXCONN</code> — is shallow next to nginx's 511).  Linux caps the effective value at <code>net.core.somaxconn</code>.  See "Performance recommendations" below for production tuning.</td>
+<td><code>listen()</code> backlog depth, sized for connection bursts; Linux caps the effective value at <code>net.core.somaxconn</code>.  Where BlackBull binds, <strong>this value bounds the accept queue</strong>; an adopted fd keeps its creator's <code>Backlog=</code> until accepting begins; see <a href="../../deployment/unix-and-fd/#the-startup-window">The startup window</a>.</td>
 </tr>
 <tr>
 <td><code>BB_SOCKET_REUSEPORT</code></td>
 <td><code>0</code></td>
-<td>When supported by the OS (Linux, modern BSDs), bind each worker to its own listening socket so the kernel hashes incoming connections across workers — eliminates the thundering-herd accept pattern.  No effect with one worker.  Enable on multi-worker deployments; a <strong>pessimization under connection churn</strong> (short-lived connections), where the hash spreads bursts unevenly — see <a href="../../deployment/workers/#workers-vs-cores-under-connection-churn">Workers</a>.  <code>0</code> leaves the kernel default in place.</td>
+<td>On Linux and modern BSDs, give each worker its own listening socket so the kernel hashes connections across workers, removing the thundering herd — but a <strong>pessimization under connection churn</strong>, where the hash spreads a burst unevenly.  Only the dual-stack TCP bind is repeated per worker: an <code>AF_UNIX</code> listener never is, so <code>workers &gt; 1</code> beside a <code>unix_path</code> fails to start unless <code>--reload</code> is set too.  <code>0</code> keeps the kernel default.  See <a href="../../deployment/workers/#socket-options-across-bind-paths">Per-path scope</a>.</td>
 </tr>
 <tr>
 <td><code>BB_SOCKET_SNDBUF</code></td>
 <td><code>0</code></td>
-<td><code>SO_SNDBUF</code> (bytes) on each accepted socket.  <code>0</code> leaves the kernel default unchanged.  Linux doubles the requested value internally; larger values help throughput for responses ≥ 64 kB.</td>
+<td><code>SO_SNDBUF</code> (bytes) on BlackBull's own listeners and the TCP connections accepted from them; <code>0</code> keeps the kernel default.  Linux clamps at <code>net.core.wmem_max</code> and doubles.  See <a href="../../deployment/workers/#socket-options-across-bind-paths">Per-path scope</a>.</td>
 </tr>
 <tr>
 <td><code>BB_SOCKET_RCVBUF</code></td>
 <td><code>0</code></td>
-<td><code>SO_RCVBUF</code> (bytes) on each accepted socket.  <code>0</code> leaves the kernel default unchanged.  Same doubling rule as <code>BB_SOCKET_SNDBUF</code>.</td>
+<td><code>SO_RCVBUF</code> (bytes) in the same scope as <code>BB_SOCKET_SNDBUF</code>, against <code>net.core.rmem_max</code> instead and doubled by the same rule.  <code>0</code> keeps the kernel default.</td>
 </tr>
 </tbody>
 </table>
@@ -6610,13 +6610,13 @@ kernel/process memory and one custom socket option:</p>
 <td><code>BB_SOCKET_SNDBUF</code></td>
 <td><code>0</code></td>
 <td><code>262144</code></td>
-<td>256 kB requested → ~512 kB effective after the kernel doubles.  Helps throughput on responses ≥ 64 kB (static assets, JSON arrays, streamed bodies).</td>
+<td>256 KiB requested.  The kernel accepts at most <code>net.core.wmem_max</code> of it and then doubles that, so the effective size is <code>2 × min(262144, wmem_max)</code> — 512 KiB where the sysctl allows it, 416 KiB at the stock <code>212992</code>, where bumping <code>net.core.wmem_max</code> is what buys the rest.  Helps throughput on responses ≥ 64 kB (static assets, JSON arrays, streamed bodies).</td>
 </tr>
 <tr>
 <td><code>BB_SOCKET_RCVBUF</code></td>
 <td><code>0</code></td>
 <td><code>262144</code></td>
-<td>Same shape as <code>SNDBUF</code>, for inbound traffic (large <code>POST</code> bodies).</td>
+<td>Same shape against <code>net.core.rmem_max</code>, for inbound traffic (large <code>POST</code> bodies).</td>
 </tr>
 <tr>
 <td><code>BB_TCP_USER_TIMEOUT_MS</code></td>
@@ -6638,6 +6638,8 @@ kernel/process memory and one custom socket option:</p>
 </tr>
 </tbody>
 </table>
+<p>See <a href="../../deployment/workers/#socket-options-across-bind-paths">Socket options across bind paths</a>
+for how each row's scope varies by bind path.</p>
 <p>For containerised deployments, set the socket-buffer values via
 the container environment (<code>docker run -e BB_SOCKET_SNDBUF=...</code>)
 since the host's <code>net.ipv4.tcp_wmem</code> won't apply inside the

@@ -6038,9 +6038,10 @@ cost the inbound rewrite is removing on the read side.</p>
 
         <p>Close after briefly discarding whatever the peer is still sending.</p>
 <p>Reads and discards up to <em>max_bytes</em> for at most <em>timeout</em> seconds,
-then closes.  Skipped when nothing was left unconsumed, so a completed
-request still gets a bare close.</p>
-<p>The Internals page explains why a rejection has to close this way and
+then closes.  A connection that wrote a response and may still have
+unread bytes — resident, or nothing arrived and no EOF — lingers
+once; otherwise its buffer and EOF decide.
+The Internals page explains why a rejection has to close this way and
 why both bounds are needed.  nginx calls it <code>lingering_close</code>.</p>
 
 

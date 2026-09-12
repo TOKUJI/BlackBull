@@ -1346,6 +1346,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#socket-options-across-bind-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Socket options across bind paths
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#cpu-pinning" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5565,6 +5576,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#socket-options-across-bind-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Socket options across bind paths
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#cpu-pinning" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5799,6 +5821,61 @@ extension package) explicitly state their per-worker limits — see
 </tr>
 </tbody>
 </table>
+<h3 id="socket-options-across-bind-paths">Socket options across bind paths<a class="headerlink" href="#socket-options-across-bind-paths" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>knob</th>
+<th>single</th>
+<th>shared</th>
+<th>+ <code>REUSEPORT</code></th>
+<th>adopted fd</th>
+<th><code>AF_UNIX</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>BB_SOCKET_BACKLOG</code></td>
+<td>bounds queue</td>
+<td>bounds queue</td>
+<td>per-worker queues</td>
+<td>creator's, until accepting</td>
+<td>bounds queue</td>
+</tr>
+<tr>
+<td><code>BB_SOCKET_REUSEPORT</code></td>
+<td>n/a</td>
+<td>off</td>
+<td>per worker</td>
+<td>creator's socket blocks it</td>
+<td>not with <code>&gt; 1</code></td>
+</tr>
+<tr>
+<td><code>BB_SOCKET_SNDBUF</code>/<code>RCVBUF</code></td>
+<td>set</td>
+<td>set</td>
+<td>not set</td>
+<td>creator's value</td>
+<td>listener only</td>
+</tr>
+<tr>
+<td><code>BB_TCP_USER_TIMEOUT_MS</code></td>
+<td>set</td>
+<td>set</td>
+<td>not set</td>
+<td>creator's value</td>
+<td>unsupported</td>
+</tr>
+<tr>
+<td><code>BB_MAX_CONNECTIONS</code></td>
+<td>per worker</td>
+<td>×N</td>
+<td>×N</td>
+<td>×N</td>
+<td>×N</td>
+</tr>
+</tbody>
+</table>
 <h3 id="cpu-pinning">CPU pinning<a class="headerlink" href="#cpu-pinning" title="Permanent link">&para;</a></h3>
 <p>Each worker pins its event loop to one core after forking, so the
 hot state it accumulates — the header line table, the HPACK
@@ -6015,7 +6092,7 @@ see the rejection it was just given.</p>
 <tbody>
 <tr>
 <td><code>BB_MAX_CONNECTIONS</code></td>
-<td><code>500</code> per worker</td>
+<td><code>auto</code> per worker</td>
 <td>Connections beyond the cap are refused at accept time.  Combine with <code>BB_SOCKET_BACKLOG</code> for graceful overload.  <code>0</code> = unlimited.</td>
 </tr>
 <tr>

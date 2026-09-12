@@ -5802,9 +5802,8 @@ in the process.</p>
 <code>RLIMIT_NOFILE</code>, less a reserve.  An explicit number is honoured as
 given, <em>not</em> clamped to that budget: an operator who names a number
 means it.  <code>0</code> disables the cap.</p>
-<p>The environment-variable reference argues why a derived default is safe
-to ship, and why this bounds descriptor exhaustion rather than
-event-loop health.</p>
+<p>Why a derived default is safe to ship, and what it does not bound, is
+argued in <code>docs/about/security-model.md</code> (qualification 2).</p>
 
 
     </div>

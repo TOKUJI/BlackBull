@@ -1435,6 +1435,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#the-startup-window" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The startup window
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#inspecting-the-bind" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5443,6 +5454,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#the-startup-window" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The startup window
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#inspecting-the-bind" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5537,6 +5559,9 @@ environment variables per the <code>sd_listen_fds(3)</code> protocol:</p>
 </ul>
 <p>When neither variable is set (non-systemd handoff, tests)
 BlackBull accepts the fd unconditionally.</p>
+<p>With <code>BB_SOCKET_REUSEPORT=1</code>, several workers and no
+<a href="../hot-reload/"><code>--reload</code></a>, a creator-held dual-stack socket leaves no worker
+serving the port.</p>
 <h3 id="what-systemd-activation-buys-you">What systemd activation buys you<a class="headerlink" href="#what-systemd-activation-buys-you" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>Bind privileged ports without running as root.</strong>  systemd
@@ -5549,6 +5574,22 @@ BlackBull accepts the fd unconditionally.</p>
 <li><strong>Lazy activation.</strong>  The socket is ready before BlackBull
   starts; the first connection wakes the service.</li>
 </ul>
+<h2 id="the-startup-window">The startup window<a class="headerlink" href="#the-startup-window" title="Permanent link">&para;</a></h2>
+<p>Accepts begin only after lifespan startup completes, so arrivals before then
+wait in the kernel's accept queue, bounded by the creator's <code>Backlog=</code> where
+the fd is adopted and by
+<a href="../../reference/env-vars/#socket-tuning"><code>BB_SOCKET_BACKLOG</code></a> where BlackBull
+binds it.  The window lasts as long as the startup hook runs, with no deadline
+from the framework.  The kernel admits <code>backlog + 1</code> parked connections per
+socket, each holding one 128 KiB receive buffer on a stock Linux (nothing reads,
+so it does not autotune upward): <strong>128.125 MiB per listener</strong> at the default,
+256.25 MiB dual-stack, and 4097 × 128 KiB = <strong>512.125 MiB</strong> on an adopted
+fd given <code>Backlog=4096</code>.
+<code>BB_SOCKET_RCVBUF</code> sets that buffer on the listener and parked connections
+inherit it: a requested <code>262144</code> is 416 KiB effective each, making the window
+<strong>416.406 MiB</strong> per listener, 832.812 MiB dual-stack.  A window longer than the
+client's SYN retransmission budget (about two minutes) loses the excess.
+BlackBull documents this window rather than forcing it smaller.</p>
 <h2 id="inspecting-the-bind">Inspecting the bind<a class="headerlink" href="#inspecting-the-bind" title="Permanent link">&para;</a></h2>
 <p><code>server.port</code> returns the kernel-assigned port number after
 <code>open_socket(port=0)</code> — useful in tests where you want an
