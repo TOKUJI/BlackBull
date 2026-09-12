@@ -36,7 +36,8 @@ def sections() -> list[tuple[str, list[tuple[str, object, str]]]]:
 
     out: list[tuple[str, list]] = []
     current: str | None = None
-    for node in tree.body:
+    body = tree.body
+    for index, node in enumerate(body):
         if not isinstance(node, ast.Assign):
             continue
         name = node.targets[0].id
@@ -49,9 +50,9 @@ def sections() -> list[tuple[str, list[tuple[str, object, str]]]]:
                 break
             if text and not text.startswith('#'):
                 break
-        doc = ast.get_docstring(ast.Module(body=[ast.Expr(node.value)], type_ignores=[]))
-        idx = tree.body.index(node) + 1
-        nxt = tree.body[idx] if idx < len(tree.body) else None
+        # The description is the string statement that follows the assignment
+        # -- an attribute docstring, which is what griffe reads too.
+        nxt = body[index + 1] if index + 1 < len(body) else None
         doc = (nxt.value.value if isinstance(nxt, ast.Expr)
                and isinstance(nxt.value, ast.Constant)
                and isinstance(nxt.value.value, str) else '')
