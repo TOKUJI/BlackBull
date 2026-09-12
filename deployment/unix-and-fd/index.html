@@ -1429,6 +1429,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#several-workers-behind-an-activated-socket" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Several workers behind an activated socket
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5448,6 +5459,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#several-workers-behind-an-activated-socket" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Several workers behind an activated socket
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5560,8 +5582,10 @@ environment variables per the <code>sd_listen_fds(3)</code> protocol:</p>
 <p>When neither variable is set (non-systemd handoff, tests)
 BlackBull accepts the fd unconditionally.</p>
 <p>With <code>BB_SOCKET_REUSEPORT=1</code>, several workers and no
-<a href="../hot-reload/"><code>--reload</code></a>, a creator-held dual-stack socket leaves no worker
-serving the port.</p>
+<a href="../hot-reload/"><code>--reload</code></a>, a creator-held dual-stack socket would leave some
+or all connections unserved — startup refuses that shape instead (see
+<a href="#several-workers-behind-an-activated-socket">Several workers behind an activated
+socket</a>).</p>
 <h3 id="what-systemd-activation-buys-you">What systemd activation buys you<a class="headerlink" href="#what-systemd-activation-buys-you" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>Bind privileged ports without running as root.</strong>  systemd
@@ -5574,6 +5598,19 @@ serving the port.</p>
 <li><strong>Lazy activation.</strong>  The socket is ready before BlackBull
   starts; the first connection wakes the service.</li>
 </ul>
+<h3 id="several-workers-behind-an-activated-socket">Several workers behind an activated socket<a class="headerlink" href="#several-workers-behind-an-activated-socket" title="Permanent link">&para;</a></h3>
+<p><code>systemd-socket-activate</code> execs the service in place, so the port is
+the workers' to re-bind; a <code>systemd.socket</code> unit keeps its own copy for
+the service's whole lifetime, and <code>ReusePort=yes</code> leaves that copy in the
+port's reuseport group — the per-worker bind then succeeds while the
+supervisor's copy keeps taking connections no worker accepts on.  A socket
+bound in another network namespace refuses for the same reason: the workers
+would bind where its clients are not.  The namespace comparison needs
+<code>SO_NETNS_COOKIE</code> (Linux 5.14+); a host that will not give it reads the
+socket as local, and that refusal is skipped silently.  Where
+<code>/proc/net/tcp*</code> cannot be read — or reads empty — a released
+<code>ReusePort=yes</code> socket is refused too: there is nothing to tell it apart
+from a kept one.</p>
 <h2 id="the-startup-window">The startup window<a class="headerlink" href="#the-startup-window" title="Permanent link">&para;</a></h2>
 <p>Accepts begin only after lifespan startup completes, so arrivals before then
 wait in the kernel's accept queue, bounded by the creator's <code>Backlog=</code> where

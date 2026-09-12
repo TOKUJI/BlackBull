@@ -5788,7 +5788,10 @@ free.  It is <strong>off by default</strong>: with <code>BB_SOCKET_REUSEPORT=0</
 every incoming connection wakes every worker's loop, with N−1
 workers <code>accept()</code>-ing to EAGAIN — the thundering-herd accept
 race.  See "Workers vs cores under connection churn" below for
-when turning it on helps and when it does not.</p>
+when turning it on helps and when it does not.  An adopted fd
+(<code>--bind fd://N</code>) is not always the workers' to split — see
+<a href="../unix-and-fd/#several-workers-behind-an-activated-socket">Unix sockets and fd
+inheritance</a>.</p>
 <h3 id="shared-nothing-model">Shared-nothing model<a class="headerlink" href="#shared-nothing-model" title="Permanent link">&para;</a></h3>
 <p>Workers share <strong>nothing</strong> mutable — no shared dict, no shared
 cache, no shared lock.  Anything that needs cross-worker

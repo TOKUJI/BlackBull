@@ -6207,7 +6207,7 @@ entirely.</p>
 <tr>
 <td><code>BB_SOCKET_REUSEPORT</code></td>
 <td><code>0</code></td>
-<td>On Linux and modern BSDs, give each worker its own listening socket so the kernel hashes connections across workers, removing the thundering herd — but a <strong>pessimization under connection churn</strong>, where the hash spreads a burst unevenly.  Only the dual-stack TCP bind is repeated per worker: an <code>AF_UNIX</code> listener never is, so <code>workers &gt; 1</code> beside a <code>unix_path</code> fails to start unless <code>--reload</code> is set too.  <code>0</code> keeps the kernel default.  See <a href="../../deployment/workers/#socket-options-across-bind-paths">Per-path scope</a>.</td>
+<td>On Linux and modern BSDs, give each worker its own listening socket so the kernel hashes connections across workers, removing the thundering herd — but a <strong>pessimization under connection churn</strong>, where the hash spreads a burst unevenly.  Only the dual-stack TCP bind is repeated per worker: an <code>AF_UNIX</code> listener never is, so <code>workers &gt; 1</code> beside a <code>unix_path</code> fails to start unless <code>--reload</code> is set too.  <code>0</code> keeps the kernel default.  See <a href="../../deployment/workers/#socket-options-across-bind-paths">Per-path scope</a>.  An adopted fd (<code>--bind fd://N</code>) is split this way only while the socket is the workers' to re-bind: a supervisor that keeps it makes startup refuse, naming this setting, the worker count and the listener — see <a href="../../deployment/unix-and-fd/#several-workers-behind-an-activated-socket">fd inheritance</a>.</td>
 </tr>
 <tr>
 <td><code>BB_SOCKET_SNDBUF</code></td>
