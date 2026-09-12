@@ -29,11 +29,32 @@ ENV_VARS_MD = pathlib.Path(__file__).resolve().parents[2] / 'docs' / 'reference'
 #: :func:`get_settings` does not read, with the reader that does read each.
 #: Listed rather than skipped: a name that stops being read anywhere should
 #: fail here, not quietly become fiction in two documents.
-READ_ELSEWHERE = {
-    'BB_DEADLINE_TICK_MS': ('blackbull.server.deadline', '300'),
-    'BB_WARMUP_BUDGET_S': ('blackbull.server.warmup', '60'),
-    'BB_WARMUP_TLS_N': ('blackbull.server.warmup', '64'),
-}
+_VAR = re.compile(r'^(?:BB|BLACKBULL)_[A-Z0-9_]*$')
+
+
+def _read_elsewhere() -> set[str]:
+    """Variables read straight off ``os.environ``, anywhere in the package.
+
+    Not every knob goes through ``Settings`` -- the warm-up budget, the
+    deadline tick, the gRPC message ceiling and the phase tracer read the
+    environment where they are used.  Found by scanning rather than listed by
+    hand: a list is one more thing to keep true, and it fell six behind.
+    """
+    root = pathlib.Path(__file__).resolve().parents[2] / 'blackbull'
+    found: set[str] = set()
+    for path in root.rglob('*.py'):
+        for node in ast.walk(ast.parse(path.read_text(encoding='utf-8'))):
+            if isinstance(node, ast.Call) and node.args:
+                first = node.args[0]
+                if (isinstance(first, ast.Constant) and isinstance(first.value, str)
+                        and _VAR.match(first.value)):
+                    found.add(first.value)
+            elif (isinstance(node, ast.Subscript)
+                  and isinstance(node.slice, ast.Constant)
+                  and isinstance(node.slice.value, str)
+                  and _VAR.match(node.slice.value)):
+                found.add(node.slice.value)
+    return found
 
 #: ``BLACKBULL_ENV`` is read by ``get_settings`` before the ``Settings(...)``
 #: call, to pick the :class:`Environment` member, so it carries no default
@@ -155,31 +176,6 @@ def _states(claim: str, value) -> bool:
     return claim.strip('`*').lower() in {s.lower() for s in _spellings(value)}
 
 
-def _docstring_defaults() -> dict[str, str | None]:
-    """env var -> the literal inside the first ``…`` of its ``Default:`` line.
-
-    ``None`` marks an entry that exists but states no default.  The docstring
-    is a definition list: a flush-left ``BB_NAME`` line opens an entry and the
-    indented lines under it are that entry's body.
-    """
-    doc = ast.get_docstring(_env_ast()) or ''
-    entries: dict[str, str | None] = {}
-    current: str | None = None
-    for line in doc.splitlines():
-        if re.fullmatch(r'(BB_[A-Z0-9_]+|BLACKBULL_ENV)', line):
-            current = line
-            entries.setdefault(current, None)
-            continue
-        if line and not line.startswith(' '):
-            current = None
-            continue
-        if current and entries[current] is None:
-            m = re.search(r'Default:\s*``(.*?)``', line)
-            if m:
-                entries[current] = m.group(1).strip()
-    return entries
-
-
 def _md_defaults() -> dict[str, str]:
     """env var -> the Default column of its first row in env-vars.md."""
     rows: dict[str, str] = {}
@@ -248,49 +244,6 @@ def test_settings_field_defaults_match_get_settings():
         'passes:\n' + '\n'.join(drift))
 
 
-def test_env_docstring_documents_every_default():
-    """``blackbull/env.py``'s module docstring is the in-source reference."""
-    reads = _env_reads(_settings_call(_env_ast()))
-    documented = _docstring_defaults()
-
-    undocumented = sorted(set(reads) - set(documented) - {ENV_SELECTOR})
-    assert not undocumented, (
-        'env vars get_settings reads with no entry in the blackbull/env.py '
-        f'module docstring: {undocumented}')
-
-    unread = sorted(set(documented) - set(reads) - set(READ_ELSEWHERE)
-                    - {ENV_SELECTOR})
-    assert not unread, (
-        'docstring entries for env vars nothing reads.  Delete the entry, or '
-        f'add the reader to READ_ELSEWHERE with its module: {unread}')
-
-    no_default = sorted(v for v, lit in documented.items() if lit is None)
-    assert not no_default, (
-        'docstring entries with no ``Default: ``<literal>``.`` line — a '
-        f'reader cannot tell what these ship with: {no_default}')
-
-    drift = []
-    for var, (field, expr) in sorted(reads.items()):
-        if var == ENV_SELECTOR:
-            continue
-        expected = _expected_literal(var, expr)
-        if expected is None:
-            continue
-        claim = documented[var]
-        if not _states(claim, expected):
-            drift.append(f'  {var} (Settings.{field}): docstring says '
-                         f'``{claim}``, get_settings uses {expr or "auto"} '
-                         f'(= {expected!r})')
-    for var, (reader, literal) in sorted(READ_ELSEWHERE.items()):
-        claim = documented.get(var)
-        if claim is not None and claim.strip('`') != literal:
-            drift.append(f'  {var} (read by {reader}): docstring says '
-                         f'``{claim}``, expected ``{literal}``')
-    assert not drift, (
-        'blackbull/env.py docstring defaults disagree with the code:\n'
-        + '\n'.join(drift))
-
-
 def test_package_docstring_states_the_import_side_effect_it_has():
     """``blackbull/__init__.py`` says the server stack loads; check that it does.
 
@@ -314,47 +267,24 @@ def test_package_docstring_states_the_import_side_effect_it_has():
         f'`import blackbull` loads {loaded} blackbull.server.* modules, but '
         f'the package docstring {"claims it does" if claims_loaded else "does not say so"}.  '
         'Whichever of the two changed, change the other.')
+def test_env_vars_md_is_what_the_code_produces():
+    """The reference page is generated; check the committed copy is current.
 
-
-def test_env_vars_md_documents_every_default():
-    """``docs/reference/env-vars.md`` calls itself exhaustive; hold it to that.
-
-    ``1``/``True`` and ``0``/``0.0`` are accepted as the same statement: the
-    page documents the *environment* spelling, which is always a string, while
-    the code holds a parsed ``bool``/``float``.  Requiring ``True`` in a table
-    of shell values would make the page wrong for its own readers.
+    Every variable, its default and its description live in
+    ``blackbull/_env_vars.py``.  The page is an output of
+    ``scripts/gen_env_docs.py``, so "does the page state the shipped default"
+    is true by construction and the only question left is whether the file in
+    git is the file the generator writes.
     """
-    reads = _env_reads(_settings_call(_env_ast()))
-    rows = _md_defaults()
+    import importlib.util
 
-    missing = sorted(set(reads) - set(rows) - {ENV_SELECTOR})
-    assert not missing, (
-        'env vars get_settings reads with no row in docs/reference/'
-        f'env-vars.md, which calls itself exhaustive: {missing}')
+    script = pathlib.Path(__file__).resolve().parents[2] / 'scripts' / 'gen_env_docs.py'
+    spec = importlib.util.spec_from_file_location('gen_env_docs', script)
+    gen = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(gen)
 
-    extra = sorted(set(rows) - set(reads) - set(READ_ELSEWHERE) - {ENV_SELECTOR})
-    assert not extra, (
-        'env-vars.md rows for variables nothing reads.  Delete the row, or '
-        f'add the reader to READ_ELSEWHERE: {extra}')
-
-    drift = []
-    for var, (field, expr) in sorted(reads.items()):
-        if var == ENV_SELECTOR:
-            continue
-        expected = _expected_literal(var, expr)
-        if expected is None:
-            continue
-        claim = _md_literal(rows[var])
-        if claim is None:
-            if expected != '':
-                drift.append(f'  {var} (Settings.{field}): env-vars.md Default '
-                             f'column names no value ({rows[var]!r}), but '
-                             f'get_settings uses {expr} (= {expected!r})')
-            continue
-        if not _states(claim, expected):
-            drift.append(f'  {var} (Settings.{field}): env-vars.md Default '
-                         f'column says `{claim}`, get_settings uses '
-                         f'{expr or "auto"} (= {expected!r})')
-    assert not drift, (
-        'docs/reference/env-vars.md Default columns disagree with the code:\n'
-        + '\n'.join(drift))
+    committed = gen.PAGE.read_text(encoding='utf-8')
+    assert committed == gen.render(committed), (
+        'docs/reference/env-vars.md is not what blackbull/_env_vars.py '
+        'produces.  Run: uv run python scripts/gen_env_docs.py')
