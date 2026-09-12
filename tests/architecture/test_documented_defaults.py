@@ -267,47 +267,24 @@ def test_package_docstring_states_the_import_side_effect_it_has():
         f'`import blackbull` loads {loaded} blackbull.server.* modules, but '
         f'the package docstring {"claims it does" if claims_loaded else "does not say so"}.  '
         'Whichever of the two changed, change the other.')
+def test_env_vars_md_is_what_the_code_produces():
+    """The reference page is generated; check the committed copy is current.
 
-
-def test_env_vars_md_documents_every_default():
-    """``docs/reference/env-vars.md`` calls itself exhaustive; hold it to that.
-
-    ``1``/``True`` and ``0``/``0.0`` are accepted as the same statement: the
-    page documents the *environment* spelling, which is always a string, while
-    the code holds a parsed ``bool``/``float``.  Requiring ``True`` in a table
-    of shell values would make the page wrong for its own readers.
+    Every variable, its default and its description live in
+    ``blackbull/_env_vars.py``.  The page is an output of
+    ``scripts/gen_env_docs.py``, so "does the page state the shipped default"
+    is true by construction and the only question left is whether the file in
+    git is the file the generator writes.
     """
-    reads = _env_reads(_settings_call(_env_ast()))
-    rows = _md_defaults()
+    import importlib.util
 
-    missing = sorted((set(reads) | _read_elsewhere()) - set(rows) - {ENV_SELECTOR})
-    assert not missing, (
-        'env vars blackbull/ reads with no row in docs/reference/'
-        f'env-vars.md, which calls itself exhaustive: {missing}')
+    script = pathlib.Path(__file__).resolve().parents[2] / 'scripts' / 'gen_env_docs.py'
+    spec = importlib.util.spec_from_file_location('gen_env_docs', script)
+    gen = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(gen)
 
-    extra = sorted(set(rows) - set(reads) - _read_elsewhere() - {ENV_SELECTOR})
-    assert not extra, (
-        'env-vars.md rows for variables nothing in blackbull/ reads.  Delete '
-        f'the row: {extra}')
-
-    drift = []
-    for var, (field, expr) in sorted(reads.items()):
-        if var == ENV_SELECTOR:
-            continue
-        expected = _expected_literal(var, expr)
-        if expected is None:
-            continue
-        claim = _md_literal(rows[var])
-        if claim is None:
-            if expected != '':
-                drift.append(f'  {var} (Settings.{field}): env-vars.md Default '
-                             f'column names no value ({rows[var]!r}), but '
-                             f'get_settings uses {expr} (= {expected!r})')
-            continue
-        if not _states(claim, expected):
-            drift.append(f'  {var} (Settings.{field}): env-vars.md Default '
-                         f'column says `{claim}`, get_settings uses '
-                         f'{expr or "auto"} (= {expected!r})')
-    assert not drift, (
-        'docs/reference/env-vars.md Default columns disagree with the code:\n'
-        + '\n'.join(drift))
+    committed = gen.PAGE.read_text(encoding='utf-8')
+    assert committed == gen.render(committed), (
+        'docs/reference/env-vars.md is not what blackbull/_env_vars.py '
+        'produces.  Run: uv run python scripts/gen_env_docs.py')
