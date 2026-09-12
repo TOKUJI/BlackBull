@@ -76,7 +76,7 @@ BB_KEEP_ALIVE_TIMEOUT = 5.0
 """Seconds an idle HTTP/1.1 keep-alive connection is held open after a complete response.  Lower for high-fan-in deployments; higher for chatty clients on slow links."""
 
 BB_TCP_USER_TIMEOUT_MS = 0
-"""`TCP_USER_TIMEOUT` socket option (Linux): per-connection upper bound on how long an unacknowledged sent segment lingers before the kernel kills the connection, evicting dead peers behind NATs without waiting for keepalives.  Set on BlackBull's own listeners and inherited by the TCP connections accepted from them; `0` keeps the kernel default.  See [Per-path scope](../deployment/workers.md#socket-options-across-bind-paths)."""
+"""`TCP_USER_TIMEOUT` socket option (Linux): per-connection upper bound on how long an unacknowledged sent segment lingers before the kernel kills the connection, evicting dead peers behind NATs without waiting for keepalives.  `0` keeps the kernel default.  See [Per-path scope](../deployment/workers.md#socket-options-across-bind-paths)."""
 
 BB_HEADER_MAX_LINE = 8192
 """Maximum bytes in a single HTTP/1.1 request-line or header line.  Matches Apache `LimitRequestLine` / nginx `large_client_header_buffers`.  Exceeded → `431 Request Header Fields Too Large`."""
@@ -163,7 +163,7 @@ BB_PRODUCTION = ''
 # --- Socket tuning -------------------------------------------------------------
 
 BB_SOCKET_BACKLOG = 1024
-"""`listen()` backlog depth, sized for connection bursts; Linux caps the effective value at `net.core.somaxconn`.  On a listener BlackBull binds itself **this value bounds the accept queue**; an adopted fd is already listening, so its queue answers to its creator's `Backlog=` until accepts begin, when `start_serving()` re-applies this value.  Arrivals before accepts begin queue in the kernel; see [The startup window](../deployment/unix-and-fd.md#the-startup-window)."""
+"""`listen()` backlog depth, sized for connection bursts; Linux caps the effective value at `net.core.somaxconn`.  Where BlackBull binds, **this value bounds the accept queue**; an adopted fd keeps its creator's `Backlog=` until accepting begins; see [The startup window](../deployment/unix-and-fd.md#the-startup-window)."""
 
 BB_SOCKET_REUSEPORT = False
 """On Linux and modern BSDs, give each worker its own listening socket so the kernel hashes connections across workers, removing the thundering herd — but a **pessimization under connection churn**, where the hash spreads a burst unevenly.  Only the dual-stack TCP bind is repeated per worker: an `AF_UNIX` listener never is, so `workers > 1` beside a `unix_path` fails to start unless `--reload` is set too.  `0` keeps the kernel default.  See [Per-path scope](../deployment/workers.md#socket-options-across-bind-paths)."""

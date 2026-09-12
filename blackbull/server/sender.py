@@ -257,11 +257,6 @@ class AbstractWriter(ABC):
     async def close(self) -> None:
         """Close the underlying transport. Default: no-op."""
 
-    async def reject_close(self) -> None:
-        """Close a refused connection without discarding the refusal; a
-        transport that cannot discard arriving bytes falls back to ``close()``."""
-        await self.close()
-
     async def sendfile(self, file, offset: int, count: int) -> int:
         """Send up to *count* bytes from *file* starting at *offset*.
 
@@ -409,13 +404,6 @@ class AsyncioWriter(AbstractWriter):
         # multi-second drain.  Safe because ``write()`` above already drained.
         if self._linger is not None:
             await self._linger()
-            return
-        self._sw.close()
-
-    async def reject_close(self) -> None:
-        """Force the linger that ``close()`` would skip."""
-        if self._linger is not None:
-            await self._linger(force=True)
             return
         self._sw.close()
 

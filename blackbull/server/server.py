@@ -520,9 +520,9 @@ class Server:
                     logger.debug(
                         '503 write failed for %s (peer disconnected?)',
                         peername)
-                # Nothing has read this connection, so the refusal needs the forced
-                # linger: docs/about/internals.md §Rejecting requires lingering.
-                await wrapped_writer.reject_close()
+                # The close decides; ``docs/about/internals.md`` §Rejecting
+                # requires lingering.
+                await wrapped_writer.close()
             else:
                 # Nothing was written, so there is no response to protect.
                 await wrapped_writer.close()
