@@ -16,7 +16,7 @@ from blackbull.server import multiworker
 from blackbull.server.listener import InheritedFd, Listener
 from blackbull.server.multiworker import (
     _PROC_NET, _held_elsewhere, _kernel_listening, _PlannedListener,
-    MultiWorkerServer,
+    _rebind_address, MultiWorkerServer,
 )
 
 pytestmark = pytest.mark.skipif(
@@ -38,6 +38,7 @@ def _plan_for(sock) -> _PlannedListener:
         port=sock.getsockname()[1],
         where='127.0.0.1:0',
         reached=frozenset({'v4'}),
+        addresses=(_rebind_address(sock),),
         adopted=((sock.family, os.fstat(sock.fileno()).st_ino),),
         flagged=True,
         foreign_netns=False,

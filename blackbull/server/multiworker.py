@@ -35,7 +35,7 @@ from dataclasses import dataclass
 from .listener import InheritedFd, Listener
 from .recipient import _WS_READ_INLINE
 from .worker import run_worker
-from ..protocol.rsock import create_dual_stack_sockets, REUSEPORT_SUPPORTED
+from ..protocol.rsock import create_configured_sockets, REUSEPORT_SUPPORTED
 
 logger = logging.getLogger(__name__)
 
@@ -60,14 +60,17 @@ _SO_NETNS_COOKIE = 71 if sys.platform.startswith('linux') else None
 class _PlannedListener:
     """A shared listener, recorded before the master releases its sockets.
 
-    *adopted* pairs each socket's family with its kernel inode; *flagged* marks
-    a socket a supervisor already carries ``SO_REUSEPORT`` on; *foreign_netns*
-    one bound outside this process's namespace.
+    *addresses* is the host each of the re-bind's sockets must ask for,
+    [`_rebind_address`][]'s answer — ``None`` for the framework's dual-stack
+    pair.  *adopted* pairs each socket's family with its kernel inode; *flagged*
+    marks a socket a supervisor already carries ``SO_REUSEPORT`` on;
+    *foreign_netns* one bound outside this process's namespace.
     """
     listener: Listener
     port: int
     where: str
     reached: frozenset
+    addresses: tuple
     adopted: tuple
     flagged: bool
     foreign_netns: bool
@@ -94,6 +97,24 @@ def _reaches(socks) -> frozenset:
         if dual_stack:
             reached.add('v4')
     return frozenset(reached)
+
+
+def _rebind_address(sock):
+    """The host the per-worker re-bind must ask for to repeat *sock*.
+
+    Callers pass an ``AF_INET``/``AF_INET6`` socket — the plan drops anything
+    else, because a socket with no IP address has nothing to repeat.  ``None``
+    asks for the framework's own dual-stack pair.  The socket is the fact here
+    — ``Listener.where`` has already dropped a named host — and the wildcard
+    ``::`` is the one address a single bind cannot repeat: asking for ``::`` by
+    name comes back with ``IPV6_V6ONLY`` set, which drops the IPv4 reach
+    ``_reaches`` reads off the same option.
+    """
+    host = sock.getsockname()[0]
+    if (sock.family == socket.AF_INET6 and host == '::'
+            and 'v4' in _reaches([sock])):
+        return None
+    return host
 
 
 def _describe(socks) -> str:
@@ -344,6 +365,9 @@ class MultiWorkerServer:
                 port=socks[0].getsockname()[1],
                 where=_describe(socks),
                 reached=_reaches(socks),
+                addresses=tuple(_rebind_address(sock) for sock in socks
+                                if sock.family in (socket.AF_INET,
+                                                   socket.AF_INET6)),
                 adopted=tuple((sock.family, os.fstat(sock.fileno()).st_ino)
                               for sock in socks),
                 flagged=isinstance(listener.where, InheritedFd)
@@ -358,8 +382,10 @@ class MultiWorkerServer:
             self._listening_sockets = []  # master no longer holds listeners
             self._worker_listeners = [
                 [(plan.listener,
-                  create_dual_stack_sockets(plan.port, backlog=cfg.socket_backlog,
-                                            reuseport=True))
+                  [sock
+                   for host in plan.addresses
+                   for sock in create_configured_sockets(
+                       plan.port, cfg, reuseport=True, host=host)])
                  for plan in planned]
                 for _ in range(workers)
             ]

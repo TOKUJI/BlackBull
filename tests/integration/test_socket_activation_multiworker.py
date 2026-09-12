@@ -252,9 +252,10 @@ def _probe(host: str, port: int) -> str:
         conn.close()
 
 
-def _settle(server: Server, port: int, budget: float = _UP_BUDGET) -> Outcome:
-    """Poll the port until both families answer or the child exits."""
-    answers = {'127.0.0.1': 'not probed', '::1': 'not probed'}
+def _settle(server: Server, port: int, budget: float = _UP_BUDGET,
+            hosts: tuple = ('127.0.0.1', '::1')) -> Outcome:
+    """Poll each host until it answers or the child exits."""
+    answers = {host: 'not probed' for host in hosts}
     deadline = time.monotonic() + budget
     while time.monotonic() < deadline:
         if server.proc.poll() is not None:
@@ -450,6 +451,35 @@ def test_a_released_listener_keeps_its_per_worker_sockets(tmp_path: Path):
             assert len(owned) == 2, (
                 f'family {family}: both sockets are held by the same worker: '
                 f'{holders}')
+    finally:
+        server.stop()
+
+
+@pytest.mark.timeout(_HARD_TIMEOUT)
+def test_a_released_named_host_listener_keeps_its_address(tmp_path: Path):
+    """The fd carries the interface its creator chose; the re-bind must not
+    widen it to every interface."""
+    creator = _dual_stack_listener(socket.AF_INET, '127.0.0.1', v6only=None)
+    port = creator.getsockname()[1]
+    bound = {row['address'] for row in _listen_rows(port)}
+    adopted = os.dup(creator.fileno())
+    creator.close()
+    server = Server(tmp_path, workers=2, reuseport=1, inherited_fd=adopted)
+    os.close(adopted)
+    try:
+        outcome = _settle(server, port, hosts=('127.0.0.1',))
+        assert outcome.served, (
+            f'the released named-host listener is not served: {outcome}\n'
+            f'{_diagnostics(server, port)}')
+
+        rows = _listen_rows(port)
+        assert {row['address'] for row in rows} == bound, (
+            f'the workers listen somewhere else: '
+            f'{sorted({row["address"] for row in rows})} != {sorted(bound)}\n'
+            f'{_diagnostics(server, port)}')
+        assert len(rows) == 2, (
+            f'expected one listening socket per worker:\n'
+            f'{_diagnostics(server, port)}')
     finally:
         server.stop()
 
