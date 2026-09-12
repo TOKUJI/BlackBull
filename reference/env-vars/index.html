@@ -1589,6 +1589,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#fault-injection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fault injection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#socket-tuning" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1604,6 +1615,17 @@
     <span class="md-ellipsis">
       
         Logging
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#static-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Static files
       
     </span>
   </a>
@@ -1637,6 +1659,17 @@
     <span class="md-ellipsis">
       
         MQTT
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#grpc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        gRPC
       
     </span>
   </a>
@@ -5608,6 +5641,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#fault-injection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fault injection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#socket-tuning" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5623,6 +5667,17 @@
     <span class="md-ellipsis">
       
         Logging
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#static-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Static files
       
     </span>
   </a>
@@ -5656,6 +5711,17 @@
     <span class="md-ellipsis">
       
         MQTT
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#grpc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        gRPC
       
     </span>
   </a>
@@ -5736,6 +5802,7 @@ on busy production deployments, see
 <p>For the precedence order (CLI flags &gt; env &gt; TOML), see
 <a href="../../guide/configuration/">Configuration</a>.</p>
 <h2 id="runtime-and-processes">Runtime and processes<a class="headerlink" href="#runtime-and-processes" title="Permanent link">&para;</a></h2>
+<!-- generated: Runtime and processes -->
 <table>
 <thead>
 <tr>
@@ -5772,8 +5839,11 @@ on busy production deployments, see
 </tr>
 </tbody>
 </table>
+<!-- /generated -->
+
 <h2 id="warm-up">Warm-up<a class="headerlink" href="#warm-up" title="Permanent link">&para;</a></h2>
 <p>Warm-up runs any hooks registered with <code>@app.on_warmup</code> <strong>once, in the master, before the listening socket is created and before workers fork</strong>, so every worker inherits the warmed heap (specialized bytecode, primed codecs/TLS) via copy-on-write.  These knobs only matter when the app registers at least one warm-up hook; with none, warm-up is a no-op.</p>
+<!-- generated: Warm-up -->
 <table>
 <thead>
 <tr>
@@ -5795,6 +5865,8 @@ on busy production deployments, see
 </tr>
 </tbody>
 </table>
+<!-- /generated -->
+
 <h2 id="connection-limits-and-timeouts">Connection limits and timeouts<a class="headerlink" href="#connection-limits-and-timeouts" title="Permanent link">&para;</a></h2>
 <p>Every cap in this section (plus the HTTP/2, WebSocket, and
 Compression caps below) emits one <code>WARNING</code> record on the
@@ -5803,6 +5875,7 @@ when a deployment hits its configured limits — see
 <a href="../../guide/logging/#cap-hit-log-blackbullcaps">Logging</a> for the
 record shape, the inventory, and the per-connection
 first-hit-then-summary rate-limit model.</p>
+<!-- generated: Connection limits and timeouts -->
 <table>
 <thead>
 <tr>
@@ -5819,8 +5892,8 @@ first-hit-then-summary rate-limit model.</p>
 </tr>
 <tr>
 <td><code>BB_REQUEST_TIMEOUT</code></td>
-<td><code>0</code> (off)</td>
-<td>Per-HTTP/2-stream deadline in seconds.  When the deadline elapses the stream is forcibly cancelled with <code>RST_STREAM CANCEL</code>.  Use a positive value (e.g. <code>30</code>) in production to evict stalled handlers from stream slots.</td>
+<td><code>0.0</code></td>
+<td>Per-HTTP/2-stream deadline in seconds.  When the deadline elapses the stream is forcibly cancelled with <code>RST_STREAM CANCEL</code>.  Use a positive value (e.g. <code>30</code>) in production to evict stalled handlers from stream slots.  Off by default.</td>
 </tr>
 <tr>
 <td><code>BB_HEADER_TIMEOUT</code></td>
@@ -5844,8 +5917,8 @@ first-hit-then-summary rate-limit model.</p>
 </tr>
 <tr>
 <td><code>BB_TCP_USER_TIMEOUT_MS</code></td>
-<td><code>0</code> (off, kernel default)</td>
-<td><code>TCP_USER_TIMEOUT</code> socket option (Linux).  Per-connection upper bound on how long an unacknowledged sent segment can linger before the kernel kills the connection.  Useful to evict dead peers behind NATs without waiting for keepalives.  See "Performance recommendations" below for production tuning.</td>
+<td><code>0</code></td>
+<td><code>TCP_USER_TIMEOUT</code> socket option (Linux).  Per-connection upper bound on how long an unacknowledged sent segment can linger before the kernel kills the connection.  Useful to evict dead peers behind NATs without waiting for keepalives.  See "Performance recommendations" below for production tuning.  <code>0</code> leaves the kernel default in place.</td>
 </tr>
 <tr>
 <td><code>BB_HEADER_MAX_LINE</code></td>
@@ -5894,6 +5967,8 @@ first-hit-then-summary rate-limit model.</p>
 </tr>
 </tbody>
 </table>
+<!-- /generated -->
+
 <h2 id="async-http-client">Async HTTP client<a class="headerlink" href="#async-http-client" title="Permanent link">&para;</a></h2>
 <p>Bounds for the client under <code>blackbull/client/</code>, which reads responses the way
 the server reads requests and needs its own answer for a peer that never
@@ -5913,6 +5988,7 @@ number.  That record is the point of the bounds: a client picks its
 peer, so what a bound here buys is a diagnosis, and one that refuses
 without naming itself is not one.  <code>BB_CLIENT_H2_ENABLE_PUSH</code> and
 <code>BB_CLIENT_MIN_BODY_RATE_GRACE</code> are not caps and keep no record.</p>
+<!-- generated: Async HTTP client -->
 <table>
 <thead>
 <tr>
@@ -5949,12 +6025,12 @@ without naming itself is not one.  <code>BB_CLIENT_H2_ENABLE_PUSH</code> and
 </tr>
 <tr>
 <td><code>BB_CLIENT_BODY_MAX_TOTAL</code></td>
-<td><code>0</code> (off)</td>
+<td><code>0</code></td>
 <td>Maximum total response-body octets the client will <strong>buffer</strong> for one response.  Bounds <code>receive()</code> only — <code>stream()</code> exists so a large response need not fit in memory, and a cap on the shared reader would cap the path that asked not to be capped.  A declared <code>Content-Length</code> over the cap is refused before a body octet is read; a chunked body, and one delimited only by the connection close, are refused the moment the running total would exceed it, before the excess payload is retained.  The close-delimited framing is the one whose total the <strong>peer alone</strong> chooses — it declares nothing to refuse in advance — so with this knob at its <code>0</code> default that body is bounded by no total at all.  <strong>Off by default</strong>, unlike the server's <code>BB_MAX_BODY_SIZE</code>: that number bounds what strangers may push into a process, while this bounds what you asked for, and a wheel or a dataset is not the size of a form post.  Set it when you know what your peer should be returning.  Exceeded → <code>ResponseTooLarge</code>.  Applies to HTTP/2 as well, where flow control cannot stand in for it: credit is returned for every DATA frame, so the window bounds what is <em>in flight</em> and never what has accumulated.  Note the "<code>stream()</code> exists" argument for defaulting this off is an HTTP/1.1 argument: <code>HTTP2Client</code> has no streaming API, so every h2 response body is buffered and with the default of <code>0</code> the h2 body total has no owner at all.  <strong>Sizing it against a memory limit: it costs about twice its value, and a little more per slice.</strong>  The cap counts response-body octets; reaching it costs <code>2 x cap</code> plus about <strong>121 bytes per slice</strong> in peak memory, on both protocols, because the client accumulates the body in slices and then joins them — at the join the slices and the joined result are both live.  Those 121 bytes do not scale with the slice: 41 for the <code>bytes</code> object's header and its pointer in the list, 80 for the <code>Py_buffer</code> that <code>bytes.join</code> builds one of per item.  <strong>The slice count is your peer's choice</strong>, not ours — its write size, or its DATA frame size — bounded above only by the client's own 64 KiB read.  So, as a multiple of the cap: <strong>2.002</strong> at 64 KiB writes, 2.008 at 16 KiB, 2.030 at 4 KiB, 2.119 at 1 KiB, <strong>2.238</strong> at 512 B — measured on an 8 MiB body, identical across HTTP/1.1's three framings and HTTP/2 and across CPython 3.11 to 3.14, and pinned by <code>tests/unit/client/test_client_body_buffer_cost.py</code> so the numbers cannot drift from the code.  Size the knob at half of what one response may occupy — below half if your peer dribbles — and count it per <em>concurrent</em> response rather than per process, since every response in flight accumulates into its own list.  The doubling is a floor and not a defect to wait out: <code>ClientResponse.body</code> is <code>bytes</code>, and pure Python cannot freeze a buffer into one in place, so the final copy is unavoidable.  Accumulating into a single <code>bytearray</code> and returning <code>bytes(buf)</code> does not remove it — that trades the per-slice cost for the bytearray's over-allocation, measures 2.03 to 2.13, and is <em>worse</em> at the write size the client actually reads at (2.072 against 2.002); reaching ~1x means returning the buffer itself, which changes the public type.  <code>BB_CLIENT_HEAD_MAX_TOTAL</code> already accumulates exactly that way and is given no multiplier of its own, because twice a head is still kilobytes.  The escape is <code>stream()</code>, which never accumulates and lets a caller hold ~1x; what it does not hand you is the status, the headers, or this cap — so today you can have ~1x <em>or</em> all three, never both.</td>
 </tr>
 <tr>
 <td><code>BB_CLIENT_MIN_BODY_RATE</code></td>
-<td><code>0</code> (off)</td>
+<td><code>0.0</code></td>
 <td>Minimum sustained response-body payload rate in <strong>bytes per second</strong>, after <code>BB_CLIENT_MIN_BODY_RATE_GRACE</code>.  The numerator is DATA payload only (HTTP/2 padding and frame overhead are excluded); the denominator is per-stream wait time, including empty/padded DATA and terminal DATA/trailing HEADERS settlement.  The window starts at the first non-empty body payload, so think time after final HEADERS is excluded.  HTTP/1.1 abandons its connection; HTTP/2 resets only the offending stream with <code>RST_STREAM(CANCEL)</code>.  <strong>Off by default</strong>; <code>0</code> disables.</td>
 </tr>
 <tr>
@@ -5964,12 +6040,12 @@ without naming itself is not one.  <code>BB_CLIENT_H2_ENABLE_PUSH</code> and
 </tr>
 <tr>
 <td><code>BB_CLIENT_WS_MAX_FRAME_PAYLOAD</code></td>
-<td><code>67108864</code></td>
+<td><code>67108864</code> (64 MiB)</td>
 <td>Client WebSocket inbound payload bytes per frame (unit).  <code>BB_CLIENT_WS_MAX_MESSAGE_SIZE</code> owns the aggregate message total.  There is no client-owned WebSocket time bound here: the H1 session has no environment time owner, and H2 per-call receive timeouts are caller arguments, not this setting.  <code>0</code> disables this unit cap.</td>
 </tr>
 <tr>
 <td><code>BB_CLIENT_WS_MAX_MESSAGE_SIZE</code></td>
-<td><code>16777216</code></td>
+<td><code>16777216</code> (16 MiB)</td>
 <td>Client WebSocket inbound payload bytes per reassembled/inflated message (total).  <code>BB_CLIENT_WS_MAX_FRAME_PAYLOAD</code> owns the per-frame unit.  There is no client-owned WebSocket time bound here: the H1 session has no environment time owner, and H2 per-call receive timeouts are caller arguments, not this setting.  <code>0</code> disables this total cap.</td>
 </tr>
 <tr>
@@ -5994,11 +6070,13 @@ without naming itself is not one.  <code>BB_CLIENT_H2_ENABLE_PUSH</code> and
 </tr>
 <tr>
 <td><code>BB_CLIENT_H2_ENABLE_PUSH</code></td>
-<td><code>1</code> (push permitted)</td>
-<td>Whether the client permits the peer to push (RFC 9113 §6.5.2).  Not a bound — a conformance switch, so it occupies no column of the size/total/time triad; what a promise costs is bounded by the same caps a <code>HEADERS</code> frame answers to.  <code>1</code> advertises <strong>nothing</strong>, because <code>1</code> is already the parameter's initial value, and a <code>PUSH_PROMISE</code> is decoded and dropped.  <code>0</code> advertises <code>SETTINGS_ENABLE_PUSH=0</code> <strong>and</strong> enforces it, because §6.5.2 makes the refusal a MUST for whoever sends the <code>0</code> — advertising without refusing is less conformant than saying nothing.  Enforcement is conditioned on the acknowledgement, not on the send: §6.5.3 makes the ACK the synchronisation point and §6.5.2 requires the parameter to have been <em>both</em> set and acknowledged, so a <code>PUSH_PROMISE</code> arriving in the round-trip before our SETTINGS is acked is conforming traffic and is accepted; after the ACK it is a <strong>connection</strong> error of type <code>PROTOCOL_ERROR</code>.  The promised block is decoded either way — §4.3 requires that even for a frame to be discarded, because the HPACK table is connection-wide and a block skipped silently corrupts every later one.  <strong>HTTP/2 only.</strong>  On the default: <code>1</code> is the parameter's own initial value in §6.5.2, so the default advertises nothing and refuses nothing — the client is silent about push until you decide otherwise, which is the right posture for a knob whose <code>0</code> obliges <em>us</em> to enforce what we announced.  Setting it to <code>0</code> is how a <a href="../../guide/fault_injection/">fault-injection</a> scenario puts the question "I told you not to push — did you push anyway?" to a server.  What it does not do: in the permitted case the promised stream is left reserved rather than reset, which belongs with a push-consuming API the client does not have.</td>
+<td><code>1</code></td>
+<td>Whether the client permits the peer to push (RFC 9113 §6.5.2).  Not a bound — a conformance switch, so it occupies no column of the size/total/time triad; what a promise costs is bounded by the same caps a <code>HEADERS</code> frame answers to.  <code>1</code> advertises <strong>nothing</strong>, because <code>1</code> is already the parameter's initial value, and a <code>PUSH_PROMISE</code> is decoded and dropped.  <code>0</code> advertises <code>SETTINGS_ENABLE_PUSH=0</code> <strong>and</strong> enforces it, because §6.5.2 makes the refusal a MUST for whoever sends the <code>0</code> — advertising without refusing is less conformant than saying nothing.  Enforcement is conditioned on the acknowledgement, not on the send: §6.5.3 makes the ACK the synchronisation point and §6.5.2 requires the parameter to have been <em>both</em> set and acknowledged, so a <code>PUSH_PROMISE</code> arriving in the round-trip before our SETTINGS is acked is conforming traffic and is accepted; after the ACK it is a <strong>connection</strong> error of type <code>PROTOCOL_ERROR</code>.  The promised block is decoded either way — §4.3 requires that even for a frame to be discarded, because the HPACK table is connection-wide and a block skipped silently corrupts every later one.  <strong>HTTP/2 only.</strong>  On the default: <code>1</code> is the parameter's own initial value in §6.5.2, so the default advertises nothing and refuses nothing — the client is silent about push until you decide otherwise, which is the right posture for a knob whose <code>0</code> obliges <em>us</em> to enforce what we announced.  Setting it to <code>0</code> is how a <a href="../../guide/fault_injection/">fault-injection</a> scenario puts the question "I told you not to push — did you push anyway?" to a server.  What it does not do: in the permitted case the promised stream is left reserved rather than reset, which belongs with a push-consuming API the client does not have.  The default of <code>1</code> permits push.</td>
 </tr>
 </tbody>
 </table>
+<!-- /generated -->
+
 <h3 id="the-clients-bounds-are-shared-across-http11-and-http2">The client's bounds are shared across HTTP/1.1 and HTTP/2<a class="headerlink" href="#the-clients-bounds-are-shared-across-http11-and-http2" title="Permanent link">&para;</a></h3>
 <p><code>Client.__aenter__</code> dispatches on <code>selected_alpn_protocol()</code>, so <strong>the peer
 chooses which client you get</strong>.  A limit that existed under one protocol and
@@ -6090,7 +6168,28 @@ response rate floor by default.</p>
 a transfer rather than a stream.  Until it is set, a trickling peer is a known
 open path — bounded by <code>BB_CLIENT_BODY_TIMEOUT</code> only insofar as it stops
 entirely.</p>
+<h2 id="fault-injection">Fault injection<a class="headerlink" href="#fault-injection" title="Permanent link">&para;</a></h2>
+<!-- generated: Fault injection -->
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Controls</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>BB_PRODUCTION</code></td>
+<td><em>(unset)</em></td>
+<td>Set to <code>1</code>, <code>true</code>, <code>yes</code> or <code>on</code> to make the fault-injection servers refuse to start, in addition to the refusal that <code>BLACKBULL_ENV=production</code> already triggers.  An explicit override for a process that reaches production without going through the <code>Settings</code> machinery.</td>
+</tr>
+</tbody>
+</table>
+<!-- /generated -->
+
 <h2 id="socket-tuning">Socket tuning<a class="headerlink" href="#socket-tuning" title="Permanent link">&para;</a></h2>
+<!-- generated: Socket tuning -->
 <table>
 <thead>
 <tr>
@@ -6107,22 +6206,25 @@ entirely.</p>
 </tr>
 <tr>
 <td><code>BB_SOCKET_REUSEPORT</code></td>
-<td><code>0</code> (kernel default)</td>
-<td>When supported by the OS (Linux, modern BSDs), bind each worker to its own listening socket so the kernel hashes incoming connections across workers — eliminates the thundering-herd accept pattern.  No effect with one worker.  Enable on multi-worker deployments; a <strong>pessimization under connection churn</strong> (short-lived connections), where the hash spreads bursts unevenly — see <a href="../../deployment/workers/#workers-vs-cores-under-connection-churn">Workers</a>.</td>
+<td><code>0</code></td>
+<td>When supported by the OS (Linux, modern BSDs), bind each worker to its own listening socket so the kernel hashes incoming connections across workers — eliminates the thundering-herd accept pattern.  No effect with one worker.  Enable on multi-worker deployments; a <strong>pessimization under connection churn</strong> (short-lived connections), where the hash spreads bursts unevenly — see <a href="../../deployment/workers/#workers-vs-cores-under-connection-churn">Workers</a>.  <code>0</code> leaves the kernel default in place.</td>
 </tr>
 <tr>
 <td><code>BB_SOCKET_SNDBUF</code></td>
-<td><code>0</code> (kernel default)</td>
+<td><code>0</code></td>
 <td><code>SO_SNDBUF</code> (bytes) on each accepted socket.  <code>0</code> leaves the kernel default unchanged.  Linux doubles the requested value internally; larger values help throughput for responses ≥ 64 kB.</td>
 </tr>
 <tr>
 <td><code>BB_SOCKET_RCVBUF</code></td>
-<td><code>0</code> (kernel default)</td>
+<td><code>0</code></td>
 <td><code>SO_RCVBUF</code> (bytes) on each accepted socket.  <code>0</code> leaves the kernel default unchanged.  Same doubling rule as <code>BB_SOCKET_SNDBUF</code>.</td>
 </tr>
 </tbody>
 </table>
+<!-- /generated -->
+
 <h2 id="logging">Logging<a class="headerlink" href="#logging" title="Permanent link">&para;</a></h2>
+<!-- generated: Logging -->
 <table>
 <thead>
 <tr>
@@ -6144,8 +6246,8 @@ entirely.</p>
 </tr>
 <tr>
 <td><code>BB_LOG_FORMAT</code></td>
-<td><em>(plain)</em></td>
-<td>Set to <code>json</code> to emit one structured JSON object per log line.  Access-log records expose <code>client_ip</code>, <code>method</code>, <code>path</code>, <code>http_version</code>, <code>status</code>, <code>response_bytes</code>, <code>duration_ms</code> (plus <code>close_code</code> on WebSocket disconnect) as top-level keys; every record carries <code>timestamp</code>, <code>level</code>, <code>logger</code>, <code>message</code>.  Applies to the default sink installed by async logging.</td>
+<td><em>(unset)</em></td>
+<td>Set to <code>json</code> to emit one structured JSON object per log line.  Access-log records expose <code>client_ip</code>, <code>method</code>, <code>path</code>, <code>http_version</code>, <code>status</code>, <code>response_bytes</code>, <code>duration_ms</code> (plus <code>close_code</code> on WebSocket disconnect) as top-level keys; every record carries <code>timestamp</code>, <code>level</code>, <code>logger</code>, <code>message</code>.  Applies to the default sink installed by async logging.  Unset means plain text.</td>
 </tr>
 <tr>
 <td><code>BB_SYSLOG_ADDR</code></td>
@@ -6169,11 +6271,34 @@ entirely.</p>
 </tr>
 </tbody>
 </table>
+<!-- /generated -->
+
 <p>The <code>blackbull.caps</code> logger has no env-var toggle — set its level
 via <code>logging.getLogger('blackbull.caps').setLevel(...)</code> at
 startup.  Default level is <code>WARNING</code>; raise to <code>ERROR</code> to silence
 or drop to <code>INFO</code> to surface the rate-limit summary records.</p>
+<h2 id="static-files">Static files<a class="headerlink" href="#static-files" title="Permanent link">&para;</a></h2>
+<!-- generated: Static files -->
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Controls</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>BB_STATIC_STAT_TTL_S</code></td>
+<td><code>1.0</code></td>
+<td>Seconds a <code>StaticFiles</code> cache entry trusts its last <code>stat()</code>.  Keeps edit-on-disk visibility under a second while taking the per-request <code>stat</code> off the cache-hit path.  <code>0</code> stats on every request.</td>
+</tr>
+</tbody>
+</table>
+<!-- /generated -->
+
 <h2 id="http2-internals">HTTP/2 internals<a class="headerlink" href="#http2-internals" title="Permanent link">&para;</a></h2>
+<!-- generated: HTTP/2 internals -->
 <table>
 <thead>
 <tr>
@@ -6185,13 +6310,13 @@ or drop to <code>INFO</code> to surface the rate-limit summary records.</p>
 <tbody>
 <tr>
 <td><code>BB_H2_INITIAL_WINDOW_SIZE</code></td>
-<td><code>65535</code> (RFC 7540 §6.9.2 default)</td>
-<td>Per-stream flow-control window advertised in the server's initial <code>SETTINGS</code> frame.  Larger lets peers send more data per stream before waiting for <code>WINDOW_UPDATE</code>.  See "Performance recommendations" below.</td>
+<td><code>65535</code></td>
+<td>Per-stream flow-control window advertised in the server's initial <code>SETTINGS</code> frame.  Larger lets peers send more data per stream before waiting for <code>WINDOW_UPDATE</code>.  See "Performance recommendations" below.  The default is RFC 7540 §6.9.2's.</td>
 </tr>
 <tr>
 <td><code>BB_H2_CONNECTION_WINDOW_SIZE</code></td>
-<td><code>65535</code> (RFC 7540 §6.9.2 minimum)</td>
-<td>Connection-level flow-control window advertised via an initial <code>WINDOW_UPDATE</code> on stream 0.  Must be ≥ 65535; smaller values are silently ignored.  See "Performance recommendations" below.</td>
+<td><code>65535</code></td>
+<td>Connection-level flow-control window advertised via an initial <code>WINDOW_UPDATE</code> on stream 0.  Must be ≥ 65535; smaller values are silently ignored.  See "Performance recommendations" below.  The default is RFC 7540 §6.9.2's minimum.</td>
 </tr>
 <tr>
 <td><code>BB_H2_MAX_CONCURRENT_STREAMS</code></td>
@@ -6220,7 +6345,10 @@ or drop to <code>INFO</code> to surface the rate-limit summary records.</p>
 </tr>
 </tbody>
 </table>
+<!-- /generated -->
+
 <h2 id="websocket">WebSocket<a class="headerlink" href="#websocket" title="Permanent link">&para;</a></h2>
+<!-- generated: WebSocket -->
 <table>
 <thead>
 <tr>
@@ -6287,10 +6415,13 @@ or drop to <code>INFO</code> to surface the rate-limit summary records.</p>
 </tr>
 </tbody>
 </table>
+<!-- /generated -->
+
 <h2 id="mqtt">MQTT<a class="headerlink" href="#mqtt" title="Permanent link">&para;</a></h2>
 <p>Every limit here is also <strong>advertised</strong> to the client in CONNACK where MQTT 5
 has a property for it, so a conforming client stays inside the bounds without
 ever meeting the enforcement path.</p>
+<!-- generated: MQTT -->
 <table>
 <thead>
 <tr>
@@ -6352,7 +6483,42 @@ ever meeting the enforcement path.</p>
 </tr>
 </tbody>
 </table>
+<!-- /generated -->
+
+<h2 id="grpc">gRPC<a class="headerlink" href="#grpc" title="Permanent link">&para;</a></h2>
+<p>Read once at import, so a change needs a restart.  Tests monkeypatch the
+module attribute rather than the variable.</p>
+<!-- generated: gRPC -->
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Controls</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>BB_GRPC_MAX_MESSAGE_SIZE</code></td>
+<td><code>4194304</code> (4 MiB)</td>
+<td>Largest gRPC message accepted on a call.  Matches grpcio's own default receive limit, so a client tuned against grpcio meets the same ceiling here.  A value that does not parse falls back to the default rather than failing the import.</td>
+</tr>
+<tr>
+<td><code>BB_GRPC_STREAM_BATCH_BYTES</code></td>
+<td><code>16384</code></td>
+<td>How many bytes of a server-streaming response are gathered before a write.  Batching amortises the per-write cost; no message is ever withheld past the call, because the batch is flushed before any trailing status.</td>
+</tr>
+<tr>
+<td><code>BB_GRPC_COMPRESS_MIN_BYTES</code></td>
+<td><code>1024</code></td>
+<td>Responses below this size are sent uncompressed.  gzip's header and trailer can make a small message <em>larger</em>, so the threshold avoids spending CPU for no bandwidth.  Set it very high to disable response compression outright.</td>
+</tr>
+</tbody>
+</table>
+<!-- /generated -->
+
 <h2 id="compression">Compression<a class="headerlink" href="#compression" title="Permanent link">&para;</a></h2>
+<!-- generated: Compression -->
 <table>
 <thead>
 <tr>
@@ -6369,12 +6535,12 @@ ever meeting the enforcement path.</p>
 </tr>
 <tr>
 <td><code>BB_COMPRESSION_EXECUTOR_THRESHOLD</code></td>
-<td><code>65536</code> (64 KiB)</td>
+<td><code>65536</code></td>
 <td>Body size above which compression is offloaded to a thread-pool executor so the event loop stays responsive during the (CPU-bound) compress call.  <code>0</code> always compresses on the event loop.</td>
 </tr>
 <tr>
 <td><code>BB_COMPRESSION_MAX_INFLIGHT</code></td>
-<td><code>max((os.cpu_count() or 1) * 2, 4)</code></td>
+<td><code>max(cpu_count() * 2, 4)</code></td>
 <td>Maximum concurrent compression offloads to the asyncio default thread pool.  When at or above this cap, additional eligible responses are served <strong>uncompressed</strong> rather than queued — bounded fall-back rather than unbounded queue growth.  The floor of 4 keeps a one- or two-CPU host overlapping a few offloads instead of serialising them.  <code>0</code> removes the cap, leaving an unbounded executor queue that saturates under burst load.</td>
 </tr>
 <tr>
@@ -6384,7 +6550,10 @@ ever meeting the enforcement path.</p>
 </tr>
 </tbody>
 </table>
+<!-- /generated -->
+
 <h2 id="diagnostic-timing">Diagnostic timing<a class="headerlink" href="#diagnostic-timing" title="Permanent link">&para;</a></h2>
+<!-- generated: Diagnostic timing -->
 <table>
 <thead>
 <tr>
@@ -6395,12 +6564,19 @@ ever meeting the enforcement path.</p>
 </thead>
 <tbody>
 <tr>
+<td><code>BB_PHASE_TRACE</code></td>
+<td><code>0</code></td>
+<td>Record per-request wall-clock and CPU checkpoints into the access-log record's <code>phases</code>.  Off by default because the extra <code>perf_counter()</code> and <code>process_time()</code> calls are visible in benchmark numbers; intended for one-off investigation, not production.</td>
+</tr>
+<tr>
 <td><code>BB_DEADLINE_TICK_MS</code></td>
 <td><code>300</code></td>
 <td>Polling interval (milliseconds) for the per-process deadline scanner that enforces <code>BB_HEADER_TIMEOUT</code>, <code>BB_BODY_TIMEOUT</code>, <code>BB_WRITE_TIMEOUT</code>, and <code>BB_KEEP_ALIVE_TIMEOUT</code>.  One shared timer for the whole process instead of one per request, which is why enabling those timeouts costs nothing per request.  Smaller = tighter timeout granularity at a small CPU cost; larger = more slack but cheaper.</td>
 </tr>
 </tbody>
 </table>
+<!-- /generated -->
+
 <h2 id="performance-recommendations">Performance recommendations<a class="headerlink" href="#performance-recommendations" title="Permanent link">&para;</a></h2>
 <p>The defaults above match Linux kernel / RFC 7540 baselines so a
 fresh BlackBull install behaves predictably regardless of host
