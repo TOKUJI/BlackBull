@@ -86,6 +86,18 @@ serving the port.
 - **Lazy activation.**  The socket is ready before BlackBull
   starts; the first connection wakes the service.
 
+### Several workers behind an activated socket
+
+`systemd-socket-activate` execs the service in place, so the port is
+the workers' to re-bind; a `systemd.socket` unit keeps its own copy for
+the service's whole lifetime, and `ReusePort=yes` leaves that copy in the
+port's reuseport group — the per-worker bind then succeeds while the
+supervisor's copy keeps taking connections no worker accepts on.  A socket
+bound in another network namespace refuses for the same reason: the workers
+would bind where its clients are not.  The namespace comparison needs
+`SO_NETNS_COOKIE` (Linux 5.14+); a host that will not give it reads the
+socket as local, and that refusal is skipped silently.
+
 ## The startup window
 
 Accepts begin only after lifespan startup completes, so arrivals before then
