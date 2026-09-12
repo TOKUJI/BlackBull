@@ -11,6 +11,7 @@ unblock rather than hang, does a reader that already has bytes avoid
 suspending at all, and does an upgrade hand its surplus over intact.
 """
 import asyncio
+import time
 
 import pytest
 
@@ -23,9 +24,24 @@ class _FakeTransport:
     def __init__(self):
         self.closed = False
         self.paused = False
+        self.written = bytearray()
+        self.eofs = 0
 
     def close(self):
         self.closed = True
+
+    def write(self, data):
+        self.written += data
+
+    def writelines(self, parts):
+        for part in parts:
+            self.written += part
+
+    def can_write_eof(self):
+        return True
+
+    def write_eof(self):
+        self.eofs += 1
 
     def pause_reading(self):
         self.paused = True
@@ -374,3 +390,44 @@ class TestWriteSide:
         proto.connection_lost(ConnectionResetError('peer gone'))
         with pytest.raises(ConnectionResetError):
             await asyncio.wait_for(task, timeout=1)
+
+
+class TestLingerClose:
+    """Whether a connection lingers is decided by the connection, once.
+
+    The refusal path calls ``linger_close`` twice — the refusal itself, then the
+    serving task's teardown.  On a socket the second call finds the EOF that
+    ``connection_lost`` has already set, so the socket-level pins cannot tell a
+    guarded second call from an unguarded one; ``_FakeTransport`` never reports
+    loss, which is what makes the guard observable.  Without this pin the next
+    reduction pass would delete it as dead code.
+    """
+
+    async def test_the_linger_decision_is_taken_once_per_connection(self, wired):
+        proto, transport = wired
+        proto.write(b'HTTP/1.1 503 Service Unavailable\r\n\r\n')
+        window = 0.1
+        await proto.linger_close(timeout=window)
+        assert transport.eofs == 1, 'the first call opened no window'
+
+        started = time.perf_counter()
+        await proto.linger_close(timeout=window)
+        elapsed = time.perf_counter() - started
+
+        assert transport.eofs == 1, 'the second call opened a second window'
+        assert elapsed < window / 2, (
+            f'the second call waited {elapsed:.3f}s: the decision was remade')
+
+    async def test_a_vectored_response_owes_the_window_too(self, wired):
+        """The other write entry point arms the same state, not just ``write``."""
+        proto, transport = wired
+        proto.writelines([b'HTTP/1.1 503 Service Unavailable\r\n\r\n', b'x' * 64])
+        await proto.linger_close(timeout=0.05)
+        assert transport.eofs == 1, 'writelines left the window unarmed'
+
+    async def test_an_empty_write_owes_nothing(self, wired):
+        proto, transport = wired
+        proto.write(b'')
+        proto.writelines([])
+        await proto.linger_close(timeout=0.05)
+        assert transport.eofs == 0, 'a write of no bytes armed the window'

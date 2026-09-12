@@ -34,7 +34,7 @@ BLACKBULL_ENV = 'development'
 """`production` | `development` | `test`.  In `production`, `StaticFiles` declines to serve files (production should sit behind nginx/Caddy for static assets), and the default error handler returns a terse response without exception details."""
 
 BB_WORKERS = 1
-"""Pre-fork worker count.  `0` resolves to `os.cpu_count()`.  Each worker runs its own asyncio event loop; combine with `BB_SOCKET_REUSEPORT=1` so the kernel load-balances accepts across workers."""
+"""Pre-fork worker count.  `0` resolves to `os.cpu_count()`.  Combine with `BB_SOCKET_REUSEPORT=1`, except under `--reload` or on a port-bound non-ASGI protocol, which keep one listener.  See [Workers](../deployment/workers.md)."""
 
 BB_UVLOOP = False
 """Install `uvloop`'s asyncio policy at startup.  Requires `pip install 'blackbull[speed]'`; falls back to the standard loop with a warning when uvloop is missing."""
@@ -58,7 +58,7 @@ BB_WARMUP_TLS_N = '64'
 # --- Connection limits and timeouts --------------------------------------------
 
 BB_MAX_CONNECTIONS = 'auto'
-"""Maximum simultaneous TCP connections **per worker**.  At the cap, new connections receive HTTP/1.1 `503 Service Unavailable` with `Retry-After: 1` before close — a well-formed response so load-balancers and health-checks can interpret it correctly.  Accepts `auto`, `0` (uncapped), or a number.<br><br>**`auto` derives the cap from the process's own `RLIMIT_NOFILE`**, less a 64-descriptor reserve for listeners, the event loop's selector, log files and your application's own descriptors.  A cap above the fd budget would be decorative — `accept()` fails with `EMFILE` before the cap is ever consulted, and the peer gets a dropped connection instead of the 503 — so the derived value can only refuse connections the OS was going to refuse anyway.  That is what makes a finite default safe to ship, and it follows your own intent: raising the fd limit is how you say how large this process may become.  The resolved value is logged at startup.<br><br>An explicit number is honoured as given, not clamped to the fd budget.  Note the derived cap bounds *descriptor exhaustion*, not event-loop health — a ceiling reflecting what one asyncio loop serves well is a policy number that depends on your workload, so set it explicitly; 1024 is a typical single-loop value.  Multi-worker servers multiply the ceiling (`workers × max_connections`)."""
+"""Maximum simultaneous TCP connections **per worker**.  Accepts `auto`, `0` (uncapped), or a number.  At the cap, new connections get HTTP/1.1 `503 Service Unavailable` with `Retry-After: 1` before close, which a load-balancer can interpret.<br><br>The cap is an **accept-time** decision: what arrives during lifespan startup is bounded by the listener's backlog instead ([The startup window](../deployment/unix-and-fd.md#the-startup-window)).  The refusal is best-effort ([Rejecting requires lingering](../about/internals.md#rejecting-requires-lingering)).  A refused ALPN-`h2` or raw-protocol connection gets no response — no framing to write one in; a prior-knowledge `h2c` one gets the same `503`.<br><br>**`auto` derives the cap from the process's own `RLIMIT_NOFILE`**, less a 64-descriptor reserve.<br><br>An explicit number is honoured as given, not clamped to the fd budget; 1024 is a typical single-loop value.  Multi-worker servers multiply the ceiling (`workers × max_connections`)."""
 
 BB_REQUEST_TIMEOUT = 0.0
 """Per-HTTP/2-stream deadline in seconds.  When the deadline elapses the stream is forcibly cancelled with `RST_STREAM CANCEL`.  Use a positive value (e.g. `30`) in production to evict stalled handlers from stream slots.  Off by default."""
@@ -76,7 +76,7 @@ BB_KEEP_ALIVE_TIMEOUT = 5.0
 """Seconds an idle HTTP/1.1 keep-alive connection is held open after a complete response.  Lower for high-fan-in deployments; higher for chatty clients on slow links."""
 
 BB_TCP_USER_TIMEOUT_MS = 0
-"""`TCP_USER_TIMEOUT` socket option (Linux).  Per-connection upper bound on how long an unacknowledged sent segment can linger before the kernel kills the connection.  Useful to evict dead peers behind NATs without waiting for keepalives.  See "Performance recommendations" below for production tuning.  `0` leaves the kernel default in place."""
+"""`TCP_USER_TIMEOUT` socket option (Linux): per-connection upper bound on how long an unacknowledged sent segment lingers before the kernel kills the connection, evicting dead peers behind NATs without waiting for keepalives.  `0` keeps the kernel default.  See [Per-path scope](../deployment/workers.md#socket-options-across-bind-paths)."""
 
 BB_HEADER_MAX_LINE = 8192
 """Maximum bytes in a single HTTP/1.1 request-line or header line.  Matches Apache `LimitRequestLine` / nginx `large_client_header_buffers`.  Exceeded → `431 Request Header Fields Too Large`."""
@@ -163,16 +163,16 @@ BB_PRODUCTION = ''
 # --- Socket tuning -------------------------------------------------------------
 
 BB_SOCKET_BACKLOG = 1024
-"""`listen()` backlog depth.  A sane default for servers facing connection bursts (128 — the traditional `SOMAXCONN` — is shallow next to nginx's 511).  Linux caps the effective value at `net.core.somaxconn`.  See "Performance recommendations" below for production tuning."""
+"""`listen()` backlog depth, sized for connection bursts; Linux caps the effective value at `net.core.somaxconn`.  Where BlackBull binds, **this value bounds the accept queue**; an adopted fd keeps its creator's `Backlog=` until accepting begins; see [The startup window](../deployment/unix-and-fd.md#the-startup-window)."""
 
 BB_SOCKET_REUSEPORT = False
-"""When supported by the OS (Linux, modern BSDs), bind each worker to its own listening socket so the kernel hashes incoming connections across workers — eliminates the thundering-herd accept pattern.  No effect with one worker.  Enable on multi-worker deployments; a **pessimization under connection churn** (short-lived connections), where the hash spreads bursts unevenly — see [Workers](../deployment/workers.md#workers-vs-cores-under-connection-churn).  `0` leaves the kernel default in place."""
+"""On Linux and modern BSDs, give each worker its own listening socket so the kernel hashes connections across workers, removing the thundering herd — but a **pessimization under connection churn**, where the hash spreads a burst unevenly.  Only the dual-stack TCP bind is repeated per worker: an `AF_UNIX` listener never is, so `workers > 1` beside a `unix_path` fails to start unless `--reload` is set too.  `0` keeps the kernel default.  See [Per-path scope](../deployment/workers.md#socket-options-across-bind-paths)."""
 
 BB_SOCKET_SNDBUF = 0
-"""`SO_SNDBUF` (bytes) on each accepted socket.  `0` leaves the kernel default unchanged.  Linux doubles the requested value internally; larger values help throughput for responses ≥ 64 kB."""
+"""`SO_SNDBUF` (bytes) on BlackBull's own listeners and the TCP connections accepted from them; `0` keeps the kernel default.  Linux clamps at `net.core.wmem_max` and doubles.  See [Per-path scope](../deployment/workers.md#socket-options-across-bind-paths)."""
 
 BB_SOCKET_RCVBUF = 0
-"""`SO_RCVBUF` (bytes) on each accepted socket.  `0` leaves the kernel default unchanged.  Same doubling rule as `BB_SOCKET_SNDBUF`."""
+"""`SO_RCVBUF` (bytes) in the same scope as `BB_SOCKET_SNDBUF`, against `net.core.rmem_max` instead and doubled by the same rule.  `0` keeps the kernel default."""
 
 
 # --- Logging -------------------------------------------------------------------

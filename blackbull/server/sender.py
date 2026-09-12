@@ -398,17 +398,10 @@ class AsyncioWriter(AbstractWriter):
             return False
 
     async def close(self) -> None:
-        # We deliberately do NOT await ``wait_closed()``: under burst-keepalive
-        # workloads (HttpArena ``static`` at c=4096) it serialises the
-        # connection-actor coroutine with the transport-close completion, adding
-        # 1-3 event-loop turns per connection — thousands of simultaneous closes
-        # then multiply into a multi-second drain that monopolises the loop.
-        # It is safe to skip because every ``write()`` above flushed via
-        # ``drain()``, so there is no buffered payload left to lose.
-        #
-        # ``linger_close`` is the exception: docs/about/internals.md
-        # §Rejecting requires lingering.  It self-selects, so the burst path
-        # above keeps its zero extra turns.
+        # We deliberately do NOT await ``wait_closed()``: it costs 1-3 event-loop
+        # turns per connection under burst-keepalive (HttpArena ``static``,
+        # c=4096), and thousands of simultaneous closes multiply that into a
+        # multi-second drain.  Safe because ``write()`` above already drained.
         if self._linger is not None:
             await self._linger()
             return

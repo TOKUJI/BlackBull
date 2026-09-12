@@ -507,9 +507,7 @@ class Server:
                         requested=self._active_connections + 1,
                         limit=self._max_connections,
                         peer=peername, protocol='tcp')
-            # h1 is the safe guess for cleartext the client has not spoken on
-            # yet.  h2 gets a bare close (no SETTINGS exchange yet, so no clean
-            # GOAWAY) and so does a raw binding, whose framing we do not know.
+            # h1 is the safe guess: the peer has not spoken.
             if bound_binding is None and alpn != 'h2':
                 try:
                     await wrapped_writer.write(
@@ -522,7 +520,12 @@ class Server:
                     logger.debug(
                         '503 write failed for %s (peer disconnected?)',
                         peername)
-            await wrapped_writer.close()
+                # The close decides; ``docs/about/internals.md`` §Rejecting
+                # requires lingering.
+                await wrapped_writer.close()
+            else:
+                # Nothing was written, so there is no response to protect.
+                await wrapped_writer.close()
             return
 
         self._active_connections += 1

@@ -54,6 +54,16 @@ extension package) explicitly state their per-worker limits — see
 | `BB_WORKERS=N` (`N > 1`) | Production CPU-bound workload — each worker saturates one core. |
 | `BB_WORKERS=0` | Production "use whatever the box has" — resolves to `os.cpu_count()` at start. |
 
+### Socket options across bind paths
+
+| knob | single | shared | + `REUSEPORT` | adopted fd | `AF_UNIX` |
+|---|---|---|---|---|---|
+| `BB_SOCKET_BACKLOG` | bounds queue | bounds queue | per-worker queues | creator's, until accepting | bounds queue |
+| `BB_SOCKET_REUSEPORT` | n/a | off | per worker | creator's socket blocks it | not with `> 1` |
+| `BB_SOCKET_SNDBUF`/`RCVBUF` | set | set | not set | creator's value | listener only |
+| `BB_TCP_USER_TIMEOUT_MS` | set | set | not set | creator's value | unsupported |
+| `BB_MAX_CONNECTIONS` | per worker | ×N | ×N | ×N | ×N |
+
 ### CPU pinning
 
 Each worker pins its event loop to one core after forking, so the
@@ -263,7 +273,7 @@ The defaults match Apache's `LimitRequestLine` /
 
 | Limit | Default | Behaviour |
 |---|---|---|
-| `BB_MAX_CONNECTIONS` | `500` per worker | Connections beyond the cap are refused at accept time.  Combine with `BB_SOCKET_BACKLOG` for graceful overload.  `0` = unlimited. |
+| `BB_MAX_CONNECTIONS` | `auto` per worker | Connections beyond the cap are refused at accept time.  Combine with `BB_SOCKET_BACKLOG` for graceful overload.  `0` = unlimited. |
 | `BB_REQUEST_TIMEOUT` | `0` (off) | Per-HTTP/2-stream deadline in seconds.  Set in production (e.g. `30`) so an ASGI handler hung on an upstream call can't keep its stream slot indefinitely.  Stream is cancelled via `RST_STREAM CANCEL`. |
 
 ## Shutdown

@@ -477,11 +477,17 @@ by time: no byte cap would hand an attacker the unbounded read the budget
 exists to refuse, and no deadline would let a slow peer hold an
 already-answered connection open.  nginx calls this `lingering_close`.
 
-It is skipped unless the connection is closing with bytes it chose not to
-consume — a completed request leaves the buffer empty, so the ordinary
-close stays a bare close.  Lingering on every connection would put a
-timeout on the teardown path that `AsyncioWriter.close` keeps free of even
-one extra loop turn, which is what the burst-keepalive workload needs.
+It is skipped when nothing is left unconsumed and the request was read out,
+or when nothing arrived and no response was written — an h2 or raw-binding
+refusal; a refusal that did write its 503 lingers even with nothing unread.
+Lingering on every connection would put a timeout on the teardown path
+`AsyncioWriter.close` keeps turn-free for burst-keepalive.
+
+The connection records a byte's arrival once; an empty buffer cannot show it,
+and a refusal's request may still be in the kernel's receive queue.
+
+Both bounds make the refusal **best-effort**, not a guarantee: a peer that
+stops reading meets the close.
 
 ## Receive-path invariant
 

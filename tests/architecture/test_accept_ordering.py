@@ -7,6 +7,10 @@ the ordering from outside the server: bytes on the wire, and the app's own
 handler count.  How the ordering is implemented is deliberately not visible
 here, so any mechanism that keeps a client from being served early passes.
 
+The window's other half is the burst that outnumbers the cap: what a refused
+client receives, however late it reads, and what that refusal costs the
+process.  Those tests are at the end of the file, under their own heading.
+
 ``tests/architecture/test_shutdown_observable.py`` is the same shape for the
 other end of the lifecycle.
 """
@@ -14,7 +18,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 import time
+from collections import Counter
 from contextlib import asynccontextmanager
 from functools import partial
 from http import HTTPMethod
@@ -23,7 +29,7 @@ from pathlib import Path
 import pytest
 
 from blackbull import BlackBull
-from blackbull.env import reset_settings_cache
+from blackbull.env import get_settings, reset_settings_cache
 from blackbull.server.server import Server
 
 REQUEST = b'GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n'
@@ -287,3 +293,783 @@ async def test_run_does_not_return_before_on_shutdown_completes(tmp_path):
 
     assert sentinel.exists(), 'on_shutdown never ran'
     assert after[0] == 'refused', f'still reachable after run(): {after!r}'
+
+
+# --- the cap: what a refused client gets, and what the refusal costs --------
+#
+# The cap is judged at accept, so a burst that queues during the startup
+# window meets it all at once when serving starts.  These tests hold every
+# handler slot open for the duration, which is what makes "how many were
+# served" a property of the cap rather than of how fast the sweep runs: no
+# slot can free up, so no later connection can be admitted.  The window's
+# numeric bound (``socket_backlog``, a kernel queue) is deliberately not
+# asserted here: observing it means holding the window open past the client's
+# SYN retransmission budget (~2 min) so the excess gives up, which is too slow
+# and too load-sensitive for this suite.
+
+#: Unambiguously past a cap of 2, small enough to keep the suite's socket
+#: churn modest.  What the cap decides is the split, not the scale.
+WINDOW_BURST = 32
+
+#: Per side (reading / streaming) of the refusal sweep in the resource test.
+SWEEP_BURST = 50
+
+#: The refusal as it must arrive: a complete, parseable HTTP/1.1 response.
+REFUSAL = (b'HTTP/1.1 503 Service Unavailable\r\n'
+           b'retry-after: 1\r\n'
+           b'content-length: 0\r\n'
+           b'connection: close\r\n'
+           b'\r\n')
+
+#: Where the resource bounds are observed.  Both are this process's, since
+#: the probe and the server share one.
+PROC_STATUS = Path('/proc/self/status')
+PROC_FD = Path('/proc/self/fd')
+
+
+def _held_handler_app(started, release, slots_filled, handlers, calls,
+                      *, free_calls: int = 0, raw: bool = False):
+    """Startup parks until *release*; the handler parks until *handlers*.
+
+    Holding the handlers is what makes the served count a property of the cap
+    rather than of timing: with no slot free, no later connection can be
+    admitted however long the sweep takes.  ``slots_filled`` fires once two
+    handlers are parked, which is that saturated state.  *free_calls* handler
+    calls answer immediately instead — how a test establishes that the server
+    is serving without spending a slot on the question.  *raw* adds a
+    port-bound protocol, whose refusals share the cap but not the HTTP reply.
+    """
+    app = BlackBull()
+    parked = 0
+
+    @app.on_startup
+    async def _startup():
+        started.set()
+        await release.wait()
+
+    @app.route(path='/', methods=[HTTPMethod.GET])
+    async def _index():
+        nonlocal parked
+        calls.append(1)
+        if len(calls) <= free_calls:
+            return BODY
+        parked += 1
+        if parked == 2:
+            slots_filled.set()
+        await handlers.wait()
+        parked -= 1
+        return BODY
+
+    if raw:
+        @app.raw_handler('sink', port=0)
+        async def _sink(reader, writer, ctx):
+            calls.append('raw')
+            while await reader.read(4096):
+                pass
+
+    return app
+
+
+def _capped_server(app) -> Server:
+    server = Server(app, max_connections=2)
+    server.open_socket(0)
+    return server
+
+
+async def _open_client(connect):
+    """One client, connected with its request already written."""
+    reader, writer = await connect()
+    writer.write(REQUEST)
+    with contextlib.suppress(OSError):
+        await writer.drain()
+    return reader, writer
+
+
+async def _open_burst(connect, n: int) -> list:
+    return await asyncio.gather(*(_open_client(connect) for _ in range(n)))
+
+
+async def _open_parked(connect, n: int):
+    """*n* clients, each parked in ``read()`` as soon as it has written.
+
+    The order a refusal is decided in is not the order the test connects in,
+    so a client whose read has not started yet is a different observation
+    from one already waiting — these are the waiting kind.
+    """
+    async def one():
+        reader, writer = await _open_client(connect)
+        return (reader, writer), asyncio.create_task(_read_response_head(reader))
+
+    pairs = await asyncio.gather(*(one() for _ in range(n)))
+    return [pair[0] for pair in pairs], [pair[1] for pair in pairs]
+
+
+async def _close_burst(clients) -> None:
+    for _reader, writer in clients:
+        writer.close()
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(writer.wait_closed(), timeout=2)
+
+
+async def _read_response_head(reader, *, timeout: float = 15.0):
+    """What one client's first read of its response returns, classified.
+
+    The head terminator, not EOF: the question is whether the response is
+    there to be read, and a read that kept going past it would report the
+    reset that follows an already-delivered response as if the response had
+    never arrived.  A reset, an empty EOF, a timeout or a truncated head are
+    the failures, so they are what this returns as such.
+    """
+    try:
+        head = await asyncio.wait_for(reader.readuntil(b'\r\n\r\n'),
+                                      timeout=timeout)
+    except ConnectionResetError:
+        return 'reset', b''
+    except asyncio.TimeoutError:
+        return 'timeout', b''
+    except (asyncio.IncompleteReadError, EOFError):
+        return 'eof', b''
+    except OSError as exc:
+        return f'error({type(exc).__name__})', b''
+    if head.startswith(b'HTTP/1.1 200 '):
+        return '200', head
+    if head.startswith(b'HTTP/1.1 503 '):
+        return '503', head
+    return 'malformed', head
+
+
+async def _await_refusal(connect, *, timeout: float = 15.0) -> None:
+    """Retry a fresh connection until the cap refuses one.
+
+    A refusal proves the probe was accepted, and the accept queue is FIFO, so
+    it also proves every connection that arrived earlier has been accepted and
+    answered.  That is what "the sweep is over" means here — the fact a fixed
+    sleep would only be guessing at.
+    """
+    deadline = time.monotonic() + timeout
+    last = 'no attempt'
+    while time.monotonic() < deadline:
+        try:
+            reader, writer = await connect()
+        except OSError as exc:
+            last = f'connect failed: {type(exc).__name__}'
+            continue
+        try:
+            writer.write(REQUEST)
+            with contextlib.suppress(OSError):
+                await writer.drain()
+            kind, data = await _read_response_head(reader, timeout=1.0)
+            last = f'{kind}: {data[:48]!r}'
+            if kind == '503':
+                return
+        finally:
+            writer.close()
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(writer.wait_closed(), timeout=2)
+    raise AssertionError(f'no refusal within {timeout}s; last observation {last}')
+
+
+def _assert_cap_split(observed) -> None:
+    """Exactly two served and everything else refused with a complete 503."""
+    counts = Counter(kind for kind, _ in observed)
+    assert counts.get('200') == 2 and counts.get('503') == len(observed) - 2, (
+        f'expected 2 served and {len(observed) - 2} refused; got {dict(counts)}')
+    for kind, head in observed:
+        if kind == '200':
+            assert head.endswith(b'\r\n\r\n'), head[:200]
+        elif kind == '503':
+            assert head == REFUSAL, (
+                f'refusal was not the complete response: {head[:200]!r}')
+
+
+@pytest.mark.asyncio
+@pytest.mark.timeout(60)
+async def test_a_parked_burst_read_after_the_sweep_is_refused_with_a_503():
+    """A refusal must survive a client that reads it only afterwards.
+
+    The refused connection is closed before anything has read its request, so
+    the request bytes are still in the kernel receive queue when the 503 goes
+    out.  Closing with unread bytes queued is answered with RST, which
+    discards a response the peer has not read yet — so what a client gets must
+    not depend on whether it happened to be reading at the instant the sweep
+    reached it.
+    """
+    started, release = asyncio.Event(), asyncio.Event()
+    slots_filled, handlers, calls = asyncio.Event(), asyncio.Event(), []
+    app = _held_handler_app(started, release, slots_filled, handlers, calls)
+    server = _capped_server(app)
+    connect = _tcp_connector(server.port)
+    clients = []
+    try:
+        async with _serving(server):
+            await asyncio.wait_for(started.wait(), timeout=5)
+
+            clients = await _open_burst(connect, WINDOW_BURST)
+            assert len(clients) == WINDOW_BURST
+            assert calls == [], (
+                f'{len(calls)} request(s) entered the app during the window')
+
+            release.set()
+            await asyncio.wait_for(slots_filled.wait(), timeout=15)
+            await _await_refusal(connect)
+            handlers.set()
+
+            observed = [await _read_response_head(reader)
+                        for reader, _ in clients]
+    finally:
+        await _close_burst(clients)
+
+    _assert_cap_split(observed)
+
+
+@pytest.mark.asyncio
+@pytest.mark.timeout(60)
+async def test_a_parked_burst_read_during_the_sweep_is_refused_with_a_503():
+    """The same burst, with every client already parked in ``read()``.
+
+    This is the reading order the refusal always worked for.  Its job here is
+    to hold that property still: a fix for the late reader must not trade one
+    reading order for the other.
+    """
+    started, release = asyncio.Event(), asyncio.Event()
+    slots_filled, handlers, calls = asyncio.Event(), asyncio.Event(), []
+    app = _held_handler_app(started, release, slots_filled, handlers, calls)
+    server = _capped_server(app)
+    connect = _tcp_connector(server.port)
+    clients = []
+    try:
+        async with _serving(server):
+            await asyncio.wait_for(started.wait(), timeout=5)
+            clients, reads = await _open_parked(connect, WINDOW_BURST)
+
+            release.set()
+            await asyncio.wait_for(slots_filled.wait(), timeout=15)
+            await _await_refusal(connect)
+            handlers.set()
+
+            observed = await asyncio.gather(*reads)
+    finally:
+        await _close_burst(clients)
+
+    _assert_cap_split(observed)
+
+
+@pytest.mark.asyncio
+@pytest.mark.timeout(60)
+async def test_a_burst_against_a_serving_server_is_refused_with_a_503():
+    """The control: the same burst once startup is no longer in the way.
+
+    The first handler call answers, which is how the test knows accepts have
+    begun; every later one parks, so the cap saturates exactly as it does in
+    the window.  A refusal decided before the request has even arrived must
+    keep the meaning it always had.
+    """
+    started, release = asyncio.Event(), asyncio.Event()
+    slots_filled, handlers, calls = asyncio.Event(), asyncio.Event(), []
+    app = _held_handler_app(started, release, slots_filled, handlers, calls,
+                            free_calls=1)
+    server = _capped_server(app)
+    connect = _tcp_connector(server.port)
+    clients = []
+    try:
+        async with _serving(server):
+            await asyncio.wait_for(started.wait(), timeout=5)
+            release.set()
+            await _await_served(connect)
+
+            # One connection ahead of the burst, so the burst is refused
+            # whatever the answered probe's slot does in the meantime.
+            lead = await _open_client(connect)
+            lead_read = asyncio.create_task(_read_response_head(lead[0]))
+            burst, burst_reads = await _open_parked(connect, WINDOW_BURST)
+            clients = [lead, *burst]
+            reads = [lead_read, *burst_reads]
+
+            await asyncio.wait_for(slots_filled.wait(), timeout=15)
+            await _await_refusal(connect)
+            handlers.set()
+
+            observed = await asyncio.gather(*reads)
+    finally:
+        await _close_burst(clients)
+
+    _assert_cap_split(observed)
+
+
+@pytest.mark.asyncio
+@pytest.mark.timeout(60)
+async def test_the_window_admits_what_the_cap_would_refuse(monkeypatch):
+    """The cap does not bound the startup window; ``socket_backlog`` does.
+
+    Pinned with a non-default backlog so the observation cannot be an
+    accident of the default: the whole burst is established while the startup
+    hook is parked and the cap has seen none of it, and the excess is refused
+    — not lost — once accepts start.  The clients are already parked in
+    ``read()`` when the window closes, so this case observes the window
+    alone; whether a *late* reader also gets its refusal is the subject of
+    the tests above.  The queue's own numeric bound is a kernel fact measured
+    outside the process, and is recorded with the measurement rather than
+    asserted here.
+    """
+    monkeypatch.setenv('BB_SOCKET_BACKLOG', '64')
+    reset_settings_cache()
+
+    started, release = asyncio.Event(), asyncio.Event()
+    slots_filled, handlers, calls = asyncio.Event(), asyncio.Event(), []
+    app = _held_handler_app(started, release, slots_filled, handlers, calls)
+    clients = []
+    try:
+        assert get_settings().socket_backlog == 64
+
+        server = _capped_server(app)
+        connect = _tcp_connector(server.port)
+        async with _serving(server):
+            await asyncio.wait_for(started.wait(), timeout=5)
+
+            clients, reads = await _open_parked(connect, WINDOW_BURST)
+            assert len(clients) == WINDOW_BURST
+            assert calls == [], (
+                f'{len(calls)} request(s) entered the app during the window')
+
+            release.set()
+            await asyncio.wait_for(slots_filled.wait(), timeout=15)
+            await _await_refusal(connect)
+            handlers.set()
+
+            observed = await asyncio.gather(*reads)
+    finally:
+        reset_settings_cache()
+        await _close_burst(clients)
+
+    _assert_cap_split(observed)
+
+
+def _rss_kb() -> int:
+    for line in PROC_STATUS.read_text().splitlines():
+        if line.startswith('VmRSS:'):
+            return int(line.split()[1])
+    raise AssertionError(f'VmRSS is not in {PROC_STATUS}')
+
+
+def _fd_count() -> int:
+    return len(os.listdir(PROC_FD))
+
+
+async def _sample_resources(samples: list, stop: asyncio.Event) -> None:
+    """Record fd count and resident size on a fixed cadence.
+
+    A cadence, not a timing assumption: the bounds below are about a peak
+    reached somewhere inside the sweep, and no single instant can show one.
+    """
+    while not stop.is_set():
+        samples.append((_fd_count(), _rss_kb()))
+        await asyncio.sleep(0.01)
+
+
+async def _stream_without_reading(writer, *, deadline: float, started_at: float):
+    """Push bytes at a server that is not reading them, until it closes us.
+
+    What the peer never reads is held by the two kernels, so the byte count
+    here is a capacity floor rather than a measure of what the server kept.
+    """
+    written = 0
+    while time.monotonic() < deadline:
+        try:
+            writer.write(b'x' * 4096)
+            await writer.drain()
+        except OSError as exc:
+            return {'bytes': written, 'outcome': type(exc).__name__,
+                    'elapsed': time.monotonic() - started_at}
+        written += 4096
+        await asyncio.sleep(0)
+    return {'bytes': written, 'outcome': 'deadline',
+            'elapsed': time.monotonic() - started_at}
+
+
+async def _await_fd_count(target: int, *, timeout: float = 15.0) -> int:
+    deadline = time.monotonic() + timeout
+    count = _fd_count()
+    while count != target and time.monotonic() < deadline:
+        await asyncio.sleep(0.02)
+        count = _fd_count()
+    return count
+
+
+@pytest.mark.asyncio
+@pytest.mark.timeout(120)
+@pytest.mark.skipif(not PROC_STATUS.is_file(),
+                    reason='observes fd count and RSS through /proc')
+async def test_a_refused_connection_is_not_a_resource_hold():
+    """A refusal may cost a bounded linger, never a hold the peer chose.
+
+    The interesting failures are opposite in shape and both are checked here:
+    reading every unread byte before closing makes the refusal's cost the
+    peer's to set, and holding the connection open to avoid the reset makes
+    its duration the peer's to set.  So, for a burst that is entirely refusal
+    traffic: the server closes each refused connection within a second of the
+    sweep reaching it, reads at most 8 MiB from any one of them, returns to
+    its idle descriptor count, and grows resident memory by at most 32 MiB.
+    """
+    started, release = asyncio.Event(), asyncio.Event()
+    slots_filled, handlers, calls = asyncio.Event(), asyncio.Event(), []
+    app = _held_handler_app(started, release, slots_filled, handlers, calls)
+    server = _capped_server(app)
+    connect = _tcp_connector(server.port)
+
+    clients: list = []
+    samples: list = []
+    stop = asyncio.Event()
+    sampler = None
+    observed, streamed = [], []
+    try:
+        async with _serving(server):
+            await asyncio.wait_for(started.wait(), timeout=5)
+            idle_fds, idle_rss = _fd_count(), _rss_kb()
+
+            # Holders first: accepts are FIFO, so the two connections the cap
+            # admits are holders and every streamer meets the refusal.
+            holders = await _open_burst(connect, SWEEP_BURST)
+            streamers = await _open_burst(connect, SWEEP_BURST)
+            clients = [*holders, *streamers]
+
+            sampler = asyncio.create_task(_sample_resources(samples, stop))
+            release.set()
+            started_at = time.monotonic()
+            deadline = started_at + 2.0
+            reads = [asyncio.create_task(_read_response_head(reader))
+                     for reader, _ in holders]
+            writes = [asyncio.create_task(
+                _stream_without_reading(writer, deadline=deadline,
+                                        started_at=started_at))
+                for _, writer in streamers]
+
+            streamed = await asyncio.gather(*writes)
+            handlers.set()
+            observed = await asyncio.gather(*reads)
+
+            stop.set()
+            await sampler
+            samples.append((_fd_count(), _rss_kb()))
+
+            # The test's own ends, closed before the count is read: a client
+            # still holding its socket is this process holding a descriptor,
+            # and the question is whether the *server* gave its half back.
+            await _close_burst(clients)
+            settled_fds = await _await_fd_count(idle_fds)
+    finally:
+        stop.set()
+        if sampler is not None and not sampler.done():
+            sampler.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await sampler
+        await _close_burst(clients)
+
+    offered = sum(s['bytes'] for s in streamed)
+    # The load has to have been real for the bounds to mean anything: every
+    # streamer must have been writing when the server closed it, not timing
+    # out on its own deadline.
+    assert all(s['outcome'] != 'deadline' for s in streamed), (
+        f'the server never closed these streamers: {streamed}')
+    assert min(s['bytes'] for s in streamed) > 0 and offered >= 1024 * 1024, (
+        f'the sweep offered {offered} bytes in total')
+
+    # a. The server closes a refused streamer within a second of the sweep.
+    assert max(s['elapsed'] for s in streamed) <= 1.0, (
+        f"refused streamer held for {max(s['elapsed'] for s in streamed):.3f}s")
+    # b. ...having read at most 8 MiB from any one of them.
+    assert max(s['bytes'] for s in streamed) <= 8 * 1024 * 1024, (
+        f"server read {max(s['bytes'] for s in streamed)} bytes from one client")
+    # c. Descriptors return to idle: every in-process client owns two of them
+    #    (its own end and the accepted end), so the peak is bounded by 2 x the
+    #    burst plus the listener and probe descriptors.
+    peak_fds = max(count for count, _ in samples)
+    assert peak_fds <= idle_fds + 2 * len(clients) + 8, (
+        f'fd peak {peak_fds} against idle {idle_fds}')
+    assert settled_fds == idle_fds, (
+        f'fds settled at {settled_fds}, idle was {idle_fds}')
+    # d. And the process grew by at most 32 MiB while the burst offered its
+    #    bytes — a coarse bound, since the probe's own buffers are inside it.
+    peak_rss = max(rss for _, rss in samples)
+    assert peak_rss - idle_rss <= 32 * 1024, (
+        f'RSS grew by {peak_rss - idle_rss} KB (idle {idle_rss} KB)')
+
+    # The two admitted connections are the first two holders: the refusal
+    # sweep did not spill into the served ones.
+    holders_seen = Counter(kind for kind, _ in observed)
+    assert holders_seen == {'200': 2, '503': SWEEP_BURST - 2}, (
+        f'holder observations: {holders_seen}')
+
+
+# --- what a refusal holds, and what it does not ----------------------------
+#
+# A refusal that wrote a response may have to outlive it briefly, because the
+# peer may still be about to send and closing on unread bytes answers with
+# RST.  That hold is the *server's* to decide, so it is observed here the same
+# way as the bounds above: descriptor counts, the process's own, timed from
+# outside.  The two paths that must not hold anything are the refusal that
+# wrote nothing (a raw binding) and the ordinary close after a completed
+# request; the descriptor count at the moment the client sees EOF separates
+# them from a linger, which sends that same FIN first and keeps the
+# descriptor for its window afterwards.
+
+#: Silent clients in the refusal-residency test: enough that the server's own
+#: half of every refused connection is visible in the descriptor count.
+SILENT_BURST = 8
+
+#: Completed requests in the served-close test.
+SERVED_BURST = 20
+
+#: Silent clients on the raw port, where the refusal has no framing to answer in.
+RAW_BURST = 8
+
+#: One bounded linger is 0.25 s.  Below the floor no window opened; above the
+#: ceiling the connection paid for two.
+LINGER_FLOOR_S = 0.15
+LINGER_CEILING_S = 0.45
+
+#: Descriptors a burst may add beyond the clients' own ends.  Wide enough for
+#: transients, far below the burst size a linger would still be holding.
+FD_SLACK = 4
+
+
+async def _await_stable_fd_count(*, stable_for: float = 0.2,
+                                 timeout: float = 10.0) -> int:
+    """The descriptor count once it has stopped moving.
+
+    A refusal's linger keeps the server's half alive for its whole window, so
+    a count taken while one is still expiring is not the idle state the
+    residency below is measured from.
+    """
+    deadline = time.monotonic() + timeout
+    last, since = _fd_count(), time.monotonic()
+    while time.monotonic() < deadline:
+        await asyncio.sleep(0.02)
+        count = _fd_count()
+        if count != last:
+            last, since = count, time.monotonic()
+        elif time.monotonic() - since >= stable_for:
+            break
+    return last
+
+
+async def _sample_fds(samples: list, stop: asyncio.Event) -> None:
+    """Timestamped descriptor count, on a cadence finer than one window."""
+    while not stop.is_set():
+        samples.append((time.monotonic(), _fd_count()))
+        await asyncio.sleep(0.005)
+
+
+async def _await_released(samples: list, target: int, *, since: float,
+                          timeout: float = 5.0):
+    """When the sampled count first falls back to *target* after *since*.
+
+    Waits on the sampler's own samples rather than polling beside it: the
+    question is what the trace shows, and it has to keep running until the
+    window in it has closed.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        at = next((t for t, count in samples if t > since and count <= target),
+                  None)
+        if at is not None:
+            return at
+        await asyncio.sleep(0.005)
+    return None
+
+
+async def _read_to_eof(reader, *, timeout: float = 15.0):
+    """Everything the server sent, read to EOF, plus the count at that EOF."""
+    try:
+        data = await asyncio.wait_for(reader.read(), timeout=timeout)
+    except ConnectionResetError:
+        return 'reset', b'', _fd_count()
+    except asyncio.TimeoutError:
+        return 'timeout', b'', _fd_count()
+    return 'eof', data, _fd_count()
+
+
+@pytest.mark.asyncio
+@pytest.mark.timeout(60)
+@pytest.mark.skipif(not PROC_FD.is_dir(),
+                    reason='observes descriptor residency through /proc')
+async def test_a_silent_refusal_holds_its_connection_for_one_window():
+    """A client that said nothing still gets its 503 — for one window only.
+
+    Nothing has read the connection when the refusal is written, so the peer
+    may still be about to send and the connection is held for the bounded
+    linger rather than closed under the response.  This client sends nothing,
+    so the descriptors that outlive the response are the *server's*: what is
+    timed is the server's decision, not the client's.  One window, not two —
+    the refusal closes the connection and the accept path closes it again,
+    and only the first of those may open a window, which the ceiling rules
+    out.
+    """
+    started, release = asyncio.Event(), asyncio.Event()
+    slots_filled, handlers, calls = asyncio.Event(), asyncio.Event(), []
+    app = _held_handler_app(started, release, slots_filled, handlers, calls)
+    server = _capped_server(app)
+    connect = _tcp_connector(server.port)
+
+    clients: list = []
+    samples: list = []
+    stop = asyncio.Event()
+    sampler = None
+    observed = []
+    settled_fds = None
+    try:
+        async with _serving(server):
+            await asyncio.wait_for(started.wait(), timeout=5)
+            release.set()
+            # The idle state with no connection yet: what the burst has to
+            # return to once every client end is closed again.
+            idle_only = await _await_stable_fd_count()
+            clients.extend(await _open_burst(connect, 2))
+            await asyncio.wait_for(slots_filled.wait(), timeout=15)
+            await _await_refusal(connect)
+            idle_fds = await _await_stable_fd_count()
+
+            sampler = asyncio.create_task(_sample_fds(samples, stop))
+            silent = await asyncio.gather(*(connect()
+                                            for _ in range(SILENT_BURST)))
+            clients.extend(silent)
+            connected_at = time.monotonic()
+            observed = await asyncio.gather(*(
+                _read_response_head(reader) for reader, _ in silent))
+            # The reads finish when the response arrives, while the window is
+            # still open: sampling goes on until the server lets its half go.
+            settled = idle_fds + SILENT_BURST
+            released_at = await _await_released(samples, settled,
+                                                since=connected_at)
+            stop.set()
+            await sampler
+            handlers.set()
+            # The probe's own ends go last: what "idle" counts is the server's
+            # descriptors plus these, so the server must be back to its half.
+            await _close_burst(clients)
+            settled_fds = await _await_fd_count(idle_only)
+    finally:
+        stop.set()
+        if sampler is not None and not sampler.done():
+            sampler.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await sampler
+        await _close_burst(clients)
+
+    assert [kind for kind, _ in observed] == ['503'] * SILENT_BURST, (
+        f'a client that sent nothing was not refused: {observed}')
+    for _kind, head in observed:
+        assert head == REFUSAL, f'incomplete refusal: {head[:200]!r}'
+
+    both_ends = idle_fds + 2 * SILENT_BURST
+    assert released_at is not None, (
+        f'the server never released its half of a refused connection: '
+        f'idle {idle_fds}, last sample {samples[-1][1]}')
+    peak = max(count for _, count in samples)
+    assert peak >= both_ends, (
+        f'descriptor peak {peak} never reached idle {idle_fds} + '
+        f'{2 * SILENT_BURST} (both ends of every refused connection)')
+    # Falling back to the clients' own ends is the server giving its half up.
+    residency = released_at - connected_at
+    assert LINGER_FLOOR_S <= residency <= LINGER_CEILING_S, (
+        f'refused-connection residency {residency:.3f}s is outside '
+        f'[{LINGER_FLOOR_S}, {LINGER_CEILING_S}]: no window opened, or a '
+        f'second one did')
+    assert settled_fds == idle_only, (
+        f'descriptors settled at {settled_fds}, idle was {idle_only}')
+
+
+@pytest.mark.asyncio
+@pytest.mark.timeout(60)
+@pytest.mark.skipif(not PROC_FD.is_dir(),
+                    reason='observes the descriptor count through /proc')
+async def test_a_completed_request_is_closed_without_a_linger():
+    """A request that was read and answered has nothing left to protect.
+
+    The client reads its 200 and then EOF, and the server's descriptor is
+    already back when that EOF arrives: a linger would have sent the same FIN
+    first and kept the descriptor for its window afterwards, so the count at
+    the moment of EOF is what tells the two apart.
+    """
+    app = BlackBull()
+
+    @app.route(path='/', methods=[HTTPMethod.GET])
+    async def _index():
+        return BODY
+
+    server = Server(app)
+    server.open_socket(0)
+    connect = _tcp_connector(server.port)
+
+    clients: list = []
+    seen: list = []
+    try:
+        async with _serving(server):
+            idle_fds = await _await_stable_fd_count()
+            pairs = await asyncio.gather(*(connect()
+                                           for _ in range(SERVED_BURST)))
+            clients.extend(pairs)
+            for _, writer in pairs:
+                writer.write(REQUEST)
+                with contextlib.suppress(OSError):
+                    await writer.drain()
+            seen = await asyncio.gather(*(
+                _read_to_eof(reader) for reader, _ in pairs))
+    finally:
+        await _close_burst(clients)
+
+    assert [kind for kind, _, _ in seen] == ['eof'] * SERVED_BURST, seen
+    assert all(data.startswith(b'HTTP/1.1 200 ') for _, data, _ in seen), seen
+    held = max(count for _, _, count in seen)
+    assert held <= idle_fds + SERVED_BURST + FD_SLACK, (
+        f'{held} descriptors against idle {idle_fds}: the server still held '
+        f'its half of a completed request')
+
+
+@pytest.mark.asyncio
+@pytest.mark.timeout(60)
+@pytest.mark.skipif(not PROC_FD.is_dir(),
+                    reason='observes the descriptor count through /proc')
+async def test_a_raw_binding_refusal_writes_nothing_and_keeps_nothing():
+    """A raw protocol has no framing to refuse in, so it is let go at once.
+
+    The client is told nothing — zero bytes, then EOF — and the server's
+    descriptor is already back when that EOF arrives.  A linger here would
+    send the same FIN first and then sit on the descriptor for its window, so
+    the count at the moment of EOF is what separates the two.
+    """
+    started, release = asyncio.Event(), asyncio.Event()
+    slots_filled, handlers, calls = asyncio.Event(), asyncio.Event(), []
+    app = _held_handler_app(started, release, slots_filled, handlers, calls,
+                            raw=True)
+    server = _capped_server(app)
+    connect = _tcp_connector(server.port)
+    raw_connect = _tcp_connector(server.protocol_ports['sink'])
+
+    clients: list = []
+    seen: list = []
+    try:
+        async with _serving(server):
+            await asyncio.wait_for(started.wait(), timeout=5)
+            release.set()
+            clients.extend(await _open_burst(connect, 2))
+            await asyncio.wait_for(slots_filled.wait(), timeout=15)
+            await _await_refusal(connect)
+            idle_fds = await _await_stable_fd_count()
+
+            pairs = await asyncio.gather(*(raw_connect()
+                                           for _ in range(RAW_BURST)))
+            clients.extend(pairs)
+            seen = await asyncio.gather(*(
+                _read_to_eof(reader) for reader, _ in pairs))
+            handlers.set()
+    finally:
+        await _close_burst(clients)
+
+    outcomes = Counter(kind for kind, _, _ in seen)
+    assert outcomes == {'eof': RAW_BURST}, f'the raw refusal answered: {seen}'
+    assert all(data == b'' for _, data, _ in seen), (
+        f'a raw refusal wrote bytes: {seen}')
+    held = max(count for _, _, count in seen)
+    assert held <= idle_fds + RAW_BURST + FD_SLACK, (
+        f'{held} descriptors against idle {idle_fds}: the server still held '
+        f'its half of a refused raw connection')

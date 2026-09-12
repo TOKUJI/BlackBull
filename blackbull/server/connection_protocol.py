@@ -349,6 +349,9 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
         self._waiter: asyncio.Future[None] | None = None
         self._eof = False
         self._exc: BaseException | None = None
+        self._response_written = False
+        self._arrived = False
+        self._linger_decided = False
         # Cleartext until connection_made says otherwise.
         self._half_close_is_honoured = True
         #: The transport is not reading.  Written only by [`pause_reading`][]
@@ -393,6 +396,7 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
             # asyncio treats a zero-length read as EOF on some transports.
             self.eof_received()
             return
+        self._arrived = True
         # The threshold is a transport fact; what a crossing *means* is the
         # reader's, so it is asked only on the crossing.
         avail = self._rb.buffer_updated(nbytes)
@@ -437,6 +441,8 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
     # reused unchanged.
 
     def write(self, data) -> None:
+        if data:
+            self._response_written = True
         if self.transport is not None:
             self.transport.write(data)
 
@@ -447,6 +453,8 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
         offers only ``write`` serves small responses and fails large ones;
         ``docs/about/internals.md`` §Send-path invariant is the obligation.
         """
+        if any(parts):
+            self._response_written = True
         if self.transport is not None:
             self.transport.writelines(parts)
 
@@ -489,15 +497,21 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
         """Close after briefly discarding whatever the peer is still sending.
 
         Reads and discards up to *max_bytes* for at most *timeout* seconds,
-        then closes.  Skipped when nothing was left unconsumed, so a completed
-        request still gets a bare close.
-
+        then closes.  A connection that wrote a response and may still have
+        unread bytes — resident, or nothing arrived and no EOF — lingers
+        once; otherwise its buffer and EOF decide.
         The Internals page explains why a rejection has to close this way and
         why both bounds are needed.  nginx calls it ``lingering_close``.
         """
         if self.transport is None:
             return
-        if self._eof or not self._rb.available:
+        if self._linger_decided:
+            self.close()
+            return
+        self._linger_decided = True
+        owed = (self._response_written
+                and (self._rb.available or not (self._arrived or self._eof)))
+        if not owed and (self._eof or not self._rb.available):
             self.close()
             return
         try:

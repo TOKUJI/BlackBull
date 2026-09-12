@@ -70,6 +70,10 @@ environment variables per the `sd_listen_fds(3)` protocol:
 When neither variable is set (non-systemd handoff, tests)
 BlackBull accepts the fd unconditionally.
 
+With `BB_SOCKET_REUSEPORT=1`, several workers and no
+[`--reload`](hot-reload.md), a creator-held dual-stack socket leaves no worker
+serving the port.
+
 ### What systemd activation buys you
 
 - **Bind privileged ports without running as root.**  systemd
@@ -81,6 +85,24 @@ BlackBull accepts the fd unconditionally.
   instead of being refused.
 - **Lazy activation.**  The socket is ready before BlackBull
   starts; the first connection wakes the service.
+
+## The startup window
+
+Accepts begin only after lifespan startup completes, so arrivals before then
+wait in the kernel's accept queue, bounded by the creator's `Backlog=` where
+the fd is adopted and by
+[`BB_SOCKET_BACKLOG`](../reference/env-vars.md#socket-tuning) where BlackBull
+binds it.  The window lasts as long as the startup hook runs, with no deadline
+from the framework.  The kernel admits `backlog + 1` parked connections per
+socket, each holding one 128 KiB receive buffer on a stock Linux (nothing reads,
+so it does not autotune upward): **128.125 MiB per listener** at the default,
+256.25 MiB dual-stack, and 4097 × 128 KiB = **512.125 MiB** on an adopted
+fd given `Backlog=4096`.
+`BB_SOCKET_RCVBUF` sets that buffer on the listener and parked connections
+inherit it: a requested `262144` is 416 KiB effective each, making the window
+**416.406 MiB** per listener, 832.812 MiB dual-stack.  A window longer than the
+client's SYN retransmission budget (about two minutes) loses the excess.
+BlackBull documents this window rather than forcing it smaller.
 
 ## Inspecting the bind
 
