@@ -178,6 +178,12 @@ a transfer rather than a stream.  Until it is set, a trickling peer is a known
 open path — bounded by `BB_CLIENT_BODY_TIMEOUT` only insofar as it stops
 entirely.
 
+## Fault injection
+
+| Variable | Default | Controls |
+|---|---|---|
+| `BB_PRODUCTION` | unset | Set to `1`, `true`, `yes` or `on` to make the fault-injection servers refuse to start, in addition to the refusal that `BLACKBULL_ENV=production` already triggers.  An explicit override for a process that reaches production without going through the `Settings` machinery. |
+
 ## Socket tuning
 
 | Variable | Default | Controls |
@@ -203,6 +209,12 @@ The `blackbull.caps` logger has no env-var toggle — set its level
 via `logging.getLogger('blackbull.caps').setLevel(...)` at
 startup.  Default level is `WARNING`; raise to `ERROR` to silence
 or drop to `INFO` to surface the rate-limit summary records.
+
+## Static files
+
+| Variable | Default | Controls |
+|---|---|---|
+| `BB_STATIC_STAT_TTL_S` | `1.0` | Seconds a `StaticFiles` cache entry trusts its last `stat()`.  Keeps edit-on-disk visibility under a second while taking the per-request `stat` off the cache-hit path.  `0` stats on every request. |
 
 ## HTTP/2 internals
 
@@ -251,6 +263,17 @@ ever meeting the enforcement path.
 | `BB_MQTT_MAX_SUBSCRIPTIONS` | `1000` | Maximum Topic Filters one session may hold — the **unit** bound on session state, whose total is `BB_MQTT_MAX_SESSIONS` and whose time bound is the Session Expiry Interval the client declares.  Without it one connected client grows broker memory without limit, and with it the per-PUBLISH routing walk, since routing tests every filter of every connected session.  At the cap a **new** filter is refused with `0x97 (Quota Exceeded)` in the SUBACK and a cap hit logged; re-subscribing to a filter the session already holds always works, because §3.8.4 makes that a replacement rather than an addition, so it occupies no new slot.  `0` disables. |
 | `BB_MQTT_MAX_SESSIONS` | `10000` | Maximum sessions the broker retains — the **total** bound on session state.  A session outlives its connection by design, and §3.1.2.11.2 defines `0xFFFFFFFF` as *never expires*, so a peer cycling Client Identifiers can pin one entry per identifier while breaking no rule.  At the cap a CONNECT for an **unknown** Client Identifier is refused with `0x97 (Quota Exceeded)` in the CONNACK and the connection closed; a client resuming a session the table already holds is admitted, because refusing it frees nothing.  Expired sessions are swept first, so the cap binds live state only.  `0` disables. |
 
+## gRPC
+
+Read once at import, so a change needs a restart.  Tests monkeypatch the
+module attribute rather than the variable.
+
+| Variable | Default | Controls |
+|---|---|---|
+| `BB_GRPC_MAX_MESSAGE_SIZE` | `4194304` (4 MiB) | Largest gRPC message accepted on a call.  Matches grpcio's own default receive limit, so a client tuned against grpcio meets the same ceiling here.  A value that does not parse falls back to the default rather than failing the import. |
+| `BB_GRPC_STREAM_BATCH_BYTES` | `16384` (16 KiB) | How many bytes of a server-streaming response are gathered before a write.  Batching amortises the per-write cost; no message is ever withheld past the call, because the batch is flushed before any trailing status. |
+| `BB_GRPC_COMPRESS_MIN_BYTES` | `1024` | Responses below this size are sent uncompressed.  gzip's header and trailer can make a small message *larger*, so the threshold avoids spending CPU for no bandwidth.  Set it very high to disable response compression outright. |
+
 ## Compression
 
 | Variable | Default | Controls |
@@ -264,6 +287,7 @@ ever meeting the enforcement path.
 
 | Variable | Default | Controls |
 |---|---|---|
+| `BB_PHASE_TRACE` | `0` | Record per-request wall-clock and CPU checkpoints into the access-log record's `phases`.  Off by default because the extra `perf_counter()` and `process_time()` calls are visible in benchmark numbers; intended for one-off investigation, not production. |
 | `BB_DEADLINE_TICK_MS` | `300` | Polling interval (milliseconds) for the per-process deadline scanner that enforces `BB_HEADER_TIMEOUT`, `BB_BODY_TIMEOUT`, `BB_WRITE_TIMEOUT`, and `BB_KEEP_ALIVE_TIMEOUT`.  One shared timer for the whole process instead of one per request, which is why enabling those timeouts costs nothing per request.  Smaller = tighter timeout granularity at a small CPU cost; larger = more slack but cheaper. |
 
 ## Performance recommendations
