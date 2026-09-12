@@ -149,9 +149,7 @@ async def SocketManager(socket_cb_pairs, ssl_context):
 
     On enter: wraps each socket in ``loop.create_server`` (TCP) or
     ``loop.create_unix_server`` (AF_UNIX) and yields the list.  Accepting does
-    not start here — the caller calls ``start_serving()`` on the servers once
-    the app can answer, so a connection that arrives first waits in the
-    backlog instead of reaching an app that is not ready for it.  Not
+    not start here — the caller calls ``start_serving()`` on the servers.  Not
     ``start_server``: that pairs a StreamReader/StreamWriter over asyncio's
     own buffering with every connection, and the whole point of the buffered
     protocol is that the connection owns exactly one buffer.
@@ -246,7 +244,7 @@ class Server:
         self._connection_tasks: set = set()
         self._stopping = False
         self._drain_timeout = None
-        self._stopped_event = None
+        self._stopped_event = asyncio.Event()
         # Process-wide singletons: looked up once, not once per accept.
         from ..event_aggregator import EventAggregator as _EA  # noqa: PLC0415
         self._cached_dispatcher = getattr(self.app, '_dispatcher', None)
@@ -728,6 +726,8 @@ class Server:
                 servers += await stack.enter_async_context(
                     SocketManager(pairs, context))
             self._running_servers = servers
+            logger.info('Bound %d server(s); accepting when lifespan startup completes',
+                        len(servers))
             # Nested inside the stack so lifespan shutdown completes before
             # the sockets it may still be answering on are closed.
             async with LifespanManager(self.app):
@@ -735,17 +735,12 @@ class Server:
                 # Accepting starts here, not in ``SocketManager``: a request
                 # accepted while an ``on_startup`` hook is still running would
                 # be answered by an app that has not finished starting.
-                self._stopped_event = asyncio.Event()
                 for srv in servers:
                     if self._stopping:
                         # ``stop()`` closed these servers; starting a closed
                         # one raises from a socket list that is already gone.
                         break
                     await srv.start_serving()
-                if self._stopping:
-                    # ``stop()`` landed before the event above existed, so it
-                    # had nothing to wake; the wait below must not park.
-                    self._stopped_event.set()
                 # Block on our own event, not ``Server.serve_forever()``: its
                 # cancellation path calls ``Server.close_clients()`` — which
                 # closes the *accepted* transports, so a drain finishes the
@@ -789,8 +784,7 @@ class Server:
         # Close listeners first, so the drain is over a set that only shrinks.
         for srv in getattr(self, '_running_servers', ()):
             srv.close()
-        if self._stopped_event is not None:
-            self._stopped_event.set()
+        self._stopped_event.set()
 
         await self._drain(drain_timeout)
 

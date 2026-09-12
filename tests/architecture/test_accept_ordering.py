@@ -232,11 +232,7 @@ async def test_a_failed_startup_serves_no_request():
 @pytest.mark.asyncio
 @pytest.mark.timeout(60)
 async def test_stop_during_startup_ends_run_without_error():
-    """``stop()`` arriving before startup completes must wind down cleanly.
-
-    ``stop()`` closes the asyncio servers; starting one of those closed
-    servers raises ``TypeError`` from a socket list that is already gone.
-    """
+    """``stop()`` arriving before startup completes must wind down cleanly."""
     started, release, calls = asyncio.Event(), asyncio.Event(), []
     app = _app_with_startup(started, release, calls)
     server, connect = _listening_server(app)
@@ -248,8 +244,6 @@ async def test_stop_during_startup_ends_run_without_error():
         await asyncio.wait_for(runner, timeout=5)
         await asyncio.wait_for(stopper, timeout=5)
 
-        # Read inside the body: the refusal is ``stop()`` having closed the
-        # listener, not this test closing it on the way out.
         after = await _probe(connect, read_timeout=0.5)
 
     assert after[0] == 'refused', f'still reachable after run(): {after!r}'
@@ -289,8 +283,6 @@ async def test_run_does_not_return_before_on_shutdown_completes(tmp_path):
         await asyncio.wait_for(runner, timeout=5)
         await asyncio.wait_for(stopper, timeout=5)
 
-        # Read inside the body: ``run()`` returning is what must have closed
-        # the listener, not this test closing it on the way out.
         after = await _probe(connect, read_timeout=0.5)
 
     assert sentinel.exists(), 'on_shutdown never ran'
