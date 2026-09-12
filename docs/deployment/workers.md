@@ -31,12 +31,8 @@ free.  It is **off by default**: with `BB_SOCKET_REUSEPORT=0`
 (the default) all workers share the master's single socket, and
 every incoming connection wakes every worker's loop, with N−1
 workers `accept()`-ing to EAGAIN — the thundering-herd accept
-race.  `--reload` shares the master's socket whatever this is
-set to, because the master keeps the listener to hand it across
-its exec — [`BB_SOCKET_REUSEPORT`](../reference/env-vars.md#socket-tuning)
-states the option's whole scope.  See "Workers vs cores under
-connection churn" below for when turning it on helps and when it
-does not.
+race.  See "Workers vs cores under connection churn" below for
+when turning it on helps and when it does not.
 
 ### Shared-nothing model
 
@@ -57,6 +53,16 @@ extension package) explicitly state their per-worker limits — see
 | `BB_WORKERS=1` (default) | Development, tests, debugging.  Easiest to reason about; everything in one process. |
 | `BB_WORKERS=N` (`N > 1`) | Production CPU-bound workload — each worker saturates one core. |
 | `BB_WORKERS=0` | Production "use whatever the box has" — resolves to `os.cpu_count()` at start. |
+
+### Socket options across bind paths
+
+| knob | single | shared | + `REUSEPORT` | adopted fd | `AF_UNIX` |
+|---|---|---|---|---|---|
+| `BB_SOCKET_BACKLOG` | bounds queue | bounds queue | per-worker queues | creator's, until accepting | bounds queue |
+| `BB_SOCKET_REUSEPORT` | n/a | off | per worker | creator's socket blocks it | not with `> 1` |
+| `BB_SOCKET_SNDBUF`/`RCVBUF` | set | set | not set | creator's value | listener only |
+| `BB_TCP_USER_TIMEOUT_MS` | set | set | not set | creator's value | unsupported |
+| `BB_MAX_CONNECTIONS` | per worker | ×N | ×N | ×N | ×N |
 
 ### CPU pinning
 
@@ -267,7 +273,7 @@ The defaults match Apache's `LimitRequestLine` /
 
 | Limit | Default | Behaviour |
 |---|---|---|
-| `BB_MAX_CONNECTIONS` | `auto` per worker | Connections beyond the cap are refused at accept time.  Combine with `BB_SOCKET_BACKLOG` for graceful overload.  `0` = unlimited.  The cap is an accept-time admission, so it does not cover connections that arrive while lifespan startup is still running — the listener's backlog is their bound until accepts begin ([`BB_SOCKET_BACKLOG`](../reference/env-vars.md#socket-tuning) where BlackBull binds the listener, the creator's where it adopts one). |
+| `BB_MAX_CONNECTIONS` | `auto` per worker | Connections beyond the cap are refused at accept time.  Combine with `BB_SOCKET_BACKLOG` for graceful overload.  `0` = unlimited. |
 | `BB_REQUEST_TIMEOUT` | `0` (off) | Per-HTTP/2-stream deadline in seconds.  Set in production (e.g. `30`) so an ASGI handler hung on an upstream call can't keep its stream slot indefinitely.  Stream is cancelled via `RST_STREAM CANCEL`. |
 
 ## Shutdown

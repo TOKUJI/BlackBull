@@ -491,12 +491,8 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
 
         Reads and discards up to *max_bytes* for at most *timeout* seconds,
         then closes.  Skipped when nothing was left unconsumed, so a completed
-        request still gets a bare close — unless *force* is set, which is what
-        a connection closed before it was ever read needs: the bytes the peer
-        sent are in the kernel's receive queue rather than in this buffer, so
-        the self-selection cannot see them, and closing over them answers the
-        peer with RST instead of the response already written.
-
+        request still gets a bare close; *force* overrides that for a
+        connection closed before anything read it.
         The Internals page explains why a rejection has to close this way and
         why both bounds are needed.  nginx calls it ``lingering_close``.
         """

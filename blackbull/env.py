@@ -82,9 +82,8 @@ def resolve_max_connections(raw: str | None) -> int:
     given, *not* clamped to that budget: an operator who names a number
     means it.  ``0`` disables the cap.
 
-    The environment-variable reference argues why a derived default is safe
-    to ship, and why this bounds descriptor exhaustion rather than
-    event-loop health.
+    Why a derived default is safe to ship, and what it does not bound, is
+    argued in ``docs/about/security-model.md`` (qualification 2).
     """
     if raw is None or raw.strip().lower() in ('', 'auto'):
         try:

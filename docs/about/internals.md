@@ -469,19 +469,13 @@ close stays a bare close.  Lingering on every connection would put a
 timeout on the teardown path that `AsyncioWriter.close` keeps free of even
 one extra loop turn, which is what the burst-keepalive workload needs.
 
-That self-selection reads the *connection's* buffer, and a connection
-refused at the cap is closed before anything has read it: the request it
-sent is still in the kernel's receive queue, where the buffer cannot see
-it.  A refusal therefore forces the linger
-(`AsyncioWriter.reject_close`) rather than asking for it, or the `503` it
-has just written is replaced by the reset the linger exists to avoid.
+That self-selection reads the *connection's* buffer, so a refusal looks
+finished: the request sits in the kernel's receive queue, where the buffer
+cannot see it.  A refusal therefore forces the linger
+(`AsyncioWriter.reject_close`).
 
 Both bounds make the refusal **best-effort**, not a guarantee: a peer that
-stops reading, or that floods past the byte budget and the deadline, still
-meets the close.  A connection refused on an ALPN-`h2` or raw-protocol
-binding gets no response at all — neither has a framing to write one in
-before the peer has spoken; one refused before its protocol is known, as a
-prior-knowledge `h2c` connection is, takes the HTTP/1.1 `503` instead.
+stops reading meets the close.
 
 ## Receive-path invariant
 

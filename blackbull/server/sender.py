@@ -258,15 +258,8 @@ class AbstractWriter(ABC):
         """Close the underlying transport. Default: no-op."""
 
     async def reject_close(self) -> None:
-        """Close a connection refused before anything has read it.
-
-        A refusal is written before the request was read, so whatever the peer
-        sent is still in the kernel's receive queue and a plain close answers
-        it with RST, which can discard the refusal the peer has not read yet.
-        A transport that cannot discard what arrives while closing can only do
-        the ordinary close; ``docs/about/internals.md`` §Rejecting requires
-        lingering is the obligation a transport that can do better meets here.
-        """
+        """Close a refused connection without discarding the refusal; a
+        transport that cannot discard arriving bytes falls back to ``close()``."""
         await self.close()
 
     async def sendfile(self, file, offset: int, count: int) -> int:
@@ -410,30 +403,17 @@ class AsyncioWriter(AbstractWriter):
             return False
 
     async def close(self) -> None:
-        # We deliberately do NOT await ``wait_closed()``: under burst-keepalive
-        # workloads (HttpArena ``static`` at c=4096) it serialises the
-        # connection-actor coroutine with the transport-close completion, adding
-        # 1-3 event-loop turns per connection — thousands of simultaneous closes
-        # then multiply into a multi-second drain that monopolises the loop.
-        # It is safe to skip because every ``write()`` above flushed via
-        # ``drain()``, so there is no buffered payload left to lose.
-        #
-        # ``linger_close`` is the exception: docs/about/internals.md
-        # §Rejecting requires lingering.  It self-selects, so the burst path
-        # above keeps its zero extra turns.
+        # We deliberately do NOT await ``wait_closed()``: it costs 1-3 event-loop
+        # turns per connection under burst-keepalive (HttpArena ``static``,
+        # c=4096), and thousands of simultaneous closes multiply that into a
+        # multi-second drain.  Safe because ``write()`` above already drained.
         if self._linger is not None:
             await self._linger()
             return
         self._sw.close()
 
     async def reject_close(self) -> None:
-        """Close a refused connection without RSTing the refusal away.
-
-        ``close()`` above lingers only for bytes this connection is known to
-        hold unconsumed, which is never the case here: the refusal is written
-        before anything read the request, so the unread bytes are in the
-        kernel queue and the linger has to be forced.
-        """
+        """Force the linger that ``close()`` would skip."""
         if self._linger is not None:
             await self._linger(force=True)
             return

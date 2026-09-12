@@ -259,7 +259,7 @@ the knobs most worth a second look:
 | `BLACKBULL_ENV` | `development` | Set to `production`.  Tightens error responses and stops `StaticFiles` from competing with your reverse proxy. |
 | `BB_WORKERS` | `1` | Set to `0` (= `cpu_count()`) or a fixed integer matching your CPU budget. |
 | `BB_REQUEST_TIMEOUT` | `0` (off) | Set to a positive value (e.g. `30`) so stalled handlers get evicted. |
-| `BB_MAX_CONNECTIONS` | `auto` (from `RLIMIT_NOFILE`) | Tune for the worker's memory budget; set `0` only if some upstream caps connection counts. |
+| `BB_MAX_CONNECTIONS` | `auto` | Tune for the worker's memory budget; set `0` only if some upstream caps connection counts. |
 | `BB_UVLOOP` | `0` | Set to `1` for a typical 1.5-2× throughput improvement on HTTP/2 hot paths. |
 
 ## Next
