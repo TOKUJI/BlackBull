@@ -1,46 +1,13 @@
-"""Declarative application configuration — [`AppConfig`][].
+"""Declarative application configuration -- [`AppConfig`][].
 
-``AppConfig`` is a small, typed, immutable holder for the server-facing
-settings that [`blackbull.BlackBull.run`][blackbull.BlackBull.run] (and [`blackbull.serve`][blackbull.serve])
-already accept as keyword arguments.  It lets an application declare those
-settings once::
+A small, typed, immutable holder for the server-facing settings that
+[`blackbull.BlackBull.run`][blackbull.BlackBull.run] and
+[`blackbull.serve`][blackbull.serve] accept as keyword arguments, so an
+application can declare them once instead of threading flags through.
 
-    from blackbull import BlackBull, AppConfig
-
-    app = BlackBull(config=AppConfig(
-        port=8443,
-        certfile='cert.pem',
-        keyfile='key.pem',
-        workers=4,
-    ))
-
-    if __name__ == '__main__':
-        app.run()          # picks up the config; no flags to thread through
-
-Resolution precedence in [`BlackBull.run`][BlackBull.run] is, highest to lowest
-(see [`resolve_run_config`][]):
-
-1.  an explicit keyword argument to ``run(...)`` — ``app.run(port=9000)``
-    always wins;
-2.  a ``BLACKBULL_*`` environment variable, for the deploy-time settings
-    (``BLACKBULL_PORT`` / ``CERT`` / ``KEY`` / ``UNIX_PATH`` / ``RELOAD``);
-3.  the same ``BLACKBULL_*`` key in a ``.env`` file in the working directory
-    (requires the ``[dotenv]`` extra; absent it, only the real environment is
-    consulted);
-4.  the value declared on the bound [`AppConfig`][] (if any);
-5.  the built-in default baked into [`blackbull.serve`][blackbull.serve].
-
-``AppConfig`` deliberately mirrors *only* the parameters ``serve`` already
-exposes — it is not a general-purpose settings store.  Per-request and
-server-tuning knobs (window sizes, timeouts, queue depths beyond the two
-listed here, ``workers``, ``max_connections``, …) continue to live in
-[`blackbull.env`][blackbull.env] and are sourced from ``BB_*`` environment variables —
-``BLACKBULL_*`` is the deployment namespace, ``BB_*`` the tuning one.
-
-``host`` is intentionally absent: BlackBull's socket layer binds dual-stack
-on all interfaces (see ``blackbull.server.ASGIServer.open_socket``), so
-a per-interface ``host`` field would silently do nothing.  Use ``unix_path``
-or ``inherited_fd`` for non-TCP binds.
+An explicit argument still wins over the config, and an environment variable
+wins over both; the Configuration guide gives the order in full and shows
+what each source looks like.
 """
 from __future__ import annotations
 
