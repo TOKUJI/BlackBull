@@ -5728,6 +5728,13 @@ the same decorator.</p>
 </tr>
 </tbody>
 </table>
+<p>Values passed to <code>send_initial_metadata()</code> or <code>set_trailing_metadata()</code> use
+grpcio's application-facing representation. For a key ending in <code>-bin</code>, pass
+the raw bytes; BlackBull converts them to canonical unpadded base64 before the
+HTTP/2 field section is encoded. Other metadata values are emitted unchanged
+and must obey the ordinary HTTP response-field rules. The
+<code>grpc-status-details-bin</code> value produced by <code>blackbull-protobuf</code> is already in
+canonical wire form and is recognised without encoding it twice.</p>
 <p>Raising <code>GrpcError(status, details)</code> anywhere in the handler has the same effect
 as <code>context.abort</code>. Any other unexpected exception becomes
 <code>GrpcStatus.INTERNAL</code> — a handler bug never tears down the stream.</p>

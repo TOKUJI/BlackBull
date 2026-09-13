@@ -5661,10 +5661,17 @@ forces <code>Content-Type: text/event-stream</code>, and sets
 </tbody>
 </table>
 <p>Recognised mapping keys are <code>data</code>, <code>event</code>, <code>id</code>, and <code>retry</code>.
-<code>data</code> may be a string with embedded newlines (each line emits its
-own <code>data:</code> field per the spec; the browser rejoins them with
-<code>\n</code>).  A non-string <code>data</code> is JSON-serialised before the wire.
-Unknown keys are ignored.</p>
+<code>data</code> may be a string or UTF-8 bytes with embedded CR, LF, or CRLF. Each
+logical line emits its own <code>data:</code> field and the browser rejoins those lines
+with <code>\n</code>; empty, consecutive, and trailing lines are preserved. A byte value
+that is not valid UTF-8 raises <code>UnicodeDecodeError</code>. Other <code>data</code> values are
+JSON-serialised before the wire.</p>
+<p><code>event</code> and <code>id</code> are converted with <code>str()</code>. Because each represents exactly
+one SSE field, CR or LF in either raises <code>ValueError</code>; NUL is also rejected in
+<code>id</code>, where the WHATWG reader would otherwise ignore the update. <code>retry</code> is
+converted with <code>int()</code> and emitted as ASCII milliseconds. Unknown keys are
+ignored. Validation happens per yielded item, so it does not buffer the async
+stream.</p>
 <p>Override the default headers by passing your own <code>headers=[...]</code>
 — a caller-supplied <code>cache-control</code> or <code>content-type</code> takes
 precedence.</p>

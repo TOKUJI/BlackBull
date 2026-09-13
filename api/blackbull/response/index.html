@@ -5700,6 +5700,9 @@
 item produced by <em>content</em> may be a <code>str</code> (bare data), <code>bytes</code>
 (bare data, UTF-8), or a <code>Mapping</code> with optional <code>data</code> /
 <code>event</code> / <code>id</code> / <code>retry</code> keys.</p>
+<p>CR, LF, and CRLF in data become equivalent logical line breaks.  Metadata
+remains one field: CR/LF in <code>event</code> or <code>id</code>, and NUL in <code>id</code>, raise
+<code>ValueError</code> when that item is encoded.</p>
 <p>The content-type is forced to <code>text/event-stream</code> and
 <code>Cache-Control: no-cache</code> is auto-emitted; both are overridable
 via the <em>headers</em> argument if a deployment knows what it's doing.</p>

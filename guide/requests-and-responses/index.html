@@ -6390,6 +6390,18 @@ non-ASCII URLs before passing them in. Extra <code>headers=</code> are merged in
     <span class="p">(</span><span class="sa">b</span><span class="s1">'cache-control'</span><span class="p">,</span> <span class="sa">b</span><span class="s1">'no-store'</span><span class="p">),</span>
 <span class="p">]))</span>
 </code></pre></div>
+<p>Each field name must be a non-empty RFC 9110 <code>token</code>. Values may contain
+HTAB, spaces, visible ASCII, and <code>obs-text</code> bytes, but not NUL, CR, LF, other
+C0 controls, or DEL. <code>Response</code> helpers validate this contract when they are
+constructed. The lower-level <code>NativeResponse</code> and ASGI
+<code>http.response.start</code> / <code>http.response.trailers</code> forms are validated by the
+sender before that field section writes bytes or changes the HTTP/2 HPACK
+table. Invalid fields raise <code>ValueError</code>; they are never silently stripped or
+rewritten. If the response has already begun, HTTP/1.1 closes rather than
+reusing a connection with an incomplete field section.</p>
+<p>String names and values are encoded as ASCII. Pass bytes explicitly when an
+RFC-defined field needs <code>obs-text</code>. Empty values and repeated fields such as
+<code>Set-Cookie</code> remain valid.</p>
 <h3 id="set-cookie-helper"><code>Set-Cookie</code> helper<a class="headerlink" href="#set-cookie-helper" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">cookie_header</span>
 
