@@ -2,7 +2,7 @@
 
 The socket is held for real (no ``EADDRINUSE`` injection, no monkeypatched
 bind) and the listeners are read from ``/proc``, never from the server's log.
-"Answered or refused" is the contract, and a refusal must name the setting.
+Startup must refuse this conflict and name the settings that resolve it.
 """
 from __future__ import annotations
 
@@ -140,8 +140,8 @@ def _can_unshare_net() -> bool:
 # The shape being tested
 # ---------------------------------------------------------------------------
 
-def _dual_stack_listener(host_family=socket.AF_INET6, host='::', v6only=0,
-                         reuseport=False):
+def _tcp_listener(host_family=socket.AF_INET6, host='::', v6only=0,
+                  reuseport=False):
     """Bind, listen, and return the creator's socket on a free port.
 
     *reuseport* is the supervisor's own ``SO_REUSEPORT`` (systemd's
@@ -279,101 +279,65 @@ def _diagnostics(server: Server, port: int) -> str:
             + server.log[-2000:])
 
 
+def _assert_creator_conflict_refusal(server: Server, creator: socket.socket,
+                                     port: int) -> None:
+    deadline = time.monotonic() + _UP_BUDGET
+    while server.proc.poll() is None and time.monotonic() < deadline:
+        time.sleep(_POLL)
+
+    exitcode = server.proc.poll()
+    assert exitcode not in (None, 0), (
+        f'the server did not refuse startup within {_UP_BUDGET}s '
+        f'(exitcode={exitcode})\n{_diagnostics(server, port)}')
+    assert creator.fileno() >= 0
+
+    log = server.log
+    expected = (
+        'BB_SOCKET_REUSEPORT=1 with 2 worker(s)',
+        'cannot give each worker its own listener on',
+        str(port),
+        'BB_SOCKET_REUSEPORT=0',
+        'BB_WORKERS=1',
+    )
+    missing = [fragment for fragment in expected if fragment not in log]
+    assert not missing, (
+        f'the refusal log is missing {missing!r}:\n{log[-2000:]}')
+
+
 # ---------------------------------------------------------------------------
 # The defect: the creator holds the socket
 # ---------------------------------------------------------------------------
 
+@pytest.mark.parametrize(
+    ('host_family', 'host', 'v6only', 'creator_reuseport'),
+    (
+        pytest.param(socket.AF_INET, '0.0.0.0', None, False,
+                     id='ipv4-only-creator-reuseport-off'),
+        pytest.param(socket.AF_INET, '0.0.0.0', None, True,
+                     id='ipv4-only-creator-reuseport-on'),
+        pytest.param(socket.AF_INET6, '::', 1, False,
+                     id='ipv6-only-creator-reuseport-off'),
+        pytest.param(socket.AF_INET6, '::', 1, True,
+                     id='ipv6-only-creator-reuseport-on'),
+        pytest.param(socket.AF_INET6, '::', 0, False,
+                     id='dual-stack-creator-reuseport-off'),
+        pytest.param(socket.AF_INET6, '::', 0, True,
+                     id='dual-stack-creator-reuseport-on'),
+    ),
+)
 @pytest.mark.timeout(_HARD_TIMEOUT)
-def test_a_creator_held_listener_is_served_or_refused(tmp_path: Path):
-    """The creator keeps its plain socket open for the whole run."""
-    creator = _dual_stack_listener()
+def test_a_creator_held_tcp_listener_is_refused(
+        tmp_path: Path, host_family: int, host: str, v6only: int | None,
+        creator_reuseport: bool):
+    """Every TCP family shape leaves connections with the creator."""
+    creator = _tcp_listener(host_family, host, v6only,
+                            reuseport=creator_reuseport)
     port = creator.getsockname()[1]
     adopted = os.dup(creator.fileno())
     server = Server(tmp_path, workers=2, reuseport=1, inherited_fd=adopted)
     os.close(adopted)
     try:
-        outcome = _settle(server, port)
-        log = server.log
-        # The creator stays open for the whole run — that is the shape.
-        assert creator.fileno() >= 0
-        if outcome.exitcode is None:
-            assert outcome.served, (
-                f'the server is still running but the port is not served: '
-                f'{outcome}\n{_diagnostics(server, port)}')
-            assert 'BB_SOCKET_REUSEPORT' in log and str(port) in log, (
-                'served, but the log never says the port was taken over '
-                f'rather than given its own listener:\n{log[-2000:]}')
-        else:
-            assert outcome.exitcode != 0, (
-                f'the server exited 0 without serving: {outcome}')
-            assert 'BB_SOCKET_REUSEPORT' in log, (
-                f'the refusal does not name the setting:\n{log[-2000:]}')
-            assert str(port) in log, (
-                f'the refusal does not name the listener:\n{log[-2000:]}')
-            assert '2 worker' in log, (
-                f'the refusal does not name the worker count:\n{log[-2000:]}')
-    finally:
-        server.stop()
-        creator.close()
-
-
-@pytest.mark.timeout(_HARD_TIMEOUT)
-def test_a_creator_held_reuseport_listener_is_served_or_refused(tmp_path: Path):
-    """The same, with the creator's ``SO_REUSEPORT`` set before the bind
-    (systemd's ``ReusePort=yes``), so the port is shared rather than blocked."""
-    creator = _dual_stack_listener(reuseport=True)
-    port = creator.getsockname()[1]
-    adopted = os.dup(creator.fileno())
-    server = Server(tmp_path, workers=2, reuseport=1, inherited_fd=adopted)
-    os.close(adopted)
-    try:
-        outcome = _settle(server, port)
-        log = server.log
-        assert creator.fileno() >= 0
-        if outcome.exitcode is None:
-            assert outcome.served, (
-                f'the server is still running but part of the port is dead: '
-                f'{outcome}\n{_diagnostics(server, port)}')
-            assert 'BB_SOCKET_REUSEPORT' in log and str(port) in log, (
-                'served, but the log never says the port was taken over '
-                f'rather than given its own listener:\n{log[-2000:]}')
-        else:
-            assert outcome.exitcode != 0, (
-                f'the server exited 0 without serving: {outcome}')
-            assert 'BB_SOCKET_REUSEPORT' in log, (
-                f'the refusal does not name the setting:\n{log[-2000:]}')
-            assert str(port) in log, (
-                f'the refusal does not name the listener:\n{log[-2000:]}')
-            assert '2 worker' in log, (
-                f'the refusal does not name the worker count:\n{log[-2000:]}')
-    finally:
-        server.stop()
-        creator.close()
-
-
-@pytest.mark.timeout(_HARD_TIMEOUT)
-def test_a_creator_held_v4_listener_does_not_half_die(tmp_path: Path):
-    """IPv4 held while IPv6 is free, so the re-bind succeeds per family."""
-    creator = _dual_stack_listener(socket.AF_INET, '0.0.0.0', v6only=None)
-    port = creator.getsockname()[1]
-    adopted = os.dup(creator.fileno())
-    server = Server(tmp_path, workers=2, reuseport=1, inherited_fd=adopted)
-    os.close(adopted)
-    try:
-        outcome = _settle(server, port)
-        log = server.log
-        if outcome.exitcode is None:
-            assert outcome.served, (
-                f'the server is still running with a half-dead port: '
-                f'{outcome}\n{_diagnostics(server, port)}')
-            assert 'BB_SOCKET_REUSEPORT' in log and str(port) in log, (
-                f'served, but the log does not name the setting and listener:\n'
-                f'{log[-2000:]}')
-        else:
-            assert outcome.exitcode != 0, (
-                f'the server exited 0 without serving: {outcome}')
-            assert 'BB_SOCKET_REUSEPORT' in log and str(port) in log, (
-                f'the refusal does not name the setting and listener:\n{log[-2000:]}')
+        _assert_creator_conflict_refusal(server, creator, port)
     finally:
         server.stop()
         creator.close()
@@ -384,7 +348,7 @@ def test_a_socket_from_another_network_namespace_is_refused(tmp_path: Path):
     """The adopted socket keeps the network namespace it was bound in."""
     if not _can_unshare_net():
         pytest.skip('needs a user and network namespace (unshare -rn)')
-    creator = _dual_stack_listener(reuseport=True)
+    creator = _tcp_listener(reuseport=True)
     port = creator.getsockname()[1]
     adopted = os.dup(creator.fileno())
     server = Server(tmp_path, workers=2, reuseport=1, inherited_fd=adopted,
@@ -412,7 +376,7 @@ def test_a_socket_from_another_network_namespace_is_refused(tmp_path: Path):
 def test_a_released_listener_keeps_its_per_worker_sockets(tmp_path: Path):
     """The creator drops its own copy before the server binds, as
     ``systemd-socket-activate`` does."""
-    creator = _dual_stack_listener()
+    creator = _tcp_listener()
     port = creator.getsockname()[1]
     creator_inode = os.fstat(creator.fileno()).st_ino
     adopted = os.dup(creator.fileno())
@@ -459,7 +423,7 @@ def test_a_released_listener_keeps_its_per_worker_sockets(tmp_path: Path):
 def test_a_released_named_host_listener_keeps_its_address(tmp_path: Path):
     """The fd carries the interface its creator chose; the re-bind must not
     widen it to every interface."""
-    creator = _dual_stack_listener(socket.AF_INET, '127.0.0.1', v6only=None)
+    creator = _tcp_listener(socket.AF_INET, '127.0.0.1', v6only=None)
     port = creator.getsockname()[1]
     bound = {row['address'] for row in _listen_rows(port)}
     adopted = os.dup(creator.fileno())
@@ -488,7 +452,7 @@ def test_a_released_named_host_listener_keeps_its_address(tmp_path: Path):
 def test_a_released_reuseport_listener_still_gets_per_worker_sockets(tmp_path: Path):
     """Released with ``SO_REUSEPORT`` set: membership alone must not read as
     "still held"."""
-    creator = _dual_stack_listener(reuseport=True)
+    creator = _tcp_listener(reuseport=True)
     port = creator.getsockname()[1]
     creator_inode = os.fstat(creator.fileno()).st_ino
     adopted = os.dup(creator.fileno())
@@ -511,6 +475,51 @@ def test_a_released_reuseport_listener_still_gets_per_worker_sockets(tmp_path: P
             assert len(inodes) == 2, (
                 f'family {family}: expected one listening socket per worker, '
                 f'found {len(inodes)}:\n{_diagnostics(server, port)}')
+    finally:
+        server.stop()
+
+
+@pytest.mark.parametrize(
+    'creator_reuseport',
+    (
+        pytest.param(False, id='creator-reuseport-off'),
+        pytest.param(True, id='creator-reuseport-on'),
+    ),
+)
+@pytest.mark.timeout(_HARD_TIMEOUT)
+def test_a_released_ipv6_only_listener_keeps_its_family(
+        tmp_path: Path, creator_reuseport: bool):
+    """Re-binding an adopted IPv6-only socket must not widen its reach."""
+    creator = _tcp_listener(socket.AF_INET6, '::', v6only=1,
+                            reuseport=creator_reuseport)
+    port = creator.getsockname()[1]
+    creator_inode = os.fstat(creator.fileno()).st_ino
+    adopted = os.dup(creator.fileno())
+    creator.close()
+    server = Server(tmp_path, workers=2, reuseport=1, inherited_fd=adopted)
+    os.close(adopted)
+    try:
+        outcome = _settle(server, port, hosts=('::1',))
+        assert outcome.served, (
+            f'the released IPv6-only listener is not served: {outcome}\n'
+            f'{_diagnostics(server, port)}')
+        ipv4_verdict = _probe('127.0.0.1', port)
+        assert ipv4_verdict.startswith('refused:'), (
+            f'the IPv6-only listener widened to IPv4: {ipv4_verdict}\n'
+            f'{_diagnostics(server, port)}')
+
+        rows = _listen_rows(port)
+        assert rows, 'the kernel reports no listener on the port'
+        assert {row['family'] for row in rows} == {6}, (
+            f'the workers changed the listener family:\n'
+            f'{_diagnostics(server, port)}')
+        inodes = {row['inode'] for row in rows}
+        assert creator_inode not in inodes, (
+            'the adopted socket is still the listener — the workers never '
+            f're-bound:\n{_diagnostics(server, port)}')
+        assert len(inodes) == 2, (
+            f'expected one IPv6-only socket per worker:\n'
+            f'{_diagnostics(server, port)}')
     finally:
         server.stop()
 
@@ -554,7 +563,7 @@ def test_reuseport_still_makes_per_worker_sockets_on_a_free_port(tmp_path: Path)
 def test_a_creator_held_listener_still_serves_without_reuseport(tmp_path: Path):
     """``BB_SOCKET_REUSEPORT=0`` shares the held socket instead of re-binding
     it — the way out the refusal names."""
-    creator = _dual_stack_listener()
+    creator = _tcp_listener()
     port = creator.getsockname()[1]
     adopted = os.dup(creator.fileno())
     server = Server(tmp_path, workers=2, reuseport=0, inherited_fd=adopted)
@@ -572,7 +581,7 @@ def test_a_creator_held_listener_still_serves_without_reuseport(tmp_path: Path):
 @pytest.mark.timeout(_HARD_TIMEOUT)
 def test_one_worker_with_a_creator_held_listener_still_serves(tmp_path: Path):
     """``workers=1`` adopts the fd as-is, with no re-bind to attempt."""
-    creator = _dual_stack_listener()
+    creator = _tcp_listener()
     port = creator.getsockname()[1]
     adopted = os.dup(creator.fileno())
     server = Server(tmp_path, workers=1, reuseport=1, inherited_fd=adopted)

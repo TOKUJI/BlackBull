@@ -71,8 +71,9 @@ When neither variable is set (non-systemd handoff, tests)
 BlackBull accepts the fd unconditionally.
 
 With `BB_SOCKET_REUSEPORT=1`, several workers and no
-[`--reload`](hot-reload.md), a creator-held dual-stack socket would leave some
-or all connections unserved — startup refuses that shape instead (see
+[`--reload`](hot-reload.md), a creator-held IPv4-only, IPv6-only, or dual-stack
+socket would leave some or all connections unserved — startup refuses each
+shape instead (see
 [Several workers behind an activated
 socket](#several-workers-behind-an-activated-socket)).
 
