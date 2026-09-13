@@ -14,6 +14,12 @@ from blackbull.asgi import ASGIEvent
 pytestmark = pytest.mark.asyncio
 
 
+@pytest.fixture(autouse=True)
+def _freeze_http_date_for_wire_equivalence(monkeypatch):
+    monkeypatch.setattr('blackbull.server.sender._http_date',
+                        lambda: b'Thu, 01 Jan 1970 00:00:00 GMT')
+
+
 class BytesWriter(AbstractWriter):
     def __init__(self):
         self.data = b''
