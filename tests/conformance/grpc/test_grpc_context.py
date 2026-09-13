@@ -174,6 +174,32 @@ class TestSendInitialMetadata:
         # Exactly one start event, carrying the leading metadata.
         assert sum(e['type'] == 'http.response.start' for e in events) == 1
         assert _start_headers(events)[b'x-leading'] == b'yes'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(('name', 'raw', 'expected'), [
+        (b'x-leading-bin', b'\x00\x01\xff', b'AAH/'),
+        (b'x-leading-bin', b'test', b'dGVzdA'),
+        (b'grpc-status-details-bin', b'abcd', b'YWJjZA'),
+        (b'grpc-status-details-bin', b'\x08\x03\x12\x07bad arg',
+         b'CAMSB2JhZCBhcmc'),
+        (b'grpc-status-details-bin', b'CAMSB2JhZCBhcmc',
+         b'CAMSB2JhZCBhcmc'),
+    ])
+    async def test_binary_leading_metadata_is_base64_on_the_http_boundary(
+            self, name, raw, expected):
+        reg = GrpcServiceRegistry()
+
+        @reg.method('/svc/BinaryMetadata')
+        async def binary_metadata(request, context):
+            await context.send_initial_metadata([(name, raw)])
+            return b'ok'
+
+        events, send = _collector()
+        await serve_grpc(
+            reg, _grpc_scope('/svc/BinaryMetadata'),
+            _receive_with(encode_message(b'')), send)
+
+        assert _start_headers(events)[name] == expected
         assert _messages(events) == [b'ok']
         assert _trailers(events)[b'grpc-status'] == b'0'
 

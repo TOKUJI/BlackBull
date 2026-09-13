@@ -26,6 +26,8 @@ Design invariants (validated in ``bench/scratch/send-model-c.py``):
 """
 from __future__ import annotations
 
+from .headers import _validate_response_header_fields
+
 
 class _HeaderView:
     """Zero-copy view over a [`NativeResponse`][] header list.
@@ -339,6 +341,14 @@ class NativeResponse:
         compression); the native H1 sender path never materialises these
         dicts.
         """
+        # Validate both sections before materialising the first event.  The
+        # external-ASGI boundary sends the returned list in order, so finding
+        # a bad trailer after returning the start/body would be too late.
+        if self._header is not None:
+            _validate_response_header_fields(self._header)
+        if self.trailers is not None:
+            _validate_response_header_fields(self.trailers)
+
         events: list[dict] = []
         if self._header is not None:
             start: dict = {'type': 'http.response.start',
