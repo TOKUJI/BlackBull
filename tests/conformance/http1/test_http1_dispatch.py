@@ -278,6 +278,34 @@ class TestHTTP11KeepAlive:
         await actor.run()
         assert call_count == 1
 
+    async def test_invalid_response_field_closes_instead_of_reusing_connection(self):
+        req1 = _http_request(
+            method='GET', path='/one',
+            headers={'Host': 'localhost:8000', 'Connection': 'keep-alive'})
+        req2 = _http_request(
+            method='GET', path='/two',
+            headers={'Host': 'localhost:8000', 'Connection': 'close'})
+        first_line, rest = req1.split(b'\r\n', 1)
+        call_count = 0
+
+        async def invalid_app(scope, receive, send):
+            nonlocal call_count
+            call_count += 1
+            await send({
+                'type': 'http.response.start', 'status': 200,
+                'headers': [(b'x-origin', b'a\r\nx-added: b')],
+            })
+            await send({'type': 'http.response.body', 'body': b''})
+
+        writer = _FakeWriter()
+        actor = HTTP1Actor(
+            _FakeReader(rest + req2), writer, invalid_app, None,
+            request=first_line + b'\r\n')
+        await actor.run()
+
+        assert call_count == 1
+        assert b'x-added:' not in writer.written
+
     async def test_keep_alive_paths_differ_between_requests(self):
         req1 = _http_request(method='GET', path='/alpha',
                              headers={'Host': 'localhost:8000', 'Connection': 'keep-alive'})

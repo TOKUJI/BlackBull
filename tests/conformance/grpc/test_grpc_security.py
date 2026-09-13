@@ -12,6 +12,8 @@ References:
 """
 from __future__ import annotations
 
+import base64
+
 import pytest
 
 from blackbull.grpc import (
@@ -526,7 +528,7 @@ class TestGrpcMetadata:
 
     @pytest.mark.asyncio
     async def test_custom_binary_metadata_round_trips(self):
-        """Custom trailing metadata set via context must appear in response."""
+        """Raw binary trailing metadata becomes an HTTP-safe base64 value."""
         reg = GrpcServiceRegistry()
 
         @reg.method('/svc/MetaEcho')
@@ -543,12 +545,32 @@ class TestGrpcMetadata:
         events, send = _collector()
         await serve_grpc(reg, _grpc_scope('/svc/MetaEcho', headers),
                          _receive_with(encode_message(b'')), send)
+        expected = base64.b64encode(b'\x00\x01\x02\xff').rstrip(b'=')
         # Find trailers event
         for e in events:
             if e['type'] == 'http.response.trailers':
                 header_dict = dict(e['headers'])
-                assert header_dict.get(b'x-response-bin') == b'\x00\x01\x02\xff'
+                assert header_dict.get(b'x-response-bin') == expected
                 assert header_dict.get(b'x-request-id') == b'123'
+
+    @pytest.mark.asyncio
+    async def test_raw_status_details_metadata_is_not_mistaken_for_wire_base64(self):
+        reg = GrpcServiceRegistry()
+
+        @reg.method('/svc/RawStatusDetails')
+        async def raw_status_details(request, context):
+            context.set_trailing_metadata([
+                (b'grpc-status-details-bin', b'abcd'),
+            ])
+            return b'ok'
+
+        events, send = _collector()
+        await serve_grpc(
+            reg, _grpc_scope('/svc/RawStatusDetails'),
+            _receive_with(encode_message(b'')), send)
+
+        expected = base64.b64encode(b'abcd').rstrip(b'=')
+        assert _trailers_of(events)[b'grpc-status-details-bin'] == expected
 
     @pytest.mark.asyncio
     async def test_missing_header_returns_default(self):

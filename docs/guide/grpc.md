@@ -121,6 +121,14 @@ the same decorator.
 | `context.set_code(status)` / `context.set_details(str)` | Set the status reported in the trailers (defaults to `OK`). |
 | `context.set_trailing_metadata([(b'k', b'v')])` | Add custom trailing metadata. |
 
+Values passed to `send_initial_metadata()` or `set_trailing_metadata()` use
+grpcio's application-facing representation. For a key ending in `-bin`, pass
+the raw bytes; BlackBull converts them to canonical unpadded base64 before the
+HTTP/2 field section is encoded. Other metadata values are emitted unchanged
+and must obey the ordinary HTTP response-field rules. The
+`grpc-status-details-bin` value produced by `blackbull-protobuf` is already in
+canonical wire form and is recognised without encoding it twice.
+
 Raising `GrpcError(status, details)` anywhere in the handler has the same effect
 as `context.abort`. Any other unexpected exception becomes
 `GrpcStatus.INTERNAL` — a handler bug never tears down the stream.

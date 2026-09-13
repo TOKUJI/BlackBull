@@ -14,6 +14,33 @@ from .protocol import structured_fields as sf
 HeaderList: TypeAlias = Iterable[tuple[bytes, bytes]]
 
 
+_FIELD_NAME_OCTETS = frozenset(
+    b"!#$%&'*+-.^_`|~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+)
+
+
+def _validate_response_header_field(name: bytes, value: bytes) -> None:
+    """Reject a response field that cannot remain one field on the wire.
+
+    Names use RFC 9110's token alphabet.  Values admit HTAB, SP, visible
+    ASCII, and obs-text; every other control octet can change a field or
+    message boundary and is rejected rather than rewritten.
+    """
+    if not isinstance(name, bytes) or not isinstance(value, bytes):
+        raise TypeError('HTTP response header name and value must be bytes')
+    if not name or any(octet not in _FIELD_NAME_OCTETS for octet in name):
+        raise ValueError('invalid HTTP response header name')
+    if any((octet < 0x20 and octet != 0x09) or octet == 0x7f
+           for octet in value):
+        raise ValueError('invalid HTTP response header value')
+
+
+def _validate_response_header_fields(headers: HeaderList) -> None:
+    """Validate a complete outbound field section before its first write."""
+    for name, value in headers:
+        _validate_response_header_field(name, value)
+
+
 class Headers:
     """Ordered multi-valued HTTP header store.
 

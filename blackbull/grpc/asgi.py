@@ -13,6 +13,8 @@ ride the existing (scope, receive, send) bridge; no new protocol Actor.
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import logging
 import os
 import struct
@@ -303,6 +305,65 @@ def _resolve_content_type(raw: bytes) -> bytes:
     return _GRPC_CONTENT_TYPE
 
 
+def _normalized_base64(value: bytes) -> bytes | None:
+    """Return canonical unpadded base64 when *value* already has that form."""
+    unpadded = value.rstrip(b'=')
+    try:
+        decoded = base64.b64decode(
+            unpadded + b'=' * (-len(unpadded) % 4), validate=True)
+    except (binascii.Error, ValueError, TypeError):
+        return None
+    normalized = base64.b64encode(decoded).rstrip(b'=')
+    return normalized if normalized == unpadded else None
+
+
+def _legacy_status_details_wire_value(value: bytes) -> bytes | None:
+    """Recognise the encoded rich-status value emitted by the companion.
+
+    Parsing a canonical non-OK ``google.rpc.Status`` distinguishes that
+    compatibility form from arbitrary base64-looking raw bytes.  Imports stay
+    optional so the core transport does not require protobuf dependencies.
+    """
+    normalized = _normalized_base64(value)
+    if normalized is None:
+        return None
+    try:
+        from google.protobuf.message import DecodeError
+        from google.rpc import status_pb2
+    except ImportError:
+        return None
+    decoded = base64.b64decode(normalized + b'=' * (-len(normalized) % 4))
+    try:
+        status = status_pb2.Status.FromString(decoded)
+    except DecodeError:
+        return None
+    if not 1 <= status.code <= 16 or status.SerializeToString() != decoded:
+        return None
+    return normalized
+
+
+def _encode_outbound_metadata(
+        metadata: list[tuple[bytes, bytes]]) -> list[tuple[bytes, bytes]]:
+    """Convert application binary metadata to HTTP-safe gRPC field values.
+
+    Context methods take raw bytes for ``-bin`` keys, matching grpcio.  The
+    companion rich-status helper supplies its canonical field already encoded;
+    recognising that one key preserves its wire value without making every
+    application ``-bin`` field ambiguous.
+    """
+    encoded = []
+    for name, value in metadata:
+        if isinstance(name, bytes) and name.lower().endswith(b'-bin'):
+            if name.lower() == b'grpc-status-details-bin':
+                legacy_value = _legacy_status_details_wire_value(value)
+                if legacy_value is not None:
+                    encoded.append((name, legacy_value))
+                    continue
+            value = base64.b64encode(value).rstrip(b'=')
+        encoded.append((name, value))
+    return encoded
+
+
 def _status_trailers(status: GrpcStatus, details: str,
                      extra: list[tuple[bytes, bytes]] | None = None
                      ) -> list[tuple[bytes, bytes]]:
@@ -310,7 +371,7 @@ def _status_trailers(status: GrpcStatus, details: str,
     if details:
         trailers.append((b'grpc-message', _pct_encode_message(details)))
     if extra:
-        trailers.extend(extra)
+        trailers.extend(_encode_outbound_metadata(extra))
     return trailers
 
 
@@ -471,7 +532,7 @@ def _response_headers(content_type: bytes,
         headers.append((b'grpc-encoding', response_encoding))
     # Handler-supplied leading metadata (context.send_initial_metadata).
     if initial_metadata:
-        headers.extend(initial_metadata)
+        headers.extend(_encode_outbound_metadata(initial_metadata))
     return headers
 
 
