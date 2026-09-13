@@ -15,6 +15,7 @@ import logging
 from collections.abc import AsyncIterator, Mapping
 from http import HTTPStatus
 
+from .headers import _validate_response_header_field
 from .native import NativeResponse
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,9 @@ def _normalize_headers(headers) -> list[tuple[bytes, bytes]]:
     response (the old ``for k, v in headers`` loop iterated a ``dict``'s
     *keys* and unpacked each key string into ``(k, v)``) or blowing up later
     in the sender's ``b''.join``.
+
+    Normalised pairs pass through the shared response-field validator before
+    they leave this construction boundary.
     """
     if not headers:
         return []
@@ -62,7 +66,9 @@ def _normalize_headers(headers) -> list[tuple[bytes, bytes]]:
             raise TypeError(
                 'header name and value must be str or bytes; got '
                 f'({type(k).__name__}, {type(v).__name__})')
-        out.append((bytes(k), bytes(v)))
+        normalized = (bytes(k), bytes(v))
+        _validate_response_header_field(*normalized)
+        out.append(normalized)
     return out
 
 
@@ -104,7 +110,7 @@ class Response:
         # A dict or a list of (name, value) pairs; str or bytes names/values.
         # See _normalize_headers for the accepted shapes and the ASCII /
         # RFC 9110 §5.5 coercion rules.
-        self.headers = [(b'content-type', content_type.encode())]
+        self.headers = _normalize_headers([(b'content-type', content_type)])
         self.headers.extend(_normalize_headers(headers))
 
     async def __call__(self, conn, receive, send) -> None:
@@ -175,7 +181,10 @@ def cookie_header(name: str, value: str, path: str = '/',
                   http_only: bool = True) -> tuple[bytes, bytes]:
     """Build a ``set-cookie`` header tuple suitable for inclusion in response headers."""
     flags = '; HttpOnly' if http_only else ''
-    return (b'set-cookie', f'{name}={value}; Path={path}{flags}; SameSite=Lax'.encode())
+    field = (b'set-cookie',
+             f'{name}={value}; Path={path}{flags}; SameSite=Lax'.encode())
+    _validate_response_header_field(*field)
+    return field
 
 
 class StreamingResponse:
@@ -201,12 +210,14 @@ class StreamingResponse:
         self._content = content
         self._status = status
         self._headers = _normalize_headers(headers)
-        self._media_type = media_type
+        self._media_type = _normalize_headers([
+            (b'content-type', media_type),
+        ])[0][1]
 
     async def __call__(self, conn, receive, send) -> None:
         h = list(self._headers)
         if not any(k.lower() == b'content-type' for k, _ in h):
-            h.insert(0, (b'content-type', self._media_type.encode()))
+            h.insert(0, (b'content-type', self._media_type))
         await send(NativeResponse(status=self._status, header=h))
         async for chunk in self._content:
             if isinstance(chunk, str):

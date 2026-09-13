@@ -42,7 +42,7 @@ from ..asgi import (
     WebSocketCloseEvent,
     WebSocketSendEvent,
 )
-from ..headers import Headers, HeaderList
+from ..headers import Headers, HeaderList, _validate_response_header_fields
 from ..native import NativeResponse, NativeWSMessage
 
 from ..logger import debug_gate  # noqa: E402
@@ -176,6 +176,9 @@ def build_response_headers(encoder, stream_id: int, status,
     ``int``, or a ``str`` — it is normalised via ``str()`` exactly as the
     object path does.
     """
+    if not isinstance(headers, (list, tuple)):
+        headers = tuple(headers)
+    _validate_response_header_fields(headers)
     if _has_header(headers, b'date'):
         fields = headers
     else:
@@ -202,6 +205,9 @@ def build_trailers(encoder, stream_id: int, headers) -> bytes:
     This is the basis for the gRPC ``grpc-status`` trailers path — a unary
     RPC response carries a second HEADERS frame with regular fields only.
     """
+    if not isinstance(headers, (list, tuple)):
+        headers = tuple(headers)
+    _validate_response_header_fields(headers)
     payload = encoder.encode(headers)
     flags = HeaderFrameFlags.END_HEADERS.value | HeaderFrameFlags.END_STREAM.value
     return (len(payload).to_bytes(3, 'big') + FrameTypes.HEADERS.value
@@ -648,7 +654,13 @@ class HTTP1Sender(BaseSender):
         match body:
             case bytes():
                 self._response_started = True
-                h = headers if isinstance(headers, Headers) else Headers(headers)
+                if isinstance(headers, Headers):
+                    h = headers
+                    _validate_response_header_fields(h)
+                else:
+                    header_pairs = list(headers)
+                    _validate_response_header_fields(header_pairs)
+                    h = Headers(header_pairs)
                 if self._log_record is not None:
                     self._log_record.status = int(status)
                     self._log_record.response_bytes += len(body)
@@ -660,13 +672,14 @@ class HTTP1Sender(BaseSender):
                 # One object may carry header, body, and/or trailers; each arm
                 # does what the correspondingly named dict arm below does.
                 if body._header is not None:
+                    header_pairs = list(body._header)
+                    _validate_response_header_fields(header_pairs)
                     self._response_started = True
                     self._buffered_status = HTTPStatus(body.status)
                     # Preserve the ASGI start `trailers: True` flag so a
                     # terminal body before the trailers event withholds the
                     # terminal chunk (lossless full-form compat).
                     self._expect_trailers = body.expects_trailers
-                    header_pairs = list(body._header)
                     self._buffered_headers = Headers(header_pairs)
                     if self._log_record is not None:
                         self._log_record.status = body.status
@@ -692,10 +705,11 @@ class HTTP1Sender(BaseSender):
                         body.trailers, body.more_trailers)
 
             case {'type': ASGIEvent.HTTP_RESPONSE_START}:
+                header_pairs = list(body.get('headers', []))
+                _validate_response_header_fields(header_pairs)
                 self._response_started = True
                 self._buffered_status = HTTPStatus(body.get('status', HTTPStatus.OK))
                 self._expect_trailers = bool(body.get('trailers', False))
-                header_pairs = list(body.get('headers', []))
                 self._buffered_headers = Headers(header_pairs)
                 if self._log_record is not None:
                     self._log_record.status = body.get('status', '-')
@@ -777,6 +791,8 @@ class HTTP1Sender(BaseSender):
         """Write one part of the trailer section for dict and native paths."""
         if not (self._expect_trailers or self._chunked):
             return
+        headers = list(headers)
+        _validate_response_header_fields(headers)
         if not self._trailers_started:
             await self._write(b'0\r\n')
             self._trailers_started = True
@@ -921,6 +937,7 @@ class HTTP1Sender(BaseSender):
 
     def _render_start(self, status: HTTPStatus, headers: HeaderList) -> bytes:
         """Build the status line + headers + blank-line as a single bytes blob."""
+        _validate_response_header_fields(headers)
         parts: list[bytes] = [_status_line(status)]
         for k, v in headers:
             parts.append(k)
@@ -1480,6 +1497,7 @@ class HTTP2Sender(BaseSender):
         """
         if self._closed:
             return
+        _validate_response_header_fields(headers)
         if more_trailers:
             if self._buffered_trailers is None:
                 self._buffered_trailers = headers
@@ -1587,8 +1605,10 @@ class HTTP2Sender(BaseSender):
                     self._stream_id)
                 return
             if body._header is not None:
+                header_pairs = list(body._header)
+                _validate_response_header_fields(header_pairs)
                 self._buffered_status = HTTPStatus(body.status)
-                self._buffered_headers = list(body._header)
+                self._buffered_headers = header_pairs
                 self._expect_trailers = body.expects_trailers
                 if self._log_record is not None:
                     self._log_record.status = body.status
@@ -1625,8 +1645,10 @@ class HTTP2Sender(BaseSender):
 
             if event_type == ASGIEvent.HTTP_RESPONSE_START:
                 # Buffered, not written: HEADERS coalesces with the first body.
+                header_pairs = list(body.get('headers', []))
+                _validate_response_header_fields(header_pairs)
                 self._buffered_status = HTTPStatus(body.get('status', 200))
-                self._buffered_headers = list(body.get('headers', []))
+                self._buffered_headers = header_pairs
                 self._expect_trailers = bool(body.get('trailers', False))
                 if self._log_record is not None:
                     self._log_record.status = body.get('status', '-')

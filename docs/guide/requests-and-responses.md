@@ -442,6 +442,20 @@ await send(JSONResponse({'ok': True}, headers=[
 ]))
 ```
 
+Each field name must be a non-empty RFC 9110 `token`. Values may contain
+HTAB, spaces, visible ASCII, and `obs-text` bytes, but not NUL, CR, LF, other
+C0 controls, or DEL. `Response` helpers validate this contract when they are
+constructed. The lower-level `NativeResponse` and ASGI
+`http.response.start` / `http.response.trailers` forms are validated by the
+sender before that field section writes bytes or changes the HTTP/2 HPACK
+table. Invalid fields raise `ValueError`; they are never silently stripped or
+rewritten. If the response has already begun, HTTP/1.1 closes rather than
+reusing a connection with an incomplete field section.
+
+String names and values are encoded as ASCII. Pass bytes explicitly when an
+RFC-defined field needs `obs-text`. Empty values and repeated fields such as
+`Set-Cookie` remain valid.
+
 ### `Set-Cookie` helper
 
 ```python
