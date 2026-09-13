@@ -11,8 +11,6 @@ exercised end to end.
 """
 from __future__ import annotations
 
-import base64
-
 import pytest
 
 from blackbull.grpc import (
@@ -178,14 +176,22 @@ class TestSendInitialMetadata:
         assert _start_headers(events)[b'x-leading'] == b'yes'
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize('raw', [b'\x00\x01\xff', b'test'])
+    @pytest.mark.parametrize(('name', 'raw', 'expected'), [
+        (b'x-leading-bin', b'\x00\x01\xff', b'AAH/'),
+        (b'x-leading-bin', b'test', b'dGVzdA'),
+        (b'grpc-status-details-bin', b'abcd', b'YWJjZA'),
+        (b'grpc-status-details-bin', b'\x08\x03\x12\x07bad arg',
+         b'CAMSB2JhZCBhcmc'),
+        (b'grpc-status-details-bin', b'CAMSB2JhZCBhcmc',
+         b'CAMSB2JhZCBhcmc'),
+    ])
     async def test_binary_leading_metadata_is_base64_on_the_http_boundary(
-            self, raw):
+            self, name, raw, expected):
         reg = GrpcServiceRegistry()
 
         @reg.method('/svc/BinaryMetadata')
         async def binary_metadata(request, context):
-            await context.send_initial_metadata([(b'x-leading-bin', raw)])
+            await context.send_initial_metadata([(name, raw)])
             return b'ok'
 
         events, send = _collector()
@@ -193,8 +199,7 @@ class TestSendInitialMetadata:
             reg, _grpc_scope('/svc/BinaryMetadata'),
             _receive_with(encode_message(b'')), send)
 
-        expected = base64.b64encode(raw).rstrip(b'=')
-        assert _start_headers(events)[b'x-leading-bin'] == expected
+        assert _start_headers(events)[name] == expected
         assert _messages(events) == [b'ok']
         assert _trailers(events)[b'grpc-status'] == b'0'
 

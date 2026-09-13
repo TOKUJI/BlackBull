@@ -9,6 +9,7 @@ for every handler-error shape (Trailers-Only, after-HEADERS, mid-stream,
 unhandled exception, deadline).
 """
 import asyncio
+import sys
 
 import pytest
 
@@ -20,6 +21,13 @@ from blackbull.native import NativeResponse
 
 
 _DETAILS_BIN = (b'grpc-status-details-bin', b'CAMSB2JhZCBhcmc')
+
+
+@pytest.fixture(autouse=True)
+def _without_optional_protobuf(monkeypatch):
+    """Exercise the core-only installation used by the default test job."""
+    monkeypatch.setitem(sys.modules, 'google.protobuf.message', None)
+    monkeypatch.setitem(sys.modules, 'google.rpc', None)
 
 
 def _grpc_scope(path, headers=None):

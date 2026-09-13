@@ -554,13 +554,19 @@ class TestGrpcMetadata:
                 assert header_dict.get(b'x-request-id') == b'123'
 
     @pytest.mark.asyncio
-    async def test_raw_status_details_metadata_is_not_mistaken_for_wire_base64(self):
+    @pytest.mark.parametrize(('value', 'expected'), [
+        (b'abcd', b'YWJjZA'),
+        (b'\x08\x03\x12\x07bad arg', b'CAMSB2JhZCBhcmc'),
+        (b'CAMSB2JhZCBhcmc', b'CAMSB2JhZCBhcmc'),
+    ])
+    async def test_status_details_metadata_has_one_wire_encoding(
+            self, value, expected):
         reg = GrpcServiceRegistry()
 
         @reg.method('/svc/RawStatusDetails')
         async def raw_status_details(request, context):
             context.set_trailing_metadata([
-                (b'grpc-status-details-bin', b'abcd'),
+                (b'grpc-status-details-bin', value),
             ])
             return b'ok'
 
@@ -569,7 +575,6 @@ class TestGrpcMetadata:
             reg, _grpc_scope('/svc/RawStatusDetails'),
             _receive_with(encode_message(b'')), send)
 
-        expected = base64.b64encode(b'abcd').rstrip(b'=')
         assert _trailers_of(events)[b'grpc-status-details-bin'] == expected
 
     @pytest.mark.asyncio

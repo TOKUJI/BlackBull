@@ -307,6 +307,8 @@ def _resolve_content_type(raw: bytes) -> bytes:
 
 def _normalized_base64(value: bytes) -> bytes | None:
     """Return canonical unpadded base64 when *value* already has that form."""
+    if value != value.rstrip(b'='):
+        return None
     unpadded = value.rstrip(b'=')
     try:
         decoded = base64.b64decode(
@@ -317,29 +319,101 @@ def _normalized_base64(value: bytes) -> bytes | None:
     return normalized if normalized == unpadded else None
 
 
+def _canonical_varint(data: bytes, position: int) -> tuple[int, int] | None:
+    value = 0
+    start = position
+    for shift in range(0, 70, 7):
+        if position == len(data):
+            return None
+        octet = data[position]
+        position += 1
+        if shift == 63 and octet > 1:
+            return None
+        value |= (octet & 0x7f) << shift
+        if not octet & 0x80:
+            width = max(1, (value.bit_length() + 6) // 7)
+            return (value, position) if position - start == width else None
+    return None
+
+
+def _length_delimited(
+        data: bytes, position: int) -> tuple[bytes, int] | None:
+    length_at = _canonical_varint(data, position)
+    if length_at is None:
+        return None
+    length, position = length_at
+    end = position + length
+    if end > len(data):
+        return None
+    return data[position:end], end
+
+
+def _valid_utf8(value: bytes) -> bool:
+    try:
+        value.decode('utf-8')
+    except UnicodeDecodeError:
+        return False
+    return True
+
+
+def _canonical_any(data: bytes) -> bool:
+    position = 0
+    if position < len(data) and data[position] == 0x0a:
+        type_url_at = _length_delimited(data, position + 1)
+        if type_url_at is None:
+            return False
+        type_url, position = type_url_at
+        if not type_url or not _valid_utf8(type_url):
+            return False
+    if position < len(data) and data[position] == 0x12:
+        value_at = _length_delimited(data, position + 1)
+        if value_at is None:
+            return False
+        value, position = value_at
+        if not value:
+            return False
+    return position == len(data)
+
+
+def _canonical_non_ok_status(data: bytes) -> bool:
+    if not data or data[0] != 0x08:
+        return False
+    code_at = _canonical_varint(data, 1)
+    if code_at is None:
+        return False
+    code, position = code_at
+    if not 1 <= code <= 16:
+        return False
+
+    if position < len(data) and data[position] == 0x12:
+        message_at = _length_delimited(data, position + 1)
+        if message_at is None:
+            return False
+        message, position = message_at
+        if not message or not _valid_utf8(message):
+            return False
+
+    while position < len(data) and data[position] == 0x1a:
+        detail_at = _length_delimited(data, position + 1)
+        if detail_at is None:
+            return False
+        detail, position = detail_at
+        if not _canonical_any(detail):
+            return False
+    return position == len(data)
+
+
 def _legacy_status_details_wire_value(value: bytes) -> bytes | None:
     """Recognise the encoded rich-status value emitted by the companion.
 
-    Parsing a canonical non-OK ``google.rpc.Status`` distinguishes that
-    compatibility form from arbitrary base64-looking raw bytes.  Imports stay
-    optional so the core transport does not require protobuf dependencies.
+    The narrow wire-shape check keeps this compatibility independent of the
+    optional protobuf packages without treating arbitrary base64 as encoded.
     """
     normalized = _normalized_base64(value)
     if normalized is None:
         return None
-    try:
-        from google.protobuf.message import DecodeError
-        from google.rpc import status_pb2
-    except ImportError:
-        return None
     decoded = base64.b64decode(normalized + b'=' * (-len(normalized) % 4))
-    try:
-        status = status_pb2.Status.FromString(decoded)
-    except DecodeError:
-        return None
-    if not 1 <= status.code <= 16 or status.SerializeToString() != decoded:
-        return None
-    return normalized
+    return normalized if _canonical_non_ok_status(decoded) else None
 
 
 def _encode_outbound_metadata(
