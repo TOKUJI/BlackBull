@@ -88,10 +88,18 @@ Yielded items accept three shapes:
 | `Mapping` | One field line per recognised key, blank-line terminator |
 
 Recognised mapping keys are `data`, `event`, `id`, and `retry`.
-`data` may be a string with embedded newlines (each line emits its
-own `data:` field per the spec; the browser rejoins them with
-`\n`).  A non-string `data` is JSON-serialised before the wire.
-Unknown keys are ignored.
+`data` may be a string or UTF-8 bytes with embedded CR, LF, or CRLF. Each
+logical line emits its own `data:` field and the browser rejoins those lines
+with `\n`; empty, consecutive, and trailing lines are preserved. A byte value
+that is not valid UTF-8 raises `UnicodeDecodeError`. Other `data` values are
+JSON-serialised before the wire.
+
+`event` and `id` are converted with `str()`. Because each represents exactly
+one SSE field, CR or LF in either raises `ValueError`; NUL is also rejected in
+`id`, where the WHATWG reader would otherwise ignore the update. `retry` is
+converted with `int()` and emitted as ASCII milliseconds. Unknown keys are
+ignored. Validation happens per yielded item, so it does not buffer the async
+stream.
 
 Override the default headers by passing your own `headers=[...]`
 — a caller-supplied `cache-control` or `content-type` takes
