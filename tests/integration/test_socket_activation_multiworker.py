@@ -2,7 +2,7 @@
 
 The socket is held for real (no ``EADDRINUSE`` injection, no monkeypatched
 bind) and the listeners are read from ``/proc``, never from the server's log.
-"Answered or refused" is the contract, and a refusal must name the setting.
+Startup must refuse this conflict and name the settings that resolve it.
 """
 from __future__ import annotations
 
@@ -279,12 +279,37 @@ def _diagnostics(server: Server, port: int) -> str:
             + server.log[-2000:])
 
 
+def _assert_creator_conflict_refusal(server: Server, creator: socket.socket,
+                                     port: int) -> None:
+    deadline = time.monotonic() + _UP_BUDGET
+    while server.proc.poll() is None and time.monotonic() < deadline:
+        time.sleep(_POLL)
+
+    exitcode = server.proc.poll()
+    assert exitcode not in (None, 0), (
+        f'the server did not refuse startup within {_UP_BUDGET}s '
+        f'(exitcode={exitcode})\n{_diagnostics(server, port)}')
+    assert creator.fileno() >= 0
+
+    log = server.log
+    expected = (
+        'BB_SOCKET_REUSEPORT=1 with 2 worker(s)',
+        'cannot give each worker its own listener on',
+        str(port),
+        'BB_SOCKET_REUSEPORT=0',
+        'BB_WORKERS=1',
+    )
+    missing = [fragment for fragment in expected if fragment not in log]
+    assert not missing, (
+        f'the refusal log is missing {missing!r}:\n{log[-2000:]}')
+
+
 # ---------------------------------------------------------------------------
 # The defect: the creator holds the socket
 # ---------------------------------------------------------------------------
 
 @pytest.mark.timeout(_HARD_TIMEOUT)
-def test_a_creator_held_listener_is_served_or_refused(tmp_path: Path):
+def test_a_creator_held_listener_is_refused(tmp_path: Path):
     """The creator keeps its plain socket open for the whole run."""
     creator = _dual_stack_listener()
     port = creator.getsockname()[1]
@@ -292,33 +317,14 @@ def test_a_creator_held_listener_is_served_or_refused(tmp_path: Path):
     server = Server(tmp_path, workers=2, reuseport=1, inherited_fd=adopted)
     os.close(adopted)
     try:
-        outcome = _settle(server, port)
-        log = server.log
-        # The creator stays open for the whole run — that is the shape.
-        assert creator.fileno() >= 0
-        if outcome.exitcode is None:
-            assert outcome.served, (
-                f'the server is still running but the port is not served: '
-                f'{outcome}\n{_diagnostics(server, port)}')
-            assert 'BB_SOCKET_REUSEPORT' in log and str(port) in log, (
-                'served, but the log never says the port was taken over '
-                f'rather than given its own listener:\n{log[-2000:]}')
-        else:
-            assert outcome.exitcode != 0, (
-                f'the server exited 0 without serving: {outcome}')
-            assert 'BB_SOCKET_REUSEPORT' in log, (
-                f'the refusal does not name the setting:\n{log[-2000:]}')
-            assert str(port) in log, (
-                f'the refusal does not name the listener:\n{log[-2000:]}')
-            assert '2 worker' in log, (
-                f'the refusal does not name the worker count:\n{log[-2000:]}')
+        _assert_creator_conflict_refusal(server, creator, port)
     finally:
         server.stop()
         creator.close()
 
 
 @pytest.mark.timeout(_HARD_TIMEOUT)
-def test_a_creator_held_reuseport_listener_is_served_or_refused(tmp_path: Path):
+def test_a_creator_held_reuseport_listener_is_refused(tmp_path: Path):
     """The same, with the creator's ``SO_REUSEPORT`` set before the bind
     (systemd's ``ReusePort=yes``), so the port is shared rather than blocked."""
     creator = _dual_stack_listener(reuseport=True)
@@ -327,53 +333,22 @@ def test_a_creator_held_reuseport_listener_is_served_or_refused(tmp_path: Path):
     server = Server(tmp_path, workers=2, reuseport=1, inherited_fd=adopted)
     os.close(adopted)
     try:
-        outcome = _settle(server, port)
-        log = server.log
-        assert creator.fileno() >= 0
-        if outcome.exitcode is None:
-            assert outcome.served, (
-                f'the server is still running but part of the port is dead: '
-                f'{outcome}\n{_diagnostics(server, port)}')
-            assert 'BB_SOCKET_REUSEPORT' in log and str(port) in log, (
-                'served, but the log never says the port was taken over '
-                f'rather than given its own listener:\n{log[-2000:]}')
-        else:
-            assert outcome.exitcode != 0, (
-                f'the server exited 0 without serving: {outcome}')
-            assert 'BB_SOCKET_REUSEPORT' in log, (
-                f'the refusal does not name the setting:\n{log[-2000:]}')
-            assert str(port) in log, (
-                f'the refusal does not name the listener:\n{log[-2000:]}')
-            assert '2 worker' in log, (
-                f'the refusal does not name the worker count:\n{log[-2000:]}')
+        _assert_creator_conflict_refusal(server, creator, port)
     finally:
         server.stop()
         creator.close()
 
 
 @pytest.mark.timeout(_HARD_TIMEOUT)
-def test_a_creator_held_v4_listener_does_not_half_die(tmp_path: Path):
-    """IPv4 held while IPv6 is free, so the re-bind succeeds per family."""
+def test_a_creator_held_v4_listener_is_refused(tmp_path: Path):
+    """An IPv4-only held listener is the single-stack conflict shape."""
     creator = _dual_stack_listener(socket.AF_INET, '0.0.0.0', v6only=None)
     port = creator.getsockname()[1]
     adopted = os.dup(creator.fileno())
     server = Server(tmp_path, workers=2, reuseport=1, inherited_fd=adopted)
     os.close(adopted)
     try:
-        outcome = _settle(server, port)
-        log = server.log
-        if outcome.exitcode is None:
-            assert outcome.served, (
-                f'the server is still running with a half-dead port: '
-                f'{outcome}\n{_diagnostics(server, port)}')
-            assert 'BB_SOCKET_REUSEPORT' in log and str(port) in log, (
-                f'served, but the log does not name the setting and listener:\n'
-                f'{log[-2000:]}')
-        else:
-            assert outcome.exitcode != 0, (
-                f'the server exited 0 without serving: {outcome}')
-            assert 'BB_SOCKET_REUSEPORT' in log and str(port) in log, (
-                f'the refusal does not name the setting and listener:\n{log[-2000:]}')
+        _assert_creator_conflict_refusal(server, creator, port)
     finally:
         server.stop()
         creator.close()
