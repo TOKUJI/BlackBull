@@ -5582,8 +5582,9 @@ environment variables per the <code>sd_listen_fds(3)</code> protocol:</p>
 <p>When neither variable is set (non-systemd handoff, tests)
 BlackBull accepts the fd unconditionally.</p>
 <p>With <code>BB_SOCKET_REUSEPORT=1</code>, several workers and no
-<a href="../hot-reload/"><code>--reload</code></a>, a creator-held dual-stack socket would leave some
-or all connections unserved — startup refuses that shape instead (see
+<a href="../hot-reload/"><code>--reload</code></a>, a creator-held IPv4-only, IPv6-only, or dual-stack
+socket would leave some or all connections unserved — startup refuses each
+shape instead (see
 <a href="#several-workers-behind-an-activated-socket">Several workers behind an activated
 socket</a>).</p>
 <h3 id="what-systemd-activation-buys-you">What systemd activation buys you<a class="headerlink" href="#what-systemd-activation-buys-you" title="Permanent link">&para;</a></h3>
