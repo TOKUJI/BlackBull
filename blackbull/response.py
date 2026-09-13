@@ -216,6 +216,15 @@ class StreamingResponse:
         await send(NativeResponse(body=b'', more_body=False))
 
 
+def _validate_sse_metadata(name: str, value, *, reject_nul: bool = False) -> str:
+    """Return one metadata value only when it remains one SSE field."""
+    text = str(value)
+    if '\r' in text or '\n' in text or (reject_nul and '\x00' in text):
+        prohibited = 'CR, LF, or NUL' if reject_nul else 'CR or LF'
+        raise ValueError(f'SSE {name} must not contain {prohibited}')
+    return text
+
+
 def _format_sse_event(event) -> bytes:
     """Format one SSE event per the WHATWG HTML Living Standard §9.2.6.
 
@@ -224,9 +233,11 @@ def _format_sse_event(event) -> bytes:
     * ``str`` / ``bytes`` — a bare message; emitted as ``data: <text>\\n\\n``.
     * ``Mapping`` — fields plucked by key (``data``, ``event``, ``id``,
       ``retry``).  ``data`` may be a string with embedded newlines (each
-      line emits its own ``data:`` field per the spec); a non-string
-      ``data`` is JSON-serialised.  ``id`` and ``event`` are coerced to
-      string; ``retry`` to int milliseconds.  Unknown keys are ignored.
+      line emits its own ``data:`` field per the spec).  Bytes and bytearrays
+      use strict UTF-8; other non-string ``data`` is JSON-serialised.  ``id``
+      and ``event`` are coerced to string, with CR/LF rejected in both and NUL
+      rejected in ``id``; ``retry`` is coerced to int milliseconds.  Unknown
+      keys are ignored.
 
     Returns the encoded UTF-8 bytes; the caller pushes them down a
     [`StreamingResponse`][] (or any ASGI body sink) directly.
@@ -240,10 +251,12 @@ def _format_sse_event(event) -> bytes:
         out = bytearray()
         ev = event.get('event')
         if ev is not None:
-            out += b'event: ' + str(ev).encode('utf-8') + b'\n'
+            value = _validate_sse_metadata('event', ev)
+            out += b'event: ' + value.encode('utf-8') + b'\n'
         eid = event.get('id')
         if eid is not None:
-            out += b'id: ' + str(eid).encode('utf-8') + b'\n'
+            value = _validate_sse_metadata('id', eid, reject_nul=True)
+            out += b'id: ' + value.encode('utf-8') + b'\n'
         retry = event.get('retry')
         if retry is not None:
             out += b'retry: ' + str(int(retry)).encode('ascii') + b'\n'
@@ -265,11 +278,11 @@ def _format_sse_event(event) -> bytes:
 def _sse_data_lines(text: str) -> bytes:
     """Encode *text* as one or more ``data: ...\\n`` lines.
 
-    Embedded ``\\n`` characters split into multiple ``data:`` fields per
-    WHATWG §9.2.6 so the client reconstructs the original payload by
-    joining the lines with ``\\n``.  Trailing newline is preserved by the
-    splitlines semantics.
+    CR, LF, and CRLF split into multiple ``data:`` fields per WHATWG
+    §9.2.5, so the client reconstructs logical lines joined by ``\\n``.
+    Empty and trailing lines are preserved.
     """
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
     return b''.join(b'data: ' + line.encode('utf-8') + b'\n'
                     for line in text.split('\n'))
 
@@ -281,6 +294,10 @@ class EventSourceResponse(StreamingResponse):
     item produced by *content* may be a ``str`` (bare data), ``bytes``
     (bare data, UTF-8), or a ``Mapping`` with optional ``data`` /
     ``event`` / ``id`` / ``retry`` keys.
+
+    CR, LF, and CRLF in data become equivalent logical line breaks.  Metadata
+    remains one field: CR/LF in ``event`` or ``id``, and NUL in ``id``, raise
+    ``ValueError`` when that item is encoded.
 
     The content-type is forced to ``text/event-stream`` and
     ``Cache-Control: no-cache`` is auto-emitted; both are overridable

@@ -99,6 +99,57 @@ class _AsgiCapture:
             self.events.append(event)
 
 
+def _reference_sse_events(payload: bytes) -> list[dict[str, str]]:
+    """Parse enough of WHATWG §9.2.6 to observe logical event boundaries."""
+    text = payload.decode('utf-8')
+    lines = text.replace('\r\n', '\n').replace('\r', '\n').split('\n')
+    data = ''
+    event_type = ''
+    last_id = ''
+    reconnect = ''
+    events = []
+    for line in lines:
+        if line == '':
+            if data:
+                events.append({
+                    'type': event_type or 'message',
+                    'data': data[:-1],
+                    'id': last_id,
+                    'retry': reconnect,
+                })
+            data = ''
+            event_type = ''
+            continue
+        if line.startswith(':'):
+            continue
+        field, separator, value = line.partition(':')
+        if separator and value.startswith(' '):
+            value = value[1:]
+        if field == 'data':
+            data += value + '\n'
+        elif field == 'event':
+            event_type = value
+        elif field == 'id' and '\x00' not in value:
+            last_id = value
+        elif field == 'retry' and value.isdecimal():
+            reconnect = value
+    return events
+
+
+async def _public_sse_wire(*items) -> bytes:
+    async def src():
+        for item in items:
+            yield item
+
+    cap = _AsgiCapture()
+    await EventSourceResponse(src())(
+        conn={'type': 'http'}, receive=None, send=cap)
+    return b''.join(
+        event.get('body', b'') for event in cap.events
+        if event.get('type') == 'http.response.body'
+    )
+
+
 @pytest.mark.asyncio
 async def test_event_source_response_emits_text_event_stream_content_type():
     async def src():
@@ -154,6 +205,85 @@ async def test_event_source_response_explicit_headers_win():
 
     headers = dict(cap.events[0]['headers'])
     assert headers[b'cache-control'] == b'public, max-age=10'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('line_ending', ['\n', '\r', '\r\n'])
+async def test_event_source_response_preserves_all_sse_data_line_endings(
+        line_ending):
+    wire = await _public_sse_wire(f'first{line_ending}second')
+
+    assert _reference_sse_events(wire) == [{
+        'type': 'message', 'data': 'first\nsecond', 'id': '', 'retry': '',
+    }]
+
+
+@pytest.mark.asyncio
+async def test_event_source_response_preserves_consecutive_and_trailing_lines():
+    wire = await _public_sse_wire('first\r\r\n\nlast\r')
+
+    assert _reference_sse_events(wire) == [{
+        'type': 'message',
+        'data': 'first\n\n\nlast\n',
+        'id': '',
+        'retry': '',
+    }]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(('field', 'value'), [
+    ('event', 'intended\nevent: changed'),
+    ('event', 'intended\revent: changed'),
+    ('id', 'intended\nid: changed'),
+    ('id', 'intended\rid: changed'),
+    ('id', 'intended\x00changed'),
+])
+async def test_event_source_response_rejects_metadata_boundary_octets(
+        field, value):
+    with pytest.raises(ValueError, match=f'SSE {field}'):
+        await _public_sse_wire({field: value, 'data': 'payload'})
+
+
+@pytest.mark.asyncio
+async def test_event_source_response_preserves_valid_metadata_and_unicode_data():
+    wire = await _public_sse_wire({
+        'event': 'token',
+        'id': 'snowman-☃',
+        'retry': 3000,
+        'data': 'hello ☃',
+    })
+
+    assert _reference_sse_events(wire) == [{
+        'type': 'token',
+        'data': 'hello ☃',
+        'id': 'snowman-☃',
+        'retry': '3000',
+    }]
+
+
+@pytest.mark.asyncio
+async def test_event_source_response_bytes_share_text_boundary_semantics():
+    wire = await _public_sse_wire(b'first\rsecond')
+
+    assert _reference_sse_events(wire) == [{
+        'type': 'message', 'data': 'first\nsecond', 'id': '', 'retry': '',
+    }]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('data', [b'first\rsecond', bytearray(b'first\rsecond')])
+async def test_event_source_mapping_bytes_share_text_boundary_semantics(data):
+    wire = await _public_sse_wire({'data': data})
+
+    assert _reference_sse_events(wire) == [{
+        'type': 'message', 'data': 'first\nsecond', 'id': '', 'retry': '',
+    }]
+
+
+@pytest.mark.asyncio
+async def test_event_source_response_rejects_invalid_utf8_bytes():
+    with pytest.raises(UnicodeDecodeError):
+        await _public_sse_wire(b'\xff')
 
 
 # ----------------------------------------------------------------------
