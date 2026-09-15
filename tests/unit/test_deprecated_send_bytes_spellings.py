@@ -99,12 +99,46 @@ def test_h2c_send_bytes_warns_naming_its_replacement(access):
     assert not any(_bare_send_raw_bytes(m) for m in messages), messages
 
 
+def _from_scenario_h1_import():
+    from blackbull.fault_injection.scenario_h1 import SendBytes
+    return SendBytes
+
+
+def _from_scenario_h2_client_import():
+    from blackbull.fault_injection.scenario_h2_client import SendBytes
+    return SendBytes
+
+
+#: The deprecated spelling each vocabulary module resolves for itself.
+MODULE_SHIM_ACCESSES = [
+    pytest.param(lambda: scenario_h1.SendBytes, id='scenario_h1-attribute'),
+    pytest.param(_from_scenario_h1_import, id='scenario_h1-from-import'),
+    pytest.param(lambda: scenario_h2_client.SendBytes,
+                 id='scenario_h2_client-attribute'),
+    pytest.param(_from_scenario_h2_client_import,
+                 id='scenario_h2_client-from-import'),
+]
+
+
 @pytest.mark.parametrize(
     'access', [p.values[0] for p in SEND_BYTES_ACCESSES]
-    + [p.values[0] for p in H2C_SEND_BYTES_ACCESSES],
+    + [p.values[0] for p in H2C_SEND_BYTES_ACCESSES]
+    + [p.values[0] for p in MODULE_SHIM_ACCESSES],
     ids=[f'SendBytes-{p.id}' for p in SEND_BYTES_ACCESSES]
-    + [f'H2CSendBytes-{p.id}' for p in H2C_SEND_BYTES_ACCESSES])
+    + [f'H2CSendBytes-{p.id}' for p in H2C_SEND_BYTES_ACCESSES]
+    + [f'SendBytes-{p.id}' for p in MODULE_SHIM_ACCESSES])
 def test_the_warning_is_attributed_to_the_callers_line(access):
+    """Why every deprecation shim's ``__getattr__`` carries no annotation.
+
+    Each shim warns with ``stacklevel=2``, which names the caller's line only
+    while ``__getattr__`` is the frame directly below the caller.  ``just
+    typecheck`` runs beartype's import hook over ``blackbull``, and the hook
+    wraps every module-level function that has an annotation; inside that
+    wrapper, ``stacklevel=2`` names the wrapper instead.  An unannotated
+    function is left unwrapped, so the warning reaches the caller under both
+    configurations — and this test fails under ``just typecheck`` the moment a
+    shim gains an annotation.
+    """
     with warnings.catch_warnings(record=True) as record:
         warnings.simplefilter('always')
         access()

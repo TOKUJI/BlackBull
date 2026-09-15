@@ -523,7 +523,8 @@ __all__ = [
 # ``SendRawBytes`` is the canonical spelling in all four scenario
 # vocabularies; ``SendBytes`` is the deprecated client-side one.
 
-def __getattr__(name: str):
+# Unannotated: see tests/unit/test_deprecated_send_bytes_spellings.py::test_the_warning_is_attributed_to_the_callers_line.
+def __getattr__(name):
     """PEP 562 — warn when the deprecated spelling is actually used.
 
     A module-level assignment would alias silently; going through
