@@ -115,7 +115,10 @@ class _H2QueueReader(AbstractReader):
         del self._buf[:n]
         return chunk
 
-    async def readuntil(self, sep: bytes) -> bytes:
+    async def readuntil(self, sep: bytes, limit: int = 0) -> bytes:
+        # The base signature: a narrower one makes read_head's line loop fall
+        # back to reading one byte at a time and hand back a head
+        # (tests/unit/test_h2_ws_readers_refuse_line_reads.py).
         raise NotImplementedError('_H2QueueReader does not support readuntil')
 
 

@@ -132,7 +132,10 @@ class HTTP2WSReader(AbstractReader):
     async def read(self, n: int) -> bytes:
         return await self.readexactly(n)
 
-    async def readuntil(self, sep: bytes) -> bytes:
+    async def readuntil(self, sep: bytes, limit: int = 0) -> bytes:
+        # The base signature: a narrower one makes read_head's line loop fall
+        # back to reading one byte at a time and hand back a head
+        # (tests/unit/test_h2_ws_readers_refuse_line_reads.py).
         raise NotImplementedError('HTTP2WSReader does not support readuntil')
 
 

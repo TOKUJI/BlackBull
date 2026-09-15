@@ -54,24 +54,18 @@ async def _refuses(call):
 
 
 @pytest.mark.parametrize('make_reader', READERS)
-@pytest.mark.xfail(strict=True, reason='master: readuntil(sep) takes no limit, '
-                   'so a positional limit raises TypeError')
 async def test_readuntil_with_a_positional_limit_is_refused(make_reader):
     reader = await make_reader()
     await _refuses(reader.readuntil(b'\r\n', 5))
 
 
 @pytest.mark.parametrize('make_reader', READERS)
-@pytest.mark.xfail(strict=True, reason='master: readuntil(sep) takes no limit, '
-                   'so limit= raises TypeError')
 async def test_readuntil_with_a_keyword_limit_is_refused(make_reader):
     reader = await make_reader()
     await _refuses(reader.readuntil(b'\r\n', limit=5))
 
 
 @pytest.mark.parametrize('make_reader', READERS)
-@pytest.mark.xfail(strict=True, reason='master: read_head(n>0) returns the head '
-                   'through the byte-at-a-time fallback')
 async def test_bounded_read_head_is_refused(make_reader):
     reader = await make_reader()
     await _refuses(reader.read_head(1024))
@@ -90,16 +84,12 @@ async def test_unbounded_read_head_is_refused(make_reader):
 
 
 @pytest.mark.parametrize('make_reader', READERS)
-@pytest.mark.xfail(strict=True, reason='master: PrefixReader sees a readuntil '
-                   'without a limit and returns a line read byte by byte')
 async def test_bounded_readuntil_through_an_empty_prefix_is_refused(make_reader):
     reader = PrefixReader(b'', await make_reader())
     await _refuses(reader.readuntil(b'\r\n', 64))
 
 
 @pytest.mark.parametrize('make_reader', READERS)
-@pytest.mark.xfail(strict=True, reason='master: PrefixReader sees a readuntil '
-                   'without a limit and returns the head read byte by byte')
 async def test_bounded_read_head_through_an_empty_prefix_is_refused(make_reader):
     reader = PrefixReader(b'', await make_reader())
     await _refuses(reader.read_head(1024))

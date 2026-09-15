@@ -71,6 +71,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   HTTP/1 keep-alive exchange on HTTP/2 vocabularies, and a docstring pointed
   readers at a file that is not shipped.  `blackbull/middleware/base.py`, which
   defined nothing and only recorded its own removal, is gone.
+- `HTTP2WSReader.readuntil` now accepts the base `limit` argument, and it and
+  `read_head` raise `NotImplementedError` for every call: the reader carries
+  WebSocket frame payload, which has no lines.  `read_head` with a positive
+  limit previously returned a head through a byte-at-a-time fallback.  The
+  HTTP/2 WebSocket client's reader behaves the same way.
 
 ## Versioning
 
