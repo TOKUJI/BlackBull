@@ -39,15 +39,12 @@ def test_the_payload_table_covers_every_frame_type():
     assert set(_PAYLOADS) == set(FrameTypes)
 
 
-@pytest.mark.xfail(strict=True, reason='master: equal type, flags and stream id '
-                   'compare equal whatever the payload')
 def test_goaways_with_different_payloads_are_unequal():
     factory = FrameFactory()
     assert (factory.goaway(last_stream_id=1, error_code=0)
             != factory.goaway(last_stream_id=9, error_code=2))
 
 
-@pytest.mark.xfail(strict=True, reason='master: PING equality compares the payload')
 def test_two_pings_with_one_payload_are_distinct_objects():
     factory = FrameFactory()
     first = factory.create(FrameTypes.PING, 0, 0, data=b'12345678')
@@ -56,8 +53,6 @@ def test_two_pings_with_one_payload_are_distinct_objects():
 
 
 @pytest.mark.parametrize('type_', _EVERY_TYPE)
-@pytest.mark.xfail(strict=True, reason='master: __eq__ without __hash__ makes '
-                   'every frame unhashable')
 def test_every_frame_is_hashable_and_distinct_in_a_set(type_):
     frame, twin = _frame(type_), _frame(type_)
     hash(frame)
@@ -65,8 +60,6 @@ def test_every_frame_is_hashable_and_distinct_in_a_set(type_):
 
 
 @pytest.mark.parametrize('type_', _EVERY_TYPE)
-@pytest.mark.xfail(strict=True, reason="master: comparing with a non-frame reads "
-                   "other.type_ and raises AttributeError")
 def test_comparing_with_a_non_frame_answers_a_bool(type_):
     frame = _frame(type_)
     assert (frame == None) is False  # noqa: E711 — the comparison is the subject

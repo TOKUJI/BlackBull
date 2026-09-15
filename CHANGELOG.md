@@ -76,6 +76,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   WebSocket frame payload, which has no lines.  `read_head` with a positive
   limit previously returned a head through a byte-at-a-time fallback.  The
   HTTP/2 WebSocket client's reader behaves the same way.
+- HTTP/2 frame objects now compare by identity and are hashable.  Two
+  frames with different payloads no longer compare equal because they share
+  a type, flags and stream id — two GOAWAYs with different error codes did —
+  and comparing a frame with a non-frame returns `False` instead of raising
+  `AttributeError`.
 
 ## Versioning
 
