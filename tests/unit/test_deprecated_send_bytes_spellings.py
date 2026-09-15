@@ -75,8 +75,6 @@ def _bare_send_raw_bytes(message: str) -> bool:
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize('access, replacement', SEND_BYTES_ACCESSES)
-@pytest.mark.xfail(strict=True, reason='master: blackbull.client and '
-                   'blackbull.fault_injection export SendBytes silently')
 def test_send_bytes_warns_naming_its_replacement(access, replacement):
     with pytest.warns(DeprecationWarning) as record:
         access()
@@ -91,8 +89,6 @@ def test_send_bytes_warns_naming_its_replacement(access, replacement):
 
 
 @pytest.mark.parametrize('access', H2C_SEND_BYTES_ACCESSES)
-@pytest.mark.xfail(strict=True, reason='master: blackbull.fault_injection '
-                   'exports H2CSendBytes silently')
 def test_h2c_send_bytes_warns_naming_its_replacement(access):
     with pytest.warns(DeprecationWarning) as record:
         access()
@@ -108,8 +104,6 @@ def test_h2c_send_bytes_warns_naming_its_replacement(access):
     + [p.values[0] for p in H2C_SEND_BYTES_ACCESSES],
     ids=[f'SendBytes-{p.id}' for p in SEND_BYTES_ACCESSES]
     + [f'H2CSendBytes-{p.id}' for p in H2C_SEND_BYTES_ACCESSES])
-@pytest.mark.xfail(strict=True, reason='master: no warning is emitted, so none '
-                   'is attributed to the caller')
 def test_the_warning_is_attributed_to_the_callers_line(access):
     with warnings.catch_warnings(record=True) as record:
         warnings.simplefilter('always')
@@ -118,8 +112,6 @@ def test_the_warning_is_attributed_to_the_callers_line(access):
                for w in record), [(w.filename, str(w.message)) for w in record]
 
 
-@pytest.mark.xfail(strict=True, reason='master: http1 binds SendRawBytes as '
-                   'SendBytes at module level')
 def test_http1_module_does_not_hand_out_send_bytes_silently():
     """``blackbull.client.http1`` either lacks the name or warns for it."""
     with warnings.catch_warnings(record=True) as record:
@@ -163,12 +155,10 @@ def test_h2c_send_bytes_yields_the_http2_client_step():
     pytest.param(blackbull.fault_injection, id='blackbull.fault_injection'),
     pytest.param(scenario_h1, id='scenario_h1'),
 ])
-@pytest.mark.xfail(strict=True, reason="master: 'SendBytes' is listed in __all__")
 def test_send_bytes_is_not_exported(module):
     assert 'SendBytes' not in module.__all__
 
 
-@pytest.mark.xfail(strict=True, reason="master: 'H2CSendBytes' is listed in __all__")
 def test_h2c_send_bytes_is_not_exported():
     assert 'H2CSendBytes' not in blackbull.fault_injection.__all__
 
@@ -176,9 +166,7 @@ def test_h2c_send_bytes_is_not_exported():
 @pytest.mark.parametrize('module_name', [
     'blackbull.client',
     'blackbull.fault_injection',
-    pytest.param('blackbull.fault_injection.scenario_h1', marks=pytest.mark.xfail(
-        strict=True, reason="master: 'SendBytes' in __all__ makes import * "
-        'reach the warning')),
+    'blackbull.fault_injection.scenario_h1',
     'blackbull.fault_injection.scenario_h2_client',
 ])
 def test_star_import_is_silent(module_name):

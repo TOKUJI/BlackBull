@@ -81,6 +81,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   a type, flags and stream id — two GOAWAYs with different error codes did —
   and comparing a frame with a non-frame returns `False` instead of raising
   `AttributeError`.
+- `blackbull.client.SendBytes` and `blackbull.fault_injection.SendBytes` now emit
+  a `DeprecationWarning`, as the `scenario_h1` spelling already did, and
+  `blackbull.fault_injection.H2CSendBytes` is deprecated the same way.  None of
+  these names is in the `__all__` of `blackbull.client`,
+  `blackbull.fault_injection` or `blackbull.fault_injection.scenario_h1`, so
+  `import *` from those modules no longer binds them.  Use `SendRawBytes` from
+  `blackbull.client`, and `H1CSendRawBytes` or `H2CSendRawBytes` from
+  `blackbull.fault_injection` — a bare `SendRawBytes` there is the HTTP/2
+  server step.  Removal no earlier than 2027-08-19.
 
 ## Versioning
 

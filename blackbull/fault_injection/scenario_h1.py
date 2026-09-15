@@ -515,7 +515,6 @@ __all__ = [
     'ReadResponse',
     'Scenario',
     'ScenarioResult',
-    'SendBytes',
     'Sleep',
     'Step',
     'StepOp',

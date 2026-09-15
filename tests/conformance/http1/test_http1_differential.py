@@ -56,7 +56,7 @@ from blackbull.client import (  # noqa: E402
     HTTP1Client,
     ReadResponse,
     Scenario,
-    SendBytes,
+    SendRawBytes,
 )
 from blackbull.fault_injection import (  # noqa: E402
     ACCEPTED_CATEGORIES,
@@ -365,7 +365,7 @@ http_request_strategy = st.fixed_dictionaries({
 def _ensure_host(req: dict) -> dict:
     """Inject a Host header if the example didn't pick one.
 
-    Phase 5 sends bytes verbatim via `SendBytes` (no HTTP1Client.request
+    Phase 5 sends bytes verbatim via `SendRawBytes` (no HTTP1Client.request
     Host injection), so the wire request must already carry Host or
     nginx will respond 400 while BlackBull is more permissive — a
     divergence that's an oracle artefact, not a bug.
@@ -383,7 +383,7 @@ well_formed_scenario_strategy = http_request_strategy.map(
 
 def _build_slowloris_scenario(req: dict, split_at: int,
                               byte_interval: float) -> Scenario:
-    """Split a well-formed wire request into two SendBytes — the first
+    """Split a well-formed wire request into two SendRawBytes — the first
     transmitted slowly (one byte every ``byte_interval`` seconds), the
     second at full speed — followed by a ReadResponse with a tight
     timeout.
@@ -395,8 +395,8 @@ def _build_slowloris_scenario(req: dict, split_at: int,
     wire = reconstruct_wire_request(_ensure_host(req))
     cut = max(1, min(len(wire) - 1, split_at))
     return Scenario(steps=(
-        SendBytes(data=wire[:cut], byte_interval=byte_interval),
-        SendBytes(data=wire[cut:]),
+        SendRawBytes(data=wire[:cut], byte_interval=byte_interval),
+        SendRawBytes(data=wire[cut:]),
         ReadResponse(timeout=1.0),
     ))
 
@@ -421,7 +421,7 @@ slowloris_scenario_strategy = st.builds(
 # These strategies emit wire bytes that the high-level HTTP1Client.request()
 # would reject up front — garbage request lines, RFC-invalid header values,
 # duplicate Content-Length, conflicting CL+TE, bad HTTP versions.  Driven
-# through SendBytes so the bytes land verbatim on the wire.  Both servers
+# through SendRawBytes so the bytes land verbatim on the wire.  Both servers
 # should reject the same way (-> BOTH_REJECTED) or BlackBull's behaviour
 # matches nginx's (-> OK).  Divergences land in the failure categories
 # Phase 4 introduced.
@@ -464,7 +464,7 @@ def _build_garbage_request_line_scenario(method: bytes, target: bytes,
                                          version: bytes) -> Scenario:
     """Send a request with a deliberately broken request line."""
     return Scenario(steps=(
-        SendBytes(
+        SendRawBytes(
             data=method + b' ' + target + b' ' + version + b'\r\n'
                  b'Host: localhost\r\n\r\n',
         ),
@@ -496,7 +496,7 @@ _INVALID_HEADER_LINES = (
 
 def _build_invalid_header_scenario(invalid_line: bytes) -> Scenario:
     return Scenario(steps=(
-        SendBytes(
+        SendRawBytes(
             data=b'POST /echo HTTP/1.1\r\n'
                  b'Host: localhost\r\n'
                  + invalid_line + b'\r\n\r\n',

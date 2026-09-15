@@ -32,20 +32,11 @@ from .http1 import (HTTP1Client, HTTP1RequestSender, HTTP1ResponseRecipient,
                     HTTP1UpgradeSession)
 from .http2 import ClientResponse, HTTP2Client
 from .response import ResponderFactory
-# The scenario primitives live in blackbull.fault_injection.
-# The names stay reachable from blackbull.client without a deprecation
-# warning so existing top-level callers keep working; the deep-import
-# path (blackbull.client.scenario) is the one that emits the warning.
 from blackbull.fault_injection.scenario_h1 import (
     Abort,
     ReadResponse,
     Scenario,
     ScenarioResult,
-    # Re-exported under the deprecated spelling *without* going through the
-    # module ``__getattr__`` that warns — this file's own comment promises
-    # exactly that, and importing the old name here made the package emit
-    # its own deprecation warning on every ``import blackbull.client``.
-    SendRawBytes as SendBytes,
     SendRawBytes,
     Sleep,
     Step,
@@ -73,7 +64,6 @@ __all__ = [
     'ResponderFactory',
     'Scenario',
     'ScenarioResult',
-    'SendBytes',
     'SendRawBytes',
     'Sleep',
     'Step',
@@ -88,3 +78,19 @@ __all__ = [
     'ResponseTooLarge',
     'StreamReset',
 ]
+
+
+# Unannotated on purpose: beartype leaves an unannotated function unwrapped,
+# and a wrapper frame would take stacklevel=2 away from the caller's line
+# (tests/unit/test_deprecated_send_bytes_spellings.py).
+def __getattr__(name):
+    """PEP 562 — ``SendBytes`` is resolved only when a caller names it, so the
+    deprecation warning reaches that caller and ``import *`` stays silent."""
+    if name == 'SendBytes':
+        import warnings  # noqa: PLC0415
+        warnings.warn(
+            f"{__name__}.SendBytes is deprecated; use SendRawBytes.  Removal no "
+            "earlier than 2027-08-19.",
+            DeprecationWarning, stacklevel=2)
+        return SendRawBytes
+    raise AttributeError(f'module {__name__!r} has no attribute {name!r}')

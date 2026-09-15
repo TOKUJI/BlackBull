@@ -38,7 +38,7 @@ from blackbull.fault_injection.scenario_h1 import (
     response_matches,
     Scenario,
     ScenarioResult,
-    SendRawBytes as SendBytes,
+    SendRawBytes,
     Sleep,
 )
 
@@ -1560,7 +1560,7 @@ class HTTP1Client:
         try/except boilerplate per scenario.
 
         Step dispatch:
-          * [`SendBytes`][]   → [`send_raw`][]
+          * [`SendRawBytes`][] → [`send_raw`][]
           * [`Sleep`][]       → ``asyncio.sleep``
           * [`ReadResponse`][] → [`read_response`][]
           * [`Abort`][]       → ``transport.abort()`` (RST on Linux);
@@ -1577,7 +1577,7 @@ class HTTP1Client:
         t0 = _time.monotonic()
         try:
             for step in scenario.steps:
-                if isinstance(step, SendBytes):
+                if isinstance(step, SendRawBytes):
                     await self.send_raw(step.data, byte_interval=step.byte_interval)
                 elif isinstance(step, Sleep):
                     await asyncio.sleep(step.duration)
