@@ -1,4 +1,6 @@
 """Unit tests for the unified protocol registry."""
+import asyncio
+
 import pytest
 
 from blackbull.server.protocol_registry import (
@@ -327,3 +329,55 @@ async def test_peek_and_select_diverged_preface_falls_to_http1():
     reader = _StubReader(first_line=b'PRI * HTTP/1.0\r\nHost: x\r\n\r\n')
     binding = await _actor(reader)._peek_and_select(ProtocolRegistry().detection_order)
     assert binding is not None and binding.name == 'http1'
+
+
+# ---------------------------------------------------------------------------
+# Best-effort writes: a failing write never changes the outcome, and
+# cancellation is never absorbed with it
+# ---------------------------------------------------------------------------
+
+class _FailingWriter(AbstractWriter):
+    def __init__(self, exc: BaseException):
+        self._exc = exc
+
+    async def write(self, data: bytes) -> None:
+        raise self._exc
+
+
+def _conn_view(reader: AbstractReader, writer: AbstractWriter):
+    from blackbull.server.deadline import ConnectionDeadline
+    from blackbull.server.protocol_registry import ConnectionView
+
+    return ConnectionView(
+        reader=reader, writer=writer, app=_noop_app, aggregator=None,
+        peername=None, sockname=None, ssl=False, alpn=None,
+        deadline=ConnectionDeadline(), connection_id='best-effort-write')
+
+
+def _bad_preface_conn(exc: BaseException):
+    return _conn_view(_StubReader(b'X' * 24), _FailingWriter(exc))
+
+
+@pytest.mark.asyncio
+async def test_bad_preface_is_refused_when_the_goaway_write_fails():
+    with pytest.raises(ValueError, match='Invalid HTTP/2 preface'):
+        await Http2Binding().serve(_bad_preface_conn(OSError('peer gone')))
+
+
+@pytest.mark.asyncio
+async def test_bad_preface_goaway_write_does_not_absorb_cancellation():
+    with pytest.raises(asyncio.CancelledError):
+        await Http2Binding().serve(_bad_preface_conn(asyncio.CancelledError()))
+
+
+@pytest.mark.asyncio
+async def test_detect_timeout_returns_when_the_408_write_fails():
+    conn = _conn_view(_StubReader(), _FailingWriter(OSError('peer gone')))
+    assert await Http1Binding().on_detect_timeout(conn) is None
+
+
+@pytest.mark.asyncio
+async def test_detect_timeout_408_write_does_not_absorb_cancellation():
+    conn = _conn_view(_StubReader(), _FailingWriter(asyncio.CancelledError()))
+    with pytest.raises(asyncio.CancelledError):
+        await Http1Binding().on_detect_timeout(conn)

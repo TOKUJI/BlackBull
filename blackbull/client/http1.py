@@ -38,7 +38,7 @@ from blackbull.fault_injection.scenario_h1 import (
     response_matches,
     Scenario,
     ScenarioResult,
-    SendRawBytes as SendBytes,
+    SendRawBytes,
     Sleep,
 )
 
@@ -59,11 +59,12 @@ _STREAM_CHUNK_SIZE: int = 64 * 1024
 _CRLF = b'\r\n'
 
 #: How a response body ends — the outcome of RFC 9112 §6.3's ordered decision.
-#: Named rather than inlined because two readers make the same decision and a
-#: third (the ``no body at all`` case) precedes both.
+#: Named rather than inlined because one method decides and three read the
+#: answer, so a misspelt mode is a NameError rather than a silent fall-through.
+_NO_BODY = 'none'
 _CHUNKED = 'chunked'
 _DECLARED = 'declared'
-_UNTIL_CLOSE = 'until-close'
+_CLOSE_DELIMITED = 'close'
 
 #: RFC 9112 §7.1 — ``chunk-size = 1*HEXDIG``.  ``int(x, 16)`` is far laxer:
 #: it takes a sign, an ``0x`` prefix, underscore separators and surrounding
@@ -737,7 +738,7 @@ class HTTP1ResponseRecipient:
         )
         protocol_switched = status == 101 or successful_connect
         if body_forbidden or successful_connect:
-            return 'none', None, not protocol_switched, protocol_switched
+            return _NO_BODY, None, not protocol_switched, protocol_switched
 
         transfer_fields = headers.getlist(b'transfer-encoding')
         if transfer_fields:
@@ -757,18 +758,18 @@ class HTTP1ResponseRecipient:
                 raise ProtocolError(
                     f'chunked applied more than once: {codings!r}')
             if codings and codings[-1] == b'chunked':
-                return 'chunked', None, True, False
+                return _CHUNKED, None, True, False
             # Transfer-Encoding overrides Content-Length even when the
             # final coding is not chunked; the message ends at connection EOF.
             # This includes a physically present field whose list members are
             # all empty: an empty parsed list does not erase TE's precedence
             # over Content-Length.
-            return 'close', None, False, False
+            return _CLOSE_DELIMITED, None, False, False
 
         declared = cls._declared_length(headers)
         if declared is not None:
-            return 'declared', declared, True, False
-        return 'close', None, False, False
+            return _DECLARED, declared, True, False
+        return _CLOSE_DELIMITED, None, False, False
 
     def _record_framing(self, framing: tuple[str, int | None, bool, bool], *,
                         request_method: str | bytes | HTTPMethod | None,
@@ -785,7 +786,7 @@ class HTTP1ResponseRecipient:
         self.reusable = framing_reusable and response_persistent
         self.protocol_switched = tunnel
         self.tunnel = tunnel and self._method_is(request_method, 'CONNECT')
-        self.connection_exhausted = mode == 'close'
+        self.connection_exhausted = mode == _CLOSE_DELIMITED
 
     async def _read_head_and_policy(
             self, reader: AbstractReader, *, skip_interim: bool = True,
@@ -811,12 +812,12 @@ class HTTP1ResponseRecipient:
         # other one exists precisely so a large response need not.
         max_total = get_settings().client_body_max_total
         mode, declared, _reusable, _tunnel = framing
-        if mode == 'none':
+        if mode == _NO_BODY:
             return b''
-        if mode == 'chunked':
+        if mode == _CHUNKED:
             return b''.join([c async for c in
                              self._read_chunked(reader, max_total=max_total)])
-        if mode == 'declared':
+        if mode == _DECLARED:
             assert declared is not None
             if max_total and declared > max_total:
                 # Refused on the declaration, before an octet is read — the
@@ -837,13 +838,13 @@ class HTTP1ResponseRecipient:
                            framing: tuple[str, int | None, bool, bool]
                            ) -> AsyncIterator[bytes]:
         mode, declared, _reusable, _tunnel = framing
-        if mode == 'none':
+        if mode == _NO_BODY:
             return
-        if mode == 'chunked':
+        if mode == _CHUNKED:
             async for chunk in self._read_chunked(reader):
                 yield chunk
             return
-        if mode == 'declared':
+        if mode == _DECLARED:
             assert declared is not None
             async for chunk in self._read_declared(reader, declared):
                 yield chunk
@@ -1559,7 +1560,7 @@ class HTTP1Client:
         try/except boilerplate per scenario.
 
         Step dispatch:
-          * [`SendBytes`][]   → [`send_raw`][]
+          * [`SendRawBytes`][] → [`send_raw`][]
           * [`Sleep`][]       → ``asyncio.sleep``
           * [`ReadResponse`][] → [`read_response`][]
           * [`Abort`][]       → ``transport.abort()`` (RST on Linux);
@@ -1576,7 +1577,7 @@ class HTTP1Client:
         t0 = _time.monotonic()
         try:
             for step in scenario.steps:
-                if isinstance(step, SendBytes):
+                if isinstance(step, SendRawBytes):
                     await self.send_raw(step.data, byte_interval=step.byte_interval)
                 elif isinstance(step, Sleep):
                     await asyncio.sleep(step.duration)

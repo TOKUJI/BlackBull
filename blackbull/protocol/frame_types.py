@@ -196,11 +196,6 @@ class FrameBase:
             logger.debug('FrameBase is saving a frame %r', res)
         return res
 
-    def __eq__(self, other):
-        return self.type_ == other.type_ and\
-               self.flags == other.flags and\
-               self.stream_id == other.stream_id
-
     def __repr__(self):
         ft = self.FRAME_TYPE
         name = ft.name if ft is not None else 'Unknown'
@@ -876,9 +871,6 @@ class Ping(FrameBase):
         if _DEBUG:
             logger.debug('Ping is saving: {}'.format(res))
         return res
-
-    def __eq__(self, other):
-        return super().__eq__(other) and (self.payload == other.payload)
 
 class Continuation(FrameBase):
     """A CONTINUATION frame — the rest of a field block (RFC 9113 §6.10).

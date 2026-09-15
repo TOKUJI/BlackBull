@@ -39,7 +39,7 @@ from blackbull.client import (
     ReadResponse,
     Scenario,
     ScenarioResult,
-    SendBytes,
+    SendRawBytes,
     Sleep,
 )
 
@@ -174,9 +174,9 @@ class TestSlowlorisDefence:
         header deadline runs from when the server starts the
         ``readuntil`` — total elapsed must be bounded."""
         scenario = Scenario(steps=(
-            SendBytes(data=b'GET / HTTP'),          # partial request line
+            SendRawBytes(data=b'GET / HTTP'),          # partial request line
             Sleep(duration=0.3),
-            SendBytes(data=b'/1.1\r\nHost: x\r\n'),  # partial header block
+            SendRawBytes(data=b'/1.1\r\nHost: x\r\n'),  # partial header block
             ReadResponse(timeout=_SHORT_HEADER_TIMEOUT + 2.0),
         ))
         t0 = time.monotonic()
@@ -197,11 +197,11 @@ class TestSlowlorisDefence:
         request sent in fragments — but completing within the budget —
         must succeed."""
         scenario = Scenario(steps=(
-            SendBytes(data=b'GET / '),
+            SendRawBytes(data=b'GET / '),
             Sleep(duration=0.1),
-            SendBytes(data=b'HTTP/1.1\r\n'),
+            SendRawBytes(data=b'HTTP/1.1\r\n'),
             Sleep(duration=0.1),
-            SendBytes(data=b'Host: localhost\r\n\r\n'),
+            SendRawBytes(data=b'Host: localhost\r\n\r\n'),
             ReadResponse(timeout=2.0),
         ))
         result = await _run(scenario, slow_app.port)
@@ -217,7 +217,7 @@ class TestIncrementalRequest:
     Sending the request one byte at a time must produce a correct
     response — this exercises the actor's ``readuntil`` loop under
     maximally fragmented input.  Phase 5: now expressed via
-    ``SendBytes(..., byte_interval=...)`` instead of a raw per-byte
+    ``SendRawBytes(..., byte_interval=...)`` instead of a raw per-byte
     socket loop.
     """
 
@@ -232,7 +232,7 @@ class TestIncrementalRequest:
         # 1 ms between bytes — keeps the test wall-clock under
         # BB_HEADER_TIMEOUT while still forcing per-byte writes.
         scenario = Scenario(steps=(
-            SendBytes(data=request, byte_interval=0.001),
+            SendRawBytes(data=request, byte_interval=0.001),
             ReadResponse(timeout=2.0),
         ))
         result = await _run(scenario, slow_app.port)
@@ -265,12 +265,12 @@ class TestBodyTrickle:
     @pytest.mark.asyncio
     async def test_body_trickle_triggers_server_close(self, slow_app):
         scenario = Scenario(steps=(
-            SendBytes(
+            SendRawBytes(
                 data=b'POST /echo HTTP/1.1\r\n'
                      b'Host: localhost\r\n'
                      b'Content-Length: 100\r\n\r\n',
             ),
-            SendBytes(data=b'x' * 100, byte_interval=0.5),
+            SendRawBytes(data=b'x' * 100, byte_interval=0.5),
             ReadResponse(timeout=_MIN_BODY_RATE_GRACE + 10.0),
         ))
         t0 = time.monotonic()
@@ -303,13 +303,13 @@ class TestKeepAliveIdle:
         # After the idle the *next* request on the same connection must
         # fail because the server closed.
         scenario = Scenario(steps=(
-            SendBytes(data=b'GET / HTTP/1.1\r\nHost: localhost\r\n\r\n'),
+            SendRawBytes(data=b'GET / HTTP/1.1\r\nHost: localhost\r\n\r\n'),
             Sleep(duration=_SHORT_KEEP_ALIVE_TIMEOUT + 1.5),
             # First read picks up the buffered first response (server
             # answered before closing).
             ReadResponse(timeout=2.0),
             # Second request on the (now-closed) connection.
-            SendBytes(data=b'GET / HTTP/1.1\r\nHost: localhost\r\n\r\n'),
+            SendRawBytes(data=b'GET / HTTP/1.1\r\nHost: localhost\r\n\r\n'),
             ReadResponse(timeout=2.0),
         ))
         result = await _run(scenario, slow_app.port)
@@ -329,10 +329,10 @@ class TestKeepAliveIdle:
         # tests that the keep-alive timer also fires when the connection
         # has been used (not just freshly accepted).
         scenario = Scenario(steps=(
-            SendBytes(data=b'GET / HTTP/1.1\r\nHost: localhost\r\n\r\n'),
+            SendRawBytes(data=b'GET / HTTP/1.1\r\nHost: localhost\r\n\r\n'),
             ReadResponse(timeout=2.0),
             Sleep(duration=_SHORT_KEEP_ALIVE_TIMEOUT + 1.5),
-            SendBytes(data=b'GET / HTTP/1.1\r\nHost: localhost\r\n\r\n'),
+            SendRawBytes(data=b'GET / HTTP/1.1\r\nHost: localhost\r\n\r\n'),
             ReadResponse(timeout=2.0),
         ))
         result = await _run(scenario, slow_app.port)
@@ -348,14 +348,14 @@ class TestKeepAliveIdle:
 class TestSmugglingRejected:
     """Duplicate or conflicting framing headers MUST be rejected with
     400 (or a connection close) — this is the CL.CL / CL+TE smuggling
-    defence in ``http1_actor.py``.  Sending the headers via SendBytes
+    defence in ``http1_actor.py``.  Sending the headers via SendRawBytes
     bypasses the client's own dedup so we can verify the server's
     check directly."""
 
     @pytest.mark.asyncio
     async def test_duplicate_content_length_rejected(self, slow_app):
         scenario = Scenario(steps=(
-            SendBytes(
+            SendRawBytes(
                 data=b'POST /echo HTTP/1.1\r\n'
                      b'Host: localhost\r\n'
                      b'Content-Length: 5\r\n'
@@ -376,7 +376,7 @@ class TestSmugglingRejected:
         # are present, the server MUST close the connection (or reject)
         # to defend against request smuggling.
         scenario = Scenario(steps=(
-            SendBytes(
+            SendRawBytes(
                 data=b'POST /echo HTTP/1.1\r\n'
                      b'Host: localhost\r\n'
                      b'Content-Length: 5\r\n'

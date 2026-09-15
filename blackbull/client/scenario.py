@@ -4,7 +4,7 @@ Groups the HTTP/1.1 client-side scenario model and the
 HTTP/2 server-side fault-injection surface under
 [`blackbull.fault_injection`][blackbull.fault_injection].  Import from there going forward::
 
-    from blackbull.fault_injection import Scenario, SendBytes  # ...
+    from blackbull.fault_injection import Scenario, H1CSendRawBytes  # ...
 
 This shim re-exports the names that used to live here and will be
 removed no earlier than BlackBull v0.45.0 (and not before
