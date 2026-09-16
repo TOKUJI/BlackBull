@@ -231,7 +231,7 @@ __all__ = [
 ]
 
 
-#: Deprecated spelling -> (its replacement, the step it still yields).  A bare
+#: Deprecated spelling -> (its replacement, the step it yields).  A bare
 #: ``SendRawBytes`` in this namespace is the HTTP/2 server step, so each entry
 #: names its own role's step.
 _DEPRECATED_SPELLINGS = {

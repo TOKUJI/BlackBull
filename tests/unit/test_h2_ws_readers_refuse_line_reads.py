@@ -3,9 +3,8 @@
 ``HTTP2WSReader`` (server) and ``_H2QueueReader`` (HTTP/2 WebSocket client)
 carry WebSocket frames, which have no line framing, so a line-oriented read on
 either is a caller error.  The refusal is ``NotImplementedError`` in every call
-shape ``AbstractReader`` admits — never a ``TypeError`` from a narrower
-signature, and never bytes assembled by the byte-at-a-time fallback that
-``read_head`` and ``PrefixReader`` choose when ``readuntil`` rejects a limit.
+shape ``AbstractReader`` admits — ``readuntil`` bounded and unbounded,
+``read_head`` at every limit, and the same two through ``PrefixReader(b'')``.
 
 Each reader holds a complete head followed by EOF, fed through its public
 input, so a call that answered with bytes returns instead of waiting forever.
