@@ -1,11 +1,11 @@
 """HTTP/2 frame objects compare by identity and are hashable.
 
-Equality that looked only at type, flags and stream id reported frames with
-different wire bytes as equal — two GOAWAYs with different error codes, two
-PINGs are the everyday case — raised ``AttributeError`` when a frame met a
-non-frame (``frame in [None, ...]``), and made every frame unhashable.
-Identity has none of those defects: it never calls different bytes equal,
-compares with anything, and agrees with ``hash``.
+Two frames built separately are unequal whatever their payloads.  Comparing
+type, flags and stream id instead calls a GOAWAY pair differing only in error
+code equal; comparing the payload too — enough for that pair — still calls two
+PINGs carrying one payload equal.  Identity separates both, answers ``False``
+against a non-frame rather than raising ``AttributeError``, and agrees with
+``hash``.
 """
 import pytest
 
