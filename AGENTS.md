@@ -8,29 +8,19 @@ no reverse proxy or sidecar required.
 An **actor-model core** gives every connection its own isolated inbox loop; the 
 same message-passing runtime drives all protocols.
 
-Internally native; ASGI is kept only at the two external boundaries.  
 **Lightweight by design**: declarative DI, OpenAPI schema generation, and a rich 
 router — but no built-in template engine, auth, or ORM.  
 **Pure Python** (zero C extensions), **competitive throughput**, and
 **RFC-grade conformance** (h2spec, Autobahn, http11probe, RFC 10008 HTTP QUERY).
 
-A personal learning project — wire correctness over API stability (ZeroVer).
-
-Workspace-wide rules — confidentiality, general operating principles, tool
-preferences — live in `~/work/AGENTS.md` and load before this file.  What
-follows is only what is specific to BlackBull; where the two overlap, this
-file is the more specific one and wins.
-
 ---
 
 ## Operating principles
 
-The workspace-wide principles are in `~/work/AGENTS.md`.  Below are the ones
-that only make sense inside BlackBull.
-
-- Keep a line of prose only if, without it, a user would misuse this or a
-  developer would implement it wrong.  Write each fact once — in a name, a
-  signature or a test where one will carry it.
+- Keep any sentence you write about the code — comment, docstring, document —
+  only if, without it, a user would misuse this or a developer would implement
+  it wrong.  Write each fact once, in a name, a signature or a test where one
+  will carry it.
 
 - **Type-check before committing.** `just typecheck` catches contract
   violations statically.  → `.claude/skills/type-check/SKILL.md` [private]
