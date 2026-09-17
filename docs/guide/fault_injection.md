@@ -245,11 +245,11 @@ short-circuit.
 
 ```python
 from blackbull.client import HTTP1Client
-from blackbull.fault_injection import Scenario, SendBytes, Sleep, ReadResponse
+from blackbull.fault_injection import Scenario, H1CSendRawBytes, Sleep, ReadResponse
 
 # Send a request one byte every 200 ms — classic slowloris.
 trickle = Scenario(steps=(
-    SendBytes(b'GET / HTTP/1.1\r\nHost: target\r\n\r\n', byte_interval=0.2),
+    H1CSendRawBytes(b'GET / HTTP/1.1\r\nHost: target\r\n\r\n', byte_interval=0.2),
     ReadResponse(timeout=10.0),
 ))
 
@@ -409,7 +409,7 @@ receive loop, handing the connection to the scenario intact.
 Without it, `execute_scenario` raises before writing a byte rather than
 sending something the peer will read as garbage.
 
-The vocabulary mirrors the HTTP/1.1 client side — `SendBytes`,
+The vocabulary mirrors the HTTP/1.1 client side — `SendRawBytes`,
 `ReadResponse`, `Sleep`, `Abort`, and `ScenarioResult`'s field names — and
 adds two steps HTTP/1.1 has no use for:
 

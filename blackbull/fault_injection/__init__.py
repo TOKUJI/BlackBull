@@ -44,7 +44,6 @@ from .scenario_h1 import (
     response_matches,
     Scenario,
     ScenarioResult,
-    SendRawBytes as SendBytes,   # deprecated spelling, still exported
     SendRawBytes as H1CSendRawBytes,
     Sleep,
     Step,
@@ -96,7 +95,6 @@ from .scenario_h2_client import (
     ReadResponse as H2CReadResponse,
     ScenarioH2Client,
     ScenarioH2ClientResult,
-    SendRawBytes as H2CSendBytes,
     SendRawBytes as H2CSendRawBytes,
     SendFrame as H2CSendFrame,
     SendPreface as H2CSendPreface,
@@ -187,7 +185,6 @@ __all__ = [
     "H2CAbort",
     "H2CReadResponse",
     "H1CSendRawBytes",
-    "H2CSendBytes",
     "H2CHalfClose",
     "H2CSendRawBytes",
     "H2CSendFrame",
@@ -210,7 +207,6 @@ __all__ = [
     "ScenarioH2ClientResult",
     "ScenarioH2Result",
     "ScenarioResult",
-    "SendBytes",
     "SendFrame",
     "SendRawBytes",
     "SideOutcome",
@@ -233,3 +229,27 @@ __all__ = [
     "scenario_h2_to_json",
     "serialize_frame",
 ]
+
+
+#: Deprecated spelling -> (its replacement, the step it yields).  A bare
+#: ``SendRawBytes`` in this namespace is the HTTP/2 server step, so each entry
+#: names its own role's step.
+_DEPRECATED_SPELLINGS = {
+    'SendBytes': ('H1CSendRawBytes', H1CSendRawBytes),
+    'H2CSendBytes': ('H2CSendRawBytes', H2CSendRawBytes),
+}
+
+
+# Unannotated: see tests/unit/test_deprecated_send_bytes_spellings.py::test_the_warning_is_attributed_to_the_callers_line.
+def __getattr__(name):
+    """PEP 562 — a deprecated spelling is resolved only when a caller names it,
+    so the warning reaches that caller and ``import *`` stays silent."""
+    if name in _DEPRECATED_SPELLINGS:
+        import warnings  # noqa: PLC0415
+        replacement, step = _DEPRECATED_SPELLINGS[name]
+        warnings.warn(
+            f"{__name__}.{name} is deprecated; use {replacement}.  Removal no "
+            "earlier than 2027-08-19.",
+            DeprecationWarning, stacklevel=2)
+        return step
+    raise AttributeError(f'module {__name__!r} has no attribute {name!r}')

@@ -22,7 +22,7 @@ from blackbull.client import (
     ReadResponse,
     Scenario,
     ScenarioResult,
-    SendBytes,
+    SendRawBytes,
     Sleep,
 )
 from blackbull.client.http1 import HTTP1Client
@@ -132,8 +132,8 @@ def _client_with_fakes(*, reader: AbstractReader | None = None,
 class TestScenarioJSON:
     def test_round_trip_all_step_types(self):
         s = Scenario(steps=(
-            SendBytes(data=b'GET / HTTP/1.1\r\nHost: x\r\n\r\n',
-                      byte_interval=0.2),
+            SendRawBytes(data=b'GET / HTTP/1.1\r\nHost: x\r\n\r\n',
+                         byte_interval=0.2),
             Sleep(duration=1.5),
             ReadResponse(timeout=3.0),
             Abort(),
@@ -148,7 +148,7 @@ class TestScenarioJSON:
     def test_round_trip_preserves_bytes_with_high_bit_and_nul(self):
         # Base64 should round-trip arbitrary bytes.
         payload = bytes(range(256))
-        s = Scenario(steps=(SendBytes(data=payload),))
+        s = Scenario(steps=(SendRawBytes(data=payload),))
         s2 = Scenario.from_json(s.to_json())
         assert s2.steps[0].data == payload
 
@@ -187,7 +187,7 @@ class TestScenarioFromBytes:
         scenario = Scenario.from_bytes(raw)
         assert len(scenario.steps) == 1
         step = scenario.steps[0]
-        assert isinstance(step, SendBytes)
+        assert isinstance(step, SendRawBytes)
         assert step.data == b'abc'
 
     def test_abort_terminates_decoding(self):
@@ -221,9 +221,6 @@ class TestScenarioFromBytes:
         )
         scenario = Scenario.from_bytes(raw)
         kinds = [type(s).__name__ for s in scenario.steps]
-        # ``SendBytes`` is now the deprecated spelling of ``SendRawBytes`` —
-        # the class was renamed at the 107+108 consistency sweep so all
-        # four scenario vocabularies use one name.
         assert kinds == ['SendRawBytes', 'Sleep', 'ReadResponse']
 
 
@@ -236,7 +233,7 @@ class TestWellFormed:
     def test_two_step_send_then_read(self):
         s = Scenario.well_formed(b'GET / HTTP/1.1\r\nHost: x\r\n\r\n')
         assert len(s.steps) == 2
-        assert isinstance(s.steps[0], SendBytes)
+        assert isinstance(s.steps[0], SendRawBytes)
         assert s.steps[0].byte_interval == 0.0
         assert isinstance(s.steps[1], ReadResponse)
 
@@ -256,7 +253,7 @@ class TestExecuteScenario:
     @pytest.mark.asyncio
     async def test_send_bytes_step_writes_to_socket(self):
         c, w, _ = _client_with_fakes()
-        scenario = Scenario(steps=(SendBytes(data=b'PING'),))
+        scenario = Scenario(steps=(SendRawBytes(data=b'PING'),))
         result = await c.execute_scenario(scenario)
         assert bytes(w.data) == b'PING'
         assert result.steps_completed == 1
@@ -267,7 +264,7 @@ class TestExecuteScenario:
     @pytest.mark.asyncio
     async def test_send_bytes_with_byte_interval_splits_writes(self):
         c, w, _ = _client_with_fakes()
-        scenario = Scenario(steps=(SendBytes(data=b'ab', byte_interval=0.01),))
+        scenario = Scenario(steps=(SendRawBytes(data=b'ab', byte_interval=0.01),))
         await c.execute_scenario(scenario)
         assert w.writes == [b'a', b'b']
 
@@ -303,9 +300,9 @@ class TestExecuteScenario:
     async def test_abort_step_short_circuits_and_calls_transport_abort(self):
         c, w, raw = _client_with_fakes(attach_raw_writer=True)
         scenario = Scenario(steps=(
-            SendBytes(data=b'first'),
+            SendRawBytes(data=b'first'),
             Abort(),
-            SendBytes(data=b'never'),  # must NOT be written
+            SendRawBytes(data=b'never'),  # must NOT be written
         ))
         result = await c.execute_scenario(scenario)
         assert result.aborted is True
@@ -318,7 +315,7 @@ class TestExecuteScenario:
             b'HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n')
         c, w, _ = _client_with_fakes(reader=reader)
         scenario = Scenario(steps=(
-            SendBytes(data=b'GET / HTTP/1.1\r\nHost: x\r\n\r\n'),
+            SendRawBytes(data=b'GET / HTTP/1.1\r\nHost: x\r\n\r\n'),
             Sleep(duration=0.01),
             ReadResponse(timeout=1.0),
         ))

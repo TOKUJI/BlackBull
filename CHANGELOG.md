@@ -71,6 +71,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   HTTP/1 keep-alive exchange on HTTP/2 vocabularies, and a docstring pointed
   readers at a file that is not shipped.  `blackbull/middleware/base.py`, which
   defined nothing and only recorded its own removal, is gone.
+- `HTTP2WSReader.readuntil` now accepts the base `limit` argument, and it and
+  `read_head` raise `NotImplementedError` for every call: the reader carries
+  WebSocket frame payload, which has no lines.  `read_head` with a positive
+  limit previously returned a head through a byte-at-a-time fallback.  The
+  HTTP/2 WebSocket client's reader behaves the same way.
+- HTTP/2 frame objects now compare by identity, and are hashable.  Two frames
+  built separately are never equal.
+- `blackbull.client.SendBytes`, `blackbull.client.http1.SendBytes` and
+  `blackbull.fault_injection.SendBytes` now emit a `DeprecationWarning`, as the
+  `scenario_h1` spelling already did, and
+  `blackbull.fault_injection.H2CSendBytes` is deprecated the same way.  None of
+  these names is in the `__all__` of `blackbull.client`,
+  `blackbull.fault_injection` or `blackbull.fault_injection.scenario_h1`, so
+  `import *` from those modules no longer binds them.  `import *` from
+  `blackbull.client.http1` stops binding `SendBytes` too, for a different
+  reason: the name was a module-level alias there, and it is now resolved only
+  when a caller asks for it.  Use `SendRawBytes` from
+  `blackbull.client`, and `H1CSendRawBytes` or `H2CSendRawBytes` from
+  `blackbull.fault_injection` — a bare `SendRawBytes` there is the HTTP/2
+  server step.  Removal no earlier than 2027-08-19.
 
 ## Versioning
 

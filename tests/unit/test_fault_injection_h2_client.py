@@ -11,7 +11,7 @@ implemented" in the example.
 used a `tuple`, result field names invented where the twin had them — and
 every one was found by someone asking rather than by reading the code.  So
 the vocabulary here mirrors `scenario_h1`'s client-side names
-(`SendBytes` / `ReadResponse` / `Sleep` / `Abort`, `ScenarioResult`'s
+(`SendRawBytes` / `ReadResponse` / `Sleep` / `Abort`, `ScenarioResult`'s
 fields) and departs only where HTTP/2 genuinely differs: it sends *frames*,
 so there is a typed `SendFrame`, and the preface is a real step.
 """
@@ -23,7 +23,7 @@ import pytest
 
 from blackbull.client.http2 import HTTP2Client
 from blackbull.fault_injection.scenario_h2_client import (
-    Abort, ReadResponse, ScenarioH2Client, ScenarioH2ClientResult, SendBytes,
+    Abort, ReadResponse, ScenarioH2Client, ScenarioH2ClientResult, SendRawBytes,
     SendFrame, SendPreface, Sleep,
 )
 from blackbull.protocol.frame_types import FrameTypes
@@ -82,7 +82,7 @@ class TestVocabularyMirrorsTheTwin:
         import dataclasses as dc
         from blackbull.fault_injection import scenario_h1 as twin
 
-        for name in ('SendBytes', 'Sleep', 'ReadResponse', 'Abort'):
+        for name in ('SendRawBytes', 'Sleep', 'ReadResponse', 'Abort'):
             mine = {f.name for f in dc.fields(globals()[name])}
             theirs = {f.name for f in dc.fields(getattr(twin, name))}
             assert mine == theirs, (
@@ -130,7 +130,7 @@ class TestExecuteScenario:
         c = _client(writer)
         junk = b'\x00\x00\x00\xfa\x00\x00\x00\x00\x00'
         result = await c.execute_scenario(ScenarioH2Client(steps=(
-            SendBytes(junk),
+            SendRawBytes(junk),
         )))
         assert result.steps_completed == 1
         assert bytes(writer.data) == junk
@@ -139,7 +139,7 @@ class TestExecuteScenario:
         writer = _RecordingWriter()
         c = _client(writer)
         result = await c.execute_scenario(ScenarioH2Client(steps=(
-            SendBytes(b'PRI * ', byte_interval=0.001),
+            SendRawBytes(b'PRI * ', byte_interval=0.001),
         )))
         assert result.steps_completed == 1
         assert bytes(writer.data) == b'PRI * '
@@ -159,9 +159,9 @@ class TestExecuteScenario:
         writer = _RecordingWriter()
         c = _client(writer)
         result = await c.execute_scenario(ScenarioH2Client(steps=(
-            SendBytes(b'PRI'),
+            SendRawBytes(b'PRI'),
             Abort(),
-            SendBytes(b'never'),
+            SendRawBytes(b'never'),
         )))
         assert result.aborted is True
         assert writer.aborted is True
@@ -212,10 +212,10 @@ class TestExportsDoNotCollide:
         from blackbull.fault_injection import (
             scenario_h1, scenario_h1_server, scenario_h2, scenario_h2_client,
         )
-        assert fi.SendBytes is scenario_h1.SendBytes            # H1 client
+        assert fi.H1CSendRawBytes is scenario_h1.SendRawBytes   # H1 client
         assert fi.H1SSendRawBytes is scenario_h1_server.SendRawBytes
         assert fi.SendRawBytes is scenario_h2.SendRawBytes      # H2 server
-        assert fi.H2CSendBytes is scenario_h2_client.SendBytes
+        assert fi.H2CSendRawBytes is scenario_h2_client.SendRawBytes
         assert fi.Abort is scenario_h1.Abort
         assert fi.H1SAbort is scenario_h1_server.Abort
         assert fi.H2Abort is scenario_h2.Abort
@@ -224,12 +224,12 @@ class TestExportsDoNotCollide:
     async def test_the_package_import_builds_a_runnable_scenario(self):
         """Import the way the docs tell a reader to, then run it."""
         from blackbull.fault_injection import (
-            H2CSendBytes, H2CSendPreface, ScenarioH2Client,
+            H2CSendPreface, H2CSendRawBytes, ScenarioH2Client,
         )
         writer = _RecordingWriter()
         c = _client(writer)
         result = await c.execute_scenario(ScenarioH2Client(steps=(
-            H2CSendPreface(), H2CSendBytes(b'\x00\x00\x00\x04\x00\x00\x00\x00\x00'),
+            H2CSendPreface(), H2CSendRawBytes(b'\x00\x00\x00\x04\x00\x00\x00\x00\x00'),
         )))
         assert result.steps_completed == 2
         assert result.exception is None

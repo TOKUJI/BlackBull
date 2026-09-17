@@ -606,7 +606,7 @@ class HTTP2Client:
           * ``SendFrame``    → one frame, assembled here rather than by the
             production sender (which is what lets a scenario declare a
             length its payload does not match)
-          * ``SendBytes``    → arbitrary bytes, optionally one at a time
+          * ``SendRawBytes`` → arbitrary bytes, optionally one at a time
           * ``Sleep``        → ``asyncio.sleep``
           * ``ReadResponse`` → one frame, or a recorded timeout
           * ``Abort``        → ``transport.abort()``; walks no further steps

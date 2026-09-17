@@ -115,7 +115,9 @@ class _H2QueueReader(AbstractReader):
         del self._buf[:n]
         return chunk
 
-    async def readuntil(self, sep: bytes) -> bytes:
+    async def readuntil(self, sep: bytes, limit: int = 0) -> bytes:
+        # Why the full base signature, and not a narrower one:
+        # docs/about/internals.md, "read_head is a contract, not a capability".
         raise NotImplementedError('_H2QueueReader does not support readuntil')
 
 

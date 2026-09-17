@@ -28,6 +28,7 @@ Note:
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
@@ -220,10 +221,8 @@ class Http2Binding(ProtocolBinding):
             goaway = (b'\x00\x00\x08\x07\x00\x00\x00\x00\x00'
                       + b'\x00\x00\x00\x00'
                       + int(ErrorCodes.PROTOCOL_ERROR).to_bytes(4, 'big'))
-            try:
+            with contextlib.suppress(Exception):
                 await conn.writer.write(goaway)
-            except Exception:
-                pass
             raise ValueError(f'Invalid HTTP/2 preface: {preface!r}')
         await self._run(conn)
 
@@ -266,13 +265,11 @@ class Http1Binding(ProtocolBinding):
         # Best-effort 408 (RFC 9110 §15.5.9): an h1 client parses it, a peer of
         # any other cleartext protocol that stalled here ignores it, and a peer
         # that is already gone makes the write fail with nothing to be done.
-        try:
+        with contextlib.suppress(Exception):
             await conn.writer.write(
                 b'HTTP/1.1 408 Request Timeout\r\n'
                 b'connection: close\r\n'
                 b'content-length: 0\r\n\r\n')
-        except Exception:
-            pass
 
 
 class RawBinding(ProtocolBinding):
