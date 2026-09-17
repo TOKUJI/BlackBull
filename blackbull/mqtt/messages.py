@@ -552,7 +552,7 @@ class MQTTConnect(MQTTMessage):
     client_id: str
     clean_start: bool
     keep_alive: int
-    proto_level: int = 5
+    proto_level: int = ProtocolLevel.V5_0
     username: str | None = None
     password: bytes | str | None = None
     will_topic: str | None = None
@@ -815,14 +815,15 @@ def _encode_connect(m: MQTTConnect) -> bytes:
     body.append(flags)
 
     body += int(m.keep_alive).to_bytes(2, 'big')
-    # §3.1.2.11 — the Properties block exists from MQTT 5 only, and the
-    # decoder above reads the body by the level this same body declares.
-    if m.proto_level >= 5:
+    # §3.1.2.11 — Properties, and the Will's below, exist from MQTT 5 only, and
+    # the decoder below reads the body by the level this same body declares: a
+    # pre-v5 CONNECT writes neither, so the else would have nothing to write.
+    if m.proto_level >= ProtocolLevel.V5_0:
         body += encode_properties(m.properties)
 
     body += _encode_utf8(m.client_id)
     if m.will_topic is not None:
-        if m.proto_level >= 5:
+        if m.proto_level >= ProtocolLevel.V5_0:
             body += encode_properties(m.will_properties)
         body += _encode_utf8(m.will_topic)
         body += _encode_binary(m.will_payload or b'')
@@ -1013,11 +1014,11 @@ def _decode_connect(body: bytes, flags: int) -> MQTTConnect:
     username_flag = bool(cflags & ConnectFlags.USERNAME)
     keep_alive = int.from_bytes(body[pos:pos + 2], 'big')
     pos += 2
-    # MQTT 3.1.1 (proto_level 4) and earlier carry no Properties block; only
-    # decode one for MQTT 5.0.  Lenient decode lets the broker reject an
+    # ProtocolLevel.V3_1_1 and earlier carry no Properties block; only decode
+    # one from ProtocolLevel.V5_0.  Lenient decode lets the broker reject an
     # unsupported protocol level with CONNACK 0x84 rather than crash here.
     properties: dict[str, Any] = {}
-    if proto_level >= 5:
+    if proto_level >= ProtocolLevel.V5_0:
         properties, c = decode_properties(body, pos)
         pos += c
 
@@ -1025,7 +1026,7 @@ def _decode_connect(body: bytes, flags: int) -> MQTTConnect:
     will_topic = will_payload = None
     will_properties: dict[str, Any] = {}
     if will_flag:
-        if proto_level >= 5:
+        if proto_level >= ProtocolLevel.V5_0:
             will_properties, c = decode_properties(body, pos)
             pos += c
         will_topic, pos = _decode_utf8(body, pos)
