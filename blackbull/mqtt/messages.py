@@ -552,7 +552,9 @@ class MQTTConnect(MQTTMessage):
     client_id: str
     clean_start: bool
     keep_alive: int
-    proto_level: int = ProtocolLevel.V5_0
+    # ``.value``, not the member: the field is annotated int, and it reaches
+    # repr and asdict unchanged.
+    proto_level: int = ProtocolLevel.V5_0.value
     username: str | None = None
     password: bytes | str | None = None
     will_topic: str | None = None
