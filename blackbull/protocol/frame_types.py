@@ -31,6 +31,10 @@ DEFAULT_INITIAL_WINDOW_SIZE = 65535
 # advertises a larger SETTINGS_MAX_FRAME_SIZE.
 DEFAULT_MAX_FRAME_SIZE = 16384
 
+# RFC 9113 §4.1, §6.5.2 — the frame length field is 24 bits, which is also
+# the ceiling SETTINGS_MAX_FRAME_SIZE may be set to.
+MAX_FRAME_SIZE = 2**24 - 1
+
 
 class FrameTypes(bytes, Enum):
     """Registered HTTP/2 frame types (RFC 9113 §11.2).
@@ -256,6 +260,26 @@ class SettingFrame(FrameBase):
         if _DEBUG:
             logger.debug('{}: {}'.format(attr, parsed))
 
+    @property
+    def payload(self) -> bytes:
+        """The raw payload octets, where an identifier this build does not
+        name survives."""
+        return self._payload
+
+    @property
+    def settings(self) -> list[tuple[int, int]]:
+        """The frame's entries as ``(identifier, value)`` pairs.
+
+        A payload that does not divide into six-octet entries yields the
+        complete entries it holds.
+        """
+        payload = self._payload
+        return [
+            (int.from_bytes(payload[index:index + 2], 'big'),
+             int.from_bytes(payload[index + 2:index + 6], 'big'))
+            for index in range(0, len(payload) - 5, 6)
+        ]
+
     def save(self):
         self.length = len(self._payload)
         return super().save() + self._payload
@@ -270,6 +294,7 @@ class WindowUpdate(FrameBase):
     otherwise.
     """
     FRAME_TYPE = FrameTypes.WINDOW_UPDATE
+    PAYLOAD_LENGTH = 4  # §6.9; the parser tolerates another length
     def __init__(self, length: int, type_, flags: int, stream_id: int, *, data=None, **kwds):
         super(WindowUpdate, self).__init__(length, type_, flags, stream_id)
         if _DEBUG:
@@ -720,14 +745,15 @@ class RstStream(FrameBase):
     """
 
     FRAME_TYPE = FrameTypes.RST_STREAM
+    PAYLOAD_LENGTH = 4
     def __init__(self, length: int, type_, flags: int, stream_id: int, *, data=None, **kwds):
         super().__init__(length, type_, flags, stream_id)
         if _DEBUG:
             logger.debug('RstStream is called.')
         data = data or b''
-        if len(data) != 4:  # §6.4
+        if len(data) != self.PAYLOAD_LENGTH:  # §6.4
             raise FrameFormatError(
-                f'RST_STREAM length {len(data)} != 4',
+                f'RST_STREAM length {len(data)} != {self.PAYLOAD_LENGTH}',
                 ErrorCodes.FRAME_SIZE_ERROR)
 
         # RFC 9113 §7 — unknown or unsupported error codes MUST NOT trigger
@@ -851,15 +877,17 @@ class Ping(FrameBase):
     payload unchanged with ``PingFrameFlags.ACK`` set.
     """
     FRAME_TYPE = FrameTypes.PING
+    PAYLOAD_LENGTH = 8
     def __init__(self, length: int, type_, flags: int, stream_id: int, *, data, **kwds):
         super().__init__(length, type_, flags, stream_id)
         if _DEBUG:
             logger.debug('Ping is called.')
         if _DEBUG:
             logger.debug('FRAME_SIZE: {}'.format(length))
-        if length != 8:  # §6.7
+        if length != self.PAYLOAD_LENGTH:  # §6.7
             raise FrameFormatError(
-                f'PING length {length} != 8', ErrorCodes.FRAME_SIZE_ERROR)
+                f'PING length {length} != {self.PAYLOAD_LENGTH}',
+                ErrorCodes.FRAME_SIZE_ERROR)
 
         self.payload = data
         if _DEBUG:

@@ -51,12 +51,11 @@ Serialisation
 -------------
 
 [`scenario_to_json`][] / [`scenario_from_json`][] round-trip
-through JSON Lines.  Because [`SendFrame`][] carries a frame
-object, round-tripping requires the frame to be reconstructable from
-its serialised form — currently SETTINGS, WINDOW_UPDATE, RST_STREAM,
-GOAWAY, PING, and a typed-payload form of HEADERS / DATA.  For ad-hoc
-frames the caller passes through [`SendRawBytes`][], which is
-always round-trippable.
+through JSON Lines, so a [`SendFrame`][] frame has to be
+reconstructable from its serialised form — the classes in
+[`ROUND_TRIP_FRAME_CLASSES`][].  Everything else, a padded DATA
+frame included, goes through [`SendRawBytes`][], which always
+round-trips.
 """
 from __future__ import annotations
 
@@ -459,16 +458,117 @@ def _step_from_dict(d: dict) -> H2Step:
     raise ValueError(f'unknown step op: {op!r}')
 
 
-def _frame_to_dict(frame: Frame) -> dict:
-    """Serialise a parsed frame to a round-trippable dict.
+#: The frame classes the record codec understands.  Both directions and the
+#: round-trip test read it, so an arm cannot land on one side alone.
+ROUND_TRIP_FRAME_CLASSES = (
+    'SettingFrame',
+    'WindowUpdate',
+    'RstStream',
+    'GoAway',
+    'Ping',
+    'Data',
+)
 
-    Restricted to the frame types catalogue scenarios actually emit:
-    SETTINGS, WINDOW_UPDATE, RST_STREAM, GOAWAY, PING, plus a
-    typed-payload form of DATA (headers stay opt-out — sending real
-    HEADERS frames usually wants the executor's HPACK encoder, not
-    a serialised one).  For anything else, the caller should pass
-    through [`SendRawBytes`][], which is always round-trippable.
+#: Frame classes RFC 9113 places on stream 0; the record cannot state another.
+_CONNECTION_LEVEL_FRAMES = ('SettingFrame', 'GoAway', 'Ping')
+
+
+def _four_octets(value: int, field: str, frame_name: str) -> bytes:
+    """Pack *value* as the record states it, or refuse the frame."""
+    if not 0 <= value <= 0xffffffff:
+        raise TypeError(
+            f'{frame_name}.{field} is {value}, which does not fit the four '
+            f'octets the record writes it into; use SendRawBytes instead.')
+    return value.to_bytes(4, 'big')
+
+
+def _canonical_payload(frame: Frame) -> bytes:
+    """The payload octets the record's fields rebuild for *frame*."""
+    name = type(frame).__name__
+    if name in ('SettingFrame', 'WindowUpdate', 'Ping', 'Data'):
+        return bytes(getattr(frame, 'payload', b'') or b'')
+    if name == 'RstStream':
+        return _four_octets(int(getattr(frame, 'error_code', 0)),
+                            'error_code', name)
+    if name == 'GoAway':
+        return (_four_octets(int(getattr(frame, 'last_stream_id', 0)),
+                             'last_stream_id', name)
+                + _four_octets(int(getattr(frame, 'error_code', 0)),
+                               'error_code', name)
+                + bytes(getattr(frame, 'append_data', b'') or b''))
+    raise TypeError(
+        f'{name} cannot be round-tripped through scenario_h2 JSON; '
+        f'use SendRawBytes instead.')
+
+
+def require_canonical(frame: Frame) -> None:
+    """Refuse a frame the record cannot describe.
+
+    The record carries fields and the executor re-encodes from them, so a
+    frame whose type, length, payload or stream identifier they cannot
+    reproduce would replay as something other than it is.  Those octets go
+    through [`SendRawBytes`][] instead.
     """
+    from blackbull.protocol import frame_types  # local; avoids import-time cost
+
+    name = type(frame).__name__
+    expected_type = getattr(type(frame), 'FRAME_TYPE', None)
+    if expected_type is not None and getattr(frame, 'type_', expected_type) != expected_type:
+        raise TypeError(
+            f'{name} carries frame type {getattr(frame, "type_", None)!r}; its '
+            f'record rebuilds {expected_type!r}; use SendRawBytes instead.')
+    payload = _canonical_payload(frame)
+    declared = int(getattr(frame, 'length', 0) or 0)
+    if declared != len(payload):
+        raise TypeError(
+            f'{name} declares a {declared}-octet payload but its fields '
+            f'describe {len(payload)}; use SendRawBytes instead.')
+    if len(payload) > frame_types.MAX_FRAME_SIZE:
+        raise TypeError(
+            f'{name} carries {len(payload)} payload octets, which exceeds the '
+            f'24-bit frame length field (RFC 9113 §4.1); use SendRawBytes '
+            f'instead.')
+    flags = int(getattr(frame, 'flags', 0) or 0)
+    if not 0 <= flags <= 0xff:
+        raise TypeError(
+            f'{name}.flags is {flags}, which does not fit the octet the record '
+            f'writes it into; use SendRawBytes instead.')
+    stream_id = int(getattr(frame, 'stream_id', 0) or 0)
+    if name in _CONNECTION_LEVEL_FRAMES:
+        if stream_id != 0:
+            raise TypeError(
+                f'{name} is a connection-level frame (RFC 9113); a non-zero '
+                f'stream identifier cannot be recorded or replayed; use '
+                f'SendRawBytes instead.')
+    elif not 0 <= stream_id <= 0x7fffffff:
+        raise TypeError(
+            f'{name}.stream_id is {stream_id}, which the record cannot put in '
+            f'the 31-bit field RFC 9113 §4.1 defines; use SendRawBytes instead.')
+    fixed = getattr(type(frame), 'PAYLOAD_LENGTH', None)
+    if fixed is not None and len(payload) != fixed:
+        raise TypeError(
+            f'{name} carries {len(payload)} payload octets, and RFC 9113 fixes '
+            f'that at {fixed}; use SendRawBytes instead.')
+    if name == 'SettingFrame' and len(payload) % 6:
+        raise TypeError(
+            f'SettingFrame carries {len(payload)} payload octets, which is not '
+            f'a whole number of six-octet entries (RFC 9113 §6.5); use '
+            f'SendRawBytes instead.')
+    if name == 'Data' and flags & int(frame_types.DataFrameFlags.PADDED):
+        raise TypeError(
+            'a padded DATA frame keeps its pad length and padding in octets '
+            'the record does not carry (RFC 9113 §6.1); use SendRawBytes '
+            'instead.')
+
+
+def _frame_to_dict(frame: Frame) -> dict:
+    """Serialise a frame to a round-trippable dict.
+
+    Restricted to [`ROUND_TRIP_FRAME_CLASSES`][]; a frame
+    [`require_canonical`][] refuses, and anything outside the list, goes
+    through [`SendRawBytes`][] instead.
+    """
+    require_canonical(frame)
     name = type(frame).__name__
     base = {
         'class': name,
@@ -476,26 +576,61 @@ def _frame_to_dict(frame: Frame) -> dict:
         'flags': int(getattr(frame, 'flags', 0) or 0),
     }
     if name == 'SettingFrame':
-        base['settings'] = list(getattr(frame, 'settings', []) or [])
+        base['settings'] = [list(pair) for pair in getattr(frame, 'settings', [])]
     elif name == 'WindowUpdate':
-        base['window_size_increment'] = getattr(
-            frame, 'window_size_increment', 0)
+        # From the payload, not ``window_size``: the record describes the
+        # octets the frame will send.
+        base['window_size_increment'] = int.from_bytes(
+            bytes(getattr(frame, 'payload', b'') or b''), 'big')
     elif name == 'RstStream':
         base['error_code'] = int(getattr(frame, 'error_code', 0))
     elif name == 'GoAway':
         base['last_stream_id'] = int(getattr(frame, 'last_stream_id', 0))
         base['error_code'] = int(getattr(frame, 'error_code', 0))
+        base['append_data'] = base64.b64encode(
+            getattr(frame, 'append_data', b'') or b'').decode('ascii')
     elif name == 'Ping':
         base['payload'] = base64.b64encode(
             getattr(frame, 'payload', b'') or b'').decode('ascii')
     elif name == 'Data':
         base['data'] = base64.b64encode(
-            getattr(frame, 'data', b'') or b'').decode('ascii')
+            getattr(frame, 'payload', b'') or b'').decode('ascii')
     else:
-        raise TypeError(
-            f'{name} cannot be round-tripped through scenario_h2 JSON; '
-            f'use SendRawBytes instead.')
+        # Reachable only if a name is added to ROUND_TRIP_FRAME_CLASSES
+        # without a writer arm here: the declaration and the codec disagree.
+        raise TypeError(f'{name!r} is declared round-trippable but has no writer arm')
     return base
+
+
+def _four_octets_from_record(d: dict, key: str) -> int:
+    """Read a four-octet record field, refusing a value that cannot be one.
+
+    A hand-written record need not come from [`_frame_to_dict`][], and the
+    constructor would report the overflow as an ``OverflowError``.
+    """
+    value = int(d.get(key, 0))
+    if not 0 <= value <= 0xffffffff:
+        raise ValueError(f'{key}={value} does not fit the four octets it describes')
+    return value
+
+
+def _header_field_from_record(d: dict, key: str, maximum: int) -> int:
+    """Read one of the frame header's numeric fields, bounded to *maximum*."""
+    value = int(d.get(key, 0))
+    if not 0 <= value <= maximum:
+        raise ValueError(f'{key}={value} does not fit the field it describes')
+    return value
+
+
+def _payload_from_record(payload: bytes) -> bytes:
+    """Refuse a record whose payload the frame length field cannot carry."""
+    from blackbull.protocol.frame_types import MAX_FRAME_SIZE
+
+    if len(payload) > MAX_FRAME_SIZE:
+        raise ValueError(
+            f'a {len(payload)}-octet payload exceeds the 24-bit frame length '
+            f'field (RFC 9113 §4.1); use SendRawBytes')
+    return payload
 
 
 def _frame_from_dict(d: dict) -> Frame:
@@ -503,43 +638,77 @@ def _frame_from_dict(d: dict) -> Frame:
     from blackbull.protocol import frame_types  # local; avoids import-time cost
 
     name = d['class']
-    stream_id = int(d.get('stream_id', 0))
-    flags = int(d.get('flags', 0))
+    if name not in ROUND_TRIP_FRAME_CLASSES:
+        raise ValueError(f'unknown frame class: {name!r}')
+    stream_id = _header_field_from_record(d, 'stream_id', 0x7fffffff)
+    flags = _header_field_from_record(d, 'flags', 0xff)
+    if name in _CONNECTION_LEVEL_FRAMES and stream_id != 0:
+        raise ValueError(
+            f'{name} is a connection-level frame (RFC 9113); a non-zero stream '
+            f'identifier cannot be recorded or replayed')
     if name == 'SettingFrame':
-        f = frame_types.SettingFrame(length=0, type_=frame_types.FrameTypes.SETTINGS,
-                                     flags=flags, stream_id=stream_id)
-        f.settings = [tuple(pair) for pair in d.get('settings', [])]
-        return f
+        # Packed so the frame parses its own payload; its property and
+        # ``save()`` then agree with the record.
+        entries = [(int(identifier), int(value))
+                   for identifier, value in d.get('settings', [])]
+        if any(not 0 <= identifier <= 0xffff or not 0 <= value <= 0xffffffff
+               for identifier, value in entries):
+            raise ValueError('a SETTINGS entry does not fit the field it describes')
+        payload = _payload_from_record(b''.join(
+            identifier.to_bytes(2, 'big') + value.to_bytes(4, 'big')
+            for identifier, value in entries))
+        return frame_types.SettingFrame(
+            length=len(payload), type_=frame_types.FrameTypes.SETTINGS,
+            flags=flags, stream_id=stream_id, data=payload)
     if name == 'WindowUpdate':
-        f = frame_types.WindowUpdate(length=0, type_=frame_types.FrameTypes.WINDOW_UPDATE,
-                                     flags=flags, stream_id=stream_id)
-        f.window_size_increment = int(d.get('window_size_increment', 0))
-        return f
+        # The increment is the payload, so the frame reads it back as the
+        # ``window_size`` the client and server use — one spelling.
+        increment = _four_octets_from_record(d, 'window_size_increment')
+        return frame_types.WindowUpdate(
+            length=4, type_=frame_types.FrameTypes.WINDOW_UPDATE,
+            flags=flags, stream_id=stream_id,
+            data=increment.to_bytes(4, 'big'))
     if name == 'RstStream':
-        f = frame_types.RstStream(length=0, type_=frame_types.FrameTypes.RST_STREAM,
-                                  flags=flags, stream_id=stream_id)
-        f.error_code = int(d.get('error_code', 0))
-        return f
+        # ``RstStream.__init__`` refuses a payload that is not four octets, so
+        # the error code arrives as the payload.  ``FrameFactory.rst_stream``
+        # would fix ``flags`` to INIT and drop a recorded flag bit.
+        error_code = _four_octets_from_record(d, 'error_code')
+        return frame_types.RstStream(
+            length=4, type_=frame_types.FrameTypes.RST_STREAM,
+            flags=flags, stream_id=stream_id,
+            data=error_code.to_bytes(4, 'big'))
     if name == 'GoAway':
-        f = frame_types.GoAway(length=0, type_=frame_types.FrameTypes.GOAWAY,
-                               flags=flags, stream_id=stream_id)
-        f.last_stream_id = int(d.get('last_stream_id', 0))
-        f.error_code = int(d.get('error_code', 0))
-        return f
+        # GOAWAY's own encoder writes last-stream-id, error code and any
+        # trailing octets, so all three have to be in the payload it parses.
+        payload = _payload_from_record(
+            _four_octets_from_record(d, 'last_stream_id').to_bytes(4, 'big')
+            + _four_octets_from_record(d, 'error_code').to_bytes(4, 'big')
+            + base64.b64decode(d.get('append_data', '')))
+        return frame_types.GoAway(
+            length=len(payload), type_=frame_types.FrameTypes.GOAWAY,
+            flags=flags, stream_id=stream_id, data=payload)
     if name == 'Ping':
         # ``Ping`` alone among the frame classes built here requires
         # ``data``; omitting it makes a serialised PING unreadable back.
-        payload = base64.b64decode(d.get('payload', ''))
+        payload = _payload_from_record(base64.b64decode(d.get('payload', '')))
         f = frame_types.Ping(length=len(payload),
                              type_=frame_types.FrameTypes.PING,
                              flags=flags, stream_id=stream_id, data=payload)
         return f
     if name == 'Data':
-        f = frame_types.Data(length=0, type_=frame_types.FrameTypes.DATA,
-                             flags=flags, stream_id=stream_id)
-        f.data = base64.b64decode(d.get('data', ''))
-        return f
-    raise ValueError(f'unknown frame class: {name!r}')
+        if flags & int(frame_types.DataFrameFlags.PADDED):
+            # The record holds the unpadded body, so the pad length and the
+            # padding octets are not recoverable; the constructor would take a
+            # body octet for the pad length.
+            raise ValueError('a padded DATA frame cannot be read back; '
+                             'use SendRawBytes')
+        payload = _payload_from_record(base64.b64decode(d.get('data', '')))
+        return frame_types.Data(
+            length=len(payload), type_=frame_types.FrameTypes.DATA,
+            flags=flags, stream_id=stream_id, data=payload)
+    # Reachable only if a name is added to ROUND_TRIP_FRAME_CLASSES without a
+    # reader arm here: the declaration and the codec disagree.
+    raise ValueError(f'{name!r} is declared round-trippable but has no reader arm')
 
 
 def scenario_to_json(scenario: ScenarioH2) -> str:
