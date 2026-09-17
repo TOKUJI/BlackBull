@@ -1,8 +1,6 @@
 """Where the prose is in a Python file.
 
-Shared by :mod:`check_comment_drift` and :mod:`changed_comments`, which both
-need the same answer and must not answer it differently: one refuses a line,
-the other decides whether that line is even in scope for review.
+Used by :mod:`prose_census`.
 
 The distinction the raw text cannot make is the one that matters.  ``# Sprint
 92`` inside a string literal is data, not a comment, and a checker that reads
