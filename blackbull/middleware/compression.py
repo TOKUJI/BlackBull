@@ -144,6 +144,17 @@ def _stamp_vary_if_compressible(header: list[tuple[bytes, bytes]]) -> bool:
     return True
 
 
+def _consume_outcome(future) -> None:
+    """Read an offload's outcome so nothing else has to.
+
+    A cancelled request stops waiting for work it submitted; without a reader,
+    a failure there surfaces at collection time as asyncio's "exception was
+    never retrieved".
+    """
+    if not future.cancelled():
+        future.exception()
+
+
 # ---------------------------------------------------------------------------
 # Middleware
 # ---------------------------------------------------------------------------
@@ -242,13 +253,21 @@ class Compression:
         cap (the caller serves the body uncompressed).  Shared by the native
         complete-response path and the ``_dict_event`` lane so the
         backpressure behaviour is defined once.
+
+        The cap is a bound on **submitted work that has not finished**, so the
+        permit is returned when the offload's thread ends, not when this
+        coroutine stops waiting: a cancelled request leaves its thread running,
+        and releasing on the way out would admit the next offload over the cap.
+        It is not a time bound and not a byte bound — the caller's threshold
+        bounds the bytes, and a wedged offload holds only its own permit.
         """
         # Backpressure: if the executor already has _executor_max_inflight
         # compressions running, skip this one and serve uncompressed rather
         # than queueing.  Prevents the unbounded executor backlog that caused
         # the HttpArena `static` profile to collapse to 0 r/s on run 2 under
         # c=1024.  Counter increment / decrement is safe without a lock —
-        # asyncio is single-threaded.
+        # asyncio is single-threaded, and the worker hands the decrement back
+        # to the loop.
         if (self._executor_max_inflight > 0
                 and self._executor_inflight >= self._executor_max_inflight):
             log_cap_hit('compression_max_inflight',
@@ -256,12 +275,50 @@ class Compression:
                         limit=self._executor_max_inflight,
                         protocol='compression')
             return None
+        loop = asyncio.get_running_loop()
         self._executor_inflight += 1
+        released = False
+
+        def release() -> None:
+            """Return the permit once, on the loop, when the work has ended."""
+            nonlocal released
+            if not released:
+                released = True
+                self._executor_inflight -= 1
+
+        def run() -> bytes:
+            """The submitted unit of work — the only signal that still exists
+            for a requester that has gone away."""
+            try:
+                return compressor(body)
+            finally:
+                try:
+                    loop.call_soon_threadsafe(release)
+                except RuntimeError:
+                    pass  # loop closed under the work; nothing left to update
+
         try:
-            loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(None, compressor, body)
-        finally:
+            future = loop.run_in_executor(None, run)
+        except BaseException:
+            # Nothing was submitted, so this coroutine still owns the permit.
             self._executor_inflight -= 1
+            raise
+        try:
+            # ``shield``: a cancelled request must not cancel the submitted
+            # work out from under the release that work owes.
+            return await asyncio.shield(future)
+        finally:
+            # Whatever happens to this coroutine, the offload's outcome gets a
+            # reader: a cancelled request never waits for it, and an exception
+            # nobody retrieves is reported as exactly that.
+            future.add_done_callback(_consume_outcome)
+            # The work has ended exactly when its future is done, and only then
+            # may this coroutine return the permit itself.  A cancelled request
+            # leaves the future pending; the worker's own callback returns the
+            # permit when the thread ends.  ``release`` is once-only, so
+            # whichever arrives first wins.
+            if future.done():
+                release()
 
     @staticmethod
     def _vary_ensuring_send(send):

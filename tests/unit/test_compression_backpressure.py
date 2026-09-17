@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import asyncio
 import gzip
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -157,6 +159,146 @@ async def test_counter_decrements_even_on_executor_exception(monkeypatch):
         await mw(_scope(b'gzip'), _noop_receive, send, call_next)
 
     assert mw._executor_inflight == 0
+
+
+async def _wait_for(predicate, timeout: float = 5.0) -> None:
+    """Poll *predicate* on the loop until it holds, or fail the test."""
+    deadline = asyncio.get_running_loop().time() + timeout
+    while not predicate():
+        assert asyncio.get_running_loop().time() < deadline, 'timed out waiting'
+        await asyncio.sleep(0.01)
+
+
+def _held_compressor(started: threading.Event, release: threading.Event,
+                     calls: list[str]):
+    """A compressor that blocks inside the executor until *release* is set.
+
+    It records each worker entry, so a test can observe the work itself
+    rather than infer it from timing.
+    """
+    def compressor(body: bytes) -> bytes:
+        calls.append(threading.current_thread().name)
+        started.set()
+        release.wait(10)
+        return gzip.compress(body)
+    return compressor
+
+
+class TestThePermitFollowsTheWorkNotTheAwait:
+    """A cancelled request leaves its offload running, so the permit has to
+    stay spent until that work ends.  Releasing it when the await stops — the
+    ``finally`` this replaces — admits the next offload over the cap, which is
+    the ceiling the middleware exists to keep.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_cancelled_request_keeps_its_permit_until_the_work_ends(self):
+        mw = Compression(executor_max_inflight=1, executor_threshold=1)
+        started, release, calls = threading.Event(), threading.Event(), []
+        mw._available['gzip'] = _held_compressor(started, release, calls)
+
+        task = asyncio.create_task(_run_through(mw, _BIG_BODY, accept=b'gzip'))
+        assert await asyncio.to_thread(started.wait, 2), 'the offload never started'
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        # The worker is still inside the compressor, so the permit is spent.
+        assert len(calls) == 1
+        assert mw._executor_inflight == 1
+
+        # ... and the next request is served uncompressed, not submitted.
+        res = await _run_through(mw, _BIG_BODY, accept=b'gzip')
+        assert b'content-encoding' not in res['headers']
+        assert res['body'] == _BIG_BODY
+        assert len(calls) == 1
+
+        release.set()
+        await _wait_for(lambda: mw._executor_inflight == 0)
+
+    @pytest.mark.asyncio
+    async def test_repeated_cancellation_never_admits_work_over_the_cap(self):
+        """The issue's shape: cap 1, cancel again and again, and the executor
+        must still never hold more than one offload."""
+        mw = Compression(executor_max_inflight=1, executor_threshold=1)
+        started, release, calls = threading.Event(), threading.Event(), []
+        mw._available['gzip'] = _held_compressor(started, release, calls)
+
+        task = asyncio.create_task(_run_through(mw, _BIG_BODY, accept=b'gzip'))
+        assert await asyncio.to_thread(started.wait, 2)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        for _ in range(3):
+            res = await _run_through(mw, _BIG_BODY, accept=b'gzip')
+            assert b'content-encoding' not in res['headers']
+            assert mw._executor_inflight == 1
+        assert len(calls) == 1, 'a cancelled request admitted a second offload'
+
+        release.set()
+        await _wait_for(lambda: mw._executor_inflight == 0)
+
+    @pytest.mark.asyncio
+    async def test_a_cancelled_offload_that_fails_still_returns_its_permit(self):
+        """The work ends in an exception nobody will await; the permit still
+        comes back exactly once."""
+        mw = Compression(executor_max_inflight=1, executor_threshold=1)
+        started, release = threading.Event(), threading.Event()
+
+        def compressor(body: bytes) -> bytes:
+            started.set()
+            release.wait(10)
+            raise RuntimeError('compressor exploded after the request was gone')
+
+        mw._available['gzip'] = compressor
+        task = asyncio.create_task(_run_through(mw, _BIG_BODY, accept=b'gzip'))
+        assert await asyncio.to_thread(started.wait, 2)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert mw._executor_inflight == 1
+
+        release.set()
+        await _wait_for(lambda: mw._executor_inflight == 0)
+        assert mw._executor_inflight >= 0
+
+    @pytest.mark.asyncio
+    async def test_a_cancelled_request_whose_job_is_queued_keeps_its_permit(self):
+        """Submitted, but the pool has not started it yet: the permit belongs
+        to that job, and the job still runs.  A queued job dropped along with
+        the request would leave its permit with no releaser at all."""
+        loop = asyncio.get_running_loop()
+        executor = ThreadPoolExecutor(max_workers=1)
+        loop.set_default_executor(executor)
+        blocker_started, release, calls = threading.Event(), threading.Event(), []
+        try:
+            def blocker() -> None:
+                blocker_started.set()
+                release.wait(10)
+
+            # Occupy the pool's only worker, so the offload below stays queued.
+            queued = loop.run_in_executor(None, blocker)
+            await _wait_for(blocker_started.is_set)
+
+            mw = Compression(executor_max_inflight=1, executor_threshold=1)
+            mw._available['gzip'] = _held_compressor(threading.Event(), release, calls)
+            task = asyncio.create_task(_run_through(mw, _BIG_BODY, accept=b'gzip'))
+            await _wait_for(lambda: mw._executor_inflight == 1)
+            assert calls == [], 'the pool ran the offload instead of queueing it'
+
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert mw._executor_inflight == 1, 'a queued job lost its permit'
+
+            release.set()
+            await _wait_for(lambda: mw._executor_inflight == 0)
+            await queued
+            assert len(calls) == 1, 'the queued job never ran'
+        finally:
+            release.set()
+            executor.shutdown(wait=True)
 
 
 @pytest.mark.asyncio
