@@ -8,121 +8,18 @@ no reverse proxy or sidecar required.
 An **actor-model core** gives every connection its own isolated inbox loop; the 
 same message-passing runtime drives all protocols.
 
-Internally native; ASGI is kept only at the two external boundaries.  
 **Lightweight by design**: declarative DI, OpenAPI schema generation, and a rich 
 router — but no built-in template engine, auth, or ORM.  
 **Pure Python** (zero C extensions), **competitive throughput**, and
 **RFC-grade conformance** (h2spec, Autobahn, http11probe, RFC 10008 HTTP QUERY).
 
-A personal learning project — wire correctness over API stability (ZeroVer).
-
-Workspace-wide rules — confidentiality, general operating principles, tool
-preferences — live in `~/work/AGENTS.md` and load before this file.  What
-follows is only what is specific to BlackBull; where the two overlap, this
-file is the more specific one and wins.
-
 ---
 
 ## Operating principles
 
-The workspace-wide principles are in `~/work/AGENTS.md`.  Below are the ones
-that only make sense inside BlackBull.
-
-- **Findings update proposals; memory holds only tooling gotchas.**  When a
-  measurement or investigation answers a question an open proposal is
-  pursuing, update that proposal — or open one — in the same turn.  Never park
-  a proposal-relevant answer in `/memories/repo/`; repo memory is only for
-  operational gotchas (tooling, harness, environment quirks) that no proposal
-  and no `docs/` page covers.  Before writing a new repo-memory file, search
-  the tracker for the proposal that owns the question; if one exists, comment
-  there instead.
-
-- **Every limit names its triad column.**  When you add or change a resource
-  limit, state which of the three it occupies — *how big may one unit be*,
-  *how big may the total be*, *how long may it take* — and name the owner of
-  the other two.  Almost every memory gap the attack-surface audit found was a
-  unit cap mistaken for a total cap: the frame was capped and the message was
-  not, the packet was capped and the session state was not.  The one exception
-  names the second question to ask: the HTTP/2 priority tree had no total
-  because nothing ever *read* what it stored, so nobody counted it as storage —
-  **a write with no reader is still a growable path**.  Also check what state
-  the protocol *shares*, because that constrains the answer — an HTTP/2 header
-  block cannot be abandoned per-stream, since HPACK state is connection-wide.
-  → `BLA-A-1` [private]
-
-- **Write the intent into the implementation, not into a comment beside it.**
-  This is a rule for every change, not only for a reduction pass.  Before
-  writing a sentence, ask whether a name, a signature, or a named constant
-  could carry it; a comment of the form "must be X when Y" is usually a
-  missing accessor.  And **never state a fact twice** — if a page, a sibling
-  function, or another file already argues it, point at that and stop.  A
-  second copy is not redundancy, it is a second thing to keep true, and the
-  copies drift apart rather than together: a design that was measured and
-  *rejected* described as though it shipped, a clamp no code implements, a
-  `--help` line calling a finite cap unlimited.
-
-- **Comment drift has two causes, and only one of them is a detection
-  problem.**  Prose that *was* true and stopped being true is caught, crudely,
-  by tooling (→ `BLA-389` [private]).  Prose that never kept up with the code
-  beside it is a **volume** problem: every line of prose is a line that can go
-  stale, so the drift surface *is* the prose count.  Measured, it only grows —
-  `v0.31.0` shipped 0.56 prose lines per code line, `v0.80.0` shipped 0.82,
-  and it rose at every release in between; code grew 2.65× over that span
-  while prose grew 3.88×.  Nearly half of every non-blank line in the package
-  is now prose, and 39 of 109 files carry more prose than code.
-  `scripts/prose_census.py` is the number — quote it before and after when you
-  claim a reduction.  → `BLA-390` [private]
-
-- **Reduction is a separate agent's only job, because the objectives differ.**
-  An agent asked *"is this comment true?"* grades its own writing and grades
-  toward accuracy: it defends the sentence and keeps it.  Ask instead *"can
-  this comment be deleted?"*, in a different head, judged on **how much of the
-  change is carried by names alone with the fewest comments left standing**.
-  True is not a reason to keep a line — true was never the question.  Renaming
-  is the instrument and is not a behaviour change; `just test` passing with no
-  test file modified is the proof, since a rename moves the AST.  A minimising
-  pass destroys five things unless they are named up front, and losing one is
-  a failure of the pass rather than a saving: **deprecation contracts with
-  their removal dates, RFC citations, a measured number and why it is that
-  number, an invariant the reader would otherwise reverse-engineer, and a
-  trade-off decided against.**
-
-- **Comments are reviewed by whoever did not write them.**  An implementation
-  is not finished when the tests pass; it is finished when an agent that did
-  not author the prose has read it against the code.  Judging your own
-  comments is the same judgement twice, and it is the judgement that fails:
-  BLA-384 found a module docstring stating three defaults the code had not
-  shipped for releases, a `--help` line calling a finite cap unlimited, and a
-  package docstring asserting the exact opposite of what importing it does.
-  Two enforcement points hold this without anyone remembering to ask:
-  `scripts/check_comment_drift.py --staged` runs first in the pre-commit hook
-  and refuses dated commentary; a `Stop` hook
-  (`.claude/hooks/require-comment-review.sh` [private]) blocks the end of a
-  turn that changed comments until an independent subagent has reviewed
-  exactly those lines.  `scripts/changed_comments.py` is what defines "exactly
-  those lines" — hand the reviewer that command, never a file list.
-  **What the API reference publishes is public members *and dunders*.**
-  mkdocstrings' default filter is `!^_[^_]`, which drops a single-underscore
-  name and keeps `__getitem__`; ten briefs said "public docstrings only" and
-  were lucky that no pass reached for a dunder.  A `#` comment renders
-  nowhere — that half was right.
-  **Only unambiguous vocabulary is machine-refused** (sprint numbers, version
-  boundaries, internal tracker ids).  `used to`, `legacy`, `still` and
-  `no longer` are measured to be mostly present-tense and are deliberately
-  left to the reviewer: a check that cries wolf gets `--no-verify`'d, and then
-  it protects nothing.
-
-- **A `BLA-<n>` never appears in shipped source or a public document.**  It is
-  the same defect as a sprint number wearing a different hat: `Closing that is
-  BLA-325` is a TODO that goes stale the day it lands, `the defect BLA-269
-  fixed` is the timeline, and `Design: BLA-A-17 [private]` sends the reader of
-  a pure-Python library somewhere they cannot go.  **State the invariant here,
-  and cite the test that holds it** — a test is a pointer every reader can
-  follow.  Both namespaces count: `BLA-<n>` and `BLA-A-<n>`.  The check covers
-  `blackbull/**/*.py` (what the wheel ships) plus `README.md`, `SECURITY.md`,
-  `CHANGELOG.md`, `KNOWN_LIMITATIONS.md` and `docs/`.  `tests/` and the
-  agent-facing files are exempt: neither ships, and the tracker is their
-  subject.
+- Write only what prevents a user misusing this or a developer implementing it
+  wrong.  Say it once, in the fewest words, and in a name, a signature or a
+  test where one will carry it.
 
 - **Type-check before committing.** `just typecheck` catches contract
   violations statically.  → `.claude/skills/type-check/SKILL.md` [private]
