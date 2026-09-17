@@ -8,6 +8,8 @@ immutability, edge cases).
 Reference: MQTT Version 5.0, OASIS Standard
 """
 
+from typing import get_type_hints
+
 import pytest
 
 from blackbull.mqtt.messages import (
@@ -19,7 +21,7 @@ from blackbull.mqtt.messages import (
     MQTTPingreq, MQTTPingresp,
     MQTTDisconnect, MQTTAuth,
     # Enums
-    MQTTPacketType, MQTTReasonCode,
+    MQTTPacketType, MQTTReasonCode, ProtocolLevel,
     # Codec
     encode_packet, decode_packet,
 )
@@ -110,6 +112,32 @@ class TestMessageDefaults:
     def test_pingresp_defaults(self):
         p = MQTTPingresp()
         assert p is not None
+
+
+class TestProtocolLevel:
+    """The CONNECT Protocol Level is a wire octet, not an enum membership."""
+
+    def test_an_unnamed_level_still_decodes(self):
+        """§3.1.2.2 — a level ``ProtocolLevel`` does not name must survive the
+        codec: the broker answers CONNACK 0x84 for it rather than failing to
+        read the packet."""
+        message = MQTTConnect(client_id='x', clean_start=True, keep_alive=60,
+                              proto_level=6)
+        decoded = decode_packet(encode_packet(message))[0]
+        assert decoded.proto_level == 6
+        assert type(decoded.proto_level) is int
+
+    def test_the_field_is_annotated_int(self):
+        """The annotation is the contract: an unnamed level is legal input, so
+        narrowing the field to ``ProtocolLevel`` is a defect even though plain
+        pytest would not fault the value."""
+        assert get_type_hints(MQTTConnect)['proto_level'] is int
+
+    def test_the_default_is_the_wire_number(self):
+        """The field is annotated ``int``, so the default is one."""
+        default = MQTTConnect(client_id='x', clean_start=True, keep_alive=60)
+        assert default.proto_level == ProtocolLevel.V5_0
+        assert type(default.proto_level) is int
 
 
 # ============================================================================

@@ -552,7 +552,9 @@ class MQTTConnect(MQTTMessage):
     client_id: str
     clean_start: bool
     keep_alive: int
-    proto_level: int = 5
+    # int, not the enum: a level this enum does not name must still decode
+    # (§3.1.2.2), and ``.value`` keeps repr and asdict at the wire number.
+    proto_level: int = ProtocolLevel.V5_0.value
     username: str | None = None
     password: bytes | str | None = None
     will_topic: str | None = None
@@ -815,11 +817,16 @@ def _encode_connect(m: MQTTConnect) -> bytes:
     body.append(flags)
 
     body += int(m.keep_alive).to_bytes(2, 'big')
-    body += encode_properties(m.properties)
+    # §3.1.2.11 — Properties, and the Will's below, exist from MQTT 5 only, and
+    # the decoder below reads the body by the level this same body declares: a
+    # pre-v5 CONNECT writes neither, so the else would have nothing to write.
+    if m.proto_level >= ProtocolLevel.V5_0:
+        body += encode_properties(m.properties)
 
     body += _encode_utf8(m.client_id)
     if m.will_topic is not None:
-        body += encode_properties(m.will_properties)
+        if m.proto_level >= ProtocolLevel.V5_0:
+            body += encode_properties(m.will_properties)
         body += _encode_utf8(m.will_topic)
         body += _encode_binary(m.will_payload or b'')
     if m.username is not None:
@@ -959,6 +966,33 @@ def encode_packet(message: MQTTMessage) -> bytes:
 # Decoder
 # ===========================================================================
 
+def _decode_packet_id(body: bytes, offset: int, packet_type: MQTTPacketType) -> int:
+    """§2.2.1 — the two-octet Packet Identifier, which is never zero."""
+    if offset + 2 > len(body):
+        raise IncompletePacket(f'{packet_type.name} is missing its Packet Identifier')
+    packet_id = int.from_bytes(body[offset:offset + 2], 'big')
+    if packet_id == 0:
+        raise MQTTDecodeError(
+            f'{packet_type.name} has Packet Identifier 0 (§2.2.1)')
+    return packet_id
+
+
+def _require_consumed(body: bytes, pos: int, packet_type: MQTTPacketType) -> None:
+    """Whatever follows this type's last field is a Malformed Packet."""
+    if pos != len(body):
+        raise MQTTDecodeError(
+            f'{packet_type.name} has {len(body) - pos} octet(s) after its '
+            f'last field')
+
+
+def _decode_without_body(cls: type, body: bytes) -> MQTTMessage:
+    """§3.12, §3.13 — PINGREQ and PINGRESP carry no payload."""
+    if body:
+        raise MQTTDecodeError(
+            f'{cls.packet_type.name} carries a {len(body)}-octet payload')
+    return cls()
+
+
 def _decode_connect(body: bytes, flags: int) -> MQTTConnect:
     pos = 0
     _proto_name, pos = _decode_utf8(body, pos)
@@ -982,11 +1016,11 @@ def _decode_connect(body: bytes, flags: int) -> MQTTConnect:
     username_flag = bool(cflags & ConnectFlags.USERNAME)
     keep_alive = int.from_bytes(body[pos:pos + 2], 'big')
     pos += 2
-    # MQTT 3.1.1 (proto_level 4) and earlier carry no Properties block; only
-    # decode one for MQTT 5.0.  Lenient decode lets the broker reject an
+    # ProtocolLevel.V3_1_1 and earlier carry no Properties block; only decode
+    # one from ProtocolLevel.V5_0.  Lenient decode lets the broker reject an
     # unsupported protocol level with CONNACK 0x84 rather than crash here.
     properties: dict[str, Any] = {}
-    if proto_level >= 5:
+    if proto_level >= ProtocolLevel.V5_0:
         properties, c = decode_properties(body, pos)
         pos += c
 
@@ -994,7 +1028,7 @@ def _decode_connect(body: bytes, flags: int) -> MQTTConnect:
     will_topic = will_payload = None
     will_properties: dict[str, Any] = {}
     if will_flag:
-        if proto_level >= 5:
+        if proto_level >= ProtocolLevel.V5_0:
             will_properties, c = decode_properties(body, pos)
             pos += c
         will_topic, pos = _decode_utf8(body, pos)
@@ -1005,6 +1039,7 @@ def _decode_connect(body: bytes, flags: int) -> MQTTConnect:
     password = None
     if password_flag:
         password, pos = _decode_binary(body, pos)
+    _require_consumed(body, pos, MQTTPacketType.CONNECT)
 
     return MQTTConnect(
         client_id=client_id, clean_start=clean_start, keep_alive=keep_alive,
@@ -1016,9 +1051,14 @@ def _decode_connect(body: bytes, flags: int) -> MQTTConnect:
 
 
 def _decode_connack(body: bytes) -> MQTTConnack:
+    # §3.2.2 — acknowledge flags, reason code, then a Property Length that is
+    # mandatory in MQTT 5 and so one octet at minimum.
+    if len(body) < 3:
+        raise IncompletePacket('CONNACK is missing its Property Length')
     session_present = bool(body[0] & 0x01)
     reason_code = body[1]
-    properties, _ = decode_properties(body, 2)
+    properties, consumed = decode_properties(body, 2)
+    _require_consumed(body, 2 + consumed, MQTTPacketType.CONNACK)
     return MQTTConnack(session_present=session_present, reason_code=reason_code,
                        properties=properties)
 
@@ -1029,7 +1069,7 @@ def _decode_publish(body: bytes, flags: int) -> MQTTPublish:
     topic, pos = _decode_utf8(body, pos)
     packet_id = None
     if decoded.qos > 0:
-        packet_id = int.from_bytes(body[pos:pos + 2], 'big')
+        packet_id = _decode_packet_id(body, pos, MQTTPacketType.PUBLISH)
         pos += 2
     properties, c = decode_properties(body, pos)
     pos += c
@@ -1040,18 +1080,28 @@ def _decode_publish(body: bytes, flags: int) -> MQTTPublish:
 
 
 def _decode_packet_id_ack(cls: type, body: bytes) -> _PacketIdAck:
-    packet_id = int.from_bytes(body[0:2], 'big')
+    """§3.4-§3.7 — identifier, then an optional reason code and properties.
+
+    A body of exactly two octets is the shortened form (§3.4.2.1) and one of
+    exactly three carries the reason code without a Property Length.
+    """
+    packet_type = cls.packet_type
+    packet_id = _decode_packet_id(body, 0, packet_type)
     reason_code = 0
     properties: dict[str, Any] = {}
+    pos = 2
     if len(body) > 2:
         reason_code = body[2]
+        pos = 3
         if len(body) > 3:
-            properties, _ = decode_properties(body, 3)
+            properties, consumed = decode_properties(body, 3)
+            pos = 3 + consumed
+    _require_consumed(body, pos, packet_type)
     return cls(packet_id=packet_id, reason_code=reason_code, properties=properties)
 
 
 def _decode_subscribe(body: bytes) -> MQTTSubscribe:
-    packet_id = int.from_bytes(body[0:2], 'big')
+    packet_id = _decode_packet_id(body, 0, MQTTPacketType.SUBSCRIBE)
     properties, c = decode_properties(body, 2)
     pos = 2 + c
     subscriptions: list[tuple[str, int]] = []
@@ -1068,53 +1118,70 @@ def _decode_subscribe(body: bytes) -> MQTTSubscribe:
             'retain_as_published': bool(options & SubscriptionOptions.RETAIN_AS_PUBLISHED),
             'retain_handling': (options >> RETAIN_HANDLING_SHIFT) & RETAIN_HANDLING_MASK,
         })
+    # §3.8.3 — at least one Topic Filter / Subscription Options pair.
+    if not subscriptions:
+        raise MQTTDecodeError('SUBSCRIBE has no Topic Filter')
     return MQTTSubscribe(packet_id=packet_id, subscriptions=subscriptions,
                          properties=properties, subscription_options=sub_options)
 
 
 def _decode_suback(body: bytes) -> MQTTSuback:
-    packet_id = int.from_bytes(body[0:2], 'big')
+    packet_id = _decode_packet_id(body, 0, MQTTPacketType.SUBACK)
     properties, c = decode_properties(body, 2)
     pos = 2 + c
     reason_codes = list(body[pos:])
+    # §3.9.3 — at least one Reason Code.
+    if not reason_codes:
+        raise MQTTDecodeError('SUBACK has no Reason Code')
     return MQTTSuback(packet_id=packet_id, reason_codes=reason_codes,
                       properties=properties)
 
 
 def _decode_unsubscribe(body: bytes) -> MQTTUnsubscribe:
-    packet_id = int.from_bytes(body[0:2], 'big')
+    packet_id = _decode_packet_id(body, 0, MQTTPacketType.UNSUBSCRIBE)
     properties, c = decode_properties(body, 2)
     pos = 2 + c
     topics: list[str] = []
     while pos < len(body):
         topic, pos = _decode_utf8(body, pos)
         topics.append(topic)
+    # §3.10.3 — at least one Topic Filter.
+    if not topics:
+        raise MQTTDecodeError('UNSUBSCRIBE has no Topic Filter')
     return MQTTUnsubscribe(packet_id=packet_id, topics=topics,
                            properties=properties)
 
 
 def _decode_unsuback(body: bytes) -> MQTTUnsuback:
-    packet_id = int.from_bytes(body[0:2], 'big')
+    packet_id = _decode_packet_id(body, 0, MQTTPacketType.UNSUBACK)
     properties, c = decode_properties(body, 2)
     pos = 2 + c
     reason_codes = list(body[pos:])
+    # §3.11.3 — at least one Reason Code.
+    if not reason_codes:
+        raise MQTTDecodeError('UNSUBACK has no Reason Code')
     return MQTTUnsuback(packet_id=packet_id, reason_codes=reason_codes,
                         properties=properties)
 
 
-def _decode_reason_and_props(body: bytes) -> tuple[int | None, dict[str, Any]]:
+def _decode_reason_and_props(body: bytes, packet_type: MQTTPacketType
+                             ) -> tuple[int | None, dict[str, Any]]:
+    """§3.14.2.1, §3.15.2.1 — reason code and properties, both optional."""
     if len(body) == 0:
         return None, {}
     reason_code = body[0]
     properties: dict[str, Any] = {}
+    pos = 1
     if len(body) > 1:
-        properties, _ = decode_properties(body, 1)
+        properties, consumed = decode_properties(body, 1)
+        pos = 1 + consumed
+    _require_consumed(body, pos, packet_type)
     return reason_code, properties
 
 
 def _decode_reason_props_msg(cls: type, body: bytes) -> MQTTMessage:
     """DISCONNECT/AUTH share a ``reason_code`` + ``properties`` body shape."""
-    rc, props = _decode_reason_and_props(body)
+    rc, props = _decode_reason_and_props(body, cls.packet_type)
     return cls(reason_code=rc, properties=props)
 
 
@@ -1134,8 +1201,8 @@ _DECODERS: dict[MQTTPacketType, Callable[[bytes, int], MQTTMessage]] = {
     MQTTPacketType.SUBACK:      lambda body, flags: _decode_suback(body),
     MQTTPacketType.UNSUBSCRIBE: lambda body, flags: _decode_unsubscribe(body),
     MQTTPacketType.UNSUBACK:    lambda body, flags: _decode_unsuback(body),
-    MQTTPacketType.PINGREQ:     lambda body, flags: MQTTPingreq(),
-    MQTTPacketType.PINGRESP:    lambda body, flags: MQTTPingresp(),
+    MQTTPacketType.PINGREQ:     lambda body, flags: _decode_without_body(MQTTPingreq, body),
+    MQTTPacketType.PINGRESP:    lambda body, flags: _decode_without_body(MQTTPingresp, body),
     MQTTPacketType.DISCONNECT:  lambda body, flags: _decode_reason_props_msg(MQTTDisconnect, body),
     MQTTPacketType.AUTH:        lambda body, flags: _decode_reason_props_msg(MQTTAuth, body),
 }
@@ -1193,6 +1260,13 @@ def decode_packet(data: bytes) -> MQTTMessage:
         raise MQTTDecodeError('Packet body inconsistent with Remaining Length') from exc
     except IndexError as exc:
         raise MQTTDecodeError('Packet body indexed past its Remaining Length') from exc
+    except MQTTDecodeError:
+        raise
+    except ValueError as exc:
+        # A message class that refuses what the wire grammar cannot catch
+        # (PASSWORD without USERNAME, §3.1.2.9) has still received a Malformed
+        # Packet, and a caller catching this codec's errors catches one type.
+        raise MQTTDecodeError(str(exc)) from exc
 
     msg._set_consumed(total)
     return msg
