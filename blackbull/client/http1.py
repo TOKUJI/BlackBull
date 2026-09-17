@@ -1646,3 +1646,17 @@ class HTTP1Client:
         finally:
             result.elapsed_s = _time.monotonic() - t0
         return result
+
+
+# Unannotated: see tests/unit/test_deprecated_send_bytes_spellings.py::test_the_warning_is_attributed_to_the_callers_line.
+def __getattr__(name):
+    """PEP 562 — ``SendBytes`` is resolved only when a caller names it, so the
+    deprecation warning reaches that caller and ``import *`` stays silent."""
+    if name == 'SendBytes':
+        import warnings  # noqa: PLC0415
+        warnings.warn(
+            f"{__name__}.SendBytes is deprecated; use SendRawBytes.  Removal no "
+            "earlier than 2027-08-19.",
+            DeprecationWarning, stacklevel=2)
+        return SendRawBytes
+    raise AttributeError(f'module {__name__!r} has no attribute {name!r}')

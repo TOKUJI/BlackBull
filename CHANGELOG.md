@@ -82,8 +82,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   did two GOAWAYs that shared a type, flags and stream id but carried
   different error codes.  Comparing a frame with a non-frame returns `False`
   instead of raising `AttributeError`.
-- `blackbull.client.SendBytes` and `blackbull.fault_injection.SendBytes` now emit
-  a `DeprecationWarning`, as the `scenario_h1` spelling already did, and
+- `blackbull.client.SendBytes`, `blackbull.client.http1.SendBytes` and
+  `blackbull.fault_injection.SendBytes` now emit a `DeprecationWarning`, as the
+  `scenario_h1` spelling already did, and
   `blackbull.fault_injection.H2CSendBytes` is deprecated the same way.  None of
   these names is in the `__all__` of `blackbull.client`,
   `blackbull.fault_injection` or `blackbull.fault_injection.scenario_h1`, so

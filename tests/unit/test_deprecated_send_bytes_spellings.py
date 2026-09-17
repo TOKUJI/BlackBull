@@ -30,6 +30,11 @@ def _from_client_import():
     return SendBytes
 
 
+def _from_http1_import():
+    from blackbull.client.http1 import SendBytes
+    return SendBytes
+
+
 def _from_fault_injection_import():
     from blackbull.fault_injection import SendBytes
     return SendBytes
@@ -45,6 +50,10 @@ SEND_BYTES_ACCESSES = [
     pytest.param(lambda: blackbull.client.SendBytes, 'SendRawBytes',
                  id='client-attribute'),
     pytest.param(_from_client_import, 'SendRawBytes', id='client-from-import'),
+    pytest.param(lambda: blackbull.client.http1.SendBytes, 'SendRawBytes',
+                 id='client.http1-attribute'),
+    pytest.param(_from_http1_import, 'SendRawBytes',
+                 id='client.http1-from-import'),
     pytest.param(lambda: blackbull.fault_injection.SendBytes, 'H1CSendRawBytes',
                  id='fault_injection-attribute'),
     pytest.param(_from_fault_injection_import, 'H1CSendRawBytes',
@@ -146,19 +155,6 @@ def test_the_warning_is_attributed_to_the_callers_line(access):
                for w in record), [(w.filename, str(w.message)) for w in record]
 
 
-def test_http1_module_does_not_hand_out_send_bytes_silently():
-    """``blackbull.client.http1`` either lacks the name or warns for it."""
-    with warnings.catch_warnings(record=True) as record:
-        warnings.simplefilter('always')
-        try:
-            blackbull.client.http1.SendBytes
-        except AttributeError:
-            return
-    assert any(issubclass(w.category, DeprecationWarning)
-               and REMOVAL_FLOOR in str(w.message) for w in record), (
-        'blackbull.client.http1.SendBytes returned without a warning')
-
-
 # ---------------------------------------------------------------------------
 # Every deprecated spelling still yields the class it always did
 # ---------------------------------------------------------------------------
@@ -166,6 +162,7 @@ def test_http1_module_does_not_hand_out_send_bytes_silently():
 def test_send_bytes_yields_the_http1_client_step_everywhere():
     h1_step = scenario_h1.SendRawBytes
     assert _quietly(lambda: blackbull.client.SendBytes) is h1_step
+    assert _quietly(lambda: blackbull.client.http1.SendBytes) is h1_step
     assert _quietly(lambda: blackbull.fault_injection.SendBytes) is h1_step
     assert (_quietly(lambda: blackbull.fault_injection.SendBytes)
             is not blackbull.fault_injection.SendRawBytes)
@@ -199,6 +196,7 @@ def test_h2c_send_bytes_is_not_exported():
 
 @pytest.mark.parametrize('module_name', [
     'blackbull.client',
+    'blackbull.client.http1',
     'blackbull.fault_injection',
     'blackbull.fault_injection.scenario_h1',
     'blackbull.fault_injection.scenario_h2_client',
