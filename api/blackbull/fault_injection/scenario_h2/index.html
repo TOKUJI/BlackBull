@@ -2881,6 +2881,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.scenario_h2.require_canonical" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        require_canonical
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.fault_injection.scenario_h2.scenario_from_json" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5708,6 +5719,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.scenario_h2.require_canonical" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        require_canonical
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.fault_injection.scenario_h2.scenario_from_json" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5851,22 +5873,21 @@ driving deliberate misbehaviour toward a server) lives in
 </ul>
 <h4 id="blackbull.fault_injection.scenario_h2--serialisation">Serialisation<a class="headerlink" href="#blackbull.fault_injection.scenario_h2--serialisation" title="Permanent link">&para;</a></h4>
 <p><a class="autorefs autorefs-internal" title="scenario_to_json(scenario)" href="#blackbull.fault_injection.scenario_h2.scenario_to_json"><code>scenario_to_json</code></a> / <a class="autorefs autorefs-internal" title="scenario_from_json(src)" href="#blackbull.fault_injection.scenario_h2.scenario_from_json"><code>scenario_from_json</code></a> round-trip
-through JSON Lines.  Because <a class="autorefs autorefs-internal" title="SendFrame
+through JSON Lines, so a <a class="autorefs autorefs-internal" title="SendFrame
 
 
   
       dataclass
-  " href="#blackbull.fault_injection.scenario_h2.SendFrame"><code>SendFrame</code></a> carries a frame
-object, round-tripping requires the frame to be reconstructable from
-its serialised form — currently SETTINGS, WINDOW_UPDATE, RST_STREAM,
-GOAWAY, PING, and a typed-payload form of HEADERS / DATA.  For ad-hoc
-frames the caller passes through <a class="autorefs autorefs-internal" title="SendRawBytes
+  " href="#blackbull.fault_injection.scenario_h2.SendFrame"><code>SendFrame</code></a> frame has to be
+reconstructable from its serialised form — the classes in
+[<code>ROUND_TRIP_FRAME_CLASSES</code>][blackbull.fault_injection.scenario_h2.ROUND_TRIP_FRAME_CLASSES].  Everything else, a padded DATA
+frame included, goes through <a class="autorefs autorefs-internal" title="SendRawBytes
 
 
   
       dataclass
-  " href="#blackbull.fault_injection.scenario_h2.SendRawBytes"><code>SendRawBytes</code></a>, which is
-always round-trippable.</p>
+  " href="#blackbull.fault_injection.scenario_h2.SendRawBytes"><code>SendRawBytes</code></a>, which always
+round-trips.</p>
 
 
 
@@ -6542,6 +6563,33 @@ entry, and silently matching on a missing key would hide the bug.</p>
 rejected this for <em>that</em> reason", and a frame carrying no error code
 never matches it.  Both HTTP/2 roles share this function, so the key
 is available to the broken server and the broken client alike.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.fault_injection.scenario_h2.require_canonical" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">require_canonical</span><span class="p">(</span><span class="n">frame</span><span class="p">)</span></code>
+
+<a href="#blackbull.fault_injection.scenario_h2.require_canonical" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Refuse a frame the record cannot describe.</p>
+<p>The record carries fields and the executor re-encodes from them, so a
+frame whose type, length, payload or stream identifier they cannot
+reproduce would replay as something other than it is.  Those octets go
+through <a class="autorefs autorefs-internal" title="SendRawBytes
+
+
+  
+      dataclass
+  " href="#blackbull.fault_injection.scenario_h2.SendRawBytes"><code>SendRawBytes</code></a> instead.</p>
 
 
     </div>

@@ -11560,14 +11560,14 @@ line-oriented stream with no out-of-band metadata.</p>
     <div class="doc doc-contents ">
 
         <p>Convert a <code>FrameBase</code> instance to wire bytes.</p>
-<p>Restricted to the frame types this server emits: SETTINGS,
-WINDOW_UPDATE, RST_STREAM, GOAWAY, PING, DATA.  Anything else
-must go through <a class="autorefs autorefs-internal" title="SendRawBytes
+<p>Restricted to the classes in [<code>ROUND_TRIP_FRAME_CLASSES</code>][blackbull.fault_injection.scenario_h2.ROUND_TRIP_FRAME_CLASSES], and to frames
+<a class="autorefs autorefs-internal" title="require_canonical(frame)" href="scenario_h2/#blackbull.fault_injection.scenario_h2.require_canonical"><code>require_canonical</code></a> accepts; anything else goes through
+<a class="autorefs autorefs-internal" title="SendRawBytes
 
 
   
       dataclass
-  " href="scenario_h2/#blackbull.fault_injection.scenario_h2.SendRawBytes"><code>SendRawBytes</code></a> instead.</p>
+  " href="scenario_h2/#blackbull.fault_injection.scenario_h2.SendRawBytes"><code>SendRawBytes</code></a>.</p>
 
 
     </div>
