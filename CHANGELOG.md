@@ -88,7 +88,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `blackbull.fault_injection.H2CSendBytes` is deprecated the same way.  None of
   these names is in the `__all__` of `blackbull.client`,
   `blackbull.fault_injection` or `blackbull.fault_injection.scenario_h1`, so
-  `import *` from those modules no longer binds them.  Use `SendRawBytes` from
+  `import *` from those modules no longer binds them.  `import *` from
+  `blackbull.client.http1` stops binding `SendBytes` too, for a different
+  reason: the name was a module-level alias there, and it is now resolved only
+  when a caller asks for it.  Use `SendRawBytes` from
   `blackbull.client`, and `H1CSendRawBytes` or `H2CSendRawBytes` from
   `blackbull.fault_injection` — a bare `SendRawBytes` there is the HTTP/2
   server step.  Removal no earlier than 2027-08-19.
