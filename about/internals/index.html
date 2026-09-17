@@ -6620,6 +6620,13 @@ bytes and underlying bytes as one unit, including separators that cross that
 boundary.  An overrun remains resident in whichever reader owns those bytes
 and carries bounded evidence in <code>ReadLimitExceeded</code>; the HTTP/1.1 recipient
 turns that evidence into its 400 framing response.</p>
+<p>Two readers refuse line reads outright.  <code>HTTP2WSReader</code> and the HTTP/2
+WebSocket client's reader carry WebSocket frame payload, which has no lines,
+so <code>readuntil</code> and <code>read_head</code> raise <code>NotImplementedError</code> for every call,
+bounded or not.  Their <code>readuntil</code> keeps the full <code>(separator, limit=0)</code>
+signature so that the refusal is what a caller gets: a narrower one would make
+the default <code>read_head</code> fall back to reading one byte at a time and return a
+head.</p>
 <p>The public reader methods choose the policy once: <code>limit &lt;= 0</code> enters an
 unbounded implementation, while a positive value enters a bounded
 implementation whose precondition is that the budget is positive.  Concrete

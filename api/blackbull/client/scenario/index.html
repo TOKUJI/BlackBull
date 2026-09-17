@@ -5675,7 +5675,7 @@
 <p>Groups the HTTP/1.1 client-side scenario model and the
 HTTP/2 server-side fault-injection surface under
 <a class="autorefs autorefs-internal" href="../../fault_injection/#blackbull.fault_injection"><code>blackbull.fault_injection</code></a>.  Import from there going forward::</p>
-<pre><code>from blackbull.fault_injection import Scenario, SendBytes  # ...
+<pre><code>from blackbull.fault_injection import Scenario, H1CSendRawBytes  # ...
 </code></pre>
 <p>This shim re-exports the names that used to live here and will be
 removed no earlier than BlackBull v0.45.0 (and not before

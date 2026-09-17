@@ -2678,17 +2678,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.fault_injection.H2CSendBytes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        H2CSendBytes
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.fault_injection.H2CSendFrame" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3064,17 +3053,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.fault_injection.SendBytes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        SendBytes
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.fault_injection.SendFrame" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3200,6 +3178,17 @@
     <span class="md-ellipsis">
       
         WaitForServerFrame
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.__getattr__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __getattr__
       
     </span>
   </a>
@@ -6689,17 +6678,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.fault_injection.H2CSendBytes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        H2CSendBytes
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.fault_injection.H2CSendFrame" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -7075,17 +7053,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.fault_injection.SendBytes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        SendBytes
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.fault_injection.SendFrame" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -7211,6 +7178,17 @@
     <span class="md-ellipsis">
       
         WaitForServerFrame
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.__getattr__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __getattr__
       
     </span>
   </a>
@@ -8937,59 +8915,6 @@ and leaving nothing to read.</p>
 
 
 
-<h3 id="blackbull.fault_injection.H2CSendBytes" class="doc doc-heading">
-            <code>H2CSendBytes</code>
-
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
-  </span>
-
-<a href="#blackbull.fault_injection.H2CSendBytes" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-
-
-        <p>Push arbitrary bytes at the server.</p>
-<p>The escape hatch, and the same name and fields the HTTP/1.1 client-side
-vocabulary uses.  <code>byte_interval &gt; 0</code> transmits one byte at a time
-with that delay.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
 <h3 id="blackbull.fault_injection.H2CSendFrame" class="doc doc-heading">
             <code>H2CSendFrame</code>
 
@@ -10631,60 +10556,6 @@ object rather than on an exception.</p>
 
 
 
-<h3 id="blackbull.fault_injection.SendBytes" class="doc doc-heading">
-            <code>SendBytes</code>
-
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
-  </span>
-
-<a href="#blackbull.fault_injection.SendBytes" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-
-
-        <p>Push raw bytes onto the connection.</p>
-<p><code>byte_interval &gt; 0</code> transmits one byte at a time with that delay
-between bytes — the primitive slowloris-style stall that lets
-scenarios express trickled headers or trickled bodies without
-dropping to a raw asyncio socket.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
 <h3 id="blackbull.fault_injection.SendFrame" class="doc doc-heading">
             <code>SendFrame</code>
 
@@ -11355,6 +11226,25 @@ written against one server.</p>
 
 </div>
 
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.fault_injection.__getattr__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="fm">__getattr__</span><span class="p">(</span><span class="n">name</span><span class="p">)</span></code>
+
+<a href="#blackbull.fault_injection.__getattr__" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>PEP 562 — a deprecated spelling is resolved only when a caller names it,
+so the warning reaches that caller and <code>import *</code> stays silent.</p>
+
+
+    </div>
+
+</div>
 
 <div class="doc doc-object doc-function">
 

@@ -5826,7 +5826,7 @@ silent server.</p>
 <li><code>SendFrame</code>    → one frame, assembled here rather than by the
   production sender (which is what lets a scenario declare a
   length its payload does not match)</li>
-<li><code>SendBytes</code>    → arbitrary bytes, optionally one at a time</li>
+<li><code>SendRawBytes</code> → arbitrary bytes, optionally one at a time</li>
 <li><code>Sleep</code>        → <code>asyncio.sleep</code></li>
 <li><code>ReadResponse</code> → one frame, or a recorded timeout</li>
 <li><code>Abort</code>        → <code>transport.abort()</code>; walks no further steps</li>
