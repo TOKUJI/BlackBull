@@ -17,10 +17,9 @@ router — but no built-in template engine, auth, or ORM.
 
 ## Operating principles
 
-- Keep any sentence you write about the code — comment, docstring, document —
-  only if, without it, a user would misuse this or a developer would implement
-  it wrong.  Write each fact once, in a name, a signature or a test where one
-  will carry it.
+- Write only what prevents a user misusing this or a developer implementing it
+  wrong.  Say it once, in the fewest words, and in a name, a signature or a
+  test where one will carry it.
 
 - **Type-check before committing.** `just typecheck` catches contract
   violations statically.  → `.claude/skills/type-check/SKILL.md` [private]
