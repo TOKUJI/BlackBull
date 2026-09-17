@@ -40,13 +40,11 @@ import ssl
 import time
 
 from blackbull.protocol.frame import FrameFactory
-from blackbull.protocol.frame_types import (
-    FrameTypes,
-    SettingFrameFlags,
-)
+from blackbull.protocol.frame_types import FrameTypes
 
 from ._transport import half_close
 from .scenario_h2 import (
+    ROUND_TRIP_FRAME_CLASSES,
     HalfClose,
     ExpectClientFrame,
     Abort,
@@ -58,6 +56,7 @@ from .scenario_h2 import (
     Sleep,
     WaitForClientFrame,
     frame_matches,
+    require_canonical,
 )
 
 logger = logging.getLogger(__name__)
@@ -126,29 +125,28 @@ def _encode_frame_header(length: int, type_byte: bytes, flags: int,
 def serialize_frame(frame) -> bytes:
     """Convert a ``FrameBase`` instance to wire bytes.
 
-    Restricted to the frame types this server emits: SETTINGS,
-    WINDOW_UPDATE, RST_STREAM, GOAWAY, PING, DATA.  Anything else
-    must go through [`SendRawBytes`][] instead.
+    Restricted to the classes in [`ROUND_TRIP_FRAME_CLASSES`][], and to frames
+    [`require_canonical`][] accepts; anything else goes through
+    [`SendRawBytes`][].
     """
     name = type(frame).__name__
+    if name not in ROUND_TRIP_FRAME_CLASSES:
+        raise TypeError(
+            f'{name} cannot be serialised by H2FaultServer; use SendRawBytes.'
+        )
+    require_canonical(frame)
     flags = int(getattr(frame, 'flags', 0) or 0)
     stream_id = int(getattr(frame, 'stream_id', 0) or 0)
 
     if name == 'SettingFrame':
-        if flags & int(SettingFrameFlags.ACK):
-            payload = b''
-        else:
-            payload = b''.join(
-                int(setting_id).to_bytes(2, 'big')
-                + int(value).to_bytes(4, 'big')
-                for setting_id, value in getattr(frame, 'settings', [])
-            )
+        # The frame's own payload: an identifier this build does not name
+        # survives only in those octets, and ACK does not blank the body.
+        payload = bytes(getattr(frame, 'payload', b'') or b'')
         return _encode_frame_header(
             len(payload), FrameTypes.SETTINGS.value, flags, 0) + payload
 
     if name == 'WindowUpdate':
-        inc = int(getattr(frame, 'window_size_increment', 0))
-        payload = inc.to_bytes(4, 'big')
+        payload = bytes(getattr(frame, 'payload', b'') or b'')
         return _encode_frame_header(
             len(payload), FrameTypes.WINDOW_UPDATE.value, flags, stream_id
         ) + payload
@@ -162,25 +160,26 @@ def serialize_frame(frame) -> bytes:
     if name == 'GoAway':
         last_stream = int(getattr(frame, 'last_stream_id', 0))
         err_code = int(getattr(frame, 'error_code', 0))
-        payload = last_stream.to_bytes(4, 'big') + err_code.to_bytes(4, 'big')
+        payload = (last_stream.to_bytes(4, 'big')
+                   + err_code.to_bytes(4, 'big')
+                   + bytes(getattr(frame, 'append_data', b'') or b''))
         return _encode_frame_header(
             len(payload), FrameTypes.GOAWAY.value, flags, 0) + payload
 
     if name == 'Ping':
         payload = bytes(getattr(frame, 'payload', b'') or b'')
-        payload = (payload + b'\x00' * 8)[:8]  # PING is always 8 bytes
         return _encode_frame_header(
-            8, FrameTypes.PING.value, flags, 0) + payload
+            len(payload), FrameTypes.PING.value, flags, 0) + payload
 
     if name == 'Data':
-        payload = bytes(getattr(frame, 'data', b'') or b'')
+        payload = bytes(getattr(frame, 'payload', b'') or b'')
         return _encode_frame_header(
             len(payload), FrameTypes.DATA.value, flags, stream_id
         ) + payload
 
-    raise TypeError(
-        f'{name} cannot be serialised by H2FaultServer; use SendRawBytes.'
-    )
+    # Reachable only if a name is added to ROUND_TRIP_FRAME_CLASSES without an
+    # encoder arm here: the declaration and the server disagree.
+    raise TypeError(f'{name!r} is declared serialisable but has no encoder arm')
 
 
 # ---------------------------------------------------------------------------

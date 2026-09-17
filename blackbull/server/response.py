@@ -17,7 +17,7 @@ control frame is a connection or stream error before it is anything else.
 """
 from ..protocol.stream import StreamState
 from ..protocol.frame_types import (
-    ErrorCodes, FrameTypes, PingFrameFlags, SettingFrameFlags,
+    ErrorCodes, FrameTypes, MAX_FRAME_SIZE, PingFrameFlags, SettingFrameFlags,
 )
 import logging
 from ..logger import log
@@ -184,7 +184,7 @@ class SettingsResponder(Responder):
     # RFC 9113 §6.5.2 — SETTINGS parameter ranges.
     _MAX_FLOW_WINDOW = 2**31 - 1           # SETTINGS_INITIAL_WINDOW_SIZE
     _MIN_MAX_FRAME_SIZE = 16384            # SETTINGS_MAX_FRAME_SIZE lower bound
-    _MAX_MAX_FRAME_SIZE = 16777215         # SETTINGS_MAX_FRAME_SIZE upper bound (2^24-1)
+    _MAX_MAX_FRAME_SIZE = MAX_FRAME_SIZE     # SETTINGS_MAX_FRAME_SIZE upper bound
 
     async def respond(self, handler):
         # RFC 9113 §6.5 — SETTINGS MUST be sent on stream 0.

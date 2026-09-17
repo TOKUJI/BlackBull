@@ -74,9 +74,9 @@ def test_scenario_h2_round_trips_through_json():
 
 
 def test_scenario_h2_serialises_settings_frame():
-    f = ft.SettingFrame(length=0, type_=ft.FrameTypes.SETTINGS,
-                        flags=0, stream_id=0)
-    f.settings = [(0x4, 0)]
+    f = ft.SettingFrame(length=6, type_=ft.FrameTypes.SETTINGS,
+                        flags=0, stream_id=0,
+                        data=b'\x00\x04\x00\x00\x00\x00')
     data = serialize_frame(f)
     # 9-byte header (length=6, type=4, flags=0, stream_id=0) + payload (6 bytes).
     assert data[:3] == b'\x00\x00\x06'
