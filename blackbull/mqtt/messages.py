@@ -552,8 +552,8 @@ class MQTTConnect(MQTTMessage):
     client_id: str
     clean_start: bool
     keep_alive: int
-    # ``.value``, not the member: the field is annotated int, and it reaches
-    # repr and asdict unchanged.
+    # int, not the enum: a level this enum does not name must still decode
+    # (§3.1.2.2), and ``.value`` keeps repr and asdict at the wire number.
     proto_level: int = ProtocolLevel.V5_0.value
     username: str | None = None
     password: bytes | str | None = None
