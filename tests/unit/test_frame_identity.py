@@ -1,12 +1,4 @@
-"""HTTP/2 frame objects compare by identity and are hashable.
-
-Two frames built separately are unequal whatever their payloads.  Comparing
-type, flags and stream id instead calls a GOAWAY pair differing only in error
-code equal; comparing the payload too — enough for that pair — still calls two
-PINGs carrying one payload equal.  Identity separates both, answers ``False``
-against a non-frame rather than raising ``AttributeError``, and agrees with
-``hash``.
-"""
+"""Two HTTP/2 frames are equal only when they are the same object, and are hashable."""
 import pytest
 
 from blackbull.protocol.frame import FrameFactory

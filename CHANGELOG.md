@@ -76,12 +76,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   WebSocket frame payload, which has no lines.  `read_head` with a positive
   limit previously returned a head through a byte-at-a-time fallback.  The
   HTTP/2 WebSocket client's reader behaves the same way.
-- HTTP/2 frame objects now compare by identity, and are hashable.  Two
-  separately built frames are unequal even when their bytes are identical: two
-  PINGs carrying the same payload compared equal before and no longer do, as
-  did two GOAWAYs that shared a type, flags and stream id but carried
-  different error codes.  Comparing a frame with a non-frame returns `False`
-  instead of raising `AttributeError`.
+- HTTP/2 frame objects now compare by identity, and are hashable.  Two frames
+  built separately are never equal.
 - `blackbull.client.SendBytes`, `blackbull.client.http1.SendBytes` and
   `blackbull.fault_injection.SendBytes` now emit a `DeprecationWarning`, as the
   `scenario_h1` spelling already did, and
