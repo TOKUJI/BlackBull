@@ -169,6 +169,11 @@ async def _wait_for(predicate, timeout: float = 5.0) -> None:
         await asyncio.sleep(0.01)
 
 
+def _raising_start(self) -> None:
+    """Stand in for ``Thread.start`` when the OS refuses another thread."""
+    raise RuntimeError("can't start new thread")
+
+
 def _held_compressor(started: threading.Event, release: threading.Event,
                      calls: list[str]):
     """A compressor that blocks inside the executor until *release* is set.
@@ -296,6 +301,54 @@ class TestThePermitFollowsTheWorkNotTheAwait:
             await _wait_for(lambda: mw._executor_inflight == 0)
             await queued
             assert len(calls) == 1, 'the queued job never ran'
+        finally:
+            release.set()
+            executor.shutdown(wait=True)
+
+    @pytest.mark.asyncio
+    async def test_a_submit_failure_returns_the_permit_once(self, monkeypatch):
+        """The pool queues the work item and *then* fails to start a thread, so
+        the job can still run: the submit-failure path and the worker both reach
+        the permit, and only one may return it — otherwise the cap goes
+        negative and admits work over itself."""
+        loop = asyncio.get_running_loop()
+        executor = ThreadPoolExecutor(max_workers=4)
+        loop.set_default_executor(executor)
+        started = [threading.Event(), threading.Event()]
+        release = threading.Event()
+        orphan_ran = threading.Event()
+        try:
+            def blocker(index):
+                def run() -> None:
+                    started[index].set()
+                    release.wait(10)
+                return run
+
+            # Two workers busy, two never started: the next submit has to start
+            # a thread, which is what fails below.
+            busy = [loop.run_in_executor(None, blocker(i)) for i in range(2)]
+            for event in started:
+                await _wait_for(event.is_set)
+
+            mw = Compression(executor_max_inflight=4, executor_threshold=1)
+
+            def compressor(body: bytes) -> bytes:
+                orphan_ran.set()
+                return gzip.compress(body)
+
+            mw._available['gzip'] = compressor
+            monkeypatch.setattr(threading.Thread, 'start', _raising_start)
+            with pytest.raises(RuntimeError):
+                await mw._compress(compressor, _BIG_BODY)
+            assert mw._executor_inflight == 0
+
+            monkeypatch.undo()
+            release.set()
+            await asyncio.gather(*busy)
+            # Drain the pool, so the orphan's own release has run.
+            executor.shutdown(wait=True)
+            assert orphan_ran.is_set(), 'the queued item never ran'
+            assert mw._executor_inflight == 0, 'the queued item returned a second permit'
         finally:
             release.set()
             executor.shutdown(wait=True)

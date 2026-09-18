@@ -152,6 +152,26 @@ def _consume_outcome(future) -> None:
         future.exception()
 
 
+class _Permit:
+    """One offload's permit, returned once.
+
+    Two paths return it — the worker's ``finally``, and the submitting
+    coroutine when the executor refuses the job — and only one of them can.
+    """
+
+    __slots__ = ('_middleware', '_returned')
+
+    def __init__(self, middleware: 'Compression') -> None:
+        self._middleware = middleware
+        self._returned = False
+
+    def release(self) -> None:
+        with self._middleware._executor_lock:
+            if not self._returned:
+                self._returned = True
+                self._middleware._executor_inflight -= 1
+
+
 # ---------------------------------------------------------------------------
 # Middleware
 # ---------------------------------------------------------------------------
@@ -251,8 +271,11 @@ class Compression:
         common small-body path).  Returns ``None`` when the executor is at
         cap (the caller serves the body uncompressed).  Shared by the native
         complete-response path and the ``_dict_event`` lane so the
-        backpressure behaviour is defined once.
+        backpressure behaviour is defined once.  The cap bounds work, not time:
+        bytes are the caller's threshold, and a wedged offload holds only its
+        own permit.
         """
+        loop = asyncio.get_running_loop()
         # Backpressure: at cap, serve uncompressed rather than queue — an
         # unbounded executor backlog collapsed the HttpArena `static` profile
         # to 0 r/s under burst load.
@@ -269,21 +292,20 @@ class Compression:
                         protocol='compression')
             return None
 
+        permit = _Permit(self)
+
         def run() -> bytes:
             try:
                 return compressor(body)
             finally:
-                # The permit follows the work, not the await: a cancelled
-                # request leaves this thread running.
-                with self._executor_lock:
-                    self._executor_inflight -= 1
+                # The permit follows the work: a cancelled request leaves this
+                # thread running.
+                permit.release()
 
-        loop = asyncio.get_running_loop()
         try:
             future = loop.run_in_executor(None, run)
         except BaseException:
-            with self._executor_lock:
-                self._executor_inflight -= 1
+            permit.release()
             raise
         future.add_done_callback(_consume_outcome)
         # A cancelled request must not drop the submitted work: this thread is
