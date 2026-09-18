@@ -18,16 +18,13 @@ several of these genuinely open.  What is asserted is that each cell can
 be *driven and judged at all* with someone else on the other end.
 
 The two broken-**client** cells need a third-party *server*, and that is
-nginx, in a container built on demand from `nginx_h2c/` — once per context,
-by `test_the_reference_image_is_prepared_for_this_context`, which the cells
-below then only start.  One listener speaks HTTP/1.1 and h2c, so both cells
-point at the same peer.  Docker is required for that half only; it skips
-cleanly without one, the way `test_http1_differential.py` does — no CLI, or a
-daemon that cannot be reached, is that same "no docker here" box.  A daemon
-that *is* reachable but cannot build the peer is not: the image is then
-missing rather than absent by design, and the preparation test says so instead
-of skipping.  The broken-**server** cells (which need third-party *clients*,
-not servers) run either way.
+nginx, in a container built on demand from `nginx_h2c/`.  One listener
+speaks HTTP/1.1 and h2c, so both cells point at the same peer.  Docker is
+required for that half only; it skips cleanly without one, the way
+`test_http1_differential.py` does — except that a daemon which answers but
+cannot build the peer fails, because that image is missing rather than absent
+by design.  The broken-**server** cells (which need third-party *clients*, not
+servers) run either way.
 """
 from __future__ import annotations
 
@@ -86,30 +83,22 @@ def _mirror_app():
 
 _NGINX_CONTEXT = Path(__file__).parent / 'nginx_h2c'
 
-#: Building nginx is not a unit-test-speed operation — a pull, or on a slow
-#: daemon even a fully cached build (112 s on the WSL2 box that filed #309),
-#: runs into the minutes, against a suite default of 30 s.
+#: Building nginx is not unit-test speed: on the box that filed #309 even a
+#: cached build took 112 s, against a suite default of 30 s.
 _NGINX_BUILD_BUDGET = 900
 
-#: A peer test uses the prepared server — start the container, publish and
-#: probe its port, run the case, stop it — and under `-n auto` may first have
-#: to wait for the preparation test's build in another worker.  Giving up on
-#: that wait early is how a slow-but-working build would become seventeen
-#: green skips, so the wait is allowed the build's own budget.
+#: A peer test uses the prepared server and, under `-n auto`, waits for the
+#: preparation test's build in another worker — so it is allowed the build's
+#: budget: an early deadline there is seventeen green skips.
 _NGINX_PEER_BUDGET = _NGINX_BUILD_BUDGET + 60
 
 
 def _nginx_context_digest(ctx: Path = _NGINX_CONTEXT) -> str:
     """A tag that changes when, and only when, the build context changes.
 
-    The tag used to be `latest`, so an edited `nginx.conf` kept running
-    whatever image happened to carry it and the "built rather than mounted"
-    promise below quietly stopped holding.  Hashing the context makes the tag
-    the answer to "is this image built from these files?", which is what lets
-    the build be skipped when it is.
-
-    Length-prefixed so no rename can forge another context's stream, and mode
-    is in because `COPY` carries it into the image.
+    `latest` was the tag before, so an edited `nginx.conf` kept running
+    whatever image carried it.  Length-prefixed so a rename cannot forge
+    another context's stream, and mode is in because `COPY` carries it.
     """
     digest = hashlib.sha256()
     for path in sorted(ctx.rglob('*')):
@@ -124,16 +113,13 @@ def _nginx_context_digest(ctx: Path = _NGINX_CONTEXT) -> str:
 #: One image per context, so the cost is paid once per change to `nginx_h2c/`.
 _NGINX_IMAGE = f'bb-fault-nginx:{_nginx_context_digest()}'
 
-#: This run's identity: xdist gives every worker the same uid, and a process
-#: that is a run of its own needs one that cannot repeat — a pid is reused by
-#: the next run, which would let that run's peers read a stale record as theirs.
+#: This run's identity: xdist gives every worker the same uid, and a run of its
+#: own needs one that cannot repeat, so the pid carries a random token.
 _RUN_ID = (os.environ.get('PYTEST_XDIST_TESTRUNUID')
            or f'{os.getpid()}-{uuid.uuid4().hex[:8]}')
 
-#: This run's record of that failure: in the temp dir because it has to outlive
-#: the process that wrote it, named per user because that dir is shared, and
-#: named per run because a record only means something to the run that wrote it
-#: — with the run in the name, no run can read or delete another's.
+#: This run's record of a failed build, for the peer tests: per user because the
+#: temp dir is shared, per run because a record only means something to its run.
 _RECORD_OWNER = os.environ.get('USER') or os.environ.get('USERNAME') or 'user'
 _NGINX_BUILD_FAILED = (Path(tempfile.gettempdir())
                        / f'{_NGINX_IMAGE.replace(":", "-")}-'
@@ -155,11 +141,7 @@ def _nginx_image_present() -> bool:
 
 
 def _recorded_build_failure() -> str | None:
-    """This run's recorded build failure, if the preparation test wrote one.
-
-    The name carries the run, so this can only ever be this run's record; one
-    the preparation test has not written yet is simply not there.
-    """
+    """This run's recorded build failure, if its preparation test wrote one."""
     try:
         return _NGINX_BUILD_FAILED.read_text()
     except FileNotFoundError:
@@ -174,14 +156,9 @@ def _record_build_failure(reason: str) -> None:
 def _prepare_nginx_image() -> None:
     """Build this context's image unless the daemon already has it.
 
-    A build that fails or overruns **fails this test**: the third-party peer
-    these cells need cannot be produced, and a skip would hide that behind a
-    green run — this is not the "no docker here" box `_require_docker` skips
-    for, it is a daemon that cannot deliver what the module exists to measure.
-    The reason is recorded first, so the peer tests skip with it and point here
-    instead of waiting out a build that is not coming: one red item and
-    seventeen explained skips is what a box that cannot build nginx should
-    look like.
+    A build that fails or overruns fails this test: the peer these cells need
+    cannot be produced, and a skip would hide that behind a green run.  The
+    reason is recorded first, so the peer tests skip with it and point here.
     """
     if _nginx_image_present():
         return
@@ -191,8 +168,7 @@ def _prepare_nginx_image() -> None:
             ['docker', 'build', '-q', '-t', _NGINX_IMAGE, str(_NGINX_CONTEXT)],
             capture_output=True, timeout=_NGINX_BUILD_BUDGET - 60)
     except subprocess.TimeoutExpired as exc:
-        # The captured output is where the daemon says what it was doing; the
-        # exception's own str() does not carry it.
+        # str(TimeoutExpired) does not carry the captured output.
         detail = (exc.stderr or b'').decode(errors='replace').strip()[:200]
         reason = f'the build did not finish within {_NGINX_BUILD_BUDGET - 60} s'
         if detail:
@@ -213,12 +189,8 @@ def _preparer_name() -> str:
 def _require_nginx_image(selected: set[str]) -> None:
     """Wait for the image the preparation test builds, then skip without it.
 
-    Only that test builds, so a peer test's budget pays for using the server
-    and never for making one.  Waiting is bounded by the build's own budget
-    because under `-n auto` that build is running in another worker; a failure
-    it recorded, or a run that did not select it, ends the wait at once — a
-    peer test that outwaited the build would be the seventeen green skips this
-    change exists to prevent.
+    Only that test builds, so a peer's budget never pays for one.  A failure it
+    recorded, or a run that did not select it, ends the wait at once.
     """
     if _nginx_image_present():
         return
@@ -239,13 +211,7 @@ def _require_nginx_image(selected: set[str]) -> None:
 
 
 async def test_the_nginx_tag_follows_the_context(tmp_path):
-    """The tag has to change with the context, or a stale image runs.
-
-    `latest` was the tag before this, so an edited `nginx.conf` kept running
-    whatever image carried the name.  Path-independent as well as content-
-    sensitive: the same files under another path are the same context, which
-    is why the digest is not of the path.
-    """
+    """The tag changes with the content and the mode, but not with the path."""
     ctx = tmp_path / 'ctx'
     ctx.mkdir()
     (ctx / 'Dockerfile').write_text('FROM nginx:1.27-alpine\n')
@@ -261,17 +227,12 @@ async def test_the_nginx_tag_follows_the_context(tmp_path):
     (same / 'nginx.conf').write_text('events { worker_connections 4; }\n')
     assert _nginx_context_digest(same) == _nginx_context_digest(ctx)
 
-    # `COPY` carries the mode into the image, so the mode is context too.
     (ctx / 'nginx.conf').chmod(0o400)
     assert _nginx_context_digest(ctx) != _nginx_context_digest(same)
 
 
 async def test_a_present_nginx_image_is_not_rebuilt(monkeypatch):
-    """The build is paid once per context, not once per run.
-
-    Asked of the daemon rather than assumed: `inspect` is the only command a
-    run that finds its image already there may issue.
-    """
+    """The build is paid once per context, not once per run."""
     calls = []
 
     def fake_run(argv, **kwargs):
@@ -302,13 +263,7 @@ async def test_an_absent_nginx_image_is_built_for_this_context(monkeypatch):
 
 async def test_a_failed_build_fails_here_and_skips_the_peers(monkeypatch,
                                                            tmp_path):
-    """A build failure is one red item, not seventeen and not a skip.
-
-    The third-party peer these cells exist for cannot be produced, so the test
-    that builds reports that; a skip would hide it behind a green run.  The
-    record then keeps the peer tests from waiting the build's budget for an
-    image that is not coming.
-    """
+    """A build failure is one red item, not seventeen and not a skip."""
     failed = tmp_path / 'failed'
 
     def fake_run(argv, **kwargs):
@@ -328,12 +283,7 @@ async def test_a_failed_build_fails_here_and_skips_the_peers(monkeypatch,
 
 
 async def test_a_build_that_overruns_fails_and_records(monkeypatch, tmp_path):
-    """An overrun is a failure too, and the peers still skip at once.
-
-    "Slower than we allowed" is not evidence the peer is unavailable — the
-    overrun may be minutes from finishing — so the test reports it rather than
-    skipping; what the peers must not do is wait again for the same build.
-    """
+    """An overrun fails too, with the daemon's last words in the reason."""
     failed = tmp_path / 'failed'
 
     def fake_run(argv, **kwargs):
@@ -355,14 +305,7 @@ async def test_a_build_that_overruns_fails_and_records(monkeypatch, tmp_path):
 
 async def test_a_missing_nginx_image_is_waited_for_not_rebuilt(monkeypatch,
                                                               tmp_path):
-    """A peer test may not turn its own budget into a build.
-
-    The build belongs to the preparation test; under `-n auto` a second worker
-    reaching this point while that one builds has to wait for it rather than
-    build the same context again beside it — and has to wait long enough for
-    that build to land, which is what keeps a slow build from becoming
-    seventeen skips.
-    """
+    """A peer test waits for the preparation test's build, and never builds."""
     calls = []
     clock = [0.0]
     state = {'present_after': None, 'polls': 0}
@@ -382,15 +325,14 @@ async def test_a_missing_nginx_image_is_waited_for_not_rebuilt(monkeypatch,
                         lambda s: clock.__setitem__(0, clock[0] + s))
     monkeypatch.setitem(globals(), '_NGINX_BUILD_FAILED', tmp_path / 'failed')
 
-    # The build lands: the wait ends, and nothing builds a second image.
+    # The build lands: the wait ends, and nothing builds beside it.
     state['present_after'] = 2
     _require_nginx_image({_preparer_name()})
     assert state['polls'] == 3, state
     assert [c[1] for c in calls] == ['image'] * 3, calls
     assert clock[0] < _NGINX_BUILD_BUDGET, clock
 
-    # The build never lands: skip at the build's own budget, not before, and
-    # still without building beside it.
+    # The build never lands: skip at the build's own budget, and build nothing.
     state.update(present_after=None, polls=0)
     calls.clear()
     with pytest.raises(pytest.skip.Exception):
@@ -403,10 +345,8 @@ async def test_a_peer_test_with_no_build_to_wait_for_skips_at_once(
         monkeypatch, tmp_path):
     """Neither wait is owed when no build can produce the image.
 
-    A cell run on its own (`-k`, a single nodeid) does not select the
-    preparation test, and a box whose build failed will not produce one on the
-    next poll either.  Both must say so immediately: a stale image tag used to
-    build here, so "wait, something is coming" is the assumption to test.
+    A cell run on its own does not select the preparation test, and this run's
+    record of a failed build means no image is coming.
     """
     calls = []
     clock = [0.0]
@@ -437,13 +377,7 @@ async def test_a_peer_test_with_no_build_to_wait_for_skips_at_once(
 
 async def test_the_failure_record_is_scoped_to_this_run(monkeypatch,
                                                        tmp_path):
-    """A record belongs to the run whose name it carries.
-
-    Two runs of this context by one user share a temp dir: with the run in the
-    name, neither can read the other's failure as its own nor delete it, which
-    would leave that run's peers waiting out the budget for an image that has
-    already failed.
-    """
+    """A record belongs to the run whose name it carries, and to no other."""
     assert _RUN_ID in _NGINX_BUILD_FAILED.name
 
     monkeypatch.setitem(globals(), '_NGINX_BUILD_FAILED', tmp_path / 'failed')
@@ -455,12 +389,7 @@ async def test_the_failure_record_is_scoped_to_this_run(monkeypatch,
 
 @pytest.mark.timeout(_NGINX_BUILD_BUDGET)
 async def test_the_reference_image_is_prepared_for_this_context():
-    """Pay for the build here, once, under a budget that admits it is a build.
-
-    The peer tests below only *use* the image.  Before this split the build
-    ran inside whichever cell happened to touch the fixture first, under that
-    cell's unit-test-sized budget, so a slow daemon turned all seventeen red.
-    """
+    """Pay for the build here, once, under a budget that admits it is a build."""
     _require_docker()
     _prepare_nginx_image()
     assert _nginx_image_present(), (
@@ -483,12 +412,9 @@ def nginx_peer(request):
     on some hosts, and a fixture that dies there takes the cell's only
     third-party server coverage with it.
 
-    The image is prepared by the test above, which is the only thing here that
-    builds: this fixture waits for it and skips if it never arrives, so a cell
-    run on its own neither pays for a build nor races another worker's.  That
-    test is defined above the cells because pytest runs a module in file order,
-    which is what makes "the build is already running" a fact a peer can act
-    on rather than a guess.
+    The image is prepared by the test above; this fixture waits for it and
+    skips if it never arrives, so a cell run on its own pays for no build and
+    races no other worker.
     """
     _require_docker()
     _require_nginx_image({item.name for item in request.session.items})
