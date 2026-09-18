@@ -13,14 +13,15 @@ import pytest
 from blackbull.actor import Actor
 from blackbull.mqtt.broker import (
     BrokerActor,
-    Attach, ClientSubscribe, ClientPublish, ClientPubrec, Detach, Send, Close,
+    Attach, ClientSubscribe, ClientUnsubscribe, ClientPublish, ClientPubrec,
+    Detach, Send, Close,
     _new_broker_session,
 )
 from blackbull.mqtt.connection import MQTT5Actor, PacketFramer
 from blackbull.mqtt.messages import (
     MQTTConnect, MQTTPublish, MQTTPuback, MQTTPubrec, MQTTPubrel,
-    MQTTSubscribe, MQTTSuback, MQTTDisconnect, MQTTDecodeError,
-    ReasonCode, decode_packet,
+    MQTTSubscribe, MQTTSuback, MQTTUnsubscribe, MQTTUnsuback, MQTTDisconnect,
+    MQTTDecodeError, ReasonCode, decode_packet,
 )
 from blackbull.server.protocol_registry import ProtocolContext
 from blackbull.server.recipient import AbstractReader
@@ -56,6 +57,12 @@ async def _subscribe(broker, conn, packet_id, subs, options=None):
     await broker._handle(ClientSubscribe(
         subscribe=MQTTSubscribe(packet_id=packet_id, subscriptions=subs,
                                 subscription_options=options),
+        sender=conn))
+
+
+async def _unsubscribe(broker, conn, packet_id, topics):
+    await broker._handle(ClientUnsubscribe(
+        unsubscribe=MQTTUnsubscribe(packet_id=packet_id, topics=topics),
         sender=conn))
 
 
@@ -408,3 +415,99 @@ class TestKeepAliveTimeout:
             # never self-terminates on keep-alive.
             await asyncio.wait_for(conn.read_loop(_SilentReader()), timeout=0.3)
         assert conn._done is False
+
+
+# ===========================================================================
+# UNSUBSCRIBE refuses what SUBSCRIBE refuses
+# ===========================================================================
+
+class TestUnsubscribeFilterValidation:
+    """An invalid filter is answered 0x8F and removes nothing; a valid one is
+    answered Success, and removed if the session held it."""
+
+    async def test_invalid_filter_is_refused_and_removes_nothing(self):
+        broker, conn = BrokerActor(), RecordingConn()
+        await _attach(broker, conn)
+        await _subscribe(broker, conn, 1, [('ok/1', 0), ('ok/2', 1)])
+        conn.outbox.clear()
+
+        # '#' not terminal — invalid (§4.7.1.2), as for SUBSCRIBE.
+        await _unsubscribe(broker, conn, 2, ['a/#/b'])
+
+        unsuback = [p for p in conn.packets() if isinstance(p, MQTTUnsuback)][0]
+        assert unsuback.reason_codes == [ReasonCode.TOPIC_FILTER_INVALID]
+        assert [s[0] for s in broker._sessions['c1']['subscriptions']] \
+            == ['ok/1', 'ok/2']
+
+    async def test_empty_filter_is_refused(self):
+        broker, conn = BrokerActor(), RecordingConn()
+        await _attach(broker, conn)
+        await _subscribe(broker, conn, 1, [('ok/1', 0)])
+        conn.outbox.clear()
+
+        # §4.7.3 — a Topic Filter is at least one character.
+        await _unsubscribe(broker, conn, 2, [''])
+
+        unsuback = [p for p in conn.packets() if isinstance(p, MQTTUnsuback)][0]
+        assert unsuback.reason_codes == [ReasonCode.TOPIC_FILTER_INVALID]
+        subs = [s[0] for s in broker._sessions['c1']['subscriptions']]
+        assert subs == ['ok/1']
+
+    async def test_malformed_share_filter_is_refused(self):
+        broker, conn = BrokerActor(), RecordingConn()
+        await _attach(broker, conn)
+        await _subscribe(broker, conn, 1, [('$share/g/t', 0)])
+        conn.outbox.clear()
+
+        # '$share/g' names a group and no topic — the malformed form §4.8.2
+        # describes, which SUBSCRIBE already refuses.
+        await _unsubscribe(broker, conn, 2, ['$share/g'])
+
+        unsuback = [p for p in conn.packets() if isinstance(p, MQTTUnsuback)][0]
+        assert unsuback.reason_codes == [ReasonCode.TOPIC_FILTER_INVALID]
+        assert [s[0] for s in broker._sessions['c1']['subscriptions']] \
+            == ['$share/g/t']
+
+    async def test_mixed_valid_and_invalid_keeps_ordering(self):
+        broker, conn = BrokerActor(), RecordingConn()
+        await _attach(broker, conn)
+        await _subscribe(broker, conn, 1, [('ok/1', 0), ('ok/2', 0)])
+        conn.outbox.clear()
+
+        await _unsubscribe(broker, conn, 2, ['ok/1', 'bad/+x', 'ok/2'])
+
+        unsuback = [p for p in conn.packets() if isinstance(p, MQTTUnsuback)][0]
+        assert unsuback.reason_codes == [
+            ReasonCode.SUCCESS, ReasonCode.TOPIC_FILTER_INVALID,
+            ReasonCode.SUCCESS]
+        # The valid entries took effect; the invalid one changed nothing.
+        assert broker._sessions['c1']['subscriptions'] == []
+
+    async def test_a_valid_filter_not_subscribed_is_still_success(self):
+        """§3.11 — the positive control: refusing invalid filters must not
+        turn "there was nothing to remove" into an error."""
+        broker, conn = BrokerActor(), RecordingConn()
+        await _attach(broker, conn)
+        await _unsubscribe(broker, conn, 2, ['never/subscribed'])
+        unsuback = [p for p in conn.packets() if isinstance(p, MQTTUnsuback)][0]
+        assert unsuback.reason_codes == [ReasonCode.SUCCESS]
+
+    async def test_the_verdict_agrees_with_subscribe_for_the_same_filters(self):
+        """One validity rule, two packets: 0x8F where SUBSCRIBE says so."""
+        filters = [('ok/1', 0), ('a/#/b', 0), ('', 0), ('$share/g', 0),
+                   ('a/#', 0), ('bad/+x', 0)]
+        broker, conn = BrokerActor(), RecordingConn()
+        await _attach(broker, conn)
+
+        await _subscribe(broker, conn, 1, filters)
+        suback = [p for p in conn.packets() if isinstance(p, MQTTSuback)][0]
+        conn.outbox.clear()
+
+        await _unsubscribe(broker, conn, 2, [f for f, _ in filters])
+        unsuback = [p for p in conn.packets() if isinstance(p, MQTTUnsuback)][0]
+
+        invalid = ReasonCode.TOPIC_FILTER_INVALID
+        assert [c == invalid for c in suback.reason_codes] == \
+            [c == invalid for c in unsuback.reason_codes]
+        assert [c == invalid for c in unsuback.reason_codes] == \
+            [False, True, True, True, False, True]
