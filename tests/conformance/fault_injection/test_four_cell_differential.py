@@ -21,14 +21,21 @@ The two broken-**client** cells need a third-party *server*, and that is
 nginx, in a container built on demand from `nginx_h2c/`.  One listener
 speaks HTTP/1.1 and h2c, so both cells point at the same peer.  Docker is
 required for that half only; it skips cleanly without one, the way
-`test_http1_differential.py` does, and the broken-**server** cells (which
-need third-party *clients*, not servers) run either way.
+`test_http1_differential.py` does — except that a daemon which answers but
+cannot build the peer fails, because that image is missing rather than absent
+by design.  The broken-**server** cells (which need third-party *clients*, not
+servers) run either way.
 """
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import os
 import shutil
 import subprocess
+import tempfile
+import time
+import uuid
 from pathlib import Path
 
 import pytest
@@ -74,8 +81,323 @@ def _mirror_app():
 # The third-party server: nginx, speaking HTTP/1.1 and h2c on one port
 # ---------------------------------------------------------------------------
 
+_NGINX_CONTEXT = Path(__file__).parent / 'nginx_h2c'
+
+#: Building nginx is not unit-test speed: on the box that filed #309 even a
+#: cached build took 112 s, against a suite default of 30 s.
+_NGINX_BUILD_BUDGET = 900
+
+#: A peer test uses the prepared server and, under `-n auto`, waits for the
+#: preparation test's build in another worker — so it is allowed the build's
+#: budget: an early deadline there is seventeen green skips.
+_NGINX_PEER_BUDGET = _NGINX_BUILD_BUDGET + 60
+
+
+def _nginx_context_digest(ctx: Path = _NGINX_CONTEXT) -> str:
+    """A tag that changes when, and only when, the build context changes.
+
+    `latest` was the tag before, so an edited `nginx.conf` kept running
+    whatever image carried it.  Length-prefixed so a rename cannot forge
+    another context's stream, and mode is in because `COPY` carries it.
+    """
+    digest = hashlib.sha256()
+    for path in sorted(ctx.rglob('*')):
+        if path.is_file():
+            fields = (path.relative_to(ctx).as_posix().encode(),
+                      f'{path.stat().st_mode & 0o777:o}'.encode(),
+                      path.read_bytes())
+            digest.update(b''.join(f'{len(f)}:'.encode() + f for f in fields))
+    return digest.hexdigest()[:12]
+
+
+#: One image per context, so the cost is paid once per change to `nginx_h2c/`.
+_NGINX_IMAGE = f'bb-fault-nginx:{_nginx_context_digest()}'
+
+#: This run's identity: xdist gives every worker the same uid, and a run of its
+#: own needs one that cannot repeat, so the pid carries a random token.
+_RUN_ID = (os.environ.get('PYTEST_XDIST_TESTRUNUID')
+           or f'{os.getpid()}-{uuid.uuid4().hex[:8]}')
+
+#: This run's record of a failed build, for the peer tests: per user because the
+#: temp dir is shared, per run because a record only means something to its run.
+_RECORD_OWNER = os.environ.get('USER') or os.environ.get('USERNAME') or 'user'
+_NGINX_BUILD_FAILED = (Path(tempfile.gettempdir())
+                       / f'{_NGINX_IMAGE.replace(":", "-")}-'
+                         f'{_RECORD_OWNER}-{_RUN_ID}.failed')
+
+
+def _require_docker() -> None:
+    """Without a CLI or a daemon there is no third-party server to reach."""
+    if shutil.which('docker') is None:
+        pytest.skip('docker CLI not installed')
+    if subprocess.run(['docker', 'info'], capture_output=True,
+                      timeout=60).returncode != 0:
+        pytest.skip('docker daemon unreachable')
+
+
+def _nginx_image_present() -> bool:
+    return subprocess.run(['docker', 'image', 'inspect', _NGINX_IMAGE],
+                          capture_output=True, timeout=60).returncode == 0
+
+
+def _recorded_build_failure() -> str | None:
+    """This run's recorded build failure, if its preparation test wrote one."""
+    try:
+        return _NGINX_BUILD_FAILED.read_text()
+    except FileNotFoundError:
+        return None
+
+
+def _record_build_failure(reason: str) -> None:
+    """Leave this run's reason behind, for the peer tests to skip with."""
+    _NGINX_BUILD_FAILED.write_text(reason)
+
+
+def _prepare_nginx_image() -> None:
+    """Build this context's image unless the daemon already has it.
+
+    A build that fails or overruns fails this test: the peer these cells need
+    cannot be produced, and a skip would hide that behind a green run.  The
+    reason is recorded first, so the peer tests skip with it and point here.
+    """
+    if _nginx_image_present():
+        return
+    # Under this test's mark, so the daemon's own timeout reports first.
+    try:
+        build = subprocess.run(
+            ['docker', 'build', '-q', '-t', _NGINX_IMAGE, str(_NGINX_CONTEXT)],
+            capture_output=True, timeout=_NGINX_BUILD_BUDGET - 60)
+    except subprocess.TimeoutExpired as exc:
+        # str(TimeoutExpired) does not carry the captured output.
+        detail = (exc.stderr or b'').decode(errors='replace').strip()[:200]
+        reason = f'the build did not finish within {_NGINX_BUILD_BUDGET - 60} s'
+        if detail:
+            reason = f'{reason}: {detail}'
+        _record_build_failure(reason)
+        pytest.fail(reason)
+    if build.returncode != 0:
+        reason = build.stderr.decode(errors='replace')[:200].strip()
+        _record_build_failure(reason)
+        pytest.fail(f'could not build the reference image: {reason}')
+
+
+def _preparer_name() -> str:
+    """The preparation test's name, resolved late so a rename cannot drift."""
+    return test_the_reference_image_is_prepared_for_this_context.__name__
+
+
+def _require_nginx_image(selected: set[str]) -> None:
+    """Wait for the image the preparation test builds, then skip without it.
+
+    Only that test builds, so a peer's budget never pays for one.  A failure it
+    recorded, or a run that did not select it, ends the wait at once.
+    """
+    if _nginx_image_present():
+        return
+    preparer = _preparer_name()
+    if preparer not in selected:
+        pytest.skip(f'{_NGINX_IMAGE} is absent and this run did not select '
+                    f'{preparer}, which builds it')
+    deadline = time.monotonic() + _NGINX_BUILD_BUDGET
+    while not _nginx_image_present():
+        recorded = _recorded_build_failure()
+        if recorded is not None:
+            pytest.skip(f'could not build the reference image: {recorded}; '
+                        f'see {preparer}')
+        if time.monotonic() >= deadline:
+            pytest.skip(f'{_NGINX_IMAGE} was not built within '
+                        f'{_NGINX_BUILD_BUDGET} s; see {preparer}')
+        time.sleep(2)
+
+
+async def test_the_nginx_tag_follows_the_context(tmp_path):
+    """The tag changes with the content and the mode, but not with the path."""
+    ctx = tmp_path / 'ctx'
+    ctx.mkdir()
+    (ctx / 'Dockerfile').write_text('FROM nginx:1.27-alpine\n')
+    (ctx / 'nginx.conf').write_text('events {}\n')
+    before = _nginx_context_digest(ctx)
+
+    (ctx / 'nginx.conf').write_text('events { worker_connections 4; }\n')
+    assert _nginx_context_digest(ctx) != before
+
+    same = tmp_path / 'elsewhere'
+    same.mkdir()
+    (same / 'Dockerfile').write_text('FROM nginx:1.27-alpine\n')
+    (same / 'nginx.conf').write_text('events { worker_connections 4; }\n')
+    assert _nginx_context_digest(same) == _nginx_context_digest(ctx)
+
+    (ctx / 'nginx.conf').chmod(0o400)
+    assert _nginx_context_digest(ctx) != _nginx_context_digest(same)
+
+
+async def test_a_present_nginx_image_is_not_rebuilt(monkeypatch):
+    """The build is paid once per context, not once per run."""
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(subprocess, 'run', fake_run)
+    _prepare_nginx_image()
+
+    assert [c[:3] for c in calls] == [['docker', 'image', 'inspect']], calls
+
+
+async def test_an_absent_nginx_image_is_built_for_this_context(monkeypatch):
+    """A miss builds this context's tag, from this context's directory."""
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, int(argv[1] == 'image'))
+
+    monkeypatch.setattr(subprocess, 'run', fake_run)
+    _prepare_nginx_image()
+
+    assert calls[-1][:2] == ['docker', 'build'], calls
+    assert calls[-1][3:5] == ['-t', _NGINX_IMAGE], calls
+    assert calls[-1][5] == str(_NGINX_CONTEXT), calls
+
+
+async def test_a_failed_build_fails_here_and_skips_the_peers(monkeypatch,
+                                                           tmp_path):
+    """A build failure is one red item, not seventeen and not a skip."""
+    failed = tmp_path / 'failed'
+
+    def fake_run(argv, **kwargs):
+        stderr = b'' if argv[1] == 'image' else b'no such host'
+        return subprocess.CompletedProcess(argv, 1, b'', stderr)
+
+    monkeypatch.setattr(subprocess, 'run', fake_run)
+    monkeypatch.setitem(globals(), '_NGINX_BUILD_FAILED', failed)
+
+    with pytest.raises(pytest.fail.Exception, match='no such host'):
+        _prepare_nginx_image()
+    assert 'no such host' in failed.read_text()
+
+    # And the record is what ends a peer test's wait, message included.
+    with pytest.raises(pytest.skip.Exception, match='no such host'):
+        _require_nginx_image({_preparer_name()})
+
+
+async def test_a_build_that_overruns_fails_and_records(monkeypatch, tmp_path):
+    """An overrun fails too, with the daemon's last words in the reason."""
+    failed = tmp_path / 'failed'
+
+    def fake_run(argv, **kwargs):
+        if argv[1] == 'image':
+            return subprocess.CompletedProcess(argv, 1)
+        raise subprocess.TimeoutExpired(argv, kwargs.get('timeout'), b'',
+                                        b'pulling nginx:1.27-alpine')
+
+    monkeypatch.setattr(subprocess, 'run', fake_run)
+    monkeypatch.setitem(globals(), '_NGINX_BUILD_FAILED', failed)
+
+    with pytest.raises(pytest.fail.Exception, match='did not finish'):
+        _prepare_nginx_image()
+    assert 'pulling nginx:1.27-alpine' in failed.read_text()
+
+    with pytest.raises(pytest.skip.Exception, match='pulling nginx'):
+        _require_nginx_image({_preparer_name()})
+
+
+async def test_a_missing_nginx_image_is_waited_for_not_rebuilt(monkeypatch,
+                                                              tmp_path):
+    """A peer test waits for the preparation test's build, and never builds."""
+    calls = []
+    clock = [0.0]
+    state = {'present_after': None, 'polls': 0}
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        if argv[1] != 'image':
+            return subprocess.CompletedProcess(argv, 0)
+        state['polls'] += 1
+        after = state['present_after']
+        present = after is not None and state['polls'] > after
+        return subprocess.CompletedProcess(argv, int(not present))
+
+    monkeypatch.setattr(subprocess, 'run', fake_run)
+    monkeypatch.setattr(time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(time, 'sleep',
+                        lambda s: clock.__setitem__(0, clock[0] + s))
+    monkeypatch.setitem(globals(), '_NGINX_BUILD_FAILED', tmp_path / 'failed')
+
+    # The build lands: the wait ends, and nothing builds beside it.
+    state['present_after'] = 2
+    _require_nginx_image({_preparer_name()})
+    assert state['polls'] == 3, state
+    assert [c[1] for c in calls] == ['image'] * 3, calls
+    assert clock[0] < _NGINX_BUILD_BUDGET, clock
+
+    # The build never lands: skip at the build's own budget, and build nothing.
+    state.update(present_after=None, polls=0)
+    calls.clear()
+    with pytest.raises(pytest.skip.Exception):
+        _require_nginx_image({_preparer_name()})
+    assert clock[0] >= _NGINX_BUILD_BUDGET, clock
+    assert [c[1] for c in calls] == ['image'] * state['polls'], calls
+
+
+async def test_a_peer_test_with_no_build_to_wait_for_skips_at_once(
+        monkeypatch, tmp_path):
+    """Neither wait is owed when no build can produce the image.
+
+    A cell run on its own does not select the preparation test, and this run's
+    record of a failed build means no image is coming.
+    """
+    calls = []
+    clock = [0.0]
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 1)
+
+    monkeypatch.setattr(subprocess, 'run', fake_run)
+    monkeypatch.setattr(time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(time, 'sleep',
+                        lambda s: clock.__setitem__(0, clock[0] + s))
+
+    preparer = test_the_reference_image_is_prepared_for_this_context.__name__
+    with pytest.raises(pytest.skip.Exception, match=preparer):
+        _require_nginx_image(set())
+
+    failed = tmp_path / 'failed'
+    failed.write_text('could not resolve the registry')
+    monkeypatch.setitem(globals(), '_NGINX_BUILD_FAILED', failed)
+    with pytest.raises(pytest.skip.Exception, match='could not resolve'):
+        _require_nginx_image({_preparer_name()})
+
+    assert clock[0] == 0.0, clock
+    assert len(calls) == 3, calls
+    assert [c[1] for c in calls].count('build') == 0, calls
+
+
+async def test_the_failure_record_is_scoped_to_this_run(monkeypatch,
+                                                       tmp_path):
+    """A record belongs to the run whose name it carries, and to no other."""
+    assert _RUN_ID in _NGINX_BUILD_FAILED.name
+
+    monkeypatch.setitem(globals(), '_NGINX_BUILD_FAILED', tmp_path / 'failed')
+    assert _recorded_build_failure() is None
+
+    (tmp_path / 'failed').write_text('registry was down last night')
+    assert _recorded_build_failure() == 'registry was down last night'
+
+
+@pytest.mark.timeout(_NGINX_BUILD_BUDGET)
+async def test_the_reference_image_is_prepared_for_this_context():
+    """Pay for the build here, once, under a budget that admits it is a build."""
+    _require_docker()
+    _prepare_nginx_image()
+    assert _nginx_image_present(), (
+        f'{_NGINX_IMAGE} missing after a build that reported success')
+
+
 @pytest.fixture(scope='module')
-def nginx_peer():
+def nginx_peer(request):
     """A reference server for the two broken-client cells.
 
     Driven through the `docker` **CLI** rather than the Python SDK.  The
@@ -89,20 +411,13 @@ def nginx_peer():
     Built rather than volume-mounted: a bind mount of a single file fails
     on some hosts, and a fixture that dies there takes the cell's only
     third-party server coverage with it.
-    """
-    if shutil.which('docker') is None:
-        pytest.skip('docker CLI not installed')
-    if subprocess.run(['docker', 'info'], capture_output=True,
-                      timeout=60).returncode != 0:
-        pytest.skip('docker daemon unreachable')
 
-    ctx = Path(__file__).parent / 'nginx_h2c'
-    build = subprocess.run(
-        ['docker', 'build', '-q', '-t', _NGINX_IMAGE, str(ctx)],
-        capture_output=True, timeout=300)
-    if build.returncode != 0:
-        pytest.skip(f'could not build the reference image: '
-                    f'{build.stderr.decode(errors="replace")[:200]}')
+    The image is prepared by the test above; this fixture waits for it and
+    skips if it never arrives, so a cell run on its own pays for no build and
+    races no other worker.
+    """
+    _require_docker()
+    _require_nginx_image({item.name for item in request.session.items})
 
     run = subprocess.run(
         ['docker', 'run', '-d', '--rm', '-P', _NGINX_IMAGE],
@@ -125,11 +440,6 @@ def nginx_peer():
                        capture_output=True, timeout=120)
 
 
-#: Tagged rather than anonymous so repeated local runs reuse the layer
-#: cache instead of rebuilding nginx every module.
-_NGINX_IMAGE = 'bb-fault-nginx:latest'
-
-
 def _wait_for_port(host: str, port: int, timeout: float = 30.0) -> None:
     """Wait until nginx answers, not merely until something accepts.
 
@@ -148,7 +458,6 @@ def _wait_for_port(host: str, port: int, timeout: float = 30.0) -> None:
     a worker is accepting and answering.
     """
     import socket
-    import time
 
     deadline = time.monotonic() + timeout
     last = None
@@ -238,6 +547,7 @@ class TestTheBrokenClientCellsReachARealServer:
         'nul_in_header_value', 'body_shorter_than_declared',
         'duplicate_transfer_encoding', 'oversized_method_token',
     ])
+    @pytest.mark.timeout(_NGINX_PEER_BUDGET)
     async def test_cell_a_case_reaches_nginx_too(self, nginx_peer, case_name):
         """The same named case, delivered to a server that is not ours.
 
@@ -258,6 +568,7 @@ class TestTheBrokenClientCellsReachARealServer:
             f'{case_name} produced neither a response nor a failure from '
             f'nginx — the scenario did not reach it')
 
+    @pytest.mark.timeout(_NGINX_PEER_BUDGET)
     async def test_cell_d_observes_a_verdict_from_nginx(self, nginx_peer):
         """The verdict step, against a server with no BlackBull in it.
 
@@ -291,6 +602,7 @@ class TestTheBrokenClientCellsReachARealServer:
         'rapid_reset_burst', 'ping_flood', 'settings_flood',
         'unknown_frame_type', 'settings_ack_with_payload',
     ])
+    @pytest.mark.timeout(_NGINX_PEER_BUDGET)
     async def test_cell_d_case_reaches_nginx(self, nginx_peer, case_name):
         """Every self-terminating cell-D case, delivered to nginx."""
         from blackbull.client.http2 import HTTP2Client
