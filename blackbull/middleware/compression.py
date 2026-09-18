@@ -16,6 +16,7 @@ same four as arguments.
 import asyncio
 import functools
 import gzip
+import threading
 from collections.abc import Callable
 from ..asgi import ASGIEvent
 from ..connection import Connection
@@ -144,6 +145,33 @@ def _stamp_vary_if_compressible(header: list[tuple[bytes, bytes]]) -> bool:
     return True
 
 
+def _consume_outcome(future) -> None:
+    """Read an offload's outcome, so an abandoned failure is not logged as an
+    unretrieved exception."""
+    if not future.cancelled():
+        future.exception()
+
+
+class _Permit:
+    """One offload's permit, returned once.
+
+    Two paths return it — the worker's ``finally``, and the submitting
+    coroutine when the executor refuses the job — and only one of them can.
+    """
+
+    __slots__ = ('_middleware', '_returned')
+
+    def __init__(self, middleware: 'Compression') -> None:
+        self._middleware = middleware
+        self._returned = False
+
+    def release(self) -> None:
+        with self._middleware._executor_lock:
+            if not self._returned:
+                self._returned = True
+                self._middleware._executor_inflight -= 1
+
+
 # ---------------------------------------------------------------------------
 # Middleware
 # ---------------------------------------------------------------------------
@@ -179,6 +207,8 @@ class Compression:
         # (the collapse mode a static-asset workload triggers).
         self._executor_max_inflight = executor_max_inflight
         self._executor_inflight: int = 0
+        # The offload's own thread returns the permit, so the counter is shared.
+        self._executor_lock = threading.Lock()
         self._available = _detect_codecs(brotli_quality=brotli_quality)
         # ``Accept-Encoding`` header bytes → selection.  Real-world traffic
         # has very few distinct Accept-Encoding values (browsers send a
@@ -241,27 +271,46 @@ class Compression:
         common small-body path).  Returns ``None`` when the executor is at
         cap (the caller serves the body uncompressed).  Shared by the native
         complete-response path and the ``_dict_event`` lane so the
-        backpressure behaviour is defined once.
+        backpressure behaviour is defined once.  The cap bounds work, not time:
+        bytes are the caller's threshold, and a wedged offload holds only its
+        own permit.
         """
-        # Backpressure: if the executor already has _executor_max_inflight
-        # compressions running, skip this one and serve uncompressed rather
-        # than queueing.  Prevents the unbounded executor backlog that caused
-        # the HttpArena `static` profile to collapse to 0 r/s on run 2 under
-        # c=1024.  Counter increment / decrement is safe without a lock —
-        # asyncio is single-threaded.
-        if (self._executor_max_inflight > 0
-                and self._executor_inflight >= self._executor_max_inflight):
+        loop = asyncio.get_running_loop()
+        # Backpressure: at cap, serve uncompressed rather than queue — an
+        # unbounded executor backlog collapsed the HttpArena `static` profile
+        # to 0 r/s under burst load.
+        with self._executor_lock:
+            inflight = self._executor_inflight
+            capped = (self._executor_max_inflight > 0
+                      and inflight >= self._executor_max_inflight)
+            if not capped:
+                self._executor_inflight = inflight + 1
+        if capped:
             log_cap_hit('compression_max_inflight',
-                        requested=self._executor_inflight + 1,
+                        requested=inflight + 1,
                         limit=self._executor_max_inflight,
                         protocol='compression')
             return None
-        self._executor_inflight += 1
+
+        permit = _Permit(self)
+
+        def run() -> bytes:
+            try:
+                return compressor(body)
+            finally:
+                # The permit follows the work: a cancelled request leaves this
+                # thread running.
+                permit.release()
+
         try:
-            loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(None, compressor, body)
-        finally:
-            self._executor_inflight -= 1
+            future = loop.run_in_executor(None, run)
+        except BaseException:
+            permit.release()
+            raise
+        future.add_done_callback(_consume_outcome)
+        # A cancelled request must not drop the submitted work: this thread is
+        # the only thing that returns its permit.
+        return await asyncio.shield(future)
 
     @staticmethod
     def _vary_ensuring_send(send):
