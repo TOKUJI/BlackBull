@@ -27,6 +27,11 @@ Example:
 203.0.113.42 "POST /tasks HTTP/1.1" 201 87 3ms
 ```
 
+Request-derived values are escaped for the message line so one request is one
+line: non-printables and spaces become `\uXXXX`, and `"`/`\` are
+backslash-escaped.  The [named fields](#named-fields-in-the-logrecord) below
+keep the raw values.
+
 Enable to stdout the same way as any Python logger:
 
 ```python
@@ -68,7 +73,7 @@ available in a custom `logging.Formatter` format string:
 | `%(response_bytes)d` | `int` | `87` |
 | `%(duration_ms).1f` | `float` | `3.4` |
 
-Custom format:
+Custom format (the fields are raw; `%(message)s` is the escaped line):
 
 ```python
 fmt = ('%(asctime)s %(client_ip)s "%(method)s %(path)s" '
