@@ -423,7 +423,7 @@ class TestKeepAliveTimeout:
 
 class TestUnsubscribeFilterValidation:
     """An invalid filter is answered 0x8F and removes nothing; a valid one is
-    answered Success and is removed."""
+    answered Success, and removed if the session held it."""
 
     async def test_invalid_filter_is_refused_and_removes_nothing(self):
         broker, conn = BrokerActor(), RecordingConn()

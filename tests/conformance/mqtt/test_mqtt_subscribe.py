@@ -214,12 +214,12 @@ class TestSubackPacket:
         (0x80, 'Unspecified error'),
         (0x83, 'Implementation specific error'),
         (0x87, 'Not authorized'),
-        (0x8F, 'Quota exceeded'),
-        (0x90, 'Topic Filter invalid'),
-        (0x91, 'Payload format invalid'),  # §3.9.2.1 — doesn't apply but code is reserved
-        (0x97, 'Shared Subscriptions not supported'),
-        (0x98, 'Subscription Identifiers not supported'),
-        (0x99, 'Wildcard Subscriptions not supported'),
+        (0x8F, 'Topic Filter invalid'),
+        (0x91, 'Packet Identifier in use'),
+        (0x97, 'Quota exceeded'),
+        (0x9E, 'Shared Subscriptions not supported'),
+        (0xA1, 'Subscription Identifiers not supported'),
+        (0xA2, 'Wildcard Subscriptions not supported'),
     ])
     def test_suback_reason_codes(self, reason_code, meaning):
         """§3.9.2.1 — All valid SUBACK reason codes are encodable."""
@@ -330,7 +330,8 @@ class TestUnsubackPacket:
         0x80,  # Unspecified error
         0x83,  # Implementation specific error
         0x87,  # Not authorized
-        0x90,  # Topic Filter invalid
+        0x8F,  # Topic Filter invalid
+        0x91,  # Packet Identifier in use
     ])
     def test_unsuback_reason_codes(self, reason_code):
         """§3.11.2.1 — All valid UNSUBACK reason codes."""
