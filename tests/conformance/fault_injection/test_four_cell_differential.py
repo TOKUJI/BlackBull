@@ -22,9 +22,10 @@ nginx, in a container built on demand from `nginx_h2c/` — once per context,
 by `test_the_reference_image_is_prepared_for_this_context`, which the cells
 below then only start.  One listener speaks HTTP/1.1 and h2c, so both cells
 point at the same peer.  Docker is required for that half only; it skips
-cleanly without one, the way `test_http1_differential.py` does, and the
-broken-**server** cells (which need third-party *clients*, not servers) run
-either way.
+cleanly without one, the way `test_http1_differential.py` does — but a box
+that has docker and cannot build the peer *fails*, because there the coverage
+is missing rather than absent by design.  The broken-**server** cells (which
+need third-party *clients*, not servers) run either way.
 """
 from __future__ import annotations
 
@@ -163,26 +164,37 @@ def _recorded_build_failure() -> str | None:
         return None
 
 
+def _record_build_failure(reason: str) -> None:
+    """Leave this run's reason behind, for the peer tests to skip with."""
+    _NGINX_BUILD_FAILED.write_text(reason)
+
+
 def _prepare_nginx_image() -> None:
     """Build this context's image unless the daemon already has it.
 
-    A build that *fails* leaves the box without a third-party peer, the same
-    as a missing CLI, so it skips — and records why, so a peer test skips with
-    it instead of waiting out a build that is not coming.  A build that
-    overruns its budget does not skip: at 112 s for a cached build, "slower
-    than we allowed" is not evidence the peer is unavailable, and a skip there
-    is coverage disappearing where nobody looks for it.
+    A build that fails or overruns **fails this test**: the third-party peer
+    these cells need cannot be produced, and a skip would hide that behind a
+    green run — the coverage is not "unavailable by design" the way it is on a
+    box with no docker at all.  The reason is recorded first, so the peer tests
+    skip with it instead of waiting out a build that is not coming; one red
+    item and seventeen explained skips is what a box that cannot build nginx
+    should look like.
     """
     if _nginx_image_present():
         return
     # Under this test's mark, so the daemon's own timeout reports first.
-    build = subprocess.run(
-        ['docker', 'build', '-q', '-t', _NGINX_IMAGE, str(_NGINX_CONTEXT)],
-        capture_output=True, timeout=_NGINX_BUILD_BUDGET - 60)
+    try:
+        build = subprocess.run(
+            ['docker', 'build', '-q', '-t', _NGINX_IMAGE, str(_NGINX_CONTEXT)],
+            capture_output=True, timeout=_NGINX_BUILD_BUDGET - 60)
+    except subprocess.TimeoutExpired:
+        _record_build_failure(f'the build did not finish within '
+                              f'{_NGINX_BUILD_BUDGET - 60} s')
+        raise
     if build.returncode != 0:
-        reason = build.stderr.decode(errors='replace')[:200]
-        _NGINX_BUILD_FAILED.write_text(reason)
-        pytest.skip(f'could not build the reference image: {reason}')
+        reason = build.stderr.decode(errors='replace')[:200].strip()
+        _record_build_failure(reason)
+        pytest.fail(f'could not build the reference image: {reason}')
 
 
 def _preparer_name() -> str:
@@ -210,7 +222,8 @@ def _require_nginx_image(selected: set[str]) -> None:
     while not _nginx_image_present():
         recorded = _recorded_build_failure()
         if recorded is not None:
-            pytest.skip(f'could not build the reference image: {recorded}')
+            pytest.skip(f'could not build the reference image: {recorded}; '
+                        f'see {preparer}')
         if time.monotonic() >= deadline:
             pytest.skip(f'{_NGINX_IMAGE} was not built within '
                         f'{_NGINX_BUILD_BUDGET} s; see {preparer}')
@@ -279,13 +292,14 @@ async def test_an_absent_nginx_image_is_built_for_this_context(monkeypatch):
     assert calls[-1][5] == str(_NGINX_CONTEXT), calls
 
 
-async def test_a_failed_build_records_why_for_the_peer_tests(monkeypatch,
-                                                            tmp_path):
-    """A peer test must not wait the build's budget for an image that failed.
+async def test_a_failed_build_fails_here_and_skips_the_peers(monkeypatch,
+                                                           tmp_path):
+    """A build failure is one red item, not seventeen and not a skip.
 
-    The preparation test is the only thing that builds, so without this record
-    every peer worker would poll for the whole budget before skipping, which
-    reads as a hang rather than as "no third-party server here".
+    The third-party peer these cells exist for cannot be produced, so the test
+    that builds reports that; a skip would hide it behind a green run.  The
+    record then keeps the peer tests from waiting the build's budget for an
+    image that is not coming.
     """
     failed = tmp_path / 'failed'
 
@@ -296,12 +310,37 @@ async def test_a_failed_build_records_why_for_the_peer_tests(monkeypatch,
     monkeypatch.setattr(subprocess, 'run', fake_run)
     monkeypatch.setitem(globals(), '_NGINX_BUILD_FAILED', failed)
 
-    with pytest.raises(pytest.skip.Exception):
+    with pytest.raises(pytest.fail.Exception, match='no such host'):
         _prepare_nginx_image()
     assert 'no such host' in failed.read_text()
 
     # And the record is what ends a peer test's wait, message included.
     with pytest.raises(pytest.skip.Exception, match='no such host'):
+        _require_nginx_image({_preparer_name()})
+
+
+async def test_a_build_that_overruns_fails_and_records(monkeypatch, tmp_path):
+    """An overrun is a failure too, and the peers still skip at once.
+
+    "Slower than we allowed" is not evidence the peer is unavailable — the
+    overrun may be minutes from finishing — so the test reports it rather than
+    skipping; what the peers must not do is wait again for the same build.
+    """
+    failed = tmp_path / 'failed'
+
+    def fake_run(argv, **kwargs):
+        if argv[1] == 'image':
+            return subprocess.CompletedProcess(argv, 1)
+        raise subprocess.TimeoutExpired(argv, kwargs.get('timeout'))
+
+    monkeypatch.setattr(subprocess, 'run', fake_run)
+    monkeypatch.setitem(globals(), '_NGINX_BUILD_FAILED', failed)
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        _prepare_nginx_image()
+    assert 'did not finish' in failed.read_text()
+
+    with pytest.raises(pytest.skip.Exception, match='did not finish'):
         _require_nginx_image({_preparer_name()})
 
 
