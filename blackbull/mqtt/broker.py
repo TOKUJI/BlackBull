@@ -788,14 +788,20 @@ class BrokerActor(Actor):
         session = self._session_for(conn)
         if session is None:
             return
-        topics = set(unsubscribe.topics)
+        # §3.10.4 / §4.7.3 — the same per-entry check as SUBSCRIBE (§3.8.3):
+        # an invalid filter is answered 0x8F and removes nothing.  The codec
+        # bounds the field's length; what a legal filter *is* stays one rule,
+        # in `validate_topic_filter`.
+        accepted = {t for t in unsubscribe.topics if _valid_filter(t)}
         session['subscriptions'] = [
-            s for s in session['subscriptions'] if s[0] not in topics
+            s for s in session['subscriptions'] if s[0] not in accepted
         ]
-        self._prune_share_rotation(topics)
+        self._prune_share_rotation(accepted)
         await conn.send(Send(packet=MQTTUnsuback(
             packet_id=unsubscribe.packet_id,
-            reason_codes=[ReasonCode.SUCCESS] * len(unsubscribe.topics))))
+            reason_codes=[ReasonCode.SUCCESS if t in accepted
+                          else ReasonCode.TOPIC_FILTER_INVALID
+                          for t in unsubscribe.topics])))
 
     async def _on_publish(self, conn, publish) -> None:
         # §3.3.1-4 — both QoS bits set is a Malformed Packet.  The codec
