@@ -22,10 +22,12 @@ nginx, in a container built on demand from `nginx_h2c/` — once per context,
 by `test_the_reference_image_is_prepared_for_this_context`, which the cells
 below then only start.  One listener speaks HTTP/1.1 and h2c, so both cells
 point at the same peer.  Docker is required for that half only; it skips
-cleanly without one, the way `test_http1_differential.py` does — but a box
-that has docker and cannot build the peer *fails*, because there the coverage
-is missing rather than absent by design.  The broken-**server** cells (which
-need third-party *clients*, not servers) run either way.
+cleanly without one, the way `test_http1_differential.py` does — no CLI, or a
+daemon that cannot be reached, is that same "no docker here" box.  A daemon
+that *is* reachable but cannot build the peer is not: the image is then
+missing rather than absent by design, and the preparation test says so instead
+of skipping.  The broken-**server** cells (which need third-party *clients*,
+not servers) run either way.
 """
 from __future__ import annotations
 
@@ -174,11 +176,12 @@ def _prepare_nginx_image() -> None:
 
     A build that fails or overruns **fails this test**: the third-party peer
     these cells need cannot be produced, and a skip would hide that behind a
-    green run — the coverage is not "unavailable by design" the way it is on a
-    box with no docker at all.  The reason is recorded first, so the peer tests
-    skip with it instead of waiting out a build that is not coming; one red
-    item and seventeen explained skips is what a box that cannot build nginx
-    should look like.
+    green run — this is not the "no docker here" box `_require_docker` skips
+    for, it is a daemon that cannot deliver what the module exists to measure.
+    The reason is recorded first, so the peer tests skip with it and point here
+    instead of waiting out a build that is not coming: one red item and
+    seventeen explained skips is what a box that cannot build nginx should
+    look like.
     """
     if _nginx_image_present():
         return
@@ -187,10 +190,15 @@ def _prepare_nginx_image() -> None:
         build = subprocess.run(
             ['docker', 'build', '-q', '-t', _NGINX_IMAGE, str(_NGINX_CONTEXT)],
             capture_output=True, timeout=_NGINX_BUILD_BUDGET - 60)
-    except subprocess.TimeoutExpired:
-        _record_build_failure(f'the build did not finish within '
-                              f'{_NGINX_BUILD_BUDGET - 60} s')
-        raise
+    except subprocess.TimeoutExpired as exc:
+        # The captured output is where the daemon says what it was doing; the
+        # exception's own str() does not carry it.
+        detail = (exc.stderr or b'').decode(errors='replace').strip()[:200]
+        reason = f'the build did not finish within {_NGINX_BUILD_BUDGET - 60} s'
+        if detail:
+            reason = f'{reason}: {detail}'
+        _record_build_failure(reason)
+        pytest.fail(reason)
     if build.returncode != 0:
         reason = build.stderr.decode(errors='replace')[:200].strip()
         _record_build_failure(reason)
@@ -331,16 +339,17 @@ async def test_a_build_that_overruns_fails_and_records(monkeypatch, tmp_path):
     def fake_run(argv, **kwargs):
         if argv[1] == 'image':
             return subprocess.CompletedProcess(argv, 1)
-        raise subprocess.TimeoutExpired(argv, kwargs.get('timeout'))
+        raise subprocess.TimeoutExpired(argv, kwargs.get('timeout'), b'',
+                                        b'pulling nginx:1.27-alpine')
 
     monkeypatch.setattr(subprocess, 'run', fake_run)
     monkeypatch.setitem(globals(), '_NGINX_BUILD_FAILED', failed)
 
-    with pytest.raises(subprocess.TimeoutExpired):
+    with pytest.raises(pytest.fail.Exception, match='did not finish'):
         _prepare_nginx_image()
-    assert 'did not finish' in failed.read_text()
+    assert 'pulling nginx:1.27-alpine' in failed.read_text()
 
-    with pytest.raises(pytest.skip.Exception, match='did not finish'):
+    with pytest.raises(pytest.skip.Exception, match='pulling nginx'):
         _require_nginx_image({_preparer_name()})
 
 
