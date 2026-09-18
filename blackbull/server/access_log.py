@@ -22,6 +22,19 @@ _access_logger = logging.getLogger('blackbull.access')
 PHASE_TRACE: bool = os.environ.get('BB_PHASE_TRACE', '0') == '1'
 
 
+def _escape(value: str) -> str:
+    """Escape one request-derived value so it cannot end the line or a field."""
+    out = []
+    for ch in value:
+        if ch in '"\\':
+            out.append('\\' + ch)
+        elif ch.isprintable() and ch != ' ':
+            out.append(ch)
+        else:
+            out.append(f'\\u{ord(ch):04x}')
+    return ''.join(out)
+
+
 def open_record(conn, aggregator: 'EventAggregator | None',
                 loop_start: 'tuple[float, float] | None' = None,
                 ) -> "AccessLogRecord | None":
@@ -258,8 +271,9 @@ class AccessLogRecord:
 
     def format(self) -> str:
         if self.close_code is not None:
-            return (f'{self.client_ip} '
-                    f'"{self.method} {self.path} WS/{self.http_version}" '
+            return (f'{_escape(self.client_ip)} '
+                    f'"{_escape(self.method)} {_escape(self.path)} '
+                    f'WS/{_escape(self.http_version)}" '
                     f'101 close={self.close_code} '
                     f'{self.duration_ms():.0f}ms')
         # Phase tracing needs sub-millisecond resolution and header-level
@@ -267,9 +281,10 @@ class AccessLogRecord:
         # the deltas and the captured headers.
         if PHASE_TRACE and self.phases:
             def _h(b: bytes) -> str:
-                return b.decode('ascii', errors='replace') if b else '-'
-            return (f'{self.client_ip} '
-                    f'"{self.method} {self.path} HTTP/{self.http_version}" '
+                return _escape(b.decode('ascii', errors='replace')) if b else '-'
+            return (f'{_escape(self.client_ip)} '
+                    f'"{_escape(self.method)} {_escape(self.path)} '
+                    f'HTTP/{_escape(self.http_version)}" '
                     f'{self.status} {self.response_bytes} '
                     f'{self.duration_ms():.3f}ms  '
                     f'req[ae={_h(self.req_accept_encoding)} '
@@ -277,8 +292,9 @@ class AccessLogRecord:
                     f'resp[ct={_h(self.resp_content_type)} '
                     f'ce={_h(self.resp_content_encoding)}] '
                     f'[{self.phase_summary()}]')
-        return (f'{self.client_ip} '
-                f'"{self.method} {self.path} HTTP/{self.http_version}" '
+        return (f'{_escape(self.client_ip)} '
+                f'"{_escape(self.method)} {_escape(self.path)} '
+                f'HTTP/{_escape(self.http_version)}" '
                 f'{self.status} {self.response_bytes} '
                 f'{self.duration_ms():.0f}ms')
 
