@@ -53,7 +53,7 @@ Serialisation
 [`scenario_to_json`][] / [`scenario_from_json`][] round-trip
 through JSON Lines, so a [`SendFrame`][] frame has to be
 reconstructable from its serialised form — the classes in
-[`ROUND_TRIP_FRAME_CLASSES`][].  Everything else, a padded DATA
+`ROUND_TRIP_FRAME_CLASSES`.  Everything else, a padded DATA
 frame included, goes through [`SendRawBytes`][], which always
 round-trips.
 """
@@ -564,7 +564,7 @@ def require_canonical(frame: Frame) -> None:
 def _frame_to_dict(frame: Frame) -> dict:
     """Serialise a frame to a round-trippable dict.
 
-    Restricted to [`ROUND_TRIP_FRAME_CLASSES`][]; a frame
+    Restricted to `ROUND_TRIP_FRAME_CLASSES`; a frame
     [`require_canonical`][] refuses, and anything outside the list, goes
     through [`SendRawBytes`][] instead.
     """

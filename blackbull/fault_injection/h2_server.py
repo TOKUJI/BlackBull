@@ -125,7 +125,7 @@ def _encode_frame_header(length: int, type_byte: bytes, flags: int,
 def serialize_frame(frame) -> bytes:
     """Convert a ``FrameBase`` instance to wire bytes.
 
-    Restricted to the classes in [`ROUND_TRIP_FRAME_CLASSES`][], and to frames
+    Restricted to the classes in `ROUND_TRIP_FRAME_CLASSES`, and to frames
     [`require_canonical`][] accepts; anything else goes through
     [`SendRawBytes`][].
     """
