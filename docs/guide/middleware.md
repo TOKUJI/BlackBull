@@ -379,10 +379,20 @@ the handler doesn't supply one.  Subsequent requests with a
 matching `If-None-Match` header receive `304 Not Modified` with no
 body.
 
-Standard `Cache-Control` directives are honoured.  Responses
-carrying `no-store`, `private`, or `no-cache` pass through
-unstored.  Requests with `Cache-Control: no-store` bypass the
-cache too.
+A response's own rules win over the cache's defaults, and every
+`Cache-Control` field is read.  Its lifetime is `max-age`,
+`s-maxage` (which wins) or `Expires − Date`; an incoming `Age`
+counts against it, a stated `0` is stale at once, and only a
+response that states no usable one of these falls back to
+`max_age`.  A `Cache-Control` field that does not parse as
+directives — an unterminated quoted string, say — is never acted
+on: the response is not stored, and a request carrying one goes to
+the handler with its response left unstored.  A
+request's `no-store`, `no-cache`, `max-age` or `Pragma: no-cache`
+goes to the handler instead — a conditional request then gets the
+handler's own `304`, never one the cache made up — and a replayed
+response carries its current `Age`.  `min-fresh`, `max-stale` and
+`only-if-cached` are not implemented.
 
 The cache is **variant-aware**: when a stored response carries a
 `Vary` header (e.g. `Vary: Accept-Encoding` behind the `Compression`
