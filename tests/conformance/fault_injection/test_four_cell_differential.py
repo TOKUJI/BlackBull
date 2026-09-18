@@ -35,6 +35,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+import uuid
 from pathlib import Path
 
 import pytest
@@ -120,21 +121,20 @@ def _nginx_context_digest(ctx: Path = _NGINX_CONTEXT) -> str:
 #: One image per context, so the cost is paid once per change to `nginx_h2c/`.
 _NGINX_IMAGE = f'bb-fault-nginx:{_nginx_context_digest()}'
 
-#: This run's identity, so a record left by an earlier run is not read as this
-#: run's failure: xdist gives every worker the same uid, and a single process
-#: is its own pid.
-_RUN_ID = os.environ.get('PYTEST_XDIST_TESTRUNUID') or str(os.getpid())
+#: This run's identity: xdist gives every worker the same uid, and a process
+#: that is a run of its own needs one that cannot repeat — a pid is reused by
+#: the next run, which would let that run's peers read a stale record as theirs.
+_RUN_ID = (os.environ.get('PYTEST_XDIST_TESTRUNUID')
+           or f'{os.getpid()}-{uuid.uuid4().hex[:8]}')
 
-#: Named per user because the temp dir is shared, and in it rather than in the
-#: checkout because the record has to outlive the process that wrote it.
+#: This run's record of that failure: in the temp dir because it has to outlive
+#: the process that wrote it, named per user because that dir is shared, and
+#: named per run because a record only means something to the run that wrote it
+#: — with the run in the name, no run can read or delete another's.
 _RECORD_OWNER = os.environ.get('USER') or os.environ.get('USERNAME') or 'user'
-
-#: What the preparation test leaves behind when its build fails, so a peer test
-#: can tell "a build is still running" from "no image is coming": the run that
-#: recorded it, then the reason.
 _NGINX_BUILD_FAILED = (Path(tempfile.gettempdir())
-                       / f'{_NGINX_IMAGE.replace(":", "-")}'
-                         f'-{_RECORD_OWNER}.failed')
+                       / f'{_NGINX_IMAGE.replace(":", "-")}-'
+                         f'{_RECORD_OWNER}-{_RUN_ID}.failed')
 
 
 def _require_docker() -> None:
@@ -154,16 +154,13 @@ def _nginx_image_present() -> bool:
 def _recorded_build_failure() -> str | None:
     """This run's recorded build failure, if the preparation test wrote one.
 
-    A record from another run is not this run's — reading it would skip the
-    coverage that this run's preparation test is still going to provide — and
-    one that vanishes mid-read (the preparation test clearing it) is simply
-    not there.
+    The name carries the run, so this can only ever be this run's record; one
+    the preparation test has not written yet is simply not there.
     """
     try:
-        run_id, _, reason = _NGINX_BUILD_FAILED.read_text().partition('\n')
+        return _NGINX_BUILD_FAILED.read_text()
     except FileNotFoundError:
         return None
-    return reason if run_id == _RUN_ID else None
 
 
 def _prepare_nginx_image() -> None:
@@ -176,7 +173,6 @@ def _prepare_nginx_image() -> None:
     than we allowed" is not evidence the peer is unavailable, and a skip there
     is coverage disappearing where nobody looks for it.
     """
-    _NGINX_BUILD_FAILED.unlink(missing_ok=True)
     if _nginx_image_present():
         return
     # Under this test's mark, so the daemon's own timeout reports first.
@@ -185,7 +181,7 @@ def _prepare_nginx_image() -> None:
         capture_output=True, timeout=_NGINX_BUILD_BUDGET - 60)
     if build.returncode != 0:
         reason = build.stderr.decode(errors='replace')[:200]
-        _NGINX_BUILD_FAILED.write_text(f'{_RUN_ID}\n{reason}')
+        _NGINX_BUILD_FAILED.write_text(reason)
         pytest.skip(f'could not build the reference image: {reason}')
 
 
@@ -249,32 +245,25 @@ async def test_the_nginx_tag_follows_the_context(tmp_path):
     assert _nginx_context_digest(ctx) != _nginx_context_digest(same)
 
 
-async def test_a_present_nginx_image_is_not_rebuilt(monkeypatch, tmp_path):
+async def test_a_present_nginx_image_is_not_rebuilt(monkeypatch):
     """The build is paid once per context, not once per run.
 
-    Asked of the daemon rather than assumed: `inspect` is the only command
-    a run that finds its image already there may issue.  A stale failure
-    record from an earlier run goes with it, so it cannot make this run's
-    peer tests skip over an image that is now there.
+    Asked of the daemon rather than assumed: `inspect` is the only command a
+    run that finds its image already there may issue.
     """
     calls = []
-    failed = tmp_path / 'failed'
-    failed.write_text('an earlier run could not reach the registry')
 
     def fake_run(argv, **kwargs):
         calls.append(argv)
         return subprocess.CompletedProcess(argv, 0)
 
     monkeypatch.setattr(subprocess, 'run', fake_run)
-    monkeypatch.setitem(globals(), '_NGINX_BUILD_FAILED', failed)
     _prepare_nginx_image()
 
     assert [c[:3] for c in calls] == [['docker', 'image', 'inspect']], calls
-    assert not failed.exists()
 
 
-async def test_an_absent_nginx_image_is_built_for_this_context(monkeypatch,
-                                                               tmp_path):
+async def test_an_absent_nginx_image_is_built_for_this_context(monkeypatch):
     """A miss builds this context's tag, from this context's directory."""
     calls = []
 
@@ -283,7 +272,6 @@ async def test_an_absent_nginx_image_is_built_for_this_context(monkeypatch,
         return subprocess.CompletedProcess(argv, int(argv[1] == 'image'))
 
     monkeypatch.setattr(subprocess, 'run', fake_run)
-    monkeypatch.setitem(globals(), '_NGINX_BUILD_FAILED', tmp_path / 'failed')
     _prepare_nginx_image()
 
     assert calls[-1][:2] == ['docker', 'build'], calls
@@ -310,7 +298,6 @@ async def test_a_failed_build_records_why_for_the_peer_tests(monkeypatch,
 
     with pytest.raises(pytest.skip.Exception):
         _prepare_nginx_image()
-    assert failed.read_text().startswith(_RUN_ID)
     assert 'no such host' in failed.read_text()
 
     # And the record is what ends a peer test's wait, message included.
@@ -390,7 +377,7 @@ async def test_a_peer_test_with_no_build_to_wait_for_skips_at_once(
         _require_nginx_image(set())
 
     failed = tmp_path / 'failed'
-    failed.write_text(f'{_RUN_ID}\ncould not resolve the registry')
+    failed.write_text('could not resolve the registry')
     monkeypatch.setitem(globals(), '_NGINX_BUILD_FAILED', failed)
     with pytest.raises(pytest.skip.Exception, match='could not resolve'):
         _require_nginx_image({_preparer_name()})
@@ -400,21 +387,21 @@ async def test_a_peer_test_with_no_build_to_wait_for_skips_at_once(
     assert [c[1] for c in calls].count('build') == 0, calls
 
 
-async def test_a_record_from_another_run_is_not_this_runs_failure(
-        monkeypatch, tmp_path):
-    """A record only means something to the run that wrote it.
+async def test_the_failure_record_is_scoped_to_this_run(monkeypatch,
+                                                       tmp_path):
+    """A record belongs to the run whose name it carries.
 
-    Reading yesterday's failure as today's would skip the coverage today's
-    preparation test is still going to provide — the same silent loss as
-    skipping a slow build, one run later.
+    Two runs of this context by one user share a temp dir: with the run in the
+    name, neither can read the other's failure as its own nor delete it, which
+    would leave that run's peers waiting out the budget for an image that has
+    already failed.
     """
-    failed = tmp_path / 'failed'
-    failed.write_text('another run\nregistry was down last night')
-    monkeypatch.setitem(globals(), '_NGINX_BUILD_FAILED', failed)
+    assert _RUN_ID in _NGINX_BUILD_FAILED.name
 
+    monkeypatch.setitem(globals(), '_NGINX_BUILD_FAILED', tmp_path / 'failed')
     assert _recorded_build_failure() is None
 
-    failed.write_text(f'{_RUN_ID}\nregistry was down last night')
+    (tmp_path / 'failed').write_text('registry was down last night')
     assert _recorded_build_failure() == 'registry was down last night'
 
 
