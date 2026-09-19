@@ -17,18 +17,6 @@ from blackbull.server.listener import Listener, Unix
 from blackbull.server.multiworker import MultiWorkerServer, _rebind_address
 from blackbull.server.server import Server
 
-try:
-    from beartype.roar import (BeartypeCallHintParamViolation
-                               as _BeartypeViolation)
-except ImportError:  # beartype is a test dependency, not a runtime one
-    _BeartypeViolation = None
-
-#: Under ``--beartype-packages=blackbull`` the plan's ``port: int`` annotation
-#: rejects a unix path's character before the refusal is reached.  Both are
-#: loud; the bare ``TypeError`` this file exists to prevent is neither.
-_REFUSALS = ((RuntimeError,) if _BeartypeViolation is None
-             else (RuntimeError, _BeartypeViolation))
-
 
 def _bound(family, host, v6only):
     sock = socket.socket(family, socket.SOCK_STREAM)
@@ -60,13 +48,13 @@ def test_the_target_repeats_the_address_the_socket_was_bound_to(
 
 
 def test_a_unix_listener_gets_no_rebind_target(tmp_path, monkeypatch):
-    """AF_UNIX under ``REUSEPORT`` refuses loudly and never attempts a bind.
+    """AF_UNIX under ``REUSEPORT`` refuses, naming the real incompatibility.
 
-    A unix path has no host to ask for, and its "port" is a character of that
-    path: reading the address anyway feeds an ``str`` into the bind and comes
-    back as a bare ``TypeError`` — which ``_bind_socket``'s ``except OSError``
-    does not catch.  The plan's family filter is what keeps that from
-    happening, so this pins the filter, not just the refusal.
+    ``SO_REUSEPORT`` is an IP-socket option, so a unix listener has no address
+    to re-bind and cannot be given a per-worker socket.  The refusal is raised
+    before the plan is built: reading the path's second character as a port is
+    what used to come back as a bare ``TypeError``, or as an annotation
+    violation under beartype.
     """
     monkeypatch.setenv('BB_SOCKET_REUSEPORT', '1')
     _env.reset_settings_cache()
@@ -79,12 +67,27 @@ def test_a_unix_listener_gets_no_rebind_target(tmp_path, monkeypatch):
                     listeners=[Listener(Unix(str(tmp_path / 's.sock')))])
     server.open_socket()
     try:
-        with pytest.raises(_REFUSALS) as refusal:
+        with pytest.raises(RuntimeError) as refusal:
             MultiWorkerServer(BlackBull(), server.bound_listeners, None,
                               workers=2)
     finally:
         server.close_socket()
+    message = str(refusal.value)
     assert calls == [], (
         f'a unix listener has no address to re-bind, tried {calls}')
-    if isinstance(refusal.value, RuntimeError):
-        assert 'BB_SOCKET_REUSEPORT' in str(refusal.value)
+    assert 'BB_SOCKET_REUSEPORT' in message
+    assert str(tmp_path / 's.sock') in message
+    assert 'SO_REUSEPORT is an IP-socket option' in message
+    assert 'IPv6' not in message and 'another process' not in message
+
+
+def test_a_unix_socket_claims_no_ip_stack(tmp_path):
+    """``_reaches`` names the stacks a socket answers on; a unix socket is on
+    none, and claiming one is what misdiagnosed the refusal as an IPv6 gap."""
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        sock.bind(str(tmp_path / 's.sock'))
+        sock.listen(8)
+        assert multiworker._reaches([sock]) == frozenset()
+    finally:
+        sock.close()
