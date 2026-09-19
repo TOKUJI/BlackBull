@@ -157,11 +157,12 @@ closed-ID branch, the current wire behaviour is:
 | evicted, reset origin unknown | no response | no response | accepted | GOAWAY(STREAM_CLOSED) | RST_STREAM(STREAM_CLOSED) |
 
 This table records what the code answers, not a conformance claim for every
-cell.  The row merges peer and local resets — the record keeps one bit —
-though §5.1 treats them differently: a frame after a *received* `RST_STREAM`
-is a stream error, while a frame after one this server *sent* is minimally
-processed and discarded.  §5.4.2 is categorical either way: no origin
-answers a late `RST_STREAM` in kind.
+cell.  The row merges peer and local resets — the record keeps one bit — and
+§5.1 answers them differently: after a *received* `RST_STREAM` a frame may be
+treated as a connection error of type `STREAM_CLOSED` (§5.4.2 permits the
+extra `RST_STREAM`, §6.1 requires one for DATA), while after one this server
+*sent* it must be minimally processed and then discarded.  §5.4.2 is
+categorical either way: no origin answers a late `RST_STREAM` in kind.
 
 A standalone CONTINUATION does not reach either state table: `_frame_loop()`
 rejects it first with `GOAWAY(PROTOCOL_ERROR)` under §6.10.  If a
@@ -505,8 +506,8 @@ enters the recipient contributes its complete flow-controlled length,
 including padding; the RFC 8441 reader likewise hands back buffered credit it
 withheld.  Late DATA on an already-closed stream also returns its connection
 credit without recreating a stream owner.  The stream-level side is not
-replayed — the stream is gone (§5.1) and any further frame on that id is
-`STREAM_CLOSED`.
+replayed — the stream is gone — and any further frame on that id meets the
+§5.1 closed-stream rules.
 
 *Because* the connection window is the easy half to forget, and forgetting it
 fails *late*.  Credit only the stream window — the obvious half — and everything
