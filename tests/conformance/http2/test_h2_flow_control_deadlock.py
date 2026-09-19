@@ -29,6 +29,7 @@ import pytest
 # ``.venv`` path (which doesn't exist on the runner's ``pip install -e``).
 _SUBPROCESS_PYTHON = sys.executable
 _TIMEOUT = 8  # seconds per subprocess
+_REASON_LIMIT = 800  # tail of a failed scenario's output kept in the reason
 
 
 # ====================================================================
@@ -200,21 +201,113 @@ _SCENARIOS = {
 }
 
 
+def _scenario_result(
+        completed: subprocess.CompletedProcess[str]) -> tuple[bool, str]:
+    """A finished scenario subprocess as the runner's ``(ok, reason)``.
+
+    Only a zero exit is a pass: an assertion, an import error or any other
+    traceback in the child must not read as one.  The reason names how it died
+    — an exit code, or the signal that killed it — and carries the child's own
+    last words, preferring stderr, bounded so a pytest assertion message stays
+    readable.
+    """
+    if completed.returncode == 0:
+        return (True, '')
+    if completed.returncode < 0:
+        reason = f'killed by signal {-completed.returncode}'
+    else:
+        reason = f'exited {completed.returncode}'
+    output = (completed.stderr or '').strip() or (completed.stdout or '').strip()
+    return (False, f'{reason}: {output[-_REASON_LIMIT:]}' if output else reason)
+
+
 def _run_scenario(name: str) -> tuple[bool, str]:
     """Run scenario *name* in a subprocess with a timeout guard.
 
-    Returns ``(True, '')`` if it completed, ``(False, reason)`` if it
-    hung (``TimeoutExpired``) or crashed.
+    Returns ``(True, '')`` when the scenario exits zero, ``(False, reason)``
+    when it hangs (``TimeoutExpired``) or exits nonzero.
     """
     try:
-        subprocess.run(
+        completed = subprocess.run(
             [_SUBPROCESS_PYTHON, __file__, name],
-            capture_output=True, timeout=_TIMEOUT,
+            capture_output=True, text=True, errors='replace', timeout=_TIMEOUT,
             cwd=str(pathlib.Path(__file__).parents[3]),
         )
-        return (True, '')
     except subprocess.TimeoutExpired:
         return (False, f'timeout ({_TIMEOUT}s) — deadlock reproduced')
+    return _scenario_result(completed)
+
+
+# ====================================================================
+# The runner's outcomes — zero exit, nonzero exit, signal, timeout — and
+# the wrapper's own failure when a step reports one.
+# ====================================================================
+
+def test_a_zero_exit_is_a_pass():
+    completed = subprocess.CompletedProcess(
+        args=[], returncode=0, stdout='', stderr='')
+    assert _scenario_result(completed) == (True, '')
+
+
+def test_a_silent_failure_reports_only_its_code():
+    completed = subprocess.CompletedProcess(
+        args=[], returncode=9, stdout='', stderr='')
+    assert _scenario_result(completed) == (False, 'exited 9')
+
+
+def test_a_signalled_failure_names_the_signal():
+    completed = subprocess.CompletedProcess(
+        args=[], returncode=-15, stdout='', stderr='')
+    assert _scenario_result(completed) == (False, 'killed by signal 15')
+    killed = subprocess.CompletedProcess(
+        args=[], returncode=-9, stdout='Killed', stderr='\n')
+    assert _scenario_result(killed) == (False, 'killed by signal 9: Killed')
+
+
+@pytest.mark.parametrize('stderr,stdout,detail', [
+    ('AssertionError: boom', '', 'AssertionError: boom'),
+    ('', 'traceback to stdout', 'traceback to stdout'),
+    ('\n', 'AssertionError: boom', 'AssertionError: boom'),
+])
+def test_a_nonzero_exit_carries_its_code_and_output(stderr, stdout, detail):
+    completed = subprocess.CompletedProcess(
+        args=[], returncode=3, stdout=stdout, stderr=stderr)
+    ok, reason = _scenario_result(completed)
+    assert not ok
+    assert reason.startswith('exited 3')
+    assert detail in reason
+
+
+def test_a_long_failure_keeps_the_tail_of_the_output():
+    completed = subprocess.CompletedProcess(
+        args=[], returncode=1, stdout='', stderr='x' * 5000 + ' LAST LINE')
+    ok, reason = _scenario_result(completed)
+    assert not ok and reason.endswith('LAST LINE')
+
+
+def test_a_crashing_scenario_fails_the_runner():
+    """End to end: the CLI exits nonzero, and the runner must say so."""
+    ok, reason = _run_scenario('no-such-scenario')
+    assert not ok
+    assert reason.startswith('exited 1')
+    assert len(reason) > len('exited 1')     # the child's own words came too
+
+
+def test_a_hanging_scenario_is_reported_as_a_deadlock(monkeypatch):
+    def hang(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args[0], _TIMEOUT)
+
+    monkeypatch.setattr(subprocess, 'run', hang)
+    ok, reason = _run_scenario('step1')
+    assert not ok and 'timeout' in reason and 'deadlock' in reason
+
+
+def test_a_failed_step_fails_the_wrapper(monkeypatch):
+    """The negative control for a step reporting a failure."""
+    monkeypatch.setattr(sys.modules[__name__], '_run_scenario',
+                        lambda name: (False, 'boom'))
+    with pytest.raises(AssertionError, match='STEP 1 FAILED'):
+        test_h2_flow_control_deadlocks()
 
 
 # ====================================================================
