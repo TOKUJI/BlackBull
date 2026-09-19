@@ -6138,10 +6138,20 @@ it does not infer a host rewrite from <code>Forwarded: host</code> or <code>X-Fo
 the handler doesn't supply one.  Subsequent requests with a
 matching <code>If-None-Match</code> header receive <code>304 Not Modified</code> with no
 body.</p>
-<p>Standard <code>Cache-Control</code> directives are honoured.  Responses
-carrying <code>no-store</code>, <code>private</code>, or <code>no-cache</code> pass through
-unstored.  Requests with <code>Cache-Control: no-store</code> bypass the
-cache too.</p>
+<p>A response's own rules win over the cache's defaults, and every
+<code>Cache-Control</code> field is read.  Its lifetime is <code>max-age</code>,
+<code>s-maxage</code> (which wins) or <code>Expires − Date</code>; an incoming <code>Age</code>
+counts against it, a stated <code>0</code> is stale at once, and only a
+response that states no usable one of these falls back to
+<code>max_age</code>.  A <code>Cache-Control</code> field that does not parse as
+directives — an unterminated quoted string, say — is never acted
+on: the response is not stored, and a request carrying one goes to
+the handler with its response left unstored.  A
+request's <code>no-store</code>, <code>no-cache</code>, <code>max-age</code> or <code>Pragma: no-cache</code>
+goes to the handler instead — a conditional request then gets the
+handler's own <code>304</code>, never one the cache made up — and a replayed
+response carries its current <code>Age</code>.  <code>min-fresh</code>, <code>max-stale</code> and
+<code>only-if-cached</code> are not implemented.</p>
 <p>The cache is <strong>variant-aware</strong>: when a stored response carries a
 <code>Vary</code> header (e.g. <code>Vary: Accept-Encoding</code> behind the <code>Compression</code>
 middleware), the varied request-header values are folded into the

@@ -5441,28 +5441,11 @@
 
         <p>Response caching middleware (RFC 9111 — HTTP Caching).</p>
 <p>Caches successful GET/HEAD responses in a per-worker, in-memory LRU and
-replays them without running the handler.  It honours <code>Cache-Control</code> in
-both directions, generates a weak ETag when the handler supplies none,
-answers <code>If-None-Match</code> with a 304, keys variants by <code>Vary</code>, and
-refuses anything carrying <code>Authorization</code> unless
-<code>cache_authenticated=True</code> (RFC 9111 §3.5).  <code>docs/guide/middleware.md</code>
-states each of those rules and tabulates the constructor.</p>
-<p>Two things it does not do: there is no invalidation API (restart the
-worker, or wait out the TTL), and nothing is shared between workers.</p>
-<p>The store is keyed by <code>(method, origin, path, query_string)</code> → a per-URL
-bucket holding the response's <code>Vary</code> field names alongside its variant
-entries.  The field names live <em>inside</em> the bucket so they cannot be
-evicted independently of the entries they key, which is what a second LRU
-beside the first would allow.</p>
-<p>Usage::</p>
-<pre><code>from blackbull.middleware import Cache
-
-app.use(Cache(max_age=600))     # 10-minute TTL
-
-@app.route(path='/feed')
-async def feed(conn, receive, send):
-    ...   # served from cache for 10 min after first hit
-</code></pre>
+replays them without running the handler.  It reads <code>Cache-Control</code> in both
+directions, generates a weak ETag when the handler supplies none, answers
+<code>If-None-Match</code> with a 304, and keys variants by <code>Vary</code>.  There is no
+invalidation API and nothing is shared between workers: restart the worker, or
+wait out the lifetime.  <code>docs/guide/middleware.md</code> tabulates the constructor.</p>
 
 
 
