@@ -5745,62 +5745,124 @@ is the same divergence arriving by omission instead of by a second factory, and
 it looks like well-formed bytes all the way to the peer.</p>
 <hr />
 <h2 id="5-streams-and-multiplexing">§5 — Streams and Multiplexing<a class="headerlink" href="#5-streams-and-multiplexing" title="Permanent link">&para;</a></h2>
-<p><strong>§5.1 Stream States</strong> ✅
+<p><strong>§5.1 Stream States</strong> ⚠️ — closed-stream handling has the §5.4.2
+exception described below.
 Four states matter for a server in practice:
 IDLE → OPEN → HALF_CLOSED_REMOTE → CLOSED.
 (The two "reserved" states exist only during server push and are not shown —
 the server sends PUSH_PROMISE but never receives one, so it only ever sees
 IDLE, OPEN, HALF_CLOSED_REMOTE, and CLOSED.)
-<code>HTTP2Actor._validate_stream_state(stream, frame_type)</code> is the gate: it returns
-<code>(error_code, level)</code> for an illegal frame in the current state, or <code>None</code> to
-allow it.</p>
+<code>HTTP2Actor._validate_stream_state(stream, frame_type)</code> is the gate for a live
+<code>Stream</code>: it returns <code>(error_code, level)</code> for an illegal frame in the current
+state, or <code>None</code> to allow it.  Normal retirement removes the node, so its
+CLOSED branch is defensive-only for a live object already marked CLOSED.</p>
 <table>
 <thead>
 <tr>
-<th>State</th>
+<th>Live state</th>
 <th>Legal frames</th>
-<th>Violation</th>
+<th>Result for any other frame</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>IDLE</td>
 <td>HEADERS, PRIORITY, CONTINUATION, PUSH_PROMISE</td>
-<td>connection PROTOCOL_ERROR</td>
+<td>GOAWAY(PROTOCOL_ERROR)</td>
 </tr>
 <tr>
 <td>HALF_CLOSED_REMOTE</td>
 <td>PRIORITY, WINDOW_UPDATE, RST_STREAM</td>
-<td>stream STREAM_CLOSED</td>
+<td>RST_STREAM(STREAM_CLOSED)</td>
 </tr>
 <tr>
-<td>CLOSED</td>
-<td>PRIORITY always; HEADERS/CONTINUATION → connection error; else → stream RST</td>
-<td></td>
+<td>CLOSED (defensive-only)</td>
+<td>PRIORITY</td>
+<td>HEADERS or CONTINUATION → GOAWAY(STREAM_CLOSED); otherwise → RST_STREAM(STREAM_CLOSED)</td>
 </tr>
 </tbody>
 </table>
-<p>CONTINUATION on IDLE is listed because <code>_validate_stream_state</code> permits it,
-but <code>_frame_loop()</code> catches a stray CONTINUATION — one not preceded by
-HEADERS without END_HEADERS — as a connection PROTOCOL_ERROR earlier in the
-loop.  The state check is the second line of defence.</p>
 <p><em>Because</em> the state table is the heart of multiplexing — getting it wrong means
 either rejecting valid concurrent streams or leaking resources on dead ones.
-A subtlety: closed streams are not kept as full <code>Stream</code> objects.
-<code>HTTP2Actor._retire_stream()</code> is the single idempotent transition used by task
+A subtlety: retired streams are not kept as full <code>Stream</code> objects, so their late
+frames cannot pass through <code>_validate_stream_state()</code>.  <code>_frame_loop()</code> instead
+consults the bounded closed-ID record before treating an absent node as IDLE.
+The exact record preserves whether retirement used an RST; after an entry is
+evicted, separate odd peer-stream and even push-stream high-water marks preserve
+CLOSED membership but not that origin.  For well-formed frames that reach this
+closed-ID branch, the current wire behaviour is:</p>
+<table>
+<thead>
+<tr>
+<th>Closed-ID origin</th>
+<th>Late WINDOW_UPDATE</th>
+<th>Late RST_STREAM</th>
+<th>PRIORITY</th>
+<th>HEADERS</th>
+<th>Other stream frames</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>retained, <code>via_rst=False</code></td>
+<td>no response</td>
+<td>no response</td>
+<td>accepted</td>
+<td>GOAWAY(STREAM_CLOSED)</td>
+<td>RST_STREAM(STREAM_CLOSED)</td>
+</tr>
+<tr>
+<td>retained, <code>via_rst=True</code></td>
+<td>RST_STREAM(STREAM_CLOSED)</td>
+<td>RST_STREAM(STREAM_CLOSED) ⚠️</td>
+<td>accepted</td>
+<td>GOAWAY(STREAM_CLOSED)</td>
+<td>RST_STREAM(STREAM_CLOSED)</td>
+</tr>
+<tr>
+<td>evicted, reset origin unknown</td>
+<td>no response</td>
+<td>no response</td>
+<td>accepted</td>
+<td>GOAWAY(STREAM_CLOSED)</td>
+<td>RST_STREAM(STREAM_CLOSED)</td>
+</tr>
+</tbody>
+</table>
+<p>This table records the implementation's wire behaviour; it does not justify
+every cell as conformant.  In particular, the flagged <code>via_rst=True</code> response
+to a late <code>RST_STREAM</code> is a known mismatch: RFC 9113 §5.4.2 prohibits sending
+<code>RST_STREAM</code> in response to <code>RST_STREAM</code>, but the closed-ID branch currently
+sends <code>RST_STREAM(STREAM_CLOSED)</code>.</p>
+<p>A standalone CONTINUATION does not reach either state table: <code>_frame_loop()</code>
+rejects it first with <code>GOAWAY(PROTOCOL_ERROR)</code> under §6.10.  If a
+CONTINUATION reaches the retired-ID branch while a header block is open, it is
+treated like HEADERS and produces <code>GOAWAY(STREAM_CLOSED)</code>.  DATA follows the
+"other stream frames" column and also returns its payload credit to the
+connection window; it does not recreate stream credit or ownership.</p>
+<p>The <code>via_rst</code> marker means only whether retirement used a reset:
+<code>via_rst=False</code> is not evidence that local <code>END_STREAM</code> alone completed the
+stream.  The normal task-completion callback and other non-reset cleanup paths
+use it as well.  When the exact entry has been evicted, the implementation
+chooses the same lenient no-response rule because the reset origin is unknown.</p>
+<p>The no-response case preserves a legal timing race.  A peer can credit the
+last response DATA while the server concurrently sends terminal response DATA
+or trailers carrying <code>END_STREAM</code>; task completion can retire the <code>Stream</code>
+before that <code>WINDOW_UPDATE</code> is read.  Answering the delayed credit with a reset
+would turn a successfully completed exchange into a stream error.  A peer's
+<code>RST_STREAM</code> can cross the same terminal output before the peer observes it.</p>
+<p><code>HTTP2Actor._retire_stream()</code> is the single idempotent transition used by task
 completion and local or peer reset.  It releases the task, sender, recipient,
 stream-tree node, counters, and any unconsumed connection-window credit, then
-records only the closed identifier.  Exact reset origin is bounded, with
-separate odd peer-stream and even push-stream high-water marks after eviction.
-<em>Because</em> a late frame still needs the CLOSED branch of validation, but an
-integer is enough; mixing the two identifier namespaces would make a closed
-push stream incorrectly classify a lower legal peer stream as closed.  An idle
-node created only to retain a future <code>PRIORITY_UPDATE</code> hint is kept in the exact
-record if reset, but does not advance a high-water mark: it was never opened,
-and a larger hint identifier says nothing about lower legal request streams.
-The same rule applies when the server emits an ownerless <code>RST_STREAM</code> for a
-future identifier: the exact id is terminal, without implying that lower ids
-were opened and closed.</p>
+records only the closed identifier.  <em>Because</em> an integer is enough to route a
+late frame through the CLOSED rules; mixing the two identifier namespaces would
+make a closed push stream incorrectly classify a lower legal peer stream as
+closed.  An idle node created only to retain a future <code>PRIORITY_UPDATE</code> hint is
+kept in the exact record if reset, but does not advance a high-water mark: it
+was never opened, and a larger hint identifier says nothing about lower legal
+request streams.  The same rule applies when the server emits an ownerless
+<code>RST_STREAM</code> for a future identifier: the exact id is terminal, without
+implying that lower ids were opened and closed.</p>
 <p>Receiving <code>END_STREAM</code> closes the request body, not the response lifetime.  The
 stream remains owned while its app task produces the response, and retirement
 occurs only when that work completes or an error/reset ends it.</p>
