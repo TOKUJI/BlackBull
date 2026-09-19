@@ -1037,7 +1037,7 @@ class TestWebSocketRecipientUnsupportedOpcode:
     async def test_unknown_opcode_sends_close_and_disconnects(self):
         """RFC 6455 §5.2: unknown opcode must send CLOSE(1002) and return disconnect."""
         from blackbull.server.recipient import WebSocketRecipient
-        from blackbull.server.ws_codec import WSFrameHeader, encode_frame
+        from blackbull.server.ws_codec import WSFrameHeader
 
         fake_header = WSFrameHeader(fin=True, rsv1=False, rsv2=False, rsv3=False,
                                     opcode=0x03, masked=False, length=2)
@@ -1057,5 +1057,13 @@ class TestWebSocketRecipientUnsupportedOpcode:
 
         assert event['type'] == 'websocket.disconnect'
         assert event['code'] == 1002
-        close_1002 = encode_frame((1002).to_bytes(2, 'big'), opcode=0x8)
-        writer.write.assert_called_once_with(close_1002)
+        # RFC 6455 §5.1 — this is the client end of the connection
+        # (require_masked=False says only the *peer* may skip masking), so its
+        # CLOSE frame must carry a mask.
+        writer.write.assert_called_once()
+        frame = writer.write.call_args.args[0]
+        assert frame[0] == 0x88                     # FIN | CLOSE
+        assert frame[1] & 0x80, 'a client MUST mask every frame it sends'
+        key, payload = frame[2:6], frame[6:]
+        assert bytes(b ^ key[i % 4] for i, b in enumerate(payload)) == \
+            (1002).to_bytes(2, 'big')
