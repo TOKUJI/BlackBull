@@ -15,6 +15,7 @@ from blackbull.protocol.frame_types import (
     FrameTypes,
     HeaderFrameFlags,
 )
+from blackbull.protocol.stream import StreamState
 from blackbull.server.http2_actor import HTTP2Actor, _CLOSED_STREAMS_CAP
 from blackbull.server.http2_ws import HTTP2WSReader
 from blackbull.server.recipient import AbstractReader
@@ -461,6 +462,155 @@ async def test_late_data_on_closed_stream_returns_connection_credit_without_owne
     assert resets[0].error_code == ErrorCodes.STREAM_CLOSED
     assert len(b"late") in updates
     assert _live_ownership(actor) == (0, 0, 0, 0, 0, 0)
+
+
+_LATE_RST = _wire(
+    FrameTypes.RST_STREAM, 0, 1, int(ErrorCodes.CANCEL).to_bytes(4, 'big')
+)
+_CLOSED_ORIGINS = ('peer_reset', 'local_reset', 'completed', 'evicted')
+
+
+async def _close_stream(
+    actor: HTTP2Actor, stream_id: int, origin: str,
+) -> None:
+    """Close *stream_id* the way *origin* does, leaving the id CLOSED.
+
+    ``peer_reset`` and ``local_reset`` keep the exact record with
+    ``via_rst=True``; ``completed`` closes without a reset; ``evicted`` ages
+    the exact record out behind the high water mark.
+    """
+    if origin == 'peer_reset':
+        stream = actor.root_stream.add_child(stream_id)
+        stream.on_headers_received(end_stream=False)
+        await RstStreamResponder(
+            actor.factory.rst_stream(stream_id, ErrorCodes.CANCEL)
+        ).respond(actor)
+    elif origin == 'local_reset':
+        await actor.send_frame(
+            actor.factory.rst_stream(stream_id, ErrorCodes.CANCEL))
+    else:
+        actor._mark_closed(stream_id, via_rst=False)
+    if origin == 'evicted':
+        for later in range(4, 4 + 2 * (_CLOSED_STREAMS_CAP + 2), 2):
+            actor._mark_closed(later, via_rst=False)
+        assert actor._is_closed_stream(stream_id) == (True, None)
+    # A local reset is itself a frame on the wire; the tests below measure
+    # only what the late frame draws.
+    actor._writer.written.clear()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('origin', _CLOSED_ORIGINS)
+async def test_late_rst_stream_is_never_answered(origin: str):
+    """RFC 9113 §5.4.2 — a received RST_STREAM is never answered in kind."""
+    calls = 0
+
+    async def app(conn, receive, send) -> None:
+        nonlocal calls
+        calls += 1
+        await send(b'ok')
+
+    actor = _actor(app=app)
+    await _close_stream(actor, 1, origin)
+    actor._reader = _Reader(_LATE_RST + _headers(3))
+
+    await actor.run()
+
+    sent = _frames(actor)
+    assert not [f for f in sent if f.FrameType() == FrameTypes.RST_STREAM]
+    assert not [f for f in sent if f.FrameType() == FrameTypes.GOAWAY]
+    assert calls == 1, 'an ignored late frame must not end the connection'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('origin', 'answered'),
+    (('peer_reset', True), ('local_reset', True),
+     ('completed', False), ('evicted', False)),
+)
+async def test_late_window_update_is_answered_only_after_a_reset(
+    origin: str, answered: bool,
+):
+    """RFC 9113 §5.1 — after RST_STREAM a late frame is a stream error; after
+    END_STREAM the late WINDOW_UPDATE is ignored."""
+    actor = _actor()
+    await _close_stream(actor, 1, origin)
+    actor._reader = _Reader(
+        _wire(FrameTypes.WINDOW_UPDATE, 0, 1, (1).to_bytes(4, 'big')))
+
+    await actor.run()
+
+    resets = [
+        f for f in _frames(actor) if f.FrameType() == FrameTypes.RST_STREAM
+    ]
+    assert [f.error_code for f in resets] == (
+        [ErrorCodes.STREAM_CLOSED] if answered else [])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('origin', _CLOSED_ORIGINS)
+async def test_late_data_returns_credit_on_every_closed_origin(origin: str):
+    actor = _actor()
+    await _close_stream(actor, 1, origin)
+    actor._reader = _Reader(_wire(FrameTypes.DATA, 0, 1, b'late'))
+
+    await actor.run()
+    await asyncio.sleep(0)
+
+    sent = _frames(actor)
+    resets = [f for f in sent if f.FrameType() == FrameTypes.RST_STREAM]
+    updates = [
+        f.window_size for f in sent
+        if f.FrameType() == FrameTypes.WINDOW_UPDATE and f.stream_id == 0
+    ]
+    assert [f.error_code for f in resets] == [ErrorCodes.STREAM_CLOSED]
+    assert len(b'late') in updates
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('origin', _CLOSED_ORIGINS)
+async def test_late_headers_is_a_connection_error_on_every_origin(origin: str):
+    actor = _actor()
+    await _close_stream(actor, 1, origin)
+    actor._reader = _Reader(_headers(1))
+
+    await actor.run()
+
+    sent = _frames(actor)
+    assert [
+        f.error_code for f in sent if f.FrameType() == FrameTypes.GOAWAY
+    ] == [ErrorCodes.STREAM_CLOSED]
+    assert not [f for f in sent if f.FrameType() == FrameTypes.RST_STREAM]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('origin', _CLOSED_ORIGINS)
+async def test_late_priority_draws_no_response(origin: str):
+    actor = _actor()
+    await _close_stream(actor, 1, origin)
+    actor._reader = _Reader(
+        _wire(FrameTypes.PRIORITY, 0, 1, b'\x00\x00\x00\x00\x01'))
+
+    await actor.run()
+
+    assert not [
+        f for f in _frames(actor)
+        if f.FrameType() in (FrameTypes.RST_STREAM, FrameTypes.GOAWAY)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_rst_on_a_defensively_closed_node_is_ignored():
+    actor = _actor()
+    stream = actor.root_stream.add_child(1)
+    stream.state = StreamState.CLOSED
+    actor._reader = _Reader(_LATE_RST)
+
+    await actor.run()
+
+    assert not [
+        f for f in _frames(actor) if f.FrameType() == FrameTypes.RST_STREAM
+    ]
 
 
 @pytest.mark.asyncio

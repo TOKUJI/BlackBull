@@ -92,6 +92,16 @@ def _make_h2_actor(app=None):
     return handler, app
 
 
+def _sent_rst_streams(handler, stream_id: int) -> list:
+    """RST_STREAM frames the actor sent for *stream_id* on the mocked wire."""
+    return [
+        call.args[0] for call in handler.send_frame.call_args_list
+        if hasattr(call.args[0], 'FrameType')
+        and call.args[0].FrameType() == FrameTypes.RST_STREAM
+        and call.args[0].stream_id == stream_id
+    ]
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # G1-G2: Stream state validation — idle / half-closed(remote)
 # ═══════════════════════════════════════════════════════════════════════
@@ -485,16 +495,27 @@ class TestG10NoRstInResponseToRst:
         handler.receive = AsyncMock(side_effect=[
             _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b''), h, rst, None])
         await handler.run()
-        # Count RST_STREAM frames sent by the handler on stream 1.
-        rst_count = 0
-        for call in handler.send_frame.call_args_list:
-            frame = call.args[0]
-            if hasattr(frame, 'FrameType') and frame.FrameType() == FrameTypes.RST_STREAM:
-                if frame.stream_id == 1:
-                    rst_count += 1
-        assert rst_count == 0, (
-            f'Handler sent {rst_count} RST_STREAM(s) in response to RST_STREAM. '
-            f'RFC 9113 §5.4.2 forbids this.')
+        sent = _sent_rst_streams(handler, 1)
+        assert not sent, (
+            f'Handler sent {len(sent)} RST_STREAM(s) in response to '
+            f'RST_STREAM. RFC 9113 §5.4.2 forbids this.')
+
+    @pytest.mark.asyncio
+    async def test_late_rst_on_a_reset_closed_stream_is_not_answered(self):
+        """The retained closed-id path has no live stream to validate."""
+        handler, app = _make_h2_actor()
+        h = _make_headers_frame(1, end_stream=False)
+        rst = _make_h2_frame(FrameTypes.RST_STREAM, 0, stream_id=1,
+                             payload=(ErrorCodes.CANCEL).to_bytes(4, 'big'))
+        # The first RST retires stream 1 and records it as reset; the second
+        # is the late frame that must draw no answer.
+        handler.receive = AsyncMock(side_effect=[
+            _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b''), h, rst, rst, None])
+        await handler.run()
+        sent = _sent_rst_streams(handler, 1)
+        assert not sent, (
+            f'Handler sent {len(sent)} RST_STREAM(s) after a stream was '
+            f'closed by RST_STREAM. RFC 9113 §5.4.2 forbids this.')
 
 
 # ═══════════════════════════════════════════════════════════════════════
