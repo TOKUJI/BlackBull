@@ -39,8 +39,8 @@ from .cap_log import log_cap_hit
 from .deadline import ConnectionDeadline, WsIdleWatchdog
 from .sender import AbstractWriter, AsyncioWriter
 from .ws_codec import (
-    FramePayloadTooLarge, MessageTooLarge, WSOpcode, encode_frame,
-    read_frame_header, read_payload,
+    FramePayloadTooLarge, InvalidFrameLength, MessageTooLarge, WSOpcode,
+    encode_frame, read_frame_header, read_payload,
 )
 from .constants import WSCloseCode
 from .rate_window import RateWindow
@@ -1910,6 +1910,8 @@ class WebSocketRecipient(BaseRecipient):
                 str(exc),
                 close_code=WSCloseCode.MESSAGE_TOO_BIG,
             ) from exc
+        except InvalidFrameLength as exc:
+            raise ProtocolError(str(exc)) from exc
 
         if self._require_masked and not h.masked:
             raise ProtocolError('unmasked client frame')
