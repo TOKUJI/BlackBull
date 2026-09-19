@@ -5883,7 +5883,10 @@ users will actually use.</p>
 <li><strong>gzip message compression</strong> is supported (<code>grpc-encoding: gzip</code> /
   <code>identity</code>); a compressed request in any other coding is rejected with
   <code>UNIMPLEMENTED</code>, and the response advertises
-  <code>grpc-accept-encoding: identity,gzip</code> so the client can retry.</li>
+  <code>grpc-accept-encoding: identity,gzip</code> so the client can retry.  A compressed
+  request must be one complete gzip member within the size cap; a truncated or
+  unreadable stream, or trailing bytes, fails the RPC (<code>INTERNAL</code>, or
+  <code>RESOURCE_EXHAUSTED</code> past the cap) instead of reaching the handler.</li>
 <li><strong>HTTP/2 required.</strong> Run with TLS + ALPN (<code>h2</code>) for real clients; the gRPC
   request must arrive over the HTTP/2 layer.</li>
 <li>BlackBull is <strong>server-side</strong>. For a client, use the standard <code>grpcio</code> client
