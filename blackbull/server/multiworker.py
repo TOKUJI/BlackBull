@@ -76,6 +76,32 @@ class _PlannedListener:
     foreign_netns: bool
 
 
+#: The families a per-worker re-bind can repeat: ``SO_REUSEPORT`` is an
+#: IP-socket option, so a listener of any other family has no address to ask
+#: for.
+_IP_FAMILIES = (socket.AF_INET, socket.AF_INET6)
+
+#: ``_stacks``'s four answers, shared so that a call allocates nothing.
+_NO_IP = frozenset()
+_V4 = frozenset(('v4',))
+_V6 = frozenset(('v6',))
+_V4_V6 = frozenset(('v4', 'v6'))
+
+
+def _stacks(sock) -> frozenset:
+    """The IP stacks one listening socket answers on; none when it is not IP."""
+    family = sock.family
+    if family not in _IP_FAMILIES:
+        return _NO_IP
+    if family == socket.AF_INET:
+        return _V4
+    try:
+        return _V6 if sock.getsockopt(socket.IPPROTO_IPV6,
+                                      socket.IPV6_V6ONLY) else _V4_V6
+    except OSError:
+        return _V6
+
+
 def _reaches(socks) -> frozenset:
     """Which stacks a set of listening sockets answers on.
 
@@ -83,20 +109,7 @@ def _reaches(socks) -> frozenset:
     legitimately comes back with one stack, so coverage — not a socket count —
     is what a re-bound set is held to.
     """
-    reached = set()
-    for sock in socks:
-        if sock.family == socket.AF_INET:
-            reached.add('v4')
-            continue
-        reached.add('v6')
-        try:
-            dual_stack = not sock.getsockopt(socket.IPPROTO_IPV6,
-                                             socket.IPV6_V6ONLY)
-        except OSError:
-            dual_stack = False
-        if dual_stack:
-            reached.add('v4')
-    return frozenset(reached)
+    return frozenset().union(*(_stacks(sock) for sock in socks))
 
 
 def _rebind_address(sock):
@@ -128,6 +141,22 @@ def _describe(socks) -> str:
         host, port = name[0], name[1]
         names.append(f'[{host}]:{port}' if ':' in host else f'{host}:{port}')
     return ', '.join(names)
+
+
+def _refuse_non_ip_rebind(shared, workers: int) -> None:
+    """Refuse the per-worker re-bind for a listener that is not an IP socket.
+
+    ``SO_REUSEPORT`` is an IP-socket option: an ``AF_UNIX`` listener has no
+    address to ask for, and its ``getsockname`` is the path, whose second
+    character a plan read as the port before this refusal existed.
+    """
+    for _listener, socks in shared:
+        non_ip = [sock for sock in socks if sock.family not in _IP_FAMILIES]
+        if non_ip:
+            raise RuntimeError(_refusal(
+                workers, _describe(non_ip),
+                f'SO_REUSEPORT is an IP-socket option, and '
+                f'{non_ip[0].family.name} has no address to re-bind per worker'))
 
 
 def _reuseport_is_set(sock) -> bool:
@@ -358,6 +387,7 @@ class MultiWorkerServer:
         from ..env import get_settings as _get_settings  # noqa: PLC0415
         cfg = _get_settings()
         if workers > 1 and REUSEPORT_SUPPORTED and cfg.socket_reuseport and not reload:
+            _refuse_non_ip_rebind(self._shared, workers)
             # Every shared listener is re-bound per worker, not just the first:
             # a deployment that states four ports wants all four on all of them.
             planned = [_PlannedListener(
@@ -366,8 +396,7 @@ class MultiWorkerServer:
                 where=_describe(socks),
                 reached=_reaches(socks),
                 addresses=tuple(_rebind_address(sock) for sock in socks
-                                if sock.family in (socket.AF_INET,
-                                                   socket.AF_INET6)),
+                                if sock.family in _IP_FAMILIES),
                 adopted=tuple((sock.family, os.fstat(sock.fileno()).st_ino)
                               for sock in socks),
                 flagged=isinstance(listener.where, InheritedFd)
