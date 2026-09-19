@@ -1033,12 +1033,8 @@ class HTTP2Actor(Actor):
                         continue
                     elif (not closed_via_rst and frame_type in (
                             FrameTypes.WINDOW_UPDATE, FrameTypes.RST_STREAM)):
-                        # RFC 9113 §5.1 — on a stream *we* closed with
-                        # END_STREAM, a WINDOW_UPDATE or RST_STREAM the peer
-                        # sent before it saw that MUST be silently ignored,
-                        # not answered: the client crediting our last response
-                        # DATA races our trailers' END_STREAM, and an RST makes
-                        # it tear the stream down early.
+                        # RFC 9113 §5.1 closed-origin cases and rationale:
+                        # ``docs/about/rfc9113-implementation.md`` §5.1.
                         continue
                     else:
                         if frame_type == FrameTypes.DATA and frame.length:
