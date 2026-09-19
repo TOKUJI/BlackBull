@@ -1942,30 +1942,14 @@ class WebSocketRecipient(BaseRecipient):
             await self._close_channel(WSCloseCode.ABNORMAL)
             return True
         except ProtocolError as exc:
-            close = encode_frame(
-                exc.close_code.to_bytes(2, 'big'),
-                opcode=WSOpcode.CLOSE,
-                mask=not self._require_masked,
-            )
-            try:
-                await self._writer.write(close)
-            except Exception:
-                pass  # best-effort CLOSE frame; the socket may already be gone.
+            await self._send_close(exc.close_code)
             await self._emit_disconnected(exc.close_code)
             # Any exception in the read loop is raised back to the app on its
             # next receive(); the close frame has already gone out.
             await self._emit(exc)
             return True
         except Exception as exc:
-            close = encode_frame(
-                (1011).to_bytes(2, 'big'),  # INTERNAL_ERROR
-                opcode=WSOpcode.CLOSE,
-                mask=not self._require_masked,
-            )
-            try:
-                await self._writer.write(close)
-            except Exception:
-                pass  # best-effort CLOSE frame; the socket may already be gone.
+            await self._send_close(WSCloseCode.INTERNAL_ERROR)
             await self._emit(exc)
             return True
 
@@ -2063,34 +2047,32 @@ class WebSocketRecipient(BaseRecipient):
             # Close frame, echoing the peer's status code if present; on any
             # violation of the code or the reason text, send 1002 instead.
             code, reason_ok = _parse_close_payload(payload)
-            echo_code = code if reason_ok else WSCloseCode.PROTOCOL_ERROR
-            event_code = code if reason_ok else WSCloseCode.PROTOCOL_ERROR
-            close = encode_frame(
-                echo_code.to_bytes(2, 'big'),
-                opcode=WSOpcode.CLOSE,
-                mask=not self._require_masked,
-            )
-            try:
-                await self._writer.write(close)
-            except Exception:
-                pass  # best-effort CLOSE frame; the socket may already be gone.
-            await self._close_channel(event_code)
+            if not reason_ok:
+                code = WSCloseCode.PROTOCOL_ERROR
+            await self._send_close(code)
+            await self._close_channel(code)
             return True
         if opcode == WSOpcode.PING:
-            pong = encode_frame(payload, opcode=WSOpcode.PONG, mask=not self._require_masked)
+            pong = self._encode_frame(payload, WSOpcode.PONG)
             await self._writer.write(pong)
         # PONG: unsolicited pong — silently drop
         return False
 
     async def _handle_unknown_opcode(self) -> None:
         """Send a CLOSE frame and emit a disconnect event for an unknown opcode."""
-        close = encode_frame(
-            WSCloseCode.PROTOCOL_ERROR.to_bytes(2, 'big'), opcode=WSOpcode.CLOSE)
-        try:
-            await self._writer.write(close)
-        except Exception:
-            pass  # best-effort CLOSE frame; the socket may already be gone.
+        await self._send_close(WSCloseCode.PROTOCOL_ERROR)
         await self._close_channel(WSCloseCode.PROTOCOL_ERROR)
+
+    def _encode_frame(self, payload: bytes, opcode: WSOpcode | int) -> bytes:
+        """A frame this end sends: masked unless this end is the server."""
+        return encode_frame(payload, opcode=opcode,
+                            mask=not self._require_masked)
+
+    async def _send_close(self, code: int) -> None:
+        """Best-effort CLOSE frame: the peer's socket may already be gone."""
+        close = self._encode_frame(code.to_bytes(2, 'big'), WSOpcode.CLOSE)
+        with contextlib.suppress(Exception):
+            await self._writer.write(close)
 
     async def _close_channel(self, code: int) -> None:
         """Fire ``websocket_disconnected`` and end the channel with *code*.
@@ -2301,8 +2283,7 @@ class WebSocketRecipient(BaseRecipient):
         probe: a peer that is talking to us is alive, and requiring the
         specific answer would close a connection that is merely busy.
         """
-        ping = encode_frame(b'', opcode=WSOpcode.PING,
-                            mask=not self._require_masked)
+        ping = self._encode_frame(b'', WSOpcode.PING)
         with contextlib.suppress(Exception):
             await self._writer.write(ping)
 
@@ -2317,11 +2298,7 @@ class WebSocketRecipient(BaseRecipient):
             return
         logger.info('WebSocket peer did not answer the liveness PING in '
                     '%.1fs — closing 1001', self._ws_pong_timeout)
-        close = encode_frame(
-            WSCloseCode.GOING_AWAY.to_bytes(2, 'big'),
-            opcode=WSOpcode.CLOSE, mask=not self._require_masked)
-        with contextlib.suppress(Exception):
-            await self._writer.write(close)
+        await self._send_close(WSCloseCode.GOING_AWAY)
         self.disarm_watchdog()
         await self._close_channel(WSCloseCode.GOING_AWAY)
 

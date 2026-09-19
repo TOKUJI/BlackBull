@@ -149,16 +149,16 @@ class _RecipientWrapper:
 
 
 # ---------------------------------------------------------------------------
-# _encode_frame (Bug 5 pre-condition)
+# encode_frame (Bug 5 pre-condition)
 # ---------------------------------------------------------------------------
 
 class TestEncodeFrame:
-    """_encode_frame must produce valid unmasked WebSocket frames."""
+    """encode_frame must produce valid unmasked WebSocket frames."""
 
     @given(payload=st.binary(min_size=0, max_size=65536),
            opcode=st.sampled_from([0x1, 0x2, 0x8]))
     def test_encode_frame_length_encoding(self, payload, opcode):
-        """_encode_frame uses the correct RFC 6455 length encoding for all payload sizes."""
+        """encode_frame uses the correct RFC 6455 length encoding for all payload sizes."""
         frame = encode_frame(payload, opcode=opcode)
         length = len(payload)
         assert frame[0] == 0x80 | opcode

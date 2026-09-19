@@ -27,7 +27,7 @@ from blackbull.server.recipient import (
     AbstractReader, ProtocolError, WebSocketRecipient,
 )
 from blackbull.server.sender import AbstractWriter
-from blackbull.server.ws_codec import WSOpcode, encode_frame
+from blackbull.server.ws_codec import WSOpcode, encode_frame, read_payload
 from blackbull.websocket import WebSocketDisconnect
 
 
@@ -172,6 +172,39 @@ async def test_invalid_utf8_is_a_1007_violation():
     with pytest.raises(ProtocolError) as exc:
         await r.next_message()
     assert exc.value.close_code == 1007
+
+
+# ---------------------------------------------------------------------------
+# What the recipient sends back carries the mask the peer's role requires
+# ---------------------------------------------------------------------------
+
+def _recipient_and_writer(*frames: bytes, require_masked: bool = True):
+    writer = _NullWriter()
+    return WebSocketRecipient(_Wire(*frames), writer,
+                              require_masked=require_masked), writer
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('require_masked, outbound_masked', [
+    (True, False),      # server: peers are clients (masked in, unmasked out)
+    (False, True),      # client: the peer is a server (unmasked in, masked out)
+])
+async def test_an_unknown_opcode_close_masks_like_the_peer_requires(
+        require_masked, outbound_masked):
+    """RFC 6455 §5.1 — the flag that demands masked frames *in* is what
+    forbids masking them *out*, and an unknown opcode is answered with a
+    CLOSE either way."""
+    peer = encode_frame(b'', opcode=0x3, mask=require_masked)
+    r, writer = _recipient_and_writer(peer, require_masked=require_masked)
+    await r.await_connect()
+    with pytest.raises(WebSocketDisconnect):
+        await r.next_message()
+
+    close = bytes(writer.out)
+    assert close[0] == 0x88                          # FIN | CLOSE
+    assert bool(close[1] & 0x80) is outbound_masked
+    assert await read_payload(_Wire(close[2:]), outbound_masked, 2) == \
+        (1002).to_bytes(2, 'big')                    # PROTOCOL_ERROR, intact
 
 
 # ---------------------------------------------------------------------------
