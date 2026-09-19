@@ -156,10 +156,12 @@ closed-ID branch, the current wire behaviour is:
 | retained, `via_rst=True` | RST_STREAM(STREAM_CLOSED) | no response | accepted | GOAWAY(STREAM_CLOSED) | RST_STREAM(STREAM_CLOSED) |
 | evicted, reset origin unknown | no response | no response | accepted | GOAWAY(STREAM_CLOSED) | RST_STREAM(STREAM_CLOSED) |
 
-This table records the implementation's wire behaviour, not a conformance
-claim for every cell.  RFC 9113 §5.4.2 is why no origin answers a late
-`RST_STREAM` in kind; §5.1 is why the `WINDOW_UPDATE` answer still differs by
-origin.
+This table records what the code answers, not a conformance claim for every
+cell.  The row merges peer and local resets — the record keeps one bit —
+though §5.1 treats them differently: a frame after a *received* `RST_STREAM`
+is a stream error, while a frame after one this server *sent* is minimally
+processed and discarded.  §5.4.2 is categorical either way: no origin
+answers a late `RST_STREAM` in kind.
 
 A standalone CONTINUATION does not reach either state table: `_frame_loop()`
 rejects it first with `GOAWAY(PROTOCOL_ERROR)` under §6.10.  If a
