@@ -66,17 +66,16 @@ def compress_gzip(data: bytes) -> bytes:
 
 
 def decompress_gzip(data: bytes, max_output: int) -> bytes:
-    """Decompress a gzip *data* stream, refusing to produce more than
-    *max_output* bytes.
+    """Decompress one gzip member, refusing to produce more than *max_output*.
 
-    The gRPC 4-byte length prefix bounds only the *compressed* transfer size;
-    a small compressed payload can inflate to gigabytes.  Decompression is
-    therefore capped: ``zlib.decompressobj.decompress`` is given a
-    ``max_length`` so it stops at the limit and parks any unprocessed input in
-    ``unconsumed_tail`` — a non-empty tail (or an output past *max_output*)
-    means the message would exceed the cap and raises
-    [`DecompressionBombError`][].  A corrupt stream (bad header or trailing
-    CRC) raises [`DecompressionError`][] via the final ``flush``.
+    The 4-byte LPM prefix bounds the *compressed* size only, so the cap uses
+    ``decompress(..., max_output + 1)`` and ``unconsumed_tail`` and raises
+    [`DecompressionBombError`][].
+
+    A message is exactly one complete member, so input that ends before the
+    member does (its CRC was never verified; mid-deflate the output is silently
+    partial), a stream ``zlib`` rejects and any trailing byte — a second member
+    included — raise [`DecompressionError`][].  That includes an empty body.
     """
     d = zlib.decompressobj(wbits=_GZIP_WBITS)
     try:
@@ -90,6 +89,11 @@ def decompress_gzip(data: bytes, max_output: int) -> bytes:
         out += d.flush()
     except zlib.error as exc:
         raise DecompressionError(f'gzip: {exc}') from exc
+    if not d.eof:
+        raise DecompressionError('gzip: the stream ends before the member does')
+    if d.unused_data:
+        raise DecompressionError(
+            f'gzip: {len(d.unused_data)} byte(s) after the member')
     if len(out) > max_output:
         raise DecompressionBombError(
             f'decompressed message exceeds the {max_output}-byte limit')

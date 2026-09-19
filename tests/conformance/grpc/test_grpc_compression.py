@@ -135,6 +135,27 @@ class TestCompressionModule:
         with pytest.raises(compression.DecompressionError):
             compression.decompress_gzip(bytes(packed), 1024 * 1024)
 
+    def test_every_truncation_is_rejected(self):
+        """Every truncation is rejected, at every byte boundary: the trailer is
+        where the CRC lives, and mid-deflate the output is silently partial."""
+        packed = compression.compress_gzip(b'payload' * 20)
+        for cut in range(1, len(packed)):
+            with pytest.raises(compression.DecompressionError):
+                compression.decompress_gzip(packed[:cut], 1024 * 1024)
+
+    def test_no_member_at_all_is_rejected(self):
+        """An empty body under ``Compressed-Flag=1`` is not a member."""
+        with pytest.raises(compression.DecompressionError):
+            compression.decompress_gzip(b'', 1024)
+
+    def test_bytes_after_the_member_are_rejected(self):
+        """One message is one stream: a trailing byte — a second member
+        included — is refused rather than dropped or inflated."""
+        packed = compression.compress_gzip(b'payload' * 20)
+        for tail in (b'junk', b'\x00', packed):
+            with pytest.raises(compression.DecompressionError):
+                compression.decompress_gzip(packed + tail, 1024 * 1024)
+
     def test_supports(self):
         assert compression.supports(b'gzip') is True
         assert compression.supports(b'identity') is False
@@ -272,6 +293,85 @@ class TestRequestDecompression:
         await serve_grpc(reg, scope, _receive_chunks([frame]), send)
         assert _trailers(events)[b'grpc-status'] == \
             str(int(GrpcStatus.INTERNAL)).encode()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('shape', [
+        'footer missing', 'deflate truncated', 'trailing byte', 'empty body'])
+    async def test_incomplete_gzip_request_is_internal_and_not_delivered(
+            self, shape):
+        reg = GrpcServiceRegistry()
+        seen = []
+
+        @reg.method('/svc/Echo')
+        async def echo(request, context) -> bytes:
+            seen.append(request)
+            return request
+
+        packed = compression.compress_gzip(b'data' * 100)
+        body = {
+            'footer missing': packed[:-8],
+            'deflate truncated': packed[:-12],
+            'trailing byte': packed + b'\x00',
+            'empty body': b'',
+        }[shape]
+        scope = _grpc_scope('/svc/Echo', headers=[
+            (b'content-type', b'application/grpc'), (b'grpc-encoding', b'gzip')])
+        events, send = _collector()
+        await serve_grpc(reg, scope,
+                         _receive_chunks([encode_message(body, compressed=True)]),
+                         send)
+
+        assert _trailers(events)[b'grpc-status'] == \
+            str(int(GrpcStatus.INTERNAL)).encode()
+        assert seen == []
+
+    @pytest.mark.asyncio
+    async def test_incomplete_gzip_message_in_a_stream_is_not_delivered(self):
+        """A malformed message fails the stream before the handler sees it."""
+        reg = GrpcServiceRegistry()
+        seen = []
+
+        @reg.method('/svc/Join')
+        async def join(request_iter, context) -> bytes:
+            async for message in request_iter:
+                seen.append(message)
+            return b''
+
+        packed = compression.compress_gzip(b'aaa' * 100)
+        body = encode_message(packed[:-8], compressed=True)
+        scope = _grpc_scope('/svc/Join', headers=[
+            (b'content-type', b'application/grpc'), (b'grpc-encoding', b'gzip')])
+        events, send = _collector()
+        await serve_grpc(reg, scope, _receive_chunks([body]), send)
+
+        assert _trailers(events)[b'grpc-status'] == \
+            str(int(GrpcStatus.INTERNAL)).encode()
+        assert seen == []
+
+    @pytest.mark.asyncio
+    async def test_a_valid_message_before_a_malformed_one_is_delivered(self):
+        """Messages are independent: the stream fails at the malformed one,
+        and the valid message ahead of it was already handed over."""
+        reg = GrpcServiceRegistry()
+        seen = []
+
+        @reg.method('/svc/Join')
+        async def join(request_iter, context) -> bytes:
+            async for message in request_iter:
+                seen.append(message)
+            return b''
+
+        packed = compression.compress_gzip(b'aaa' * 100)
+        body = (_compressed_frame(b'aaa' * 100)
+                + encode_message(packed[:-8], compressed=True))
+        scope = _grpc_scope('/svc/Join', headers=[
+            (b'content-type', b'application/grpc'), (b'grpc-encoding', b'gzip')])
+        events, send = _collector()
+        await serve_grpc(reg, scope, _receive_chunks([body]), send)
+
+        assert _trailers(events)[b'grpc-status'] == \
+            str(int(GrpcStatus.INTERNAL)).encode()
+        assert seen == [b'aaa' * 100]
 
 
 # --------------------------------------------------------------------------

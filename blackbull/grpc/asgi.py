@@ -127,7 +127,7 @@ def _decompress_message(message: bytes, encoding: bytes) -> bytes:
     Raises [`GrpcError`][]: UNIMPLEMENTED for an unsupported / absent
     encoding (the server's ``grpc-accept-encoding`` is advertised on the
     response so the client can retry uncompressed), RESOURCE_EXHAUSTED for a
-    decompression bomb, INTERNAL for a corrupt stream."""
+    decompression bomb, INTERNAL for a corrupt or incomplete stream."""
     if encoding == b'gzip':
         try:
             return compression.decompress_gzip(message, MAX_MESSAGE_SIZE)
