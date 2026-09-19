@@ -18,12 +18,17 @@ import pytest
 from blackbull.native import NativeResponse
 from blackbull.middleware.cache import (
     Cache,
-    _Entry,
-    _cache_control,
+    _Capture,
+    _directives,
     _etag_matches,
-    _read_etag,
-    _request_has_no_store,
-    _response_max_age,
+    _must_not_store,
+    _names,
+    _parse_directives,
+    _readable,
+    _response_etag,
+    _smallest,
+    _stated_freshness,
+    _stated_max_age,
 )
 
 
@@ -41,6 +46,21 @@ def _scope(method: str = 'GET', path: str = '/', query: bytes = b'',
         'path': path,
         'query_string': query,
         'headers': list(headers or []),
+        'server': ('testserver', 80),
+    })
+
+
+def _ws_scope(path: str = '/'):
+    """A WebSocket handshake, as the H/1 actor marks one before dispatch."""
+    from blackbull.connection import Connection
+    return Connection.from_scope({
+        'type': 'websocket',
+        'method': 'GET',
+        'path': path,
+        'query_string': b'',
+        'headers': [(b'upgrade', b'websocket'),
+                    (b'sec-websocket-key', b'x' * 24),
+                    (b'sec-websocket-version', b'13')],
         'server': ('testserver', 80),
     })
 
@@ -332,6 +352,466 @@ class TestExpiry:
 
 
 # ---------------------------------------------------------------------------
+# Stated freshness and the request's own directives (RFC 9111 §4.2, §5.2)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestExplicitFreshness:
+    """The configured default must not widen a freshness the response stated."""
+
+    async def test_zero_max_age_is_stale_at_once(self):
+        mw = Cache(max_age=600)
+        cn, counter = _make_handler(
+            extra_headers=[(b'cache-control', b'max-age=0')])
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
+            await _run(mw, _scope(), cn)
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.5):
+            await _run(mw, _scope(), cn)
+        assert counter['n'] == 2
+
+    async def test_zero_s_maxage_wins_over_positive_max_age(self):
+        mw = Cache(max_age=600)
+        cn, counter = _make_handler(
+            extra_headers=[(b'cache-control', b'max-age=120, s-maxage=0')])
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
+            await _run(mw, _scope(), cn)
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.5):
+            await _run(mw, _scope(), cn)
+        assert counter['n'] == 2
+
+    async def test_absent_freshness_keeps_the_configured_default(self):
+        mw = Cache(max_age=600)
+        cn, counter = _make_handler()
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
+            await _run(mw, _scope(), cn)
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_500.0):
+            await _run(mw, _scope(), cn)
+        assert counter['n'] == 1
+
+    async def test_malformed_freshness_keeps_the_configured_default(self):
+        mw = Cache(max_age=600)
+        cn, counter = _make_handler(
+            extra_headers=[(b'cache-control', b'max-age=abc')])
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
+            await _run(mw, _scope(), cn)
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_500.0):
+            await _run(mw, _scope(), cn)
+        assert counter['n'] == 1
+
+    async def test_negative_freshness_is_stale_not_defaulted(self):
+        mw = Cache(max_age=600)
+        cn, counter = _make_handler(
+            extra_headers=[(b'cache-control', b'max-age=-5')])
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
+            await _run(mw, _scope(), cn)
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.5):
+            await _run(mw, _scope(), cn)
+        assert counter['n'] == 2
+
+    async def test_every_cache_control_field_is_read(self):
+        mw = Cache(max_age=600)
+        cn, counter = _make_handler(extra_headers=[
+            (b'cache-control', b'public'), (b'cache-control', b'max-age=0')])
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
+            await _run(mw, _scope(), cn)
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.5):
+            await _run(mw, _scope(), cn)
+        assert counter['n'] == 2
+
+
+@pytest.mark.asyncio
+class TestStatedFreshnessSources:
+    """Every place a response can state freshness, and one that states age."""
+
+    async def test_expires_only_response_is_as_stale_as_it_says(self):
+        mw = Cache(max_age=600)
+        cn, counter = _make_handler(extra_headers=[
+            (b'expires', b'Thu, 01 Jan 1970 00:00:00 GMT')])
+        await _run(mw, _scope(), cn)
+        await _run(mw, _scope(), cn)
+        assert counter['n'] == 2
+
+    async def test_expires_lifetime_is_measured_against_date(self):
+        mw = Cache(max_age=600)
+        cn, counter = _make_handler(extra_headers=[
+            (b'date', b'Mon, 01 Jan 2024 00:00:00 GMT'),
+            (b'expires', b'Mon, 01 Jan 2024 00:00:10 GMT')])
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
+            await _run(mw, _scope(), cn)
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_005.0):
+            await _run(mw, _scope(), cn)
+        assert counter['n'] == 1
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_020.0):
+            await _run(mw, _scope(), cn)
+        assert counter['n'] == 2
+
+    async def test_max_age_wins_over_expires(self):
+        mw = Cache(max_age=600)
+        cn, counter = _make_handler(extra_headers=[
+            (b'cache-control', b'max-age=60'),
+            (b'expires', b'Thu, 01 Jan 1970 00:00:00 GMT')])
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
+            await _run(mw, _scope(), cn)
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_030.0):
+            await _run(mw, _scope(), cn)
+        assert counter['n'] == 1
+
+    async def test_an_incoming_age_counts_against_the_lifetime(self):
+        mw = Cache()
+        cn, counter = _make_handler(extra_headers=[
+            (b'cache-control', b'max-age=600'), (b'age', b'10000')])
+        await _run(mw, _scope(), cn)
+        await _run(mw, _scope(), cn)
+        assert counter['n'] == 2
+
+    async def test_an_absurd_stated_lifetime_does_not_break_the_response(self):
+        mw = Cache(max_age=600)
+        cn, counter = _make_handler(extra_headers=[
+            (b'cache-control', b'max-age=' + b'9' * 400)])
+        sent = await _run(mw, _scope(), cn)
+        assert _split_response(sent)[0] == 200
+        await _run(mw, _scope(), cn)          # clamped short, still fresh
+        assert counter['n'] == 1
+
+    async def test_quoted_delta_seconds_are_read(self):
+        mw = Cache(max_age=600)
+        cn, counter = _make_handler(
+            extra_headers=[(b'cache-control', b'max-age="0"')])
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
+            await _run(mw, _scope(), cn)
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.5):
+            await _run(mw, _scope(), cn)
+        assert counter['n'] == 2
+
+    async def test_a_quoted_value_cannot_inject_a_directive(self):
+        """``x="a,max-age=31536000,b"`` is one extension directive whose value
+        mentions max-age — not a stated lifetime."""
+        mw = Cache(max_age=300)
+        cn, counter = _make_handler(extra_headers=[
+            (b'cache-control', b'x="a,max-age=31536000,b"')])
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
+            await _run(mw, _scope(), cn)
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_400.0):
+            await _run(mw, _scope(), cn)
+        assert counter['n'] == 2
+
+    async def test_repeated_expires_takes_the_earliest(self):
+        far = b'Fri, 31 Dec 9999 23:59:59 GMT'
+        past = b'Thu, 01 Jan 1970 00:00:00 GMT'
+        for headers in ([(b'expires', past), (b'expires', far)],
+                        [(b'expires', far), (b'expires', past)]):
+            mw = Cache(max_age=300)
+            cn, counter = _make_handler(extra_headers=headers)
+            with patch('blackbull.middleware.cache.time.monotonic',
+                       return_value=1_000.0):
+                await _run(mw, _scope(), cn)
+            with patch('blackbull.middleware.cache.time.monotonic',
+                       return_value=1_400.0):
+                await _run(mw, _scope(), cn)
+            assert counter['n'] == 2, headers
+
+    async def test_replayed_response_carries_its_current_age(self):
+        mw = Cache()
+        cn, _ = _make_handler(extra_headers=[
+            (b'cache-control', b'max-age=600'), (b'age', b'100')])
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
+            await _run(mw, _scope(), cn)
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_400.0):
+            sent = await _run(mw, _scope(), cn)
+        ages = [v for n, v in _split_response(sent)[1] if n.lower() == b'age']
+        assert ages == [b'500'], ages
+
+    async def test_a_regressed_clock_does_not_emit_a_negative_age(self):
+        mw = Cache()
+        cn, _ = _make_handler(extra_headers=[(b'cache-control', b'max-age=600')])
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
+            await _run(mw, _scope(), cn)
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=995.0):
+            sent = await _run(mw, _scope(), cn)
+        ages = [v for n, v in _split_response(sent)[1] if n.lower() == b'age']
+        assert ages == [b'0'], ages
+
+    async def test_a_field_we_cannot_parse_is_not_stored(self):
+        """An unterminated quote makes the field unreadable, so the response is
+        not stored rather than read through the broken text."""
+        mw = Cache(max_age=300)
+        cn, counter = _make_handler(extra_headers=[
+            (b'cache-control', b'x="a,max-age=31536000')])
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
+            await _run(mw, _scope(), cn)
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_400.0):
+            await _run(mw, _scope(), cn)
+        assert counter['n'] == 2
+
+    async def test_a_misplaced_quote_is_not_stored(self):
+        """``"no-cache"`` is balanced, so a reader that only counts quotes
+        would store the response — the cache must not."""
+        mw = Cache(max_age=600)
+        cn, counter = _make_handler(
+            extra_headers=[(b'cache-control', b'"no-cache"')])
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
+            await _run(mw, _scope(), cn)
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.5):
+            await _run(mw, _scope(), cn)
+        assert counter['n'] == 2
+
+    async def test_a_quoted_value_that_is_no_number_states_no_lifetime(self):
+        """``max-age="31536000\\"x"`` de-escapes to a string that is not a
+        number, so its leading digits are not the lifetime; the default stands
+        and expires at 600 s, not after a year."""
+        mw = Cache(max_age=600)
+        cn, counter = _make_handler(
+            extra_headers=[(b'cache-control', b'max-age="31536000\\"x"')])
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
+            await _run(mw, _scope(), cn)
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_700.0):
+            await _run(mw, _scope(), cn)
+        assert counter['n'] == 2
+
+    async def test_repeated_max_age_takes_the_most_restrictive_value(self):
+        mw = Cache(max_age=600)
+        cn, counter = _make_handler()
+        await _run(mw, _scope(), cn)
+        await _run(mw, _scope(headers=[
+            (b'cache-control', b'max-age=600, max-age=0')]), cn)
+        assert counter['n'] == 2
+
+
+@pytest.mark.asyncio
+class TestRequestDirectives:
+    """The request's own Cache-Control binds what a hit may reuse."""
+
+    async def test_request_no_cache_runs_the_handler(self):
+        mw = Cache()
+        cn, counter = _make_handler()
+        await _run(mw, _scope(), cn)
+        await _run(mw, _scope(headers=[(b'cache-control', b'no-cache')]), cn)
+        assert counter['n'] == 2
+
+    async def test_request_no_cache_is_not_answered_304_by_the_cache(self):
+        """A conditional request with ``no-cache`` is the origin's to answer:
+        the stored copy must not be turned into a 304 behind its back."""
+        mw = Cache()
+        cn, counter = _make_handler()
+        first = await _run(mw, _scope(), cn)
+        etag = next(v for n, v in _split_response(first)[1]
+                    if n.lower() == b'etag')
+
+        sent = await _run(mw, _scope(headers=[
+            (b'cache-control', b'no-cache'), (b'if-none-match', etag)]), cn)
+
+        status, _, body = _split_response(sent)
+        assert counter['n'] == 2
+        assert (status, body) == (200, b'hello')
+
+    async def test_request_max_age_bounds_the_age_it_accepts(self):
+        mw = Cache()
+        cn, counter = _make_handler()
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
+            await _run(mw, _scope(), cn)
+        # 3 s old, the client accepts 60 s → the stored copy still answers.
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_003.0):
+            await _run(mw, _scope(headers=[(b'cache-control', b'max-age=60')]), cn)
+        assert counter['n'] == 1
+        # 10 s old, the client accepts 5 s → the handler runs.
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_010.0):
+            await _run(mw, _scope(headers=[(b'cache-control', b'max-age=5')]), cn)
+        assert counter['n'] == 2
+
+    async def test_a_second_cache_control_field_still_binds(self):
+        mw = Cache()
+        cn, counter = _make_handler()
+        await _run(mw, _scope(), cn)
+        await _run(mw, _scope(headers=[(b'cache-control', b'max-age=600'),
+                                       (b'cache-control', b'no-cache')]), cn)
+        assert counter['n'] == 2
+
+    async def test_a_second_field_no_store_bypasses(self):
+        mw = Cache()
+        cn, counter = _make_handler()
+        await _run(mw, _scope(), cn)
+        await _run(mw, _scope(headers=[(b'cache-control', b'public'),
+                                       (b'cache-control', b'no-store')]), cn)
+        assert counter['n'] == 2
+
+    async def test_pragma_no_cache_validates_when_cache_control_is_absent(self):
+        mw = Cache()
+        cn, counter = _make_handler()
+        await _run(mw, _scope(), cn)
+        await _run(mw, _scope(headers=[(b'pragma', b'no-cache')]), cn)
+        assert counter['n'] == 2
+
+    async def test_pragma_is_ignored_when_cache_control_is_present(self):
+        mw = Cache()
+        cn, counter = _make_handler()
+        await _run(mw, _scope(), cn)
+        await _run(mw, _scope(headers=[(b'cache-control', b'max-age=600'),
+                                       (b'pragma', b'no-cache')]), cn)
+        assert counter['n'] == 1
+
+    async def test_a_quoted_request_max_age_is_read(self):
+        mw = Cache()
+        cn, counter = _make_handler()
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
+            await _run(mw, _scope(), cn)
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.5):
+            await _run(mw, _scope(headers=[(b'cache-control', b'max-age="0"')]), cn)
+        assert counter['n'] == 2
+
+    async def test_pragma_no_cache_as_a_list_or_second_field(self):
+        mw = Cache()
+        cn, counter = _make_handler()
+        await _run(mw, _scope(), cn)
+        await _run(mw, _scope(headers=[(b'pragma', b'no-cache, x')]), cn)
+        assert counter['n'] == 2
+        await _run(mw, _scope(headers=[(b'pragma', b'x'),
+                                       (b'pragma', b'no-cache')]), cn)
+        assert counter['n'] == 3
+
+    async def test_qualified_request_no_cache_still_validates(self):
+        mw = Cache()
+        cn, counter = _make_handler()
+        await _run(mw, _scope(), cn)
+        await _run(mw, _scope(headers=[
+            (b'cache-control', b'no-cache="set-cookie"')]), cn)
+        assert counter['n'] == 2
+
+    async def test_a_stray_quote_does_not_hide_a_later_directive(self):
+        """The field cannot be read, so the response is not stored — and the
+        ``max-age=0`` behind the stray quote is never read past."""
+        mw = Cache(max_age=600)
+        cn, counter = _make_handler(
+            extra_headers=[(b'cache-control', b'x", max-age=0')])
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
+            await _run(mw, _scope(), cn)
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.5):
+            await _run(mw, _scope(), cn)
+        assert counter['n'] == 2
+
+    async def test_a_trailing_stray_quote_leaves_the_field_unreadable(self):
+        mw = Cache(max_age=600)
+        cn, counter = _make_handler(
+            extra_headers=[(b'cache-control', b'no-cache"')])
+        await _run(mw, _scope(), cn)
+        await _run(mw, _scope(), cn)
+        assert counter['n'] == 2
+
+        mw = Cache(max_age=600)
+        cn, counter = _make_handler(
+            extra_headers=[(b'cache-control', b'max-age=0"')])
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
+            await _run(mw, _scope(), cn)
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.5):
+            await _run(mw, _scope(), cn)
+        assert counter['n'] == 2
+
+    async def test_no_store_is_matched_by_name_not_inside_a_value(self):
+        """``no-store="a,b"`` asks for it; a mention inside another directive's
+        quoted value does not."""
+        mw = Cache()
+        cn, counter = _make_handler()
+        await _run(mw, _scope(), cn)
+        await _run(mw, _scope(headers=[
+            (b'cache-control', b'no-store="a,b"')]), cn)
+        assert counter['n'] == 2
+        await _run(mw, _scope(headers=[
+            (b'cache-control', b'x="a,no-store,b"')]), cn)
+        assert counter['n'] == 2, 'the mentioned no-store must not bypass'
+
+    async def test_no_store_with_a_stray_quote_still_bypasses(self):
+        mw = Cache()
+        cn, counter = _make_handler()
+        await _run(mw, _scope(), cn)
+        await _run(mw, _scope(headers=[(b'cache-control', b'no-store"')]), cn)
+        assert counter['n'] == 2
+
+    async def test_a_quote_inside_a_name_is_not_stored(self):
+        """A quote where the grammar has none makes the field unreadable, so a
+        ``no-cache`` written that way is not read through."""
+        mw = Cache(max_age=300)
+        cn, counter = _make_handler(
+            extra_headers=[(b'cache-control', b'no-cache"x"')])
+        await _run(mw, _scope(), cn)
+        await _run(mw, _scope(), cn)
+        assert counter['n'] == 2
+
+    async def test_a_quote_inside_a_request_name_validates(self):
+        mw = Cache()
+        cn, counter = _make_handler()
+        await _run(mw, _scope(), cn)
+        await _run(mw, _scope(headers=[(b'cache-control', b'no-cache"x"')]), cn)
+        assert counter['n'] == 2
+
+    async def test_a_value_that_does_not_end_at_a_comma_is_not_stored(self):
+        """``max-age="0"x`` states nothing a reader can trust, so it is not
+        read as "unstated" and given the default either."""
+        mw = Cache(max_age=600)
+        cn, counter = _make_handler(
+            extra_headers=[(b'cache-control', b'max-age="0"x')])
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
+            await _run(mw, _scope(), cn)
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.5):
+            await _run(mw, _scope(), cn)
+        assert counter['n'] == 2
+
+    async def test_a_request_value_that_does_not_end_at_a_comma_validates(self):
+        mw = Cache()
+        cn, counter = _make_handler()
+        await _run(mw, _scope(), cn)
+        await _run(mw, _scope(headers=[(b'cache-control', b'max-age="0"x')]), cn)
+        assert counter['n'] == 2
+
+    async def test_a_misplaced_quote_in_a_request_validates(self):
+        mw = Cache()
+        cn, counter = _make_handler()
+        await _run(mw, _scope(), cn)
+        await _run(mw, _scope(headers=[(b'cache-control', b'"no-cache"')]), cn)
+        assert counter['n'] == 2
+
+    async def test_an_unreadable_request_field_is_not_stored(self):
+        """It could be stating a ``no-store`` this cache failed to read, so the
+        response it produced must not answer the next request."""
+        mw = Cache(max_age=600)
+        cn, counter = _make_handler()
+        await _run(mw, _scope(headers=[(b'cache-control', b'"no-store"')]), cn)
+        await _run(mw, _scope(), cn)
+        assert counter['n'] == 2
+
+    async def test_a_quoted_pair_keeps_the_field_usable(self):
+        """``x="a\"b"`` is legal, so the response is stored with its stated
+        lifetime instead of being refused."""
+        mw = Cache()
+        cn, counter = _make_handler(extra_headers=[
+            (b'cache-control', b'x="a\\"b", max-age=600')])
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
+            await _run(mw, _scope(), cn)
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_400.0):
+            await _run(mw, _scope(), cn)
+        assert counter['n'] == 1
+
+    async def test_an_escaped_closing_quote_leaves_the_field_unreadable(self):
+        """The quote that would close the value is escaped, so the string is
+        still open: not a one-year lifetime."""
+        mw = Cache(max_age=300)
+        cn, counter = _make_handler(extra_headers=[
+            (b'cache-control', b'max-age="31536000\\"')])
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
+            await _run(mw, _scope(), cn)
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_400.0):
+            await _run(mw, _scope(), cn)
+        assert counter['n'] == 2
+
+    async def test_request_max_age_zero_always_validates(self):
+        mw = Cache()
+        cn, counter = _make_handler()
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
+            await _run(mw, _scope(), cn)
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.5):
+            await _run(mw, _scope(headers=[(b'cache-control', b'max-age=0')]), cn)
+        assert counter['n'] == 2
+
+
+# ---------------------------------------------------------------------------
 # LRU bound
 # ---------------------------------------------------------------------------
 
@@ -363,28 +843,182 @@ class TestLRUEviction:
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-class TestScopeFilter:
-    async def test_websocket_scope_passes_through(self):
-        mw = Cache()
-        called = []
+class TestNonHTTPRequests:
+    """Cache serves HTTP requests; everything else goes to the handler."""
+
+    async def test_a_websocket_handshake_is_not_answered_from_the_cache(self):
+        """The app hands middleware a native Connection of the request's own
+        type, so a handshake must not be served the cached GET for its URL."""
+        mw = Cache(max_age=600)
+        cn, counter = _make_handler()
+        await _run(mw, _scope(path='/chat'), cn)
+        await _run(mw, _ws_scope(path='/chat'), cn)
+        assert counter['n'] == 2
+
+    async def test_a_response_with_trailers_is_passed_through_unstored(self):
+        mw = Cache(max_age=600)
+        calls = {'n': 0}
 
         async def call_next(scope, receive, send):
-            called.append(scope)
+            calls['n'] += 1
+            await send(NativeResponse(
+                status=200, header=[(b'content-type', b'text/plain')],
+                body=b'hello', expects_trailers=True))
+            await send(NativeResponse(trailers=[(b'x-sum', b'1')]))
 
-        scope = {'type': 'websocket', 'method': 'GET', 'path': '/', 'headers': []}
-        await mw(scope, None, None, call_next)
-        assert called == [scope]
+        sent: list = []
 
-    async def test_lifespan_scope_passes_through(self):
-        mw = Cache()
-        called = []
+        async def send(event):
+            sent.append(event)
 
-        async def call_next(scope, receive, send):
-            called.append(scope)
+        await mw(_scope(), None, send, call_next)
+        assert [(e.trailers) for e in sent] == [None, [(b'x-sum', b'1')]]
+        await mw(_scope(), None, send, call_next)
+        assert calls['n'] == 2
 
-        scope = {'type': 'lifespan'}
-        await mw(scope, None, None, call_next)
-        assert called == [scope]
+
+@pytest.mark.asyncio
+class TestOriginKeying:
+    """The key is per origin: two hosts never share one copy."""
+
+    async def test_hosts_do_not_share_an_entry(self):
+        mw = Cache(max_age=600)
+        cn, counter = _make_handler()
+        await _run(mw, _scope(headers=[(b'host', b'a.example')]), cn)
+        await _run(mw, _scope(headers=[(b'host', b'b.example')]), cn)
+        assert counter['n'] == 2
+
+    async def test_case_and_default_port_are_one_origin(self):
+        mw = Cache(max_age=600)
+        cn, counter = _make_handler()
+        await _run(mw, _scope(headers=[(b'host', b'Example.com')]), cn)
+        await _run(mw, _scope(headers=[(b'host', b'example.com:080')]), cn)
+        assert counter['n'] == 1
+
+    async def test_an_ip_literal_is_not_the_same_name(self):
+        mw = Cache(max_age=600)
+        cn, counter = _make_handler()
+        await _run(mw, _scope(headers=[(b'host', b'[v1.example]')]), cn)
+        await _run(mw, _scope(headers=[(b'host', b'v1.example')]), cn)
+        assert counter['n'] == 2
+
+    async def test_two_host_fields_bypass_the_cache(self):
+        mw = Cache(max_age=600)
+        cn, counter = _make_handler()
+        await _run(mw, _scope(headers=[(b'host', b'a.example'),
+                                       (b'host', b'b.example')]), cn)
+        await _run(mw, _scope(headers=[(b'host', b'a.example')]), cn)
+        assert counter['n'] == 2
+
+    @pytest.mark.parametrize('authority', [
+        b'a.example@b.example', b'a.example/x', b'a.example:invalid',
+        b'[::1]suffix', b'',
+    ])
+    async def test_an_ambiguous_authority_bypasses_the_cache(self, authority):
+        mw = Cache(max_age=600)
+        cn, counter = _make_handler()
+        await _run(mw, _scope(headers=[(b'host', authority)]), cn)
+        await _run(mw, _scope(headers=[(b'host', authority)]), cn)
+        assert counter['n'] == 2
+
+
+@pytest.mark.asyncio
+class TestCapture:
+    """The miss-path buffer on its own: it holds a response until its body is
+    known, then either stores it or forwards it in order."""
+
+    def _capture(self, mw):
+        sent: list = []
+
+        async def send(event):
+            sent.append(event)
+
+        conn = _scope()
+        base_key = (conn.method, ('http', 'testserver', 80), conn.path,
+                    conn.query_string)
+        return _Capture(mw, conn, send, base_key), sent
+
+    @staticmethod
+    def _entry(mw):
+        bucket = mw._store[('GET', ('http', 'testserver', 80), '/', b'')]
+        return bucket.entries[()]
+
+    async def test_a_complete_response_is_stored_and_released_once(self):
+        mw = Cache(max_age=600)
+        capture, sent = self._capture(mw)
+        event = NativeResponse.complete(
+            200, [(b'content-type', b'text/plain')], b'hello')
+        await capture.send(event)
+        await capture.release()
+        await capture.release()
+        assert sent == [event]
+        entry = self._entry(mw)
+        assert (entry.status, entry.body) == (200, b'hello')
+        assert entry.etag.startswith(b'W/"')
+        # The live response carries the same ETag the entry stored.
+        assert (b'etag', entry.etag) in event._header
+
+    async def test_the_stored_header_is_a_copy(self):
+        mw = Cache(max_age=600)
+        capture, _ = self._capture(mw)
+        event = NativeResponse.complete(
+            200, [(b'content-type', b'text/plain')], b'hello')
+        await capture.send(event)
+        event.header.append((b'x-injected', b'1'))
+        assert (b'x-injected', b'1') not in self._entry(mw).header
+
+    async def test_a_streamed_body_is_passed_through_unstored(self):
+        mw = Cache(max_age=600)
+        capture, sent = self._capture(mw)
+        header = NativeResponse(
+            status=200, header=[(b'content-type', b'text/plain')])
+        first = NativeResponse(body=b'hel', more_body=True)
+        last = NativeResponse(body=b'lo')
+        for event in (header, first, last):
+            await capture.send(event)
+        assert sent == [header, first, last]
+        assert not mw._store
+
+    async def test_trailers_are_passed_through_unstored(self):
+        mw = Cache(max_age=600)
+        capture, sent = self._capture(mw)
+        header = NativeResponse(
+            status=200, header=[(b'content-type', b'text/plain')],
+            body=b'hello', expects_trailers=True)
+        trailers = NativeResponse(trailers=[(b'x-sum', b'1')])
+        await capture.send(header)
+        await capture.send(trailers)
+        assert sent == [header, trailers]
+        assert not mw._store
+
+    async def test_an_unstorable_response_is_forwarded_at_once(self):
+        mw = Cache(max_age=600)
+        capture, sent = self._capture(mw)
+        header = NativeResponse(
+            status=200, header=[(b'cache-control', b'no-store')])
+        body = NativeResponse(body=b'hello')
+        await capture.send(header)
+        assert sent == [header]             # released by the header alone
+        await capture.send(body)
+        assert sent == [header, body]
+        assert not mw._store
+
+    async def test_vary_star_is_forwarded_at_once(self):
+        mw = Cache(max_age=600)
+        capture, sent = self._capture(mw)
+        header = NativeResponse(status=200, header=[(b'vary', b'*')])
+        await capture.send(header)
+        assert sent == [header]
+        assert not mw._store
+
+    async def test_a_response_without_an_etag_is_sent_but_not_stored(self):
+        mw = Cache(max_age=600, generate_etag=False)
+        capture, sent = self._capture(mw)
+        event = NativeResponse.complete(
+            200, [(b'content-type', b'text/plain')], b'hello')
+        await capture.send(event)
+        assert sent == [event]
+        assert not mw._store
 
 
 # ---------------------------------------------------------------------------
@@ -393,36 +1027,96 @@ class TestScopeFilter:
 
 class TestHeaderHelpers:
     def test_request_no_store_detection(self):
-        assert _request_has_no_store({b'cache-control': b'no-store'})
-        assert _request_has_no_store({b'cache-control': b'no-cache, no-store'})
-        assert not _request_has_no_store({b'cache-control': b'no-cache'})
-        assert not _request_has_no_store({})
+        assert _must_not_store(b'no-store')
+        assert _must_not_store(b'no-cache, no-store')
+        assert not _must_not_store(b'no-cache')
+        assert not _must_not_store(None)
 
-    def test_cache_control_directive_split(self):
-        cc = _cache_control([(b'cache-control', b'public, max-age=300, must-revalidate')])
-        assert b'public' in cc
-        assert b'must-revalidate' in cc
-        assert b'max-age=300' in cc
-        assert b'max-age' in cc   # bare directive name also present
+    def test_an_unreadable_request_field_forbids_storing(self):
+        """It could be stating a ``no-store`` this cache failed to read."""
+        assert _must_not_store(b'"no-store"')
+        assert _must_not_store(b'no-store"')
+
+    def test_directive_names_are_read_in_order(self):
+        names = _names(b'public, max-age=300, must-revalidate')
+        assert names == [b'public', b'max-age', b'must-revalidate']
 
     def test_response_max_age_parses_max_age(self):
-        assert _response_max_age([(b'cache-control', b'max-age=120')]) == 120
+        assert _stated_max_age([(b'cache-control', b'max-age=120')]) == 120
 
     def test_response_max_age_prefers_s_maxage(self):
-        assert _response_max_age(
+        assert _stated_max_age(
             [(b'cache-control', b'max-age=10, s-maxage=99')]) == 99
 
     def test_response_max_age_missing_returns_none(self):
-        assert _response_max_age([(b'cache-control', b'public')]) is None
-        assert _response_max_age([]) is None
+        assert _stated_max_age([(b'cache-control', b'public')]) is None
+        assert _stated_max_age([]) is None
 
     def test_response_max_age_garbage_value_ignored(self):
-        assert _response_max_age([(b'cache-control', b'max-age=oops')]) is None
+        assert _stated_max_age([(b'cache-control', b'max-age=oops')]) is None
+
+    def test_response_max_age_reads_quoted_and_repeated_values(self):
+        assert _stated_max_age([(b'cache-control', b'max-age="0"')]) == 0
+        assert _stated_max_age(
+            [(b'cache-control', b'max-age=600, max-age=0')]) == 0
+
+    def test_a_field_reads_as_its_directives(self):
+        assert _parse_directives(b'public, max-age=300, no-cache="set-cookie"') == [
+            (b'public', None), (b'max-age', b'300'),
+            (b'no-cache', b'set-cookie')]
+        assert _parse_directives(b'x="a\\"b", max-age=600') == [
+            (b'x', b'a"b'), (b'max-age', b'600')]
+
+    def test_directive_names_are_case_insensitive(self):
+        """RFC 9111 §5.2 compares them that way, so ``Max-Age=0`` is a stated
+        zero and not an unstated default."""
+        assert _names(b'No-Store, Max-Age=0') == [b'no-store', b'max-age']
+        assert _stated_max_age([(b'cache-control', b'Max-Age=60')]) == 60
+
+    def test_whitespace_between_directives_is_allowed(self):
+        assert _names(b' public ,\tmax-age=300 ') == [b'public', b'max-age']
+        assert _names(b'no-cache,') == [b'no-cache']
+
+    @pytest.mark.parametrize('value', [
+        b'max-age="0',              # unterminated quoted-string
+        b'max-age="31536000\\"',    # its closing quote is escaped
+        b'"no-cache"',              # a quote where a name belongs
+        b'"',                       # a quote and nothing else
+        b'max-age="0"x',            # text after the closing quote
+        b'max-age = 0',             # OWS where the grammar has none
+        b'=0',                      # a value with no name
+        b'a=b=c',                   # a second '='
+        b'no-cache x',              # a name after a name
+        b'max-age=',                # '=' with no value
+    ])
+    def test_a_field_that_breaks_the_grammar_is_unreadable(self, value):
+        assert _parse_directives(value) is None
+        assert not _readable(value)
+        assert _names(value) == []
+        assert list(_directives([(b'cache-control', value)])) == []
+        assert _smallest([(b'cache-control', value)], b'max-age') is None
+
+    def test_a_malformed_cache_control_falls_back_to_expires(self):
+        """Precedence: a ``max-age`` that states no number is unstated, so
+        ``Expires`` still decides the lifetime."""
+        assert _stated_freshness([
+            (b'cache-control', b'max-age=abc'),
+            (b'expires', b'Fri, 31 Dec 9999 23:59:59 GMT')]) is not None
+
+    def test_request_no_store_matches_by_name(self):
+        assert _must_not_store(b'no-store="a,b"')
+        assert not _must_not_store(b'x="a,no-store,b"')
+
+    def test_directives_do_not_split_inside_a_quoted_value(self):
+        assert _names(b'x="a,max-age=0", max-age=60') == [b'x', b'max-age']
+        assert _smallest(
+            [(b'cache-control', b'x="a,max-age=31536000,b"')],
+            b'max-age') is None
 
     def test_read_etag(self):
-        assert _read_etag([(b'etag', b'"abc"')]) == b'"abc"'
-        assert _read_etag([(b'ETag', b'"abc"')]) == b'"abc"'
-        assert _read_etag([]) is None
+        assert _response_etag([(b'etag', b'"abc"')]) == b'"abc"'
+        assert _response_etag([(b'ETag', b'"abc"')]) == b'"abc"'
+        assert _response_etag([]) is None
 
     def test_etag_matches_exact(self):
         assert _etag_matches(b'"abc"', b'"abc"')
@@ -612,28 +1306,30 @@ class TestCacheBehindCompression:
 
 
 class TestVaryHelpers:
-    def test_response_vary_absent(self):
-        from blackbull.middleware.cache import _response_vary
-        assert _response_vary([(b'content-type', b'text/plain')]) == ()
+    def test_vary_fields_absent(self):
+        from blackbull.middleware.cache import _vary_fields
+        assert _vary_fields([(b'content-type', b'text/plain')]) == ()
 
-    def test_response_vary_fields_sorted_lowercased(self):
-        from blackbull.middleware.cache import _response_vary
-        assert _response_vary(
+    def test_vary_fields_sorted_lowercased(self):
+        from blackbull.middleware.cache import _vary_fields
+        assert _vary_fields(
             [(b'vary', b'Accept-Encoding, Accept-Language')]
         ) == (b'accept-encoding', b'accept-language')
 
-    def test_response_vary_star_is_none(self):
-        from blackbull.middleware.cache import _response_vary
-        assert _response_vary([(b'vary', b'*')]) is None
+    def test_vary_star_is_none(self):
+        from blackbull.middleware.cache import _vary_fields
+        assert _vary_fields([(b'vary', b'*')]) is None
 
-    def test_vary_key_pulls_request_values(self):
-        from blackbull.middleware.cache import _vary_key
-        req = {b'accept-encoding': b'br'}
-        assert _vary_key((b'accept-encoding',), req) == ((b'accept-encoding', b'br'),)
+    def test_variant_key_pulls_request_values(self):
+        from blackbull.headers import Headers
+        from blackbull.middleware.cache import _variant_key
+        req = Headers([(b'accept-encoding', b'br')])
+        assert _variant_key((b'accept-encoding',), req) == (b'br',)
 
-    def test_vary_key_missing_header_is_empty(self):
-        from blackbull.middleware.cache import _vary_key
-        assert _vary_key((b'accept-encoding',), {}) == ((b'accept-encoding', b''),)
+    def test_variant_key_missing_header_is_empty(self):
+        from blackbull.headers import Headers
+        from blackbull.middleware.cache import _variant_key
+        assert _variant_key((b'accept-encoding',), Headers([])) == (b'',)
 
 
 # ---------------------------------------------------------------------------

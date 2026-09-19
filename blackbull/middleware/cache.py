@@ -1,107 +1,87 @@
 """Response caching middleware (RFC 9111 — HTTP Caching).
 
 Caches successful GET/HEAD responses in a per-worker, in-memory LRU and
-replays them without running the handler.  It honours ``Cache-Control`` in
-both directions, generates a weak ETag when the handler supplies none,
-answers ``If-None-Match`` with a 304, keys variants by ``Vary``, and
-refuses anything carrying ``Authorization`` unless
-``cache_authenticated=True`` (RFC 9111 §3.5).  ``docs/guide/middleware.md``
-states each of those rules and tabulates the constructor.
-
-Two things it does not do: there is no invalidation API (restart the
-worker, or wait out the TTL), and nothing is shared between workers.
-
-The store is keyed by ``(method, origin, path, query_string)`` → a per-URL
-bucket holding the response's ``Vary`` field names alongside its variant
-entries.  The field names live *inside* the bucket so they cannot be
-evicted independently of the entries they key, which is what a second LRU
-beside the first would allow.
-
-Usage::
-
-    from blackbull.middleware import Cache
-
-    app.use(Cache(max_age=600))     # 10-minute TTL
-
-    @app.route(path='/feed')
-    async def feed(conn, receive, send):
-        ...   # served from cache for 10 min after first hit
+replays them without running the handler.  It reads ``Cache-Control`` in both
+directions, generates a weak ETag when the handler supplies none, answers
+``If-None-Match`` with a 304, and keys variants by ``Vary``.  There is no
+invalidation API and nothing is shared between workers: restart the worker, or
+wait out the lifetime.  ``docs/guide/middleware.md`` tabulates the constructor.
 """
 from __future__ import annotations
 
 import hashlib
-import logging
 import time
 from collections import OrderedDict
+from collections.abc import Iterable, Iterator
+from datetime import timezone
+from email.utils import parsedate_to_datetime
+from typing import NamedTuple
 from urllib.parse import urlsplit
 
 from ..connection import Connection
+from ..headers import Headers
 from ..native import NativeResponse
 from .utils import as_middleware
 
-logger = logging.getLogger(__name__)
-
-
-# RFC 9110 §15.x — status codes that are heuristically cacheable.
-# We're stricter than the RFC's full list: caching error responses is
-# rarely what the user means.
+#: Narrower than RFC 9110 §15's heuristically cacheable set: caching an error
+#: is rarely what an application meant.
 _DEFAULT_CACHEABLE_STATUSES = frozenset({200, 203, 300, 301, 308, 404, 410, 414, 451})
 
 _DEFAULT_CACHEABLE_METHODS = frozenset({'GET', 'HEAD'})
 
+#: Clamp on a stated lifetime, so a parseable-but-absurd ``max-age`` cannot
+#: overflow an entry's expiry (RFC 9111 §4.2.1).  Clamping shortens, never
+#: widens.
+_MAX_DELTA_SECONDS = 365 * 24 * 60 * 60
 
-class _Entry:
-    """One stored cache hit — the response as *data*, not as a message.
+#: Cap on the variants one base key holds, so a peer varying an ``Accept-*``
+#: header cannot grow one bucket without bound.
+_MAX_VARIANTS_PER_KEY = 16
 
-    Held as ``(status, header, body)`` rather than a ready-made
-    [`NativeResponse`][blackbull.native.NativeResponse] so every replay can build a
-    fresh object over a fresh header list.  Middleware below the cache — CORS,
-    the route header injector — append to ``_header`` **in place**; handing
-    out one shared object would grow the stored entry on every hit.
+
+
+
+class _StoredResponse(NamedTuple):
+    """A cached response as data, so every replay builds a fresh message.
+
+    A ready-made object cannot be handed out twice: middleware below this one
+    append to a response's header list in place, growing the entry per hit.
     """
-    __slots__ = ('status', 'header', 'body', 'etag', 'expires_at')
+    status: int
+    header: list[tuple[bytes, bytes]]
+    body: bytes
+    etag: bytes
+    expires_at: float
+    stored_at: float
 
-    def __init__(self, status: int, header: list[tuple[bytes, bytes]],
-                 body: bytes, etag: bytes, expires_at: float):
-        self.status = status
-        self.header = header
-        self.body = body
-        self.etag = etag
-        self.expires_at = expires_at
-
-    def replay(self) -> 'NativeResponse':
-        """A private copy of the stored response, safe to mutate downstream."""
-        return NativeResponse(status=self.status, header=list(self.header),
-                              body=self.body)
+    def replay(self, age: int) -> NativeResponse:
+        """A private copy carrying its *current* age (RFC 9111 §4.2.3)."""
+        header = [(name, value) for name, value in self.header
+                  if name.lower() != b'age']
+        header.append((b'age', str(age).encode()))
+        return NativeResponse(status=self.status, header=header, body=self.body)
 
     def expired(self, now: float | None = None) -> bool:
         return (now if now is not None else time.monotonic()) >= self.expires_at
 
+    def age(self, now: float | None = None) -> float:
+        """Seconds since the origin generated the response: ``stored_at`` is
+        back-dated by the arriving ``Age``, so this is the whole age, not the
+        residency (§4.2.3)."""
+        return (now if now is not None else time.monotonic()) - self.stored_at
 
-# Safety cap on the number of stored variants for a single base key, so a
-# hostile peer varying an Accept-* header cannot grow one bucket without bound.
-# Far above any real Accept-Encoding × Accept-Language cross-product.
-_MAX_VARIANTS_PER_KEY = 16
 
+class _Variants:
+    """Everything cached for one method, origin, path and query string.
 
-class _Bucket:
-    """All cached variants for one method, origin, path and query string.
-
-    The response ``Vary`` field names live *inside* the bucket, beside the
-    per-variant entries — not in a separate LRU.  That is the fix for 1.21g:
-    with two independent LRUs (the old ``_store`` + ``_vary_registry``) the vary
-    record could be evicted before its entries, orphaning them (future lookups
-    rebuilt the variant key with empty vary fields and never matched). Here the
-    vary fields cannot outlive their entries, so no orphan is possible.
-
-    ``entries`` is a per-variant LRU keyed by the variant tuple from
-    [`_vary_key`][] (``()`` for a non-varying response).
+    The ``Vary`` field names sit beside the entries they key, so they cannot be
+    evicted ahead of them — which a second LRU over the names would allow.
     """
     __slots__ = ('vary_fields', 'entries')
 
     def __init__(self, vary_fields: tuple[bytes, ...] = ()):
         self.vary_fields = vary_fields
-        self.entries: OrderedDict[tuple, _Entry] = OrderedDict()
+        self.entries: OrderedDict[tuple, _StoredResponse] = OrderedDict()
 
 
 @as_middleware
@@ -128,265 +108,236 @@ class Cache:
         self._cacheable_statuses = frozenset(cacheable_statuses)
         self._cache_authenticated = cache_authenticated
         self._generate_etag = generate_etag
-        # base_key → _Bucket.  OrderedDict gives O(1) move-to-end on access +
-        # popitem(last=False) for LRU eviction — same pattern as
-        # [`functools.lru_cache`][functools.lru_cache].  ``_max_entries`` bounds the number of
-        # distinct URLs (base keys); each bucket LRU-bounds its own variants.
-        self._store: OrderedDict[tuple, _Bucket] = OrderedDict()
-
-    # ---- ASGI surface ----------------------------------------------------
+        # Base key → variants.  OrderedDict gives O(1) move-to-end and
+        # ``popitem(last=False)`` for the LRU, as functools.lru_cache does.
+        self._store: OrderedDict[tuple, _Variants] = OrderedDict()
 
     async def __call__(self, conn, receive, send, call_next):
-        # Native Connection for HTTP and WebSocket; the guard is defensive
-        # against a raw ASGI scope dict (only reachable outside BlackBull's own
-        # dispatch).
-        if not isinstance(conn, Connection):
+        # The app converts an external host's scope once, on the way in, so
+        # every middleware sees a native Connection: the only requests to
+        # decline here are the non-HTTP ones.
+        if conn.type != 'http' or conn.method not in self._cacheable_methods:
+            await call_next(conn, receive, send)
+            return
+        if not self._cache_authenticated and b'authorization' in conn.headers:
+            # RFC 9111 §3.5 — shared only when the application opted in.
             await call_next(conn, receive, send)
             return
 
-        method = conn.method
-        if method not in self._cacheable_methods:
+        cc = _joined(conn.headers, b'cache-control')
+        pragma = _joined(conn.headers, b'pragma')
+        if _must_not_store(cc):
             await call_next(conn, receive, send)
             return
 
-        req_headers = _request_headers(conn)
-        if not self._cache_authenticated and b'authorization' in req_headers:
-            # RFC 9111 §3.5 — caches MUST NOT use responses to requests with
-            # Authorization unless explicit cache-control allows it.
-            await call_next(conn, receive, send)
-            return
-        if _request_has_no_store(req_headers):
-            await call_next(conn, receive, send)
-            return
-
-        origin = _request_origin(conn)
+        origin = _origin(conn)
         if origin is None:
-            # An unresolved/ambiguous origin must not share an anonymous
-            # cache bucket. Bypass caching without rejecting the request.
+            # No unambiguous origin: bypass rather than share a bucket.
             await call_next(conn, receive, send)
             return
-        base_key = (method, origin, conn.path, conn.query_string)
-        # Look up the bucket for this URL, then the specific variant inside it
-        # using the Vary fields recorded on the bucket (empty tuple ⇒ the single
-        # non-varying entry keyed by ``()``).
-        bucket = self._store.get(base_key)
-        variant_key = _vary_key(bucket.vary_fields, req_headers) if bucket else ()
-        entry = bucket.entries.get(variant_key) if bucket else None
+        base_key = (conn.method, origin, conn.path, conn.query_string)
+        variants = self._store.get(base_key)
+        variant_key = (_variant_key(variants.vary_fields, conn.headers)
+                       if variants else ())
+        entry = variants.entries.get(variant_key) if variants else None
 
         # --- cache hit? ---
-        if entry is not None and not entry.expired():
-            self._store.move_to_end(base_key)      # URL touched → MRU
-            bucket.entries.move_to_end(variant_key)  # variant touched → MRU
-            inm = req_headers.get(b'if-none-match')
-            if inm is not None and _etag_matches(inm, entry.etag):
-                await send(NativeResponse(status=304,
-                                          header=[(b'etag', entry.etag)],
-                                          body=b''))
+        if (entry is not None and not entry.expired()
+                and _may_reuse(entry, cc, pragma)):
+            self._store.move_to_end(base_key)
+            variants.entries.move_to_end(variant_key)
+            age = max(0, int(entry.age()))
+            inm = conn.headers.get(b'if-none-match')
+            if inm and _etag_matches(inm, entry.etag):
+                await send(NativeResponse(
+                    status=304,
+                    header=[(b'etag', entry.etag),
+                            (b'age', str(age).encode())],
+                    body=b''))
                 return
-            # Replay a private copy — downstream middleware append headers in
-            # place, and the stored entry must not accumulate them.
-            await send(entry.replay())
+            await send(entry.replay(age))
             return
 
-        # --- cache miss → call inner, buffer, then send + maybe store ---
-        # We buffer the response (rather than passing each event straight
-        # through) so we can inject an ETag into the *start* event before
-        # any bytes hit the client.  For streaming responses (more_body
-        # arriving as True on the first body chunk) the buffer drops
-        # straight through and we skip caching: a streaming body's size
-        # is unknown and hashing it post-hoc would defeat the streaming.
-        held: list = []                 # native objects buffered, in order
-        body_chunks: list[bytes] = []
-        status: int | None = None
-        response_headers: list[tuple[bytes, bytes]] = []
-        streaming = False
-        flushed = False
+        # --- cache miss: hand the response to a capture, which decides ---
+        capture = _Capture(self, conn, send, base_key)
+        await call_next(conn, receive, capture.send)
+        await capture.release()         # a handler that never sent a body
 
-        async def cap_send(event):
-            """Buffer the response so an ETag can be injected before any byte
-            reaches the client.  The seam is native, so the header and body
-            arms are read off the object directly — no expansion, no dicts.
-
-            A ``NativeResponse`` may carry the header and terminal body
-            together (the complete shape), the header alone, or a body chunk
-            alone; all three are handled here.
-            """
-            nonlocal status, response_headers, streaming, flushed
-
-            if not isinstance(event, NativeResponse):
-                # A non-response event (pathsend / push) cannot be cached and
-                # cannot be held — release anything buffered, then pass it on.
-                if not flushed:
-                    streaming = True
-                    for buf in held:
-                        await send(buf)
-                    flushed = True
-                await send(event)
-                return
-
-            if event._header is not None:
-                status = event.status
-                response_headers = list(event._header)
-
-            if event.file_path is not None:
-                # Sendfile: the bytes never pass through us, so there is
-                # nothing to hash and nothing to store.
-                streaming = True
-                held.append(event)
-                if not flushed:
-                    for buf in held:
-                        await send(buf)
-                    flushed = True
-                return
-
-            if event._body is None:
-                # Header arm alone — hold it for the body that completes it.
-                held.append(event)
-                return
-
-            if streaming:
-                # Already past the switch: every later chunk goes straight
-                # out.  Nothing is held and nothing is accumulated, or the
-                # stream would be buffered in full to cache a response the
-                # docstring says is not cached.
-                await send(event)
-                return
-
-            if event.more_body:
-                # Streaming starts here.  Flush what is held, **clear it**,
-                # and switch to pass-through: a streamed body's size is
-                # unknown and hashing it post-hoc would defeat the streaming.
-                #
-                # Clearing is the whole correctness of this arm.  Leaving the
-                # buffer populated sent the header and the first chunk a
-                # second time when the terminal chunk flushed it again —
-                # two ``http.response.start`` events on HTTP/1.1, a duplicated
-                # body on HTTP/2.
-                streaming = True
-                held.append(event)
-                for buf in held:
-                    await send(buf)
-                held.clear()
-                flushed = True
-                return
-
-            body_chunks.append(event._body)
-            # Final body chunk arrived; decide cacheability + ETag now.
-            held.append(event)
-            body = b''.join(body_chunks)
-            if self._should_cache(status, response_headers):
-                vary_fields = _response_vary(response_headers)
-                etag = _read_etag(response_headers) or (
-                    self._make_etag(body) if self._generate_etag else None)
-                if etag is not None and _read_etag(response_headers) is None:
-                    # Inject the generated ETag before anything is sent, so the
-                    # live response and the cached copy carry the same header.
-                    # ``response_headers`` is already our own list; the header
-                    # arm is updated from it so both agree.
-                    response_headers.append((b'etag', etag))
-                    for buf in held:
-                        if buf._header is not None:
-                            buf.header = list(response_headers)
-                            break
-                # ``vary_fields is None`` ⇒ ``Vary: *`` ⇒ uncacheable.
-                if etag is not None and vary_fields is not None:
-                    ttl = _response_max_age(response_headers) or self._max_age
-                    bucket = self._store.get(base_key)
-                    if bucket is None:
-                        bucket = _Bucket(vary_fields)
-                        self._store[base_key] = bucket
-                    elif bucket.vary_fields != vary_fields:
-                        # The response's Vary changed; the old variant keys
-                        # were built from the old fields and can no longer be
-                        # reached — adopt the new fields and drop them.
-                        bucket.vary_fields = vary_fields
-                        bucket.entries.clear()
-                    variant_key = _vary_key(vary_fields, req_headers)
-                    # Stored as data, with its own header list: replays build a
-                    # fresh object so downstream in-place appends cannot reach
-                    # the entry.
-                    bucket.entries[variant_key] = _Entry(
-                        status=status if status is not None else 200,
-                        header=list(response_headers),
-                        body=body,
-                        etag=etag,
-                        expires_at=time.monotonic() + ttl,
-                    )
-                    bucket.entries.move_to_end(variant_key)
-                    self._store.move_to_end(base_key)
-                    # Per-bucket variant bound, then per-URL bound.
-                    while len(bucket.entries) > _MAX_VARIANTS_PER_KEY:
-                        bucket.entries.popitem(last=False)
-                    while len(self._store) > self._max_entries:
-                        self._store.popitem(last=False)
-            # Flush to client.
-            for buf in held:
-                await send(buf)
-            flushed = True
-
-        await call_next(conn, receive, cap_send)
-
-        # If the handler never emitted a terminal body the response was never
-        # flushed — forward whatever we have so the client at least sees
-        # something.  Pathological case; not cached.
-        if not flushed:
-            for buf in held:
-                await send(buf)
-
-    # ---- helpers --------------------------------------------------------
-
-    def _should_cache(self, status: int | None,
-                      headers: list[tuple[bytes, bytes]]) -> bool:
+    def _storable(self, status: int | None,
+                  headers: list[tuple[bytes, bytes]]) -> bool:
+        """RFC 9111 §3 / §5.2.2 — whether this response may be stored."""
         if status not in self._cacheable_statuses:
             return False
-        # RFC 9111 §5.2.2 — these directives forbid storing.
-        cc = _cache_control(headers)
-        if b'no-store' in cc or b'private' in cc or b'no-cache' in cc:
+        if {name for name, _ in _directives(headers)} & {
+                b'no-store', b'private', b'no-cache'}:
             return False
-        return True
+        # A field nobody can read could be stating one of those.
+        return all(_readable(value) for name, value in headers
+                   if name.lower() == b'cache-control')
 
-    def _make_etag(self, body: bytes) -> bytes:
-        # Weak ETag (W/ prefix) over a sha256 prefix.  Weak because the
-        # body bytes are what we hashed but other facets (compression,
-        # negotiation) may differ between served variants.
-        h = hashlib.sha256(body).hexdigest()[:16]
-        return b'W/"' + h.encode() + b'"'
+    def _remember(self, base_key: tuple, req_headers: Headers,
+                  vary_fields: tuple[bytes, ...], status: int,
+                  headers: list[tuple[bytes, bytes]], body: bytes,
+                  etag: bytes) -> None:
+        """Store one response, evicting whatever makes room for it."""
+        stated = _stated_freshness(headers)
+        # Only a response that states no usable lifetime takes the default.
+        ttl = self._max_age if stated is None else stated
+        now = time.monotonic() - _incoming_age(headers)
+        bucket = self._store.get(base_key)
+        if bucket is None:
+            bucket = _Variants(vary_fields)
+            self._store[base_key] = bucket
+        elif bucket.vary_fields != vary_fields:
+            # Keys built from the old Vary field names are unreachable now.
+            bucket.vary_fields = vary_fields
+            bucket.entries.clear()
+        key = _variant_key(vary_fields, req_headers)
+        bucket.entries[key] = _StoredResponse(
+            status=status, header=list(headers), body=body, etag=etag,
+            expires_at=now + ttl, stored_at=now)
+        bucket.entries.move_to_end(key)
+        self._store.move_to_end(base_key)
+        while len(bucket.entries) > _MAX_VARIANTS_PER_KEY:
+            bucket.entries.popitem(last=False)
+        while len(self._store) > self._max_entries:
+            self._store.popitem(last=False)
+
+    def _etag(self, body: bytes) -> bytes:
+        # Weak: what is hashed is the body, while a variant served to another
+        # client may differ in encoding or negotiation.
+        return b'W/"' + hashlib.sha256(body).hexdigest()[:16].encode() + b'"'
 
 
-# ---------------------------------------------------------------------------
-# Header inspection helpers (kept module-level so the middleware class stays
-# focused on the orchestration logic).
-# ---------------------------------------------------------------------------
+class _Capture:
+    """The response of one cache miss, held until its body is known.
 
-def _request_origin(conn: Connection) -> tuple[str, str, int] | None:
+    Whether a response can be stored is only settled once its body has
+    arrived: a generated ETag belongs in the header arm *before* the first
+    byte leaves, and a response that never completes must still reach the
+    client in order.  Keeping that state here leaves
+    [`Cache.__call__`][blackbull.middleware.cache.Cache] the hit/miss decision
+    alone.
+    """
+    __slots__ = ('_cache', '_conn', '_send', '_base_key', '_held', '_body',
+                 '_status', '_headers', '_vary_fields', '_released')
+
+    def __init__(self, cache: 'Cache', conn: Connection, send,
+                 base_key: tuple):
+        self._cache = cache
+        self._conn = conn
+        self._send = send
+        self._base_key = base_key
+        self._held: list[NativeResponse] = []
+        self._body = bytearray()
+        self._status: int | None = None
+        self._headers: list[tuple[bytes, bytes]] = []
+        self._vary_fields: tuple[bytes, ...] | None = ()
+        self._released = False
+
+    async def release(self) -> None:
+        """Send everything held, once, in the order it arrived."""
+        if not self._released:
+            for buffered in self._held:
+                await self._send(buffered)
+            self._held.clear()
+            self._released = True
+
+    async def _forward(self, event) -> None:
+        """Give up on storing this response, keeping the events in order."""
+        self._held.append(event)
+        await self.release()
+
+    async def send(self, event) -> None:
+        """Take one response event, holding it while it may still be stored."""
+        if self._released:
+            await self._send(event)
+            return
+        if (not isinstance(event, NativeResponse)
+                or event.file_path is not None
+                or event.expects_trailers
+                or event.trailers is not None):
+            # Nothing about this shape can be stored, and the rest of the
+            # response has to follow it out unchanged.
+            await self._forward(event)
+            return
+        if event._header is not None:
+            self._status = event.status
+            self._headers = list(event._header)
+            self._vary_fields = _vary_fields(self._headers)
+            # ``Vary: *`` and an unstorable status or directive are settled by
+            # the header alone: stop holding the body as well.
+            if (self._vary_fields is None
+                    or not self._cache._storable(self._status, self._headers)):
+                await self._forward(event)
+                return
+        if event._body is None:
+            self._held.append(event)                # the header arm alone
+            return
+        if event.more_body or self._status is None:
+            await self._forward(event)
+            return
+
+        self._body.extend(event._body)
+        self._held.append(event)
+        etag = _response_etag(self._headers)
+        if etag is None and self._cache._generate_etag:
+            etag = self._cache._etag(bytes(self._body))
+            # The live response and the stored copy must agree on it.
+            self._headers.append((b'etag', etag))
+            for buffered in self._held:
+                if buffered._header is not None:
+                    buffered.header = self._headers
+                    break
+        if etag is not None:
+            self._cache._remember(self._base_key, self._conn.headers,
+                                  self._vary_fields, self._status,
+                                  self._headers, bytes(self._body), etag)
+        await self.release()
+
+
+# --- header inspection helpers ---------------------------------------------
+
+def _joined(headers: Headers, name: bytes) -> bytes | None:
+    """The field's value, repeated fields joined as one list (RFC 9110 §5.2).
+
+    A directive in the second field line still binds.
+    """
+    values = [value for _, value in headers.getlist(name)]
+    return b','.join(values) if values else None
+
+
+def _origin(conn: Connection) -> tuple[str, str, int] | None:
     """Effective HTTP origin, after trusted middleware has applied rewrites.
 
     Native HTTP/2 maps :authority into Host before dispatch, as does the ASGI
-    boundary. Forwarded headers are not authority here: only the configured
+    boundary.  Forwarded headers are not authority here: only the configured
     trusted-proxy layer may change what the application sees.
     """
     scheme = conn.scheme.lower()
     default_port = {'http': 80, 'https': 443}.get(scheme)
     if default_port is None:
         return None
-    hosts = [value for name, value in conn.headers if name.lower() == b'host']
+    hosts = conn.headers.getlist(b'host')
     if len(hosts) > 1:
         return None
     try:
         if hosts:
-            authority = hosts[0].strip(b' \t').decode('ascii')
+            authority = hosts[0][1].strip(b' \t').decode('ascii')
         elif conn.server is not None:
             host, port = conn.server
             # ASGI server tuples use an unbracketed IPv6 address; URI
             # authority syntax needs brackets to distinguish it from a port.
-            authority = f'[{host}]' if ':' in host and not host.startswith('[') else host
+            authority = (f'[{host}]'
+                         if ':' in host and not host.startswith('[') else host)
             if port is not None:
                 authority += f':{port}'
         else:
             return None
-        # urlsplit removes some control characters and interprets delimiters.
-        # Do not let those transformations alias an ambiguous value to a
-        # cacheable origin. Request validation belongs to the protocol layer.
+        # ``urlsplit`` removes some control characters and interprets
+        # delimiters; do not let those transformations alias an ambiguous value
+        # to a cacheable origin.  Request validation belongs to the protocol
+        # layer, so this is only a second reading of the same value.
         if not authority or any(ord(c) <= 32 or ord(c) == 127 or c in '/?#@\\'
                                 for c in authority):
             return None
@@ -404,121 +355,275 @@ def _request_origin(conn: Connection) -> tuple[str, str, int] | None:
     except (UnicodeError, ValueError):
         return None
     # RFC 9110 §4.3.1: host/scheme case and explicit default ports do not
-    # identify different origins. Integer conversion normalizes leading zeros.
-    # Preserve IP-literal syntax: [v1.example] (IPvFuture) is not the
-    # registered name v1.example. urlsplit lowercases the hostname while
+    # identify different origins, and integer conversion normalizes leading
+    # zeros.  Preserve IP-literal syntax: [v1.example] (IPvFuture) is not the
+    # registered name v1.example.  urlsplit lowercases the hostname while
     # preserving the case-sensitive zone identifier of a scoped address.
-    return scheme, f'[{host}]' if literal else host, default_port if port is None else port
+    return (scheme, f'[{host}]' if literal else host,
+            default_port if port is None else port)
 
 
-def _request_headers(conn) -> dict[bytes, bytes]:
-    """Index the request headers by lowercase name → value (first occurrence)."""
-    out: dict[bytes, bytes] = {}
-    for name, value in conn.headers:
-        n = name.lower()
-        if n not in out:
-            out[n] = value
-    return out
+def _must_not_store(cc: bytes | None) -> bool:
+    """RFC 9111 §5.2.1.5 — a request ``no-store``, or a field we cannot read.
 
-
-def _request_has_no_store(headers: dict[bytes, bytes]) -> bool:
-    """RFC 9111 §5.2.1 — request directive ``Cache-Control: no-store``."""
-    cc = headers.get(b'cache-control', b'').lower()
-    return any(piece.strip() == b'no-store' for piece in cc.split(b','))
-
-
-def _cache_control(headers: list[tuple[bytes, bytes]]) -> set[bytes]:
-    """Return the set of directive tokens from the response Cache-Control header.
-
-    Values are normalised to lowercase, with leading parameter names only —
-    ``max-age=120`` ⇒ ``b'max-age=120'`` is kept whole; ``no-store`` is also
-    kept whole.  Callers compare with ``in``.
+    A field nobody can read might be stating one, and a wrong reading cannot
+    undo the response it stored.
     """
-    tokens: set[bytes] = set()
-    for name, value in headers:
-        if name.lower() != b'cache-control':
-            continue
-        for piece in value.split(b','):
-            t = piece.strip().lower()
-            if t:
-                tokens.add(t)
-                # Also add the bare directive name so ``'max-age' in cc``
-                # works regardless of the value.
-                if b'=' in t:
-                    tokens.add(t.split(b'=', 1)[0])
-    return tokens
+    return cc is not None and (not _readable(cc) or b'no-store' in _names(cc))
 
 
-def _response_max_age(headers: list[tuple[bytes, bytes]]) -> int | None:
-    """Pull ``max-age`` / ``s-maxage`` (preferred) out of Cache-Control."""
-    s_max: int | None = None
-    max_age: int | None = None
-    for name, value in headers:
-        if name.lower() != b'cache-control':
-            continue
-        for piece in value.split(b','):
-            t = piece.strip().lower()
-            if t.startswith(b's-maxage='):
-                try:
-                    s_max = int(t[9:])
-                except ValueError:
-                    pass  # malformed s-maxage → ignore this directive.
-            elif t.startswith(b'max-age='):
-                try:
-                    max_age = int(t[8:])
-                except ValueError:
-                    pass  # malformed max-age → ignore this directive.
-    return s_max if s_max is not None else max_age
+#: RFC 9110 §5.6.2 — ``tchar``, the bytes a directive name or a token value
+#: may hold (the same set the H/1 actor checks method names against).
+_TCHAR_OCTETS = (b"!#$%&'*+-.^_`|~"
+                 + bytes(range(0x30, 0x3A)) + bytes(range(0x41, 0x5B))
+                 + bytes(range(0x61, 0x7B)))
+_TCHAR_SET = frozenset(_TCHAR_OCTETS)
 
 
-def _response_vary(headers: list[tuple[bytes, bytes]]) -> tuple[bytes, ...] | None:
-    """Return the response's ``Vary`` field names, lowercased and sorted.
+def _is_qdtext(octet: int) -> bool:
+    """RFC 9110 §5.6.4 — the octets a ``quoted-string`` body may hold."""
+    return octet == 0x09 or 0x20 <= octet <= 0x7E or octet >= 0x80
 
-    ``None`` signals ``Vary: *`` (RFC 9110 §12.5.5 — response is
-    unstorable by a shared cache).  An absent ``Vary`` yields the empty
-    tuple (store under the bare base key).
+
+def _parse_directives(value: bytes) -> list[tuple[bytes, bytes | None]] | None:
+    """The ``(name, value)`` directives of one field, or ``None`` if unreadable.
+
+    RFC 9111 §5.2 — ``#cache-directive``, a directive being
+    ``token [ "=" ( token / quoted-string ) ]`` — walked on the raw bytes,
+    because ``parse_http_list`` drops the backslash of a quoted-pair and its
+    pieces cannot tell an escaped quote from the one that closes a value.
+    Names come back lowercased, as the RFC compares them.  A field that breaks
+    the grammar is unreadable and its callers act on nothing in it.
     """
-    fields: set[bytes] = set()
-    for name, value in headers:
+    pairs: list[tuple[bytes, bytes | None]] = []
+    pos = 0
+    while True:
+        # OWS sits around a comma and around the whole list, never elsewhere.
+        while pos < len(value) and value[pos] in (0x20, 0x09):
+            pos += 1
+        if pos == len(value):
+            return pairs
+        if value[pos] == 0x2C:
+            pos += 1                    # an empty member is ignored (§5.6.1.1)
+            continue
+        start = pos
+        while pos < len(value) and value[pos] in _TCHAR_SET:
+            pos += 1
+        name = value[start:pos].lower()
+        if not name:
+            return None                 # a quote or comma where a name belongs
+        if pos < len(value) and value[pos] == 0x3D:
+            pos += 1
+            if pos < len(value) and value[pos] == 0x22:
+                pos += 1
+                out = bytearray()
+                while True:
+                    if pos == len(value):
+                        return None                     # unterminated string
+                    octet = value[pos]
+                    pos += 1
+                    if octet == 0x22:
+                        break                           # the closing quote
+                    if octet == 0x5C:
+                        if pos == len(value):
+                            return None                 # nothing to pair with
+                        octet = value[pos]
+                        pos += 1
+                    if not _is_qdtext(octet):
+                        return None                     # not a quoted-string
+                    out += bytes((octet,))
+                pairs.append((name, bytes(out)))
+            else:
+                start = pos
+                while pos < len(value) and value[pos] in _TCHAR_SET:
+                    pos += 1
+                if pos == start:
+                    return None             # '=' with no value
+                pairs.append((name, value[start:pos]))
+        else:
+            pairs.append((name, None))
+        while pos < len(value) and value[pos] in (0x20, 0x09):
+            pos += 1
+        if pos == len(value):
+            return pairs
+        if value[pos] != 0x2C:
+            return None                     # a directive ends at a comma
+        pos += 1
+
+
+def _names(value: bytes) -> list[bytes]:
+    """The directive names of one field, or none if it is unreadable."""
+    pairs = _parse_directives(value)
+    return [name for name, _ in pairs] if pairs else []
+
+
+def _readable(value: bytes) -> bool:
+    """Whether one field parses as directives."""
+    return _parse_directives(value) is not None
+
+
+def _directives(fields: Iterable[tuple[bytes, bytes]]
+                ) -> Iterator[tuple[bytes, bytes | None]]:
+    """The directives of every ``Cache-Control`` field, in order.
+
+    A field that cannot be read contributes nothing, so a caller that must not
+    act on a partly-read field checks [`_readable`][] itself.
+    """
+    for name, value in fields:
+        if name.lower() == b'cache-control':
+            yield from _parse_directives(value) or ()
+
+
+def _smallest(fields: Iterable[tuple[bytes, bytes]],
+              name: bytes) -> int | None:
+    """The smallest value these fields state for *name*, or ``None``.
+
+    Repeated directives resolve to the most restrictive reading (RFC 9111
+    §4.2.1 allows the first occurrence or a stale one); a value that is not a
+    number leaves it unstated.
+    """
+    values = []
+    for key, raw in _directives(fields):
+        if key != name or raw is None:
+            continue
+        sign, digits = ((raw[:1], raw[1:]) if raw[:1] in (b'-', b'+')
+                        else (b'', raw))
+        if not digits.isdigit():
+            continue
+        try:
+            values.append(int(raw))
+        except ValueError:               # more digits than int() will read
+            values.append(-1 if sign == b'-' else _MAX_DELTA_SECONDS)
+    return max(0, min(min(values), _MAX_DELTA_SECONDS)) if values else None
+
+
+def _incoming_age(fields: Iterable[tuple[bytes, bytes]]) -> int:
+    """The response's ``Age`` in seconds (RFC 9111 §4.2.3).
+
+    Absent or unreadable reads as 0: an age the origin did not state is not
+    evidence of staleness.
+    """
+    for name, value in fields:
+        if name.lower() != b'age':
+            continue
+        try:
+            return max(0, min(int(value.strip()), _MAX_DELTA_SECONDS))
+        except ValueError:
+            return 0
+    return 0
+
+
+def _date_seconds(value: bytes) -> float | None:
+    """An HTTP-date as a POSIX timestamp, or ``None`` if it does not parse."""
+    try:
+        when = parsedate_to_datetime(value.decode('latin-1'))
+    except (TypeError, ValueError):
+        return None
+    if when is None:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return when.timestamp()
+
+
+def _expires_in(fields: Iterable[tuple[bytes, bytes]]) -> int | None:
+    """Freshness from ``Expires``, or ``None`` when there is no such field.
+
+    RFC 9111 §5.3: the lifetime is ``Expires − Date`` (the wall clock when the
+    origin sent no usable ``Date``) and an unparsable value means the past.
+    The earliest ``Expires`` against the latest ``Date`` is the conservative
+    reading of a repeated field, and this is consulted only when neither
+    ``s-maxage`` nor ``max-age`` stated a lifetime.
+    """
+    expires = [_date_seconds(v) for n, v in fields if n.lower() == b'expires']
+    if not expires:
+        return None
+    if any(when is None for when in expires):
+        return 0
+    dates = [_date_seconds(v) for n, v in fields if n.lower() == b'date']
+    base = max([when for when in dates if when is not None], default=time.time())
+    return max(0, min(int(min(expires) - base), _MAX_DELTA_SECONDS))
+
+
+def _stated_max_age(fields: Iterable[tuple[bytes, bytes]]) -> int | None:
+    """``s-maxage`` (which overrides ``max-age``, §5.2.2.10) or ``None``."""
+    stated = _smallest(fields, b's-maxage')
+    return stated if stated is not None else _smallest(fields, b'max-age')
+
+
+def _stated_freshness(fields: Iterable[tuple[bytes, bytes]]) -> int | None:
+    """The response's own lifetime, or ``None`` when it states none."""
+    stated = _stated_max_age(fields)
+    return stated if stated is not None else _expires_in(fields)
+
+
+def _may_reuse(entry: _StoredResponse, cc: bytes | None,
+               pragma: bytes | None) -> bool:
+    """Whether *entry* may answer this request without validation.
+
+    RFC 9111 §5.2.1 — a request's ``no-cache`` asks the origin to validate, and
+    ``max-age=N`` refuses a copy older than N, so ``max-age=0`` always
+    validates.  ``Pragma: no-cache`` counts when no ``Cache-Control`` was sent
+    (§5.4), and a field that cannot be read could be hiding a ``no-cache``.
+    ``min-fresh``, ``max-stale`` and ``only-if-cached`` are not implemented.
+    """
+    if cc is not None and not _readable(cc):
+        return False
+    if cc is None and pragma is not None and (
+            not _readable(pragma) or b'no-cache' in _names(pragma)):
+        return False
+    # The name alone: ``no-cache="field"`` still asks for validation, and this
+    # cache does not validate per field (§5.2.2.4).
+    if cc is not None and b'no-cache' in _names(cc):
+        return False
+    limit = _smallest([(b'cache-control', cc)], b'max-age') if cc else None
+    return limit is None or entry.age() <= limit
+
+
+def _vary_fields(fields: Iterable[tuple[bytes, bytes]]
+                 ) -> tuple[bytes, ...] | None:
+    """The response's ``Vary`` field names, lowercased and sorted.
+
+    ``None`` is ``Vary: *``, unstorable by a shared cache (RFC 9110 §12.5.5);
+    no ``Vary`` yields ``()``, the key of the one non-varying entry.
+    """
+    names: set[bytes] = set()
+    for name, value in fields:
         if name.lower() != b'vary':
             continue
-        for piece in value.split(b','):
-            t = piece.strip().lower()
-            if t == b'*':
+        for token in value.split(b','):
+            token = token.strip().lower()
+            if token == b'*':
                 return None
-            if t:
-                fields.add(t)
-    return tuple(sorted(fields))
+            if token:
+                names.add(token)
+    return tuple(sorted(names))
 
 
-def _vary_key(vary_fields: tuple[bytes, ...],
-              req_headers: dict[bytes, bytes]) -> tuple:
-    """Build the variant portion of the cache key from the request headers
-    named by *vary_fields*.  A missing request header contributes ``b''``."""
-    return tuple((f, req_headers.get(f, b'')) for f in vary_fields)
+def _variant_key(vary_fields: tuple[bytes, ...], headers: Headers) -> tuple:
+    """The key of one variant: the request's values for those field names."""
+    return tuple(headers.get(name, b'') for name in vary_fields)
 
 
-def _read_etag(headers: list[tuple[bytes, bytes]]) -> bytes | None:
-    for name, value in headers:
-        if name.lower() == b'etag':
-            return value
-    return None
+def _response_etag(fields: Iterable[tuple[bytes, bytes]]) -> bytes | None:
+    """The response's own ``ETag``, or ``None``."""
+    return next((value for name, value in fields if name.lower() == b'etag'),
+                None)
 
 
 def _etag_matches(if_none_match: bytes, etag: bytes) -> bool:
-    """RFC 9110 §13.1.2 — If-None-Match.  ``*`` matches anything; otherwise
-    we do a weak comparison (W/ prefix on either side is fine)."""
-    inm = if_none_match.strip()
-    if inm == b'*':
+    """RFC 9110 §13.1.2 — ``If-None-Match`` against one ETag.
+
+    Weak comparison ignores ``W/`` on either side; ``*`` and a list of
+    candidates are both read.
+    """
+    if if_none_match.strip() == b'*':
         return True
-    # Multiple ETags separated by commas.
-    candidates = [c.strip() for c in inm.split(b',')]
-    # Strip the optional weak prefix for weak comparison.
-    target = etag
-    if target.startswith(b'W/'):
-        target = target[2:]
-    for cand in candidates:
-        c = cand[2:] if cand.startswith(b'W/') else cand
-        if c == target:
+    target = etag[2:] if etag.startswith(b'W/') else etag
+    for candidate in if_none_match.split(b','):
+        candidate = candidate.strip()
+        if candidate.startswith(b'W/'):
+            candidate = candidate[2:]
+        if candidate == target:
             return True
     return False
