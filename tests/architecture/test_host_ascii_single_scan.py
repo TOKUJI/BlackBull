@@ -2,37 +2,78 @@
 
 `_validate_host` runs on every HTTP/1.1 request, so the non-ASCII rule (RFC
 3986 §3.2 authorities are ASCII) must not pay for another pass over the value:
-it lives in the one regex the function already runs.  A `decode` — or an
-`isascii` — call in that function is the regression this file exists to catch,
-and the octet sweep is there so the rule cannot be dropped instead of moved.
+it lives in the one regex the function already runs.
+
+Two questions, two answers: the octet sweeps at the foot prove the rule is
+*enforced* (nothing can drop it), and the walker proves it stays *one pass*
+(nothing can silently re-add a second).  The walker is deliberately blunt — it
+flags every way a second pass is realistically spelled, not only the `decode`
+this commit removed — and it is still a tripwire, not a proof: a pass written
+as something none of those shapes describes would be missed, which is why the
+sweeps carry the enforcement claim.
 """
 import ast
 import pathlib
 
+import pytest
+
 import blackbull.server.http1_actor as http1_actor
 
-_SCAN_CALLS = frozenset({'decode', 'isascii'})
+_FUNCTION = '_validate_host'
+_SCAN = '_HOST_FORBIDDEN_RE'
+
+# Bytes methods that read the whole value.  ``.strip`` is not one of them: it
+# runs once on the raw header before this scan and is not a second pass over
+# the authority the regex then examines.
+_VALUE_READS = frozenset({
+    'decode', 'encode', 'isascii', 'translate', 'find', 'rfind', 'index',
+    'rindex', 'count', 'split', 'rsplit', 'splitlines', 'partition',
+    'rpartition', 'startswith', 'endswith', 'removeprefix', 'removesuffix',
+})
+
+# The only bare calls the function may make: the presence check and the raise.
+_ALLOWED_CALLS = frozenset({'len', 'BadRequestError'})
 
 
 def _validate_host_function() -> ast.FunctionDef:
     tree = ast.parse(pathlib.Path(http1_actor.__file__).read_text())
     for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == '_validate_host':
+        if isinstance(node, ast.FunctionDef) and node.name == _FUNCTION:
             return node
-    raise AssertionError('_validate_host not found')
+    raise AssertionError(f'{_FUNCTION} not found')
 
 
-def _second_scan_calls(node: ast.AST) -> list[str]:
-    return [
-        call.func.attr for call in ast.walk(node)
-        if isinstance(call, ast.Call)
-        and isinstance(call.func, ast.Attribute)
-        and call.func.attr in _SCAN_CALLS
-    ]
+def _second_passes(node: ast.AST) -> list[str]:
+    """Shapes that can only mean the value is read a second time."""
+    found = []
+    for child in ast.walk(node):
+        if isinstance(child, ast.Call):
+            func = child.func
+            if isinstance(func, ast.Attribute) and func.attr in _VALUE_READS:
+                found.append(f'{func.attr}()')
+            elif isinstance(func, ast.Name) and func.id not in _ALLOWED_CALLS:
+                found.append(f'{func.id}()')
+        elif isinstance(child, (ast.ListComp, ast.SetComp, ast.DictComp,
+                                ast.GeneratorExp, ast.For)):
+            found.append(type(child).__name__)
+    return found
 
 
-def test_validate_host_does_not_rescan_the_value():
-    assert _second_scan_calls(_validate_host_function()) == []
+def _scan_calls(node: ast.AST) -> int:
+    return sum(
+        1 for child in ast.walk(node)
+        if isinstance(child, ast.Call)
+        and isinstance(child.func, ast.Attribute)
+        and child.func.attr == 'search'
+        and isinstance(child.func.value, ast.Name)
+        and child.func.value.id == _SCAN
+    )
+
+
+def test_validate_host_reads_the_value_once():
+    function = _validate_host_function()
+    assert _second_passes(function) == []
+    assert _scan_calls(function) == 1
 
 
 def test_the_single_scan_rejects_every_non_ascii_octet():
@@ -53,9 +94,37 @@ def test_the_single_scan_leaves_a_real_authority_alone():
     assert http1_actor._HOST_FORBIDDEN_RE.search(b'example.com:8080') is None
 
 
-def test_the_walker_finds_a_second_scan():
-    """Guard the guard: a walker that finds nothing is not evidence."""
+_SPELLINGS = {
+    'bytes decode': 'value.decode("ascii")',
+    'bytes isascii': 'value.isascii()',
+    'str constructor': 'str(value, "ascii")',
+    'codecs module': 'codecs.decode(value, "ascii")',
+    'bytes translate': 'value.translate(None, forbidden)',
+    'helper call': '_is_ascii(value)',
+    'all comprehension': 'all(b < 0x80 for b in value)',
+    'explicit loop': 'for b in value:\n        pass',
+}
+
+
+@pytest.mark.parametrize('source', _SPELLINGS.values(), ids=_SPELLINGS)
+def test_the_walker_sees_every_spelling_of_a_second_pass(source):
+    body = '\n    '.join(source.split('\n'))
+    sample = ast.parse(f'def f(value):\n    {body}\n')
+    assert _second_passes(sample) != [], source
+
+
+def test_the_walker_counts_a_duplicate_scan():
     sample = ast.parse('def f(value):\n'
-                       '    value.decode("ascii")\n'
-                       '    return value.isascii()\n')
-    assert sorted(_second_scan_calls(sample)) == ['decode', 'isascii']
+                       f'    {_SCAN}.search(value)\n'
+                       f'    return {_SCAN}.search(value)\n')
+    assert _scan_calls(sample) == 2
+
+
+def test_the_walker_sees_the_decode_when_it_is_put_back():
+    """The regression this file exists for, spelled into the real body."""
+    source = ast.unparse(_validate_host_function())
+    regressed = source.replace(
+        f'match = {_SCAN}.search(value)',
+        f'value.decode("ascii")\n    match = {_SCAN}.search(value)')
+    assert regressed != source
+    assert _second_passes(ast.parse(regressed)) != []
