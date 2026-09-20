@@ -458,9 +458,15 @@ class HTTP2Actor(Actor):
         # group whenever it can accept work.
         task = None
         if self._task_group is not None:
+            coro = _replay()
             try:
-                task = self._task_group.create_task(_replay())
+                task = self._task_group.create_task(coro)
             except RuntimeError:
+                # The group is shutting down.  3.11/3.12 raise without closing
+                # the coroutine they were handed, so close it here — 3.13 does
+                # it for us, and closing twice is a no-op — before the
+                # fallback creates its own.
+                coro.close()
                 task = None
         if task is None:
             coro = _replay()
