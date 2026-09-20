@@ -95,5 +95,5 @@ def test_just_recipes_delegate_to_workflow_scripts() -> None:
         "httparena-bench:": "scripts/run-httparena-bench.sh",
     }
     for header, command in recipes.items():
-        pattern = rf"(?m)^{re.escape(header)}\n    {re.escape(command)}$"
+        pattern = rf"(?m)^{re.escape(header)}\n    {re.escape(command)}\n(?!(?:    |\t))"
         assert re.search(pattern, justfile), header
