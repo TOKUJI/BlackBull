@@ -701,7 +701,8 @@ class TestG11PriorityFrameLengthValidation:
 class TestG13FieldCharacterValidation:
     """RFC 9113 §8.2.1: Field names MUST NOT contain characters in ranges
     0x00-0x20, 0x41-0x5a (uppercase), or 0x7f-0xff.  Field values MUST NOT
-    contain NUL, LF, or CR.  Violations → malformed."""
+    contain NUL, LF, or CR, and MUST NOT start or end with SP or HTAB.
+    Violations → malformed."""
 
     @pytest.mark.asyncio
     async def test_uppercase_field_name_is_malformed(self):
@@ -734,6 +735,32 @@ class TestG13FieldCharacterValidation:
             (b'x-colon:name', b'value'),
             'colon in field name')
 
+    @pytest.mark.parametrize('value', [b' value', b'value ', b'\tvalue',
+                                       b'value\t'])
+    @pytest.mark.asyncio
+    async def test_field_value_bounded_by_whitespace_is_malformed(self, value):
+        """§8.2.1: a field value MUST NOT start or end with SP or HTAB."""
+        await self._check_malformed_field(
+            (b'x-test', value), f'boundary whitespace in {value!r}')
+
+    @pytest.mark.asyncio
+    async def test_field_value_with_inner_whitespace_still_reaches_the_app(self):
+        """The edge is what the MUST is about: SP and HTAB stay legal inside
+        a field value, so this one is not malformed."""
+        handler, app = _make_h2_actor()
+        fields = [
+            (b':method', b'GET'), (b':path', b'/'), (b':scheme', b'https'),
+            (b':authority', b'example.com'),
+            (b'x-test', b'value with\tinner whitespace'),
+        ]
+        h = _make_headers_frame(1, end_stream=True, fields=fields)
+        settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
+        handler.receive = AsyncMock(side_effect=[settings, h, None])
+        await handler.run()
+
+        assert app.await_count == 1
+        assert not _sent_rst_streams(handler, 1)
+
     @staticmethod
     async def _check_malformed_field(bad_field, description):
         handler, app = _make_h2_actor()
@@ -746,12 +773,12 @@ class TestG13FieldCharacterValidation:
         settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
         handler.receive = AsyncMock(side_effect=[settings, h, None])
         await handler.run()
-        for call in handler.send_frame.call_args_list:
-            frame = call.args[0]
-            if hasattr(frame, 'FrameType') and frame.FrameType() == FrameTypes.RST_STREAM:
-                if frame.stream_id == 1:
-                    return  # malformed detected
-        pytest.fail(f'Field violation ({description}) was not rejected as malformed')
+        rst = _sent_rst_streams(handler, 1)
+        assert [f.error_code for f in rst] == [ErrorCodes.PROTOCOL_ERROR], \
+            f'Field violation ({description}) was not answered with ' \
+            f'RST_STREAM(PROTOCOL_ERROR): {rst}'
+        assert app.await_count == 0, \
+            f'Field violation ({description}) reached the application'
 
 
 # ═══════════════════════════════════════════════════════════════════════

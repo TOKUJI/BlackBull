@@ -14,7 +14,8 @@ import struct
 from hypothesis import given, strategies as st
 
 from blackbull.protocol.frame_types import (
-    field_name_is_valid, field_value_is_valid)
+    field_name_is_valid, field_value_has_boundary_whitespace,
+    field_value_is_valid)
 
 # Octets legal inside a (lowercase) field name: visible ASCII excluding SP,
 # uppercase, colon, DEL, and the 0x7F-0xFF range (RFC 9113 §8.2.1).
@@ -25,6 +26,14 @@ _safe_name = st.lists(_safe_name_octets, min_size=1, max_size=20).map(bytes)
 _safe_value_octets = st.sampled_from(
     [b for b in range(0x100) if b not in (0x00, 0x0A, 0x0D)])
 _safe_value = st.lists(_safe_value_octets, max_size=40).map(bytes)
+# Octets legal *at either end* of a field value: the above minus the two
+# octets RFC 9113 §8.2.1 forbids there (SP and HTAB).
+_safe_value_edge = st.sampled_from(
+    [b for b in range(0x100) if b not in (0x00, 0x0A, 0x0D, 0x20, 0x09)]
+).map(bytes)
+_edgeless_value = st.tuples(
+    _safe_value_edge, _safe_value, _safe_value_edge
+).map(lambda t: t[0] + t[1] + t[2])
 
 # Strategies
 _valid_frame_types = st.sampled_from([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
@@ -118,6 +127,22 @@ class TestFieldValidationProperties:
         malformed (RFC 9113 §8.2.1)."""
         value = prefix + bytes([bad]) + suffix
         assert not field_value_is_valid(value)
+
+    @given(value=_edgeless_value)
+    def test_a_field_value_without_edge_whitespace_is_not_a_violation(
+            self, value):
+        """SP and HTAB are legal inside a field value, and these values have
+        neither at either end."""
+        assert not field_value_has_boundary_whitespace(value)
+
+    @given(value=_safe_value, edge=st.sampled_from([0x20, 0x09]),
+           leading=st.booleans())
+    def test_a_field_value_bounded_by_whitespace_is_a_violation(
+            self, value, edge, leading):
+        """A field value that starts or ends with SP or HTAB violates the
+        MUST, wherever else its bytes came from (RFC 9113 §8.2.1)."""
+        padded = bytes([edge]) + value if leading else value + bytes([edge])
+        assert field_value_has_boundary_whitespace(padded)
 
     @given(prefix=_safe_name, suffix=_safe_name,
            upper=st.integers(min_value=0x41, max_value=0x5A))
