@@ -232,6 +232,69 @@ class TestSpecialRequestForms:
                              b'Host: example.com\r\n\r\n')
         assert scope.path == '/'
 
+    @pytest.mark.parametrize('target', [
+        b'1http://example.com/echo',     # first octet must be ALPHA
+        b'ht,tp://example.com/echo',     # ',' is outside the scheme grammar
+        b'ht_tp://example.com/echo',     # '_' likewise
+        b'-http://example.com/echo',
+        b'://example.com/echo',          # empty scheme
+    ])
+    def test_absolute_form_rejects_a_scheme_outside_the_grammar(self, target):
+        """RFC 9112 §3.2.2 names RFC 3986 §3.1's scheme grammar, and the
+        request-target octet check above it admits every one of these."""
+        from blackbull.server.http1_actor import BadRequestError
+
+        actor = _make_actor()
+        with pytest.raises(BadRequestError, match='scheme'):
+            actor._parse(b'GET ' + target + b' HTTP/1.1\r\nHost: h\r\n\r\n')
+
+    @pytest.mark.parametrize('scheme', [b'http', b'HTTPS', b'ht+tp',
+                                        b'ht-tp', b'ht.tp', b'h1'])
+    def test_absolute_form_accepts_the_scheme_grammar(self, scheme):
+        actor = _make_actor()
+        scope = actor._parse(
+            b'GET ' + scheme + b'://example.com/echo HTTP/1.1\r\nHost: h\r\n\r\n')
+        assert scope.path == '/echo'
+        assert scope.headers.get(b'host') == b'example.com'
+
+    def test_the_scheme_grammar_matches_the_stdlib_url_parser(self):
+        """`urllib.parse.urlsplit` scans the scheme with RFC 3986 §3.1's
+        grammar but exposes no validator, so it serves as this one's oracle
+        over the visible-ASCII pairs the request-target check admits.
+
+        The parser is not used at the call site: it parses and allocates a
+        SplitResult for the whole URL, lowercases the scheme, and strips
+        leading controls and space and inner tab/CR/LF — none of which belongs
+        in a bytes-level check of the scheme alone.  It is also ``lru_cache``d
+        per process (128 entries), so repeated-input timings are cache hits and
+        the fresh-URL cost is the one that matters.
+        """
+        from urllib.parse import urlsplit
+        from blackbull.server.http1_actor import _SCHEME_RE
+
+        candidates = [
+            bytes([first]) + tail
+            for first in range(0x21, 0x7F)
+            for tail in (b'',) + tuple(bytes([b]) for b in range(0x21, 0x7F))
+        ]
+        mismatched = [
+            candidate for candidate in candidates
+            if bool(_SCHEME_RE.fullmatch(candidate))
+            is not (urlsplit(candidate.decode('ascii') + '://x').scheme.encode()
+                    == candidate.lower())
+        ]
+        assert mismatched == []
+
+    def test_the_target_scheme_does_not_replace_the_connection_scheme(self):
+        """RFC 9112 §3.2.2 is silent on adopting the target's scheme, and an
+        origin server answers on the connection it accepted: a plaintext client
+        must not be able to claim https by writing it into the target."""
+        actor = _make_actor()
+        scope = actor._parse(
+            b'GET https://real.example/ HTTP/1.1\r\nHost: h\r\n\r\n')
+        assert scope.scheme == 'http'
+        assert scope.headers.get(b'host') == b'real.example'
+
     def test_asterisk_form_options_flagged_for_server_level_answer(self):
         actor = _make_actor()
         scope = actor._parse(b'OPTIONS * HTTP/1.1\r\n'
