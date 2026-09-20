@@ -341,8 +341,8 @@ class RstStreamResponder(Responder):
     Cancels the handler task, drops the stream's sender and recipient, and
     replays to the connection window the inbound credit the cancelled handler
     never consumed, so later streams are not starved by it.  The identifier is
-    recorded as closed-via-RST, so a frame arriving on it afterwards is
-    answered STREAM_CLOSED rather than opening a new stream.
+    recorded as closed-via-RST, so a frame arriving on it afterwards meets the
+    §5.1 closed-stream rules rather than opening a new stream.
     """
 
     @log

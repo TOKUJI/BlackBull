@@ -124,9 +124,7 @@ it looks like well-formed bytes all the way to the peer.
 
 ## §5 — Streams and Multiplexing
 
-**§5.1 Stream States** ⚠️ — closed-stream handling has the §5.4.2
-exception described below.
-Four states matter for a server in practice:
+**§5.1 Stream States** — four states matter for a server in practice:
 IDLE → OPEN → HALF_CLOSED_REMOTE → CLOSED.
 (The two "reserved" states exist only during server push and are not shown —
 the server sends PUSH_PROMISE but never receives one, so it only ever sees
@@ -140,7 +138,7 @@ CLOSED branch is defensive-only for a live object already marked CLOSED.
 |---|---|---|
 | IDLE | HEADERS, PRIORITY, CONTINUATION, PUSH_PROMISE | GOAWAY(PROTOCOL_ERROR) |
 | HALF_CLOSED_REMOTE | PRIORITY, WINDOW_UPDATE, RST_STREAM | RST_STREAM(STREAM_CLOSED) |
-| CLOSED (defensive-only) | PRIORITY | HEADERS or CONTINUATION → GOAWAY(STREAM_CLOSED); otherwise → RST_STREAM(STREAM_CLOSED) |
+| CLOSED (defensive-only) | PRIORITY, RST_STREAM | HEADERS or CONTINUATION → GOAWAY(STREAM_CLOSED); otherwise → RST_STREAM(STREAM_CLOSED) |
 
 *Because* the state table is the heart of multiplexing — getting it wrong means
 either rejecting valid concurrent streams or leaking resources on dead ones.
@@ -155,14 +153,16 @@ closed-ID branch, the current wire behaviour is:
 | Closed-ID origin | Late WINDOW_UPDATE | Late RST_STREAM | PRIORITY | HEADERS | Other stream frames |
 |---|---|---|---|---|---|
 | retained, `via_rst=False` | no response | no response | accepted | GOAWAY(STREAM_CLOSED) | RST_STREAM(STREAM_CLOSED) |
-| retained, `via_rst=True` | RST_STREAM(STREAM_CLOSED) | RST_STREAM(STREAM_CLOSED) ⚠️ | accepted | GOAWAY(STREAM_CLOSED) | RST_STREAM(STREAM_CLOSED) |
+| retained, `via_rst=True` | RST_STREAM(STREAM_CLOSED) | no response | accepted | GOAWAY(STREAM_CLOSED) | RST_STREAM(STREAM_CLOSED) |
 | evicted, reset origin unknown | no response | no response | accepted | GOAWAY(STREAM_CLOSED) | RST_STREAM(STREAM_CLOSED) |
 
-This table records the implementation's wire behaviour; it does not justify
-every cell as conformant.  In particular, the flagged `via_rst=True` response
-to a late `RST_STREAM` is a known mismatch: RFC 9113 §5.4.2 prohibits sending
-`RST_STREAM` in response to `RST_STREAM`, but the closed-ID branch currently
-sends `RST_STREAM(STREAM_CLOSED)`.
+This table records what the code answers, not a conformance claim for every
+cell.  The row merges peer and local resets — the record keeps one bit — and
+§5.1 answers them differently: after a *received* `RST_STREAM` a frame may be
+treated as a connection error of type `STREAM_CLOSED` (§5.4.2 permits the
+extra `RST_STREAM`, §6.1 requires one for DATA), while after one this server
+*sent* it must be minimally processed and then discarded.  §5.4.2 is
+categorical either way: no origin answers a late `RST_STREAM` in kind.
 
 A standalone CONTINUATION does not reach either state table: `_frame_loop()`
 rejects it first with `GOAWAY(PROTOCOL_ERROR)` under §6.10.  If a
@@ -506,8 +506,8 @@ enters the recipient contributes its complete flow-controlled length,
 including padding; the RFC 8441 reader likewise hands back buffered credit it
 withheld.  Late DATA on an already-closed stream also returns its connection
 credit without recreating a stream owner.  The stream-level side is not
-replayed — the stream is gone (§5.1) and any further frame on that id is
-`STREAM_CLOSED`.
+replayed — the stream is gone — and any further frame on that id meets the
+§5.1 closed-stream rules.
 
 *Because* the connection window is the easy half to forget, and forgetting it
 fails *late*.  Credit only the stream window — the obvious half — and everything

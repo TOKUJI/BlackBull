@@ -534,7 +534,9 @@ class HTTP2Actor(Actor):
             return (ErrorCodes.STREAM_CLOSED, 'stream')
 
         if state == StreamState.CLOSED:
-            if frame_type == FrameTypes.PRIORITY:
+            # RFC 9113 §5.4.2 — a received RST_STREAM is never answered in
+            # kind; its responder retires the node idempotently instead.
+            if frame_type in (FrameTypes.PRIORITY, FrameTypes.RST_STREAM):
                 return None
             would_reopen_the_stream = frame_type in (
                 FrameTypes.HEADERS, FrameTypes.CONTINUATION)
@@ -1026,13 +1028,17 @@ class HTTP2Actor(Actor):
                     # Late frame on a CLOSED stream (§5.1).
                     if frame_type == FrameTypes.PRIORITY:
                         pass  # always allowed
+                    elif frame_type == FrameTypes.RST_STREAM:
+                        # RFC 9113 §5.4.2 — never answer a RST_STREAM in kind,
+                        # whether the reset was the peer's or this server's.
+                        continue
                     elif frame_type in (FrameTypes.HEADERS, FrameTypes.CONTINUATION):
                         await self._connection_error(
                             ErrorCodes.STREAM_CLOSED,
                             f'{frame_type.name} on closed stream {frame.stream_id}')
                         continue
-                    elif (not closed_via_rst and frame_type in (
-                            FrameTypes.WINDOW_UPDATE, FrameTypes.RST_STREAM)):
+                    elif (not closed_via_rst
+                            and frame_type == FrameTypes.WINDOW_UPDATE):
                         # RFC 9113 §5.1 closed-origin cases and rationale:
                         # ``docs/about/rfc9113-implementation.md`` §5.1.
                         continue
