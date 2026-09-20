@@ -6097,7 +6097,12 @@ PUSH_PROMISE by testing the type against the class-level frozenset
 <code>HTTP2Actor._STREAM_ONLY_FRAME_TYPES</code>.  <em>Because</em> the promise has to reference
 the request that triggered
 it, which is the parent stream — sending it on the new stream would leave the
-client unable to correlate.</p>
+client unable to correlate.
+A PUSH_PROMISE <em>from</em> the peer is refused before the stream-state
+classification, as a connection error of type PROTOCOL_ERROR whatever the
+stream's state (§6.6 / §8.4 — a client cannot push).  <em>Because</em> that
+classification answers per state (idle: PROTOCOL_ERROR from §5.1;
+half-closed: RST_STREAM(STREAM_CLOSED)), and neither is this frame's answer.</p>
 <p><strong>§6.7 PING — <code>Ping(FrameBase)</code></strong> ✅
 A <code>Ping</code> frame is handled by <code>PingResponder</code>: PING with ACK → no-op (it answers
 our own PING); PING without ACK → echo with ACK, unchanged opaque data.
