@@ -102,6 +102,15 @@ def _sent_rst_streams(handler, stream_id: int) -> list:
     ]
 
 
+def _sent_goaway_codes(handler) -> list:
+    """Error codes of the GOAWAY frames the actor sent on the mocked wire."""
+    return [
+        call.args[0].error_code for call in handler.send_frame.call_args_list
+        if hasattr(call.args[0], 'FrameType')
+        and call.args[0].FrameType() == FrameTypes.GOAWAY
+    ]
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # G1-G2: Stream state validation — idle / half-closed(remote)
 # ═══════════════════════════════════════════════════════════════════════
@@ -482,6 +491,69 @@ class TestG6PathOctets:
             if hasattr(call.args[0], 'FrameType')
             and call.args[0].FrameType() == FrameTypes.RST_STREAM
         ]
+
+
+def _make_raw_headers_frame(block: bytes, stream_id: int = 1) -> bytes:
+    """A HEADERS frame carrying *block* exactly as it arrived on the wire."""
+    flags = int(HeaderFrameFlags.END_HEADERS) | int(HeaderFrameFlags.END_STREAM)
+    return _make_h2_frame(FrameTypes.HEADERS, flags, stream_id, block)
+
+
+class TestG4CompressionErrors:
+    """RFC 9113 §4.3/§5.4.1 — a field block that cannot be decoded is a
+    connection error of type COMPRESSION_ERROR: GOAWAY, never RST_STREAM."""
+
+    @pytest.mark.parametrize('block', [
+        b'\x80', b'\x00', b'\x3f\xe1\x3f',
+    ])
+    @pytest.mark.asyncio
+    async def test_undecodable_block_goes_away_with_compression_error(self, block):
+        handler, app = _make_h2_actor()
+        settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
+        handler.receive = AsyncMock(side_effect=[
+            settings, _make_raw_headers_frame(block), None])
+        await handler.run()
+
+        assert _sent_goaway_codes(handler) == [ErrorCodes.COMPRESSION_ERROR]
+        assert _sent_rst_streams(handler, 1) == []
+        assert handler._goaway_sent
+        assert app.await_count == 0
+
+    @pytest.mark.asyncio
+    async def test_an_undecodable_block_split_across_continuation(self):
+        """The block is decoded when the last CONTINUATION lands, not when
+        the HEADERS frame is loaded, so that path needs the same answer."""
+        handler, app = _make_h2_actor()
+        settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
+        flags = int(HeaderFrameFlags.END_STREAM)
+        handler.receive = AsyncMock(side_effect=[
+            settings,
+            _make_h2_frame(FrameTypes.HEADERS, flags, 1, b'\x00'),
+            _make_h2_frame(FrameTypes.CONTINUATION,
+                           int(HeaderFrameFlags.END_HEADERS), 1, b'\x80'),
+            None])
+        await handler.run()
+
+        assert _sent_goaway_codes(handler) == [ErrorCodes.COMPRESSION_ERROR]
+        assert _sent_rst_streams(handler, 1) == []
+        assert handler._goaway_sent
+        assert app.await_count == 0
+
+    @pytest.mark.asyncio
+    async def test_a_legal_table_size_update_still_decodes(self):
+        """The allowed maximum is legal: what is refused is the codec's
+        failure, not the presence of a size update."""
+        block = b'\x3f\xe1\x1f' + Encoder().encode([
+            (b':method', b'GET'), (b':path', b'/'), (b':scheme', b'https'),
+            (b':authority', b'example.com')])
+        handler, app = _make_h2_actor()
+        settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
+        handler.receive = AsyncMock(side_effect=[
+            settings, _make_raw_headers_frame(block), None])
+        await handler.run()
+
+        assert app.await_count == 1
+        assert _sent_goaway_codes(handler) == []
 
 
 # ═══════════════════════════════════════════════════════════════════════
