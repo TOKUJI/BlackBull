@@ -588,6 +588,10 @@ content-length rule at §8.1.2.6; RFC 9113 folds it into §8.1.1.)
 Field-level violations — including a pseudo-header value that is not UTF-8 —
 are flagged by `Headers.parse_payload()` / `parse_headers() in parser.py` (the
 `malformed` flag) and rejected as above.
+Both field-value MUSTs are checked there: no NUL, LF or CR at any position,
+and no SP or HTAB at either end.  *Because* RFC 9112 §5 has HTTP/1.1 trim
+that whitespace off the field line instead, a transport that kept it would
+hand the application a value the other transport never produces.
 **§8.2.2 Connection-Specific Header Fields** (e.g. `Connection`,
 `Transfer-Encoding`) are rejected at parse time (in `frame_types.py`).
 **§8.2.3 Cookie crumb compression** ✗ — not specially handled; cookies pass

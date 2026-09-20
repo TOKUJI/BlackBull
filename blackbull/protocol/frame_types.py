@@ -378,6 +378,17 @@ def field_value_is_valid(value: bytes) -> bool:
     return not (0x00 in value or 0x0A in value or 0x0D in value)
 
 
+def field_value_has_boundary_whitespace(value: bytes) -> bool:
+    """RFC 9113 §8.2.1 — SP or HTAB at either end of a field value.
+
+    Inside the value both octets stay legal, which is why this is a second
+    question and not folded into [`field_value_is_valid`][]: it is about the
+    position, not the octet.
+    """
+    return bool(value) and (value[0] in (0x20, 0x09)
+                            or value[-1] in (0x20, 0x09))
+
+
 def no_hpack_context(frame: 'FrameBase', codec: str) -> TypeError:
     """The refusal for a header frame that cannot name its connection's codec.
 
@@ -521,10 +532,17 @@ class Headers(FrameBase):
             if not field_name_is_valid(kb_raw):
                 self._mark_malformed(f'invalid character in field name: {kb_raw!r}')
                 return
-            # RFC 9113 §8.2.1 — field values MUST NOT contain NUL, LF, or CR
-            # (applies to pseudo-header and regular field values alike).
+            # RFC 9113 §8.2.1 — field values MUST NOT contain NUL, LF, or CR,
+            # and MUST NOT start or end with SP or HTAB (both apply to
+            # pseudo-header and regular field values alike).  RFC 9112 §5
+            # trims that whitespace on the HTTP/1.1 side instead, so this is
+            # where the two transports diverge by design, not by accident.
             if not field_value_is_valid(vb):
                 self._mark_malformed(f'prohibited character in field value: {vb!r}')
+                return
+            if field_value_has_boundary_whitespace(vb):
+                self._mark_malformed(
+                    f'field value starts or ends with whitespace: {vb!r}')
                 return
             kb = kb_raw  # already lowercase per the check above
 

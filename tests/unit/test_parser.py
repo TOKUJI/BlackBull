@@ -677,3 +677,47 @@ class TestHTTP11DuplicateHeaders:
         scope = _get_scope(raw)
         values = [v for k, v in scope['headers'] if k == b'x-custom']
         assert b'first' in values
+
+
+class TestBoundaryWhitespaceInFieldValues:
+    """RFC 9113 §8.2.1 — a field value MUST NOT start or end with SP or HTAB.
+
+    RFC 9112 §5 has HTTP/1.1 trim that whitespace from the field line instead,
+    so the two transports do not share a verdict; what neither may do is hand
+    the padded value to the application.
+    """
+
+    @pytest.mark.parametrize('value', [b' value', b'value ', b'\tvalue',
+                                       b'value\t'])
+    def test_a_value_bounded_by_whitespace_is_malformed(self, value):
+        frame = _make_h2_headers_frame_dispatch([(b'x-foo', value)])
+        assert _real_parse_headers(frame) is None
+        assert frame.malformed
+        assert 'whitespace' in (frame.malformed_reason or '')
+
+    @pytest.mark.parametrize('value', [b'value with spaces',
+                                       b'value\twith\ttabs', b''])
+    def test_whitespace_inside_a_value_is_not_a_violation(self, value):
+        scope = _parse_headers(
+            _make_h2_headers_frame_dispatch([(b'x-foo', value)]))
+        assert (b'x-foo', value) in scope['headers']
+
+    def test_the_rule_covers_pseudo_header_values(self):
+        """The value rules run before the pseudo-header branch, so :path is
+        held to this one too."""
+        frame = _make_h2_headers_frame_dispatch(path='/foo ')
+        assert _real_parse_headers(frame) is None
+        assert frame.malformed
+        assert 'whitespace' in (frame.malformed_reason or '')
+
+    def test_http1_trims_what_http2_refuses(self):
+        """RFC 9112 §5 has HTTP/1.1 trim the OWS that RFC 9113 §8.2.1 makes
+        malformed, so HTTP/1.1 hands the application the stripped value where
+        HTTP/2 refuses the field section before dispatch."""
+        scope = _get_scope(_http_request(
+            headers={'Host': 'localhost:8000', 'X-Foo': 'value '}))
+        assert (b'x-foo', b'value') in scope['headers']
+
+        frame = _make_h2_headers_frame_dispatch([(b'x-foo', b'value ')])
+        assert _real_parse_headers(frame) is None
+        assert frame.malformed
