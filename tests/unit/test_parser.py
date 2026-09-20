@@ -432,6 +432,22 @@ class TestParseHeadersNoneContract:
         assert _real_parse_headers(frame) is None
         assert frame.malformed
 
+    @pytest.mark.parametrize('name', [
+        b':method', b':scheme', b':path', b':authority', b':protocol',
+    ])
+    @pytest.mark.parametrize('value', [b'\xff', b'\x80', b'\xe4\xbe'])
+    def test_invalid_utf8_in_a_pseudo_header_is_malformed(self, name, value):
+        """RFC 9113 §8.3 with §8.1.1 — a pseudo-header value is text; one that
+        is not UTF-8 is malformed (stream error PROTOCOL_ERROR), not an
+        unhandled decode error."""
+        fields = {b':method': b'GET', b':scheme': b'https', b':path': b'/',
+                  b':authority': b'example.com'}
+        fields[name] = value
+        frame = self._headers_frame(list(fields.items()))
+        assert frame.malformed
+        assert 'UTF-8' in (frame.malformed_reason or '')
+        assert _real_parse_headers(frame) is None
+
     @pytest.mark.parametrize('value', [
         b'example.com', b'example.com:8443', b'[::1]:8100',
         b'exam\x01ple.com', b'exam\x7fple.com', b'exam ple.com',

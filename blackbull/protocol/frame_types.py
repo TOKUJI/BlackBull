@@ -549,9 +549,19 @@ class Headers(FrameBase):
                 if pseudo_key in self.pseudo_headers:
                     self._mark_malformed(f'duplicate pseudo-header: {kb!r}')
                     return
-                self.pseudo_headers[pseudo_key] = vb.decode('utf-8')
+                try:
+                    value_text = vb.decode('utf-8')
+                except UnicodeDecodeError:
+                    # RFC 9113 §8.1.1 — a pseudo-header value that is not UTF-8
+                    # text is malformed, which is a stream error of type
+                    # PROTOCOL_ERROR, never a decode error out of the loader.
+                    self._mark_malformed(
+                        f'invalid UTF-8 in pseudo-header value: '
+                        f'{kb!r}: {vb!r}')
+                    return
+                self.pseudo_headers[pseudo_key] = value_text
                 if debug:
-                    logger.debug('%r: %r', kb, self.pseudo_headers[pseudo_key])
+                    logger.debug('%r: %r', kb, value_text)
                 continue
 
             seen_regular = True

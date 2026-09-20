@@ -577,8 +577,9 @@ malformed request must never reach handler code.  (RFC 7540 located the
 content-length rule at §8.1.2.6; RFC 9113 folds it into §8.1.1.)
 
 **§8.2 HTTP Fields / §8.2.1 Field Validity** ✅
-Field-level violations are flagged by `Headers.parse_payload()` /
-`parse_headers() in parser.py` (the `malformed` flag) and rejected as above.
+Field-level violations — including a pseudo-header value that is not UTF-8 —
+are flagged by `Headers.parse_payload()` / `parse_headers() in parser.py` (the
+`malformed` flag) and rejected as above.
 **§8.2.2 Connection-Specific Header Fields** (e.g. `Connection`,
 `Transfer-Encoding`) are rejected at parse time (in `frame_types.py`).
 **§8.2.3 Cookie crumb compression** ✗ — not specially handled; cookies pass

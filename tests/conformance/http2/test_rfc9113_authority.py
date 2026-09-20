@@ -184,6 +184,27 @@ class TestAuthorityGrammar:
         _assert_malformed(handler)
         assert app.await_count == 0
 
+    @pytest.mark.parametrize('value', [b'\xff', b'\xe4\xbe'])
+    @pytest.mark.asyncio
+    async def test_invalid_utf8_authority_is_malformed(self, value):
+        """RFC 9113 §8.3 with §8.1.1 — a pseudo-header value that is not
+        UTF-8 is malformed, not an unhandled decode error."""
+        handler, app = await _run_with_headers(
+            _PSEUDO_TRIO + [(b':authority', value)])
+        _assert_malformed(handler)
+        assert app.await_count == 0
+
+    @pytest.mark.asyncio
+    async def test_obs_text_in_a_regular_field_is_not_decoded(self):
+        """Only pseudo-header values are text: a regular field keeps its
+        bytes, so obs-text is not a UTF-8 failure."""
+        handler, app = await _run_with_headers(
+            _PSEUDO_TRIO + [(b':authority', b'example.com'),
+                            (b'x-thing', b'caf\xc3\xa9'),
+                            (b'x-raw', b'\xff')])
+        assert app.await_count == 1
+        assert not _rst_streams(handler)
+
     @pytest.mark.parametrize('control', list(range(0x00, 0x20)) + [0x7F])
     @pytest.mark.asyncio
     async def test_every_control_in_host_without_authority_is_malformed(
