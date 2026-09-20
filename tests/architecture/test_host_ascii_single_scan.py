@@ -146,8 +146,13 @@ def _with_extra_line(line: str) -> list[str]:
     decide whether the tripwire fires.
     """
     body = ast.unparse(_validate_host_function()).splitlines()
-    index = next(i for i, text in enumerate(body) if _SCAN in text)
-    indent = body[index][:len(body[index]) - len(body[index].lstrip())]
+    for index, text in enumerate(body):
+        if _SCAN in text:
+            indent = text[:len(text) - len(text.lstrip())]
+            break
+    else:
+        pytest.fail(f'{_FUNCTION} no longer scans with {_SCAN}: update this '
+                    f'guard rather than deleting it')
     body.insert(index, f'{indent}{line}')
     return _second_passes(ast.parse('\n'.join(body)))
 
