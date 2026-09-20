@@ -139,13 +139,17 @@ def test_the_walker_counts_a_duplicate_scan():
 
 
 def _with_extra_line(line: str) -> list[str]:
-    """The real body with *line* re-inserted, as the regression would look."""
-    source = ast.unparse(_validate_host_function())
-    regressed = source.replace(
-        f'match = {_SCAN}.search(value)',
-        f'{line}\n    match = {_SCAN}.search(value)')
-    assert regressed != source
-    return _second_passes(ast.parse(regressed))
+    """The real body with *line* spliced in before the scan, as a regression.
+
+    Anchored on the scan expression rather than the statement around it, so a
+    rebinding of the result (``match = ...`` vs ``if match := ...``) does not
+    decide whether the tripwire fires.
+    """
+    body = ast.unparse(_validate_host_function()).splitlines()
+    index = next(i for i, text in enumerate(body) if _SCAN in text)
+    indent = body[index][:len(body[index]) - len(body[index].lstrip())]
+    body.insert(index, f'{indent}{line}')
+    return _second_passes(ast.parse('\n'.join(body)))
 
 
 def test_the_walker_sees_the_decode_when_it_is_put_back():

@@ -411,8 +411,7 @@ def _validate_host(headers: 'Headers') -> None:
     value = hosts[0][1].strip(b' \t')
     if not value:
         raise BadRequestError('empty Host header value')
-    match = _HOST_FORBIDDEN_RE.search(value)
-    if match is not None:
+    if match := _HOST_FORBIDDEN_RE.search(value):
         if match[0][0] >= 0x80:
             raise BadRequestError(
                 f'invalid Host authority {value!r}: non-ASCII byte in a '
