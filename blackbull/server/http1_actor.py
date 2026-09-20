@@ -350,15 +350,13 @@ def _validate_message_framing(headers: 'Headers') -> int:
     return declared
 
 
-# RFC 3986 §3.2 — authority = [userinfo "@"] host [":" port].  None of these
-# delimiters belong in a Host value; their presence (or an empty value) is a
-# smuggling / SSRF vector nginx rejects with 400 and a lenient parser accepts
-# silently.  ``@`` is included: the deprecated userinfo component has no place
-# in a Host header and enables credential-spoofing.  The high bytes are in for
-# RFC 3986 §3.2 too: an authority is ASCII — an internationalised name reaches
-# the wire as punycode, which is too — and riding this class means the rule
-# costs no second pass over every request's Host.
-_HOST_FORBIDDEN_BYTES = frozenset(b'/?# \t@') | frozenset(range(0x80, 0x100))
+# RFC 3986 §3.2 — authority = [userinfo "@"] host [":" port]; these octets are
+# not in one.  ``@`` is the deprecated userinfo component, the controls are
+# CTL/DEL and the high bytes non-ASCII, all carried here because HTTP/2 has no
+# per-value CTL scan before the authority becomes the host header.
+_HOST_FORBIDDEN_BYTES = (
+    frozenset(b'/?# \t@') | frozenset(range(0x20)) | frozenset({0x7F})
+    | frozenset(range(0x80, 0x100)))
 _HOST_FORBIDDEN_RE = re.compile(
     b'[' + re.escape(bytes(sorted(_HOST_FORBIDDEN_BYTES))) + b']')
 
@@ -412,13 +410,16 @@ def _validate_host(headers: 'Headers') -> None:
     if not value:
         raise BadRequestError('empty Host header value')
     if match := _HOST_FORBIDDEN_RE.search(value):
-        if match[0][0] >= 0x80:
-            raise BadRequestError(
-                f'invalid Host authority {value!r}: non-ASCII byte in a '
-                f'URI authority (RFC 3986 §3.2)')
+        byte = match[0][0]
+        if byte >= 0x80:
+            what = 'non-ASCII byte in a URI authority'
+        elif byte < 0x20 or byte == 0x7F:
+            what = 'control byte in a URI authority'
+        else:
+            what = 'delimiter / whitespace'
         raise BadRequestError(
-            f'invalid Host authority {value!r}: contains '
-            f'delimiter / whitespace forbidden by RFC 3986 §3.2')
+            f'invalid Host authority {value!r}: {what} forbidden by '
+            f'RFC 3986 §3.2')
 
 
 # ---------------------------------------------------------------------------

@@ -173,6 +173,28 @@ class TestAuthorityGrammar:
             _PSEUDO_TRIO + [(b':authority', b'exam' + bad_byte + b'ple.com')])
         _assert_malformed(handler)
 
+    @pytest.mark.parametrize('control', list(range(0x00, 0x20)) + [0x7F])
+    @pytest.mark.asyncio
+    async def test_every_control_in_authority_is_malformed(self, control):
+        """Every control byte, not a sample: NUL, LF and CR are refused a
+        layer earlier (RFC 9113 §8.2.1), the rest by the authority grammar."""
+        handler, app = await _run_with_headers(
+            _PSEUDO_TRIO + [
+                (b':authority', b'exam' + bytes([control]) + b'ple.com')])
+        _assert_malformed(handler)
+        assert app.await_count == 0
+
+    @pytest.mark.parametrize('control', list(range(0x00, 0x20)) + [0x7F])
+    @pytest.mark.asyncio
+    async def test_every_control_in_host_without_authority_is_malformed(
+        self, control,
+    ):
+        """The ``Host`` fallback is held to the same grammar."""
+        handler, app = await _run_with_headers(
+            _PSEUDO_TRIO + [
+                (b'host', b'exam' + bytes([control]) + b'ple.com')])
+        _assert_malformed(handler)
+
     @pytest.mark.asyncio
     async def test_empty_authority_is_malformed(self):
         handler, app = await _run_with_headers(

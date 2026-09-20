@@ -592,8 +592,8 @@ split for pushed requests lives in `HTTP2Actor._handle_push()`.
 `:authority` is validated and surfaced by `_request_headers_with_host() in
 parser.py` (v0.54.0): an `http(s)` request carrying neither `:authority` nor
 `Host` is malformed, as is an authority containing userinfo, RFC 3986 §3.2
-delimiters, whitespace, or a non-ASCII byte (the same grammar HTTP/1.1
-enforces on `Host`, one forbidden-byte scan serving both);
+delimiters, whitespace, a control byte, or a non-ASCII byte (the same grammar
+HTTP/1.1 enforces on `Host`, one forbidden-byte scan serving both);
 multiple `Host` fields without `:authority` are likewise rejected.  A valid
 `:authority` is mapped into `conn.headers` as the `host` header,
 replacing any literal `Host` — the ASGI host mapping, mirroring H1's
