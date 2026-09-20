@@ -549,7 +549,7 @@ async def test_credit_replay_survives_a_task_group_that_refuses_the_task():
     """
     handler = _make_actor()
 
-    class _RefusingTaskGroup:
+    class _RefusingTaskGroup(asyncio.TaskGroup):
         """asyncio.TaskGroup.create_task() on a shutting-down group."""
 
         def create_task(self, coro, **kwargs):

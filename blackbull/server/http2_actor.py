@@ -120,6 +120,32 @@ def _build_h2_extensions(
 
 
 
+def _schedule_group_task(
+    tg: asyncio.TaskGroup, coro,
+) -> asyncio.Task | None:
+    """Schedule *coro* on *tg*, closing it when the group refuses it.
+
+    A group that is shutting down raises from ``create_task`` before it wraps
+    the coroutine, and 3.11/3.12 leave that coroutine open for the GC to
+    report as never awaited — 3.13 closes it — so it is closed here either
+    way.  ``None`` means the group would not take it.
+    """
+    try:
+        return tg.create_task(coro)
+    except RuntimeError:
+        coro.close()
+        return None
+
+
+def _schedule_loop_task(coro) -> asyncio.Task | None:
+    """Schedule *coro* on the running loop, closing it if the loop refuses."""
+    try:
+        return asyncio.get_running_loop().create_task(coro)
+    except RuntimeError:
+        coro.close()
+        return None
+
+
 async def _run_when_stream_cap_admits(start_stream, cap):
     """Run *start_stream()* once *cap* admits it.
 
@@ -458,23 +484,11 @@ class HTTP2Actor(Actor):
         # group whenever it can accept work.
         task = None
         if self._task_group is not None:
-            coro = _replay()
-            try:
-                task = self._task_group.create_task(coro)
-            except RuntimeError:
-                # The group is shutting down.  3.11/3.12 raise without closing
-                # the coroutine they were handed, so close it here — 3.13 does
-                # it for us, and closing twice is a no-op — before the
-                # fallback creates its own.
-                coro.close()
-                task = None
+            task = _schedule_group_task(self._task_group, _replay())
         if task is None:
-            coro = _replay()
-            try:
-                task = asyncio.get_running_loop().create_task(coro)
-            except RuntimeError:
-                coro.close()
-                return None
+            task = _schedule_loop_task(_replay())
+        if task is None:
+            return None
         self._credit_flush_tasks.add(task)
         task.add_done_callback(self._credit_flush_tasks.discard)
         return task
@@ -753,11 +767,14 @@ class HTTP2Actor(Actor):
 
         async with asyncio.TaskGroup() as tg:
             self._task_group = tg
-            watchdog = tg.create_task(self._liveness_watchdog())
-            try:
-                await self._frame_loop(tg)
-            finally:
-                watchdog.cancel()
+            watchdog = _schedule_group_task(tg, self._liveness_watchdog())
+            # Cannot be None: the group was just entered.  Guarded anyway, so
+            # a refused watchdog can never look like a healthy connection.
+            if watchdog is not None:
+                try:
+                    await self._frame_loop(tg)
+                finally:
+                    watchdog.cancel()
 
         self._task_group = None
 
@@ -1213,13 +1230,13 @@ class HTTP2Actor(Actor):
         else:
             make_final = _start_stream
 
-        try:
-            if self._stream_semaphore is not None:
-                task = tg.create_task(
-                    _run_when_stream_cap_admits(make_final, self._stream_semaphore))
-            else:
-                task = tg.create_task(make_final())
-        except RuntimeError:
+        if self._stream_semaphore is not None:
+            task = _schedule_group_task(
+                tg,
+                _run_when_stream_cap_admits(make_final, self._stream_semaphore))
+        else:
+            task = _schedule_group_task(tg, make_final())
+        if task is None:
             # HEADERS arrived in the turn the connection went away; no peer
             # left to RST_STREAM.
             if _DEBUG:
@@ -1607,9 +1624,8 @@ class HTTP2Actor(Actor):
             finally:
                 _close_ws_record(log_record, ws_actor._disconnect_code)
 
-        try:
-            task = tg.create_task(_run_ws())
-        except RuntimeError:
+        task = _schedule_group_task(tg, _run_ws())
+        if task is None:
             self._retire_stream(stream.stream_id, via_rst=False)
             return
         self._ws_stream_ids.add(stream.stream_id)

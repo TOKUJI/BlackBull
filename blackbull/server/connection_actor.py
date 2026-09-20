@@ -22,9 +22,10 @@ class ConnectionActor(Actor):
     Detects protocol, spawns the appropriate protocol Actor, and isolates
     failures so one bad connection cannot affect others.
 
-    Supervisor strategy: isolate — ExceptionGroup from the TaskGroup is
-    caught and emitted as a single on_error event; the connection is always
-    closed in finally.
+    Supervisor strategy: isolate — a failure from the protocol actor (an
+    ExceptionGroup from HTTP/2's own stream TaskGroup included) is caught and
+    emitted as a single on_error event; the connection is always closed in
+    finally.
     """
 
     def __init__(

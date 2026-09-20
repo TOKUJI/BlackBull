@@ -1,8 +1,10 @@
 """HTTP/2 stream ownership is released through one idempotent lifecycle."""
 
+import ast
 import asyncio
 import gc
 import inspect
+import pathlib
 import warnings
 from http import HTTPStatus
 from types import SimpleNamespace
@@ -19,6 +21,7 @@ from blackbull.protocol.frame_types import (
     HeaderFrameFlags,
 )
 from blackbull.protocol.stream import StreamState
+import blackbull.server.http2_actor as http2_actor
 from blackbull.server.http2_actor import HTTP2Actor, _CLOSED_STREAMS_CAP
 from blackbull.server.http2_ws import HTTP2WSReader
 from blackbull.server.recipient import AbstractReader
@@ -1151,15 +1154,17 @@ async def test_undecoded_header_block_over_cap_is_connection_error():
     assert not [frame for frame in sent if frame.FrameType() == FrameTypes.RST_STREAM]
 
 
-class _RefusingTaskGroup:
+class _RefusingTaskGroup(asyncio.TaskGroup):
     """A task group at shutdown on 3.11/3.12.
 
     ``create_task`` raises *without* closing the coroutine it was handed —
     the interpreter behaviour the fix must not depend on (3.13 closes it for
     us, which is why the leak was invisible on the development interpreter).
+    A real ``TaskGroup`` subclass, so it passes the annotated ``tg`` seams.
     """
 
     def __init__(self) -> None:
+        super().__init__()
         self.handed: list = []
 
     def create_task(self, coro):
@@ -1297,3 +1302,162 @@ def test_the_unawaited_warning_check_detects_a_deliberate_leak():
 
     assert _unawaited_coroutine_warnings(record), (
         'the warning instrument cannot see an abandoned coroutine')
+
+
+# ---------------------------------------------------------------------------
+# Every coroutine we build for a task is either scheduled or closed
+# ---------------------------------------------------------------------------
+
+#: The two functions allowed to call ``create_task`` — one per scheduling form.
+_ALLOWED_CREATE_TASK_OWNERS = frozenset({
+    '_schedule_group_task',
+    '_schedule_loop_task',
+})
+
+
+def _module_tree() -> ast.Module:
+    return ast.parse(pathlib.Path(http2_actor.__file__).read_text())
+
+
+def _helper_nodes(tree: ast.Module) -> frozenset:
+    """The two functions allowed to touch ``create_task``, by node identity.
+
+    Identity rather than name: a nested redefinition of an allowed name is
+    not the helper.
+    """
+    return frozenset(
+        node for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name in _ALLOWED_CREATE_TASK_OWNERS
+    )
+
+
+def _create_task_owners(tree: ast.Module) -> dict:
+    owners: dict = {}
+
+    def visit(node, owner):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                inner = child
+            else:
+                inner = owner
+            if (isinstance(child, ast.Call)
+                    and isinstance(child.func, ast.Attribute)
+                    and child.func.attr == 'create_task'):
+                owners[inner] = owners.get(inner, 0) + 1
+            visit(child, inner)
+
+    visit(tree, None)
+    return owners
+
+
+def test_every_create_task_call_lives_in_a_scheduling_helper():
+    tree = _module_tree()
+    helpers = _helper_nodes(tree)
+    assert len(helpers) == len(_ALLOWED_CREATE_TASK_OWNERS), helpers
+    owners = _create_task_owners(tree)
+    assert owners, 'the walker found no create_task call at all'
+    wrong = {getattr(node, 'name', None): n
+             for node, n in owners.items() if node not in helpers}
+    assert wrong == {}, wrong
+
+
+def test_create_task_is_referenced_nowhere_but_those_two_calls():
+    """The walker above cannot see ``getattr(tg, 'create_task')`` or an alias
+    binding (``ct = tg.create_task``), so the module is allowed exactly two
+    references to the name: the unbound-attribute form is forbidden, and no
+    string may spell it either."""
+    tree = _module_tree()
+    attributes = [n for n in ast.walk(tree)
+                  if isinstance(n, ast.Attribute) and n.attr == 'create_task']
+    called = {
+        id(call.func) for call in ast.walk(tree)
+        if isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+        and call.func.attr == 'create_task'
+    }
+    strings = [n for n in ast.walk(tree)
+               if isinstance(n, ast.Constant) and n.value == 'create_task']
+    assert len(attributes) + len(strings) == 2, (len(attributes), len(strings))
+    assert [n for n in attributes if id(n) not in called] == [], (
+        'create_task is bound instead of called')
+
+
+def _assert_closed(coro, what: str) -> None:
+    assert inspect.getcoroutinestate(coro) is inspect.CORO_CLOSED, (
+        f'{what} was left unclosed')
+
+
+@pytest.mark.asyncio
+async def test_the_group_helper_closes_what_a_closing_group_refuses():
+    group = _RefusingTaskGroup()
+
+    async def _never_run():
+        return None
+
+    coro = _never_run()
+    assert http2_actor._schedule_group_task(group, coro) is None
+    _assert_closed(coro, 'the coroutine the group refused')
+
+
+@pytest.mark.asyncio
+async def test_the_group_helper_returns_the_task_a_live_group_takes():
+    async def _runs():
+        return 'ran'
+
+    async with asyncio.TaskGroup() as tg:
+        task = http2_actor._schedule_group_task(tg, _runs())
+        assert isinstance(task, asyncio.Task)
+    assert task.result() == 'ran'
+
+
+@pytest.mark.asyncio
+async def test_the_group_helper_tolerates_a_coroutine_already_closed():
+    """3.13 closes the coroutine before raising; the second close is a no-op."""
+    group = _ClosingRefusingTaskGroup()
+
+    async def _never_run():
+        return None
+
+    coro = _never_run()
+    assert http2_actor._schedule_group_task(group, coro) is None
+    _assert_closed(coro, 'the coroutine 3.13 closed for us')
+
+
+@pytest.mark.parametrize('with_semaphore', [False, True])
+@pytest.mark.asyncio
+async def test_a_rejected_stream_spawn_closes_its_coroutine(with_semaphore):
+    actor = _actor()
+    if with_semaphore:
+        actor._stream_semaphore = asyncio.Semaphore(1)
+        await actor._stream_semaphore.acquire()   # force the cap-admits wrapper
+    stream = actor.root_stream.add_child(1)
+    stream.on_headers_received(end_stream=True)
+    recipient = _Recipient()
+    actor._recipients[1] = recipient
+    sender = actor.make_sender(1)
+    conn = Connection(method='GET', path='/', raw_path=b'/', headers=Headers([]))
+
+    group = _RefusingTaskGroup()
+    actor._spawn_stream_task(group, 1, conn, recipient, sender, None)
+
+    handed, = group.handed
+    _assert_closed(handed, 'the stream coroutine the group refused')
+    assert _live_ownership(actor) == (0, 0, 0, 0, 0, 0)
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_ws_handoff_closes_its_coroutine():
+    actor = _actor()
+    stream = actor.root_stream.add_child(1)
+    stream.on_headers_received(end_stream=True)
+    conn = Connection(method='GET', path='/ws', raw_path=b'/ws',
+                      headers=Headers([]))
+    stream.conn = conn
+    log_record = SimpleNamespace(status=None)
+    group = _RefusingTaskGroup()
+
+    await actor._handle_h2_websocket(stream, group, log_record)
+
+    handed, = group.handed
+    _assert_closed(handed, 'the WebSocket coroutine the group refused')
+    assert actor._ws_stream_count == 0
