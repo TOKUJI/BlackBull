@@ -199,15 +199,15 @@ class MessageTooLarge(Exception):
         self.maximum = maximum
 
 
-def _resolve_payload_length(code: int, raw: bytes) -> int:
-    """The payload length an extended length field encodes (RFC 6455 §5.2).
+async def _read_extended_length(reader, code: int) -> int:
+    """Read and validate an extended payload-length field (RFC 6455 §5.2).
 
-    *code* is the 7-bit wire indicator: 126 for the 16-bit form, 127 for the
+    *code* is the 7-bit wire indicator: 126 selects the 16-bit form, 127 the
     64-bit one.  Each form carries only values that do not fit the shorter
     form, and the 64-bit form's most significant bit is 0.
     """
-    declared = int.from_bytes(raw, 'big')
-    minimal = 126 if code == 126 else 65536
+    width, minimal = (2, 126) if code == 126 else (8, 65536)
+    declared = int.from_bytes(await reader.readexactly(width), 'big')
     if declared < minimal or declared >> 63:
         raise InvalidFrameLength(code, declared)
     return declared
@@ -233,10 +233,8 @@ async def read_payload(
     body byte, so an unreadable encoding cannot be made legal by
     staying under a cap.
     """
-    if length == 126:
-        length = _resolve_payload_length(126, await reader.readexactly(2))
-    elif length == 127:
-        length = _resolve_payload_length(127, await reader.readexactly(8))
+    if length in (126, 127):
+        length = await _read_extended_length(reader, length)
 
     if max_length is not None and length > max_length:
         raise FramePayloadTooLarge(length, max_length)
