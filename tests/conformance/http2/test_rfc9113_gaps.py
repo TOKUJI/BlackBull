@@ -540,6 +540,25 @@ class TestG4CompressionErrors:
         assert app.await_count == 0
 
     @pytest.mark.asyncio
+    async def test_an_undecodable_promised_block_goes_away_the_same_way(self):
+        """A client may not push at all, but the block it sent is still
+        decoded for the connection-wide table, so §4.3 is answered before a
+        stream-state rule rejects the frame."""
+        handler, app = _make_h2_actor()
+        settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
+        payload = (2).to_bytes(4, 'big') + b'\x80'
+        handler.receive = AsyncMock(side_effect=[
+            settings,
+            _make_h2_frame(FrameTypes.PUSH_PROMISE,
+                           int(HeaderFrameFlags.END_HEADERS), 1, payload),
+            None])
+        await handler.run()
+
+        assert _sent_goaway_codes(handler) == [ErrorCodes.COMPRESSION_ERROR]
+        assert handler._goaway_sent
+        assert app.await_count == 0
+
+    @pytest.mark.asyncio
     async def test_a_legal_table_size_update_still_decodes(self):
         """The allowed maximum is legal: what is refused is the codec's
         failure, not the presence of a size update."""
