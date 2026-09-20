@@ -871,18 +871,6 @@ class HTTP1Actor(Actor):
             raise NotImplementedFramingError(
                 f'CONNECT (tunneling) is not implemented: {path!r}')
 
-        # Request-target octets — reject CTLs, DEL, and non-ASCII (§2.1 /
-        # RFC 3986: a raw byte ≥ 0x80 in the target is a normalisation /
-        # smuggling vector, MAL-NON-ASCII-URL).  Graded here, before the
-        # absolute-form branch below rewrites the target to origin-form: the
-        # scheme and the authority are request-target octets too, and the
-        # authority then becomes the host header without passing the
-        # per-value check the received headers went through.  Asterisk-form is
-        # the literal ``*``, validated by its own branch.
-        if path != b'*' and (
-                not path or path.translate(None, _TARGET_ALLOWED_OCTETS)):
-            raise BadRequestError(f'invalid request-target {path!r}')
-
         if path == b'*':
             # asterisk-form (§3.2.4) — a server-wide request, valid only for
             # OPTIONS.
@@ -891,20 +879,28 @@ class HTTP1Actor(Actor):
                     f'asterisk-form request-target is valid only for OPTIONS, '
                     f'not {method!r}')
             asterisk_form = True
-        elif (_ss := path.find(b'://')) != -1 and b'/' not in path[:_ss]:
-            # absolute-form (§3.2.2): ``scheme "://" authority path-abempty``.
-            # Rewrite it to origin-form and let the authority override Host
-            # (§3.2.2 — the origin server MUST ignore the Host header here).
-            rest = path[_ss + 3:]
-            slash = rest.find(b'/')
-            if slash == -1:
-                authority_override, path = rest, b'/'
-            else:
-                authority_override, path = rest[:slash], rest[slash:]
-            if not authority_override:
-                raise BadRequestError(
-                    f'absolute-form request-target has empty authority: '
-                    f'{path!r}')
+        else:
+            # Request-target octets — reject CTLs, DEL, and non-ASCII (§2.1 /
+            # RFC 3986; MAL-NON-ASCII-URL).  Before the absolute-form rewrite
+            # below, whose scheme and authority would otherwise reach the host
+            # header with no per-value check.
+            if not path or path.translate(None, _TARGET_ALLOWED_OCTETS):
+                raise BadRequestError(f'invalid request-target {path!r}')
+            if (_ss := path.find(b'://')) != -1 and b'/' not in path[:_ss]:
+                # absolute-form (§3.2.2): ``scheme "://" authority
+                # path-abempty``.  Rewrite it to origin-form and let the
+                # authority override Host (§3.2.2 — the origin server MUST
+                # ignore the Host header here).
+                rest = path[_ss + 3:]
+                slash = rest.find(b'/')
+                if slash == -1:
+                    authority_override, path = rest, b'/'
+                else:
+                    authority_override, path = rest[:slash], rest[slash:]
+                if not authority_override:
+                    raise BadRequestError(
+                        f'absolute-form request-target has empty authority: '
+                        f'{path!r}')
 
         if asterisk_form:
             _raw_path_b, _query_string = b'*', b''

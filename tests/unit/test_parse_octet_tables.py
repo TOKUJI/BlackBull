@@ -95,12 +95,10 @@ def test_parse_rejects_empty_target(actor):
         actor._parse(b'GET  HTTP/1.1\r\nHost: localhost\r\n\r\n')
 
 
-# ---- absolute-form: the whole target is graded, not only its path ----------
+# ---- absolute-form: the authority and the scheme are graded too ------------
 #
-# The authority is sliced out of the target and substituted as the host header
-# after the per-value CTL check has already run over the received headers, so
-# the target itself has to be what rejects a CTL there.  Grading the rewritten
-# path instead misses the scheme and the authority entirely.
+# Both are request-target octets, and the authority becomes the host header
+# without passing the per-value CTL check the received headers went through.
 
 @pytest.mark.parametrize('bad', [b'\x00', b'\x01', b'\x1f', b'\x7f'])
 def test_absolute_form_rejects_a_ctl_in_the_authority(actor, bad):
