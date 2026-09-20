@@ -4,7 +4,7 @@
 3986 §3.2 authorities are ASCII) must not pay for another pass over the value:
 it lives in the one regex the function already runs.
 
-Two questions, two answers: the octet sweeps at the foot prove the rule is
+Two questions, two answers: the octet sweeps below prove the rule is
 *enforced* (nothing can drop it), and the walker proves it stays *one pass*.
 The walker allow-lists the three attribute calls the function needs — two on
 the raw header, one scan — and flags every other call, loop, comprehension and
