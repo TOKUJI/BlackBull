@@ -425,6 +425,11 @@ PUSH_PROMISE by testing the type against the class-level frozenset
 the request that triggered
 it, which is the parent stream — sending it on the new stream would leave the
 client unable to correlate.
+A PUSH_PROMISE *from* the peer is refused before the stream-state
+classification, as a connection error of type PROTOCOL_ERROR whatever the
+stream's state (§6.6 / §8.4 — a client cannot push).  *Because* that
+classification answers per state (idle: PROTOCOL_ERROR from §5.1;
+half-closed: RST_STREAM(STREAM_CLOSED)), and neither is this frame's answer.
 
 **§6.7 PING — `Ping(FrameBase)`** ✅
 A `Ping` frame is handled by `PingResponder`: PING with ACK → no-op (it answers

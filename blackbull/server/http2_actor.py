@@ -1024,6 +1024,15 @@ class HTTP2Actor(Actor):
                     frame.stream_id, ErrorCodes.FRAME_SIZE_ERROR))
                 continue
 
+            # RFC 9113 §6.6 / §8.4 — a client cannot push: a connection error
+            # whatever the stream's state, so it precedes the classifier that
+            # answers idle and half-closed differently.
+            if frame_type == FrameTypes.PUSH_PROMISE:
+                await self._connection_error(
+                    ErrorCodes.PROTOCOL_ERROR,
+                    f'client sent PUSH_PROMISE on stream {frame.stream_id}')
+                continue
+
             # Live streams sit directly under root; closed ones have been
             # pruned to _closed_streams, which is what still separates CLOSED
             # from IDLE below.
