@@ -21,6 +21,22 @@ docs:
 docs-build:
     DISABLE_MKDOCS_2_WARNING=true uv run mkdocs build --strict
 
+# Run the pinned HTTP/1.1 probe in native, compatibility, or both lanes
+http11probe lane='both':
+    scripts/run-http11probe.sh --lane "{{lane}}"
+
+# Run the repository-authoritative local peer comparison
+bench-compare:
+    scripts/run-bench-compare.sh
+
+# Run one approved A/B cloud lifecycle, including teardown
+ab-verify:
+    scripts/run-ab-verify.sh
+
+# Run one approved HTTPArena cloud lifecycle, including teardown
+httparena-bench:
+    scripts/run-httparena-bench.sh
+
 # YouTrack REST access. Credentials are read only by scripts/youtrack.sh.
 yt-search query='project: BLA #Unresolved':
     scripts/youtrack.sh search "{{query}}"

@@ -34,6 +34,7 @@
 : "${SG_NAME:=blackbull-bench-sg}"
 : "${TAG_KEY:=Project}"
 : "${TAG_VALUE:=BlackBull-bench}"
+: "${RUN_TAG_KEY:=BlackBullRun}"
 : "${ROLE_TAG_KEY:=Role}"
 : "${SERVER_ROLE_VALUE:=server}"
 : "${LOADGEN_ROLE_VALUE:=loadgen}"
