@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 
 
@@ -86,8 +87,13 @@ def test_cloud_wrapper_preflight_is_non_mutating() -> None:
 
 
 def test_just_recipes_delegate_to_workflow_scripts() -> None:
-    for recipe, script in SCRIPTS.items():
-        args = ("both",) if recipe == "http11probe" else ()
-        result = run("just", "--dry-run", recipe, *args)
-        assert result.returncode == 0, result.stderr
-        assert script.name in result.stdout + result.stderr
+    justfile = (ROOT / "justfile").read_text()
+    recipes = {
+        "http11probe lane='both':": 'scripts/run-http11probe.sh --lane "{{lane}}"',
+        "bench-compare:": "scripts/run-bench-compare.sh",
+        "ab-verify:": "scripts/run-ab-verify.sh",
+        "httparena-bench:": "scripts/run-httparena-bench.sh",
+    }
+    for header, command in recipes.items():
+        pattern = rf"(?m)^{re.escape(header)}\n    {re.escape(command)}$"
+        assert re.search(pattern, justfile), header
