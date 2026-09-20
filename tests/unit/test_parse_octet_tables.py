@@ -95,6 +95,33 @@ def test_parse_rejects_empty_target(actor):
         actor._parse(b'GET  HTTP/1.1\r\nHost: localhost\r\n\r\n')
 
 
+# ---- absolute-form: the whole target is graded, not only its path ----------
+#
+# The authority is sliced out of the target and substituted as the host header
+# after the per-value CTL check has already run over the received headers, so
+# the target itself has to be what rejects a CTL there.  Grading the rewritten
+# path instead misses the scheme and the authority entirely.
+
+@pytest.mark.parametrize('bad', [b'\x00', b'\x01', b'\x1f', b'\x7f'])
+def test_absolute_form_rejects_a_ctl_in_the_authority(actor, bad):
+    with pytest.raises(BadRequestError, match='request-target'):
+        actor._parse(_req(target=b'http://ho' + bad + b'st/path'))
+
+
+@pytest.mark.parametrize('bad', [b'\x01', b'\x1f', b'\x7f', b'\x80'])
+def test_absolute_form_rejects_a_bad_octet_in_the_scheme(actor, bad):
+    with pytest.raises(BadRequestError, match='request-target'):
+        actor._parse(_req(target=b'ht' + bad + b'tp://host/path'))
+
+
+def test_absolute_form_still_overrides_host(actor):
+    conn = actor._parse(_req(target=b'http://real.example/echo?x=1',
+                             host=b'spoofed.example'))
+    assert conn.headers.get(b'host') == b'real.example'
+    assert conn.path == '/echo'
+    assert conn.query_string == b'x=1'
+
+
 # ---- field-name (tchar) table ----------------------------------------------
 
 def test_tchar_table_classifies_all_256_octets_identically():

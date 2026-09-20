@@ -870,6 +870,19 @@ class HTTP1Actor(Actor):
             # BlackBull does not implement.  Answer 501, not a spurious 404.
             raise NotImplementedFramingError(
                 f'CONNECT (tunneling) is not implemented: {path!r}')
+
+        # Request-target octets — reject CTLs, DEL, and non-ASCII (§2.1 /
+        # RFC 3986: a raw byte ≥ 0x80 in the target is a normalisation /
+        # smuggling vector, MAL-NON-ASCII-URL).  Graded here, before the
+        # absolute-form branch below rewrites the target to origin-form: the
+        # scheme and the authority are request-target octets too, and the
+        # authority then becomes the host header without passing the
+        # per-value check the received headers went through.  Asterisk-form is
+        # the literal ``*``, validated by its own branch.
+        if path != b'*' and (
+                not path or path.translate(None, _TARGET_ALLOWED_OCTETS)):
+            raise BadRequestError(f'invalid request-target {path!r}')
+
         if path == b'*':
             # asterisk-form (§3.2.4) — a server-wide request, valid only for
             # OPTIONS.
@@ -892,14 +905,6 @@ class HTTP1Actor(Actor):
                 raise BadRequestError(
                     f'absolute-form request-target has empty authority: '
                     f'{path!r}')
-
-        # Request-target octets — reject CTLs, DEL, and non-ASCII (§2.1 /
-        # RFC 3986: a raw byte ≥ 0x80 in the target is a normalisation /
-        # smuggling vector, MAL-NON-ASCII-URL).  Skipped for asterisk-form
-        # (the literal ``*`` is validated above).
-        if not asterisk_form and (
-                not path or path.translate(None, _TARGET_ALLOWED_OCTETS)):
-            raise BadRequestError(f'invalid request-target {path!r}')
 
         if asterisk_form:
             _raw_path_b, _query_string = b'*', b''
