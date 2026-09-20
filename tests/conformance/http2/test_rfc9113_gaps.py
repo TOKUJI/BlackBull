@@ -388,9 +388,11 @@ async def _check_malformed(fields):
         frame = call.args[0]
         if (hasattr(frame, 'FrameType')
                 and frame.FrameType() == FrameTypes.RST_STREAM
-                and frame.stream_id == 1):
+                and frame.stream_id == 1
+                and frame.error_code == ErrorCodes.PROTOCOL_ERROR):
             return
-    pytest.fail(f'Malformed request with fields {fields} was not rejected')
+    pytest.fail(f'Malformed request with fields {fields} was not rejected '
+                f'with RST_STREAM(PROTOCOL_ERROR)')
 
 
 class TestG6MissingMandatoryPseudoHeaders:
@@ -448,9 +450,18 @@ class TestG6PathOctets:
         await _check_malformed(self._fields(b'/a' + bad + b'b'))
 
     @pytest.mark.asyncio
-    async def test_control_in_extended_connect_path_is_malformed(self):
+    async def test_control_in_extended_connect_path_is_malformed(
+        self, monkeypatch,
+    ):
         """RFC 8441 reads ``:path`` too, so the rule cannot sit only in the
-        non-CONNECT branch."""
+        non-CONNECT branch.
+
+        WS-over-H2 has to be enabled for the request to reach the path check:
+        with the option off the actor refuses every Extended CONNECT before the
+        header block is graded, which would make this test pass for the wrong
+        reason.
+        """
+        monkeypatch.setenv('BB_H2_ENABLE_WEBSOCKET', '1')
         await _check_malformed([
             (b':method', b'CONNECT'), (b':protocol', b'websocket'),
             (b':scheme', b'https'), (b':authority', b'example.com'),

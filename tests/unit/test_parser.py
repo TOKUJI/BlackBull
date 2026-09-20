@@ -477,6 +477,15 @@ class TestParseHeadersNoneContract:
             http1_ok = True
         assert (_real_parse_headers(frame) is not None) is http1_ok
 
+    def test_a_control_in_path_reports_its_reason(self):
+        """The refusal names the octet rule, not merely "malformed"."""
+        frame = self._headers_frame([
+            (b':method', b'GET'), (b':scheme', b'https'),
+            (b':authority', b'example.com'), (b':path', b'/a\x01b'),
+        ])
+        assert _real_parse_headers(frame) is None
+        assert 'invalid :path' in (frame.malformed_reason or '')
+
     def test_well_formed_frame_returns_connection_not_none(self):
         conn = _real_parse_headers(_make_h2_headers_frame_dispatch())
         assert conn is not None
