@@ -13,9 +13,11 @@ from hypothesis import strategies as st
 
 from blackbull.server.sender import WebSocketSender, AsyncioWriter, AbstractWriter
 from blackbull.server.recipient import (WebSocketRecipient, AsyncioReader,
-                                        AbstractReader, ProtocolError)
-from blackbull.server.ws_codec import (encode_frame, encode_frame_header,
-                                       read_frame, WSOpcode)
+                                        AbstractReader, PrefixReader,
+                                        ProtocolError)
+from blackbull.server.ws_codec import (
+    encode_frame, encode_frame_header, read_frame, read_payload,
+    FramePayloadTooLarge, InvalidFrameLength, WSOpcode)
 
 
 def _ws_conn(path: str = '/ws'):
@@ -986,6 +988,252 @@ class TestFramePayloadSizeGuard:
         assert WSCloseCode.MESSAGE_TOO_BIG.to_bytes(2, 'big') not in bytes(wrapper.writer.written), (
             'with the cap raised, the size guard must not fire on '
             'declared lengths within the override')
+
+
+# ---------------------------------------------------------------------------
+# Length-field format (RFC 6455 §5.2)
+# ---------------------------------------------------------------------------
+#
+# §5.2 constrains the *encoding*, not the size: the 16-bit and 64-bit forms
+# carry only values that do not fit the shorter form, and the most significant
+# bit of the 64-bit form is 0.  A peer cannot buy acceptance by keeping the
+# declared payload small, and no size cap can stand in for the check — the
+# format is judged before the cap and before any body byte is read.
+
+class TestFrameLengthFormat:
+    """A non-minimal or over-wide length field is a protocol error."""
+
+    @staticmethod
+    def _frame(code: int, declared: int, *, payload: bytes = b'',
+               opcode: int = 0x2, masked: bool = True,
+               fin: bool = True) -> bytes:
+        """A frame whose length indicator is *code* and whose extended field
+        declares *declared*, whatever body it actually carries."""
+        header = bytes([(0x80 if fin else 0) | opcode,
+                        (0x80 if masked else 0) | code])
+        if code == 126:
+            header += declared.to_bytes(2, 'big')
+        elif code == 127:
+            header += declared.to_bytes(8, 'big')
+        if not masked:
+            return header + payload
+        mask = b'\xde\xad\xbe\xef'
+        return header + mask + bytes(
+            b ^ mask[i % 4] for i, b in enumerate(payload))
+
+    @staticmethod
+    async def _feed_in_chunks(stream, data: bytes, chunk: int) -> None:
+        for start in range(0, len(data), chunk):
+            stream.feed_data(data[start:start + chunk])
+            await asyncio.sleep(0)
+        stream.feed_eof()
+
+    @staticmethod
+    async def _payload_reader(frame: bytes) -> _FakeReader:
+        """A reader positioned where ``read_payload`` starts: the caller has
+        already consumed the two-byte frame header."""
+        reader = _FakeReader(frame)
+        await reader.readexactly(2)
+        return reader
+
+    @pytest.mark.parametrize('declared', [0, 1, 125])
+    @pytest.mark.asyncio
+    async def test_non_minimal_16bit_length_is_rejected(self, declared):
+        frame = self._frame(126, declared, payload=b'x')
+        reader = _FakeReader(frame)
+
+        with pytest.raises(InvalidFrameLength) as exc:
+            await read_frame(reader)
+
+        assert exc.value.code == 126
+        assert exc.value.declared == declared
+        # Only the two header bytes and the 16-bit field were consumed: the
+        # mask key and the body are still unread.
+        assert bytes(reader._buf) == frame[4:]
+
+    @pytest.mark.parametrize('declared', [0, 1, 126, 65535])
+    @pytest.mark.asyncio
+    async def test_non_minimal_64bit_length_is_rejected(self, declared):
+        frame = self._frame(127, declared, payload=b'x')
+        reader = _FakeReader(frame)
+
+        with pytest.raises(InvalidFrameLength) as exc:
+            await read_frame(reader)
+
+        assert exc.value.code == 127
+        assert bytes(reader._buf) == frame[10:]
+
+    @pytest.mark.parametrize('declared', [1 << 63, (1 << 64) - 1])
+    @pytest.mark.asyncio
+    async def test_64bit_length_with_the_top_bit_set_is_rejected(
+        self, declared,
+    ):
+        reader = _FakeReader(self._frame(127, declared))
+
+        with pytest.raises(InvalidFrameLength) as exc:
+            await read_frame(reader)
+
+        assert exc.value.declared == declared
+        assert 'most significant bit' in str(exc.value)
+
+    @pytest.mark.asyncio
+    async def test_top_bit_rule_holds_with_the_cap_disabled(self):
+        """The 64-bit range is a format rule, not the size cap: with
+        ``max_length=None`` the frame must be refused, not awaited."""
+        reader = await self._payload_reader(self._frame(127, 1 << 63))
+
+        with pytest.raises(InvalidFrameLength):
+            await read_payload(reader, True, 127, max_length=None)
+
+    @pytest.mark.asyncio
+    async def test_format_is_judged_before_the_size_cap(self):
+        """A frame that is both malformed and over the cap reports the format
+        error, so the cap can never make an unreadable length legal."""
+        reader = await self._payload_reader(self._frame(127, 1))
+
+        with pytest.raises(InvalidFrameLength):
+            await read_payload(reader, True, 127, max_length=0)
+
+    @pytest.mark.asyncio
+    async def test_largest_legal_64bit_length_fails_only_on_the_cap(self):
+        """2**63 - 1 is the top of the legal range: the format check passes
+        and the declared size is what refuses it."""
+        reader = await self._payload_reader(self._frame(127, 2**63 - 1))
+
+        with pytest.raises(FramePayloadTooLarge) as exc:
+            await read_payload(reader, True, 127, max_length=64 * 1024)
+
+        assert exc.value.declared == 2**63 - 1
+
+    @pytest.mark.parametrize('declared', [125, 126, 65535, 65536])
+    @pytest.mark.asyncio
+    async def test_each_form_accepts_the_top_of_its_range(self, declared):
+        payload = b'z' * declared
+        code = declared if declared < 126 else (
+            126 if declared < 65536 else 127)
+        reader = _FakeReader(self._frame(code, declared, payload=payload))
+
+        assert (await read_frame(reader))[1] == payload
+
+    @pytest.mark.asyncio
+    async def test_unmasked_frames_are_validated_too(self):
+        """The client role reads unmasked frames and applies the same rules."""
+        bad = self._frame(126, 5, payload=b'x', masked=False)
+        with pytest.raises(InvalidFrameLength):
+            await read_frame(_FakeReader(bad))
+
+        good = self._frame(126, 126, payload=b'z' * 126, masked=False)
+        assert len((await read_frame(_FakeReader(good)))[1]) == 126
+
+    @pytest.mark.asyncio
+    async def test_extended_length_split_across_reads_resolves_the_same(self):
+        """Segmentation cannot change the verdict — the field may arrive one
+        byte at a time."""
+        good = self._frame(126, 300, payload=b'z' * 300)
+        stream = asyncio.StreamReader()
+        feeder = asyncio.create_task(self._feed_in_chunks(stream, good, 1))
+        assert (await read_frame(stream))[1] == b'z' * 300
+        await feeder
+
+    @pytest.mark.asyncio
+    async def test_split_malformed_length_is_still_rejected(self):
+        bad = self._frame(127, 1, payload=b'x')
+        stream = asyncio.StreamReader()
+        feeder = asyncio.create_task(self._feed_in_chunks(stream, bad, 1))
+
+        with pytest.raises(InvalidFrameLength):
+            await read_frame(stream)
+
+        await feeder
+
+
+class TestFrameLengthFormatClose:
+    """The recipient turns a bad length field into CLOSE 1002 before the
+    handler is handed anything."""
+
+    @pytest.mark.parametrize(
+        ('code', 'declared'),
+        [(126, 5), (127, 5), (127, 1 << 63)],
+    )
+    @pytest.mark.asyncio
+    async def test_bad_length_closes_with_1002(self, code, declared):
+        from blackbull.server.constants import WSCloseCode
+        raw = TestFrameLengthFormat._frame(
+            code, declared, payload=b'hello', opcode=0x1)
+        handler = _RecipientWrapper(raw)
+        await handler.receive()  # websocket.connect
+
+        with pytest.raises(ProtocolError) as exc:
+            await handler.receive()
+
+        assert exc.value.close_code == WSCloseCode.PROTOCOL_ERROR
+        assert WSCloseCode.PROTOCOL_ERROR.to_bytes(2, 'big') in bytes(
+            handler.writer.written), 'the peer must be told why'
+
+    @pytest.mark.asyncio
+    async def test_client_role_rejects_the_same_shapes(self):
+        """``require_masked=False`` marks the client's reader; the rules do
+        not change with the role."""
+        raw = TestFrameLengthFormat._frame(
+            126, 5, payload=b'hello', masked=False)
+        recipient = WebSocketRecipient(
+            AsyncioReader(_FakeReader(raw)), AsyncioWriter(_FakeWriter()),
+            require_masked=False)
+        await recipient()  # websocket.connect
+
+        with pytest.raises(ProtocolError) as exc:
+            await recipient()
+
+        assert exc.value.close_code == 1002
+
+    @pytest.mark.parametrize('code', [126, 127])
+    @pytest.mark.asyncio
+    async def test_control_frame_with_an_extended_length_is_refused(
+        self, code,
+    ):
+        """RFC 6455 §5.5 caps a control frame at 125 bytes, so it can never
+        use an extended length — the body is not read."""
+        raw = TestFrameLengthFormat._frame(
+            code, 5, payload=b'ping!', opcode=0x9)
+        handler = _RecipientWrapper(raw)
+        await handler.receive()  # websocket.connect
+
+        with pytest.raises(ProtocolError):
+            await handler.receive()
+
+    @pytest.mark.asyncio
+    async def test_inline_scan_and_decoder_agree_on_the_length(self):
+        """``_frame_bytes_needed`` sizes a buffered frame independently of
+        ``read_payload``; the two must agree, or proactive servicing would
+        treat a frame the decoder refuses as never complete."""
+        from blackbull.server.constants import WSCloseCode
+        raw = TestFrameLengthFormat._frame(
+            126, 5, payload=b'ping!', opcode=0x9)
+        writer = _FakeWriter()
+        recipient = WebSocketRecipient(
+            PrefixReader(raw, AsyncioReader(_FakeReader(b''))),
+            AsyncioWriter(writer))
+        await recipient()  # websocket.connect
+
+        assert recipient._frame_bytes_needed() == len(raw)
+        assert await recipient.service_available_control_frames() is True
+        assert WSCloseCode.PROTOCOL_ERROR.to_bytes(2, 'big') in bytes(
+            writer.written)
+
+    @pytest.mark.asyncio
+    async def test_coalesced_fragments_and_a_ping_still_read(self):
+        """The new check rejects nothing legal: a ping between the fragments
+        of a coalesced message is serviced and the message still arrives."""
+        first = _make_client_frame(b'hel', opcode=0x1)
+        first = bytes([first[0] & 0x7F]) + first[1:]      # FIN=0
+        last = _make_client_frame(b'lo', opcode=0x0)      # CONTINUATION, FIN=1
+        ping = _make_client_frame(b'hi', opcode=0x9)
+        handler = _RecipientWrapper(first + ping + last)
+        await handler.receive()  # websocket.connect
+
+        event = await handler.receive()
+
+        assert event.get('text') == 'hello'
 
 
 # ---------------------------------------------------------------------------

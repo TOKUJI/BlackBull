@@ -157,6 +157,25 @@ class FramePayloadTooLarge(Exception):
         self.maximum = maximum
 
 
+class InvalidFrameLength(Exception):
+    """Raised by [`read_payload`][] when the length field breaks RFC 6455 §5.2.
+
+    Two rules, both about the *encoding* rather than the size: the 16-bit and
+    64-bit forms carry only values that do not fit the shorter form, and the
+    most significant bit of the 64-bit form is zero.  The caller translates
+    this into a protocol-error CLOSE (RFC 6455 §7.4.1 code 1002); like
+    [`FramePayloadTooLarge`][], the codec stays protocol-agnostic.
+    """
+
+    def __init__(self, code: int, declared: int):
+        form = '16-bit' if code == 126 else '64-bit'
+        reason = ('has the most significant bit set'
+                  if declared >> 63 else 'is not minimal')
+        super().__init__(f'{form} payload length {declared} {reason}')
+        self.code = code
+        self.declared = declared
+
+
 class MessageTooLarge(Exception):
     """Raised when a *message* outgrows its bound.
 
@@ -180,6 +199,20 @@ class MessageTooLarge(Exception):
         self.maximum = maximum
 
 
+async def _read_extended_length(reader, code: int) -> int:
+    """Read and validate an extended payload-length field (RFC 6455 §5.2).
+
+    *code* is the 7-bit wire indicator: 126 selects the 16-bit form, 127 the
+    64-bit one.  Each form carries only values that do not fit the shorter
+    form, and the 64-bit form's most significant bit is 0.
+    """
+    width, minimal = (2, 126) if code == 126 else (8, 65536)
+    declared = int.from_bytes(await reader.readexactly(width), 'big')
+    if declared < minimal or declared >> 63:
+        raise InvalidFrameLength(code, declared)
+    return declared
+
+
 async def read_payload(
     reader, masked: bool, length: int, *, max_length: int | None = None,
 ) -> bytes:
@@ -194,11 +227,14 @@ async def read_payload(
     reading any body bytes off the wire.  Defends against
     post-handshake OOM where the peer advertises a 2**63 - 1 payload
     and the server tries to buffer it.
+
+    A length field that breaks §5.2 raises [`InvalidFrameLength`][]
+    instead, judged the same way: before the size cap and before any
+    body byte, so an unreadable encoding cannot be made legal by
+    staying under a cap.
     """
-    if length == 126:
-        length = int.from_bytes(await reader.readexactly(2), 'big')
-    elif length == 127:
-        length = int.from_bytes(await reader.readexactly(8), 'big')
+    if length in (126, 127):
+        length = await _read_extended_length(reader, length)
 
     if max_length is not None and length > max_length:
         raise FramePayloadTooLarge(length, max_length)

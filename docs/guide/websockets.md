@@ -419,6 +419,8 @@ The following are protocol violations and raise
 | CONTINUATION frame with no fragmentation in progress | §5.4 |
 | New TEXT or BINARY frame while a fragment sequence is open | §5.4 |
 | Control frame (ping/pong/close) with FIN=0 | §5.5 |
+| Control frame longer than 125 bytes | §5.5 |
+| Payload length not minimal, or a 64-bit length with the top bit set | §5.2 |
 
 ## Message size limits
 
