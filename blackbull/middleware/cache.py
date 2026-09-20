@@ -21,6 +21,7 @@ from urllib.parse import urlsplit
 from ..connection import Connection
 from ..headers import Headers
 from ..native import NativeResponse
+from ..protocol.field_grammar import FIELD_VALUE_ALLOWED_SET, TCHAR_SET
 from .utils import as_middleware
 
 #: Narrower than RFC 9110 §15's heuristically cacheable set: caching an error
@@ -372,17 +373,12 @@ def _must_not_store(cc: bytes | None) -> bool:
     return cc is not None and (not _readable(cc) or b'no-store' in _names(cc))
 
 
-#: RFC 9110 §5.6.2 — ``tchar``, the bytes a directive name or a token value
-#: may hold (the same set the H/1 actor checks method names against).
-_TCHAR_OCTETS = (b"!#$%&'*+-.^_`|~"
-                 + bytes(range(0x30, 0x3A)) + bytes(range(0x41, 0x5B))
-                 + bytes(range(0x61, 0x7B)))
-_TCHAR_SET = frozenset(_TCHAR_OCTETS)
-
-
-def _is_qdtext(octet: int) -> bool:
-    """RFC 9110 §5.6.4 — the octets a ``quoted-string`` body may hold."""
-    return octet == 0x09 or 0x20 <= octet <= 0x7E or octet >= 0x80
+def _is_field_content(octet: int) -> bool:
+    """RFC 9110 §5.5 field-content — the octets this parser lets a quoted
+    directive value hold.  That is what ``quoted-string`` admits between its
+    quotes, plus the ``"`` and ``\\`` this parser is deliberately lenient
+    about."""
+    return octet in FIELD_VALUE_ALLOWED_SET
 
 
 def _parse_directives(value: bytes) -> list[tuple[bytes, bytes | None]] | None:
@@ -407,7 +403,7 @@ def _parse_directives(value: bytes) -> list[tuple[bytes, bytes | None]] | None:
             pos += 1                    # an empty member is ignored (§5.6.1.1)
             continue
         start = pos
-        while pos < len(value) and value[pos] in _TCHAR_SET:
+        while pos < len(value) and value[pos] in TCHAR_SET:
             pos += 1
         name = value[start:pos].lower()
         if not name:
@@ -429,13 +425,13 @@ def _parse_directives(value: bytes) -> list[tuple[bytes, bytes | None]] | None:
                             return None                 # nothing to pair with
                         octet = value[pos]
                         pos += 1
-                    if not _is_qdtext(octet):
+                    if not _is_field_content(octet):
                         return None                     # not a quoted-string
                     out += bytes((octet,))
                 pairs.append((name, bytes(out)))
             else:
                 start = pos
-                while pos < len(value) and value[pos] in _TCHAR_SET:
+                while pos < len(value) and value[pos] in TCHAR_SET:
                     pos += 1
                 if pos == start:
                     return None             # '=' with no value

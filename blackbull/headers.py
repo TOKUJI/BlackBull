@@ -10,28 +10,22 @@ from collections.abc import Iterable
 from typing import TypeAlias
 
 from .protocol import structured_fields as sf
+from .protocol.field_grammar import FIELD_VALUE_ALLOWED_OCTETS, TCHAR_OCTETS
 
 HeaderList: TypeAlias = Iterable[tuple[bytes, bytes]]
-
-
-_FIELD_NAME_OCTETS = frozenset(
-    b"!#$%&'*+-.^_`|~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-)
 
 
 def _validate_response_header_field(name: bytes, value: bytes) -> None:
     """Reject a response field that cannot remain one field on the wire.
 
-    Names use RFC 9110's token alphabet.  Values admit HTAB, SP, visible
-    ASCII, and obs-text; every other control octet can change a field or
-    message boundary and is rejected rather than rewritten.
+    The grammar is HTTP's, not this layer's: the same token alphabet and the
+    same field-content octets the two transports validate against.
     """
     if not isinstance(name, bytes) or not isinstance(value, bytes):
         raise TypeError('HTTP response header name and value must be bytes')
-    if not name or any(octet not in _FIELD_NAME_OCTETS for octet in name):
+    if not name or name.translate(None, TCHAR_OCTETS):
         raise ValueError('invalid HTTP response header name')
-    if any((octet < 0x20 and octet != 0x09) or octet == 0x7f
-           for octet in value):
+    if value.translate(None, FIELD_VALUE_ALLOWED_OCTETS):
         raise ValueError('invalid HTTP response header value')
 
 

@@ -700,8 +700,10 @@ class TestG11PriorityFrameLengthValidation:
 
 class TestG13FieldCharacterValidation:
     """RFC 9113 §8.2.1: Field names MUST NOT contain characters in ranges
-    0x00-0x20, 0x41-0x5a (uppercase), or 0x7f-0xff.  Field values MUST NOT
-    contain NUL, LF, or CR, and MUST NOT start or end with SP or HTAB.
+    0x00-0x20, 0x41-0x5a (uppercase), or 0x7f-0xff, and field values MUST NOT
+    contain NUL, LF, or CR, or start or end with SP or HTAB.  The section also
+    asks (SHOULD) for RFC 9110's definitions, so a name is a §5.6.2 token —
+    its separators included — and a value is §5.5 field-content.
     Violations → malformed."""
 
     @pytest.mark.asyncio
@@ -752,6 +754,48 @@ class TestG13FieldCharacterValidation:
             (b':method', b'GET'), (b':path', b'/'), (b':scheme', b'https'),
             (b':authority', b'example.com'),
             (b'x-test', b'value with\tinner whitespace'),
+        ]
+        h = _make_headers_frame(1, end_stream=True, fields=fields)
+        settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
+        handler.receive = AsyncMock(side_effect=[settings, h, None])
+        await handler.run()
+
+        assert app.await_count == 1
+        assert not _sent_rst_streams(handler, 1)
+
+    @pytest.mark.parametrize('value', [b'value\x01mid', b'value\x0bmid',
+                                       b'value\x0cmid', b'value\x1fmid',
+                                       b'value\x7f'])
+    @pytest.mark.asyncio
+    async def test_field_value_with_a_control_octet_is_malformed(self, value):
+        """RFC 9110 §5.5 through §8.2.1's SHOULD: every control octet but HTAB
+        is prohibited, and HTTP/1.1 already refuses the same octets."""
+        await self._check_malformed_field(
+            (b'x-test', value), f'control octet in {value!r}')
+
+    @pytest.mark.parametrize('name', [b'x,y', b'x;y', b'x@y', b'x"y',
+                                      b'x(y', b'x/y', b'x[y'])
+    @pytest.mark.asyncio
+    async def test_field_name_with_a_separator_octet_is_malformed(self, name):
+        """RFC 9110 §5.6.2: a field name is a token, so a separator is not a
+        name octet — HTTP/1.1's tchar table already refuses them."""
+        await self._check_malformed_field(
+            (name, b'v'), f'separator in {name!r}')
+
+    @pytest.mark.asyncio
+    async def test_an_empty_field_name_is_malformed(self):
+        """RFC 9110 §5.6.2 — ``token = 1*tchar``, so no octets is not a name."""
+        await self._check_malformed_field((b'', b'v'), 'empty field name')
+
+    @pytest.mark.asyncio
+    async def test_obs_text_in_a_field_value_still_reaches_the_app(self):
+        """obs-text (0x80-0xFF) is inside RFC 9110's field-content, so the
+        widened grammar must not swallow it."""
+        handler, app = _make_h2_actor()
+        fields = [
+            (b':method', b'GET'), (b':path', b'/'), (b':scheme', b'https'),
+            (b':authority', b'example.com'),
+            (b'x-test', b'value\x80\xff'),
         ]
         h = _make_headers_frame(1, end_stream=True, fields=fields)
         settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')

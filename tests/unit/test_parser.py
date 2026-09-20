@@ -242,15 +242,13 @@ class TestParse:
         assert _get_scope(_http_request(version='HTTP/1.1'))['http_version'] == '1.1'
 
     # ------------------------------------------------------------------
-    # Compiled-regex header validators.
+    # Shared-table header validators.
     #
-    # Replaced per-byte `any(...)` scans in _parse with compiled
-    # `_FIELD_NAME_INVALID_RE.search(...)` and
-    # `_FIELD_VALUE_INVALID_RE.search(...)`.  The regex character
-    # classes must match the exact RFC 9110 §5.6.2 tchar negation
-    # and the §5.5 CTL-except-HTAB allow-list respectively.  These
-    # tests exercise the character-boundary cases that would diverge
-    # if the regex were one byte off.
+    # Replaced per-byte `any(...)` scans in _parse with the shared
+    # `bytes.translate(...)` tables.  Each table must be the exact RFC 9110
+    # §5.6.2 tchar set and the §5.5 field-content set respectively.  These
+    # tests exercise the character-boundary cases that would diverge if a
+    # table were one byte off.
     # ------------------------------------------------------------------
 
     def test_tchar_accepted_in_method(self):
@@ -494,10 +492,15 @@ class TestParseHeadersNoneContract:
         assert (_real_parse_headers(frame) is not None) is http1_ok
 
     def test_a_control_in_path_reports_its_reason(self):
-        """The refusal names the octet rule, not merely "malformed"."""
+        """The refusal names the octet rule, not merely "malformed".
+
+        The octet is a SP rather than a C0 control: the shared field-value
+        grammar refuses those a layer earlier and reports its own rule, which
+        is the precedence both this test and the value tests pin.
+        """
         frame = self._headers_frame([
             (b':method', b'GET'), (b':scheme', b'https'),
-            (b':authority', b'example.com'), (b':path', b'/a\x01b'),
+            (b':authority', b'example.com'), (b':path', b'/a b'),
         ])
         assert _real_parse_headers(frame) is None
         assert 'invalid :path' in (frame.malformed_reason or '')
@@ -721,3 +724,31 @@ class TestBoundaryWhitespaceInFieldValues:
         frame = _make_h2_headers_frame_dispatch([(b'x-foo', b'value ')])
         assert _real_parse_headers(frame) is None
         assert frame.malformed
+
+
+class TestOneFieldGrammarForBothTransports:
+    """RFC 9110 §5.5/§5.6.2 — the octets HTTP/2 refuses are the octets
+    HTTP/1.1 refuses; each origin still names its own rule in the reason."""
+
+    @pytest.mark.parametrize('name', [b'x,y', b'x;y', b'x@y', b'x"y'])
+    def test_a_separator_in_a_name_is_malformed(self, name):
+        """A field name is a token, so a separator is not a name octet."""
+        frame = _make_h2_headers_frame_dispatch([(name, b'v')])
+        assert _real_parse_headers(frame) is None
+        assert frame.malformed
+        assert 'field name' in (frame.malformed_reason or '')
+
+    @pytest.mark.parametrize('value', [b'value\x01mid', b'value\x0bmid',
+                                       b'value\x7f'])
+    def test_a_control_octet_in_a_value_is_malformed(self, value):
+        frame = _make_h2_headers_frame_dispatch([(b'x-foo', value)])
+        assert _real_parse_headers(frame) is None
+        assert frame.malformed
+        assert 'field value' in (frame.malformed_reason or '')
+
+    def test_obs_text_is_not_a_control(self):
+        """0x80-0xFF are inside RFC 9110's field-content, so the rule that
+        refuses the C0 controls must not take them too."""
+        scope = _parse_headers(
+            _make_h2_headers_frame_dispatch([(b'x-foo', b'value\x80\xff')]))
+        assert (b'x-foo', b'value\x80\xff') in scope['headers']

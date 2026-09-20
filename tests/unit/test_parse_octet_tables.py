@@ -4,8 +4,9 @@ The request-target and Host authority scans were per-byte Python generator
 expressions; they are now C-level bulk operations (`bytes.translate` for the
 target's large allowed set, a precompiled regex for Host's small forbidden
 set).  Both rewrites are only safe if they classify all 256 octets exactly as
-the predicates did, so that is what these tests assert — against a literal
-copy of the original predicate, not against a restatement of the new one.
+the predicates did, so that is what these tests assert — for the field-name
+table and the Host scan, against their frozenset forms; for the target scan,
+against a literal copy of the original predicate.
 """
 import pytest
 
@@ -123,11 +124,11 @@ def test_absolute_form_still_overrides_host(actor):
 # ---- field-name (tchar) table ----------------------------------------------
 
 def test_tchar_table_classifies_all_256_octets_identically():
-    from blackbull.server.http1_actor import _FIELD_NAME_INVALID_RE, _TCHAR_OCTETS
+    from blackbull.protocol.field_grammar import TCHAR_OCTETS, TCHAR_SET
     mismatched = [
         b for b in range(256)
-        if bool(bytes([b]).translate(None, _TCHAR_OCTETS))
-        is not bool(_FIELD_NAME_INVALID_RE.search(bytes([b])))
+        if bool(bytes([b]).translate(None, TCHAR_OCTETS))
+        is not (b not in TCHAR_SET)
     ]
     assert mismatched == []
 
@@ -139,17 +140,18 @@ def test_parse_rejects_non_token_header_name(actor, name):
 
 
 def test_parse_accepts_every_tchar_in_a_header_name(actor):
-    from blackbull.server.http1_actor import _TCHAR_OCTETS
-    conn = actor._parse(b'GET / HTTP/1.1\r\nHost: h\r\n' + _TCHAR_OCTETS + b': v\r\n\r\n')
-    assert conn.headers.get(_TCHAR_OCTETS.lower()) == b'v'
+    from blackbull.protocol.field_grammar import TCHAR_OCTETS
+    conn = actor._parse(b'GET / HTTP/1.1\r\nHost: h\r\n' + TCHAR_OCTETS + b': v\r\n\r\n')
+    assert conn.headers.get(TCHAR_OCTETS.lower()) == b'v'
 
 
 # ---- whole-block CTL pre-scan ----------------------------------------------
 #
-# The per-value regex is skipped when one C-level pass proves no field value
+# The per-value check is skipped when one C-level pass proves no field value
 # can contain a forbidden octet.  The pre-scan is a fast path, never a
-# rejection: when it trips, the per-header regex still runs and still raises
-# the original error.  So what these tests pin is that nothing changes.
+# rejection: when it trips, the per-value delete-table check still runs and
+# still raises the original error.  So what these tests pin is that nothing
+# changes.
 
 def _hdr(extra: bytes) -> bytes:
     return b'GET / HTTP/1.1\r\nHost: h\r\n' + extra + b'\r\n\r\n'

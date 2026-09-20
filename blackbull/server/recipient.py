@@ -35,6 +35,7 @@ from inspect import signature
 from time import monotonic as _monotonic
 from typing import Awaitable, Callable, NoReturn, Optional
 
+from ..protocol.field_grammar import FIELD_VALUE_ALLOWED_OCTETS, TCHAR_OCTETS
 from .cap_log import log_cap_hit
 from .deadline import ConnectionDeadline, WsIdleWatchdog
 from .sender import AbstractWriter, AsyncioWriter
@@ -152,15 +153,6 @@ _HEAD_END = b'\r\n\r\n'
 
 _HEXDIG_SET = frozenset(b'0123456789abcdefABCDEF')
 
-# RFC 9110 §5.6.2 — ``token = 1*tchar``.  Used to validate ``chunk-ext-name``
-# and an unquoted ``chunk-ext-val`` (RFC 9112 §7.1.1).
-_TCHAR_SET = frozenset(
-    b"!#$%&'*+-.^_`|~"
-    b"0123456789"
-    b"abcdefghijklmnopqrstuvwxyz"
-    b"ABCDEFGHIJKLMNOPQRSTUVWXYZ")
-
-
 def _bad_request(detail: str):
     """The framework's status-carrying 400.
 
@@ -208,15 +200,15 @@ def _validate_chunk_ext(ext: bytes) -> None:
         element = element.strip(b' \t')          # BWS around the element
         name, eq, val = element.partition(b'=')
         name = name.rstrip(b' \t')
-        if not name or any(c not in _TCHAR_SET for c in name):
+        if not name or name.translate(None, TCHAR_OCTETS):
             raise _bad_request(f'invalid chunk-ext-name {name!r}')
         if eq:
             val = val.strip(b' \t')
             if val[:1] == b'"':
-                if len(val) < 2 or not val.endswith(b'"') or any(
-                        c < 0x20 and c != 0x09 for c in val):
+                if (len(val) < 2 or not val.endswith(b'"')
+                        or val.translate(None, FIELD_VALUE_ALLOWED_OCTETS)):
                     raise _bad_request(f'invalid quoted chunk-ext-val {val!r}')
-            elif not val or any(c not in _TCHAR_SET for c in val):
+            elif not val or val.translate(None, TCHAR_OCTETS):
                 raise _bad_request(f'invalid chunk-ext-val {val!r}')
 
 

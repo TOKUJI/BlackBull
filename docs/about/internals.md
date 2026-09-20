@@ -673,9 +673,9 @@ intuition that fewer allocations or fewer passes must be faster.
 The idiom used throughout `_parse` is a **delete-the-allowed table**:
 
 ```python
-_TCHAR_OCTETS = b"!#$%&'*+-.^_`|~0123456789ABC...xyz"
+from blackbull.protocol.field_grammar import TCHAR_OCTETS
 
-if key.translate(None, _TCHAR_OCTETS):   # non-empty ⇒ a non-token octet
+if key.translate(None, TCHAR_OCTETS):    # non-empty ⇒ a non-token octet
     raise BadRequestError(...)
 ```
 
@@ -692,8 +692,8 @@ than once per header.  Deleting everything a block may contain leaves
 only CR, LF and the CTLs a value may not carry; if what remains tiles
 exactly into CRLF pairs, no field value can hold a forbidden octet and
 the per-header check is skipped.  A block that fails the pre-scan
-falls back to the per-header regex, so error messages never change —
-the bulk pass is a fast path, never a rejection.
+falls back to that same delete-table check per value, so error messages
+never change — the bulk pass is a fast path, never a rejection.
 
 Three plausible-sounding alternatives were measured and **rejected**;
 do not reintroduce them without new numbers:
