@@ -5504,8 +5504,9 @@ returns <code>None</code> rather than a half-built <a class="autorefs autorefs-i
   " href="../../connection/#blackbull.connection.Connection"><code>Connection</code></a>, so a caller
 checks <code>frame.malformed</code> and never reads a partial object, and nothing
 is constructed on the error path.</p>
-<p>Also performs request-level pseudo-header presence checks (RFC 9113
-§8.3.1); field-level checks already happened in <code>parse_payload</code>.</p>
+<p>Also performs request-level pseudo-header presence and octet checks
+(RFC 9113 §8.3.1: <code>:path</code> is graded like HTTP/1.1's request-target);
+field-level checks already happened in <code>parse_payload</code>.</p>
 <p>A module-level function and not a <code>ParserFactory</code> product: nothing here
 is per-instance, so a factory would charge every request for a dict lookup
 and an allocation.  The Internals page states why the read path threads a
