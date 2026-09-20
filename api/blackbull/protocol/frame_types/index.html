@@ -4091,6 +4091,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.protocol.frame_types.field_value_has_boundary_whitespace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        field_value_has_boundary_whitespace
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.protocol.frame_types.field_value_is_valid" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6019,6 +6030,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.protocol.frame_types.field_value_has_boundary_whitespace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        field_value_has_boundary_whitespace
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.protocol.frame_types.field_value_is_valid" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -7292,6 +7314,27 @@ otherwise.</p>
 0x41-0x5A (uppercase), or 0x7F-0xFF.  It MUST NOT include a colon (0x3A)
 other than the single leading octet that marks a pseudo-header field.
 Rejecting these closes a header-injection / request-smuggling vector.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.protocol.frame_types.field_value_has_boundary_whitespace" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">field_value_has_boundary_whitespace</span><span class="p">(</span><span class="n">value</span><span class="p">)</span></code>
+
+<a href="#blackbull.protocol.frame_types.field_value_has_boundary_whitespace" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>RFC 9113 §8.2.1 — SP or HTAB at either end of a field value.</p>
+<p>Inside the value both octets stay legal, which is why this is a second
+question and not folded into <a class="autorefs autorefs-internal" title="field_value_is_valid(value)" href="#blackbull.protocol.frame_types.field_value_is_valid"><code>field_value_is_valid</code></a>: it is about the
+position, not the octet.</p>
 
 
     </div>
