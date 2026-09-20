@@ -5,12 +5,13 @@
 it lives in the one regex the function already runs.
 
 Two questions, two answers: the octet sweeps at the foot prove the rule is
-*enforced* (nothing can drop it), and the walker proves it stays *one pass*
-(nothing can silently re-add a second).  The walker is deliberately blunt — it
-flags every way a second pass is realistically spelled, not only the `decode`
-this commit removed — and it is still a tripwire, not a proof: a pass written
-as something none of those shapes describes would be missed, which is why the
-sweeps carry the enforcement claim.
+*enforced* (nothing can drop it), and the walker proves it stays *one pass*.
+The walker allow-lists the three attribute calls the function needs — two on
+the raw header, one scan — and flags every other call, loop, comprehension and
+subscript, so a second pass is caught whichever way it is spelled rather than
+only the `decode` this change removed.  It is still a tripwire, not a proof: an
+aliased value, or a read through an API none of those shapes describes, would
+be missed, which is why the sweeps carry the enforcement claim.
 """
 import ast
 import pathlib
@@ -22,17 +23,15 @@ import blackbull.server.http1_actor as http1_actor
 _FUNCTION = '_validate_host'
 _SCAN = '_HOST_FORBIDDEN_RE'
 
-# Bytes methods that read the whole value.  ``.strip`` is not one of them: it
-# runs once on the raw header before this scan and is not a second pass over
-# the authority the regex then examines.
-_VALUE_READS = frozenset({
-    'decode', 'encode', 'isascii', 'translate', 'find', 'rfind', 'index',
-    'rindex', 'count', 'split', 'rsplit', 'splitlines', 'partition',
-    'rpartition', 'startswith', 'endswith', 'removeprefix', 'removesuffix',
-})
-
-# The only bare calls the function may make: the presence check and the raise.
+# The only attribute calls the function may make.  Anything else is a read of
+# the value by another name (``decode``, ``isascii``, ``translate``, ``match``,
+# ``isdisjoint``, a second pattern's ``search``, ...).
+_ALLOWED_READS = frozenset({'getlist', 'strip'})
+_SCAN_METHOD = 'search'
+# The only bare calls: the presence check and the raise.
 _ALLOWED_CALLS = frozenset({'len', 'BadRequestError'})
+# The only names that may be subscripted: the header list and the match.
+_ALLOWED_SUBSCRIPTS = frozenset({'hosts', 'match'})
 
 
 def _validate_host_function() -> ast.FunctionDef:
@@ -44,18 +43,28 @@ def _validate_host_function() -> ast.FunctionDef:
 
 
 def _second_passes(node: ast.AST) -> list[str]:
-    """Shapes that can only mean the value is read a second time."""
+    """Every shape a second read of the value would have to take."""
     found = []
     for child in ast.walk(node):
         if isinstance(child, ast.Call):
             func = child.func
-            if isinstance(func, ast.Attribute) and func.attr in _VALUE_READS:
-                found.append(f'{func.attr}()')
+            if isinstance(func, ast.Attribute):
+                receiver = func.value
+                name = receiver.id if isinstance(receiver, ast.Name) else 'expr'
+                if func.attr == _SCAN_METHOD:
+                    if name != _SCAN:
+                        found.append(f'{name}.{func.attr}()')
+                elif func.attr not in _ALLOWED_READS:
+                    found.append(f'{name}.{func.attr}()')
             elif isinstance(func, ast.Name) and func.id not in _ALLOWED_CALLS:
                 found.append(f'{func.id}()')
         elif isinstance(child, (ast.ListComp, ast.SetComp, ast.DictComp,
-                                ast.GeneratorExp, ast.For)):
+                                ast.GeneratorExp, ast.For, ast.While)):
             found.append(type(child).__name__)
+        elif (isinstance(child, ast.Subscript)
+              and isinstance(child.value, ast.Name)
+              and child.value.id not in _ALLOWED_SUBSCRIPTS):
+            found.append(f'{child.value.id}[...]')
     return found
 
 
@@ -64,7 +73,7 @@ def _scan_calls(node: ast.AST) -> int:
         1 for child in ast.walk(node)
         if isinstance(child, ast.Call)
         and isinstance(child.func, ast.Attribute)
-        and child.func.attr == 'search'
+        and child.func.attr == _SCAN_METHOD
         and isinstance(child.func.value, ast.Name)
         and child.func.value.id == _SCAN
     )
@@ -100,8 +109,17 @@ _SPELLINGS = {
     'str constructor': 'str(value, "ascii")',
     'codecs module': 'codecs.decode(value, "ascii")',
     'bytes translate': 'value.translate(None, forbidden)',
+    'bytes contains': 'value.__contains__(0x80)',
+    'bytes slice': 'value[1:]',
+    'frozenset isdisjoint': '_HOST_FORBIDDEN_BYTES.isdisjoint(value)',
+    'frozenset intersection': '_HOST_FORBIDDEN_BYTES.intersection(value)',
     'helper call': '_is_ascii(value)',
+    'getattr lookup': 'getattr(value, "decode")("ascii")',
     'all comprehension': 'all(b < 0x80 for b in value)',
+    'itertools filter': 'itertools.filterfalse(_bad, value)',
+    'second pattern': '_ASCII_RE.search(value)',
+    're module search': 're.search(_ASCII_RE, value)',
+    're module match': 're.match(_ASCII_RE, value)',
     'explicit loop': 'for b in value:\n        pass',
 }
 
@@ -120,11 +138,19 @@ def test_the_walker_counts_a_duplicate_scan():
     assert _scan_calls(sample) == 2
 
 
-def test_the_walker_sees_the_decode_when_it_is_put_back():
-    """The regression this file exists for, spelled into the real body."""
+def _with_extra_line(line: str) -> list[str]:
+    """The real body with *line* re-inserted, as the regression would look."""
     source = ast.unparse(_validate_host_function())
     regressed = source.replace(
         f'match = {_SCAN}.search(value)',
-        f'value.decode("ascii")\n    match = {_SCAN}.search(value)')
+        f'{line}\n    match = {_SCAN}.search(value)')
     assert regressed != source
-    assert _second_passes(ast.parse(regressed)) != []
+    return _second_passes(ast.parse(regressed))
+
+
+def test_the_walker_sees_the_decode_when_it_is_put_back():
+    assert _with_extra_line('value.decode("ascii")') != []
+
+
+def test_the_walker_sees_a_second_pattern_when_it_is_added():
+    assert _with_extra_line('_ASCII_RE.search(value)') != []
