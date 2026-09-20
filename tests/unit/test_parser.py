@@ -432,6 +432,29 @@ class TestParseHeadersNoneContract:
         assert _real_parse_headers(frame) is None
         assert frame.malformed
 
+    @pytest.mark.parametrize('value', [
+        b'example.com', b'example.com:8443', b'[::1]:8100',
+        b'exam\x01ple.com', b'exam\x7fple.com', b'exam ple.com',
+        b'user@example.com', '\u4f8b\u3048.jp'.encode('utf-8'),
+    ])
+    def test_authority_verdict_matches_http1(self, value):
+        """The same authority value is accepted or refused identically on both
+        transports — one grammar, two header models."""
+        frame = self._headers_frame([
+            (b':method', b'GET'), (b':path', b'/'), (b':scheme', b'https'),
+            (b':authority', value),
+        ])
+        from blackbull.server.http1_actor import BadRequestError
+        actor = object.__new__(_HTTP1Actor)
+        actor._ssl = False
+        try:
+            actor._parse(b'GET / HTTP/1.1\r\nHost: ' + value + b'\r\n\r\n')
+        except BadRequestError:
+            http1_ok = False
+        else:
+            http1_ok = True
+        assert (_real_parse_headers(frame) is not None) is http1_ok
+
     def test_well_formed_frame_returns_connection_not_none(self):
         conn = _real_parse_headers(_make_h2_headers_frame_dispatch())
         assert conn is not None

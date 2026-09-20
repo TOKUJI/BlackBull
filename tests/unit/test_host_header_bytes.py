@@ -92,8 +92,10 @@ class TestEveryHighByteIsRejected:
         with pytest.raises(BadRequestError):
             _validate_host(_headers(b'example.com' + bytes([high])))
 
-    def test_the_two_diagnostics_stay_apart(self):
+    def test_the_three_diagnostics_stay_apart(self):
         with pytest.raises(BadRequestError, match='non-ASCII'):
             _validate_host(_headers(b'ex\xffample.com'))
+        with pytest.raises(BadRequestError, match='control byte'):
+            _validate_host(_headers(b'ex\x01ample.com'))
         with pytest.raises(BadRequestError, match='delimiter'):
             _validate_host(_headers(b'exam/ple.com'))
