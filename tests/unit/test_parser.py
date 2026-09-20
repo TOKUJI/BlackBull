@@ -383,34 +383,52 @@ class TestParseHeadersNoneContract:
     ``frame.malformed`` before reading the result, but a real difference for
     any direct caller). Pins ``result is None ⟺ frame.malformed``."""
 
-    def test_missing_authority_and_host_returns_none(self):
+    @staticmethod
+    def _headers_frame(fields: list) -> object:
         from hpack import Encoder
         from blackbull.protocol.frame import FrameFactory
         from blackbull.protocol.frame_types import FrameTypes, HeaderFrameFlags
 
-        block = Encoder().encode([
-            (b':method', b'GET'), (b':path', b'/'), (b':scheme', b'https'),
-        ])  # no :authority, no Host — https requires one of the two
+        block = Encoder().encode(fields)
         flags = HeaderFrameFlags.END_HEADERS | HeaderFrameFlags.END_STREAM
         raw = (len(block).to_bytes(3, 'big') + FrameTypes.HEADERS
                + bytes([flags]) + (1).to_bytes(4, 'big') + block)
-        frame = FrameFactory().load(raw)
+        return FrameFactory().load(raw)
+
+    def test_missing_authority_and_host_returns_none(self):
+        # no :authority, no Host — https requires one of the two
+        frame = self._headers_frame([
+            (b':method', b'GET'), (b':path', b'/'), (b':scheme', b'https'),
+        ])
         assert _real_parse_headers(frame) is None
         assert frame.malformed
 
     def test_empty_authority_returns_none(self):
-        from hpack import Encoder
-        from blackbull.protocol.frame import FrameFactory
-        from blackbull.protocol.frame_types import FrameTypes, HeaderFrameFlags
-
-        block = Encoder().encode([
+        frame = self._headers_frame([
             (b':method', b'GET'), (b':path', b'/'), (b':scheme', b'https'),
             (b':authority', b''),
         ])
-        flags = HeaderFrameFlags.END_HEADERS | HeaderFrameFlags.END_STREAM
-        raw = (len(block).to_bytes(3, 'big') + FrameTypes.HEADERS
-               + bytes([flags]) + (1).to_bytes(4, 'big') + block)
-        frame = FrameFactory().load(raw)
+        assert _real_parse_headers(frame) is None
+        assert frame.malformed
+
+    def test_non_ascii_authority_returns_none(self):
+        """RFC 3986 §3.2 — an authority is ASCII, and one scan decides it.
+
+        The HTTP/1.1 path rejects a non-ASCII Host; sharing the scan is what
+        keeps the two transports on the same authority grammar.
+        """
+        frame = self._headers_frame([
+            (b':method', b'GET'), (b':path', b'/'), (b':scheme', b'https'),
+            (b':authority', '\u4f8b\u3048.jp'),
+        ])
+        assert _real_parse_headers(frame) is None
+        assert frame.malformed
+
+    def test_non_ascii_host_returns_none(self):
+        frame = self._headers_frame([
+            (b':method', b'GET'), (b':path', b'/'), (b':scheme', b'https'),
+            (b'host', b'ex\xffample.com'),
+        ])
         assert _real_parse_headers(frame) is None
         assert frame.malformed
 

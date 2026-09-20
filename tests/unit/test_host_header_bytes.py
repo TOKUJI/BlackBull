@@ -72,3 +72,27 @@ class TestValidHostsStillWork:
             _validate_host(_headers(b'0/0'))
         with pytest.raises(BadRequestError):
             _validate_host(_headers(b''))
+
+
+class TestEveryHighByteIsRejected:
+    """The ASCII rule rides the delimiter scan, so it must cover all of them.
+
+    A range that started at 0x80 but stopped short would still pass every
+    hand-picked sample; the sweep is what makes the claim total.
+    """
+
+    @pytest.mark.parametrize('high', range(0x80, 0x100))
+    def test_a_bare_high_byte(self, high):
+        with pytest.raises(BadRequestError):
+            _validate_host(_headers(bytes([high])))
+
+    @pytest.mark.parametrize('high', range(0x80, 0x100))
+    def test_a_high_byte_inside_an_otherwise_valid_host(self, high):
+        with pytest.raises(BadRequestError):
+            _validate_host(_headers(b'example.com' + bytes([high])))
+
+    def test_the_two_diagnostics_stay_apart(self):
+        with pytest.raises(BadRequestError, match='non-ASCII'):
+            _validate_host(_headers(b'ex\xffample.com'))
+        with pytest.raises(BadRequestError, match='delimiter'):
+            _validate_host(_headers(b'exam/ple.com'))
