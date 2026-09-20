@@ -5604,7 +5604,8 @@ only by that actor's loop.</p>
 own actor and cannot corrupt another's state. The same model runs your HTTP
 routes, the MQTT broker, and the gRPC handlers — one concurrency story across
 every protocol. See <a href="../internals/">Internals</a> for the actor topology and the
-per-connection <code>TaskGroup</code> supervision.</p>
+per-actor supervisor strategies; the one <code>TaskGroup</code> is HTTP/2's per-stream
+supervision in <code>HTTP2Actor.run()</code>.</p>
 <h2 id="fault-injection-the-differentiator">Fault injection — the differentiator<a class="headerlink" href="#fault-injection-the-differentiator" title="Permanent link">&para;</a></h2>
 <p>Because BlackBull owns its HTTP implementations, it can be instructed to
 <strong>misbehave on command</strong>: half-closed streams, exhausted flow-control
