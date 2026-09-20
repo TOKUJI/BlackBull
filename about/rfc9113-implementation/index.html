@@ -6215,8 +6215,8 @@ split for pushed requests lives in <code>HTTP2Actor._handle_push()</code>.
 <code>:authority</code> is validated and surfaced by <code>_request_headers_with_host() in
 parser.py</code> (v0.54.0): an <code>http(s)</code> request carrying neither <code>:authority</code> nor
 <code>Host</code> is malformed, as is an authority containing userinfo, RFC 3986 §3.2
-delimiters, whitespace, or a non-ASCII byte (the same grammar HTTP/1.1
-enforces on <code>Host</code>, one forbidden-byte scan serving both);
+delimiters, whitespace, a control byte, or a non-ASCII byte (the same grammar
+HTTP/1.1 enforces on <code>Host</code>, one forbidden-byte scan serving both);
 multiple <code>Host</code> fields without <code>:authority</code> are likewise rejected.  A valid
 <code>:authority</code> is mapped into <code>conn.headers</code> as the <code>host</code> header,
 replacing any literal <code>Host</code> — the ASGI host mapping, mirroring H1's
