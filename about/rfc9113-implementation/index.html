@@ -5745,9 +5745,7 @@ is the same divergence arriving by omission instead of by a second factory, and
 it looks like well-formed bytes all the way to the peer.</p>
 <hr />
 <h2 id="5-streams-and-multiplexing">§5 — Streams and Multiplexing<a class="headerlink" href="#5-streams-and-multiplexing" title="Permanent link">&para;</a></h2>
-<p><strong>§5.1 Stream States</strong> ⚠️ — closed-stream handling has the §5.4.2
-exception described below.
-Four states matter for a server in practice:
+<p><strong>§5.1 Stream States</strong> — four states matter for a server in practice:
 IDLE → OPEN → HALF_CLOSED_REMOTE → CLOSED.
 (The two "reserved" states exist only during server push and are not shown —
 the server sends PUSH_PROMISE but never receives one, so it only ever sees
@@ -5777,7 +5775,7 @@ CLOSED branch is defensive-only for a live object already marked CLOSED.</p>
 </tr>
 <tr>
 <td>CLOSED (defensive-only)</td>
-<td>PRIORITY</td>
+<td>PRIORITY, RST_STREAM</td>
 <td>HEADERS or CONTINUATION → GOAWAY(STREAM_CLOSED); otherwise → RST_STREAM(STREAM_CLOSED)</td>
 </tr>
 </tbody>
@@ -5814,7 +5812,7 @@ closed-ID branch, the current wire behaviour is:</p>
 <tr>
 <td>retained, <code>via_rst=True</code></td>
 <td>RST_STREAM(STREAM_CLOSED)</td>
-<td>RST_STREAM(STREAM_CLOSED) ⚠️</td>
+<td>no response</td>
 <td>accepted</td>
 <td>GOAWAY(STREAM_CLOSED)</td>
 <td>RST_STREAM(STREAM_CLOSED)</td>
@@ -5829,11 +5827,13 @@ closed-ID branch, the current wire behaviour is:</p>
 </tr>
 </tbody>
 </table>
-<p>This table records the implementation's wire behaviour; it does not justify
-every cell as conformant.  In particular, the flagged <code>via_rst=True</code> response
-to a late <code>RST_STREAM</code> is a known mismatch: RFC 9113 §5.4.2 prohibits sending
-<code>RST_STREAM</code> in response to <code>RST_STREAM</code>, but the closed-ID branch currently
-sends <code>RST_STREAM(STREAM_CLOSED)</code>.</p>
+<p>This table records what the code answers, not a conformance claim for every
+cell.  The row merges peer and local resets — the record keeps one bit — and
+§5.1 answers them differently: after a <em>received</em> <code>RST_STREAM</code> a frame may be
+treated as a connection error of type <code>STREAM_CLOSED</code> (§5.4.2 permits the
+extra <code>RST_STREAM</code>, §6.1 requires one for DATA), while after one this server
+<em>sent</em> it must be minimally processed and then discarded.  §5.4.2 is
+categorical either way: no origin answers a late <code>RST_STREAM</code> in kind.</p>
 <p>A standalone CONTINUATION does not reach either state table: <code>_frame_loop()</code>
 rejects it first with <code>GOAWAY(PROTOCOL_ERROR)</code> under §6.10.  If a
 CONTINUATION reaches the retired-ID branch while a header block is open, it is
@@ -6140,8 +6140,8 @@ enters the recipient contributes its complete flow-controlled length,
 including padding; the RFC 8441 reader likewise hands back buffered credit it
 withheld.  Late DATA on an already-closed stream also returns its connection
 credit without recreating a stream owner.  The stream-level side is not
-replayed — the stream is gone (§5.1) and any further frame on that id is
-<code>STREAM_CLOSED</code>.</p>
+replayed — the stream is gone — and any further frame on that id meets the
+§5.1 closed-stream rules.</p>
 <p><em>Because</em> the connection window is the easy half to forget, and forgetting it
 fails <em>late</em>.  Credit only the stream window — the obvious half — and everything
 works until ~65535 cumulative bytes have flowed; only then does the shared
