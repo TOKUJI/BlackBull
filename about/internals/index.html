@@ -3679,6 +3679,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/protocol/field_grammar/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    field_grammar
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/protocol/frame/" class="md-nav__link">
         
   
@@ -6853,9 +6881,9 @@ means <code>bytes.translate</code>, <code>bytes.find</code>, <code>bytes.split</
 <code>bytes.count</code>, and precompiled regexes — and it means resisting the
 intuition that fewer allocations or fewer passes must be faster.</p>
 <p>The idiom used throughout <code>_parse</code> is a <strong>delete-the-allowed table</strong>:</p>
-<div class="highlight"><pre><span></span><code><span class="n">_TCHAR_OCTETS</span> <span class="o">=</span> <span class="sa">b</span><span class="s2">"!#$%&amp;'*+-.^_`|~0123456789ABC...xyz"</span>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.protocol.field_grammar</span><span class="w"> </span><span class="kn">import</span> <span class="n">TCHAR_OCTETS</span>
 
-<span class="k">if</span> <span class="n">key</span><span class="o">.</span><span class="n">translate</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="n">_TCHAR_OCTETS</span><span class="p">):</span>   <span class="c1"># non-empty ⇒ a non-token octet</span>
+<span class="k">if</span> <span class="n">key</span><span class="o">.</span><span class="n">translate</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="n">TCHAR_OCTETS</span><span class="p">):</span>    <span class="c1"># non-empty ⇒ a non-token octet</span>
     <span class="k">raise</span> <span class="n">BadRequestError</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
 </code></pre></div>
 <p>Deleting every permitted octet leaves the empty string for valid
@@ -6870,8 +6898,8 @@ than once per header.  Deleting everything a block may contain leaves
 only CR, LF and the CTLs a value may not carry; if what remains tiles
 exactly into CRLF pairs, no field value can hold a forbidden octet and
 the per-header check is skipped.  A block that fails the pre-scan
-falls back to the per-header regex, so error messages never change —
-the bulk pass is a fast path, never a rejection.</p>
+falls back to that same delete-table check per value, so error messages
+never change — the bulk pass is a fast path, never a rejection.</p>
 <p>Three plausible-sounding alternatives were measured and <strong>rejected</strong>;
 do not reintroduce them without new numbers:</p>
 <table>

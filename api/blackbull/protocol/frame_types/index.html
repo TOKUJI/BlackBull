@@ -3687,6 +3687,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../field_grammar/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    field_grammar
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../frame/" class="md-nav__link">
         
   
@@ -7310,10 +7338,11 @@ otherwise.</p>
     <div class="doc doc-contents ">
 
         <p>RFC 9113 §8.2.1 — is <em>name</em> a legal HTTP/2 field name?</p>
-<p>A field name MUST NOT contain characters in 0x00-0x20 (controls and SP),
-0x41-0x5A (uppercase), or 0x7F-0xFF.  It MUST NOT include a colon (0x3A)
-other than the single leading octet that marks a pseudo-header field.
-Rejecting these closes a header-injection / request-smuggling vector.</p>
+<p>The RFC 9110 §5.6.2 token alphabet, lowercased (§8.2), with the single
+leading colon that marks a pseudo-header field allowed.  The alphabet is
+shared with HTTP/1.1: a separator is not a name octet on either transport,
+and a name that matched here but not there was a smuggling surface §8.2.1
+names explicitly.</p>
 
 
     </div>
@@ -7352,7 +7381,10 @@ position, not the octet.</p>
 
     <div class="doc doc-contents ">
 
-        <p>RFC 9113 §8.2.1 — a field value MUST NOT contain NUL, LF, or CR.</p>
+        <p>RFC 9110 §5.5 field-content — no control octet but HTAB, and no DEL.</p>
+<p>§8.2.1 states the minimal form of this rule as a MUST and asks for the
+full HTTP definition as a SHOULD; HTTP/1.1 already refuses these octets,
+and a value is the same value on either transport.</p>
 
 
     </div>
