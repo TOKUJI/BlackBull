@@ -878,3 +878,88 @@ class TestG14PseudoHeaderOrdering:
                 if frame.stream_id == 1:
                     return
         pytest.fail('Pseudo-headers in CONTINUATION after regular field not rejected')
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# G15: A client cannot push (§6.6 / §8.4) — PUSH_PROMISE is a connection error
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestG15ClientPushPromise:
+    """RFC 9113 §6.6 and §8.4: servers MUST treat the receipt of a PUSH_PROMISE
+    as a connection error of type PROTOCOL_ERROR, whatever the stream state.
+
+    The field block is still decoded first — the table is connection-wide — so
+    an undecodable one is answered with COMPRESSION_ERROR (see
+    ``TestG4CompressionErrors``); this is about a block that decodes.
+    """
+
+    @staticmethod
+    def _push_promise(stream_id: int = 1, promised: int = 2) -> bytes:
+        block = Encoder().encode([
+            (b':method', b'GET'), (b':path', b'/pushed'),
+            (b':scheme', b'https'), (b':authority', b'example.com'),
+        ])
+        return _make_h2_frame(
+            FrameTypes.PUSH_PROMISE, int(HeaderFrameFlags.END_HEADERS),
+            stream_id, promised.to_bytes(4, 'big') + block)
+
+    @staticmethod
+    def _observe_connection_error(handler):
+        handler._connection_error = AsyncMock(wraps=handler._connection_error)
+        return handler._connection_error
+
+    @pytest.mark.asyncio
+    async def test_a_push_promise_on_an_idle_stream_goes_away(self):
+        handler, app = _make_h2_actor()
+        connection_error = self._observe_connection_error(handler)
+        settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
+        handler.receive = AsyncMock(side_effect=[
+            settings, self._push_promise(), None])
+        await handler.run()
+
+        assert _sent_goaway_codes(handler) == [ErrorCodes.PROTOCOL_ERROR]
+        assert _sent_rst_streams(handler, 1) == []
+        assert 'client sent PUSH_PROMISE' in connection_error.call_args.args[1]
+        assert app.await_count == 0
+
+    @pytest.mark.asyncio
+    async def test_a_push_promise_on_an_open_stream_goes_away(self):
+        """The open-stream case used to raise out of the responder lookup."""
+        handler, app = _make_h2_actor()
+        connection_error = self._observe_connection_error(handler)
+        settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
+        handler.receive = AsyncMock(side_effect=[
+            settings, _make_headers_frame(1, end_stream=False),
+            self._push_promise(), None])
+        await handler.run()
+
+        assert _sent_goaway_codes(handler) == [ErrorCodes.PROTOCOL_ERROR]
+        assert _sent_rst_streams(handler, 1) == []
+        assert 'client sent PUSH_PROMISE' in connection_error.call_args.args[1]
+
+    @pytest.mark.asyncio
+    async def test_a_push_promise_on_a_half_closed_stream_goes_away(self):
+        """Half-closed(remote) used to answer RST_STREAM(STREAM_CLOSED)."""
+        handler, app = _make_h2_actor()
+        connection_error = self._observe_connection_error(handler)
+        settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
+        handler.receive = AsyncMock(side_effect=[
+            settings, _make_headers_frame(1, end_stream=True),
+            self._push_promise(), None])
+        await handler.run()
+
+        assert _sent_goaway_codes(handler) == [ErrorCodes.PROTOCOL_ERROR]
+        assert _sent_rst_streams(handler, 1) == []
+        assert 'client sent PUSH_PROMISE' in connection_error.call_args.args[1]
+
+    @pytest.mark.asyncio
+    async def test_a_client_request_still_reaches_the_app(self):
+        """The refusal is about PUSH_PROMISE, not about the stream state."""
+        handler, app = _make_h2_actor()
+        settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
+        handler.receive = AsyncMock(side_effect=[
+            settings, _make_headers_frame(1, end_stream=True), None])
+        await handler.run()
+
+        assert app.await_count == 1
+        assert _sent_goaway_codes(handler) == []
