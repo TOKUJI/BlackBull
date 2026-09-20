@@ -5727,7 +5727,15 @@ package in the protocol stack), wrapped by <code>hpack_fastpath.py</code> for th
 short-header case.  <em>Because</em> HPACK is stateful at the connection level (a
 shared dynamic table); re-implementing a conformant codec is a sub-project of
 its own, and <code>hpack</code> is the de-facto Python reference — itself pure Python, so
-it stays <code>pdb</code>-debuggable.</p>
+it stays <code>pdb</code>-debuggable.
+A block the codec cannot decode (bad table index, failed size update,
+oversized list) is a <strong>connection</strong> error: <code>HTTP2Actor</code> catches <code>hpack</code>'s
+<code>HPACKError</code> where a block is decoded — either while the frame is loaded or
+when the last CONTINUATION lands — and answers with
+<code>GOAWAY(COMPRESSION_ERROR)</code>, never <code>RST_STREAM</code>.  <em>Because</em> hpack may have
+applied part of a block before raising, so no later block on that connection
+is known to be decodable, and a stream error would leave it encoding against
+a table we no longer agree on.</p>
 <p>That connection-level state is why <strong>one <code>FrameFactory</code> serves a whole
 connection</strong> and everything framing on it takes that one — <code>HTTP2Actor.factory</code>
 on the server, <code>HTTP2Client.frame_factory</code> on the client, and the RFC 8441
