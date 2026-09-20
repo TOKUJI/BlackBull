@@ -102,6 +102,14 @@ short-header case.  *Because* HPACK is stateful at the connection level (a
 shared dynamic table); re-implementing a conformant codec is a sub-project of
 its own, and `hpack` is the de-facto Python reference — itself pure Python, so
 it stays `pdb`-debuggable.
+A block the codec cannot decode (bad table index, failed size update,
+oversized list) is a **connection** error: `HTTP2Actor` catches `hpack`'s
+`HPACKError` where a block is decoded — either while the frame is loaded or
+when the last CONTINUATION lands — and answers with
+`GOAWAY(COMPRESSION_ERROR)`, never `RST_STREAM`.  *Because* hpack may have
+applied part of a block before raising, so no later block on that connection
+is known to be decodable, and a stream error would leave it encoding against
+a table we no longer agree on.
 
 That connection-level state is why **one `FrameFactory` serves a whole
 connection** and everything framing on it takes that one — `HTTP2Actor.factory`

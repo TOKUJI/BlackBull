@@ -32,7 +32,7 @@ prove nothing.
 from __future__ import annotations
 
 import pytest
-from hpack import Encoder
+from hpack import Encoder, HPACKError
 
 from blackbull.protocol.frame import FrameFactory
 from blackbull.protocol.frame_types import (
@@ -232,3 +232,39 @@ class TestASkippedPromisedBlockDesynchronisesTheTable:
         assert connection.decoder.decode(later, raw=True) != [
             (b':method', b'GET'), (b'x-promise', b'p-value')], \
             'a decoder that missed the promised insertions cannot read what follows'
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# A block the codec cannot decode — the connection's error, not the stream's
+# ═══════════════════════════════════════════════════════════════════════
+
+def _headers_wire(block: bytes, stream_id: int = 1) -> bytes:
+    """A HEADERS frame carrying *block* exactly as it arrived on the wire."""
+    flags = int(HeaderFrameFlags.END_HEADERS) | int(HeaderFrameFlags.END_STREAM)
+    return (len(block).to_bytes(3, 'big') + FrameTypes.HEADERS
+            + bytes([flags]) + stream_id.to_bytes(4, 'big') + block)
+
+
+def _push_promise_wire(block: bytes, promised: int = 2) -> bytes:
+    payload = promised.to_bytes(4, 'big') + block
+    return (len(payload).to_bytes(3, 'big') + FrameTypes.PUSH_PROMISE
+            + bytes([int(HeaderFrameFlags.END_HEADERS)])
+            + (1).to_bytes(4, 'big') + payload)
+
+
+class TestABlockTheCodecCannotDecode:
+    """RFC 9113 §4.3 — the loader lets the codec's ``HPACKError`` out as it
+    is; both ends route on that type."""
+
+    @pytest.mark.parametrize('block', [
+        b'\x80',          # table index 0 does not exist
+        b'\x00',          # truncated integer
+        b'\x3f\xe1\x3f',  # dynamic table size update past the maximum
+    ])
+    def test_headers_lets_the_codec_error_out(self, block):
+        with pytest.raises(HPACKError):
+            FrameFactory().load(_headers_wire(block))
+
+    def test_push_promise_lets_the_codec_error_out(self):
+        with pytest.raises(HPACKError):
+            FrameFactory().load(_push_promise_wire(b'\x80'))

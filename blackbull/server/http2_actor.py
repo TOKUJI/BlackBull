@@ -11,6 +11,8 @@ from collections.abc import Awaitable, Callable
 from http import HTTPStatus
 from typing import Protocol, runtime_checkable
 
+from hpack import HPACKError
+
 from ..actor import Actor, Message
 from ..event_aggregator import EventAggregator
 from ..logger import log, debug_gate
@@ -917,7 +919,13 @@ class HTTP2Actor(Actor):
                     f'{DEFAULT_MAX_FRAME_SIZE}')
                 _signal_recipients(self._recipients)
                 return
-            frame = self.factory.load(data)
+            try:
+                frame = self.factory.load(data)
+            except HPACKError as exc:
+                await self._connection_error(
+                    ErrorCodes.COMPRESSION_ERROR,
+                    f'could not decode the field block: {exc}')
+                continue  # let h2spec read the GOAWAY before we close
             frame_type = frame.FrameType()
 
             # RFC 9113 §6.10 — inside a header block, unknown frame types
@@ -1400,7 +1408,13 @@ class HTTP2Actor(Actor):
         if not frame.end_headers:
             return False
 
-        header_frame.parse_payload()
+        try:
+            header_frame.parse_payload()
+        except HPACKError as exc:
+            await self._connection_error(
+                ErrorCodes.COMPRESSION_ERROR,
+                f'could not decode the field block: {exc}')
+            return True
         return await self._complete_header_block(
             header_frame, stream, send, tg)
 
