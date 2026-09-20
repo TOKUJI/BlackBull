@@ -556,7 +556,8 @@ class Headers(FrameBase):
                     # text is malformed, which is a stream error of type
                     # PROTOCOL_ERROR, never a decode error out of the loader.
                     self._mark_malformed(
-                        f'invalid UTF-8 in pseudo-header value: {kb!r}: {vb!r}')
+                        f'invalid UTF-8 in pseudo-header value: '
+                        f'{kb!r}: {vb!r}')
                     return
                 self.pseudo_headers[pseudo_key] = value_text
                 if debug:
