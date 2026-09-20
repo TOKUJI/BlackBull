@@ -47,7 +47,8 @@ The payoff is isolation: a misbehaving or slow connection is contained to its
 own actor and cannot corrupt another's state. The same model runs your HTTP
 routes, the MQTT broker, and the gRPC handlers — one concurrency story across
 every protocol. See [Internals](internals.md) for the actor topology and the
-per-connection `TaskGroup` supervision.
+per-actor supervisor strategies; the one `TaskGroup` is HTTP/2's per-stream
+supervision in `HTTP2Actor.run()`.
 
 ## Fault injection — the differentiator
 
