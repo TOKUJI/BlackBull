@@ -176,8 +176,9 @@ class TestAuthorityGrammar:
     @pytest.mark.parametrize('control', list(range(0x00, 0x20)) + [0x7F])
     @pytest.mark.asyncio
     async def test_every_control_in_authority_is_malformed(self, control):
-        """Every control byte, not a sample: NUL, LF and CR are refused a
-        layer earlier (RFC 9113 §8.2.1), the rest by the authority grammar."""
+        """Every control byte, not a sample — and all of them are refused by
+        the field-value grammar (RFC 9110 §5.5 through §8.2.1) before the
+        authority grammar sees the value, DEL included."""
         handler, app = await _run_with_headers(
             _PSEUDO_TRIO + [
                 (b':authority', b'exam' + bytes([control]) + b'ple.com')])

@@ -13,24 +13,28 @@ from __future__ import annotations
 import struct
 from hypothesis import given, strategies as st
 
+from blackbull.protocol.field_grammar import (
+    FIELD_VALUE_ALLOWED_OCTETS, TCHAR_SET)
 from blackbull.protocol.frame_types import (
     field_name_is_valid, field_value_has_boundary_whitespace,
     field_value_is_valid)
 
-# Octets legal inside a (lowercase) field name: visible ASCII excluding SP,
-# uppercase, colon, DEL, and the 0x7F-0xFF range (RFC 9113 §8.2.1).
-_safe_name_octets = st.sampled_from(
-    [b for b in range(0x21, 0x7F) if b != 0x3A and not (0x41 <= b <= 0x5A)])
+# Octets legal inside a field name: the RFC 9110 §5.6.2 token alphabet, minus
+# the uppercase RFC 9113 §8.2 forbids in an HTTP/2 name.
+_safe_name_octets = st.sampled_from(sorted(
+    b for b in TCHAR_SET if not 0x41 <= b <= 0x5A))
 _safe_name = st.lists(_safe_name_octets, min_size=1, max_size=20).map(bytes)
-# Octets legal inside a field value: anything except NUL, LF, CR.
+# Octets legal inside a field value: RFC 9110 §5.5 field-content, the
+# complement of which both transports refuse.
+_value_forbidden = frozenset(range(0x100)) - frozenset(
+    FIELD_VALUE_ALLOWED_OCTETS)
 _safe_value_octets = st.sampled_from(
-    [b for b in range(0x100) if b not in (0x00, 0x0A, 0x0D)])
+    [b for b in range(0x100) if b not in _value_forbidden])
 _safe_value = st.lists(_safe_value_octets, max_size=40).map(bytes)
-# Octets legal *at either end* of a field value: the above minus the two
-# octets RFC 9113 §8.2.1 forbids there (SP and HTAB).
+# The same, minus the two octets RFC 9113 §8.2.1 forbids at either end.
 _safe_value_edge = st.sampled_from(
-    [b for b in range(0x100) if b not in (0x00, 0x0A, 0x0D, 0x20, 0x09)]
-).map(bytes)
+    [b for b in range(0x100)
+     if b not in _value_forbidden and b not in (0x20, 0x09)]).map(bytes)
 _edgeless_value = st.tuples(
     _safe_value_edge, _safe_value, _safe_value_edge
 ).map(lambda t: t[0] + t[1] + t[2])

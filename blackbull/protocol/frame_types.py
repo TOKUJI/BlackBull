@@ -12,6 +12,7 @@ from io import BytesIO
 from itertools import chain
 
 from . import hpack_fastpath, structured_fields
+from .field_grammar import FIELD_VALUE_ALLOWED_OCTETS, TCHAR_OCTETS
 
 import logging
 from ..logger import log, debug_gate
@@ -354,28 +355,34 @@ _HOP_BY_HOP_HEADERS: frozenset[bytes] = frozenset((
 ))
 
 
+#: The shared token alphabet with the uppercase octets removed — RFC 9113 §8.2
+#: puts an HTTP/2 name in lowercase, so uppercase is not a name octet here.
+_NAME_OCTETS = TCHAR_OCTETS.translate(None, b'ABCDEFGHIJKLMNOPQRSTUVWXYZ')
+
+
 def field_name_is_valid(name: bytes) -> bool:
     """RFC 9113 §8.2.1 — is *name* a legal HTTP/2 field name?
 
-    A field name MUST NOT contain characters in 0x00-0x20 (controls and SP),
-    0x41-0x5A (uppercase), or 0x7F-0xFF.  It MUST NOT include a colon (0x3A)
-    other than the single leading octet that marks a pseudo-header field.
-    Rejecting these closes a header-injection / request-smuggling vector.
+    The RFC 9110 §5.6.2 token alphabet, lowercased (§8.2), with the single
+    leading colon that marks a pseudo-header field allowed.  The alphabet is
+    shared with HTTP/1.1: a separator is not a name octet on either transport,
+    and a name that matched here but not there was a smuggling surface §8.2.1
+    names explicitly.
     """
     if not name:
         return False
-    # A leading colon is the only legal colon (pseudo-header marker); validate
-    # the remainder of a pseudo-header name with the colon prohibited.
     start = 1 if name[0] == 0x3A else 0
-    for b in name[start:]:
-        if b <= 0x20 or b == 0x3A or 0x41 <= b <= 0x5A or b >= 0x7F:
-            return False
-    return True
+    return not name[start:].translate(None, _NAME_OCTETS)
 
 
 def field_value_is_valid(value: bytes) -> bool:
-    """RFC 9113 §8.2.1 — a field value MUST NOT contain NUL, LF, or CR."""
-    return not (0x00 in value or 0x0A in value or 0x0D in value)
+    """RFC 9110 §5.5 field-content — no control octet but HTAB, and no DEL.
+
+    §8.2.1 states the minimal form of this rule as a MUST and asks for the
+    full HTTP definition as a SHOULD; HTTP/1.1 already refuses these octets,
+    and a value is the same value on either transport.
+    """
+    return not value.translate(None, FIELD_VALUE_ALLOWED_OCTETS)
 
 
 def field_value_has_boundary_whitespace(value: bytes) -> bool:
@@ -527,15 +534,17 @@ class Headers(FrameBase):
         for k, v in fields:
             kb_raw = bytes(k)  # bytes(...) normalizes memoryview/bytearray
             vb = v if isinstance(v, bytes) else bytes(v)
-            # RFC 9113 §8.2.1 — field-name octet validation (rejects uppercase,
-            # controls/SP, 0x7F-0xFF, and a non-leading colon).
+            # RFC 9113 §8.2.1 — field-name octet validation, which is the
+            # RFC 9110 §5.6.2 token alphabet plus a leading colon: it rejects
+            # the separators, uppercase, controls/SP and 0x7F-0xFF too.
             if not field_name_is_valid(kb_raw):
                 self._mark_malformed(f'invalid character in field name: {kb_raw!r}')
                 return
-            # RFC 9113 §8.2.1 — field values MUST NOT contain NUL, LF, or CR,
-            # and MUST NOT start or end with SP or HTAB (both apply to
-            # pseudo-header and regular field values alike).  RFC 9112 §5
-            # trims that whitespace on the HTTP/1.1 side instead, so this is
+            # RFC 9113 §8.2.1 — a field value is RFC 9110 §5.5 field-content
+            # (its MUSTs are the NUL/LF/CR and edge-SP/HTAB cases of that), and
+            # MUST NOT start or end with SP or HTAB.  Both apply to
+            # pseudo-header and regular field values alike.  RFC 9112 §5 trims
+            # the edge whitespace on the HTTP/1.1 side instead, so this is
             # where the two transports diverge by design, not by accident.
             if not field_value_is_valid(vb):
                 self._mark_malformed(f'prohibited character in field value: {vb!r}')

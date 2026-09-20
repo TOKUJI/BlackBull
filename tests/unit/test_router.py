@@ -1292,6 +1292,10 @@ class TestRouterEdgeCases:
         router = Router()
         with pytest.raises(ValueError):
             router.route_fn(methods=['BREW METHOD'], path='/x')  # space is not tchar
+        # A trailing newline is not tchar either: the check is a table, not an
+        # anchored pattern, so it cannot admit one the way `$` would.
+        with pytest.raises(ValueError):
+            router.route_fn(methods=['GET\n'], path='/x')
 
     def test_register_chain_non_middleware_in_middle_raises(self):
         router = Router()

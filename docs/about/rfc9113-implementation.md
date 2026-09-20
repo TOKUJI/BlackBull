@@ -588,10 +588,14 @@ content-length rule at §8.1.2.6; RFC 9113 folds it into §8.1.1.)
 Field-level violations — including a pseudo-header value that is not UTF-8 —
 are flagged by `Headers.parse_payload()` / `parse_headers() in parser.py` (the
 `malformed` flag) and rejected as above.
-Both field-value MUSTs are checked there: no NUL, LF or CR at any position,
-and no SP or HTAB at either end.  *Because* RFC 9112 §5 has HTTP/1.1 trim
-that whitespace off the field line instead, a transport that kept it would
-hand the application a value the other transport never produces.
+The alphabet is the RFC 9110 one, defined once in
+`blackbull/protocol/field_grammar.py`: a name is a §5.6.2 token and a value is
+§5.5 field-content, so the octets HTTP/1.1 refuses are the octets HTTP/2
+refuses — §8.2.1 names a field the two transports read differently as the
+request-smuggling surface.  Two differences stay by design: HTTP/2 refuses
+uppercase names (§8.2) where HTTP/1.1 accepts them, and refuses a value with
+SP or HTAB at either end (§8.2.1) where HTTP/1.1 trims it off the field line
+(RFC 9112 §5).
 **§8.2.2 Connection-Specific Header Fields** (e.g. `Connection`,
 `Transfer-Encoding`) are rejected at parse time (in `frame_types.py`).
 **§8.2.3 Cookie crumb compression** ✗ — not specially handled; cookies pass

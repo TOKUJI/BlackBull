@@ -24,6 +24,9 @@ from ..server.rate_window import ByteRateFloor
 from ..server.recipient import (AbstractReader, AsyncioReader,
                                 IncompleteReadError, ReadLimitExceeded,
                                 _accepts_read_limit)
+from ..protocol.field_grammar import (
+    FIELD_VALUE_ALLOWED_OCTETS, FIELD_VALUE_ALLOWED_SET, TCHAR_OCTETS,
+    TCHAR_SET)
 from ..server.sender import AbstractWriter, AsyncioWriter
 from ._connect import DEFAULT_CONNECT_TIMEOUT, open_connection as _open_connection
 from .exceptions import ConnectionError, ProtocolError, ResponseTooLarge
@@ -71,18 +74,6 @@ _CLOSE_DELIMITED = 'close'
 #: whitespace, and a negative numeral reached ``readexactly()``.
 _HEXDIG = frozenset(b'0123456789abcdefABCDEF')
 
-# RFC 9110 §5.6.2.  Transfer-Encoding is an HTTP list, not a comma split:
-# parameters may contain quoted commas and each coding is a token followed by
-# zero or more ``; name=value`` parameters.
-_TCHAR = frozenset(
-    b"!#$%&'*+-.^_`|~"
-    b'0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz')
-
-#: RFC 9110 §5.5 field-value: HTAB, VCHAR and obs-text.  Deleting these from a
-#: value leaves exactly the octets it may not carry, so the whole check is one
-#: C-level ``translate`` rather than one Python step per octet.
-_FIELD_VCHAR = (bytes([0x09]) + bytes(range(0x20, 0x7f))
-                + bytes(range(0x80, 0x100)))
 # Empty list members are tolerated for interoperability, but the parser must
 # not spend unbounded work on a peer sending only commas.  The head-size budget
 # remains the total byte bound; this is only a small structural sanity bound.
@@ -97,7 +88,7 @@ def _skip_ows(value: bytes, pos: int) -> int:
 
 def _te_token(value: bytes, pos: int) -> tuple[bytes, int]:
     start = pos
-    while pos < len(value) and value[pos] in _TCHAR:
+    while pos < len(value) and value[pos] in TCHAR_SET:
         pos += 1
     if pos == start:
         raise ProtocolError(
@@ -115,13 +106,10 @@ def _te_quoted_string(value: bytes, pos: int) -> int:
             return pos + 1
         if octet == 0x5c:
             pos += 1
-            if pos >= len(value) or not (
-                    value[pos] == 0x09 or value[pos] == 0x20
-                    or 0x21 <= value[pos] <= 0x7e
-                    or value[pos] >= 0x80):
+            if pos >= len(value) or value[pos] not in FIELD_VALUE_ALLOWED_SET:
                 raise ProtocolError(
                     'invalid quoted Transfer-Encoding parameter')
-        elif (octet < 0x20 and octet != 0x09) or octet == 0x7f:
+        elif octet not in FIELD_VALUE_ALLOWED_SET:
             raise ProtocolError(
                 'invalid quoted Transfer-Encoding parameter')
         pos += 1
@@ -496,7 +484,9 @@ class HTTP1ResponseRecipient:
             # bytes.strip() would also take VT, FF, CR and LF, turning an
             # invalid value into a valid framing instruction (VT + "chunked").
             value = value.strip(b' \t')
-            if value.translate(None, _FIELD_VCHAR):
+            # Deleting RFC 9110 §5.5's field-content octets leaves exactly the
+            # octets the value may not carry, in one C-level pass.
+            if value.translate(None, FIELD_VALUE_ALLOWED_OCTETS):
                 raise ProtocolError(
                     f'prohibited control in response field {name!r}')
             pairs.append((name.strip(b' \t').lower(), value))
@@ -511,7 +501,7 @@ class HTTP1ResponseRecipient:
                 option = raw.strip(b' \t')
                 if not option:
                     continue
-                if not _TCHAR.issuperset(option):
+                if option.translate(None, TCHAR_OCTETS):
                     raise ProtocolError(
                         f'invalid Connection option {option!r}')
                 options.add(option.lower())

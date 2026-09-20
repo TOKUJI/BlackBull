@@ -51,38 +51,25 @@ _H1_PATHSEND_EXTENSIONS = {'http.response.pathsend': {}}
 # RFC 9112 §4 — HTTP-version = "HTTP/" DIGIT "." DIGIT
 _HTTP_VERSION_RE = re.compile(rb'^HTTP/\d\.\d$')
 
-# The exact negation of the RFC 9110 §5.6.2 tchar set and the §5.5
-# CTL-except-HTAB allow-list.  Regexes rather than per-byte membership scans:
-# 3–4× faster than the equivalent Python loop per pyperf.
-#
-# `_FIELD_NAME_INVALID_RE` has no call site here — `_TCHAR_OCTETS` is what
-# `_parse` uses — and is **not** dead: `tests/unit/test_parse_octet_tables.py`
-# validates that table against it octet for octet, so the fast form cannot
-# drift from the RFC without a test failing.
-_FIELD_NAME_INVALID_RE = re.compile(rb"[^!#$%&'*+\-.^_`|~0-9A-Za-z]")
-_FIELD_VALUE_INVALID_RE = re.compile(rb"[\x00-\x08\x0a-\x1f\x7f]")
+# The RFC 9110 field grammar — the name alphabet and the allowed value
+# octets — is defined once in ``blackbull.protocol.field_grammar``, so HTTP/2
+# cannot validate against a different set than this one.  `_parse` reads both
+# as bytes tables, which is what makes each check one C-level pass;
+# `tests/unit/test_parse_octet_tables.py` audits the name table against the
+# frozenset form of it, octet for octet.
+from ..protocol.field_grammar import (
+    FIELD_VALUE_ALLOWED_OCTETS, TCHAR_OCTETS)
 
-# RFC 9110 §5.6.2 tchar, spelled out.
-_TCHAR_OCTETS = (b"!#$%&'*+-.^_`|~"
-                 b'0123456789'
-                 b'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
-                 b'abcdefghijklmnopqrstuvwxyz')
-
-_BLOCK_ALLOWED_OCTETS = bytes(
-    c for c in range(256)
-    if not (c < 0x09 or 0x0B <= c <= 0x0C or 0x0E <= c <= 0x1F or c == 0x7F)
-    and c not in (0x0A, 0x0D)
-)
 
 
 def _block_values_are_clean(data: bytes) -> bool:
     """True when no field value in *data* can contain a forbidden octet.
 
     A ``False`` result never rejects and says nothing about *which* line is at
-    fault — it only turns the per-header regex back on, so error messages are
+    fault — it only turns the per-value check back on, so error messages are
     unchanged.
     """
-    residue = data.translate(None, _BLOCK_ALLOWED_OCTETS)
+    residue = data.translate(None, FIELD_VALUE_ALLOWED_OCTETS)
     return residue.count(b'\r\n') * 2 == len(residue)
 
 
@@ -164,14 +151,14 @@ def _build_default_lines() -> dict[bytes, tuple[bytes, bytes]]:
         if colon < 1 or line[0] in (0x20, 0x09):
             raise ValueError(f'malformed default header line: {line!r}')
         key = line[:colon]
-        if key.translate(None, _TCHAR_OCTETS):
+        if key.translate(None, TCHAR_OCTETS):
             raise ValueError(f'invalid name in default header line: {line!r}')
         lkey = key.lower()
         if lkey in _UNDERSCORE_FRAMING_NAMES or lkey in _FRAMING_NAMES:
             raise ValueError(
                 f'framing header must not be pre-seeded: {line!r}')
         value = line[colon + 1:].strip(b' \t')
-        if _FIELD_VALUE_INVALID_RE.search(value):
+        if value.translate(None, FIELD_VALUE_ALLOWED_OCTETS):
             raise ValueError(f'CTL in default header value: {line!r}')
         if len(line) > _LINE_CACHE_MAX_LINE:
             raise ValueError(f'default header line too long: {line!r}')
@@ -846,7 +833,7 @@ class HTTP1Actor(Actor):
         method, path, version = parts
 
         # Method (§4 / RFC 9110 §9.1) — case-sensitive token of 1+ tchar.
-        if not method or method.translate(None, _TCHAR_OCTETS):
+        if not method or method.translate(None, TCHAR_OCTETS):
             raise BadRequestError(f'invalid method {method!r}')
 
         # HTTP-version (§2.5) — exactly ``HTTP/d.d``.
@@ -969,7 +956,7 @@ class HTTP1Actor(Actor):
             # and HTAB are not tchar, so this one test also decides §5.1 (no
             # whitespace between field-name and ':'), and only a rejected name
             # pays to tell the two apart.  `colon < 1` makes `key[-1]` safe.
-            if key.translate(None, _TCHAR_OCTETS):
+            if key.translate(None, TCHAR_OCTETS):
                 if key[-1] in (0x20, 0x09):
                     raise BadRequestError(
                         f'whitespace before colon (smuggling vector): {line!r}')
@@ -985,7 +972,8 @@ class HTTP1Actor(Actor):
                     f'(RFC 9110 §8.6)')
             # Strip the OWS surrounding the value (§5).
             value = value.strip(b' \t')
-            if values_need_checking and _FIELD_VALUE_INVALID_RE.search(value):
+            if (values_need_checking
+                    and value.translate(None, FIELD_VALUE_ALLOWED_OCTETS)):
                 raise BadRequestError(
                     f'CTL in header value (smuggling / log-injection): '
                     f'{key!r}: {value!r}')

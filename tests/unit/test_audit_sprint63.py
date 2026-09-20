@@ -113,6 +113,7 @@ class TestChunkSizeGrammar:
         (b'5 ;foo=bar\r\n', 5),         # BWS between size and ';'
         (b'5;foo\r\n', 5),              # ext-name with no value
         (b'5;a="quoted val"\r\n', 5),   # quoted-string ext-val
+        (b'5;a="x,y"\r\n', 5),          # quoted ext-val: a comma is legal
     ])
     def test_valid_chunk_size_lines(self, line, expected):
         assert _parse_chunk_size(line) == expected
@@ -128,6 +129,8 @@ class TestChunkSizeGrammar:
         b'5;a@b=c\r\n',   # SMUG-CHUNK-EXT-INVALID-TOKEN — '@' not a tchar
         b'5;a=\x01\r\n',  # SMUG-CHUNK-EXT-CTRL — control char in ext-val
         b'5;a="unterminated\r\n',  # broken quoted-string ext-val
+        b'5;a="x\x01"\r\n',      # SMUG-CHUNK-EXT-QUOTED-CTRL
+        b'5;a="x\x7f"\r\n',      # SMUG-CHUNK-EXT-QUOTED-DEL
         b'\r\n',          # empty size
         b'XYZ\r\n',       # non-hex
     ])
