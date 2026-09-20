@@ -354,8 +354,11 @@ def _validate_message_framing(headers: 'Headers') -> int:
 # delimiters belong in a Host value; their presence (or an empty value) is a
 # smuggling / SSRF vector nginx rejects with 400 and a lenient parser accepts
 # silently.  ``@`` is included: the deprecated userinfo component has no place
-# in a Host header and enables credential-spoofing.
-_HOST_FORBIDDEN_BYTES = frozenset(b'/?# \t@')
+# in a Host header and enables credential-spoofing.  The high bytes are in for
+# RFC 3986 §3.2 too: an authority is ASCII — an internationalised name reaches
+# the wire as punycode, which is too — and riding this class means the rule
+# costs no second pass over every request's Host.
+_HOST_FORBIDDEN_BYTES = frozenset(b'/?# \t@') | frozenset(range(0x80, 0x100))
 _HOST_FORBIDDEN_RE = re.compile(
     b'[' + re.escape(bytes(sorted(_HOST_FORBIDDEN_BYTES))) + b']')
 
@@ -408,21 +411,14 @@ def _validate_host(headers: 'Headers') -> None:
     value = hosts[0][1].strip(b' \t')
     if not value:
         raise BadRequestError('empty Host header value')
-    if _HOST_FORBIDDEN_RE.search(value):
+    if match := _HOST_FORBIDDEN_RE.search(value):
+        if match[0][0] >= 0x80:
+            raise BadRequestError(
+                f'invalid Host authority {value!r}: non-ASCII byte in a '
+                f'URI authority (RFC 3986 §3.2)')
         raise BadRequestError(
             f'invalid Host authority {value!r}: contains '
             f'delimiter / whitespace forbidden by RFC 3986 §3.2')
-    # RFC 3986 §3.2 authorities are ASCII — an internationalised name reaches
-    # the wire as punycode, which is too.  Neither check above excludes a high
-    # byte: the delimiter set is `/ ? #` plus whitespace, and the CTL check
-    # covers \x00-\x08\x0a-\x1f\x7f.  nginx answers 400, and *some* answer is
-    # the point — a caller cannot tell a silent drop from a crash.
-    try:
-        value.decode('ascii')
-    except UnicodeDecodeError:
-        raise BadRequestError(
-            f'invalid Host authority {value!r}: non-ASCII byte in a '
-            f'URI authority (RFC 3986 §3.2)') from None
 
 
 # ---------------------------------------------------------------------------

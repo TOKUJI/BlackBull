@@ -108,10 +108,10 @@ def _request_headers_with_host(frame, *, require_present: bool) -> list | None:
     RFC 9113 §8.3.1 — ``:authority`` MUST NOT include userinfo; an
     ``http``/``https`` request without ``:authority`` must carry a valid
     ``Host`` field (*require_present*).  The grammar is H1's
-    ``_validate_host`` (RFC 3986 §3.2 delimiters, same forbidden set);
-    a present ``:authority`` replaces any literal ``Host`` handed to the
-    application, mirroring H1's absolute-form override (RFC 9112 §3.2.2)
-    so handlers see one ``host`` under either transport.
+    ``_validate_host`` (RFC 3986 §3.2 delimiters and ASCII rule, the same
+    forbidden set); a present ``:authority`` replaces any literal ``Host``
+    handed to the application, mirroring H1's absolute-form override
+    (RFC 9112 §3.2.2) so handlers see one ``host`` under either transport.
 
     Returns the header list for ``Headers(...)``, or ``None`` after
     marking the frame malformed (the actor then answers RST_STREAM
@@ -126,7 +126,8 @@ def _request_headers_with_host(frame, *, require_present: bool) -> list | None:
         if _HOST_FORBIDDEN_RE.search(value):
             frame._mark_malformed(
                 f'invalid :authority {authority!r}: contains userinfo, '
-                f'delimiter, or whitespace forbidden by RFC 3986 §3.2')
+                f'delimiter, whitespace, or a non-ASCII byte forbidden by '
+                f'RFC 3986 §3.2')
             return None
         return ([(k, v) for (k, v) in frame.headers if k != b'host']
                 + [(b'host', value)])
@@ -147,8 +148,8 @@ def _request_headers_with_host(frame, *, require_present: bool) -> list | None:
         return None
     if _HOST_FORBIDDEN_RE.search(value):
         frame._mark_malformed(
-            f'invalid Host authority {value!r}: contains delimiter / '
-            f'whitespace forbidden by RFC 3986 §3.2')
+            f'invalid Host authority {value!r}: contains delimiter, '
+            f'whitespace, or a non-ASCII byte forbidden by RFC 3986 §3.2')
         return None
     return frame.headers
 

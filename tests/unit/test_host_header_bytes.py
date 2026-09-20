@@ -1,15 +1,16 @@
 """A Host header the parser cannot decode must be a 400, not a dropped call.
 
 `_parse_host_header` calls `value.decode('utf-8')` in five places with no
-guard.  A high byte reaches it because neither of the two checks in front
-excludes one: `_HOST_FORBIDDEN_RE` looks for `/ ? #` and whitespace, and
-the CTL check covers `\\x00-\\x08\\x0a-\\x1f\\x7f` — `\\xff` is in neither
-set.
+guard, so `_validate_host` has to reject a high byte before the parser sees
+it.  It does that with the same forbidden-byte scan as the delimiters — the
+class carries `\\x80-\\xff` — which is why the two cannot drift apart: a value
+is delimited, non-ASCII, or fit to parse.
 
-The resulting `UnicodeDecodeError` is not caught anywhere in `run()`, so
-the connection closes with no bytes written.  A client sees "empty reply
-from server"; nginx answers 400.  Failing to answer is worse than
-answering wrongly: the caller cannot tell a rejection from a crash.
+The `UnicodeDecodeError` a high byte would otherwise raise is caught nowhere
+in `run()`, so the connection would close with no bytes written: a client
+sees "empty reply from server" where nginx answers 400.  Failing to answer is
+worse than answering wrongly — the caller cannot tell a rejection from a
+crash.
 """
 from __future__ import annotations
 
@@ -72,3 +73,27 @@ class TestValidHostsStillWork:
             _validate_host(_headers(b'0/0'))
         with pytest.raises(BadRequestError):
             _validate_host(_headers(b''))
+
+
+class TestEveryHighByteIsRejected:
+    """The ASCII rule rides the delimiter scan, so it must cover all of them.
+
+    A range that started at 0x80 but stopped short would still pass every
+    hand-picked sample; the sweep is what makes the claim total.
+    """
+
+    @pytest.mark.parametrize('high', range(0x80, 0x100))
+    def test_a_bare_high_byte(self, high):
+        with pytest.raises(BadRequestError):
+            _validate_host(_headers(bytes([high])))
+
+    @pytest.mark.parametrize('high', range(0x80, 0x100))
+    def test_a_high_byte_inside_an_otherwise_valid_host(self, high):
+        with pytest.raises(BadRequestError):
+            _validate_host(_headers(b'example.com' + bytes([high])))
+
+    def test_the_two_diagnostics_stay_apart(self):
+        with pytest.raises(BadRequestError, match='non-ASCII'):
+            _validate_host(_headers(b'ex\xffample.com'))
+        with pytest.raises(BadRequestError, match='delimiter'):
+            _validate_host(_headers(b'exam/ple.com'))
