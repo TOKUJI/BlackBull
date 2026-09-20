@@ -19,7 +19,7 @@ from ..protocol.frame_types import PseudoHeaders
 import logging
 from ..connection import Connection
 from ..headers import Headers
-from .http1_actor import _HOST_FORBIDDEN_RE
+from .http1_actor import _HOST_FORBIDDEN_RE, _TARGET_ALLOWED_OCTETS
 
 logger = logging.getLogger(__name__)
 
@@ -164,8 +164,9 @@ def parse_headers(frame) -> Connection | None:
     checks ``frame.malformed`` and never reads a partial object, and nothing
     is constructed on the error path.
 
-    Also performs request-level pseudo-header presence checks (RFC 9113
-    §8.3.1); field-level checks already happened in ``parse_payload``.
+    Also performs request-level pseudo-header presence and octet checks
+    (RFC 9113 §8.3.1: ``:path`` is graded like HTTP/1.1's request-target);
+    field-level checks already happened in ``parse_payload``.
 
     A module-level function and not a ``ParserFactory`` product: nothing here
     is per-instance, so a factory would charge every request for a dict lookup
@@ -190,11 +191,22 @@ def parse_headers(frame) -> Connection | None:
     if method is None:
         frame._mark_malformed('missing :method')
         return None
+
+    # RFC 9112 §2.1 with RFC 3986 — the visible-ASCII rule HTTP/1.1 applies to
+    # its request-target, so the transports cannot disagree about a path
+    # (MAL-NON-ASCII-URL).  Graded whenever the field is present: the CONNECT
+    # forms below read ``:path`` too.
+    path_pseudo = frame.pseudo_headers.get(PseudoHeaders.PATH)
+    if (path_pseudo is not None
+            and path_pseudo.encode('utf-8').translate(
+                None, _TARGET_ALLOWED_OCTETS)):
+        frame._mark_malformed(f'invalid :path {path_pseudo!r}')
+        return None
+
     if method != 'CONNECT':
         if PseudoHeaders.SCHEME not in frame.pseudo_headers:
             frame._mark_malformed('missing :scheme')
             return None
-        path_pseudo = frame.pseudo_headers.get(PseudoHeaders.PATH)
         if path_pseudo is None:
             frame._mark_malformed('missing :path')
             return None

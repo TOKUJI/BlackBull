@@ -588,7 +588,9 @@ a correctness requirement.
 **§8.3 HTTP Control Data** ✅
 Pseudo-headers are parsed and validated before dispatch.  **§8.3.1 Request
 Pseudo-Headers** — `:method`, `:scheme`, `:path`, `:authority`; the `:path`
-split for pushed requests lives in `HTTP2Actor._handle_push()`.
+split for pushed requests lives in `HTTP2Actor._handle_push()`, and a
+request's `:path` is graded with the visible-ASCII rule HTTP/1.1 applies to
+its request-target.
 `:authority` is validated and surfaced by `_request_headers_with_host() in
 parser.py` (v0.54.0): an `http(s)` request carrying neither `:authority` nor
 `Host` is malformed, as is an authority containing userinfo, RFC 3986 §3.2

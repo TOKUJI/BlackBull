@@ -377,26 +377,42 @@ class TestG5ConnectionSpecificHeadersForbidden:
 # G6: Missing mandatory pseudo-headers (§8.3.1)
 # ═══════════════════════════════════════════════════════════════════════
 
+async def _check_malformed(fields):
+    """Drive a HEADERS block and require RST_STREAM(PROTOCOL_ERROR) on 1."""
+    handler, app = _make_h2_actor()
+    h = _make_headers_frame(1, end_stream=True, fields=fields)
+    settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
+    handler.receive = AsyncMock(side_effect=[settings, h, None])
+    await handler.run()
+    for call in handler.send_frame.call_args_list:
+        frame = call.args[0]
+        if (hasattr(frame, 'FrameType')
+                and frame.FrameType() == FrameTypes.RST_STREAM
+                and frame.stream_id == 1):
+            return
+    pytest.fail(f'Malformed request with fields {fields} was not rejected')
+
+
 class TestG6MissingMandatoryPseudoHeaders:
     """RFC 9113 §8.3.1: All HTTP/2 requests MUST include exactly one valid
     value for :method, :scheme, and :path.  Omission → malformed."""
 
     @pytest.mark.asyncio
     async def test_missing_method_is_malformed(self):
-        await self._check_malformed([(b':path', b'/'), (b':scheme', b'https'), (b':authority', b'example.com')])
+        await _check_malformed([(b':path', b'/'), (b':scheme', b'https'), (b':authority', b'example.com')])
 
     @pytest.mark.asyncio
     async def test_missing_path_is_malformed(self):
-        await self._check_malformed([(b':method', b'GET'), (b':scheme', b'https'), (b':authority', b'example.com')])
+        await _check_malformed([(b':method', b'GET'), (b':scheme', b'https'), (b':authority', b'example.com')])
 
     @pytest.mark.asyncio
     async def test_missing_scheme_is_malformed(self):
-        await self._check_malformed([(b':method', b'GET'), (b':path', b'/')])
+        await _check_malformed([(b':method', b'GET'), (b':path', b'/')])
 
     @pytest.mark.asyncio
     async def test_duplicate_method_is_malformed(self):
         """§8.3: Same pseudo-header MUST NOT appear more than once."""
-        await self._check_malformed([
+        await _check_malformed([
             (b':method', b'GET'), (b':method', b'POST'),
             (b':path', b'/'), (b':scheme', b'https'),
             (b':authority', b'example.com'),
@@ -405,24 +421,56 @@ class TestG6MissingMandatoryPseudoHeaders:
     @pytest.mark.asyncio
     async def test_empty_path_for_http_uri_is_malformed(self):
         """§8.3.1: :path MUST NOT be empty for http/https URIs."""
-        await self._check_malformed([
+        await _check_malformed([
             (b':method', b'GET'), (b':path', b''), (b':scheme', b'https'),
             (b':authority', b'example.com'),
         ])
 
+
+class TestG6PathOctets:
+    """RFC 9113 §8.3.1 with RFC 9112 §2.1 — a ``:path`` carries the octets
+    HTTP/1.1 allows in its request-target, so the transports cannot disagree
+    about a path (MAL-NON-ASCII-URL)."""
+
     @staticmethod
-    async def _check_malformed(fields):
+    def _fields(path: bytes) -> list:
+        return [(b':method', b'GET'), (b':scheme', b'https'),
+                (b':authority', b'example.com'), (b':path', path)]
+
+    @pytest.mark.parametrize('bad', list(range(0x20)) + [0x7F])
+    @pytest.mark.asyncio
+    async def test_every_control_in_path_is_malformed(self, bad):
+        await _check_malformed(self._fields(b'/a' + bytes([bad]) + b'b'))
+
+    @pytest.mark.parametrize('bad', [b' ', b'\xc3\xa9'])
+    @pytest.mark.asyncio
+    async def test_non_visible_path_octet_is_malformed(self, bad):
+        await _check_malformed(self._fields(b'/a' + bad + b'b'))
+
+    @pytest.mark.asyncio
+    async def test_control_in_extended_connect_path_is_malformed(self):
+        """RFC 8441 reads ``:path`` too, so the rule cannot sit only in the
+        non-CONNECT branch."""
+        await _check_malformed([
+            (b':method', b'CONNECT'), (b':protocol', b'websocket'),
+            (b':scheme', b'https'), (b':authority', b'example.com'),
+            (b':path', b'/ws\x01'),
+        ])
+
+    @pytest.mark.asyncio
+    async def test_a_visible_ascii_path_is_accepted(self):
         handler, app = _make_h2_actor()
-        h = _make_headers_frame(1, end_stream=True, fields=fields)
+        h = _make_headers_frame(1, end_stream=True,
+                                fields=self._fields(b'/a/b?x=1'))
         settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
         handler.receive = AsyncMock(side_effect=[settings, h, None])
         await handler.run()
-        for call in handler.send_frame.call_args_list:
-            frame = call.args[0]
-            if hasattr(frame, 'FrameType') and frame.FrameType() == FrameTypes.RST_STREAM:
-                if frame.stream_id == 1:
-                    return
-        pytest.fail(f'Malformed request with fields {fields} was not rejected')
+        assert app.await_count == 1
+        assert not [
+            call for call in handler.send_frame.call_args_list
+            if hasattr(call.args[0], 'FrameType')
+            and call.args[0].FrameType() == FrameTypes.RST_STREAM
+        ]
 
 
 # ═══════════════════════════════════════════════════════════════════════

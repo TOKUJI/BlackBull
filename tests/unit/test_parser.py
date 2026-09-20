@@ -455,6 +455,28 @@ class TestParseHeadersNoneContract:
             http1_ok = True
         assert (_real_parse_headers(frame) is not None) is http1_ok
 
+    @pytest.mark.parametrize('value', [
+        b'/', b'/a/b?x=1', b'/%E4%BE%8B', b'/a~b!$&()*+,;=:@',
+        b'/a\x01b', b'/a\x7fb', b'/a b', '/a\u00e9b'.encode('utf-8'),
+    ])
+    def test_path_verdict_matches_http1(self, value):
+        """The same path octets are accepted or refused identically on both
+        transports."""
+        frame = self._headers_frame([
+            (b':method', b'GET'), (b':scheme', b'https'),
+            (b':authority', b'example.com'), (b':path', value),
+        ])
+        from blackbull.server.http1_actor import BadRequestError
+        actor = object.__new__(_HTTP1Actor)
+        actor._ssl = False
+        try:
+            actor._parse(b'GET ' + value + b' HTTP/1.1\r\nHost: h\r\n\r\n')
+        except BadRequestError:
+            http1_ok = False
+        else:
+            http1_ok = True
+        assert (_real_parse_headers(frame) is not None) is http1_ok
+
     def test_well_formed_frame_returns_connection_not_none(self):
         conn = _real_parse_headers(_make_h2_headers_frame_dispatch())
         assert conn is not None
