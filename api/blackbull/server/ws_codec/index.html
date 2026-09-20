@@ -4833,6 +4833,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.ws_codec.InvalidFrameLength" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        InvalidFrameLength
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.ws_codec.MessageTooLarge" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5499,6 +5510,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.ws_codec.InvalidFrameLength" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        InvalidFrameLength
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.ws_codec.MessageTooLarge" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5686,6 +5708,63 @@ module-level functions directly.</p>
 declared payload length exceeds it.  The caller is responsible for
 translating this into a WebSocket-level CLOSE (RFC 6455 §7.4.1
 code 1009 MESSAGE_TOO_BIG) — the codec stays protocol-agnostic.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.server.ws_codec.InvalidFrameLength" class="doc doc-heading">
+            <code>InvalidFrameLength</code>
+
+
+<a href="#blackbull.server.ws_codec.InvalidFrameLength" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="Exception">Exception</span></code></p>
+
+
+
+        <p>Raised by <a class="autorefs autorefs-internal" title="read_payload(reader, masked, length, *, max_length=None)
+
+  
+      async
+  " href="#blackbull.server.ws_codec.read_payload"><code>read_payload</code></a> when the length field breaks RFC 6455 §5.2.</p>
+<p>Two rules, both about the <em>encoding</em> rather than the size: the 16-bit and
+64-bit forms carry only values that do not fit the shorter form, and the
+most significant bit of the 64-bit form is zero.  The caller translates
+this into a protocol-error CLOSE (RFC 6455 §7.4.1 code 1002); like
+<a class="autorefs autorefs-internal" href="#blackbull.server.ws_codec.FramePayloadTooLarge"><code>FramePayloadTooLarge</code></a>, the codec stays protocol-agnostic.</p>
 
 
 
@@ -6058,6 +6137,10 @@ from the 16-bit or 64-bit extended-length field per RFC 6455
 reading any body bytes off the wire.  Defends against
 post-handshake OOM where the peer advertises a 2**63 - 1 payload
 and the server tries to buffer it.</p>
+<p>A length field that breaks §5.2 raises <a class="autorefs autorefs-internal" href="#blackbull.server.ws_codec.InvalidFrameLength"><code>InvalidFrameLength</code></a>
+instead, judged the same way: before the size cap and before any
+body byte, so an unreadable encoding cannot be made legal by
+staying under a cap.</p>
 
 
     </div>
