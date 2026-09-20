@@ -1,6 +1,9 @@
 """HTTP/2 stream ownership is released through one idempotent lifecycle."""
 
 import asyncio
+import gc
+import inspect
+import warnings
 from http import HTTPStatus
 from types import SimpleNamespace
 
@@ -1146,3 +1149,151 @@ async def test_undecoded_header_block_over_cap_is_connection_error():
     sent = _frames(actor)
     assert [frame for frame in sent if frame.FrameType() == FrameTypes.GOAWAY]
     assert not [frame for frame in sent if frame.FrameType() == FrameTypes.RST_STREAM]
+
+
+class _RefusingTaskGroup:
+    """A task group at shutdown on 3.11/3.12.
+
+    ``create_task`` raises *without* closing the coroutine it was handed —
+    the interpreter behaviour the fix must not depend on (3.13 closes it for
+    us, which is why the leak was invisible on the development interpreter).
+    """
+
+    def __init__(self) -> None:
+        self.handed: list = []
+
+    def create_task(self, coro):
+        self.handed.append(coro)
+        raise RuntimeError('TaskGroup is shutting down')
+
+
+class _ClosingRefusingTaskGroup(_RefusingTaskGroup):
+    """The 3.13 behaviour: raise *and* close the coroutine for us."""
+
+    def create_task(self, coro):
+        self.handed.append(coro)
+        coro.close()
+        raise RuntimeError('TaskGroup is shutting down')
+
+
+def _assert_replay_coroutine_closed(coro) -> None:
+    assert inspect.getcoroutinestate(coro) is inspect.CORO_CLOSED, (
+        'the replay coroutine the task group rejected was left unclosed')
+
+
+def _update_recorder(actor: HTTP2Actor) -> list:
+    sent: list = []
+
+    async def send_control(frame) -> None:
+        if frame.FrameType() == FrameTypes.WINDOW_UPDATE:
+            sent.append((frame.stream_id, frame.window_size))
+
+    actor._control_sender = send_control
+    return sent
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_replay_coroutine_is_closed_and_not_reused():
+    actor = _actor()
+    sent = _update_recorder(actor)
+    group = _RefusingTaskGroup()
+    actor._task_group = group
+
+    task = actor._schedule_credit_replay(7)
+    await asyncio.gather(task)
+
+    rejected, = group.handed
+    _assert_replay_coroutine_closed(rejected)
+    assert task.get_coro() is not rejected, 'fallback reused the rejected object'
+    assert sent == [(0, 7)], 'the fallback replays the connection window once'
+    assert not actor._credit_flush_tasks
+
+
+def _unawaited_coroutine_warnings(record) -> list:
+    return [w for w in record
+            if issubclass(w.category, RuntimeWarning)
+            and 'never awaited' in str(w.message)]
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_replay_leaves_no_unawaited_coroutine_warning():
+    actor = _actor()
+    _update_recorder(actor)
+    group = _RefusingTaskGroup()
+    actor._task_group = group
+
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter('always')
+        task = actor._schedule_credit_replay(7)
+        await asyncio.gather(task)
+        actor._task_group = None
+        del task
+        group.handed.clear()   # drop the last reference to the rejected object
+        del group
+        gc.collect()
+
+    assert not _unawaited_coroutine_warnings(record)
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_replay_tolerates_an_already_closed_coroutine():
+    """3.13 closes the rejected coroutine itself; closing it again must be a
+    no-op and the fallback must still replay once."""
+    actor = _actor()
+    sent = _update_recorder(actor)
+    actor._task_group = _ClosingRefusingTaskGroup()
+
+    task = actor._schedule_credit_replay(7)
+    await asyncio.gather(task)
+
+    assert sent == [(0, 7)]
+    assert not actor._credit_flush_tasks
+
+
+@pytest.mark.asyncio
+async def test_an_accepted_replay_runs_once_and_is_joined_by_the_group():
+    sent: list = []
+    async with asyncio.TaskGroup() as tg:
+        actor = _actor()
+        actor._task_group = tg
+        actor._control_sender = None
+
+        async def send_control(frame) -> None:
+            if frame.FrameType() == FrameTypes.WINDOW_UPDATE:
+                sent.append((frame.stream_id, frame.window_size))
+
+        actor._control_sender = send_control
+        task = actor._schedule_credit_replay(5)
+        assert task in actor._credit_flush_tasks
+
+    assert sent == [(0, 5)]
+    assert not actor._credit_flush_tasks
+
+
+def test_the_coroutine_state_check_flags_a_deliberately_leaked_coroutine():
+    """The instrument the two tests above rely on has to fail on a leak."""
+
+    async def _never_awaited() -> None:
+        return None
+
+    coro = _never_awaited()
+    try:
+        with pytest.raises(AssertionError):
+            _assert_replay_coroutine_closed(coro)
+    finally:
+        coro.close()
+
+
+def test_the_unawaited_warning_check_detects_a_deliberate_leak():
+    """Same for the warning instrument: an abandoned coroutine must trip it."""
+
+    async def _never_awaited() -> None:
+        return None
+
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter('always')
+        _never_awaited()
+        gc.collect()
+
+    assert _unawaited_coroutine_warnings(record), (
+        'the warning instrument cannot see an abandoned coroutine')
