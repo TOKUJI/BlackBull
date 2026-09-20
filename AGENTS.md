@@ -1,84 +1,209 @@
 # AGENTS.md — BlackBull
 
-This file extends the `AGENTS.md` in the parent directory; do not restate its
-rules here.
+## Identity
 
-## Implementation discipline
+BlackBull is a **multi-protocol async framework with its own ASGI 3.0-compatible
+server** — HTTP/1.1, HTTP/2, WebSocket, gRPC, and MQTT 5 coexist in one process,
+no reverse proxy or sidecar required.  
+An **actor-model core** gives every connection its own isolated inbox loop; the 
+same message-passing runtime drives all protocols.
 
-Before writing code, follow this order:
+**Lightweight by design**: declarative DI, OpenAPI schema generation, and a rich 
+router — but no built-in template engine, auth, or ORM.  
+**Pure Python** (zero C extensions), **competitive throughput**, and
+**RFC-grade conformance** (h2spec, Autobahn, http11probe, RFC 10008 HTTP QUERY).
 
-1. Search the Python standard library, available packages, and this repository
-   for the required capability.
-2. If an equivalent implementation exists, reuse it; do not add another.
-3. If a similar implementation exists, determine whether both can share one
-   abstraction or implementation.
-4. If they can, refactor them to share it.
-5. Add a new implementation only after establishing that neither reuse nor
-   commonization is possible.
+---
 
-Add prose, including comments and documentation, only when omitting it would
-cause a user or developer to make a mistake. Prefer a name, type, signature,
-or test; do not restate one in prose.
+## Operating principles
 
-Run `just typecheck`, `just test`, and `just docs` as applicable. When behavior
-or an API changes, update `docs/guide/` for users or `docs/about/` for internals.
+- Write only what prevents a user misusing this or a developer implementing it
+  wrong.  Say it once, in the fewest words, and in a name, a signature or a
+  test where one will carry it.
 
-## Architecture invariants
+- **Type-check before committing.** `just typecheck` catches contract
+  violations statically.  → `.claude/skills/type-check/SKILL.md` [private]
 
-- **Protocol ownership:** HTTP/1.1, HTTP/2, WebSocket, gRPC, and MQTT wire
-  handling stays pure Python. Do not depend on `h11`, `h2`, `wsproto`, or any
-  other third-party protocol implementation.
-  See `docs/about/architecture.md`.
-- **Actors:** concurrency uses message passing, not shared locks.
-  `ConnectionActor` creates one protocol actor and inbox loop per connection;
-  only that loop mutates its state. Use a per-connection `asyncio.TaskGroup`.
-  See `docs/about/internals.md`.
-- **Connection boundary:** the native server carries typed `Connection`
-  objects end to end. ASGI scope dictionaries exist only for external ASGI
-  hosts and `BB_FORCE_ASGI_SCOPE=1`; `scope` always means such a dictionary.
-  See `docs/about/internals.md` (Read-path invariant).
-- **One runtime:** all protocols share one process and runtime. Attach non-HTTP
-  protocols with `app.add_extension(...)`.
-  See `docs/about/architecture.md`.
-- **Events:** Level A messages are internal actor traffic. Level B exposes
-  `@app.on` (fire-and-forget, isolated exceptions) and `@app.intercept`
-  (synchronous, may short-circuit). Each of the four request-lifecycle events
-  fires exactly once per request on every transport.
-  See `docs/guide/events.md`.
-- **Send path:** protocol senders pass parts to `BaseSender._write_many(parts)`;
-  they do not choose joining or vectored writes. The 32 KiB size gate decides.
-  See `docs/about/internals.md` (Send-path invariant).
+- **When stuck on handler code, consult docs and examples.**  Consult
+  `docs/getting-started/` and `examples/` before guessing.  A signature
+  mistake (full ASGI vs simplified form) wastes EC2 hours.
 
-## Required conventions
+### BlackBull addenda to the workspace rules
 
-- Header keys are bytes and lookups use lowercase, for example
-  `headers.get(b"content-type")`.
-  See `docs/guide/requests-and-responses.md`.
-- WebSocket servers never mask outgoing frames. `FragmentAssembler` gives the
-  application complete messages; RSV1 denotes per-message deflate.
-  See `docs/guide/websockets.md`.
-- The router recognizes a full handler only when both `receive` and `send` are
-  present; simplified handlers return `str | bytes | dict | Response | None`.
-  WebSocket handlers always use `(conn, receive, send)`.
-  See `docs/getting-started/first-app.md`.
-- Middleware uses `(conn, receive, send, call_next)` and short-circuits by not
-  calling `call_next`. `@as_middleware` converts `Response` objects to ASGI
-  events. See `docs/guide/middleware.md`.
-- `@log` checks its logger level at decoration time. Use `blackbull.*` for
-  DEBUG and `blackbull.access` for INFO.
-  See `docs/guide/logging.md`.
+- *Docs follow code* — the page to update lives under `docs/`: `docs/guide/`
+  covers user-facing features; `docs/about/` covers internals.
 
-## YouTrack safety
+---
 
-- Use only the `just yt-*` commands in `justfile`; do not call the REST API
-  directly, hard-code credentials, or print `YOUTRACK_URL` or
-  `YOUTRACK_TOKEN`.
-- Issues use `BLA-<n>` and Knowledge Base articles use `BLA-A-<n>`. Use
-  `just yt-show` for issues and `just yt-article` for articles.
-- Every `just yt-article-update` invocation requires the user's explicit
-  permission for that specific edit. This gate does not apply to issues.
+## Architecture principles
 
-Tracker planning uses issue `Type` and the `active`, `candidate`, `archive`,
-and `sprint-log` tags. Close superseded work; do not move or delete its record,
-and do not infer staleness from age. Prioritize `tag: active #Unresolved` by
-`Priority`.
+Non-negotiable structural rules.  Each cites its authoritative source —
+the *why* lives there; here is the *what* so you don't violate it by accident.
+
+- **Protocol ownership** — Every byte of HTTP/1.1, HTTP/2, WebSocket, gRPC,
+  and MQTT is pure Python.  Never introduce a dependency on `h11`, `h2`,
+  `wsproto`, or any third-party protocol library.
+  → `docs/about/architecture.md`
+
+- **Actor model** — Concurrency is message-passing, not shared-lock.
+  `ConnectionActor` spawns a protocol actor per connection; each runs its own
+  inbox loop.  State lives inside one actor, mutated only by that actor's loop.
+  Per-connection `asyncio.TaskGroup` for structured concurrency.
+  → `docs/about/internals.md`, `.claude/design/actor-model.md`
+
+- **Native `Connection`, not ASGI scope** — BlackBull's own server threads a
+  typed `Connection` end-to-end.  ASGI scope dicts exist only at two boundaries
+  (external ASGI hosts and `BB_FORCE_ASGI_SCOPE=1`).  The word `scope` in code
+  means a genuine ASGI scope dict — never a `Connection`.
+  → `docs/about/internals.md` §Read-path invariant.  This pointer said
+  `architecture.md` for a long time; that page contains the word "ASGI" zero
+  times, so an agent sent there found nothing and re-derived the principle in
+  the source — four times over, in `app.py` alone.
+
+- **Multi-protocol, one process** — HTTP, WebSocket, gRPC, and MQTT share one
+  runtime.  Non-HTTP protocols attach through `app.add_extension(...)`.
+  → `docs/about/architecture.md`
+
+- **Two-level event system** — Level A: internal actor-to-actor messages (not
+  subscribable from application code).  Level B: `@app.on` (fire-and-forget,
+  exceptions isolated) / `@app.intercept` (synchronous, can short-circuit).
+  The four request-lifecycle events fire exactly once per request under any
+  transport.  → `.claude/design/event-catalogue.md`, `docs/guide/events.md`
+
+- **Send-path invariant** — Protocol senders never choose join-vs-vectored;
+  they call `BaseSender._write_many(parts)`.  The size gate (32 KiB) decides.
+  → `docs/about/internals.md` §Send-path invariant
+
+---
+
+## Conventions & gotchas
+
+Rules that aren't architectural but will cause subtle bugs if you forget them.
+
+- **Headers: bytes keys, lowercase index** — `headers.get(b'content-type')`.
+  → `docs/guide/requests-and-responses.md`
+
+- **WebSocket** — Server never masks outgoing frames (RFC 6455 §5.1).
+  `FragmentAssembler` reassembles transparently; the app always receives one
+  complete message.  RSV1 = per-message deflate (RFC 7692).
+  → `docs/guide/websockets.md`
+
+- **Handler signatures** — The router detects simplified vs full form at
+  registration time.  Full form = both `receive` + `send` params present;
+  simplified = return `str | bytes | dict | Response | None`.  Middleware
+  and WebSocket handlers always use the full `(conn, receive, send)` form.
+  → `docs/getting-started/first-app.md`
+
+- **Middleware** — `(conn, receive, send, call_next)`.  Short-circuit by
+  returning without calling `call_next`.  `@as_middleware` normalises
+  `Response` objects into plain ASGI events.
+  → `docs/guide/middleware.md`
+
+- **Logging** — `@log` checks the logger level at decoration time (import);
+  a zero-cost no-op when DEBUG is disabled.  Two hierarchies: `blackbull.*`
+  (DEBUG) and `blackbull.access` (INFO).
+  → `docs/guide/logging.md`
+
+---
+
+## Tool preferences
+
+The general table — search priority `ast-grep` → `rg` → `grep`, plus `uv`,
+`just`, `py-spy`, `jq`, `bc` — is in `~/work/AGENTS.md`.  BlackBull specifics:
+
+- **`just`** — the repo's `justfile` carries `just typecheck`, `just test`,
+  `just docs`.
+- **`jq`** — filter conformance output, e.g.
+  `jq '[.cases[] | select(.state=="failed")]'` on h2spec / http11probe results.
+- **`uv`** — entry points are declared in `pyproject.toml` `[project.scripts]`.
+- **`py-spy`** — the profiling workflow lives in
+  `.claude/patterns/benchmarking.md` §Profiling [private].
+
+- **YouTrack** — use the `just yt-*` commands in `justfile` for all tracker
+  access; they read `YOUTRACK_URL` and `YOUTRACK_TOKEN` internally. Do not
+  access the REST API directly, hard-code credentials, or print the token.
+  Two namespaces, not one: issues are `BLA-<n>` and articles — the Knowledge
+  Base — are `BLA-<n>`'s sibling `BLA-A-<n>`. An article id handed to
+  `yt-show` answers 404 and reads as a typo, so reach for `yt-article`
+  (no id lists them all).
+
+- **Never rewrite a Knowledge Base article without asking first.** `just
+  yt-article-update` exists, and every use of it needs the user's explicit
+  say-so *for that edit*, not a standing permission carried over from an
+  earlier one. Articles are the research and design notes the tracker holds
+  still: `docs/about/security-model.md` is a projection of `BLA-A-1`, and
+  `BLA-A-10` specifies how — so an article edited in passing silently moves
+  what a public page is supposed to be derived from. Issues change with the
+  work and need no such gate; articles do not.
+
+---
+
+## Working docs map
+
+This file and `~/work/AGENTS.md` are the only docs auto-loaded every session.
+The docs below are **not** loaded automatically — open the relevant one when
+the trigger applies. Do not duplicate their content here; link, don't copy.
+
+Entries under `.claude/` are **git-ignored** (stored in a private companion
+repo; see `.claude/CLAUDE_DEV.md` for setup).  Each entry lists a public
+fallback where one exists.
+
+| When you are… | Read |
+|---|---|
+| Doing any framework change (workflow, testing, type rules) | `.claude/CLAUDE_DEV.md` [private] |
+| Writing/adjusting tests | `.claude/patterns/testing.md` + `.claude/skills/create-test/SKILL.md` [both private] |
+| Running benchmarks or profiling | `.claude/patterns/benchmarking.md` + `.claude/skills/bench-compare/SKILL.md` [both private] |
+| Chaining dependent long-running steps (multi-phase measurement/build) | `.claude/patterns/chaining-long-running-steps.md` [private] |
+| Running peer server comparisons (FastAPI / Sanic / etc.) locally | `.claude/skills/peer-compare/SKILL.md` [private] |
+| High-precision A/B check (rule out regression / equivalence within ±Δ%) | `bench/peers/AB-HIGH-PRECISION.md` + `.claude/skills/ab-verify/SKILL.md` [skill private] — read the null phase before trusting a real verdict; pooled TOST on EC2 |
+| Tracing a regression across sprints | YouTrack, `tag: sprint-log` [private] — per-sprint bottleneck-attribution logs.  `bench/CHARACTERIZATION.md` is the public summary; the tracker holds the raw diagnostic numbers |
+| Cutting a release / sprint close | `.claude/patterns/release.md` + `.claude/skills/sprint-close/SKILL.md` [both private] |
+| Reasoning about actors / events | `.claude/design/actor-model.md` + `.claude/design/event-catalogue.md` [both private] |
+| Checking a known gotcha before acting | `.claude/patterns/cautions.md` [private] |
+| Adding or changing a resource limit / reviewing defence coverage | `BLA-A-1` [private] — the mechanism × surface matrix, the limit-triad grid, and the closed gap register with its evidence pointers |
+| Answering a user's question about BlackBull's security posture | `docs/about/security-model.md` — quote the published claim rather than improvising one; it is a projection of the audit above, so the two must not drift |
+| Picking/triaging what to build next | YouTrack, `tag: active #Unresolved` ordered by `Priority` [private] — Critical first.  The hand-sorted index this replaced is closed: it fell four proposals behind before anyone noticed |
+| Reading a point-in-time design | YouTrack Knowledge Base [private] |
+
+**Skills** (invocable, harness-surfaced; they live in `.claude/skills/` [private] —
+`.github/skills` is an optional local symlink, see `.gitignore`):
+`plan-change`, `ab-verify`, `refactor`, `sprint-close`, `bench-compare`, `peer-compare`,
+`pre-release-docs`, `update-roadmap`, `create-test`, `type-check`, `add-event`,
+`new-http2-frame`, `protocol-handler`, `httparena-bench`, `run-http11probe`.
+
+### Task-to-skill mapping
+
+Before acting on a request, read the corresponding skill file first.
+
+| Request type | Read first |
+|---|---|
+| Benchmark / performance comparison | `.claude/skills/bench-compare/SKILL.md` [private] |
+| A/B regression check / rule out regression / equivalence within ±Δ% | `.claude/skills/ab-verify/SKILL.md` [private] + `bench/peers/AB-HIGH-PRECISION.md` |
+| HttpArena (EC2 / local) | `.claude/skills/httparena-bench/SKILL.md` [private] |
+| HttpArena local run details | `/memories/repo/httparena-local-run.md` |
+| Type checking | `.claude/skills/type-check/SKILL.md` [private] |
+| Test authoring | `.claude/skills/create-test/SKILL.md` [private] |
+| New event | `.claude/skills/add-event/SKILL.md` [private] |
+| New protocol handler | `.claude/skills/protocol-handler/SKILL.md` [private] |
+| New HTTP/2 frame | `.claude/skills/new-http2-frame/SKILL.md` [private] |
+| Pre-release audit | `.claude/skills/pre-release-docs/SKILL.md` [private] |
+| Sprint close | `.claude/skills/sprint-close/SKILL.md` [private] |
+| Roadmap update | `.claude/skills/update-roadmap/SKILL.md` [private] |
+| Planning any change / scoping an issue / briefing a subagent | `.claude/skills/plan-change/SKILL.md` [private] |
+
+### Doc lifecycle (so docs don't rot)
+
+Planning material lives in the tracker, not in files.  A document's state is the
+issue's own: `Type` says what it is, the tag says which stage it occupies
+(`active`, `candidate`, `archive`, `sprint-log`), and closing an issue is what
+moving a file to `archives/` used to mean.  Nothing is relocated and nothing is
+deleted, so a superseded proposal stays readable rather than disappearing from
+a git-ignored tree.
+
+There is deliberately **no age-based staleness rule**.  One existed — a
+scheduled rule tagging anything unresolved and `active` after thirty days
+without an update — and it was withdrawn: against a backlog of this size and a
+closure rate that keeps the count roughly flat, it labelled most of the
+tracker, and a label most items carry says nothing.  Age is not evidence that
+an item has stopped being true.  What an item is worth is read from `Priority`
+and from the triage query above, both of which someone has to think about.

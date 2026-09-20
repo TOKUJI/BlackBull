@@ -255,17 +255,13 @@ fi
 
 _teardown() {
     local rc=$?
-    trap - EXIT
     if [ "$KEEP_INSTANCE" = "1" ]; then
         echo "KEEP_INSTANCE=1 — leaving EC2 alive; remember to run 'bash bench/aws/down.sh'"
-        exit "$rc"
+        return $rc
     fi
     echo ">>> bench/aws/down.sh (trap EXIT) ..."
-    if ! bash "$(dirname "$0")/down.sh"; then
-        echo "HTTPArena teardown failed; state is retained for retry." >&2
-        rc=1
-    fi
-    exit "$rc"
+    bash "$(dirname "$0")/down.sh" || true
+    return $rc
 }
 trap _teardown EXIT
 
