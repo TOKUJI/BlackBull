@@ -5597,9 +5597,9 @@
      and re-forks workers — now running the <em>new</em> code.</li>
 </ol>
 <p>Picking up new code requires the master itself to re-import, which is
-why we re-exec the whole process rather than <code>importlib.reload</code>.  The
-listening sockets do not close at any point: kernel multiplexes the
-same fd across master+workers; only python state churns.</p>
+why we re-exec the whole process rather than <code>importlib.reload</code>.  On a
+successful re-exec, the listening sockets stay open throughout: the
+kernel multiplexes the same fd across master+workers while Python state churns.</p>
 <p>The watcher runs in a daemon thread so it can not block the master's
 synchronous supervision loop.  It debounces filesystem events itself
 (watchfiles default ~50 ms) so a single editor save does not trigger

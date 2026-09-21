@@ -836,6 +836,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#startup-is-all-or-nothing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Startup is all-or-nothing
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -5480,6 +5491,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#startup-is-all-or-nothing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Startup is all-or-nothing
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -5605,6 +5627,16 @@ not rewritten; the answer is read back:</p>
 </code></pre></div>
 <p><code>server.port</code> and <code>server.unix_path</code> describe the first listener, as they
 always did.</p>
+<h2 id="startup-is-all-or-nothing">Startup is all-or-nothing<a class="headerlink" href="#startup-is-all-or-nothing" title="Permanent link">&para;</a></h2>
+<p>BlackBull does not publish or serve a partial listener set. It first acquires
+every requested TCP, Unix, inherited-fd, and protocol-specific socket; only
+then does it expose the set through <code>bound_listeners</code>. If a later bind or
+socket inspection fails, all sockets acquired by that attempt are closed and
+the <code>Server</code> remains unbound, so the same object can retry <code>open_socket()</code>.</p>
+<p>Once event-loop servers are created, accepting still waits for lifespan
+startup to complete. A failure while grouping listeners by TLS context, during
+lifespan startup, or while starting acceptance closes every earlier group and
+reclaims the lifespan task before the original startup exception is reported.</p>
 
 
 

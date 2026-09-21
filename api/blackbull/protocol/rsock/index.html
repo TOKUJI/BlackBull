@@ -3893,6 +3893,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.protocol.rsock.close_sockets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        close_sockets
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.protocol.rsock.create_configured_sockets" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5494,6 +5505,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.protocol.rsock.close_sockets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        close_sockets
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.protocol.rsock.create_configured_sockets" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5673,6 +5695,24 @@ on the user's behalf.</p>
 object anyway (useful for non-systemd handoff and for tests).</p>
 <p>The fd is <em>not</em> unset CLOEXEC — workers inherit it via fork, the
 multiworker path already handles set_inheritable as needed.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.protocol.rsock.close_sockets" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">close_sockets</span><span class="p">(</span><span class="n">sockets</span><span class="p">)</span></code>
+
+<a href="#blackbull.protocol.rsock.close_sockets" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Close each live descriptor once and return any close failures.</p>
 
 
     </div>

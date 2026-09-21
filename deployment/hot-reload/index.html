@@ -5576,10 +5576,19 @@ app.run<span class="o">(</span><span class="nv">port</span><span class="o">=</sp
    can adopt them.</li>
 <li>The fresh master forks workers from the new code.</li>
 </ol>
-<p>The kernel multiplexes the same listening fd across master
-generations — no socket is ever closed, so connections in
-flight during a reload finish under the old workers, and new
-connections route to new workers transparently.</p>
+<p>The handoff is transactional. The old master records the previous
+<code>BB_INHERIT_FDS</code> value and each descriptor's inheritable flag before calling
+<code>execvp</code>. If descriptor preparation or <code>execvp</code> fails, those values are
+restored, workers and the watcher are reclaimed within the existing shutdown
+deadline, and the listening sockets are closed by the old master. The fresh
+master likewise adopts the advertised descriptors as one set: a malformed or
+unusable member closes any descriptors already adopted instead of starting
+with only part of the listener set.</p>
+<p>On a successful handoff, the kernel multiplexes the same listening fd across
+master generations without closing it, so connections in flight during a
+reload finish under the old workers and new connections route to new workers
+transparently. A failed handoff instead rolls back and closes the old master's
+listeners as described above.</p>
 <p>Each step logs at <code>INFO</code>, so a reload that doesn't happen can be
 attributed rather than guessed at:</p>
 <div class="highlight"><pre><span></span><code>auto-reload: watching /srv/app for *.py changes     # watcher armed

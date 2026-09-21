@@ -5776,7 +5776,7 @@ the object under <code>BlackBull.run()</code>.  It resolves its
   " href="../listener/#blackbull.server.listener.Listener"><code>Listener</code></a> set into bound sockets, groups
 them by TLS context so a listener terminates the certificate it names, and
 serves each group through
-<a class="autorefs autorefs-internal" title="SocketManager(socket_cb_pairs, ssl_context)
+<a class="autorefs autorefs-internal" title="SocketManager(socket_cb_pairs, ssl_context, cleanup_budget=None)
 
   
       async
@@ -6181,7 +6181,7 @@ in a SIGKILL.</p>
 
 
 <h3 id="blackbull.server.server.SocketManager" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">SocketManager</span><span class="p">(</span><span class="n">socket_cb_pairs</span><span class="p">,</span> <span class="n">ssl_context</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">SocketManager</span><span class="p">(</span><span class="n">socket_cb_pairs</span><span class="p">,</span> <span class="n">ssl_context</span><span class="p">,</span> <span class="n">cleanup_budget</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
