@@ -42,7 +42,9 @@ def test_adopt_returns_none_when_env_blank(monkeypatch):
 
 def test_adopt_returns_none_when_env_malformed(monkeypatch):
     monkeypatch.setenv(_INHERIT_FDS_ENV, 'not-a-number,bogus')
-    assert adopt_inherited_sockets() is None
+    with pytest.raises(RuntimeError, match='Malformed BB_INHERIT_FDS'):
+        adopt_inherited_sockets()
+    assert _INHERIT_FDS_ENV not in os.environ
 
 
 def test_adopt_builds_sockets_and_clears_env(monkeypatch):

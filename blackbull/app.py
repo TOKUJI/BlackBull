@@ -1356,31 +1356,58 @@ def serve(app, *,
                                listeners=listeners)
 
     # Before open_socket and before the fork — see on_warmup.
+    from .protocol.rsock import close_sockets  # noqa: PLC0415
     from .server.warmup import run_warmup  # noqa: PLC0415
-    run_warmup(app, master_server.ssl_context)
+    supervisor_ssl_context = master_server.ssl_context
+    run_warmup(app, supervisor_ssl_context)
 
-    master_server.open_socket(port, unix_path=unix_path, inherited_fd=inherited_fd)
-    addr = (f'unix:{master_server.unix_path}'
-            if master_server.unix_path else
-            f'port {master_server.port}')
-    logger.info(
-        'Starting %d worker(s) on %s%s', workers, addr,
-        ' [auto-reload]' if reload else '',
-    )
+    bound_listeners = None
+    try:
+        master_server.open_socket(
+            port, unix_path=unix_path, inherited_fd=inherited_fd)
+        addr = (f'unix:{master_server.unix_path}'
+                if master_server.unix_path else
+                f'port {master_server.port}')
+        logger.info(
+            'Starting %d worker(s) on %s%s', workers, addr,
+            ' [auto-reload]' if reload else '',
+        )
 
-    MultiWorkerServer(
-        app,
-        master_server.bound_listeners,
-        master_server.ssl_context,
-        workers=workers,
-        max_connections=max_connections,
-        stream_queue_depth=stream_queue_depth,
-        ws_queue_depth=ws_queue_depth,
-        reload=reload,
-        reload_paths=reload_paths,
-    ).run()
+        # The local scope owns the detached listeners until the supervisor has
+        # entered run(); re-closing after its own rollback is harmless.
+        bound_listeners = master_server._take_bound_listeners()
 
-    master_server.close_socket()
+        MultiWorkerServer(
+            app,
+            bound_listeners,
+            supervisor_ssl_context,
+            workers=workers,
+            max_connections=max_connections,
+            stream_queue_depth=stream_queue_depth,
+            ws_queue_depth=ws_queue_depth,
+            reload=reload,
+            reload_paths=reload_paths,
+        ).run()
+    except BaseException:
+        try:
+            if bound_listeners is None:
+                cleanup_error = master_server._close_socket()
+            else:
+                cleanup_error = close_sockets(
+                    sock
+                    for _listener, sockets in bound_listeners
+                    for sock in sockets)
+        except BaseException as exc:
+            cleanup_error = exc
+        if cleanup_error is not None:
+            try:
+                logger.error(
+                    'Failed to close listeners during startup rollback: %s',
+                    cleanup_error)
+            except BaseException:
+                # Logging caused, or must not replace, the startup failure.
+                pass
+        raise
 
 
 def _serve_single_worker(

@@ -32,10 +32,12 @@ import sys
 import time
 from dataclasses import dataclass
 
+from .._cleanup import combine_cleanup_errors
 from .listener import InheritedFd, Listener
 from .recipient import _WS_READ_INLINE
 from .worker import run_worker
-from ..protocol.rsock import create_configured_sockets, REUSEPORT_SUPPORTED
+from ..protocol.rsock import (close_sockets, create_configured_sockets,
+                              REUSEPORT_SUPPORTED)
 
 logger = logging.getLogger(__name__)
 
@@ -224,14 +226,6 @@ def _held_elsewhere(plan: _PlannedListener) -> bool | None:
     return any(inode in listening for _family, inode in plan.adopted)
 
 
-def _release_worker_sockets(worker_listeners) -> None:
-    """Close the sets just bound, so a refusal does not hold the port."""
-    for group in worker_listeners:
-        for _listener, bound in group:
-            for sock in bound:
-                sock.close()
-
-
 def _refusal(workers: int, where: str, reason: str) -> str:
     """The one refusal an unserved port gets, naming every way out of it."""
     return (f'BB_SOCKET_REUSEPORT=1 with {workers} worker(s) cannot give each '
@@ -280,7 +274,6 @@ def _refuse_when_unserved(planned, worker_listeners, workers: int) -> None:
         reason = _unserved_reason(plan, worker_listeners, index)
         if reason is None:
             continue
-        _release_worker_sockets(worker_listeners)
         raise RuntimeError(_refusal(workers, plan.where, reason))
 
 
@@ -341,88 +334,86 @@ class MultiWorkerServer:
                  shutdown_timeout: float = _SHUTDOWN_TIMEOUT,
                  reload: bool = False,
                  reload_paths=None):
-        if workers < 1:
-            raise ValueError(f'workers must be >= 1, got {workers}')
-        self._app = app
-        self._ssl_context = ssl_context
-        self._num_workers = workers
-        # Who owns what is the listener's own answer, read here and nowhere
-        # else.  A single-owner listener (a stateful broker) stays on the
-        # master's socket so a respawned worker 0 re-inherits it.
         bound_listeners = list(bound_listeners)
-        if workers > 1:
-            _settle_stateful_bindings(app, workers)
-        self._shared = [(l, socks) for l, socks in bound_listeners
-                        if l.workers == 'all']
-        self._single_owner = [(l, socks) for l, socks in bound_listeners
-                              if l.workers == 'one']
-        self._max_connections = max_connections
-        self._stream_queue_depth = stream_queue_depth
-        self._ws_queue_depth = ws_queue_depth
-        self._shutdown_timeout = shutdown_timeout
-        self._reload = reload
-        self._reload_paths = reload_paths
-        self._reload_pending = False
-        # Never re-initialised in run(): signal handlers are installed before
-        # the workers spawn, so a stop can land mid-startup, and resetting the
-        # flag afterwards would discard it and leave the master supervising
-        # until something SIGKILLs it.
-        self._stopped = False
-        self._watcher = None  # set in run() when reload is enabled
-        self._processes: list = []
-        # The original listening sockets the master adopts/binds.  These
-        # are the ones we hand off across exec when reloading — distinct
-        # from ``_worker_sockets`` which may be SO_REUSEPORT sets.
-        self._listening_sockets = [s for _l, socks in self._shared for s in socks]
-        # Use 'fork' so workers inherit socket FDs and the app object without
-        # pickling.  'spawn' would require the app and sockets to be picklable
-        # and would re-import all modules from scratch.
-        self._mp_ctx = multiprocessing.get_context('fork')
+        self._worker_listeners = []
+        self._pending_processes: list = []
+        try:
+            if workers < 1:
+                raise ValueError(f'workers must be >= 1, got {workers}')
+            self._app = app
+            self._ssl_context = ssl_context
+            self._num_workers = workers
+            if workers > 1:
+                _settle_stateful_bindings(app, workers)
+            self._shared = [(l, socks) for l, socks in bound_listeners
+                            if l.workers == 'all']
+            self._single_owner = [(l, socks) for l, socks in bound_listeners
+                                  if l.workers == 'one']
+            self._max_connections = max_connections
+            self._stream_queue_depth = stream_queue_depth
+            self._ws_queue_depth = ws_queue_depth
+            self._shutdown_timeout = shutdown_timeout
+            self._reload = reload
+            self._reload_paths = reload_paths
+            self._reload_pending = False
+            self._stopped = False
+            self._watcher = None
+            self._processes: list = []
+            self._cleanup_deadline: float | None = None
+            self._listening_sockets = [
+                s for _l, socks in self._shared for s in socks]
+            self._mp_ctx = multiprocessing.get_context('fork')
 
-        # Per-worker sockets via SO_REUSEPORT give each worker its own kernel
-        # accept queue, so connections spread without a thundering herd.  The
-        # else-branch — one worker, no SO_REUSEPORT, or reload — shares the
-        # master's pre-bound sockets instead; reload needs that, because the
-        # master must still hold the listeners to hand them across the exec.
-        from ..env import get_settings as _get_settings  # noqa: PLC0415
-        cfg = _get_settings()
-        if workers > 1 and REUSEPORT_SUPPORTED and cfg.socket_reuseport and not reload:
-            _refuse_non_ip_rebind(self._shared, workers)
-            # Every shared listener is re-bound per worker, not just the first:
-            # a deployment that states four ports wants all four on all of them.
-            planned = [_PlannedListener(
-                listener=listener,
-                port=socks[0].getsockname()[1],
-                where=_describe(socks),
-                reached=_reaches(socks),
-                addresses=tuple(_rebind_address(sock) for sock in socks
-                                if sock.family in _IP_FAMILIES),
-                adopted=tuple((sock.family, os.fstat(sock.fileno()).st_ino)
-                              for sock in socks),
-                flagged=isinstance(listener.where, InheritedFd)
-                        and any(_reuseport_is_set(sock) for sock in socks),
-                foreign_netns=any(_elsewhere_netns(sock) for sock in socks),
-            ) for listener, socks in self._shared]
-            # Close the master sockets first: a co-bind needs every socket on
-            # the port to carry SO_REUSEPORT, and a kept one would take a share
-            # nobody accepts.
-            for s in self._listening_sockets:
-                s.close()
-            self._listening_sockets = []  # master no longer holds listeners
-            self._worker_listeners = [
-                [(plan.listener,
-                  [sock
-                   for host in plan.addresses
-                   for sock in create_configured_sockets(
-                       plan.port, cfg, reuseport=True, host=host)])
-                 for plan in planned]
-                for _ in range(workers)
-            ]
-            _refuse_when_unserved(planned, self._worker_listeners, workers)
-            logger.info('SO_REUSEPORT: created %d per-worker socket set(s) for %d listener(s)',
-                        workers, len(planned))
-        else:
-            self._worker_listeners = [self._shared] * workers
+            from ..env import get_settings as _get_settings  # noqa: PLC0415
+            cfg = _get_settings()
+            if (workers > 1 and REUSEPORT_SUPPORTED
+                    and cfg.socket_reuseport and not reload):
+                _refuse_non_ip_rebind(self._shared, workers)
+                planned = [_PlannedListener(
+                    listener=listener,
+                    port=socks[0].getsockname()[1],
+                    where=_describe(socks),
+                    reached=_reaches(socks),
+                    addresses=tuple(_rebind_address(sock) for sock in socks
+                                    if sock.family in _IP_FAMILIES),
+                    adopted=tuple((sock.family, os.fstat(sock.fileno()).st_ino)
+                                  for sock in socks),
+                    flagged=isinstance(listener.where, InheritedFd)
+                            and any(_reuseport_is_set(sock) for sock in socks),
+                    foreign_netns=any(_elsewhere_netns(sock) for sock in socks),
+                ) for listener, socks in self._shared]
+                close_error = close_sockets(self._listening_sockets)
+                self._listening_sockets = []
+                if close_error is not None:
+                    raise close_error
+                for _worker in range(workers):
+                    group = []
+                    self._worker_listeners.append(group)
+                    for plan in planned:
+                        bound = []
+                        group.append((plan.listener, bound))
+                        for host in plan.addresses:
+                            created = create_configured_sockets(
+                                plan.port, cfg, reuseport=True, host=host)
+                            if not created:
+                                raise RuntimeError(
+                                    f'Failed to re-bind worker listener on {plan.where}')
+                            bound.extend(created)
+                _refuse_when_unserved(
+                    planned, self._worker_listeners, workers)
+                logger.info(
+                    'SO_REUSEPORT: created %d per-worker socket set(s) for %d listener(s)',
+                    workers, len(planned))
+            else:
+                self._worker_listeners = [self._shared] * workers
+        except BaseException:
+            owned_sockets = [
+                sock for _listener, socks in bound_listeners for sock in socks]
+            owned_sockets.extend(
+                sock for group in self._worker_listeners
+                for _listener, sockets in group for sock in sockets)
+            close_sockets(owned_sockets)
+            raise
 
     # ------------------------------------------------------------------
     # Public API
@@ -435,20 +426,21 @@ class MultiWorkerServer:
         re-execs itself on any matching change — see
         [`blackbull.server.reload`][blackbull.server.reload].
         """
-        self._install_signal_handlers()
-        self._spawn_all()
-
-        logger.info(
-            'Master (PID %d) running %d worker(s)%s',
-            os.getpid(), self._num_workers,
-            ' [auto-reload]' if self._reload else '',
-        )
-
-        if self._reload:
-            self._start_watcher()
-
-        tick = _RELOAD_TICK if self._reload else _MONITOR_INTERVAL
+        primary = None
         try:
+            self._install_signal_handlers()
+            self._spawn_all()
+
+            logger.info(
+                'Master (PID %d) running %d worker(s)%s',
+                os.getpid(), self._num_workers,
+                ' [auto-reload]' if self._reload else '',
+            )
+
+            if self._reload:
+                self._start_watcher()
+
+            tick = _RELOAD_TICK if self._reload else _MONITOR_INTERVAL
             elapsed_since_reap = 0.0
             while not self._stopped:
                 if self._reload and self._reload_pending:
@@ -462,21 +454,49 @@ class MultiWorkerServer:
                     elapsed_since_reap = 0.0
                 time.sleep(tick)
                 elapsed_since_reap += tick
+        except BaseException as exc:
+            primary = exc
+            raise
         finally:
-            if self._watcher is not None:
-                self._watcher.stop()
-            self._shutdown_all()
+            cleanup_error = self._shutdown_all()
+            socket_error = close_sockets(self._listening_socket_references())
+            self._listening_sockets = []
+            self._worker_listeners = []
+            self._single_owner = []
+            self._shared = []
+            cleanup_error = combine_cleanup_errors(cleanup_error, socket_error)
+            if cleanup_error is not None:
+                if primary is None:
+                    raise cleanup_error
+                logger.error('Multi-worker cleanup failed: %s', cleanup_error)
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
     def _all_listening_sockets(self) -> list:
-        """Every listening socket the master created, in any role."""
-        return [sock
-                for group in (*self._worker_listeners, self._single_owner)
-                for _listener, socks in group
-                for sock in socks]
+        """Every live listening descriptor the master owns, exactly once."""
+        unique = []
+        seen = set()
+        for sock in self._listening_socket_references():
+            try:
+                fd = sock.fileno()
+            except Exception:
+                continue
+            if not isinstance(fd, int) or fd < 0:
+                continue
+            key = ('fd', fd)
+            if key not in seen:
+                seen.add(key)
+                unique.append(sock)
+        return unique
+
+    def _listening_socket_references(self):
+        """Every socket wrapper retained by the supervisor, including aliases."""
+        yield from self._listening_sockets
+        for group in (*self._worker_listeners, self._single_owner, self._shared):
+            for _listener, bound in group:
+                yield from bound
 
     def _spawn_worker(self, worker_id: int):
         # A single-owner listener goes to worker 0 and no one else — worker 0
@@ -501,12 +521,42 @@ class MultiWorkerServer:
             daemon=False,  # workers must be reaped explicitly on shutdown
             name=f'bb-worker-{worker_id}',
         )
-        p.start()
-        logger.info('Spawned worker %d (PID %d)', worker_id, p.pid)
+        self._pending_processes.append(p)
+        try:
+            p.start()
+            logger.info('Spawned worker %d (PID %d)', worker_id, p.pid)
+        except BaseException:
+            unreclaimed, cleanup_error = self._reclaim_processes(
+                [p], self._cleanup_deadline_value(),
+                terminate=True)
+            if not unreclaimed:
+                self._remove_pending_process(p)
+            if cleanup_error is not None:
+                logger.error('Failed to reclaim worker after start error: %s',
+                             cleanup_error)
+            raise
         return p
 
+    def _track_process(self, process) -> None:
+        self._processes.append(process)
+        self._remove_pending_process(process)
+
+    def _remove_pending_process(self, process) -> None:
+        self._pending_processes = [
+            pending for pending in self._pending_processes
+            if pending is not process]
+
     def _spawn_all(self) -> None:
-        self._processes = [self._spawn_worker(i) for i in range(self._num_workers)]
+        self._processes = []
+        try:
+            for worker_id in range(self._num_workers):
+                self._track_process(self._spawn_worker(worker_id))
+        except BaseException:
+            cleanup_error = self._shutdown_all()
+            if cleanup_error is not None:
+                logger.error('Failed to roll back partially spawned workers: %s',
+                             cleanup_error)
+            raise
 
     def _reap_and_respawn(self) -> None:
         for i, p in enumerate(self._processes):
@@ -515,27 +565,152 @@ class MultiWorkerServer:
                     'Worker %d (PID %d) exited with code %s — respawning',
                     i, p.pid, p.exitcode,
                 )
-                p.close()
-                self._processes[i] = self._spawn_worker(i)
+                try:
+                    replacement = self._spawn_worker(i)
+                except BaseException:
+                    _unreclaimed, cleanup_error = self._reclaim_processes(
+                        [p], self._cleanup_deadline_value(),
+                        terminate=False)
+                    if cleanup_error is not None:
+                        logger.error('Failed to close exited worker: %s',
+                                     cleanup_error)
+                    raise
+                self._processes[i] = replacement
+                self._remove_pending_process(replacement)
+                unreclaimed, cleanup_error = self._reclaim_processes(
+                    [p], time.monotonic() + self._shutdown_timeout,
+                    terminate=False)
+                self._pending_processes.extend(
+                    process for process in unreclaimed
+                    if all(process is not pending
+                           for pending in self._pending_processes))
+                if cleanup_error is not None:
+                    raise cleanup_error
 
-    def _shutdown_all(self) -> None:
-        logger.info('Sending SIGTERM to %d worker(s)', len(self._processes))
-        for p in self._processes:
-            if p.is_alive():
+    @staticmethod
+    def _process_is_alive(process):
+        try:
+            return process.is_alive(), None
+        except (AssertionError, ValueError):
+            return False, None
+        except Exception as exc:
+            return None, exc
+
+    @staticmethod
+    def _process_started(process):
+        try:
+            return process.pid is not None, None
+        except ValueError:
+            return False, None
+        except Exception as exc:
+            return None, exc
+
+    def _owned_processes(self):
+        owned = []
+        seen = set()
+        for process in (*self._processes, *self._pending_processes):
+            if id(process) in seen:
+                continue
+            seen.add(id(process))
+            owned.append(process)
+        return owned
+
+    def _cleanup_deadline_value(self) -> float:
+        if self._cleanup_deadline is None:
+            self._cleanup_deadline = time.monotonic() + self._shutdown_timeout
+        return self._cleanup_deadline
+
+    def _terminate_all(self) -> Exception | None:
+        """Ask every running child to stop, continuing after any error."""
+        errors = []
+        processes = self._owned_processes()
+        logger.info('Sending SIGTERM to %d worker(s)', len(processes))
+        for p in processes:
+            alive, state_error = self._process_is_alive(p)
+            errors.append(state_error)
+            if alive is False:
+                continue
+            try:
                 p.terminate()
+            except Exception as exc:
+                errors.append(exc)
+                logger.exception('Failed to terminate worker')
+        return combine_cleanup_errors(*errors)
 
-        deadline = time.monotonic() + self._shutdown_timeout
-        for p in self._processes:
-            remaining = max(0.0, deadline - time.monotonic())
-            p.join(timeout=remaining)
-            if p.is_alive():
-                logger.warning('Worker PID %d did not stop — sending SIGKILL', p.pid)
-                p.kill()
-                p.join()
-            p.close()
+    def _reclaim_processes(self, processes, deadline: float, *, terminate: bool):
+        """Reap and close process objects without exceeding *deadline*."""
+        errors = []
+        unreclaimed = []
+        for p in processes:
+            alive, state_error = self._process_is_alive(p)
+            errors.append(state_error)
+            if terminate and alive is not False:
+                try:
+                    p.terminate()
+                except Exception as exc:
+                    errors.append(exc)
+                    logger.exception('Failed to terminate worker')
+            started, state_error = self._process_started(p)
+            errors.append(state_error)
+            if started is not False:
+                try:
+                    p.join(timeout=max(0.0, deadline - time.monotonic()))
+                except Exception as exc:
+                    errors.append(exc)
+                    logger.exception('Failed to join worker')
+            alive, state_error = self._process_is_alive(p)
+            errors.append(state_error)
+            if alive is not False:
+                try:
+                    logger.warning('Worker did not stop — sending SIGKILL')
+                    p.kill()
+                    p.join(timeout=max(0.0, deadline - time.monotonic()))
+                except Exception as exc:
+                    errors.append(exc)
+                    logger.exception('Failed to kill or join worker')
+            alive, state_error = self._process_is_alive(p)
+            errors.append(state_error)
+            if alive is not False:
+                unreclaimed.append(p)
+                errors.append(TimeoutError(
+                    'worker did not stop before the deadline'))
+                continue
+            try:
+                p.close()
+            except ValueError:
+                # A closed Process has no resources left to reclaim.
+                pass
+            except Exception as exc:
+                errors.append(exc)
+                logger.exception('Failed to close worker process')
+                unreclaimed.append(p)
+        return unreclaimed, combine_cleanup_errors(*errors)
 
-        self._processes.clear()
-        logger.info('All workers stopped')
+    def _shutdown_all(self) -> Exception | None:
+        deadline = self._cleanup_deadline_value()
+        termination_error = self._terminate_all()
+        watcher_error = self._stop_watcher()
+        processes = self._owned_processes()
+        unreclaimed, reclaim_error = self._reclaim_processes(
+            processes, deadline, terminate=False)
+        self._processes = []
+        self._pending_processes = unreclaimed
+        if not unreclaimed:
+            logger.info('All workers stopped')
+        return combine_cleanup_errors(
+            termination_error, watcher_error, reclaim_error)
+
+    def _stop_watcher(self) -> Exception | None:
+        if self._watcher is None:
+            return None
+        deadline = self._cleanup_deadline_value()
+        try:
+            self._watcher.stop(timeout=max(0.0, deadline - time.monotonic()))
+        except Exception as exc:
+            logger.exception('Failed to stop file watcher')
+            return exc
+        self._watcher = None
+        return None
 
     def _install_signal_handlers(self) -> None:
         import threading  # noqa: PLC0415
@@ -571,13 +746,9 @@ class MultiWorkerServer:
         """SIGTERM workers, then re-exec the master.  Does not return."""
         from .reload import exec_self_with_sockets  # noqa: PLC0415
 
-        # Stop the watcher first so the next-generation master can start
-        # its own thread without conflict.
-        if self._watcher is not None:
-            self._watcher.stop()
-            self._watcher = None
-
-        self._shutdown_all()
+        cleanup_error = self._shutdown_all()
+        if cleanup_error is not None:
+            raise cleanup_error
 
         if not self._listening_sockets:
             # SO_REUSEPORT path closed the master sockets — reload was

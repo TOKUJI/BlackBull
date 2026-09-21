@@ -112,3 +112,16 @@ for listener, socks in server.bound_listeners:
 
 `server.port` and `server.unix_path` describe the first listener, as they
 always did.
+
+## Startup is all-or-nothing
+
+BlackBull does not publish or serve a partial listener set. It first acquires
+every requested TCP, Unix, inherited-fd, and protocol-specific socket; only
+then does it expose the set through `bound_listeners`. If a later bind or
+socket inspection fails, all sockets acquired by that attempt are closed and
+the `Server` remains unbound, so the same object can retry `open_socket()`.
+
+Once event-loop servers are created, accepting still waits for lifespan
+startup to complete. A failure while grouping listeners by TLS context, during
+lifespan startup, or while starting acceptance closes every earlier group and
+reclaims the lifespan task before the original startup exception is reported.

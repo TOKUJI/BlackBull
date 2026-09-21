@@ -18,8 +18,6 @@ half-written response.  ``open_socket()`` binds without serving — what the
 multi-worker master, and a test that needs a port before it forks, both use.
 """
 import asyncio
-import contextlib
-
 from http import HTTPStatus
 import logging
 import ssl
@@ -30,9 +28,10 @@ from dataclasses import replace
 from pathlib import Path
 import time
 
+from .._cleanup import combine_cleanup_errors
 from ..protocol.rsock import (
     create_configured_sockets, create_unix_socket,
-    adopt_inherited_sockets, adopt_listening_fd,
+    adopt_inherited_sockets, adopt_listening_fd, close_sockets,
 )
 from .listener import HTTP, InheritedFd, Listener, Tcp, Unix
 from .sender import AbstractWriter
@@ -60,6 +59,112 @@ def _address_of(sock) -> Tcp | Unix:
 
 # ``eager_start`` landed in 3.12; the supported floor is 3.11.
 _EAGER_TASKS = sys.version_info >= (3, 12)
+_CLEANUP_TIMEOUT = 8.0
+
+
+class _AsyncCleanupBudget:
+    """One lazy absolute deadline shared by every async cleanup owner."""
+
+    def __init__(self, timeout: float = _CLEANUP_TIMEOUT):
+        self._timeout = timeout
+        self._deadline: float | None = None
+
+    def start(self, timeout: float | None = None) -> None:
+        if self._deadline is None:
+            self._deadline = (asyncio.get_running_loop().time()
+                              + (self._timeout if timeout is None else timeout))
+
+    def remaining(self) -> float:
+        self.start()
+        return max(0.0, self._deadline - asyncio.get_running_loop().time())
+
+
+async def _cancel_tasks(tasks, budget: _AsyncCleanupBudget) -> Exception | None:
+    tasks = [task for task in tasks if task is not None]
+    pending = [task for task in tasks if not task.done()]
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.sleep(0)
+        pending = [task for task in pending if not task.done()]
+    if pending and budget.remaining() > 0:
+        _done, pending = await asyncio.wait(pending, timeout=budget.remaining())
+    errors = []
+    for task in tasks:
+        if not task.done() or task.cancelled():
+            continue
+        try:
+            task_error = task.exception()
+        except asyncio.CancelledError:
+            continue
+        except Exception as exc:
+            task_error = exc
+        if isinstance(task_error, Exception):
+            errors.append(task_error)
+    if pending:
+        errors.append(TimeoutError(
+            'async cleanup did not finish before the deadline'))
+    return combine_cleanup_errors(*errors)
+
+
+async def _wait_for_event_ignoring_cancellation(event: asyncio.Event) -> None:
+    """Wait for a cleanup boundary even when the caller is cancelled again."""
+    waiter = asyncio.create_task(event.wait())
+    while not waiter.done():
+        try:
+            await asyncio.shield(waiter)
+        except asyncio.CancelledError:
+            logger.info('Server task cancelled during shutdown cleanup.')
+    waiter.result()
+
+
+def _close_servers(servers) -> Exception | None:
+    errors = []
+    for server in servers:
+        try:
+            server.close()
+        except Exception as exc:
+            errors.append(exc)
+            logger.exception('Failed to close asyncio server')
+    return combine_cleanup_errors(*errors)
+
+
+async def _wait_async_servers_closed(
+        servers, budget: _AsyncCleanupBudget) -> Exception | None:
+    errors = []
+    waiters = []
+    for server in servers:
+        wait_closed = getattr(server, 'wait_closed', None)
+        if wait_closed is not None:
+            waiters.append(asyncio.create_task(wait_closed()))
+    if waiters:
+        done, pending = await asyncio.wait(waiters, timeout=budget.remaining())
+        for task in done:
+            if task.cancelled():
+                continue
+            exc = task.exception()
+            errors.append(exc)
+        errors.append(await _cancel_tasks(pending, budget))
+    return combine_cleanup_errors(*errors)
+
+
+async def _close_async_servers(servers, budget: _AsyncCleanupBudget) -> Exception | None:
+    return combine_cleanup_errors(
+        _close_servers(servers),
+        await _wait_async_servers_closed(servers, budget))
+
+
+def _validate_unique_socket_fds(bound_listeners) -> None:
+    """Reject aliases before ownership can move to multiple asyncio servers."""
+    seen = set()
+    for _listener, sockets in bound_listeners:
+        for sock in sockets:
+            fd = sock.fileno()
+            if isinstance(fd, int) and fd >= 0:
+                if fd in seen:
+                    raise RuntimeError(
+                        f'Duplicate listening fd {fd} cannot have multiple owners')
+                seen.add(fd)
 
 
 class LifespanManager:
@@ -74,44 +179,49 @@ class LifespanManager:
     leaving a zombie async-generator that asyncio tries to finalize on loop close.
     """
 
-    def __init__(self, app):
+    def __init__(self, app, cleanup_budget=None, *, cleanup_timeout=_CLEANUP_TIMEOUT):
         self._app = app
         self._receive_q: asyncio.Queue = asyncio.Queue()
         self._send_q:    asyncio.Queue = asyncio.Queue()
         self._task = None
+        self._cleanup_budget = (cleanup_budget
+                                or _AsyncCleanupBudget(cleanup_timeout))
 
     async def __aenter__(self):
         scope = {'type': 'lifespan', 'asgi': {'version': '3.0'}}
-        self._task = asyncio.create_task(
-            self._app(scope, self._receive_q.get, self._send_q.put))
-        await self._receive_q.put({'type': ASGIEvent.LIFESPAN_STARTUP})
-        # Race the startup ack against the lifespan task itself.  A lifespan
-        # app that dies before acking — e.g. a startup hook that raises and
-        # takes the task down with it — would otherwise strand __aenter__ on
-        # an empty send queue forever and the server would neither start nor
-        # error.  Mirrors the FIRST_COMPLETED race in __aexit__.
-        getter = asyncio.ensure_future(self._send_q.get())
         try:
-            await asyncio.wait(
-                {getter, self._task}, return_when=asyncio.FIRST_COMPLETED)
-        finally:
-            if not getter.done():
-                getter.cancel()
-        if getter.done() and not getter.cancelled():
-            event = getter.result()
-            if event.get('type') == ASGIEvent.LIFESPAN_STARTUP_FAILED:
-                raise RuntimeError(event.get('message', 'Lifespan startup failed'))
-            return self
-        if self._task.done():
-            exc = self._task.exception()
-            if exc is not None:
-                raise RuntimeError(f'Lifespan startup failed: {exc!r}') from exc
-            # A bare ASGI app that ignores the lifespan scope returns without
-            # acking.  ASGI calls that "lifespan unsupported": serve anyway.
-            return self
-        raise RuntimeError('Lifespan startup did not complete')
+            self._task = asyncio.create_task(
+                self._app(scope, self._receive_q.get, self._send_q.put))
+            await self._receive_q.put({'type': ASGIEvent.LIFESPAN_STARTUP})
+            getter = asyncio.ensure_future(self._send_q.get())
+            try:
+                await asyncio.wait(
+                    {getter, self._task}, return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                if not getter.done():
+                    getter.cancel()
+                    await asyncio.gather(getter, return_exceptions=True)
+            if getter.done() and not getter.cancelled():
+                event = getter.result()
+                if event.get('type') == ASGIEvent.LIFESPAN_STARTUP_FAILED:
+                    raise RuntimeError(
+                        event.get('message', 'Lifespan startup failed'))
+                return self
+            if self._task.done():
+                exc = self._task.exception()
+                if exc is not None:
+                    raise RuntimeError(
+                        f'Lifespan startup failed: {exc!r}') from exc
+                return self
+            raise RuntimeError('Lifespan startup did not complete')
+        except BaseException:
+            cleanup_error = await _cancel_tasks(
+                [self._task], self._cleanup_budget)
+            if cleanup_error is not None:
+                logger.error('Lifespan startup rollback failed: %s', cleanup_error)
+            raise
 
-    async def __aexit__(self, *_):
+    async def __aexit__(self, exc_type, exc, traceback):
         task = self._task
         if task is None:
             return False
@@ -120,25 +230,28 @@ class LifespanManager:
         # emits lifespan.shutdown.complete, so an unconditional wait on the
         # send queue would wedge teardown.  Handshake only while it is alive,
         # and race the ack against the task itself.
+        errors = []
         if not task.done():
             await self._receive_q.put({'type': ASGIEvent.LIFESPAN_SHUTDOWN})
             getter = asyncio.ensure_future(self._send_q.get())
-            try:
-                await asyncio.wait(
-                    {getter, task}, return_when=asyncio.FIRST_COMPLETED)
-            finally:
-                getter.cancel()
-        if not task.done():
-            task.cancel()
-        try:
-            await task   # drain finally blocks inside the lifespan app
-        except asyncio.CancelledError:
-            pass
+            done, pending = await asyncio.wait(
+                {getter, task}, timeout=self._cleanup_budget.remaining(),
+                return_when=asyncio.FIRST_COMPLETED)
+            if not done:
+                errors.append(TimeoutError(
+                    'lifespan shutdown did not finish before the deadline'))
+            errors.append(await _cancel_tasks([getter], self._cleanup_budget))
+        errors.append(await _cancel_tasks([task], self._cleanup_budget))
+        cleanup_error = combine_cleanup_errors(*errors)
+        if cleanup_error is not None:
+            if exc_type is None:
+                raise cleanup_error
+            logger.error('Lifespan cleanup failed: %s', cleanup_error)
         return False
 
 
 @asynccontextmanager
-async def SocketManager(socket_cb_pairs, ssl_context):
+async def SocketManager(socket_cb_pairs, ssl_context, cleanup_budget=None):
     """Async context manager that creates asyncio servers from already-bound sockets.
 
     *socket_cb_pairs* is an iterable of ``(sock, protocol_factory)`` — each
@@ -167,23 +280,30 @@ async def SocketManager(socket_cb_pairs, ssl_context):
     # Some Windows builds do not define AF_UNIX at all.
     _af_unix = getattr(_socket, 'AF_UNIX', None)
     loop = asyncio.get_running_loop()
+    budget = cleanup_budget or _AsyncCleanupBudget()
     servers = []
-    for sock, factory in socket_cb_pairs:
-        kwargs = {'sock': sock, 'ssl': ssl_context, 'backlog': _backlog,
-                  'start_serving': False}
-        if ssl_context is not None:
-            kwargs['ssl_handshake_timeout'] = 60.0
-        if _af_unix is not None and sock.family == _af_unix:
-            # create_server() rejects non-INET families at family validation.
-            srv = await loop.create_unix_server(factory, **kwargs)
-        else:
-            srv = await loop.create_server(factory, **kwargs)
-        servers.append(srv)
+    primary = None
     try:
+        for sock, factory in socket_cb_pairs:
+            kwargs = {'sock': sock, 'ssl': ssl_context, 'backlog': _backlog,
+                      'start_serving': False}
+            if ssl_context is not None:
+                kwargs['ssl_handshake_timeout'] = 60.0
+            if _af_unix is not None and sock.family == _af_unix:
+                srv = await loop.create_unix_server(factory, **kwargs)
+            else:
+                srv = await loop.create_server(factory, **kwargs)
+            servers.append(srv)
         yield servers
+    except BaseException as exc:
+        primary = exc
+        raise
     finally:
-        for srv in servers:
-            srv.close()
+        cleanup_error = await _close_async_servers(servers, budget)
+        if cleanup_error is not None:
+            if primary is None:
+                raise cleanup_error
+            logger.error('Asyncio server cleanup failed: %s', cleanup_error)
 
 
 def _max_connections_report(resolved: int) -> tuple[str, str]:
@@ -245,6 +365,8 @@ class Server:
         self._stopping = False
         self._drain_timeout = None
         self._stopped_event = asyncio.Event()
+        self._stop_done_event = asyncio.Event()
+        self._stop_error: BaseException | None = None
         # Process-wide singletons: looked up once, not once per accept.
         from ..event_aggregator import EventAggregator as _EA  # noqa: PLC0415
         self._cached_dispatcher = getattr(self.app, '_dispatcher', None)
@@ -260,6 +382,7 @@ class Server:
         self.certfile = certfile
         self.make_ssl_context()
         self.socket = None
+        self.raw_sockets: list = []
         self.port = None
         self.unix_path: str | None = None
 
@@ -555,30 +678,46 @@ class Server:
         """
         from ..env import get_settings as _get_settings  # noqa: PLC0415
         _cfg = _get_settings()
+        if self.bound_listeners:
+            self._publish_socket_view()
+            return
 
-        if self._listeners is None:
-            # Adopting the re-exec'd master's sockets keeps the listener
-            # continuous across a reload: no port-release race, no missed SYNs.
-            inherited = adopt_inherited_sockets()
-            if inherited:
-                # HTTP fds only, so a raw-protocol port is rebound below rather
-                # than adopted.  Safe: those sockets are CLOEXEC and the caller
-                # terminates the workers holding copies before re-execing.
-                self.bound_listeners = [
-                    (Listener(_address_of(inherited[0]), tls=self.ssl_context),
-                     inherited)]
-            else:
-                self._listeners = [
-                    _listener_from_args(port, unix_path, inherited_fd,
-                                        self.ssl_context)]
+        acquired: list[tuple[Listener, list]] = []
+        protocol_ports: dict[str, int] = {}
+        listeners = self._listeners
+        try:
+            if listeners is None:
+                inherited = adopt_inherited_sockets()
+                if inherited:
+                    acquired.append((
+                        Listener(_address_of(inherited[0]), tls=self.ssl_context),
+                        inherited,
+                    ))
+                    listeners = None
+                else:
+                    listeners = [
+                        _listener_from_args(port, unix_path, inherited_fd,
+                                            self.ssl_context)]
 
-        if not self.bound_listeners:
-            self.bound_listeners = [(listener, self._bind_listener(listener, _cfg))
-                                    for listener in self._listeners]
-        self._publish_socket_view()
-        # Sockets are handed over bare: ``create_server(ssl=...)`` does the
-        # handshake, and a ``wrap_socket`` here would make it a double layer.
-        self._bind_protocol_sockets(_cfg)
+            if not acquired:
+                for listener in listeners:
+                    acquired.append((listener, self._bind_listener(listener, _cfg)))
+
+            self._bind_protocol_sockets(
+                _cfg, acquired=acquired, protocol_ports=protocol_ports)
+            _validate_unique_socket_fds(acquired)
+            raw_sockets, resolved_port, resolved_unix = self._socket_view(acquired)
+        except BaseException:
+            close_sockets(
+                sock for _listener, socks in acquired for sock in socks)
+            raise
+
+        self._listeners = listeners
+        self.bound_listeners = acquired
+        self.raw_sockets = raw_sockets
+        self.port = resolved_port
+        self.unix_path = resolved_unix
+        self.protocol_ports = protocol_ports
 
     def _bind_listener(self, listener, _cfg) -> list:
         """Bind one listener and return its sockets."""
@@ -616,16 +755,22 @@ class Server:
         ``raw_sockets`` is every HTTP socket — what the multi-worker master
         hands each worker.  ``port`` / ``unix_path`` describe the first one.
         """
-        self.raw_sockets = [sock for listener, socks in self.bound_listeners
-                            for sock in socks if listener.speaks == HTTP]
-        first = self.raw_sockets[0] if self.raw_sockets else None
+        self.raw_sockets, self.port, self.unix_path = self._socket_view(
+            self.bound_listeners)
+
+    @staticmethod
+    def _socket_view(bound_listeners):
+        raw_sockets = [sock for listener, socks in bound_listeners
+                       for sock in socks if listener.speaks == HTTP]
+        first = raw_sockets[0] if raw_sockets else None
         sockname = first.getsockname() if first is not None else None
         if isinstance(sockname, str):
-            self.port, self.unix_path = None, sockname
+            return raw_sockets, None, sockname
         elif sockname is not None:
-            self.port, self.unix_path = sockname[1], None
+            return raw_sockets, sockname[1], None
+        return raw_sockets, None, None
 
-    def _bind_protocol_sockets(self, _cfg):
+    def _bind_protocol_sockets(self, _cfg, *, acquired, protocol_ports):
         """Bind a listening socket per port-bound non-ASGI protocol.
 
         Each [`RawBinding`][] registered with a ``port`` gets its own
@@ -639,34 +784,52 @@ class Server:
         for binding in self._protocol_registry.raw_bindings.values():
             if binding.port is None:
                 continue
-            port = binding.port
-            socks = create_configured_sockets(port, _cfg, reuseport=False)
-            if not socks:
-                logger.error('Failed to bind %s on port %d.', binding.name, port)
-                continue
-            bound_port = socks[0].getsockname()[1]
-            self.protocol_ports[binding.name] = bound_port
-            # Refused here rather than at serve time, so the misconfiguration
-            # fails before workers fork.
             if binding.tls and self.ssl_context is None:
                 raise RuntimeError(
                     f'Raw protocol binding {binding.name!r} requires TLS '
                     f'(tls=True) but the server has no certificate configured '
                     f'— pass certfile/keyfile or an ssl_context.')
-            self.bound_listeners.append((
-                Listener(Tcp(bound_port), speaks=binding.name,
-                         tls=self._raw_tls_context() if binding.tls else None),
+            tls_context = self._raw_tls_context() if binding.tls else None
+            port = binding.port
+            socks = create_configured_sockets(port, _cfg, reuseport=False)
+            if not socks:
+                raise RuntimeError(
+                    f'Failed to bind {binding.name!r} on port {port}.')
+            # Track the sockets before asking them for metadata: even an
+            # unusual getsockname failure must unwind through open_socket's
+            # transaction rather than strand the descriptors.
+            acquired.append((
+                Listener(Tcp(port), speaks=binding.name, tls=tls_context),
                 socks))
+            bound_port = socks[0].getsockname()[1]
+            protocol_ports[binding.name] = bound_port
+            acquired[-1] = (
+                Listener(Tcp(bound_port), speaks=binding.name,
+                         tls=tls_context),
+                socks)
             logger.info('Protocol %r listening on port %d', binding.name, bound_port)
 
     def close_socket(self):
-        # raw_sockets names the HTTP ones only; closing that would leak the rest.
-        for _listener, socks in self.bound_listeners:
-            for s in socks:
-                s.close()
-        if not self.bound_listeners:
-            for s in getattr(self, 'raw_sockets', []):
-                s.close()
+        cleanup_error = self._close_socket()
+        if cleanup_error is not None:
+            raise cleanup_error
+
+    def _close_socket(self):
+        fallback = list(self.raw_sockets)
+        listeners = self._take_bound_listeners()
+        sockets = [sock for _listener, group in listeners for sock in group]
+        if not sockets:
+            sockets = fallback
+        return close_sockets(sockets)
+
+    def _take_bound_listeners(self):
+        listeners = self.bound_listeners
+        self.bound_listeners = []
+        self.raw_sockets = []
+        self.port = None
+        self.unix_path = None
+        self.protocol_ports = {}
+        return listeners
 
     async def startup(self):
         """Drive the ASGI lifespan startup handshake.
@@ -685,72 +848,74 @@ class Server:
 
     async def run(self, port=80):
         """Run an asyncio socket server with the setting in this object."""
-        if not self.bound_listeners:
-            if getattr(self, 'raw_sockets', None):
-                # A forked worker gets what the master bound: a flat socket
-                # list and one context, so every listener terminates that one.
-                self.bound_listeners = [
-                    (Listener(_address_of(sock), tls=self.ssl_context), [sock])
-                    for sock in self.raw_sockets]
-            else:
-                self.open_socket(port)
+        budget = _AsyncCleanupBudget()
+        self._cleanup_budget = budget
+        startup_committed = False
+        primary = None
+        cleanup_error = None
+        try:
+            if not self.bound_listeners:
+                if self.raw_sockets:
+                    self.bound_listeners = [
+                        (Listener(_address_of(sock), tls=self.ssl_context), [sock])
+                        for sock in self.raw_sockets]
+                else:
+                    self.open_socket(port)
 
-        # One group per distinct TLS context, because a listener terminates the
-        # certificate it names and its neighbour may name another — or none.
-        # ``None`` is a group like any other; it is the cleartext one.
-        groups: dict[object, list] = defaultdict(list)
-        for listener, socks in self.bound_listeners:
-            # ``speaks`` is a name; the binding it names is resolved here, so a
-            # listener stays independent of the order things were registered in.
-            binding = (None if listener.speaks == HTTP else
-                       self._protocol_registry.raw_bindings.get(listener.speaks))
-            factory = self.connection_protocol_factory(binding)
-            for sock in socks:
-                groups[listener.tls].append((sock, factory))
+            _validate_unique_socket_fds(self.bound_listeners)
 
-        async with AsyncExitStack() as stack:
-            servers = []
-            for context, pairs in groups.items():
-                servers += await stack.enter_async_context(
-                    SocketManager(pairs, context))
-            self._running_servers = servers
-            logger.info('Bound %d server(s); accepting when lifespan startup completes',
-                        len(servers))
-            # Nested inside the stack so lifespan shutdown completes before
-            # the sockets it may still be answering on are closed.
-            async with LifespanManager(self.app):
-                logger.info(f'Server(s) created: {servers}')
-                # Accepting starts here, not in ``SocketManager``: a request
-                # accepted while an ``on_startup`` hook is still running would
-                # be answered by an app that has not finished starting.
-                for srv in servers:
+            groups: dict[object, list] = defaultdict(list)
+            for listener, socks in self.bound_listeners:
+                binding = (None if listener.speaks == HTTP else
+                           self._protocol_registry.raw_bindings.get(listener.speaks))
+                factory = self.connection_protocol_factory(binding)
+                for sock in socks:
+                    groups[listener.tls].append((sock, factory))
+
+            async with AsyncExitStack() as stack:
+                servers = []
+                for context, pairs in groups.items():
+                    servers += await stack.enter_async_context(
+                        SocketManager(pairs, context, budget))
+                self._running_servers = servers
+                logger.info(
+                    'Bound %d server(s); accepting when lifespan startup completes',
+                    len(servers))
+                async with LifespanManager(self.app, budget):
+                    logger.info(f'Server(s) created: {servers}')
+                    for srv in servers:
+                        if self._stopping:
+                            break
+                        await srv.start_serving()
+                    startup_committed = True
+                    try:
+                        await self._stopped_event.wait()
+                    except KeyboardInterrupt:
+                        logger.info('KeyboardInterrupt received — shutting down.')
+                    except asyncio.CancelledError:
+                        # Cancellation after accepting starts retains the public
+                        # run() contract: unwind cleanly instead of propagating.
+                        logger.info('Server task cancelled.')
+                    except Exception as exc:
+                        logger.error('Server error: %s', exc)
+
                     if self._stopping:
-                        # ``stop()`` closed these servers; starting a closed
-                        # one raises from a socket list that is already gone.
-                        break
-                    await srv.start_serving()
-                # Block on our own event, not ``Server.serve_forever()``: its
-                # cancellation path calls ``Server.close_clients()`` — which
-                # closes the *accepted* transports, so a drain finishes the
-                # handler and the send path writes into a transport asyncio
-                # already closed.  The client sees exactly the reset the drain
-                # exists to prevent.
-                # Measured: 3.14.6 lacks the call and passes; 3.14.7 and
-                # 3.13.15 have it and fail.
-                try:
-                    await self._stopped_event.wait()
-
-                except KeyboardInterrupt:
-                    logger.info('KeyboardInterrupt received — shutting down.')
-
-                except asyncio.CancelledError:
-                    logger.info('Server task cancelled.')
-
-                except Exception as exc:
-                    logger.error('Server error: %s', exc)
-
-                if self._stopping:
-                    await self._drain(self._drain_timeout or 8.0)
+                        await _wait_for_event_ignoring_cancellation(
+                            self._stop_done_event)
+                        if self._stop_error is not None:
+                            raise self._stop_error
+        except BaseException as exc:
+            primary = exc
+            if not startup_committed:
+                cleanup_error = await self._cancel_connection_tasks(budget)
+            raise
+        finally:
+            socket_error = self._close_socket()
+            cleanup_error = combine_cleanup_errors(cleanup_error, socket_error)
+            if cleanup_error is not None:
+                if primary is None:
+                    raise cleanup_error
+                logger.error('Server cleanup failed: %s', cleanup_error)
 
         logger.info('Server has been stopped.')
 
@@ -765,20 +930,40 @@ class Server:
         in a SIGKILL.
         """
         if self._stopping:
+            await self._stop_done_event.wait()
+            if self._stop_error is not None:
+                raise self._stop_error
             return
         self._stopping = True
         self._drain_timeout = drain_timeout
+        budget = getattr(self, '_cleanup_budget', None)
+        if budget is None:
+            budget = self._cleanup_budget = _AsyncCleanupBudget(drain_timeout)
+        budget.start(drain_timeout)
 
-        # Close listeners first, so the drain is over a set that only shrinks.
-        for srv in getattr(self, '_running_servers', ()):
-            srv.close()
+        # Close every listener first, so the drain is over a set that only
+        # shrinks.  A failed close must not strand the remaining listeners.
+        running_servers = list(getattr(self, '_running_servers', ()))
+        errors = [_close_servers(running_servers)]
         self._stopped_event.set()
 
-        await self._drain(drain_timeout)
+        try:
+            await self._drain(drain_timeout)
+        except BaseException as exc:
+            errors.append(exc)
+            logger.exception('Failed to drain connections during shutdown')
 
-        for srv in getattr(self, '_running_servers', ()):
-            with contextlib.suppress(Exception):
-                await srv.wait_closed()
+        try:
+            errors.append(
+                await _wait_async_servers_closed(running_servers, budget))
+        except BaseException as exc:
+            errors.append(exc)
+
+        cleanup_error = combine_cleanup_errors(*errors)
+        self._stop_error = cleanup_error
+        self._stop_done_event.set()
+        if cleanup_error is not None:
+            raise cleanup_error
 
     async def _drain(self, drain_timeout: float) -> None:
         """Let the connections already being served finish.  Idempotent.
@@ -794,14 +979,25 @@ class Server:
             return
         logger.info('Draining %d connection(s), up to %.1fs',
                     len(pending), drain_timeout)
-        _done, still = await asyncio.wait(pending, timeout=drain_timeout)
+        budget = getattr(self, '_cleanup_budget', None)
+        timeout = (budget.remaining() if budget is not None else drain_timeout)
+        _done, still = await asyncio.wait(pending, timeout=timeout)
         if still:
             logger.warning(
                 '%d connection(s) did not finish within %.1fs — cancelling',
                 len(still), drain_timeout)
             for task in still:
                 task.cancel()
-            await asyncio.gather(*still, return_exceptions=True)
+            if budget is None:
+                await asyncio.gather(*still, return_exceptions=True)
+            else:
+                cleanup_error = await _cancel_tasks(still, budget)
+                if cleanup_error is not None:
+                    raise cleanup_error
+
+    async def _cancel_connection_tasks(self, budget) -> Exception | None:
+        return await _cancel_tasks(
+            [task for task in self._connection_tasks if not task.done()], budget)
 
     def wait_for_port(self, timeout: float = 10.0, poll_interval: float = 0.1):
         if self.port is None:
