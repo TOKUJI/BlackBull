@@ -51,6 +51,10 @@ _H1_PATHSEND_EXTENSIONS = {'http.response.pathsend': {}}
 # RFC 9112 §4 — HTTP-version = "HTTP/" DIGIT "." DIGIT
 _HTTP_VERSION_RE = re.compile(rb'^HTTP/\d\.\d$')
 
+# RFC 3986 §3.1 — scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ), the
+# grammar RFC 9112 §3.2.2 borrows for the absolute-form request-target.
+_SCHEME_RE = re.compile(rb'[A-Za-z][A-Za-z0-9+\-.]*')
+
 # The RFC 9110 field grammar — the name alphabet and the allowed value
 # octets — is defined once in ``blackbull.protocol.field_grammar``, so HTTP/2
 # cannot validate against a different set than this one.  `_parse` reads both
@@ -879,6 +883,12 @@ class HTTP1Actor(Actor):
                 # path-abempty``.  Rewrite it to origin-form and let the
                 # authority override Host (§3.2.2 — the origin server MUST
                 # ignore the Host header here).
+                # RFC 3986 §3.1 — the target's scheme grammar.  conn.scheme
+                # stays the connection's: the target must not claim https.
+                if not _SCHEME_RE.fullmatch(path[:_ss]):
+                    raise BadRequestError(
+                        f'invalid scheme in absolute-form request-target: '
+                        f'{path[:_ss]!r}')
                 rest = path[_ss + 3:]
                 slash = rest.find(b'/')
                 if slash == -1:
