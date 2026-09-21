@@ -68,6 +68,44 @@ class TestRequestTargetForms:
         assert r.status == 400
 
 
+# RFC 3986 §3.2.2 — the bracket forms, on both H1 authority paths.  The first
+# five are what a bracketed string with no IPv6 grammar behind it looks like,
+# the next two are a doubled bracket and a bracket in the port; the last three
+# are real and must stay accepted.
+_BAD_IP_LITERALS = [b'[::1', b'[]', b'[zz]', b'[::1]x', b'[1.2.3.4]',
+                    b'[[]', b'[::1]:80]']
+_GOOD_IP_LITERALS = [b'[::1]', b'[::1]:8100', b'[fe80::1%25eth0]']
+
+
+@pytest.mark.integration
+class TestAuthorityIpLiteral:
+    @pytest.mark.parametrize('authority', _BAD_IP_LITERALS)
+    def test_bad_ip_literal_in_absolute_form_is_400(self, h1_app, authority):
+        r = send_raw('127.0.0.1', h1_app.port,
+                     b'GET http://' + authority + b'/echo HTTP/1.1\r\n'
+                     b'Host: localhost\r\n\r\n')
+        assert r.status == 400
+
+    @pytest.mark.parametrize('authority', _BAD_IP_LITERALS)
+    def test_bad_ip_literal_in_host_is_400(self, h1_app, authority):
+        r = send_raw('127.0.0.1', h1_app.port,
+                     b'GET /echo HTTP/1.1\r\nHost: ' + authority + b'\r\n\r\n')
+        assert r.status == 400
+
+    @pytest.mark.parametrize('authority', _GOOD_IP_LITERALS)
+    def test_ip_literal_in_absolute_form_still_accepted(self, h1_app, authority):
+        r = send_raw('127.0.0.1', h1_app.port,
+                     b'GET http://' + authority + b'/echo HTTP/1.1\r\n'
+                     b'Host: localhost\r\n\r\n')
+        assert r.status == 200
+
+    @pytest.mark.parametrize('authority', _GOOD_IP_LITERALS)
+    def test_ip_literal_in_host_still_accepted(self, h1_app, authority):
+        r = send_raw('127.0.0.1', h1_app.port,
+                     b'GET /echo HTTP/1.1\r\nHost: ' + authority + b'\r\n\r\n')
+        assert r.status == 200
+
+
 @pytest.mark.integration
 class TestTransferEncodingValidation:
     def test_te_chunked_not_final_is_400(self, h1_app):

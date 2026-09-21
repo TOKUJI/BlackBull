@@ -19,7 +19,7 @@ from ..protocol.frame_types import PseudoHeaders
 import logging
 from ..connection import Connection
 from ..headers import Headers
-from .http1_actor import _HOST_FORBIDDEN_RE, _TARGET_ALLOWED_OCTETS
+from .http1_actor import _TARGET_ALLOWED_OCTETS, _authority_is_valid
 
 logger = logging.getLogger(__name__)
 
@@ -108,8 +108,9 @@ def _request_headers_with_host(frame, *, require_present: bool) -> list | None:
     RFC 9113 §8.3.1 — ``:authority`` MUST NOT include userinfo; an
     ``http``/``https`` request without ``:authority`` must carry a valid
     ``Host`` field (*require_present*).  The grammar is H1's
-    ``_validate_host`` (RFC 3986 §3.2 delimiters, controls and ASCII rule,
-    the same forbidden set); a present ``:authority`` replaces any literal
+    ``_authority_is_valid`` (RFC 3986 §3.2 delimiters, controls and ASCII
+    rule, and §3.2.2's IP-literal); a present ``:authority`` replaces any
+    literal
     ``Host`` handed to the application, mirroring H1's absolute-form override
     (RFC 9112 §3.2.2) so handlers see one ``host`` under either transport.
 
@@ -123,11 +124,8 @@ def _request_headers_with_host(frame, *, require_present: bool) -> list | None:
         if not value:
             frame._mark_malformed('empty :authority')
             return None
-        if _HOST_FORBIDDEN_RE.search(value):
-            frame._mark_malformed(
-                f'invalid :authority {authority!r}: contains userinfo, '
-                f'a control, delimiter, whitespace, or a non-ASCII byte '
-                f'forbidden by RFC 3986 §3.2')
+        if not _authority_is_valid(value):
+            frame._mark_malformed(f'invalid :authority {authority!r}')
             return None
         return ([(k, v) for (k, v) in frame.headers if k != b'host']
                 + [(b'host', value)])
@@ -146,11 +144,8 @@ def _request_headers_with_host(frame, *, require_present: bool) -> list | None:
     if not value:
         frame._mark_malformed('empty Host header value')
         return None
-    if _HOST_FORBIDDEN_RE.search(value):
-        frame._mark_malformed(
-            f'invalid Host authority {value!r}: contains a control, '
-            f'delimiter, whitespace, or a non-ASCII byte forbidden by '
-            f'RFC 3986 §3.2')
+    if not _authority_is_valid(value):
+        frame._mark_malformed(f'invalid Host authority {value!r}')
         return None
     return frame.headers
 

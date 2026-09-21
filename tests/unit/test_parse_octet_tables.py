@@ -7,12 +7,16 @@ set).  Both rewrites are only safe if they classify all 256 octets exactly as
 the predicates did, so that is what these tests assert — for the field-name
 table and the Host scan, against their frozenset forms; for the target scan,
 against a literal copy of the original predicate.
+
+The Host regex now reports the IP-literal brackets as well (RFC 3986 §3.2.2),
+so its sweep is against the forbidden set plus those two octets.
 """
 import pytest
 
 from blackbull.server.http1_actor import (
+    _AUTHORITY_SCAN_BYTES,
+    _AUTHORITY_SCAN_RE,
     _HOST_FORBIDDEN_BYTES,
-    _HOST_FORBIDDEN_RE,
     _TARGET_ALLOWED_OCTETS,
     BadRequestError,
     HTTP1Actor,
@@ -52,16 +56,21 @@ def test_target_table_accepts_a_realistic_target():
     assert not _target_rejects(b'/api/v1/x?q=1&r=%20#frag')
 
 
-def test_host_regex_classifies_all_256_octets_identically():
+def test_authority_scan_classifies_all_256_octets_identically():
     mismatched = [b for b in range(256)
-                  if bool(_HOST_FORBIDDEN_RE.search(bytes([b]))) is not (b in _HOST_FORBIDDEN_BYTES)]
+                  if bool(_AUTHORITY_SCAN_RE.search(bytes([b])))
+                  is not (b in _AUTHORITY_SCAN_BYTES)]
     assert mismatched == []
 
 
-def test_host_regex_is_derived_from_the_frozenset():
-    # The two must not be able to drift; the set is the single source of truth.
+def test_authority_scan_is_derived_from_the_forbidden_set():
+    # The two must not be able to drift; the forbidden set is the source of
+    # truth and the brackets are what §3.2.2 adds to it.
+    assert _AUTHORITY_SCAN_BYTES == _HOST_FORBIDDEN_BYTES | {0x5B, 0x5D}
     for b in _HOST_FORBIDDEN_BYTES:
-        assert _HOST_FORBIDDEN_RE.search(b'example.com' + bytes([b]))
+        assert _AUTHORITY_SCAN_RE.search(b'example.com' + bytes([b]))
+    assert _AUTHORITY_SCAN_RE.search(b'[')
+    assert _AUTHORITY_SCAN_RE.search(b']')
 
 
 # ---- the same decisions, through the real parser ---------------------------

@@ -92,10 +92,12 @@ class TestEveryHighByteIsRejected:
         with pytest.raises(BadRequestError):
             _validate_host(_headers(b'example.com' + bytes([high])))
 
-    def test_the_three_diagnostics_stay_apart(self):
-        with pytest.raises(BadRequestError, match='non-ASCII'):
-            _validate_host(_headers(b'ex\xffample.com'))
-        with pytest.raises(BadRequestError, match='control byte'):
-            _validate_host(_headers(b'ex\x01ample.com'))
-        with pytest.raises(BadRequestError, match='delimiter'):
-            _validate_host(_headers(b'exam/ple.com'))
+    @pytest.mark.parametrize('value', [
+        b'ex\xffample.com',    # non-ASCII
+        b'ex\x01ample.com',    # a control byte
+        b'exam/ple.com',       # a delimiter
+        b'[::1',               # an IP-literal that is not one
+    ])
+    def test_the_shapes_the_one_scan_refuses(self, value):
+        with pytest.raises(BadRequestError, match='invalid Host authority'):
+            _validate_host(_headers(value))
