@@ -231,6 +231,42 @@ class TestAuthorityGrammar:
         _assert_malformed(handler)
 
 
+# RFC 3986 §3.2.2 — the IP-literal grammar, the same one H1 applies to its
+# absolute-form authority and its Host field.  The first five are what a
+# bracketed string with no IPv6 grammar behind it looks like, the next two are
+# a doubled bracket and a bracket in the port; the last three are real and must
+# stay accepted.
+_BAD_IP_LITERALS = [b'[::1', b'[]', b'[zz]', b'[::1]x', b'[1.2.3.4]',
+                    b'[[]', b'[::1]:80]']
+_GOOD_IP_LITERALS = [b'[::1]', b'[::1]:8100', b'[fe80::1%25eth0]']
+
+
+class TestAuthorityIpLiteral:
+    @pytest.mark.parametrize('authority', _BAD_IP_LITERALS)
+    @pytest.mark.asyncio
+    async def test_bad_ip_literal_in_authority_is_malformed(self, authority):
+        handler, app = await _run_with_headers(
+            _PSEUDO_TRIO + [(b':authority', authority)])
+        _assert_malformed(handler)
+        assert app.await_count == 0
+
+    @pytest.mark.parametrize('authority', _BAD_IP_LITERALS)
+    @pytest.mark.asyncio
+    async def test_bad_ip_literal_in_host_fallback_is_malformed(self, authority):
+        handler, app = await _run_with_headers(
+            _PSEUDO_TRIO + [(b'host', authority)])
+        _assert_malformed(handler)
+        assert app.await_count == 0
+
+    @pytest.mark.parametrize('authority', _GOOD_IP_LITERALS)
+    @pytest.mark.asyncio
+    async def test_ip_literal_authority_is_accepted(self, authority):
+        handler, app = await _run_with_headers(
+            _PSEUDO_TRIO + [(b':authority', authority)])
+        assert app.await_count == 1
+        assert 1 not in _rst_streams(handler)
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # F.1b — ASGI mapping: :authority → host in scope.headers
 # ═══════════════════════════════════════════════════════════════════════

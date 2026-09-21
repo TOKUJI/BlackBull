@@ -3,6 +3,7 @@
 HTTP1Actor drives the keep-alive loop for one TCP connection.
 RequestActor owns the lifetime of a single HTTP request.
 """
+import ipaddress
 import logging
 import re
 from base64 import b64encode, b64decode
@@ -348,11 +349,63 @@ def _validate_message_framing(headers: 'Headers') -> int:
 _HOST_FORBIDDEN_BYTES = (
     frozenset(b'/?# \t@') | frozenset(range(0x20)) | frozenset({0x7F})
     | frozenset(range(0x80, 0x100)))
-_HOST_FORBIDDEN_RE = re.compile(
-    b'[' + re.escape(bytes(sorted(_HOST_FORBIDDEN_BYTES))) + b']')
+
+# §3.2.2 puts the brackets of an IP-literal in an authority only around an
+# IPv6 address, so they join the same scan: one pass over the octets that can
+# make a Host value invalid, and the octet it reports decides which rule
+# applies.  Folding them in here rather than testing for them separately is
+# what keeps the ASCII rule (BLA-293) on the single pass it already paid for.
+_AUTHORITY_SCAN_BYTES = _HOST_FORBIDDEN_BYTES | {0x5B, 0x5D}  # '[' ']'
+_AUTHORITY_SCAN_RE = re.compile(
+    b'[' + re.escape(bytes(sorted(_AUTHORITY_SCAN_BYTES))) + b']')
 
 # RFC 9112 §2.1 / RFC 3986 — a request-target may carry only visible ASCII.
 _TARGET_ALLOWED_OCTETS = bytes(range(0x21, 0x7F))
+
+
+# RFC 3986 §3.2.2 — IP-literal = "[" IPv6address "]"; the port that may follow
+# it keeps the authority's lax octet rule (the reg-name path's port is BLA-440).
+# ``IPvFuture`` is not accepted even though §3.2.2 lists it beside
+# ``IPv6address``: nothing emits it, and the one stdlib reading of it is a
+# case-sensitive ``v`` special case with a laxer tail than the production.
+def _ip_literal_is_valid(value: bytes) -> bool:
+    """RFC 3986 §3.2.2 — whether *value*'s bracketed host is an IPv6 address."""
+    if (
+        not value.startswith(b'[')
+        or value.count(b'[') != 1
+        or value.count(b']') != 1
+    ):
+        return False
+
+    close = value.find(b']', 1)
+    tail = value[close + 1:]
+
+    if tail and (
+        tail[:1] != b':'
+        or not _HOST_FORBIDDEN_BYTES.isdisjoint(tail[1:])
+    ):
+        return False
+
+    try:
+        # ``UnicodeDecodeError`` is a ``ValueError``: a high byte inside the
+        # bracket reaches this decode.
+        ipaddress.IPv6Address(value[1:close].decode('ascii'))
+    except ValueError:
+        return False
+    return True
+
+
+def _authority_is_valid(value: bytes) -> bool:
+    """RFC 3986 §3.2 — whether *value* is a URI authority.
+
+    The one scan decides: a forbidden octet refuses the value, and a bracket
+    hands it to §3.2.2's IP-literal grammar.  Neither caller reads a reason,
+    so the message it raises names the value and nothing finer.
+    """
+    match = _AUTHORITY_SCAN_RE.search(value)
+    if match is None:
+        return True
+    return match[0] in (b'[', b']') and _ip_literal_is_valid(value)
 
 
 def _parse_host_header(value: bytes, default_port: int) -> tuple[str, int]:
@@ -400,17 +453,8 @@ def _validate_host(headers: 'Headers') -> None:
     value = hosts[0][1].strip(b' \t')
     if not value:
         raise BadRequestError('empty Host header value')
-    if match := _HOST_FORBIDDEN_RE.search(value):
-        byte = match[0][0]
-        if byte >= 0x80:
-            what = 'non-ASCII byte in a URI authority'
-        elif byte < 0x20 or byte == 0x7F:
-            what = 'control byte in a URI authority'
-        else:
-            what = 'delimiter / whitespace'
-        raise BadRequestError(
-            f'invalid Host authority {value!r}: {what} forbidden by '
-            f'RFC 3986 §3.2')
+    if not _authority_is_valid(value):
+        raise BadRequestError(f'invalid Host authority {value!r}')
 
 
 # ---------------------------------------------------------------------------
