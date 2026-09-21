@@ -567,6 +567,24 @@ async def test_stop_close_failure_finishes_cleanup_and_is_reported_by_run():
 
 
 @pytest.mark.asyncio
+async def test_stop_notifies_waiters_when_fatal_drain_error_propagates():
+    server = Server(BlackBull())
+    fatal = KeyboardInterrupt("interrupt during drain")
+
+    async def fail_drain(_timeout):
+        raise fatal
+
+    server._drain = fail_drain
+
+    with pytest.raises(KeyboardInterrupt) as raised:
+        await server.stop(drain_timeout=0.0)
+
+    assert raised.value is fatal
+    assert server._stop_error is fatal
+    assert server._stop_done_event.is_set()
+
+
+@pytest.mark.asyncio
 async def test_run_waits_for_in_progress_stop_despite_repeated_cancellation(
     monkeypatch,
 ):

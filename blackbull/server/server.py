@@ -948,20 +948,24 @@ class Server:
         self._stopped_event.set()
 
         try:
-            await self._drain(drain_timeout)
-        except BaseException as exc:
-            errors.append(exc)
-            logger.exception('Failed to drain connections during shutdown')
+            try:
+                await self._drain(drain_timeout)
+            except (asyncio.CancelledError, Exception) as exc:
+                errors.append(exc)
+                logger.exception('Failed to drain connections during shutdown')
 
-        try:
-            errors.append(
-                await _wait_async_servers_closed(running_servers, budget))
-        except BaseException as exc:
+            try:
+                errors.append(
+                    await _wait_async_servers_closed(running_servers, budget))
+            except (asyncio.CancelledError, Exception) as exc:
+                errors.append(exc)
+        except (KeyboardInterrupt, SystemExit) as exc:
             errors.append(exc)
-
-        cleanup_error = combine_cleanup_errors(*errors)
-        self._stop_error = cleanup_error
-        self._stop_done_event.set()
+            raise
+        finally:
+            cleanup_error = combine_cleanup_errors(*errors)
+            self._stop_error = cleanup_error
+            self._stop_done_event.set()
         if cleanup_error is not None:
             raise cleanup_error
 

@@ -386,6 +386,10 @@ class MultiWorkerServer:
                 self._listening_sockets = []
                 if close_error is not None:
                     raise close_error
+                # Check for a creator that still holds the adopted port before
+                # attempting a SO_REUSEPORT bind that cannot join it.
+                _refuse_when_unserved(
+                    planned, self._worker_listeners, workers)
                 for _worker in range(workers):
                     group = []
                     self._worker_listeners.append(group)
