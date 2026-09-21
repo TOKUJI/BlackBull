@@ -40,10 +40,20 @@ When `--reload` is on, BlackBull's master process:
    can adopt them.
 4. The fresh master forks workers from the new code.
 
-The kernel multiplexes the same listening fd across master
-generations — no socket is ever closed, so connections in
-flight during a reload finish under the old workers, and new
-connections route to new workers transparently.
+The handoff is transactional. The old master records the previous
+`BB_INHERIT_FDS` value and each descriptor's inheritable flag before calling
+`execvp`. If descriptor preparation or `execvp` fails, those values are
+restored, workers and the watcher are reclaimed within the existing shutdown
+deadline, and the listening sockets are closed by the old master. The fresh
+master likewise adopts the advertised descriptors as one set: a malformed or
+unusable member closes any descriptors already adopted instead of starting
+with only part of the listener set.
+
+On a successful handoff, the kernel multiplexes the same listening fd across
+master generations without closing it, so connections in flight during a
+reload finish under the old workers and new connections route to new workers
+transparently. A failed handoff instead rolls back and closes the old master's
+listeners as described above.
 
 Each step logs at `INFO`, so a reload that doesn't happen can be
 attributed rather than guessed at:

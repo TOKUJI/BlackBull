@@ -24,6 +24,8 @@ See ``docs/deployment/unix-and-fd.md`` for the deployment shapes these serve.
 import os
 import socket
 
+from .._cleanup import combine_cleanup_errors
+
 import logging
 logger = logging.getLogger(__name__)
 
@@ -35,6 +37,43 @@ REUSEPORT_SUPPORTED = hasattr(socket, 'SO_REUSEPORT')
 #: Env var holding a comma-separated list of fds the master has handed
 #: to itself across ``os.execvp`` — see [`adopt_inherited_sockets`][].
 _INHERIT_FDS_ENV = 'BB_INHERIT_FDS'
+
+
+def close_sockets(sockets) -> Exception | None:
+    """Close each live descriptor once and return any close failures."""
+    unique = []
+    aliases = []
+    owners = {}
+    for sock in sockets:
+        try:
+            fd = sock.fileno()
+        except Exception:
+            fd = -1
+        key = ('fd', fd) if isinstance(fd, int) and fd >= 0 else ('object', id(sock))
+        if key in owners:
+            if owners[key] is not sock:
+                aliases.append(sock)
+            continue
+        owners[key] = sock
+        unique.append(sock)
+
+    errors = []
+    for sock in aliases:
+        detach = getattr(sock, 'detach', None)
+        if detach is None:
+            continue
+        try:
+            detach()
+        except Exception as exc:
+            errors.append(exc)
+            logger.exception('Failed to disarm aliased listening socket')
+    for sock in unique:
+        try:
+            sock.close()
+        except Exception as exc:
+            errors.append(exc)
+            logger.exception('Failed to close listening socket')
+    return combine_cleanup_errors(*errors)
 
 
 def adopt_inherited_sockets() -> list[socket.socket] | None:
@@ -55,34 +94,48 @@ def adopt_inherited_sockets() -> list[socket.socket] | None:
     spec = os.environ.get(_INHERIT_FDS_ENV)
     if not spec:
         return None
-    try:
-        fds = [int(s) for s in spec.split(',') if s]
-    except ValueError:
-        logger.error('Malformed %s=%r — ignoring', _INHERIT_FDS_ENV, spec)
-        return None
-    if not fds:
-        return None
-
     sockets: list[socket.socket] = []
-    for fd in fds:
+    try:
         try:
-            sock = socket.socket(fileno=fd)
-        except OSError as exc:
-            logger.error('Failed to adopt inherited fd %d: %s', fd, exc)
-            continue
-        # Mark the inherited socket non-inheritable for any further
-        # fork+exec — only this generation of the master needs it.
-        try:
-            os.set_inheritable(sock.fileno(), False)
-        except OSError:
-            pass  # best-effort; a socket we can't mark non-inheritable is still usable.
-        sockets.append(sock)
-        logger.info('Adopted inherited listening socket fd=%d %s',
-                    fd, sock.getsockname())
+            tokens = spec.split(',')
+            if any(not token for token in tokens):
+                raise ValueError('empty fd token')
+            fds = [int(token) for token in tokens]
+            if any(fd < 0 for fd in fds):
+                raise ValueError('negative fd')
+        except ValueError as exc:
+            raise RuntimeError(
+                f'Malformed {_INHERIT_FDS_ENV}={spec!r}'
+            ) from exc
 
-    # Clear the env var so workers forked from us don't try to re-adopt.
-    del os.environ[_INHERIT_FDS_ENV]
-    return sockets or None
+        seen_fds = set()
+        for fd in fds:
+            if fd in seen_fds:
+                raise RuntimeError(
+                    f'Duplicate inherited fd {fd} cannot have multiple owners')
+            seen_fds.add(fd)
+            try:
+                sock = socket.socket(fileno=fd)
+            except (OSError, OverflowError, ValueError) as exc:
+                raise RuntimeError(
+                    f'Failed to adopt inherited fd {fd}: {exc}'
+                ) from exc
+            sockets.append(sock)
+            try:
+                os.set_inheritable(sock.fileno(), False)
+                address = sock.getsockname()
+            except OSError as exc:
+                raise RuntimeError(
+                    f'Failed to prepare inherited fd {fd}: {exc}'
+                ) from exc
+            logger.info('Adopted inherited listening socket fd=%d %s', fd, address)
+        return sockets
+    except BaseException:
+        close_sockets(sockets)
+        raise
+    finally:
+        # Workers forked from this process must never re-adopt this generation.
+        os.environ.pop(_INHERIT_FDS_ENV, None)
 
 
 def _bind_socket(family, host, port,

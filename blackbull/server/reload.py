@@ -17,9 +17,9 @@ The reload model is **master re-exec**:
      and re-forks workers — now running the *new* code.
 
 Picking up new code requires the master itself to re-import, which is
-why we re-exec the whole process rather than ``importlib.reload``.  The
-listening sockets do not close at any point: kernel multiplexes the
-same fd across master+workers; only python state churns.
+why we re-exec the whole process rather than ``importlib.reload``.  On a
+successful re-exec, the listening sockets stay open throughout: the
+kernel multiplexes the same fd across master+workers while Python state churns.
 
 The watcher runs in a daemon thread so it can not block the master's
 synchronous supervision loop.  It debounces filesystem events itself
@@ -146,10 +146,12 @@ class FileChangeWatcher:
         logger.info('auto-reload: watching %s for *.py changes',
                     ', '.join(self._paths))
 
-    def stop(self) -> None:
+    def stop(self, timeout: float = 2.0) -> None:
         self._stop_event.set()
         if self._thread is not None:
-            self._thread.join(timeout=2.0)
+            self._thread.join(timeout=max(0.0, timeout))
+            if self._thread.is_alive():
+                raise TimeoutError('file watcher did not stop before the deadline')
             self._thread = None
 
 
@@ -179,21 +181,36 @@ def exec_self_with_sockets(sockets: Sequence[socket.socket],
     if not argv:
         raise RuntimeError('cannot re-exec: sys.argv is empty')
 
-    fd_strings: list[str] = []
-    for sock in sockets:
-        fd = sock.fileno()
-        if fd < 0:
-            logger.warning('skipping closed socket during exec')
-            continue
-        os.set_inheritable(fd, True)
-        fd_strings.append(str(fd))
+    previous_env = os.environ.get(_INHERIT_FDS_ENV)
+    previous_flags: list[tuple[int, bool]] = []
+    try:
+        fd_strings: list[str] = []
+        for sock in sockets:
+            fd = sock.fileno()
+            if fd < 0:
+                logger.warning('skipping closed socket during exec')
+                continue
+            previous_flags.append((fd, os.get_inheritable(fd)))
+            os.set_inheritable(fd, True)
+            fd_strings.append(str(fd))
 
-    if not fd_strings:
-        raise RuntimeError('exec_self_with_sockets: no live sockets to hand off')
+        if not fd_strings:
+            raise RuntimeError('exec_self_with_sockets: no live sockets to hand off')
 
-    os.environ[_INHERIT_FDS_ENV] = ','.join(fd_strings)
-    logger.info('reload: execv %s argv=%r BB_INHERIT_FDS=%s',
-                sys.executable, list(argv), os.environ[_INHERIT_FDS_ENV])
+        os.environ[_INHERIT_FDS_ENV] = ','.join(fd_strings)
+        logger.info('reload: execv %s argv=%r BB_INHERIT_FDS=%s',
+                    sys.executable, list(argv), os.environ[_INHERIT_FDS_ENV])
 
-    # execvp replaces the process image — only returns on failure.
-    os.execvp(sys.executable, [sys.executable, *argv])
+        # execvp replaces the process image — only returns on failure.
+        os.execvp(sys.executable, [sys.executable, *argv])
+        raise RuntimeError('execvp returned without replacing the process')
+    finally:
+        for fd, inheritable in previous_flags:
+            try:
+                os.set_inheritable(fd, inheritable)
+            except OSError:
+                logger.exception('Failed to restore inheritable flag for fd %d', fd)
+        if previous_env is None:
+            os.environ.pop(_INHERIT_FDS_ENV, None)
+        else:
+            os.environ[_INHERIT_FDS_ENV] = previous_env

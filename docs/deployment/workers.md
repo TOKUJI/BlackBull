@@ -23,6 +23,16 @@ Multi-worker uses **pre-fork multiprocessing** — each worker is
 a separate OS process, not a thread.  The master process binds
 the socket, forks workers, and then sleeps until SIGTERM/SIGINT.
 
+The master owns the complete listener set and every `Process` object until a
+successful handoff or shutdown. Worker creation is sequentially committed: if
+worker N cannot start, workers 0 through N−1 are terminated and joined before
+the startup error returns. The same rollback covers per-worker
+`SO_REUSEPORT` binds and watcher startup. Cleanup continues after an individual
+close or process-operation error, while the first startup error remains the
+reported failure. If cleanup itself has several independent failures and no
+startup error is active, they are reported together as an `ExceptionGroup`;
+a single cleanup failure is raised unchanged.
+
 On Linux / modern BSDs each worker can bind its own listening
 socket via `SO_REUSEPORT` (`BB_SOCKET_REUSEPORT=1`), so the
 kernel hashes incoming connections across workers' accept
@@ -298,6 +308,12 @@ Nothing in flight is cancelled while that budget lasts. A cancelled handler
 means a client holding a half-written response, which is worse than the wait.
 Whatever has not finished by the deadline *is* cancelled: a shutdown that must
 complete still completes.
+
+Watcher stop, worker joins and forced kills consume one master shutdown
+deadline rather than receiving a fresh timeout each. Listener descriptors are
+closed after the children are reaped; aliases of one descriptor are disarmed
+once, while descriptors created with `dup()` remain separate resources and are
+each closed.
 
 This is what a rolling deploy or a `docker stop` depends on. Drain the node at
 the load balancer first if you want zero in-flight requests at all — the

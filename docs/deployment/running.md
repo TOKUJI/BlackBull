@@ -121,6 +121,13 @@ exposes it as `server.port` — the same pattern the
 [testing fixture](../guide/testing.md#fixture-ephemeral-port-server)
 uses.
 
+The direct API keeps ownership until `run()` has completely handed each socket
+to an event-loop server. Any exception or cancellation before that startup
+commit closes the listeners, event-loop servers, lifespan task, and connection
+tasks acquired so far. Cleanup shares one bounded deadline and does not replace
+the exception that caused startup to fail. Calling `close_socket()` again is
+safe.
+
 ## Picking the deployment shape
 
 | Shape | When |
