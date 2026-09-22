@@ -136,6 +136,25 @@ startup, especially on `AF_UNIX`; a backlog below 64 there logs a warning.
 BlackBull does not change the backlog of an adopted fd (`--bind fd://N`): set
 it where the socket is created, such as systemd's `Backlog=`.
 
+## Sizing the connection cap under uvloop
+
+Under `BB_UVLOOP=1`, accepting does not pause at `BB_MAX_CONNECTIONS`.
+Connections beyond the cap are refused using spare file descriptors, and when
+those run out, clients get no response at all.
+
+If you use uvloop and expect bursts beyond the cap:
+
+- Do not rely on `BB_MAX_CONNECTIONS=auto`; it leaves only 64 spare
+  descriptors.
+- Set `BB_MAX_CONNECTIONS ≤ RLIMIT_NOFILE − (peak burst + held + margin)`,
+  where `held` is what the process holds at its busiest besides client
+  connections: the connection pool's maximum, files opened per request times
+  concurrency, and anything opened lazily.  Do not count `held` at idle.
+- Use a margin of at least 64, and more with TLS or with
+  `BB_SOCKET_REUSEPORT=1`.
+
+If a hard bound matters more than uvloop's speed, use the default event loop.
+
 ## Inspecting the bind
 
 `server.port` returns the kernel-assigned port number after

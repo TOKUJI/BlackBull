@@ -37,8 +37,10 @@ from .listener import HTTP, InheritedFd, Listener, Tcp, Unix
 from .sender import AbstractWriter
 from .recipient import (AbstractReader,
                         _HTTP2_STREAM_QUEUE_DEPTH, _WS_READ_INLINE)
-from .cap_log import log_cap_hit
+from .cap_log import CapHitCounter, log_cap_hit
 from ..asgi import ASGIEvent
+from ..env import FD_RESERVE
+from asyncio.selector_events import BaseSelectorEventLoop
 logger = logging.getLogger(__name__)
 
 
@@ -220,6 +222,101 @@ def _validate_unique_socket_fds(bound_listeners) -> None:
                 seen.add(fd)
 
 
+_REFUSAL_RESERVE = FD_RESERVE // 4
+_ACCEPTS_PER_TICK = FD_RESERVE // 8
+assert _REFUSAL_RESERVE + _ACCEPTS_PER_TICK <= FD_RESERVE
+
+
+class _AcceptGate:
+    """Pause accepting while no descriptor can be spared.  Selector loops only."""
+
+    def __init__(self):
+        self._entries: list = []
+        self._loop = None
+        self._limit = 0
+        #: Not reset by ``close()``: releases arrive after it.
+        self._descriptors_held = 0
+        self._paused = False
+        self._cap_hits = CapHitCounter(flush_interval=0)
+
+    def arm(self, entries, max_connections: int) -> bool:
+        """Open accepting in place of ``start_serving()``, not after it.
+
+        ``start_serving()`` yields, and the queue drains in that yield.
+        """
+        self.close()
+        if not max_connections:
+            return False
+        loop = asyncio.get_running_loop()
+        if not isinstance(loop, BaseSelectorEventLoop):
+            logger.warning(
+                'Accept admission disabled on %s: a burst against a saturated '
+                'cap can leave clients unanswered. Size BB_MAX_CONNECTIONS '
+                'per docs/deployment/unix-and-fd.md.', type(loop).__name__)
+            return False
+        self._loop = loop
+        self._entries = list(entries)
+        self._limit = max_connections + _REFUSAL_RESERVE
+        armed: list = []
+        try:
+            for server, sock in self._entries:
+                sock.listen(server._backlog)
+                server._serving = True
+                armed.append(server)
+                self._arm_one(server, sock)
+        except Exception:
+            logger.warning('Accept admission could not arm; '
+                           'falling back to unbounded accepting', exc_info=True)
+            for server in armed:
+                server._serving = False
+            self.close()
+            return False
+        return True
+
+    def _arm_one(self, server, sock) -> None:
+        # Private ``asyncio.Server`` attributes, unguarded: a missing one must
+        # reach ``arm()``'s fallback, not a silent default.
+        self._loop._start_serving(
+            server._protocol_factory, sock, server._ssl_context, server,
+            _ACCEPTS_PER_TICK, server._ssl_handshake_timeout,
+            server._ssl_shutdown_timeout)
+
+    def hold(self) -> None:
+        self._descriptors_held += 1
+        if self._limit and not self._paused and self._descriptors_held >= self._limit:
+            self._pause()
+
+    def release(self) -> None:
+        self._descriptors_held -= 1
+        if self._paused and self._descriptors_held < self._limit:
+            self._resume()
+
+    def close(self) -> None:
+        self._entries = []
+        self._limit = 0
+        self._paused = False
+        self._cap_hits.flush(protocol='tcp')
+
+    def _pause(self) -> None:
+        self._paused = True
+        log_cap_hit('max_connections',
+                    requested=self._descriptors_held + 1, limit=self._limit,
+                    counter=self._cap_hits, protocol='tcp')
+        for _server, sock in self._entries:
+            try:
+                self._loop.remove_reader(sock.fileno())
+            except Exception:  # pragma: no cover - a closed listener
+                logger.debug('Listener already unregistered', exc_info=True)
+
+    def _resume(self) -> None:
+        self._paused = False
+        for server, sock in self._entries:
+            try:
+                self._arm_one(server, sock)
+            except Exception:  # pragma: no cover - a closed listener
+                logger.debug('Listener could not be re-armed', exc_info=True)
+
+
 class _StartupAbandoned(Exception):
     """A stop arrived before the application answered startup.  Not a failure."""
 
@@ -231,7 +328,6 @@ class LifespanManager:
     Raises RuntimeError if the app responds with 'lifespan.startup.failed'.
     On exit: delivers 'lifespan.shutdown'; 'lifespan.shutdown.failed' raises
     RuntimeError with the app's message.
-
 
     Implemented as a class (not asynccontextmanager) so that __aenter__ and
     __aexit__ can be called independently — e.g. startup() / shutdown() — without
@@ -437,6 +533,7 @@ class Server:
         self._stream_queue_depth = stream_queue_depth
         self._ws_queue_depth = ws_queue_depth
         self._active_connections = 0
+        self._accept_gate = _AcceptGate()
 
         # An app carries a registry only once a raw_handler is registered.
         from .protocol_registry import ProtocolRegistry as _PR  # noqa: PLC0415
@@ -573,6 +670,8 @@ class Server:
         class _ServedConnection(ConnectionProtocol):
             def connection_made(self, transport):
                 super().connection_made(transport)
+                # Refusals included: each holds a descriptor.
+                server._accept_gate.hold()
                 # Eager start runs the serve prologue inside this callback and
                 # parks at the same read it would have parked at anyway, one
                 # loop iteration earlier — a hop paid once per connection, so
@@ -608,6 +707,12 @@ class Server:
                     # A bare close would RST away the response a peer that is
                     # still sending has not read yet.
                     await self.linger_close()
+
+            def connection_lost(self, exc):
+                try:
+                    super().connection_lost(exc)
+                finally:
+                    server._accept_gate.release()
 
             @staticmethod
             def _serve_done(task):
@@ -965,9 +1070,14 @@ class Server:
 
             async with AsyncExitStack() as stack:
                 servers = []
+                listening: list = []
                 for context, pairs in groups.items():
-                    servers += await stack.enter_async_context(
+                    # One server per socket, in order: the gate pairs them.
+                    group = await stack.enter_async_context(
                         SocketManager(pairs, context, budget))
+                    servers += group
+                    listening += list(zip(group, (sock for sock, _f in pairs),
+                                          strict=True))
                 self._running_servers = servers
                 logger.info(
                     'Bound %d server(s); accepting when lifespan startup completes',
@@ -976,10 +1086,7 @@ class Server:
                     async with LifespanManager(self.app, budget,
                                                abandon_on=self._stopped_event):
                         logger.info(f'Server(s) created: {servers}')
-                        for srv in servers:
-                            if self._stopping:
-                                break
-                            await srv.start_serving()
+                        await self._open_accepting(listening, servers)
                         startup_committed = True
                         try:
                             await self._stopped_event.wait()
@@ -1010,6 +1117,7 @@ class Server:
                 cleanup_error = await self._cancel_connection_tasks(budget)
             raise
         finally:
+            self._accept_gate.close()
             socket_error = self._close_socket()
             cleanup_error = combine_cleanup_errors(cleanup_error, socket_error)
             if cleanup_error is not None:
@@ -1018,6 +1126,18 @@ class Server:
                 logger.error('Server cleanup failed: %s', cleanup_error)
 
         logger.info('Server has been stopped.')
+
+    async def _open_accepting(self, listening, servers) -> None:
+        if self._stopping:
+            return
+        if self._accept_gate.arm(listening, self._max_connections):
+            # The yield ``start_serving()`` makes.
+            await asyncio.sleep(0)
+            return
+        for srv in servers:
+            if self._stopping:
+                break
+            await srv.start_serving()
 
     async def stop(self, drain_timeout: float = 8.0) -> None:
         """Stop accepting, then let the connections already being served finish.
@@ -1044,6 +1164,7 @@ class Server:
         # Close every listener first, so the drain is over a set that only
         # shrinks.  A failed close must not strand the remaining listeners.
         running_servers = list(getattr(self, '_running_servers', ()))
+        self._accept_gate.close()
         errors = [_close_servers(running_servers)]
         self._stopped_event.set()
 

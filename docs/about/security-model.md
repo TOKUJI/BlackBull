@@ -165,11 +165,16 @@ are the difference between the label and the whole truth:
 2. **The default connection cap is only as protective as your `ulimit`.**
    `BB_MAX_CONNECTIONS` defaults to `auto`, which derives the cap from the
    process's own `RLIMIT_NOFILE` less a 64-descriptor reserve. That is finite
-   and honest — a cap above the fd budget would be decorative, since `accept()`
-   fails with `EMFILE` before the cap is consulted — but on a host whose limit
-   is 1,048,576 the derived cap is ~1,048,512. It bounds *descriptor
-   exhaustion*, not event-loop health. For the latter, set an explicit number;
-   1024 is a typical single-loop value.
+   and honest — a cap above the fd budget cannot be honoured, because the
+   descriptors run out first — but on a host whose limit is 1,048,576 the
+   derived cap is ~1,048,512. It bounds *descriptor exhaustion*, not
+   event-loop health. For the latter, set an explicit number; 1024 is a
+   typical single-loop value.
+
+   Connections beyond the cap wait in the accept queue and each receives a
+   `503`, on the default event loop.  Under `BB_UVLOOP=1` a burst beyond the
+   cap can leave clients unanswered; see [Sizing the connection cap under
+   uvloop](../deployment/unix-and-fd.md#sizing-the-connection-cap-under-uvloop).
 
 3. **An MQTT session that never expires is bounded by the total, not by the
    clock.** §3.1.2.11.2 defines a Session Expiry Interval of `0xFFFFFFFF` as

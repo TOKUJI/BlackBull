@@ -319,7 +319,7 @@ record on `blackbull.caps` when it fires.  Coverage:
 
 | Cap (env var) | Where it fires |
 |---|---|
-| `BB_MAX_CONNECTIONS` | accept loop — connection cap hit |
+| `BB_MAX_CONNECTIONS` | accept loop — a refusal (`limit` is the cap) or a pause in accepting (`limit` is slightly above the cap) |
 | `BB_HEADER_TIMEOUT` | slowloris defence — headers didn't arrive in time |
 | `BB_HEADER_MAX_LINE` | per-line header limit exceeded |
 | `BB_HEADER_MAX_TOTAL` | aggregate header block exceeded (H/1.1 + H/2 CONTINUATION) |

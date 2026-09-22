@@ -17,6 +17,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   instead of waiting for the application to answer.
 - `Server.shutdown()` without `Server.startup()` raises `RuntimeError`.
 - An `AF_UNIX` listener with `BB_SOCKET_BACKLOG` below 64 logs a warning.
+- A burst beyond `BB_MAX_CONNECTIONS` no longer exhausts file descriptors on
+  the default event loop.  Under `BB_UVLOOP=1`, see *Sizing the connection cap
+  under uvloop*.
 
 - Added client-owned write and WebSocket size bounds, and applied the
   response minimum-body-rate floor to HTTP/2 streams.
