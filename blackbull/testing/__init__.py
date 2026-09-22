@@ -31,7 +31,9 @@ here and nowhere else in the suite.
 
 The client is a context manager so that ASGI ``lifespan.startup`` runs
 before any request and ``lifespan.shutdown`` runs on exit.  Apps that
-don't implement the lifespan protocol are tolerated silently.
+don't implement the lifespan protocol are tolerated silently.  A failure
+the app reports is not: both ``lifespan.startup.failed`` and
+``lifespan.shutdown.failed`` raise out of the block.
 
 For everything else, start from ``docs/guide/testing.md``.
 """
@@ -39,6 +41,7 @@ For everything else, start from ``docs/guide/testing.md``.
 from __future__ import annotations
 
 import asyncio
+import logging
 import queue
 import threading
 from typing import Any
@@ -49,6 +52,8 @@ from ..native import NativeWSMessage
 from ..websocket import WebSocketDisconnect
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 # ``WebSocketDisconnect`` is re-exported, not redefined.  The
 # server side a handler object that raises the same "the other end closed"
@@ -162,18 +167,25 @@ class _LifespanManager:
     def shutdown(self) -> None:
         if self._unsupported:
             return
+        failure = None
         try:
             self.loop_thread.run_coro(
                 self.loop_thread.client_to_server.put({'type': 'lifespan.shutdown'}),
                 timeout=self.shutdown_timeout,
             )
-            self._wait_for_lifespan_event(self.shutdown_timeout)
+            event = self._wait_for_lifespan_event(self.shutdown_timeout)
+            if event is not None and event['type'] == 'lifespan.shutdown.failed':
+                failure = RuntimeError(
+                    'Lifespan shutdown failed: '
+                    f'{event.get("message") or "no message"}')
         finally:
             if self._app_task is not None:
                 try:
                     self.loop_thread.run_coro(self._await_task(), timeout=self.shutdown_timeout)
                 except Exception:
                     pass  # shutdown best-effort; a lifespan exit error is surfaced elsewhere.
+        if failure is not None:
+            raise failure
 
     async def _await_task(self):
         assert self._app_task is not None
@@ -461,6 +473,17 @@ class WebSocketTestSession:
             self._loop_thread.stop()
 
 
+def _shutdown_on_exit(lifespan, exc_info) -> None:
+    if lifespan is None:
+        return
+    try:
+        lifespan.shutdown()
+    except Exception:
+        if not exc_info or exc_info[0] is None:
+            raise
+        logger.exception('Lifespan shutdown failed')
+
+
 class TestClient:
     """In-memory HTTP+WebSocket test client for ASGI 3.0 applications.
 
@@ -539,8 +562,7 @@ class TestClient:
 
     def __exit__(self, *exc_info) -> None:
         try:
-            if self._lifespan is not None:
-                self._lifespan.shutdown()
+            _shutdown_on_exit(self._lifespan, exc_info)
         finally:
             try:
                 if self._async_client is not None:

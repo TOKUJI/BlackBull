@@ -5,6 +5,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+- **A failing `@app.on_shutdown` hook now exits `1`** instead of `0` in a
+  single-worker process (`app.run()`, the `blackbull` CLI).  `TestClient` and
+  `NativeClient` raise it from the `with` block unless the block is already
+  raising.
+- `Server.shutdown()` without `Server.startup()` raises `RuntimeError`.
+
 - Added client-owned write and WebSocket size bounds, and applied the
   response minimum-body-rate floor to HTTP/2 streams.
 - Corrected the defaults stated in `blackbull/env.py`'s environment-variable

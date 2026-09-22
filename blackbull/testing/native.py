@@ -50,6 +50,7 @@ from ..headers import Headers
 # its own ``NativeTestResponse`` — two different things that both wanted the
 # name ``NativeResponse``, which is exactly the collision this alias removes.
 from ..native import NativeResponse as _NativeResponse
+from . import _shutdown_on_exit
 
 __all__ = [
     'NativeTestResponse', 'NativeResponse', 'NativeClient', 'NativeTestServer',
@@ -371,8 +372,7 @@ class NativeClient:
     def __exit__(self, *exc_info) -> None:
         self._entered = False
         try:
-            if self._lifespan is not None:
-                self._lifespan.shutdown()
+            _shutdown_on_exit(self._lifespan, exc_info)
         finally:
             self._loop_thread.stop()
 

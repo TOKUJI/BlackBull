@@ -1073,3 +1073,31 @@ async def test_a_raw_binding_refusal_writes_nothing_and_keeps_nothing():
     assert held <= idle_fds + RAW_BURST + FD_SLACK, (
         f'{held} descriptors against idle {idle_fds}: the server still held '
         f'its half of a refused raw connection')
+
+
+@pytest.mark.asyncio
+@pytest.mark.timeout(60)
+async def test_run_cancelled_while_serving_still_returns_normally():
+    app = BlackBull()
+
+    @app.route(path='/', methods=[HTTPMethod.GET])
+    async def index():
+        return BODY.decode()
+
+    server = Server(app)
+    server.open_socket(0)
+    runner = asyncio.create_task(server.run())
+    try:
+        # Serving first, so "absorbed" cannot mean "never started".
+        assert BODY in await _await_served(_tcp_connector(server.port))
+        runner.cancel()
+        await asyncio.wait({runner}, timeout=10)
+        assert runner.done(), 'run() never returned after the cancel'
+        assert not runner.cancelled(), (
+            'run() propagated a cancellation it contracts to absorb')
+        assert runner.exception() is None, repr(runner.exception())
+    finally:
+        if not runner.done():
+            runner.cancel()
+            await asyncio.gather(runner, return_exceptions=True)
+        server.close_socket()

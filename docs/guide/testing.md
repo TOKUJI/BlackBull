@@ -465,9 +465,10 @@ def test_lifespan_runs():
 If a startup handler raises, `TestClient.__enter__` re-raises a
 `RuntimeError` describing the failure, so a broken startup
 fails the test rather than silently leaving the app in a
-half-initialised state.  Apps that don't implement the
-lifespan protocol (i.e. legacy ASGI-2.0-style callables) are
-tolerated silently.
+half-initialised state.  A shutdown handler that raises is
+reported the same way, unless the `with` block is already
+raising.  Apps that don't implement the lifespan protocol
+(i.e. legacy ASGI-2.0-style callables) are tolerated silently.
 
 ### Construction options
 

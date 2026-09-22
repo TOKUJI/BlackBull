@@ -172,7 +172,9 @@ class LifespanManager:
 
     On enter: launches the app's lifespan task and delivers 'lifespan.startup'.
     Raises RuntimeError if the app responds with 'lifespan.startup.failed'.
-    On exit: delivers 'lifespan.shutdown' and waits for 'lifespan.shutdown.complete'.
+    On exit: delivers 'lifespan.shutdown'; 'lifespan.shutdown.failed' raises
+    RuntimeError with the app's message.
+
 
     Implemented as a class (not asynccontextmanager) so that __aenter__ and
     __aexit__ can be called independently — e.g. startup() / shutdown() — without
@@ -221,6 +223,15 @@ class LifespanManager:
                 logger.error('Lifespan startup rollback failed: %s', cleanup_error)
             raise
 
+    @staticmethod
+    def _shutdown_failure(event) -> Exception | None:
+        if event.get('type') == ASGIEvent.LIFESPAN_SHUTDOWN_FAILED:
+            message = event.get('message') or 'no message'
+            # Logged too: raised, it reaches the operator only as an exit status.
+            logger.error('Lifespan shutdown failed: %s', message)
+            return RuntimeError(f'Lifespan shutdown failed: {message}')
+        return None
+
     async def __aexit__(self, exc_type, exc, traceback):
         task = self._task
         if task is None:
@@ -240,6 +251,8 @@ class LifespanManager:
             if not done:
                 errors.append(TimeoutError(
                     'lifespan shutdown did not finish before the deadline'))
+            elif getter in done and not getter.cancelled():
+                errors.append(self._shutdown_failure(getter.result()))
             errors.append(await _cancel_tasks([getter], self._cleanup_budget))
         errors.append(await _cancel_tasks([task], self._cleanup_budget))
         cleanup_error = combine_cleanup_errors(*errors)
@@ -351,6 +364,7 @@ class Server:
         self.bound_listeners: list = []
         self._max_connections = max_connections
         logger.info('max_connections=%s (%s)', *_max_connections_report(max_connections))
+        self._lifespan_cm: LifespanManager | None = None
         self._stream_queue_depth = stream_queue_depth
         self._ws_queue_depth = ws_queue_depth
         self._active_connections = 0
@@ -843,7 +857,15 @@ class Server:
         await self._lifespan_cm.__aenter__()
 
     async def shutdown(self):
-        """Drive the ASGI lifespan shutdown handshake."""
+        """Drive the ASGI lifespan shutdown handshake.
+
+        Raises ``RuntimeError`` if ``startup()`` was never called.  After a
+        failed ``startup()`` it cleans up quietly, so ``try``/``finally`` is safe.
+        """
+        if self._lifespan_cm is None:
+            raise RuntimeError(
+                'Server.shutdown() called without Server.startup(); there is '
+                'no lifespan to shut down.')
         await self._lifespan_cm.__aexit__(None, None, None)
 
     async def run(self, port=80):

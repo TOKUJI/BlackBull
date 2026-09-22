@@ -15,6 +15,7 @@ from __future__ import annotations
 import http.client
 import os
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -260,3 +261,101 @@ def test_cli_serves_raw_asgi_callable(tmp_path: Path):
         if log_path.exists() and log_path.stat().st_size > 0:
             print(f'--- subprocess log ({log_path.stat().st_size} bytes) ---')
             print(log_path.read_text()[-4000:])
+
+
+# ---------------------------------------------------------------------------
+# Exit status and signals
+# ---------------------------------------------------------------------------
+# ``python -c`` into ``cli.main``, not the console script: the status read
+# must be the entry point's own.
+
+_SHUTDOWN_APP = '''
+import sys
+
+from blackbull import BlackBull
+
+app = BlackBull()
+
+
+@app.route(path='/ready')
+async def ready():
+    return b'ready'
+
+
+@app.on_shutdown
+async def _flush():
+    print('SHUTDOWN_HOOK_RAN', file=sys.stderr, flush=True)
+    {body}
+'''
+
+_CLI_ENTRY = 'from blackbull.cli import main; raise SystemExit(main())'
+
+
+def _repo_root() -> str:
+    import blackbull
+    return str(Path(blackbull.__file__).resolve().parent.parent)
+
+
+def _spawn_server(tmp_path: Path, body: str, port: int) -> subprocess.Popen:
+    (tmp_path / 'shutdown_app.py').write_text(
+        _SHUTDOWN_APP.format(body=body).lstrip())
+
+    env = os.environ.copy()
+    env['BB_ACCESS_LOG'] = '0'
+    env['PYTHONUNBUFFERED'] = '1'
+    env['PYTHONPATH'] = os.pathsep.join([str(tmp_path), _repo_root()])
+
+    proc = subprocess.Popen(
+        [sys.executable, '-c', _CLI_ENTRY,
+         'shutdown_app:app', '--bind', f'127.0.0.1:{port}'],
+        env=env, cwd=str(tmp_path), stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, text=True, start_new_session=True,
+    )
+    assert _wait_until(
+        lambda: _get(port, '/ready'),
+        deadline=time.monotonic() + _STARTUP_DEADLINE_SEC,
+    ) == b'ready', 'the server never served a request'
+    return proc
+
+
+def _reap(proc: subprocess.Popen) -> subprocess.CompletedProcess:
+    try:
+        stdout, stderr = proc.communicate(timeout=30)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate(timeout=5)
+    return subprocess.CompletedProcess(proc.args, proc.returncode, stdout, stderr)
+
+
+def _serve_then_signal(tmp_path: Path, body: str,
+                       sig: int) -> subprocess.CompletedProcess:
+    port = _free_port()
+    proc = _spawn_server(tmp_path, body, port)
+    proc.send_signal(sig)
+    return _reap(proc)
+
+
+@pytest.mark.parametrize('sig', [signal.SIGINT], ids=['sigint'])
+@pytest.mark.timeout(60)
+def test_a_failing_shutdown_hook_exits_non_zero(tmp_path: Path, sig: int):
+    done = _serve_then_signal(
+        tmp_path, "raise RuntimeError('flush to disk failed')", sig)
+    assert 'SHUTDOWN_HOOK_RAN' in done.stderr, (
+        f'the shutdown hook never ran on {signal.Signals(sig).name}\n'
+        f'{done.stderr[-2000:]}')
+    assert done.returncode == 1, (
+        f'a failed shutdown exited {done.returncode}\n{done.stderr[-2000:]}')
+    assert 'flush to disk failed' in done.stderr, done.stderr[-2000:]
+
+
+@pytest.mark.parametrize('sig', [signal.SIGINT], ids=['sigint'])
+@pytest.mark.timeout(60)
+def test_a_clean_shutdown_hook_still_exits_zero(tmp_path: Path, sig: int):
+    done = _serve_then_signal(tmp_path, 'return', sig)
+    assert 'SHUTDOWN_HOOK_RAN' in done.stderr, (
+        f'the shutdown hook never ran on {signal.Signals(sig).name}\n'
+        f'{done.stderr[-2000:]}')
+    assert done.returncode == 0, (
+        f'a clean shutdown exited {done.returncode}\n{done.stderr[-2000:]}')
+

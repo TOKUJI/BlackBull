@@ -125,3 +125,18 @@ Once event-loop servers are created, accepting still waits for lifespan
 startup to complete. A failure while grouping listeners by TLS context, during
 lifespan startup, or while starting acceptance closes every earlier group and
 reclaims the lifespan task before the original startup exception is reported.
+
+## A failing shutdown is a failing process
+
+`run()` reports what the application answered:
+
+| the app … | `run()` … |
+|---|---|
+| sends `lifespan.startup.failed` | raises, carrying the app's message |
+| sends `lifespan.shutdown.failed` | raises on the way out, carrying the app's message |
+| never answers | waits at startup; at shutdown, ends at the cleanup budget |
+
+A raising `@app.on_shutdown` hook therefore makes a single-worker process log
+the failure and exit `1`, so a supervisor can act on it.  With `workers > 1`
+or `--reload` the master exits `0`; check the workers' logs.
+
