@@ -15,12 +15,13 @@ Dual-stack support – original ``create_socket`` bound only to ``'::1'``
 ``AF_INET6`` so IPv4-only clients can also reach the server.
 """
 
+import logging
 import socket
 import pytest
 
 from blackbull.protocol.rsock import (
     _bind_socket, create_socket, create_dual_stack_sockets, create_unix_socket,
-    adopt_listening_fd, _SD_LISTEN_FDS_START,
+    adopt_listening_fd, _SD_LISTEN_FDS_START, _UNIX_BACKLOG_WARN_BELOW,
 )
 
 
@@ -445,3 +446,39 @@ class TestAdoptListeningFd:
         s.close()
         with pytest.raises(RuntimeError, match='adopt'):
             adopt_listening_fd(fd)
+
+
+# ---------------------------------------------------------------------------
+# create_unix_socket — small-backlog warning
+# ---------------------------------------------------------------------------
+
+class TestUnixBacklogWarning:
+
+    def _bind(self, tmp_path, backlog, caplog):
+        path = str(tmp_path / f'advisory-{backlog}.sock')
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger='blackbull.protocol.rsock'):
+            sock = create_unix_socket(path, backlog=backlog)
+        try:
+            assert sock is not None
+            return [record for record in caplog.records
+                    if record.levelno >= logging.WARNING]
+        finally:
+            if sock is not None:
+                sock.close()
+
+    def test_a_small_unix_backlog_is_warned_about_once(self, tmp_path, caplog):
+        warnings = self._bind(tmp_path, 8, caplog)
+        assert len(warnings) == 1, [record.getMessage() for record in warnings]
+        message = warnings[0].getMessage()
+        assert 'BB_SOCKET_BACKLOG' in message, message
+        assert '8' in message, message
+        assert '9' in message, message          # backlog + 1 can wait
+        assert 'refus' in message.lower(), message
+
+    def test_the_shipped_default_is_not_warned_about(self, tmp_path, caplog):
+        assert self._bind(tmp_path, 1024, caplog) == []
+
+    def test_warns_below_the_threshold_not_at_it(self, tmp_path, caplog):
+        assert self._bind(tmp_path, _UNIX_BACKLOG_WARN_BELOW, caplog) == []
+        assert len(self._bind(tmp_path, _UNIX_BACKLOG_WARN_BELOW - 1, caplog)) == 1

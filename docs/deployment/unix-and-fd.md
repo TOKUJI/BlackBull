@@ -122,6 +122,20 @@ inherit it: a requested `262144` is 416 KiB effective each, making the window
 client's SYN retransmission budget (about two minutes) loses the excess.
 BlackBull documents this window rather than forcing it smaller.
 
+### What a client beyond the backlog observes
+
+Until startup completes, `backlog + 1` connections can wait.  Beyond that:
+
+| family | the client |
+|---|---|
+| TCP | retransmits, and is served once startup completes |
+| `AF_UNIX` | is refused immediately |
+
+Set `BB_SOCKET_BACKLOG` above the number of connections you expect during
+startup, especially on `AF_UNIX`; a backlog below 64 there logs a warning.
+BlackBull does not change the backlog of an adopted fd (`--bind fd://N`): set
+it where the socket is created, such as systemd's `Backlog=`.
+
 ## Inspecting the bind
 
 `server.port` returns the kernel-assigned port number after

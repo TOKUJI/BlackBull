@@ -1101,3 +1101,109 @@ async def test_run_cancelled_while_serving_still_returns_normally():
             runner.cancel()
             await asyncio.gather(runner, return_exceptions=True)
         server.close_socket()
+
+
+WINDOW_CLIENTS = 40
+# Must outlast the park: a shorter patience reads a delayed client as refused.
+WINDOW_PATIENCE = 5.0
+STARTUP_PARK_SECONDS = 0.4
+
+
+async def _window_client(connect, patience: float = WINDOW_PATIENCE) -> str:
+    try:
+        reader, writer = await asyncio.wait_for(connect(), patience)
+    except (OSError, asyncio.TimeoutError) as exc:
+        return f'connect:{type(exc).__name__}'
+    try:
+        writer.write(REQUEST)
+        await asyncio.wait_for(writer.drain(), patience)
+    except (OSError, asyncio.TimeoutError) as exc:
+        return f'send:{type(exc).__name__}'
+    try:
+        line = await asyncio.wait_for(reader.readline(), patience)
+    except (OSError, asyncio.TimeoutError) as exc:
+        return f'read:{type(exc).__name__}'
+    finally:
+        writer.close()
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(writer.wait_closed(), timeout=2)
+    return 'served' if line.startswith(b'HTTP/1.1 200') else f'other:{line[:24]!r}'
+
+
+async def _burst_during_parked_startup(server, connect, release, started, *,
+                                      n: int = WINDOW_CLIENTS,
+                                      stop_inside: bool = False) -> Counter:
+    async with _serving(server):
+        await asyncio.wait_for(started.wait(), timeout=5)
+        clients = [asyncio.ensure_future(_window_client(connect))
+                   for _ in range(n)]
+        await asyncio.sleep(STARTUP_PARK_SECONDS)
+        stopper = (asyncio.create_task(server.stop(drain_timeout=1.0))
+                   if stop_inside else None)
+        release.set()
+        results = await asyncio.gather(*clients)
+        if stopper is not None:
+            await asyncio.wait_for(stopper, timeout=10)
+    return Counter(results)
+
+
+@pytest.mark.asyncio
+@pytest.mark.timeout(120)
+async def test_beyond_the_backlog_af_unix_refuses_and_tcp_serves_late(
+        tmp_path, monkeypatch):
+    """Pins docs/deployment/unix-and-fd.md §What a client beyond the backlog observes."""
+    monkeypatch.setenv('BB_SOCKET_BACKLOG', '8')
+    reset_settings_cache()
+    try:
+        assert get_settings().socket_backlog == 8
+
+        started, release, calls = asyncio.Event(), asyncio.Event(), []
+        app = _app_with_startup(started, release, calls)
+        server, connect = _listening_server(app, tmp_path)
+        unix = await _burst_during_parked_startup(server, connect, release, started)
+
+        started, release, calls = asyncio.Event(), asyncio.Event(), []
+        app = _app_with_startup(started, release, calls)
+        server, connect = _listening_server(app)
+        tcp = await _burst_during_parked_startup(server, connect, release, started)
+    finally:
+        reset_settings_cache()
+
+    assert sum(tcp.values()) == sum(unix.values()) == WINDOW_CLIENTS
+    assert tcp['served'] == WINDOW_CLIENTS, (
+        f'TCP no longer absorbs the window in the kernel: {dict(tcp)}')
+    assert unix['served'] < WINDOW_CLIENTS, (
+        f'AF_UNIX absorbed the whole burst; the documented split is gone: '
+        f'{dict(unix)}')
+    assert 0 < unix['served'] <= 8 + 1, (
+        f'AF_UNIX served a count the backlog does not explain: {dict(unix)}')
+    refused = sum(count for outcome, count in unix.items()
+                  if outcome.startswith(('connect:', 'send:', 'read:')))
+    assert unix['served'] + refused == WINDOW_CLIENTS, (
+        f'an AF_UNIX client neither served nor refused: {dict(unix)}')
+
+
+@pytest.mark.asyncio
+@pytest.mark.timeout(120)
+async def test_stop_during_the_startup_window_refuses_both_families_alike(
+        tmp_path, monkeypatch):
+    monkeypatch.setenv('BB_SOCKET_BACKLOG', '1024')
+    reset_settings_cache()
+    try:
+        started, release, calls = asyncio.Event(), asyncio.Event(), []
+        app = _app_with_startup(started, release, calls)
+        server, connect = _listening_server(app, tmp_path)
+        unix = await _burst_during_parked_startup(server, connect, release, started,
+                                   stop_inside=True)
+
+        started, release, calls = asyncio.Event(), asyncio.Event(), []
+        app = _app_with_startup(started, release, calls)
+        server, connect = _listening_server(app)
+        tcp = await _burst_during_parked_startup(server, connect, release, started,
+                                  stop_inside=True)
+    finally:
+        reset_settings_cache()
+
+    assert unix['served'] == 0 and tcp['served'] == 0, (
+        f'a client was served after stop(): unix={dict(unix)} tcp={dict(tcp)}')
+    assert sum(unix.values()) == sum(tcp.values()) == WINDOW_CLIENTS
