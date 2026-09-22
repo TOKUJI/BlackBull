@@ -154,6 +154,59 @@ async def _close_async_servers(servers, budget: _AsyncCleanupBudget) -> Exceptio
         await _wait_async_servers_closed(servers, budget))
 
 
+class _SigtermCapture:
+    """Borrow ``SIGTERM`` for one serve so the shutdown runs, then restore it.
+
+    ``signal.signal`` because only it returns the previous handler.  An
+    application's handler is re-raised into after the drain; the default is not.
+    """
+
+    def __init__(self, server, drain_timeout: float):
+        self._server = server
+        self._drain_timeout = drain_timeout
+        self._previous = None
+        self._captured: list = []
+        self._loop = None
+        self.installed = False
+
+    def __enter__(self) -> '_SigtermCapture':
+        import signal  # noqa: PLC0415 - boot path only
+        import threading  # noqa: PLC0415
+        if threading.current_thread() is not threading.main_thread():
+            return self
+        try:
+            self._loop = asyncio.get_running_loop()
+            self._previous = signal.signal(signal.SIGTERM, self._handle)
+        except (ValueError, RuntimeError, OSError):
+            return self
+        self.installed = True
+        return self
+
+    def _handle(self, signo, _frame) -> None:
+        self._captured.append(signo)
+        try:
+            self._loop.call_soon_threadsafe(self._begin_stop)
+        except RuntimeError:  # pragma: no cover - loop already closed
+            pass
+
+    def _begin_stop(self) -> None:
+        if not self._server._stopping:
+            self._loop.create_task(
+                self._server.stop(drain_timeout=self._drain_timeout))
+
+    def __exit__(self, exc_type, exc, traceback) -> bool:
+        import signal  # noqa: PLC0415
+        if not self.installed:
+            return False
+        # None: installed from C, and not accepted back.
+        signal.signal(signal.SIGTERM,
+                      signal.SIG_DFL if self._previous is None else self._previous)
+        if self._captured and callable(self._previous):
+            for signo in self._captured:
+                signal.raise_signal(signo)
+        return False
+
+
 def _validate_unique_socket_fds(bound_listeners) -> None:
     """Reject aliases before ownership can move to multiple asyncio servers."""
     seen = set()
@@ -165,6 +218,10 @@ def _validate_unique_socket_fds(bound_listeners) -> None:
                     raise RuntimeError(
                         f'Duplicate listening fd {fd} cannot have multiple owners')
                 seen.add(fd)
+
+
+class _StartupAbandoned(Exception):
+    """A stop arrived before the application answered startup.  Not a failure."""
 
 
 class LifespanManager:
@@ -181,8 +238,10 @@ class LifespanManager:
     leaving a zombie async-generator that asyncio tries to finalize on loop close.
     """
 
-    def __init__(self, app, cleanup_budget=None, *, cleanup_timeout=_CLEANUP_TIMEOUT):
+    def __init__(self, app, cleanup_budget=None, *, cleanup_timeout=_CLEANUP_TIMEOUT,
+                 abandon_on: asyncio.Event | None = None):
         self._app = app
+        self._abandon_on = abandon_on
         self._receive_q: asyncio.Queue = asyncio.Queue()
         self._send_q:    asyncio.Queue = asyncio.Queue()
         self._task = None
@@ -196,13 +255,19 @@ class LifespanManager:
                 self._app(scope, self._receive_q.get, self._send_q.put))
             await self._receive_q.put({'type': ASGIEvent.LIFESPAN_STARTUP})
             getter = asyncio.ensure_future(self._send_q.get())
+            abandoned = (asyncio.ensure_future(self._abandon_on.wait())
+                         if self._abandon_on is not None else None)
+            waiters = {getter, self._task}
+            if abandoned is not None:
+                waiters.add(abandoned)
             try:
-                await asyncio.wait(
-                    {getter, self._task}, return_when=asyncio.FIRST_COMPLETED)
+                await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
             finally:
-                if not getter.done():
-                    getter.cancel()
-                    await asyncio.gather(getter, return_exceptions=True)
+                for waiter in (getter, abandoned):
+                    if waiter is not None and not waiter.done():
+                        waiter.cancel()
+                        await asyncio.gather(waiter, return_exceptions=True)
+            # An answer wins over a simultaneous stop.
             if getter.done() and not getter.cancelled():
                 event = getter.result()
                 if event.get('type') == ASGIEvent.LIFESPAN_STARTUP_FAILED:
@@ -215,6 +280,10 @@ class LifespanManager:
                     raise RuntimeError(
                         f'Lifespan startup failed: {exc!r}') from exc
                 return self
+            if abandoned is not None and abandoned.done():
+                raise _StartupAbandoned(
+                    'stop requested before the application answered '
+                    'lifespan.startup')
             raise RuntimeError('Lifespan startup did not complete')
         except BaseException:
             cleanup_error = await _cancel_tasks(
@@ -903,24 +972,33 @@ class Server:
                 logger.info(
                     'Bound %d server(s); accepting when lifespan startup completes',
                     len(servers))
-                async with LifespanManager(self.app, budget):
-                    logger.info(f'Server(s) created: {servers}')
-                    for srv in servers:
-                        if self._stopping:
-                            break
-                        await srv.start_serving()
-                    startup_committed = True
-                    try:
-                        await self._stopped_event.wait()
-                    except KeyboardInterrupt:
-                        logger.info('KeyboardInterrupt received — shutting down.')
-                    except asyncio.CancelledError:
-                        # Cancellation after accepting starts retains the public
-                        # run() contract: unwind cleanly instead of propagating.
-                        logger.info('Server task cancelled.')
-                    except Exception as exc:
-                        logger.error('Server error: %s', exc)
+                try:
+                    async with LifespanManager(self.app, budget,
+                                               abandon_on=self._stopped_event):
+                        logger.info(f'Server(s) created: {servers}')
+                        for srv in servers:
+                            if self._stopping:
+                                break
+                            await srv.start_serving()
+                        startup_committed = True
+                        try:
+                            await self._stopped_event.wait()
+                        except KeyboardInterrupt:
+                            logger.info('KeyboardInterrupt received — shutting down.')
+                        except asyncio.CancelledError:
+                            # Cancellation after accepting starts retains the public
+                            # run() contract: unwind cleanly instead of propagating.
+                            logger.info('Server task cancelled.')
+                        except Exception as exc:
+                            logger.error('Server error: %s', exc)
 
+                        if self._stopping:
+                            await _wait_for_event_ignoring_cancellation(
+                                self._stop_done_event)
+                            if self._stop_error is not None:
+                                raise self._stop_error
+                except _StartupAbandoned as abandoned:
+                    logger.info('%s — leaving without one', abandoned)
                     if self._stopping:
                         await _wait_for_event_ignoring_cancellation(
                             self._stop_done_event)

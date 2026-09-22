@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import signal
 
 import pytest
 
@@ -236,3 +237,37 @@ async def test_second_aexit_is_a_no_op():
     finally:
         await _cancel_leftover_task(manager)
 
+
+
+@pytest.mark.timeout(60)
+def test_restore_accepts_a_handler_installed_from_c():
+    from blackbull.server.server import _SigtermCapture
+
+    before = signal.getsignal(signal.SIGTERM)
+    capture = _SigtermCapture(server=None, drain_timeout=0.0)
+    try:
+        capture.installed = True
+        capture._previous = None       # what ``signal.signal()`` returns for C
+
+        assert capture.__exit__(None, None, None) is False
+
+        capture._captured = [signal.SIGTERM]
+        assert capture.__exit__(None, None, None) is False
+    finally:
+        signal.signal(signal.SIGTERM, before)
+
+
+@pytest.mark.timeout(60)
+def test_restore_puts_sig_dfl_back_when_the_previous_handler_is_unknown():
+    from blackbull.server.server import _SigtermCapture
+
+    before = signal.getsignal(signal.SIGTERM)
+    capture = _SigtermCapture(server=None, drain_timeout=0.0)
+    try:
+        capture.installed = True
+        capture._previous = None
+        signal.signal(signal.SIGTERM, capture._handle)   # as __enter__ leaves it
+        capture.__exit__(None, None, None)
+        assert signal.getsignal(signal.SIGTERM) is signal.SIG_DFL
+    finally:
+        signal.signal(signal.SIGTERM, before)

@@ -217,7 +217,7 @@ BB_H2_MAX_CONCURRENT_STREAMS = 100
 """`SETTINGS_MAX_CONCURRENT_STREAMS` (RFC 9113 §6.5.2 id `0x3`).  Streams beyond the cap receive `RST_STREAM REFUSED_STREAM` and are not dispatched."""
 
 BB_WORKER_DRAIN_TIMEOUT = 8.0
-"""Seconds a worker spends letting already-accepted connections finish after `SIGTERM`, before cancelling what is left.  Nothing in flight is cancelled while it lasts — a cancelled handler is a client holding a half-written response.  It sits inside the supervisor's own wait, so the drain ends in the worker rather than in a `SIGKILL`; raising it past that wait only moves the deadline.  `0` drops in-flight requests immediately, which is what the server did before this existed.  See [Shutdown](../deployment/workers.md#shutdown)."""
+"""Seconds a server spends letting already-accepted connections finish after `SIGTERM`, before cancelling what is left.  Applies to forked workers and to single-worker `app.run()` / `blackbull module:app`.  Nothing in flight is cancelled while it lasts — a cancelled handler is a client holding a half-written response.  It sits inside the supervisor's own wait, so the drain ends in the worker rather than in a `SIGKILL`; raising it past that wait only moves the deadline.  `0` drops in-flight requests immediately, which is what the server did before this existed.  See [Shutdown](../deployment/workers.md#shutdown)."""
 
 BB_H2_ACTIVE_STREAMS = 20
 """Per-connection `asyncio.Semaphore` cap on stream handlers actually running concurrently, under multi-worker.  Prevents one high-mux connection from saturating a single event loop.  `0` disables (no cap beyond `BB_H2_MAX_CONCURRENT_STREAMS`)."""
