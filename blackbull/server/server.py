@@ -2,10 +2,10 @@
 
 [`Server`][blackbull.server.server.Server] — ``ASGIServer`` is an alias — is
 the object under ``BlackBull.run()``.  It resolves its
-[`Listener`][blackbull.server.listener.Listener] set into bound sockets, groups
-them by TLS context so a listener terminates the certificate it names, and
-serves each group through
-[`SocketManager`][blackbull.server.server.SocketManager].  Every accepted
+[`Listener`][blackbull.server.listener.Listener] set into bound sockets, each
+terminating the TLS context its listener names, and accepts on them through
+``_AcceptGate``, which counts every accepted descriptor against the connection
+cap on any event loop.  Every accepted
 connection becomes a buffered protocol and, from there, one
 [`ConnectionActor`][blackbull.server.connection_actor.ConnectionActor].
 [`LifespanManager`][blackbull.server.server.LifespanManager] drives the ASGI
@@ -18,6 +18,7 @@ half-written response.  ``open_socket()`` binds without serving — what the
 multi-worker master, and a test that needs a port before it forks, both use.
 """
 import asyncio
+import errno
 from http import HTTPStatus
 import logging
 import socket
@@ -42,7 +43,6 @@ from .recipient import (AbstractReader,
 from .cap_log import CapHitCounter, log_cap_hit
 from ..asgi import ASGIEvent
 from ..env import FD_RESERVE
-from asyncio.selector_events import BaseSelectorEventLoop
 logger = logging.getLogger(__name__)
 
 
@@ -109,6 +109,12 @@ async def _cancel_tasks(tasks, budget: _AsyncCleanupBudget) -> Exception | None:
         errors.append(TimeoutError(
             'async cleanup did not finish before the deadline'))
     return combine_cleanup_errors(*errors)
+
+
+async def _settle(cancelled, budget: _AsyncCleanupBudget) -> None:
+    """Wait, inside the budget, for cancelled tasks to finish unwinding."""
+    if cancelled:
+        await asyncio.wait(cancelled, timeout=budget.remaining())
 
 
 async def _wait_for_event_ignoring_cancellation(event: asyncio.Event) -> None:
@@ -270,95 +276,248 @@ _REFUSAL_RESERVE = FD_RESERVE // 4
 _ACCEPTS_PER_TICK = FD_RESERVE // 8
 assert _REFUSAL_RESERVE + _ACCEPTS_PER_TICK <= FD_RESERVE
 
+_SSL_HANDSHAKE_TIMEOUT = 60.0
+_ACCEPT_RETRY_DELAY = asyncio.constants.ACCEPT_RETRY_DELAY
+_ACCEPT_RESOURCE_ERRNOS = frozenset(
+    {errno.EMFILE, errno.ENFILE, errno.ENOBUFS, errno.ENOMEM})
+
+
+class _Admission:
+    """One accepted descriptor's place in the gate's count, released once.
+
+    Released by whichever comes first: the connect failing, or the protocol's
+    ``connection_lost``.  Either may come alone, or both.
+    """
+
+    __slots__ = ('_gate',)
+
+    def __init__(self, gate) -> None:
+        self._gate = gate
+        gate._hold()
+
+    def release(self) -> None:
+        gate, self._gate = self._gate, None
+        if gate is not None:
+            gate._release()
+
+
+class _Listening:
+    """One listening socket accepting through the public loop API.
+
+    ``Server.stop`` closes it as it would an ``asyncio.Server``.
+    """
+
+    def __init__(self, gate, sock, factory, ssl_context) -> None:
+        self._gate = gate
+        self._sock = sock
+        self._fd = sock.fileno()
+        self._factory = factory
+        self._tls = ssl_context
+        self._reading = False
+        self._stopped = False
+        self._closed = False
+        self._retry: asyncio.TimerHandle | None = None
+
+    def is_serving(self) -> bool:
+        return not self._stopped
+
+    def start_reading(self) -> None:
+        if self._reading or self._stopped or self._retry is not None:
+            return
+        self._gate._loop.add_reader(self._fd, self._on_readable)
+        self._reading = True
+
+    def stop_reading(self) -> None:
+        if self._reading:
+            self._reading = False
+            self._gate._loop.remove_reader(self._fd)
+
+    def stop(self) -> None:
+        self._stopped = True
+        if self._retry is not None:
+            self._retry.cancel()
+            self._retry = None
+        self.stop_reading()
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        # The reader goes first: left on a closed descriptor, it fires on
+        # whatever socket reuses the number next.
+        try:
+            self.stop()
+        finally:
+            self._sock.close()
+
+    def _on_readable(self) -> None:
+        for _ in range(_ACCEPTS_PER_TICK):
+            if not self._reading:
+                return
+            try:
+                conn, _address = self._sock.accept()
+            except ConnectionAbortedError:
+                continue
+            except (BlockingIOError, InterruptedError):
+                return
+            except OSError as exc:
+                if exc.errno not in _ACCEPT_RESOURCE_ERRNOS:
+                    raise
+                loop = self._gate._loop
+                loop.call_exception_handler({
+                    'message': 'socket.accept() out of system resource',
+                    'exception': exc,
+                    'socket': self._sock,
+                })
+                self.stop_reading()
+                self._retry = loop.call_later(_ACCEPT_RETRY_DELAY, self._retried)
+                return
+            self._gate.connect(conn, self._factory, self._tls)
+
+    def _retried(self) -> None:
+        self._retry = None
+        if not self._gate._paused:
+            self.start_reading()
+
 
 class _AcceptGate:
-    """Pause accepting while no descriptor can be spared.  Selector loops only."""
+    """Accept for every listener, counting each descriptor from ``accept()``
+    until it is closed, and pause accepting while the count is at its limit.
+
+    Public loop API only, so the bound holds on every event loop.
+    """
 
     def __init__(self):
-        self._entries: list = []
+        self._listening: list[_Listening] = []
         self._loop = None
         self._limit = 0
-        #: Not reset by ``close()``: releases arrive after it.
+        #: Accepted descriptors, refusals and TLS handshakes included; the 503
+        #: decision counts ``Server._active_connections``, the ones being
+        #: served.  Not reset by ``close()``: releases arrive after it.
         self._descriptors_held = 0
         self._paused = False
+        self._connecting: set[asyncio.Task] = set()
         self._cap_hits = CapHitCounter(flush_interval=0)
 
-    def arm(self, entries, max_connections: int) -> bool:
-        """Open accepting in place of ``start_serving()``, not after it.
+    def arm(self, entries, max_connections: int,
+            backlog: int) -> list[_Listening] | None:
+        """Start accepting on each ``((factory, ssl_context), sock)``.
 
-        ``start_serving()`` yields, and the queue drains in that yield.
+        ``None`` when some listener could not be armed; none is left
+        registered then, and the caller accepts through the loop.
         """
         self.close()
-        if not max_connections:
-            return False
-        loop = asyncio.get_running_loop()
-        if not isinstance(loop, BaseSelectorEventLoop):
-            logger.warning(
-                'Accept admission disabled on %s: a burst against a saturated '
-                'cap can leave clients unanswered. Size BB_MAX_CONNECTIONS '
-                'per docs/deployment/unix-and-fd.md.', type(loop).__name__)
-            return False
-        self._loop = loop
-        self._entries = list(entries)
-        self._limit = max_connections + _REFUSAL_RESERVE
-        armed: list = []
+        self._loop = asyncio.get_running_loop()
+        self._limit = (max_connections + _REFUSAL_RESERVE
+                       if max_connections else 0)
+        self._paused = bool(self._limit) and self._descriptors_held >= self._limit
+        listening: list[_Listening] = []
+        step = 'listen()'
         try:
-            for server, sock in self._entries:
-                sock.listen(server._backlog)
-                server._serving = True
-                armed.append(server)
-                self._arm_one(server, sock)
-        except Exception:
-            logger.warning('Accept admission could not arm; '
-                           'falling back to unbounded accepting', exc_info=True)
-            for server in armed:
-                server._serving = False
-            self.close()
-            return False
-        return True
+            for (factory, ssl_context), sock in entries:
+                step = 'listen()'
+                sock.listen(backlog)
+                step = 'setblocking()'
+                sock.setblocking(False)
+                entry = _Listening(self, sock, factory, ssl_context)
+                listening.append(entry)
+                if not self._paused:
+                    step = 'add_reader()'
+                    entry.start_reading()
+        except Exception as exc:
+            logger.warning(
+                'Accept admission could not arm a listener on %s: %s failed '
+                '(%r); accepting through the loop instead, where '
+                'BB_MAX_CONNECTIONS does not bound descriptors.',
+                type(self._loop).__name__, step, exc, exc_info=True)
+            for entry in listening:
+                entry.stop()
+            self._limit = 0
+            self._paused = False
+            return None
+        self._listening = listening
+        return list(listening)
 
-    def _arm_one(self, server, sock) -> None:
-        # Private ``asyncio.Server`` attributes, unguarded: a missing one must
-        # reach ``arm()``'s fallback, not a silent default.
-        self._loop._start_serving(
-            server._protocol_factory, sock, server._ssl_context, server,
-            _ACCEPTS_PER_TICK, server._ssl_handshake_timeout,
-            server._ssl_shutdown_timeout)
+    def admit(self) -> _Admission:
+        return _Admission(self)
 
-    def hold(self) -> None:
+    def connect(self, conn, factory, ssl_context) -> None:
+        """Hand one accepted socket to the loop, counted until it closes."""
+        admission = self.admit()
+        try:
+            conn.setblocking(False)
+            protocol = factory()
+            if hasattr(protocol, 'admission'):
+                protocol.admission = admission
+        except BaseException:
+            conn.close()
+            admission.release()
+            raise
+        loop = asyncio.get_running_loop()
+        task = loop.create_task(loop.connect_accepted_socket(
+            lambda: protocol, conn, ssl=ssl_context,
+            ssl_handshake_timeout=(_SSL_HANDSHAKE_TIMEOUT
+                                   if ssl_context is not None else None)))
+        self._connecting.add(task)
+        task.add_done_callback(
+            lambda done: self._connected(done, conn, admission))
+
+    def _connected(self, task: asyncio.Task, conn, admission: _Admission) -> None:
+        self._connecting.discard(task)
+        if not task.cancelled():
+            exc = task.exception()
+            if exc is None:
+                return
+            loop = task.get_loop()
+            if loop.get_debug():
+                loop.call_exception_handler({
+                    'message': 'Error on transport creation for incoming '
+                               'connection',
+                    'exception': exc,
+                })
+        # A transport closes the socket it was given; this one never got one.
+        if conn.fileno() != -1:
+            conn.close()
+        admission.release()
+
+    def _hold(self) -> None:
         self._descriptors_held += 1
         if self._limit and not self._paused and self._descriptors_held >= self._limit:
             self._pause()
 
-    def release(self) -> None:
+    def _release(self) -> None:
         self._descriptors_held -= 1
         if self._paused and self._descriptors_held < self._limit:
             self._resume()
 
-    def close(self) -> None:
-        self._entries = []
+    def close(self) -> list[asyncio.Task]:
+        """Stop accepting and cancel the connects still in progress.
+
+        Returns those connects; each closes its socket as it unwinds.
+        """
+        for entry in self._listening:
+            entry.stop()
+        self._listening = []
         self._limit = 0
         self._paused = False
         self._cap_hits.flush(protocol='tcp')
+        connecting = [task for task in self._connecting if not task.done()]
+        for task in connecting:
+            task.cancel()
+        return connecting
 
     def _pause(self) -> None:
         self._paused = True
         log_cap_hit('max_connections',
                     requested=self._descriptors_held + 1, limit=self._limit,
                     counter=self._cap_hits, protocol='tcp')
-        for _server, sock in self._entries:
-            try:
-                self._loop.remove_reader(sock.fileno())
-            except Exception:  # pragma: no cover - a closed listener
-                logger.debug('Listener already unregistered', exc_info=True)
+        for entry in self._listening:
+            entry.stop_reading()
 
     def _resume(self) -> None:
         self._paused = False
-        for server, sock in self._entries:
-            try:
-                self._arm_one(server, sock)
-            except Exception:  # pragma: no cover - a closed listener
-                logger.debug('Listener could not be re-armed', exc_info=True)
+        for entry in self._listening:
+            entry.start_reading()
 
 
 class _StartupAbandoned(Exception):
@@ -476,6 +635,10 @@ class LifespanManager:
 async def SocketManager(socket_cb_pairs, ssl_context, cleanup_budget=None):
     """Async context manager that creates asyncio servers from already-bound sockets.
 
+    ``Server.run`` accepts through these only when the loop cannot register a
+    reader for ``_AcceptGate``; the connection cap then bounds requests, not
+    descriptors.
+
     *socket_cb_pairs* is an iterable of ``(sock, protocol_factory)`` — each
     socket is served by its own factory.  The shared HTTP listener and each
     port-bound non-ASGI protocol both come from
@@ -498,7 +661,7 @@ async def SocketManager(socket_cb_pairs, ssl_context, cleanup_budget=None):
     """
     import socket as _socket  # noqa: PLC0415
     from ..env import get_settings as _get_settings  # noqa: PLC0415
-    _backlog = _get_settings().socket_backlog
+    backlog = _get_settings().socket_backlog
     # Some Windows builds do not define AF_UNIX at all.
     _af_unix = getattr(_socket, 'AF_UNIX', None)
     loop = asyncio.get_running_loop()
@@ -507,10 +670,10 @@ async def SocketManager(socket_cb_pairs, ssl_context, cleanup_budget=None):
     primary = None
     try:
         for sock, factory in socket_cb_pairs:
-            kwargs = {'sock': sock, 'ssl': ssl_context, 'backlog': _backlog,
+            kwargs = {'sock': sock, 'ssl': ssl_context, 'backlog': backlog,
                       'start_serving': False}
             if ssl_context is not None:
-                kwargs['ssl_handshake_timeout'] = 60.0
+                kwargs['ssl_handshake_timeout'] = _SSL_HANDSHAKE_TIMEOUT
             if _af_unix is not None and sock.family == _af_unix:
                 srv = await loop.create_unix_server(factory, **kwargs)
             else:
@@ -712,10 +875,11 @@ class Server:
         write_timeout = _get_settings().write_timeout
 
         class _ServedConnection(ConnectionProtocol):
+            #: Set by the accept gate; ``None`` for a connection it did not accept.
+            admission = None
+
             def connection_made(self, transport):
                 super().connection_made(transport)
-                # Refusals included: each holds a descriptor.
-                server._accept_gate.hold()
                 # Eager start runs the serve prologue inside this callback and
                 # parks at the same read it would have parked at anyway, one
                 # loop iteration earlier — a hop paid once per connection, so
@@ -756,7 +920,8 @@ class Server:
                 try:
                     super().connection_lost(exc)
                 finally:
-                    server._accept_gate.release()
+                    if self.admission is not None:
+                        self.admission.release()
 
             @staticmethod
             def _serve_done(task):
@@ -1112,25 +1277,22 @@ class Server:
                 for sock in socks:
                     groups[listener.tls].append((sock, factory))
 
+            listening = [((factory, context), sock)
+                         for context, pairs in groups.items()
+                         for sock, factory in pairs]
+            for _spec, sock in listening:
+                if sock.type != socket.SOCK_STREAM:
+                    raise ValueError(f'A Stream Socket was expected, got {sock!r}')
+
             async with AsyncExitStack() as stack:
-                servers = []
-                listening: list = []
-                for context, pairs in groups.items():
-                    # One server per socket, in order: the gate pairs them.
-                    group = await stack.enter_async_context(
-                        SocketManager(pairs, context, budget))
-                    servers += group
-                    listening += list(zip(group, (sock for sock, _f in pairs),
-                                          strict=True))
-                self._running_servers = servers
+                self._running_servers = []
                 logger.info(
-                    'Bound %d server(s); accepting when lifespan startup completes',
-                    len(servers))
+                    'Bound %d listener(s); accepting when lifespan startup '
+                    'completes', len(listening))
                 try:
                     async with LifespanManager(self.app, budget,
                                                abandon_on=self._stopped_event):
-                        logger.info(f'Server(s) created: {servers}')
-                        await self._open_accepting(listening, servers)
+                        await self._open_accepting(listening, stack, budget)
                         startup_committed = True
                         try:
                             await self._stopped_event.wait()
@@ -1161,8 +1323,10 @@ class Server:
                 cleanup_error = await self._cancel_connection_tasks(budget)
             raise
         finally:
-            self._accept_gate.close()
-            socket_error = self._close_socket()
+            try:
+                await _settle(self._accept_gate.close(), budget)
+            finally:
+                socket_error = self._close_socket()
             cleanup_error = combine_cleanup_errors(cleanup_error, socket_error)
             if cleanup_error is not None:
                 if primary is None:
@@ -1171,18 +1335,26 @@ class Server:
 
         logger.info('Server has been stopped.')
 
-    async def _open_accepting(self, listening, servers) -> None:
+    async def _open_accepting(self, listening, stack, budget) -> None:
         if self._stopping:
             return
         af_unix = getattr(socket, 'AF_UNIX', None)
-        for _server, sock in listening:
+        for _spec, sock in listening:
             if af_unix is not None and sock.family == af_unix:
                 _warn_if_unix_queue_full(sock)
-        if self._accept_gate.arm(listening, self._max_connections):
-            # The yield ``start_serving()`` makes.
-            await asyncio.sleep(0)
+        from ..env import get_settings as _get_settings  # noqa: PLC0415
+        accepting = self._accept_gate.arm(
+            listening, self._max_connections, _get_settings().socket_backlog)
+        if accepting is not None:
+            self._running_servers = accepting
             return
-        for srv in servers:
+        groups: dict[object, list] = defaultdict(list)
+        for (factory, context), sock in listening:
+            groups[context].append((sock, factory))
+        for context, pairs in groups.items():
+            self._running_servers += await stack.enter_async_context(
+                SocketManager(pairs, context, budget))
+        for srv in list(self._running_servers):
             if self._stopping:
                 break
             await srv.start_serving()
@@ -1212,12 +1384,15 @@ class Server:
         # Close every listener first, so the drain is over a set that only
         # shrinks.  A failed close must not strand the remaining listeners.
         running_servers = list(getattr(self, '_running_servers', ()))
-        self._accept_gate.close()
+        connecting = self._accept_gate.close()
         errors = [_close_servers(running_servers)]
         self._stopped_event.set()
 
         try:
             try:
+                # A connection still in its TLS handshake has no request to
+                # finish; the drain is for the ones being served.
+                await _settle(connecting, budget)
                 await self._drain(drain_timeout)
             except (asyncio.CancelledError, Exception) as exc:
                 errors.append(exc)

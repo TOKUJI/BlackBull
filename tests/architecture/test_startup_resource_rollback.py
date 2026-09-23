@@ -49,6 +49,22 @@ class _AsyncServerProbe(_CloseProbe):
 
 class _SocketProbe(_CloseProbe):
     family = socket.AF_INET
+    type = socket.SOCK_STREAM
+
+    def listen(self, _backlog):
+        pass
+
+    def setblocking(self, _flag):
+        pass
+
+
+def _refuse_readers(monkeypatch):
+    """Send ``Server.run`` down the loop's own accept, where asyncio servers
+    are created and started."""
+    def add_reader(*_args):
+        raise NotImplementedError("no readers on this loop")
+
+    monkeypatch.setattr(asyncio.get_running_loop(), "add_reader", add_reader)
 
 
 class _GetSockNameFailure(_CloseProbe):
@@ -168,6 +184,7 @@ async def test_later_tls_group_failure_closes_earlier_group(monkeypatch):
         return first_group
 
     loop = asyncio.get_running_loop()
+    _refuse_readers(monkeypatch)
     monkeypatch.setattr(loop, "create_server", create_server)
     monkeypatch.setattr(
         server, "connection_protocol_factory", lambda _binding: asyncio.Protocol
@@ -251,6 +268,7 @@ async def test_start_serving_partial_failure_reclaims_real_connection(monkeypatc
             return await create_server(factory, **kwargs)
         return failing_server
 
+    _refuse_readers(monkeypatch)
     monkeypatch.setattr(loop, "create_server", create_one_real_server)
     monkeypatch.setattr(server, "connection_protocol_factory", lambda _binding: TrackingProtocol)
 

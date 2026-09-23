@@ -25,6 +25,7 @@ import os
 import socket
 import struct
 import sys
+import weakref
 
 from .._cleanup import combine_cleanup_errors
 
@@ -39,6 +40,34 @@ REUSEPORT_SUPPORTED = hasattr(socket, 'SO_REUSEPORT')
 #: Env var holding a comma-separated list of fds the master has handed
 #: to itself across ``os.execvp`` — see [`adopt_inherited_sockets`][].
 _INHERIT_FDS_ENV = 'BB_INHERIT_FDS'
+
+
+#: The socket files this process bound: listener -> (path, inode, pid).  A
+#: forked worker inherits the entry but not the pid, and an adopted socket
+#: never has one, so neither removes a file another process listens on.
+_BOUND_SOCKET_FILES: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+
+def _take_bound_socket_file(sock):
+    try:
+        return _BOUND_SOCKET_FILES.pop(sock, None)
+    except TypeError:
+        return None
+
+
+def _unlink_bound_socket_file(record) -> None:
+    """Remove the file unless another process bound it or something else has
+    been bound at that path since."""
+    if record is None:
+        return
+    path, inode, pid = record
+    if pid != os.getpid():
+        return
+    try:
+        if os.stat(path).st_ino == inode:
+            os.unlink(path)
+    except OSError:
+        pass
 
 
 def close_sockets(sockets) -> Exception | None:
@@ -70,11 +99,13 @@ def close_sockets(sockets) -> Exception | None:
             errors.append(exc)
             logger.exception('Failed to disarm aliased listening socket')
     for sock in unique:
+        socket_file = _take_bound_socket_file(sock)
         try:
             sock.close()
         except Exception as exc:
             errors.append(exc)
             logger.exception('Failed to close listening socket')
+        _unlink_bound_socket_file(socket_file)
     return combine_cleanup_errors(*errors)
 
 
@@ -360,6 +391,11 @@ def create_unix_socket(path: str, backlog: int = _DEFAULT_BACKLOG,
                 # chmod failure isn't fatal for binding; warn and keep going.
                 logger.warning('Could not chmod %s to %o: %s', path, mode, msg)
         sock.listen(backlog)
+        try:
+            _BOUND_SOCKET_FILES[sock] = (path, os.stat(path).st_ino, os.getpid())
+        except OSError:
+            logger.debug('Socket file %s not tracked for removal', path,
+                         exc_info=True)
         logger.info('Bound AF_UNIX socket on %s (backlog=%d mode=%s)',
                     path, backlog,
                     'unchanged' if mode is None else f'0o{mode:o}')
