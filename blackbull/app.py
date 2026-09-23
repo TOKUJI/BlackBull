@@ -1455,6 +1455,7 @@ def _serve_single_worker(
                 max_connections=max_connections,
                 stream_queue_depth=stream_queue_depth,
                 ws_queue_depth=ws_queue_depth,
+                drain_timeout=cfg.worker_drain_timeout,
             )
         )
     finally:
@@ -1463,9 +1464,10 @@ def _serve_single_worker(
 
 async def _run_single(app, *, certfile, keyfile, port, unix_path, inherited_fd,
                       listeners, max_connections, stream_queue_depth,
-                      ws_queue_depth):
+                      ws_queue_depth, drain_timeout):
     """Single-worker server loop — invoked from ``serve``."""
     from .server import ASGIServer  # noqa: PLC0415
+    from .server.server import _SigtermCapture  # noqa: PLC0415
     server = ASGIServer(app, certfile=certfile, keyfile=keyfile,
                         max_connections=max_connections,
                         stream_queue_depth=stream_queue_depth,
@@ -1477,4 +1479,8 @@ async def _run_single(app, *, certfile, keyfile, port, unix_path, inherited_fd,
     await warmup_inline(app, server.ssl_context)
 
     server.open_socket(port, unix_path=unix_path, inherited_fd=inherited_fd)
-    await server.run(port=port)
+    with _SigtermCapture(server, drain_timeout) as sigterm:
+        if not sigterm.installed:
+            logger.info('SIGTERM not capturable here; it stays an immediate '
+                        'termination')
+        await server.run(port=port)

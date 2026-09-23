@@ -31,6 +31,8 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_BACKLOG = 1024
 
+_UNIX_BACKLOG_WARN_BELOW = 64
+
 #: True when the OS supports SO_REUSEPORT (Linux ≥ 3.9, macOS ≥ 10.6).
 REUSEPORT_SUPPORTED = hasattr(socket, 'SO_REUSEPORT')
 
@@ -361,6 +363,12 @@ def create_unix_socket(path: str, backlog: int = _DEFAULT_BACKLOG,
         logger.info('Bound AF_UNIX socket on %s (backlog=%d mode=%s)',
                     path, backlog,
                     'unchanged' if mode is None else f'0o{mode:o}')
+        if backlog < _UNIX_BACKLOG_WARN_BELOW:
+            logger.warning(
+                'BB_SOCKET_BACKLOG=%d on AF_UNIX listener %s: only %d '
+                'connection(s) can wait; more are refused, not delayed as on '
+                'TCP. Raise it above the expected burst.',
+                backlog, path, backlog + 1)
         return sock
     except OSError as msg:
         logger.error('Could not bind AF_UNIX socket on %s: %s', path, msg)

@@ -69,7 +69,8 @@ def run_worker(app, bound_listeners, ssl_context, worker_id: int,
 
     from ..env import apply_event_loop_policy, get_settings as _get_settings  # noqa: PLC0415
     from ..logger import setup_async_logging, teardown_async_logging  # noqa: PLC0415
-    from .server import ASGIServer  # noqa: PLC0415 — deferred to avoid import cycles
+    from .server import (ASGIServer,  # noqa: PLC0415 — deferred to avoid import cycles
+                         _SigtermCapture)
 
     cfg = _get_settings()
     apply_event_loop_policy(cfg)
@@ -116,17 +117,10 @@ def run_worker(app, bound_listeners, ssl_context, worker_id: int,
         if offload_mask is not None:
             loop.set_default_executor(make_offload_executor(offload_mask))
 
-        def _drain_and_stop(*_):
-            loop.create_task(server.stop(drain_timeout=cfg.worker_drain_timeout))
-
-        try:
-            # On the loop, not signal.signal, so the handler can await.
-            loop.add_signal_handler(signal.SIGTERM, _drain_and_stop)
-        except (NotImplementedError, RuntimeError):
-            # No loop signal support; SIG_DFL above still applies.
-            logger.debug('Worker %d: loop signal handler unavailable', worker_id)
-
-        await server.run()
+        with _SigtermCapture(server, cfg.worker_drain_timeout) as sigterm:
+            if not sigterm.installed:
+                logger.debug('Worker %d: SIGTERM not capturable here', worker_id)
+            await server.run()
 
     logger.info('Worker %d starting (PID %d)', worker_id, os.getpid())
     try:

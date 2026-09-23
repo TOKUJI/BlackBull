@@ -524,7 +524,8 @@ def main(argv: list[str] | None = None) -> int:
     except RuntimeError as exc:
         # adopt_listening_fd / create_unix_socket raise RuntimeError on
         # well-defined failure modes (bad LISTEN_PID, fd out of window,
-        # path collision).  These belong in stderr, not a traceback.
+        # path collision), and so does a shutdown the application reported
+        # as failed.  These belong in stderr, not a traceback.
         print(f'blackbull: {exc}', file=sys.stderr)
         return 1
     return 0

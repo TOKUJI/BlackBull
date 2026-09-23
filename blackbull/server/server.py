@@ -37,8 +37,10 @@ from .listener import HTTP, InheritedFd, Listener, Tcp, Unix
 from .sender import AbstractWriter
 from .recipient import (AbstractReader,
                         _HTTP2_STREAM_QUEUE_DEPTH, _WS_READ_INLINE)
-from .cap_log import log_cap_hit
+from .cap_log import CapHitCounter, log_cap_hit
 from ..asgi import ASGIEvent
+from ..env import FD_RESERVE
+from asyncio.selector_events import BaseSelectorEventLoop
 logger = logging.getLogger(__name__)
 
 
@@ -154,6 +156,59 @@ async def _close_async_servers(servers, budget: _AsyncCleanupBudget) -> Exceptio
         await _wait_async_servers_closed(servers, budget))
 
 
+class _SigtermCapture:
+    """Borrow ``SIGTERM`` for one serve so the shutdown runs, then restore it.
+
+    ``signal.signal`` because only it returns the previous handler.  An
+    application's handler is re-raised into after the drain; the default is not.
+    """
+
+    def __init__(self, server, drain_timeout: float):
+        self._server = server
+        self._drain_timeout = drain_timeout
+        self._previous = None
+        self._captured: list = []
+        self._loop = None
+        self.installed = False
+
+    def __enter__(self) -> '_SigtermCapture':
+        import signal  # noqa: PLC0415 - boot path only
+        import threading  # noqa: PLC0415
+        if threading.current_thread() is not threading.main_thread():
+            return self
+        try:
+            self._loop = asyncio.get_running_loop()
+            self._previous = signal.signal(signal.SIGTERM, self._handle)
+        except (ValueError, RuntimeError, OSError):
+            return self
+        self.installed = True
+        return self
+
+    def _handle(self, signo, _frame) -> None:
+        self._captured.append(signo)
+        try:
+            self._loop.call_soon_threadsafe(self._begin_stop)
+        except RuntimeError:  # pragma: no cover - loop already closed
+            pass
+
+    def _begin_stop(self) -> None:
+        if not self._server._stopping:
+            self._loop.create_task(
+                self._server.stop(drain_timeout=self._drain_timeout))
+
+    def __exit__(self, exc_type, exc, traceback) -> bool:
+        import signal  # noqa: PLC0415
+        if not self.installed:
+            return False
+        # None: installed from C, and not accepted back.
+        signal.signal(signal.SIGTERM,
+                      signal.SIG_DFL if self._previous is None else self._previous)
+        if self._captured and callable(self._previous):
+            for signo in self._captured:
+                signal.raise_signal(signo)
+        return False
+
+
 def _validate_unique_socket_fds(bound_listeners) -> None:
     """Reject aliases before ownership can move to multiple asyncio servers."""
     seen = set()
@@ -167,20 +222,122 @@ def _validate_unique_socket_fds(bound_listeners) -> None:
                 seen.add(fd)
 
 
+_REFUSAL_RESERVE = FD_RESERVE // 4
+_ACCEPTS_PER_TICK = FD_RESERVE // 8
+assert _REFUSAL_RESERVE + _ACCEPTS_PER_TICK <= FD_RESERVE
+
+
+class _AcceptGate:
+    """Pause accepting while no descriptor can be spared.  Selector loops only."""
+
+    def __init__(self):
+        self._entries: list = []
+        self._loop = None
+        self._limit = 0
+        #: Not reset by ``close()``: releases arrive after it.
+        self._descriptors_held = 0
+        self._paused = False
+        self._cap_hits = CapHitCounter(flush_interval=0)
+
+    def arm(self, entries, max_connections: int) -> bool:
+        """Open accepting in place of ``start_serving()``, not after it.
+
+        ``start_serving()`` yields, and the queue drains in that yield.
+        """
+        self.close()
+        if not max_connections:
+            return False
+        loop = asyncio.get_running_loop()
+        if not isinstance(loop, BaseSelectorEventLoop):
+            logger.warning(
+                'Accept admission disabled on %s: a burst against a saturated '
+                'cap can leave clients unanswered. Size BB_MAX_CONNECTIONS '
+                'per docs/deployment/unix-and-fd.md.', type(loop).__name__)
+            return False
+        self._loop = loop
+        self._entries = list(entries)
+        self._limit = max_connections + _REFUSAL_RESERVE
+        armed: list = []
+        try:
+            for server, sock in self._entries:
+                sock.listen(server._backlog)
+                server._serving = True
+                armed.append(server)
+                self._arm_one(server, sock)
+        except Exception:
+            logger.warning('Accept admission could not arm; '
+                           'falling back to unbounded accepting', exc_info=True)
+            for server in armed:
+                server._serving = False
+            self.close()
+            return False
+        return True
+
+    def _arm_one(self, server, sock) -> None:
+        # Private ``asyncio.Server`` attributes, unguarded: a missing one must
+        # reach ``arm()``'s fallback, not a silent default.
+        self._loop._start_serving(
+            server._protocol_factory, sock, server._ssl_context, server,
+            _ACCEPTS_PER_TICK, server._ssl_handshake_timeout,
+            server._ssl_shutdown_timeout)
+
+    def hold(self) -> None:
+        self._descriptors_held += 1
+        if self._limit and not self._paused and self._descriptors_held >= self._limit:
+            self._pause()
+
+    def release(self) -> None:
+        self._descriptors_held -= 1
+        if self._paused and self._descriptors_held < self._limit:
+            self._resume()
+
+    def close(self) -> None:
+        self._entries = []
+        self._limit = 0
+        self._paused = False
+        self._cap_hits.flush(protocol='tcp')
+
+    def _pause(self) -> None:
+        self._paused = True
+        log_cap_hit('max_connections',
+                    requested=self._descriptors_held + 1, limit=self._limit,
+                    counter=self._cap_hits, protocol='tcp')
+        for _server, sock in self._entries:
+            try:
+                self._loop.remove_reader(sock.fileno())
+            except Exception:  # pragma: no cover - a closed listener
+                logger.debug('Listener already unregistered', exc_info=True)
+
+    def _resume(self) -> None:
+        self._paused = False
+        for server, sock in self._entries:
+            try:
+                self._arm_one(server, sock)
+            except Exception:  # pragma: no cover - a closed listener
+                logger.debug('Listener could not be re-armed', exc_info=True)
+
+
+class _StartupAbandoned(Exception):
+    """A stop arrived before the application answered startup.  Not a failure."""
+
+
 class LifespanManager:
     """Async context manager that drives the ASGI lifespan protocol.
 
     On enter: launches the app's lifespan task and delivers 'lifespan.startup'.
     Raises RuntimeError if the app responds with 'lifespan.startup.failed'.
-    On exit: delivers 'lifespan.shutdown' and waits for 'lifespan.shutdown.complete'.
+    On exit: delivers 'lifespan.shutdown'; 'lifespan.shutdown.failed' raises
+    RuntimeError with the app's message.
 
     Implemented as a class (not asynccontextmanager) so that __aenter__ and
     __aexit__ can be called independently — e.g. startup() / shutdown() — without
     leaving a zombie async-generator that asyncio tries to finalize on loop close.
     """
 
-    def __init__(self, app, cleanup_budget=None, *, cleanup_timeout=_CLEANUP_TIMEOUT):
+    def __init__(self, app, cleanup_budget=None, *, cleanup_timeout=_CLEANUP_TIMEOUT,
+                 abandon_on: asyncio.Event | None = None):
         self._app = app
+        self._abandon_on = abandon_on
         self._receive_q: asyncio.Queue = asyncio.Queue()
         self._send_q:    asyncio.Queue = asyncio.Queue()
         self._task = None
@@ -194,13 +351,19 @@ class LifespanManager:
                 self._app(scope, self._receive_q.get, self._send_q.put))
             await self._receive_q.put({'type': ASGIEvent.LIFESPAN_STARTUP})
             getter = asyncio.ensure_future(self._send_q.get())
+            abandoned = (asyncio.ensure_future(self._abandon_on.wait())
+                         if self._abandon_on is not None else None)
+            waiters = {getter, self._task}
+            if abandoned is not None:
+                waiters.add(abandoned)
             try:
-                await asyncio.wait(
-                    {getter, self._task}, return_when=asyncio.FIRST_COMPLETED)
+                await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
             finally:
-                if not getter.done():
-                    getter.cancel()
-                    await asyncio.gather(getter, return_exceptions=True)
+                for waiter in (getter, abandoned):
+                    if waiter is not None and not waiter.done():
+                        waiter.cancel()
+                        await asyncio.gather(waiter, return_exceptions=True)
+            # An answer wins over a simultaneous stop.
             if getter.done() and not getter.cancelled():
                 event = getter.result()
                 if event.get('type') == ASGIEvent.LIFESPAN_STARTUP_FAILED:
@@ -213,6 +376,10 @@ class LifespanManager:
                     raise RuntimeError(
                         f'Lifespan startup failed: {exc!r}') from exc
                 return self
+            if abandoned is not None and abandoned.done():
+                raise _StartupAbandoned(
+                    'stop requested before the application answered '
+                    'lifespan.startup')
             raise RuntimeError('Lifespan startup did not complete')
         except BaseException:
             cleanup_error = await _cancel_tasks(
@@ -220,6 +387,15 @@ class LifespanManager:
             if cleanup_error is not None:
                 logger.error('Lifespan startup rollback failed: %s', cleanup_error)
             raise
+
+    @staticmethod
+    def _shutdown_failure(event) -> Exception | None:
+        if event.get('type') == ASGIEvent.LIFESPAN_SHUTDOWN_FAILED:
+            message = event.get('message') or 'no message'
+            # Logged too: raised, it reaches the operator only as an exit status.
+            logger.error('Lifespan shutdown failed: %s', message)
+            return RuntimeError(f'Lifespan shutdown failed: {message}')
+        return None
 
     async def __aexit__(self, exc_type, exc, traceback):
         task = self._task
@@ -240,6 +416,8 @@ class LifespanManager:
             if not done:
                 errors.append(TimeoutError(
                     'lifespan shutdown did not finish before the deadline'))
+            elif getter in done and not getter.cancelled():
+                errors.append(self._shutdown_failure(getter.result()))
             errors.append(await _cancel_tasks([getter], self._cleanup_budget))
         errors.append(await _cancel_tasks([task], self._cleanup_budget))
         cleanup_error = combine_cleanup_errors(*errors)
@@ -351,9 +529,11 @@ class Server:
         self.bound_listeners: list = []
         self._max_connections = max_connections
         logger.info('max_connections=%s (%s)', *_max_connections_report(max_connections))
+        self._lifespan_cm: LifespanManager | None = None
         self._stream_queue_depth = stream_queue_depth
         self._ws_queue_depth = ws_queue_depth
         self._active_connections = 0
+        self._accept_gate = _AcceptGate()
 
         # An app carries a registry only once a raw_handler is registered.
         from .protocol_registry import ProtocolRegistry as _PR  # noqa: PLC0415
@@ -490,6 +670,8 @@ class Server:
         class _ServedConnection(ConnectionProtocol):
             def connection_made(self, transport):
                 super().connection_made(transport)
+                # Refusals included: each holds a descriptor.
+                server._accept_gate.hold()
                 # Eager start runs the serve prologue inside this callback and
                 # parks at the same read it would have parked at anyway, one
                 # loop iteration earlier — a hop paid once per connection, so
@@ -525,6 +707,12 @@ class Server:
                     # A bare close would RST away the response a peer that is
                     # still sending has not read yet.
                     await self.linger_close()
+
+            def connection_lost(self, exc):
+                try:
+                    super().connection_lost(exc)
+                finally:
+                    server._accept_gate.release()
 
             @staticmethod
             def _serve_done(task):
@@ -843,7 +1031,15 @@ class Server:
         await self._lifespan_cm.__aenter__()
 
     async def shutdown(self):
-        """Drive the ASGI lifespan shutdown handshake."""
+        """Drive the ASGI lifespan shutdown handshake.
+
+        Raises ``RuntimeError`` if ``startup()`` was never called.  After a
+        failed ``startup()`` it cleans up quietly, so ``try``/``finally`` is safe.
+        """
+        if self._lifespan_cm is None:
+            raise RuntimeError(
+                'Server.shutdown() called without Server.startup(); there is '
+                'no lifespan to shut down.')
         await self._lifespan_cm.__aexit__(None, None, None)
 
     async def run(self, port=80):
@@ -874,31 +1070,42 @@ class Server:
 
             async with AsyncExitStack() as stack:
                 servers = []
+                listening: list = []
                 for context, pairs in groups.items():
-                    servers += await stack.enter_async_context(
+                    # One server per socket, in order: the gate pairs them.
+                    group = await stack.enter_async_context(
                         SocketManager(pairs, context, budget))
+                    servers += group
+                    listening += list(zip(group, (sock for sock, _f in pairs),
+                                          strict=True))
                 self._running_servers = servers
                 logger.info(
                     'Bound %d server(s); accepting when lifespan startup completes',
                     len(servers))
-                async with LifespanManager(self.app, budget):
-                    logger.info(f'Server(s) created: {servers}')
-                    for srv in servers:
-                        if self._stopping:
-                            break
-                        await srv.start_serving()
-                    startup_committed = True
-                    try:
-                        await self._stopped_event.wait()
-                    except KeyboardInterrupt:
-                        logger.info('KeyboardInterrupt received — shutting down.')
-                    except asyncio.CancelledError:
-                        # Cancellation after accepting starts retains the public
-                        # run() contract: unwind cleanly instead of propagating.
-                        logger.info('Server task cancelled.')
-                    except Exception as exc:
-                        logger.error('Server error: %s', exc)
+                try:
+                    async with LifespanManager(self.app, budget,
+                                               abandon_on=self._stopped_event):
+                        logger.info(f'Server(s) created: {servers}')
+                        await self._open_accepting(listening, servers)
+                        startup_committed = True
+                        try:
+                            await self._stopped_event.wait()
+                        except KeyboardInterrupt:
+                            logger.info('KeyboardInterrupt received — shutting down.')
+                        except asyncio.CancelledError:
+                            # Cancellation after accepting starts retains the public
+                            # run() contract: unwind cleanly instead of propagating.
+                            logger.info('Server task cancelled.')
+                        except Exception as exc:
+                            logger.error('Server error: %s', exc)
 
+                        if self._stopping:
+                            await _wait_for_event_ignoring_cancellation(
+                                self._stop_done_event)
+                            if self._stop_error is not None:
+                                raise self._stop_error
+                except _StartupAbandoned as abandoned:
+                    logger.info('%s — leaving without one', abandoned)
                     if self._stopping:
                         await _wait_for_event_ignoring_cancellation(
                             self._stop_done_event)
@@ -910,6 +1117,7 @@ class Server:
                 cleanup_error = await self._cancel_connection_tasks(budget)
             raise
         finally:
+            self._accept_gate.close()
             socket_error = self._close_socket()
             cleanup_error = combine_cleanup_errors(cleanup_error, socket_error)
             if cleanup_error is not None:
@@ -918,6 +1126,18 @@ class Server:
                 logger.error('Server cleanup failed: %s', cleanup_error)
 
         logger.info('Server has been stopped.')
+
+    async def _open_accepting(self, listening, servers) -> None:
+        if self._stopping:
+            return
+        if self._accept_gate.arm(listening, self._max_connections):
+            # The yield ``start_serving()`` makes.
+            await asyncio.sleep(0)
+            return
+        for srv in servers:
+            if self._stopping:
+                break
+            await srv.start_serving()
 
     async def stop(self, drain_timeout: float = 8.0) -> None:
         """Stop accepting, then let the connections already being served finish.
@@ -944,6 +1164,7 @@ class Server:
         # Close every listener first, so the drain is over a set that only
         # shrinks.  A failed close must not strand the remaining listeners.
         running_servers = list(getattr(self, '_running_servers', ()))
+        self._accept_gate.close()
         errors = [_close_servers(running_servers)]
         self._stopped_event.set()
 

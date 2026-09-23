@@ -5,6 +5,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+- **A failing `@app.on_shutdown` hook now exits `1`** instead of `0` in a
+  single-worker process (`app.run()`, the `blackbull` CLI).  `TestClient` and
+  `NativeClient` raise it from the `with` block unless the block is already
+  raising.
+- **`SIGTERM` now shuts a single-worker process down gracefully**: in-flight
+  requests finish, up to `BB_WORKER_DRAIN_TIMEOUT`, and `@app.on_shutdown`
+  runs.  An application's own `SIGTERM` handler is restored afterwards and
+  still runs.
+- `Server.stop()` and `SIGTERM` now end `run()` during lifespan startup
+  instead of waiting for the application to answer.
+- `Server.shutdown()` without `Server.startup()` raises `RuntimeError`.
+- An `AF_UNIX` listener with `BB_SOCKET_BACKLOG` below 64 logs a warning.
+- A burst beyond `BB_MAX_CONNECTIONS` no longer exhausts file descriptors on
+  the default event loop.  Under `BB_UVLOOP=1`, see *Sizing the connection cap
+  under uvloop*.
+
 - Added client-owned write and WebSocket size bounds, and applied the
   response minimum-body-rate floor to HTTP/2 streams.
 - Corrected the defaults stated in `blackbull/env.py`'s environment-variable

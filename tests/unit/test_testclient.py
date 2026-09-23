@@ -5,6 +5,7 @@ should be the first place a reader looks to learn how to use
 TestClient against a BlackBull app.
 """
 
+import logging
 from http import HTTPMethod
 
 import pytest
@@ -302,5 +303,35 @@ def test_lifespan_startup_failure_surfaces() -> None:
         raise RuntimeError('intentional startup failure')
 
     with pytest.raises(RuntimeError, match='startup failed'):
+        with TestClient(app):
+            pass
+
+
+def test_a_failing_shutdown_does_not_replace_the_block_s_own_error(caplog) -> None:
+    app = BlackBull()
+
+    @app.on_shutdown
+    async def _boom() -> None:
+        raise RuntimeError('shutdown failure that must not win')
+
+    with caplog.at_level(logging.ERROR, logger='blackbull.testing'):
+        with pytest.raises(AssertionError, match='the assertion under test'):
+            with TestClient(app):
+                raise AssertionError('the assertion under test')
+
+    assert any('shutdown failure that must not win' in record.getMessage()
+               or 'Lifespan shutdown failed' in record.getMessage()
+               for record in caplog.records), (
+        'the suppressed shutdown failure was not reported anywhere')
+
+
+def test_lifespan_shutdown_failure_surfaces() -> None:
+    app = BlackBull()
+
+    @app.on_shutdown
+    async def _boom() -> None:
+        raise RuntimeError('intentional shutdown failure')
+
+    with pytest.raises(RuntimeError, match='intentional shutdown failure'):
         with TestClient(app):
             pass

@@ -13,6 +13,7 @@ a request client, and that the object the handler receives is the native
 """
 import asyncio
 import json
+import logging
 from http import HTTPStatus
 
 import pytest
@@ -424,3 +425,62 @@ def test_native_client_runs_lifespan(app):
         client.get('/x')
         assert order == ['up']
     assert order == ['up', 'down']
+
+
+def test_native_client_surfaces_a_failing_shutdown_hook():
+    a = BlackBull()
+
+    @a.on_shutdown
+    async def _down():
+        raise RuntimeError('native shutdown blew up')
+
+    @a.route(path='/x')
+    async def _x():
+        return 'x'
+
+    with pytest.raises(RuntimeError, match='native shutdown blew up'):
+        with NativeClient(a) as client:
+            client.get('/x')
+
+
+def test_a_failing_shutdown_does_not_replace_the_block_s_own_error(caplog):
+    a = BlackBull()
+
+    @a.on_shutdown
+    async def _down():
+        raise RuntimeError('native shutdown failure that must not win')
+
+    @a.route(path='/x')
+    async def _x():
+        return 'x'
+
+    with caplog.at_level(logging.ERROR, logger='blackbull.testing'):
+        with pytest.raises(AssertionError, match='the assertion under test'):
+            with NativeClient(a) as client:
+                client.get('/x')
+                raise AssertionError('the assertion under test')
+
+    assert any('native shutdown failure that must not win' in record.getMessage()
+               or 'Lifespan shutdown failed' in record.getMessage()
+               for record in caplog.records), (
+        'the suppressed shutdown failure was not reported anywhere')
+
+
+@pytest.mark.asyncio
+async def test_native_test_server_surfaces_a_failing_shutdown_hook():
+    from blackbull.testing.native import NativeTestServer
+
+    a = BlackBull()
+
+    @a.on_shutdown
+    async def _down():
+        raise RuntimeError('native server shutdown blew up')
+
+    @a.route(path='/x')
+    async def _x():
+        return 'x'
+
+    with pytest.raises(RuntimeError, match='native server shutdown blew up'):
+        async with NativeTestServer(a) as server:
+            response = await server.client.get('/x')
+            assert response.status_code == 200
