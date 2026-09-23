@@ -6184,6 +6184,10 @@ record on <code>blackbull.caps</code> when it fires.  Coverage:</p>
 <td><code>BB_COMPRESSION_MAX_INFLIGHT</code></td>
 <td>Compression middleware bypassed (executor saturated)</td>
 </tr>
+<tr>
+<td><code>BB_SOCKET_BACKLOG</code></td>
+<td>An <code>AF_UNIX</code> listener's accept queue was full when accepting opened, so clients may have been refused during lifespan startup.  Logged as cap name <code>socket_backlog</code>; <code>requested</code> is the number waiting, <code>limit</code> the kernel's effective backlog (an adopted fd's own, capped by <code>net.core.somaxconn</code>), and <code>scope_path</code> the listener's path (<code>@name</code> for an abstract socket).  Linux only</td>
+</tr>
 </tbody>
 </table>
 <p>The async client under <code>blackbull/client/</code> keeps the same record for its

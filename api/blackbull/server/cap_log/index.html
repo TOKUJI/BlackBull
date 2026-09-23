@@ -5581,14 +5581,14 @@ that logger gets actionable visibility without grep-walking the
 framework code.</p>
 <p>Surface:</p>
 <ul>
-<li><a class="autorefs autorefs-internal" title="log_cap_hit(cap, requested, limit, *, counter=None, peer=None, scope_path=None, protocol=None, connection_id=None)" href="#blackbull.server.cap_log.log_cap_hit"><code>log_cap_hit</code></a> — the single emission point.  Call from any
+<li><a class="autorefs autorefs-internal" title="log_cap_hit(cap, requested, limit, *, counter=None, peer=None, scope_path=None, protocol=None, connection_id=None, advice=None)" href="#blackbull.server.cap_log.log_cap_hit"><code>log_cap_hit</code></a> — the single emission point.  Call from any
   cap-rejection site with the cap name, requested value, and limit.</li>
 <li><a class="autorefs autorefs-internal" href="#blackbull.server.cap_log.CapHitCounter"><code>CapHitCounter</code></a> — per-connection state for the "first hit
   per cap logs in full; later hits silently counted; summary on
   <a class="autorefs autorefs-internal" title="flush(*, peer=None, protocol=None, connection_id=None)" href="#blackbull.server.cap_log.CapHitCounter.flush"><code>flush</code></a>" rate-limit pattern.</li>
 <li><a class="autorefs autorefs-internal" title="bind()" href="#blackbull.server.cap_log.CapHitCounter.bind"><code>CapHitCounter.bind</code></a> — context manager that installs the
   counter on a <code>ContextVar</code>.  All
-  <a class="autorefs autorefs-internal" title="log_cap_hit(cap, requested, limit, *, counter=None, peer=None, scope_path=None, protocol=None, connection_id=None)" href="#blackbull.server.cap_log.log_cap_hit"><code>log_cap_hit</code></a> calls inside the <code>with</code> block (including
+  <a class="autorefs autorefs-internal" title="log_cap_hit(cap, requested, limit, *, counter=None, peer=None, scope_path=None, protocol=None, connection_id=None, advice=None)" href="#blackbull.server.cap_log.log_cap_hit"><code>log_cap_hit</code></a> calls inside the <code>with</code> block (including
   those in child tasks created via <code>asyncio.TaskGroup</code>, which
   inherit context) automatically pick up the counter.  Zero
   plumbing through actor constructors.</li>
@@ -5765,7 +5765,7 @@ reuse afterwards if the holder is pooled.</p>
 
 
 <h3 id="blackbull.server.cap_log.log_cap_hit" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">log_cap_hit</span><span class="p">(</span><span class="n">cap</span><span class="p">,</span> <span class="n">requested</span><span class="p">,</span> <span class="n">limit</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">counter</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">peer</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">scope_path</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">protocol</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">connection_id</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">log_cap_hit</span><span class="p">(</span><span class="n">cap</span><span class="p">,</span> <span class="n">requested</span><span class="p">,</span> <span class="n">limit</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">counter</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">peer</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">scope_path</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">protocol</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">connection_id</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">advice</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 <a href="#blackbull.server.cap_log.log_cap_hit" class="headerlink" title="Permanent link">&para;</a></h3>
 
@@ -5773,6 +5773,7 @@ reuse afterwards if the holder is pooled.</p>
     <div class="doc doc-contents ">
 
         <p>Emit one cap-hit record on <code>blackbull.caps</code> at WARN level.</p>
+<p><em>advice</em> is appended to the message: what the operator should change.</p>
 <p>The structured fields land in <code>record.extra</code> (<code>cap</code>,
 <code>requested</code>, <code>limit</code>, <code>peer</code>, <code>scope_path</code>, <code>protocol</code>,
 <code>connection_id</code>) so log handlers can route or aggregate

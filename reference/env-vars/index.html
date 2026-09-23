@@ -6230,7 +6230,7 @@ entirely.</p>
 <tr>
 <td><code>BB_SOCKET_BACKLOG</code></td>
 <td><code>1024</code></td>
-<td><code>listen()</code> backlog depth, sized for connection bursts; Linux caps the effective value at <code>net.core.somaxconn</code>.  Where BlackBull binds, <strong>this value bounds the accept queue</strong>; an adopted fd keeps its creator's <code>Backlog=</code> until accepting begins; see <a href="../../deployment/unix-and-fd/#the-startup-window">The startup window</a>.  During that window a TCP client beyond the backlog is served late and an <code>AF_UNIX</code> client is refused (<a href="../../deployment/unix-and-fd/#what-a-client-beyond-the-backlog-observes">details</a>); below <code>64</code> an <code>AF_UNIX</code> bind warns.</td>
+<td><code>listen()</code> backlog depth, sized for connection bursts; Linux caps the effective value at <code>net.core.somaxconn</code>.  Where BlackBull binds, <strong>this value bounds the accept queue</strong>; an adopted fd keeps its creator's <code>Backlog=</code> until accepting begins; see <a href="../../deployment/unix-and-fd/#the-startup-window">The startup window</a>.  During that window a TCP client beyond the backlog is served late and a non-blocking <code>AF_UNIX</code> client is refused (<a href="../../deployment/unix-and-fd/#what-a-client-beyond-the-backlog-observes">details</a>); an <code>AF_UNIX</code> queue found full when accepting opens is logged on <code>blackbull.caps</code>.</td>
 </tr>
 <tr>
 <td><code>BB_SOCKET_REUSEPORT</code></td>

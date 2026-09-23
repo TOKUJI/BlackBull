@@ -3947,6 +3947,28 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#blackbull.protocol.rsock.somaxconn" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        somaxconn
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.protocol.rsock.unix_accept_queue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        unix_accept_queue
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5559,6 +5581,28 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#blackbull.protocol.rsock.somaxconn" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        somaxconn
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.protocol.rsock.unix_accept_queue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        unix_accept_queue
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5816,6 +5860,46 @@ certainly didn't mean to point us at one.</p>
 <p>TCP-only socket options (<code>SO_REUSEPORT</code>, <code>TCP_USER_TIMEOUT</code>,
 <code>IPV6_V6ONLY</code>) are deliberately skipped — <code>AF_UNIX</code> doesn't carry
 them.  <code>SO_SNDBUF</code> / <code>SO_RCVBUF</code> <em>are</em> honoured when supplied.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.protocol.rsock.somaxconn" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">somaxconn</span><span class="p">()</span></code>
+
+<a href="#blackbull.protocol.rsock.somaxconn" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p><code>net.core.somaxconn</code> in this process's network namespace, or <code>None</code>.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.protocol.rsock.unix_accept_queue" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">unix_accept_queue</span><span class="p">(</span><span class="n">sock</span><span class="p">)</span></code>
+
+<a href="#blackbull.protocol.rsock.unix_accept_queue" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p><code>(waiting, backlog)</code> of a listening <code>AF_UNIX</code> socket, from the kernel.</p>
+<p>Read by inode, so an adopted or duplicated fd reports its creator's
+backlog.  The queue is full when <code>waiting &gt; backlog</code>.  <code>None</code> off
+Linux, for a socket that is not listening or is in another network
+namespace, or on any failure.</p>
 
 
     </div>

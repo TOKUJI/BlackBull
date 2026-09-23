@@ -5727,15 +5727,25 @@ BlackBull documents this window rather than forcing it smaller.</p>
 <td>retransmits, and is served once startup completes</td>
 </tr>
 <tr>
-<td><code>AF_UNIX</code></td>
-<td>is refused immediately</td>
+<td><code>AF_UNIX</code>, non-blocking (nginx, asyncio, a Python socket with a timeout)</td>
+<td>is refused at once (<code>EAGAIN</code>)</td>
+</tr>
+<tr>
+<td><code>AF_UNIX</code>, blocking</td>
+<td>waits, and connects once the queue drains</td>
 </tr>
 </tbody>
 </table>
 <p>Set <code>BB_SOCKET_BACKLOG</code> above the number of connections you expect during
-startup, especially on <code>AF_UNIX</code>; a backlog below 64 there logs a warning.
-BlackBull does not change the backlog of an adopted fd (<code>--bind fd://N</code>): set
-it where the socket is created, such as systemd's <code>Backlog=</code>.</p>
+startup, especially on <code>AF_UNIX</code>.  An adopted fd (<code>--bind fd://N</code>) keeps the
+backlog it was created with until accepting opens, and <code>BB_SOCKET_BACKLOG</code>
+after: size the startup burst where the socket is created, such as systemd's
+<code>Backlog=</code>.  <code>net.core.somaxconn</code> caps both.</p>
+<p>On Linux, a worker that finds an <code>AF_UNIX</code> listener's queue full as it opens
+accepting logs one <code>socket_backlog</code> warning on <code>blackbull.caps</code>, naming the
+listener, the connections waiting and the backlog.  An adopted fd created in
+another network namespace (systemd <code>PrivateNetwork=yes</code>) cannot be read and is
+not checked.</p>
 <h2 id="sizing-the-connection-cap-under-uvloop">Sizing the connection cap under uvloop<a class="headerlink" href="#sizing-the-connection-cap-under-uvloop" title="Permanent link">&para;</a></h2>
 <p>Under <code>BB_UVLOOP=1</code>, accepting does not pause at <code>BB_MAX_CONNECTIONS</code>.
 Connections beyond the cap are refused using spare file descriptors, and when
