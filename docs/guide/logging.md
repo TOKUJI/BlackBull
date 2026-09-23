@@ -337,6 +337,7 @@ record on `blackbull.caps` when it fires.  Coverage:
 | `BB_H2_MAX_CONCURRENT_STREAMS` | HTTP/2 stream-open guard tripped |
 | `BB_H2_WS_MAX_STREAMS_PER_CONNECTION` | RFC 8441 WebSocket stream cap tripped |
 | `BB_COMPRESSION_MAX_INFLIGHT` | Compression middleware bypassed (executor saturated) |
+| `BB_SOCKET_BACKLOG` | An `AF_UNIX` listener's accept queue was full when accepting opened, so clients may have been refused during lifespan startup.  Logged as cap name `socket_backlog`; `requested` is the number waiting, `limit` the kernel's effective backlog (an adopted fd's own, capped by `net.core.somaxconn`), and `scope_path` the listener's path (`@name` for an abstract socket).  Linux only |
 
 The async client under `blackbull/client/` keeps the same record for its
 own bounds.  The argument for a client having bounds at all is

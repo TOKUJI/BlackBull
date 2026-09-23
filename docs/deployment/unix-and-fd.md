@@ -129,12 +129,20 @@ Until startup completes, `backlog + 1` connections can wait.  Beyond that:
 | family | the client |
 |---|---|
 | TCP | retransmits, and is served once startup completes |
-| `AF_UNIX` | is refused immediately |
+| `AF_UNIX`, non-blocking (nginx, asyncio, a Python socket with a timeout) | is refused at once (`EAGAIN`) |
+| `AF_UNIX`, blocking | waits, and connects once the queue drains |
 
 Set `BB_SOCKET_BACKLOG` above the number of connections you expect during
-startup, especially on `AF_UNIX`; a backlog below 64 there logs a warning.
-BlackBull does not change the backlog of an adopted fd (`--bind fd://N`): set
-it where the socket is created, such as systemd's `Backlog=`.
+startup, especially on `AF_UNIX`.  An adopted fd (`--bind fd://N`) keeps the
+backlog it was created with until accepting opens, and `BB_SOCKET_BACKLOG`
+after: size the startup burst where the socket is created, such as systemd's
+`Backlog=`.  `net.core.somaxconn` caps both.
+
+On Linux, a worker that finds an `AF_UNIX` listener's queue full as it opens
+accepting logs one `socket_backlog` warning on `blackbull.caps`, naming the
+listener, the connections waiting and the backlog.  An adopted fd created in
+another network namespace (systemd `PrivateNetwork=yes`) cannot be read and is
+not checked.
 
 ## Sizing the connection cap under uvloop
 

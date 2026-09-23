@@ -480,6 +480,10 @@ async def test_header_max_line_logs(caps_caplog):
     assert len(records) >= 1
     assert records[0].levelno == logging.WARNING
     assert records[0].protocol == 'http1'
+    # Handlers group records by template.
+    assert records[0].msg == 'cap hit: %s (requested=%s, limit=%s)'
+    assert records[0].args == (
+        'header_max_line', records[0].requested, records[0].limit)
 
 
 @pytest.mark.asyncio
@@ -1587,6 +1591,7 @@ _INVENTORY = (
     'h2_max_concurrent_streams',
     'h2_ws_max_streams_per_connection',
     'compression_max_inflight',
+    'socket_backlog',
 )
 
 

@@ -16,7 +16,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `Server.stop()` and `SIGTERM` now end `run()` during lifespan startup
   instead of waiting for the application to answer.
 - `Server.shutdown()` without `Server.startup()` raises `RuntimeError`.
-- An `AF_UNIX` listener with `BB_SOCKET_BACKLOG` below 64 logs a warning.
+- On Linux, an `AF_UNIX` listener whose accept queue is full when accepting
+  opens logs one `socket_backlog` warning on `blackbull.caps`, adopted fds
+  included unless created in another network namespace.
 - A burst beyond `BB_MAX_CONNECTIONS` no longer exhausts file descriptors on
   the default event loop.  Under `BB_UVLOOP=1`, see *Sizing the connection cap
   under uvloop*.

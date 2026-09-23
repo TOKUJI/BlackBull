@@ -20,6 +20,7 @@ multi-worker master, and a test that needs a port before it forks, both use.
 import asyncio
 from http import HTTPStatus
 import logging
+import socket
 import ssl
 import sys
 from collections import defaultdict, deque
@@ -32,6 +33,7 @@ from .._cleanup import combine_cleanup_errors
 from ..protocol.rsock import (
     create_configured_sockets, create_unix_socket,
     adopt_inherited_sockets, adopt_listening_fd, close_sockets,
+    somaxconn, unix_accept_queue,
 )
 from .listener import HTTP, InheritedFd, Listener, Tcp, Unix
 from .sender import AbstractWriter
@@ -207,6 +209,48 @@ class _SigtermCapture:
             for signo in self._captured:
                 signal.raise_signal(signo)
         return False
+
+
+def _unix_address(sock) -> str:
+    """The listener's name as ``ss`` prints it: an abstract one gets ``@``."""
+    name = sock.getsockname()
+    if isinstance(name, bytes):
+        if name[:1] == b'\0':
+            return '@' + name[1:].decode('utf-8', 'backslashreplace')
+        return name.decode('utf-8', 'backslashreplace')
+    return name
+
+
+def _warn_if_unix_queue_full(sock) -> None:
+    """Must run before accepting opens: that re-``listen()``s, replacing an
+    adopted fd's backlog, and starts draining the queue.  Never raises."""
+    try:
+        _report_full_unix_queue(sock)
+    except Exception:
+        logger.debug('AF_UNIX accept queue check failed', exc_info=True)
+
+
+def _report_full_unix_queue(sock) -> None:
+    queue = unix_accept_queue(sock)
+    if queue is None:
+        return
+    waiting, backlog = queue
+    if waiting <= backlog:
+        return
+    listener = _unix_address(sock)
+    cap = somaxconn()
+    if cap is not None and backlog >= cap:
+        raise_what = (f'net.core.somaxconn caps this backlog at {cap}: raise '
+                      f'it, and the backlog if needed, above the startup burst.')
+    else:
+        raise_what = ('Raise the backlog above the startup burst: '
+                      'BB_SOCKET_BACKLOG, or Backlog= where the socket is '
+                      'created for an adopted fd.')
+    log_cap_hit(
+        'socket_backlog', waiting, backlog, scope_path=listener,
+        advice=(f'AF_UNIX listener {listener!r} was full when accepting '
+                f'opened; clients beyond it may have been refused while '
+                f'lifespan startup ran. {raise_what}'))
 
 
 def _validate_unique_socket_fds(bound_listeners) -> None:
@@ -1130,6 +1174,10 @@ class Server:
     async def _open_accepting(self, listening, servers) -> None:
         if self._stopping:
             return
+        af_unix = getattr(socket, 'AF_UNIX', None)
+        for _server, sock in listening:
+            if af_unix is not None and sock.family == af_unix:
+                _warn_if_unix_queue_full(sock)
         if self._accept_gate.arm(listening, self._max_connections):
             # The yield ``start_serving()`` makes.
             await asyncio.sleep(0)
