@@ -6502,7 +6502,9 @@ def test_asgi_boundary():
 </code></pre>
 <p>The client is a context manager so that ASGI <code>lifespan.startup</code> runs
 before any request and <code>lifespan.shutdown</code> runs on exit.  Apps that
-don't implement the lifespan protocol are tolerated silently.</p>
+don't implement the lifespan protocol are tolerated silently.  A failure
+the app reports is not: both <code>lifespan.startup.failed</code> and
+<code>lifespan.shutdown.failed</code> raise out of the block.</p>
 <p>For everything else, start from <code>docs/guide/testing.md</code>.</p>
 
 

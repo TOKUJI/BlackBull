@@ -1454,6 +1454,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="The startup window">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-a-client-beyond-the-backlog-observes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What a client beyond the backlog observes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sizing-the-connection-cap-under-uvloop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sizing the connection cap under uvloop
+      
+    </span>
+  </a>
+  
 </li>
       
         <li class="md-nav__item">
@@ -5512,6 +5540,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="The startup window">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-a-client-beyond-the-backlog-observes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What a client beyond the backlog observes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sizing-the-connection-cap-under-uvloop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sizing the connection cap under uvloop
+      
+    </span>
+  </a>
+  
 </li>
       
         <li class="md-nav__item">
@@ -5656,6 +5712,46 @@ inherit it: a requested <code>262144</code> is 416 KiB effective each, making th
 <strong>416.406 MiB</strong> per listener, 832.812 MiB dual-stack.  A window longer than the
 client's SYN retransmission budget (about two minutes) loses the excess.
 BlackBull documents this window rather than forcing it smaller.</p>
+<h3 id="what-a-client-beyond-the-backlog-observes">What a client beyond the backlog observes<a class="headerlink" href="#what-a-client-beyond-the-backlog-observes" title="Permanent link">&para;</a></h3>
+<p>Until startup completes, <code>backlog + 1</code> connections can wait.  Beyond that:</p>
+<table>
+<thead>
+<tr>
+<th>family</th>
+<th>the client</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>TCP</td>
+<td>retransmits, and is served once startup completes</td>
+</tr>
+<tr>
+<td><code>AF_UNIX</code></td>
+<td>is refused immediately</td>
+</tr>
+</tbody>
+</table>
+<p>Set <code>BB_SOCKET_BACKLOG</code> above the number of connections you expect during
+startup, especially on <code>AF_UNIX</code>; a backlog below 64 there logs a warning.
+BlackBull does not change the backlog of an adopted fd (<code>--bind fd://N</code>): set
+it where the socket is created, such as systemd's <code>Backlog=</code>.</p>
+<h2 id="sizing-the-connection-cap-under-uvloop">Sizing the connection cap under uvloop<a class="headerlink" href="#sizing-the-connection-cap-under-uvloop" title="Permanent link">&para;</a></h2>
+<p>Under <code>BB_UVLOOP=1</code>, accepting does not pause at <code>BB_MAX_CONNECTIONS</code>.
+Connections beyond the cap are refused using spare file descriptors, and when
+those run out, clients get no response at all.</p>
+<p>If you use uvloop and expect bursts beyond the cap:</p>
+<ul>
+<li>Do not rely on <code>BB_MAX_CONNECTIONS=auto</code>; it leaves only 64 spare
+  descriptors.</li>
+<li>Set <code>BB_MAX_CONNECTIONS ≤ RLIMIT_NOFILE − (peak burst + held + margin)</code>,
+  where <code>held</code> is what the process holds at its busiest besides client
+  connections: the connection pool's maximum, files opened per request times
+  concurrency, and anything opened lazily.  Do not count <code>held</code> at idle.</li>
+<li>Use a margin of at least 64, and more with TLS or with
+  <code>BB_SOCKET_REUSEPORT=1</code>.</li>
+</ul>
+<p>If a hard bound matters more than uvloop's speed, use the default event loop.</p>
 <h2 id="inspecting-the-bind">Inspecting the bind<a class="headerlink" href="#inspecting-the-bind" title="Permanent link">&para;</a></h2>
 <p><code>server.port</code> returns the kernel-assigned port number after
 <code>open_socket(port=0)</code> — useful in tests where you want an

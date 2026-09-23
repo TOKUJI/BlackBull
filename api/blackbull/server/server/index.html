@@ -5828,7 +5828,8 @@ multi-worker master, and a test that needs a port before it forks, both use.</p>
         <p>Async context manager that drives the ASGI lifespan protocol.</p>
 <p>On enter: launches the app's lifespan task and delivers 'lifespan.startup'.
 Raises RuntimeError if the app responds with 'lifespan.startup.failed'.
-On exit: delivers 'lifespan.shutdown' and waits for 'lifespan.shutdown.complete'.</p>
+On exit: delivers 'lifespan.shutdown'; 'lifespan.shutdown.failed' raises
+RuntimeError with the app's message.</p>
 <p>Implemented as a class (not asynccontextmanager) so that <strong>aenter</strong> and
 <strong>aexit</strong> can be called independently — e.g. startup() / shutdown() — without
 leaving a zombie async-generator that asyncio tries to finalize on loop close.</p>
@@ -6108,6 +6109,8 @@ not two.</p>
     <div class="doc doc-contents ">
 
         <p>Drive the ASGI lifespan shutdown handshake.</p>
+<p>Raises <code>RuntimeError</code> if <code>startup()</code> was never called.  After a
+failed <code>startup()</code> it cleans up quietly, so <code>try</code>/<code>finally</code> is safe.</p>
 
 
     </div>

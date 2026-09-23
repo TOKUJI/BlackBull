@@ -5998,6 +5998,8 @@ not two.</p>
     <div class="doc doc-contents ">
 
         <p>Drive the ASGI lifespan shutdown handshake.</p>
+<p>Raises <code>RuntimeError</code> if <code>startup()</code> was never called.  After a
+failed <code>startup()</code> it cleans up quietly, so <code>try</code>/<code>finally</code> is safe.</p>
 
 
     </div>

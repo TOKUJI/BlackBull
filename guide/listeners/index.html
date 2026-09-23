@@ -847,6 +847,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#a-failing-shutdown-is-a-failing-process" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A failing shutdown is a failing process
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -5502,6 +5513,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#a-failing-shutdown-is-a-failing-process" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A failing shutdown is a failing process
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -5637,6 +5659,43 @@ the <code>Server</code> remains unbound, so the same object can retry <code>open
 startup to complete. A failure while grouping listeners by TLS context, during
 lifespan startup, or while starting acceptance closes every earlier group and
 reclaims the lifespan task before the original startup exception is reported.</p>
+<h2 id="a-failing-shutdown-is-a-failing-process">A failing shutdown is a failing process<a class="headerlink" href="#a-failing-shutdown-is-a-failing-process" title="Permanent link">&para;</a></h2>
+<p><code>run()</code> reports what the application answered:</p>
+<table>
+<thead>
+<tr>
+<th>the app …</th>
+<th><code>run()</code> …</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>sends <code>lifespan.startup.failed</code></td>
+<td>raises, carrying the app's message</td>
+</tr>
+<tr>
+<td>sends <code>lifespan.shutdown.failed</code></td>
+<td>raises on the way out, carrying the app's message</td>
+</tr>
+<tr>
+<td>never answers</td>
+<td>waits at startup; at shutdown, ends at the cleanup budget</td>
+</tr>
+</tbody>
+</table>
+<p>A raising <code>@app.on_shutdown</code> hook therefore makes a single-worker process log
+the failure and exit <code>1</code>, so a supervisor can act on it.  With <code>workers &gt; 1</code>
+or <code>--reload</code> the master exits <code>0</code>; check the workers' logs.</p>
+<p><strong>Signals.</strong>  <code>SIGINT</code> and <code>SIGTERM</code> both run the shutdown.  <code>SIGTERM</code> lets
+in-flight requests finish for up to
+<a href="../../reference/env-vars/#connection-limits-and-timeouts"><code>BB_WORKER_DRAIN_TIMEOUT</code></a>;
+keep it below your supervisor's grace period (<code>docker stop</code>: 10 s).</p>
+<p>Put shutdown work in <code>@app.on_shutdown</code>, not in a <code>SIGTERM</code> handler of your
+own.  BlackBull takes <code>SIGTERM</code> while serving and restores your handler
+afterwards; it then runs once per signal received, after the drain, and its
+exit status wins.  Off the main thread BlackBull leaves <code>SIGTERM</code> alone.</p>
+<p><code>Server.stop()</code> ends <code>run()</code> cleanly at any point, including during lifespan
+startup.</p>
 
 
 

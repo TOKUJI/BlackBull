@@ -5853,7 +5853,7 @@ on busy production deployments, see
 <tr>
 <td><code>BB_UVLOOP</code></td>
 <td><code>0</code></td>
-<td>Install <code>uvloop</code>'s asyncio policy at startup.  Requires <code>pip install 'blackbull[speed]'</code>; falls back to the standard loop with a warning when uvloop is missing.</td>
+<td>Install <code>uvloop</code>'s asyncio policy at startup.  Requires <code>pip install 'blackbull[speed]'</code>; falls back to the standard loop with a warning when uvloop is missing.  Under uvloop the connection cap does not pause accepting; size it by <a href="../../deployment/unix-and-fd/#sizing-the-connection-cap-under-uvloop">Sizing the connection cap under uvloop</a>.</td>
 </tr>
 <tr>
 <td><code>BB_FORCE_ASGI_SCOPE</code></td>
@@ -5916,7 +5916,7 @@ first-hit-then-summary rate-limit model.</p>
 <tr>
 <td><code>BB_MAX_CONNECTIONS</code></td>
 <td><code>auto</code></td>
-<td>Maximum simultaneous TCP connections <strong>per worker</strong>.  Accepts <code>auto</code>, <code>0</code> (uncapped), or a number.  At the cap, new connections get HTTP/1.1 <code>503 Service Unavailable</code> with <code>Retry-After: 1</code> before close, which a load-balancer can interpret.<br><br>The cap is an <strong>accept-time</strong> decision: what arrives during lifespan startup is bounded by the listener's backlog instead (<a href="../../deployment/unix-and-fd/#the-startup-window">The startup window</a>).  The refusal is best-effort (<a href="../../about/internals/#rejecting-requires-lingering">Rejecting requires lingering</a>).  A refused ALPN-<code>h2</code> or raw-protocol connection gets no response — no framing to write one in; a prior-knowledge <code>h2c</code> one gets the same <code>503</code>.<br><br><strong><code>auto</code> derives the cap from the process's own <code>RLIMIT_NOFILE</code></strong>, less a 64-descriptor reserve.<br><br>An explicit number is honoured as given, not clamped to the fd budget; 1024 is a typical single-loop value.  Multi-worker servers multiply the ceiling (<code>workers × max_connections</code>).</td>
+<td>Maximum simultaneous TCP connections <strong>per worker</strong>.  Accepts <code>auto</code>, <code>0</code> (uncapped), or a number.  At the cap, new connections get HTTP/1.1 <code>503 Service Unavailable</code> with <code>Retry-After: 1</code> before close, which a load-balancer can interpret.<br><br>The cap is an <strong>accept-time</strong> decision: what arrives during lifespan startup is bounded by the listener's backlog instead (<a href="../../deployment/unix-and-fd/#the-startup-window">The startup window</a>).  The refusal is best-effort (<a href="../../about/internals/#rejecting-requires-lingering">Rejecting requires lingering</a>).  A refused ALPN-<code>h2</code> or raw-protocol connection gets no response — no framing to write one in; a prior-knowledge <code>h2c</code> one gets the same <code>503</code>.<br><br><strong><code>auto</code> derives the cap from the process's own <code>RLIMIT_NOFILE</code></strong>, less a 64-descriptor reserve.  Connections beyond the cap wait in the accept queue; under <code>BB_UVLOOP=1</code>, see <a href="../../deployment/unix-and-fd/#sizing-the-connection-cap-under-uvloop">Sizing the connection cap under uvloop</a>.<br><br>An explicit number is honoured as given, not clamped to the fd budget; 1024 is a typical single-loop value.  Multi-worker servers multiply the ceiling (<code>workers × max_connections</code>).</td>
 </tr>
 <tr>
 <td><code>BB_REQUEST_TIMEOUT</code></td>
@@ -6230,7 +6230,7 @@ entirely.</p>
 <tr>
 <td><code>BB_SOCKET_BACKLOG</code></td>
 <td><code>1024</code></td>
-<td><code>listen()</code> backlog depth, sized for connection bursts; Linux caps the effective value at <code>net.core.somaxconn</code>.  Where BlackBull binds, <strong>this value bounds the accept queue</strong>; an adopted fd keeps its creator's <code>Backlog=</code> until accepting begins; see <a href="../../deployment/unix-and-fd/#the-startup-window">The startup window</a>.</td>
+<td><code>listen()</code> backlog depth, sized for connection bursts; Linux caps the effective value at <code>net.core.somaxconn</code>.  Where BlackBull binds, <strong>this value bounds the accept queue</strong>; an adopted fd keeps its creator's <code>Backlog=</code> until accepting begins; see <a href="../../deployment/unix-and-fd/#the-startup-window">The startup window</a>.  During that window a TCP client beyond the backlog is served late and an <code>AF_UNIX</code> client is refused (<a href="../../deployment/unix-and-fd/#what-a-client-beyond-the-backlog-observes">details</a>); below <code>64</code> an <code>AF_UNIX</code> bind warns.</td>
 </tr>
 <tr>
 <td><code>BB_SOCKET_REUSEPORT</code></td>
@@ -6354,7 +6354,7 @@ or drop to <code>INFO</code> to surface the rate-limit summary records.</p>
 <tr>
 <td><code>BB_WORKER_DRAIN_TIMEOUT</code></td>
 <td><code>8.0</code></td>
-<td>Seconds a worker spends letting already-accepted connections finish after <code>SIGTERM</code>, before cancelling what is left.  Nothing in flight is cancelled while it lasts — a cancelled handler is a client holding a half-written response.  It sits inside the supervisor's own wait, so the drain ends in the worker rather than in a <code>SIGKILL</code>; raising it past that wait only moves the deadline.  <code>0</code> drops in-flight requests immediately, which is what the server did before this existed.  See <a href="../../deployment/workers/#shutdown">Shutdown</a>.</td>
+<td>Seconds a server spends letting already-accepted connections finish after <code>SIGTERM</code>, before cancelling what is left.  Applies to forked workers and to single-worker <code>app.run()</code> / <code>blackbull module:app</code>.  Nothing in flight is cancelled while it lasts — a cancelled handler is a client holding a half-written response.  It sits inside the supervisor's own wait, so the drain ends in the worker rather than in a <code>SIGKILL</code>; raising it past that wait only moves the deadline.  <code>0</code> drops in-flight requests immediately, which is what the server did before this existed.  See <a href="../../deployment/workers/#shutdown">Shutdown</a>.</td>
 </tr>
 <tr>
 <td><code>BB_H2_ACTIVE_STREAMS</code></td>

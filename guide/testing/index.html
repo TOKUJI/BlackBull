@@ -6385,9 +6385,10 @@ around the <code>with</code> block:</p>
 <p>If a startup handler raises, <code>TestClient.__enter__</code> re-raises a
 <code>RuntimeError</code> describing the failure, so a broken startup
 fails the test rather than silently leaving the app in a
-half-initialised state.  Apps that don't implement the
-lifespan protocol (i.e. legacy ASGI-2.0-style callables) are
-tolerated silently.</p>
+half-initialised state.  A shutdown handler that raises is
+reported the same way, unless the <code>with</code> block is already
+raising.  Apps that don't implement the lifespan protocol
+(i.e. legacy ASGI-2.0-style callables) are tolerated silently.</p>
 <h3 id="construction-options">Construction options<a class="headerlink" href="#construction-options" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="n">TestClient</span><span class="p">(</span>
     <span class="n">app</span><span class="p">,</span>
