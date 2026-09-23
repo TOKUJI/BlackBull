@@ -23,6 +23,8 @@ See ``docs/deployment/unix-and-fd.md`` for the deployment shapes these serve.
 """
 import os
 import socket
+import struct
+import sys
 
 from .._cleanup import combine_cleanup_errors
 
@@ -30,8 +32,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 _DEFAULT_BACKLOG = 1024
-
-_UNIX_BACKLOG_WARN_BELOW = 64
 
 #: True when the OS supports SO_REUSEPORT (Linux ≥ 3.9, macOS ≥ 10.6).
 REUSEPORT_SUPPORTED = hasattr(socket, 'SO_REUSEPORT')
@@ -363,17 +363,82 @@ def create_unix_socket(path: str, backlog: int = _DEFAULT_BACKLOG,
         logger.info('Bound AF_UNIX socket on %s (backlog=%d mode=%s)',
                     path, backlog,
                     'unchanged' if mode is None else f'0o{mode:o}')
-        if backlog < _UNIX_BACKLOG_WARN_BELOW:
-            logger.warning(
-                'BB_SOCKET_BACKLOG=%d on AF_UNIX listener %s: only %d '
-                'connection(s) can wait; more are refused, not delayed as on '
-                'TCP. Raise it above the expected burst.',
-                backlog, path, backlog + 1)
         return sock
     except OSError as msg:
         logger.error('Could not bind AF_UNIX socket on %s: %s', path, msg)
         sock.close()
         return None
+
+
+# linux/sock_diag.h, linux/unix_diag.h, linux/netlink.h
+_NETLINK_SOCK_DIAG = 4
+_SOCK_DIAG_BY_FAMILY = 20
+_NLM_F_REQUEST = 1
+_UDIAG_SHOW_RQLEN = 0x10
+_UNIX_DIAG_RQLEN = 4
+_TCP_LISTEN = 10
+_NLMSGHDR = struct.Struct('=IHHII')
+_UNIX_DIAG_REQ = struct.Struct('=BBHIIIII')
+_UNIX_DIAG_MSG = struct.Struct('=BBBBIII')
+_RTATTR = struct.Struct('=HH')
+_RQLEN = struct.Struct('=II')
+
+
+def _sock_diag_exchange(request: bytes) -> bytes:
+    with socket.socket(socket.AF_NETLINK, socket.SOCK_DGRAM,
+                       _NETLINK_SOCK_DIAG) as nl:
+        nl.send(request)
+        # The kernel answers inside send(); nothing to wait for.
+        return nl.recv(8192, socket.MSG_DONTWAIT)
+
+
+def somaxconn() -> int | None:
+    """``net.core.somaxconn`` in this process's network namespace, or ``None``."""
+    try:
+        with open('/proc/sys/net/core/somaxconn') as f:
+            return int(f.read())
+    except (OSError, ValueError):
+        return None
+
+
+def unix_accept_queue(sock) -> tuple[int, int] | None:
+    """``(waiting, backlog)`` of a listening ``AF_UNIX`` socket, from the kernel.
+
+    Read by inode, so an adopted or duplicated fd reports its creator's
+    backlog.  The queue is full when ``waiting > backlog``.  ``None`` off
+    Linux, for a socket that is not listening or is in another network
+    namespace, or on any failure.
+    """
+    if not sys.platform.startswith('linux'):
+        return None
+    try:
+        inode = os.fstat(sock.fileno()).st_ino
+        req = _UNIX_DIAG_REQ.pack(socket.AF_UNIX, 0, 0, 1 << _TCP_LISTEN,
+                                  inode, _UDIAG_SHOW_RQLEN,
+                                  0xFFFFFFFF, 0xFFFFFFFF)
+        reply = _sock_diag_exchange(
+            _NLMSGHDR.pack(_NLMSGHDR.size + len(req), _SOCK_DIAG_BY_FAMILY,
+                           _NLM_F_REQUEST, 1, 0) + req)
+        length, kind, _flags, _seq, _pid = _NLMSGHDR.unpack_from(reply)
+        if kind != _SOCK_DIAG_BY_FAMILY or length > len(reply):
+            return None
+        offset = _NLMSGHDR.size
+        _family, _type, state, _pad, found, *_cookie = (
+            _UNIX_DIAG_MSG.unpack_from(reply, offset))
+        if found != inode or state != _TCP_LISTEN:
+            return None
+        offset += _UNIX_DIAG_MSG.size
+        while offset + _RTATTR.size <= length:
+            attr_len, attr_type = _RTATTR.unpack_from(reply, offset)
+            if attr_len < _RTATTR.size:
+                return None
+            if (attr_type == _UNIX_DIAG_RQLEN
+                    and attr_len >= _RTATTR.size + _RQLEN.size):
+                return _RQLEN.unpack_from(reply, offset + _RTATTR.size)
+            offset += (attr_len + 3) & ~3
+    except Exception:
+        logger.debug('sock_diag query failed', exc_info=True)
+    return None
 
 
 def create_dual_stack_sockets(port, backlog: int = _DEFAULT_BACKLOG,

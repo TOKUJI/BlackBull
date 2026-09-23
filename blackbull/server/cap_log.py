@@ -369,8 +369,11 @@ def log_cap_hit(
     scope_path: Optional[str] = None,
     protocol: Optional[str] = None,
     connection_id: Optional[str] = None,
+    advice: Optional[str] = None,
 ) -> None:
     """Emit one cap-hit record on ``blackbull.caps`` at WARN level.
+
+    *advice* is appended to the message: what the operator should change.
 
     The structured fields land in ``record.extra`` (``cap``,
     ``requested``, ``limit``, ``peer``, ``scope_path``, ``protocol``,
@@ -409,16 +412,19 @@ def log_cap_hit(
     cid = connection_id
     if cid is None and active is not None:
         cid = active._connection_id
-    _logger.warning(
-        'cap hit: %s (requested=%s, limit=%s)',
-        cap, requested, limit,
-        extra={
-            'cap':           cap,
-            'requested':     requested,
-            'limit':         limit,
-            'peer':          peer,
-            'scope_path':    scope_path,
-            'protocol':      protocol,
-            'connection_id': cid,
-        },
-    )
+    extra = {
+        'cap':           cap,
+        'requested':     requested,
+        'limit':         limit,
+        'peer':          peer,
+        'scope_path':    scope_path,
+        'protocol':      protocol,
+        'connection_id': cid,
+    }
+    # Handlers group by template: a call without advice keeps the original.
+    if advice is None:
+        _logger.warning('cap hit: %s (requested=%s, limit=%s)',
+                        cap, requested, limit, extra=extra)
+    else:
+        _logger.warning('cap hit: %s (requested=%s, limit=%s): %s',
+                        cap, requested, limit, advice, extra=extra)
