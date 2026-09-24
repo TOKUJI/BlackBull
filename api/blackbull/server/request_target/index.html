@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/grpc/codec/">
+        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/server/request_target/">
       
       
-        <link rel="prev" href="../asgi/">
+        <link rel="prev" href="../reload/">
       
       
-        <link rel="next" href="../compression/">
+        <link rel="next" href="../response/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>codec - BlackBull</title>
+        <title>request_target - BlackBull</title>
       
     
     
@@ -72,7 +72,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#blackbullgrpccodec" class="md-skip">
+        <a href="#blackbullserverrequest_target" class="md-skip">
           Skip to content
         </a>
       
@@ -108,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              codec
+              request_target
             
           </span>
         </div>
@@ -2714,20 +2714,18 @@
                 
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_15" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_15" >
         
           
           <label class="md-nav__link" for="__nav_5_2_1_15" id="__nav_5_2_1_15_label" tabindex="0">
@@ -2748,7 +2746,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_15_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_15_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5_2_1_15">
             <span class="md-nav__icon md-icon"></span>
             
@@ -2766,7 +2764,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../" class="md-nav__link">
+      <a href="../../grpc/" class="md-nav__link">
         
   
   
@@ -2794,7 +2792,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../asgi/" class="md-nav__link">
+      <a href="../../grpc/asgi/" class="md-nav__link">
         
   
   
@@ -2819,37 +2817,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    codec
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../grpc/codec/" class="md-nav__link">
         
   
   
@@ -2865,76 +2836,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#blackbull.grpc.codec" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        codec
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="codec">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.grpc.codec.GrpcDecodeError" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        GrpcDecodeError
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.grpc.codec.decode_messages" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        decode_messages
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.grpc.codec.encode_message" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        encode_message
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -2947,7 +2848,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../compression/" class="md-nav__link">
+      <a href="../../grpc/compression/" class="md-nav__link">
         
   
   
@@ -2975,7 +2876,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../registry/" class="md-nav__link">
+      <a href="../../grpc/registry/" class="md-nav__link">
         
   
   
@@ -3003,7 +2904,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../status/" class="md-nav__link">
+      <a href="../../grpc/status/" class="md-nav__link">
         
   
   
@@ -4069,18 +3970,20 @@
                 
   
   
+    
   
   
+  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_26" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_26" checked>
         
           
           <label class="md-nav__link" for="__nav_5_2_1_26" id="__nav_5_2_1_26_label" tabindex="0">
@@ -4101,7 +4004,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_26_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_26_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_5_2_1_26">
             <span class="md-nav__icon md-icon"></span>
             
@@ -4119,7 +4022,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/" class="md-nav__link">
+      <a href="../" class="md-nav__link">
         
   
   
@@ -4147,7 +4050,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/access_log/" class="md-nav__link">
+      <a href="../access_log/" class="md-nav__link">
         
   
   
@@ -4175,7 +4078,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/affinity/" class="md-nav__link">
+      <a href="../affinity/" class="md-nav__link">
         
   
   
@@ -4203,7 +4106,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/cap_log/" class="md-nav__link">
+      <a href="../cap_log/" class="md-nav__link">
         
   
   
@@ -4231,7 +4134,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/conn_id/" class="md-nav__link">
+      <a href="../conn_id/" class="md-nav__link">
         
   
   
@@ -4259,7 +4162,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/connection_actor/" class="md-nav__link">
+      <a href="../connection_actor/" class="md-nav__link">
         
   
   
@@ -4287,7 +4190,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/connection_protocol/" class="md-nav__link">
+      <a href="../connection_protocol/" class="md-nav__link">
         
   
   
@@ -4315,7 +4218,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/constants/" class="md-nav__link">
+      <a href="../constants/" class="md-nav__link">
         
   
   
@@ -4343,7 +4246,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/deadline/" class="md-nav__link">
+      <a href="../deadline/" class="md-nav__link">
         
   
   
@@ -4371,7 +4274,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/http1_actor/" class="md-nav__link">
+      <a href="../http1_actor/" class="md-nav__link">
         
   
   
@@ -4399,7 +4302,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/http2_actor/" class="md-nav__link">
+      <a href="../http2_actor/" class="md-nav__link">
         
   
   
@@ -4427,7 +4330,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/http2_ws/" class="md-nav__link">
+      <a href="../http2_ws/" class="md-nav__link">
         
   
   
@@ -4455,7 +4358,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/listener/" class="md-nav__link">
+      <a href="../listener/" class="md-nav__link">
         
   
   
@@ -4483,7 +4386,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/multiworker/" class="md-nav__link">
+      <a href="../multiworker/" class="md-nav__link">
         
   
   
@@ -4511,7 +4414,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/parser/" class="md-nav__link">
+      <a href="../parser/" class="md-nav__link">
         
   
   
@@ -4539,7 +4442,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/permessage_deflate/" class="md-nav__link">
+      <a href="../permessage_deflate/" class="md-nav__link">
         
   
   
@@ -4567,7 +4470,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/protocol_registry/" class="md-nav__link">
+      <a href="../protocol_registry/" class="md-nav__link">
         
   
   
@@ -4595,7 +4498,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/rate_window/" class="md-nav__link">
+      <a href="../rate_window/" class="md-nav__link">
         
   
   
@@ -4623,7 +4526,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/read_buffer/" class="md-nav__link">
+      <a href="../read_buffer/" class="md-nav__link">
         
   
   
@@ -4651,7 +4554,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/recipient/" class="md-nav__link">
+      <a href="../recipient/" class="md-nav__link">
         
   
   
@@ -4679,7 +4582,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/reload/" class="md-nav__link">
+      <a href="../reload/" class="md-nav__link">
         
   
   
@@ -4704,10 +4607,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../server/request_target/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    request_target
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -4723,6 +4653,37 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#blackbull.server.request_target" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        request_target
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -4735,7 +4696,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/response/" class="md-nav__link">
+      <a href="../response/" class="md-nav__link">
         
   
   
@@ -4763,7 +4724,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/sender/" class="md-nav__link">
+      <a href="../sender/" class="md-nav__link">
         
   
   
@@ -4791,7 +4752,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/server/" class="md-nav__link">
+      <a href="../server/" class="md-nav__link">
         
   
   
@@ -4819,7 +4780,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/warmup/" class="md-nav__link">
+      <a href="../warmup/" class="md-nav__link">
         
   
   
@@ -4847,7 +4808,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/websocket_actor/" class="md-nav__link">
+      <a href="../websocket_actor/" class="md-nav__link">
         
   
   
@@ -4875,7 +4836,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/worker/" class="md-nav__link">
+      <a href="../worker/" class="md-nav__link">
         
   
   
@@ -4903,7 +4864,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/ws_codec/" class="md-nav__link">
+      <a href="../ws_codec/" class="md-nav__link">
         
   
   
@@ -5455,52 +5416,13 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#blackbull.grpc.codec" class="md-nav__link">
+  <a href="#blackbull.server.request_target" class="md-nav__link">
     <span class="md-ellipsis">
       
-        codec
+        request_target
       
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="codec">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.grpc.codec.GrpcDecodeError" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        GrpcDecodeError
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.grpc.codec.decode_messages" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        decode_messages
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.grpc.codec.encode_message" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        encode_message
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -5524,36 +5446,22 @@
   
 
 
-<h1 id="blackbullgrpccodec"><code>blackbull.grpc.codec</code><a class="headerlink" href="#blackbullgrpccodec" title="Permanent link">&para;</a></h1>
+<h1 id="blackbullserverrequest_target"><code>blackbull.server.request_target</code><a class="headerlink" href="#blackbullserverrequest_target" title="Permanent link">&para;</a></h1>
 
 
 <div class="doc doc-object doc-module">
 
 
 
-<h2 id="blackbull.grpc.codec" class="doc doc-heading">
-            <code>blackbull.grpc.codec</code>
+<h2 id="blackbull.server.request_target" class="doc doc-heading">
+            <code>blackbull.server.request_target</code>
 
 
-<a href="#blackbull.grpc.codec" class="headerlink" title="Permanent link">&para;</a></h2>
+<a href="#blackbull.server.request_target" class="headerlink" title="Permanent link">&para;</a></h2>
 
     <div class="doc doc-contents first">
 
-        <p>gRPC Length-Prefixed-Message codec.</p>
-<p>The gRPC wire format (https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md)
-carries each message inside an HTTP/2 DATA stream as:</p>
-<pre><code>Length-Prefixed-Message = Compressed-Flag (1 byte, unsigned)
-                          Message-Length  (4 bytes, big-endian uint32)
-                          Message         (Message-Length bytes)
-</code></pre>
-<p><code>Compressed-Flag</code> is 0 for an uncompressed message and 1 when the message
-body is compressed with the algorithm named in the <code>grpc-encoding</code> header.
-This module is pure framing: it carries the flag but does not (de)compress —
-<a class="autorefs autorefs-internal" title="blackbull.grpc.compression" href="../compression/#blackbull.grpc.compression"><code>compression</code></a> holds the gzip codec and the ASGI bridge
-sets/reads the flag around it.</p>
-<p>This module is pure binary framing — no protobuf dependency.  Protobuf
-serialisation is the application's concern; handlers receive and return the
-raw message bytes.</p>
+        <p>Path-plus-query decomposition shared by the HTTP wire parsers.</p>
 
 
 
@@ -5574,78 +5482,6 @@ raw message bytes.</p>
 
 
 
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.grpc.codec.GrpcDecodeError" class="doc doc-heading">
-            <code>GrpcDecodeError</code>
-
-
-<a href="#blackbull.grpc.codec.GrpcDecodeError" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><span title="ValueError">ValueError</span></code></p>
-
-
-
-        <p>Raised when a DATA buffer is not a valid sequence of
-Length-Prefixed-Messages (truncated prefix or short body).</p>
-
-
-
-
-
-
-
-
-
-    </div>
-
-</div>
-
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="blackbull.grpc.codec.decode_messages" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">decode_messages</span><span class="p">(</span><span class="n">data</span><span class="p">)</span></code>
-
-<a href="#blackbull.grpc.codec.decode_messages" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Parse <em>data</em> into a list of <code>(compressed, payload)</code> messages.</p>
-<p>A single DATA buffer may contain zero, one, or many framed messages
-(gRPC permits multiple messages per stream and does not align them to
-DATA-frame boundaries).  Raises <a class="autorefs autorefs-internal" href="#blackbull.grpc.codec.GrpcDecodeError"><code>GrpcDecodeError</code></a> on a truncated
-prefix or a message body shorter than its declared length.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="blackbull.grpc.codec.encode_message" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">encode_message</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">compressed</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
-
-<a href="#blackbull.grpc.codec.encode_message" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Frame <em>payload</em> as a single gRPC Length-Prefixed-Message.</p>
-
-
-    </div>
-
-</div>
 
 
 

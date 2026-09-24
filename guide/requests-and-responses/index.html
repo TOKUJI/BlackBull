@@ -4956,6 +4956,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/server/request_target/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    request_target
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/server/response/" class="md-nav__link">
         
   
@@ -6095,17 +6123,19 @@ freshly-derived dict) — the scope is no longer the primary
 representation, so it is generated on demand rather than held.</p>
 </div>
 <div class="admonition note">
-<p class="admonition-title"><code>path</code> is percent-decoded (since v0.53.0)</p>
+<p class="admonition-title"><code>path</code> is percent-decoded once</p>
 <p><code>conn.path</code> (and the underlying <code>scope['path']</code>) is the
-<strong>percent-decoded</strong> request target with the query string removed —
+<strong>percent-decoded</strong> path component with the query string removed —
 <code>/files/a%2Fb</code> arrives as <code>/files/a/b</code>, matching the ASGI spec and
 uvicorn.  The <strong>un</strong>decoded bytes are available as
 <code>conn.raw_path</code> (<code>bytes</code>, query excluded) for the rare consumer
 — reverse proxies, WAFs, cache-key / signature verification — that
 must reproduce the exact received byte sequence.  RFC 3986 <code>;</code>
 parameters are preserved in both (<code>/cart;sid=abc</code> stays intact).
-Before v0.53.0 <code>path</code> was not decoded; code that re-decoded it
-itself should drop that step.</p>
+Leading slashes are preserved: <code>//group/review</code> is a path, not an
+authority. An HTTP/1 absolute target with an empty path, such as
+<code>http://example.com?q=ok</code>, supplies <code>/</code> and query <code>b'q=ok'</code>.
+Do not decode <code>conn.path</code> again: <code>/a%252Fb</code> arrives as <code>/a%2Fb</code>.</p>
 </div>
 <p>The sections below cover the same reads on the raw ASGI surface —
 useful inside middleware (which always uses the full form) and for
