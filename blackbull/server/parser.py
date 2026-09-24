@@ -13,13 +13,12 @@ and the ``:authority`` / ``Host`` authority grammar that decides the ``host``
 a handler sees.  Field-level validation already happened when the frame parsed
 its payload.
 """
-from urllib.parse import unquote, urlsplit
-
 from ..protocol.frame_types import PseudoHeaders
 import logging
 from ..connection import Connection
 from ..headers import Headers
 from .http1_actor import _TARGET_ALLOWED_OCTETS, _authority_is_valid
+from .request_target import split_path_query
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +76,7 @@ def _build_h2_connection(method: str, path: str, raw_path: bytes,
     return c
 
 
-def _split_h2_path(raw: str):
+def _split_h2_path(raw: str) -> tuple[str, bytes, bytes]:
     """Split an HTTP/2 ``:path`` pseudo into ASGI (path, raw_path, query_string).
 
     RFC 9113 §8.3.1: ``:path`` carries the origin-form request target
@@ -86,20 +85,8 @@ def _split_h2_path(raw: str):
     ``raw`` is always ``str`` — ``frame_types`` decodes pseudo-header values
     when the HEADERS frame is parsed, and the server-push caller passes the
     ASGI event's ``str`` path.
-
-    ``urlsplit`` (not ``urlparse``) so an RFC 3986 ``;`` path sub-delimiter
-    stays in the path component rather than being split off as obsolete RFC
-    2396 ``;params``.  The ``'%' in path`` guard keeps escape-free targets on
-    the plain fast path; unquote semantics match uvicorn ('+' stays literal,
-    malformed escapes pass through, ``errors='replace'`` can never raise).
     """
-    parsed = urlsplit(raw)
-    path = parsed.path
-    if '%' in path:
-        decoded = unquote(path, encoding='utf-8', errors='replace')
-    else:
-        decoded = path
-    return decoded, path.encode('utf-8'), parsed.query.encode('utf-8')
+    return split_path_query(raw.encode('utf-8'))
 
 
 def _request_headers_with_host(frame, *, require_present: bool) -> list | None:

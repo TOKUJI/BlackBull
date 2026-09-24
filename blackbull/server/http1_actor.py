@@ -11,7 +11,6 @@ from binascii import Error as BinasciiError
 from collections.abc import Awaitable, Callable
 from hashlib import sha1
 from http import HTTPStatus
-from urllib.parse import unquote
 
 from ..actor import Actor, Message
 from ..event_aggregator import EventAggregator
@@ -20,6 +19,7 @@ from ..connection import (
     Connection, bind_receive_channel)
 from ..headers import Headers
 from .deadline import ConnectionDeadline
+from .request_target import split_path_query
 from .recipient import (CONNECTION_MUST_CLOSE, CONNECTION_NEEDS_DRAIN,
                         AbstractReader, HTTP1Recipient, IncompleteReadError,
                         ReadLimitExceeded, RecipientFactory, _HEAD_END,
@@ -934,35 +934,26 @@ class HTTP1Actor(Actor):
                         f'invalid scheme in absolute-form request-target: '
                         f'{path[:_ss]!r}')
                 rest = path[_ss + 3:]
-                slash = rest.find(b'/')
-                if slash == -1:
+                authority_end = len(rest)
+                for delimiter in (b'/', b'?', b'#'):
+                    offset = rest.find(delimiter)
+                    if offset != -1 and offset < authority_end:
+                        authority_end = offset
+                if authority_end == len(rest):
                     authority_override, path = rest, b'/'
                 else:
-                    authority_override, path = rest[:slash], rest[slash:]
+                    authority_override, path = rest[:authority_end], rest[authority_end:]
+                    if not path.startswith(b'/'):
+                        path = b'/' + path
                 if not authority_override:
                     raise BadRequestError(
                         f'absolute-form request-target has empty authority: '
                         f'{path!r}')
 
         if asterisk_form:
-            _raw_path_b, _query_string = b'*', b''
+            _decoded_path, _raw_path_b, _query_string = '*', b'*', b''
         else:
-            # C-level partition calls (~12× faster than urlparse): strip
-            # #fragment, then split ?query.  ';' is NOT split off — RFC 3986
-            # makes it an ordinary path sub-delimiter (the ;params grammar is
-            # obsolete RFC 2396), so it stays in the path component.
-            _no_frag, _, _ = path.partition(b'#')
-            _raw_path_b, _, _query_string = _no_frag.partition(b'?')
-
-        # The b'%' guard keeps the no-escape case on the plain-decode path;
-        # the target was already rejected above if it holds a byte >= 0x80, so
-        # ``decode('ascii')`` cannot fail.  unquote semantics match uvicorn:
-        # '+' stays literal, malformed escapes pass through, never raises.
-        if b'%' in _raw_path_b:
-            _decoded_path = unquote(_raw_path_b.decode('ascii'),
-                                  encoding='utf-8', errors='replace')
-        else:
-            _decoded_path = _raw_path_b.decode('utf-8')
+            _decoded_path, _raw_path_b, _query_string = split_path_query(path)
 
         values_need_checking = not _block_values_are_clean(data)
 
