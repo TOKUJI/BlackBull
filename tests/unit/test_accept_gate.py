@@ -8,8 +8,10 @@ from __future__ import annotations
 import asyncio
 import errno
 import logging
+import os
 import socket
 import ssl
+import sys
 
 import pytest
 
@@ -532,4 +534,102 @@ async def test_a_failed_connect_is_reported_only_in_debug_and_never_as_unretriev
     finally:
         loop.set_debug(False)
         loop.set_exception_handler(None)
+        client.close()
+
+
+# ---------------------------------------------------------------------------
+# The connect task's first step: eager where the loop allows it
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+@pytest.mark.timeout(30)
+async def test_a_connect_cancelled_before_its_first_step_releases(
+        listener, monkeypatch):
+    """Without eager start (3.11), stop() can cancel a connect whose coroutine
+    never ran: its cleanup must still run."""
+    monkeypatch.setattr(server_mod, '_EAGER_TASKS', False)
+    gate = _AcceptGate()
+    client = socket.create_connection(listener.getsockname())
+    conn, _ = listener.accept()
+    try:
+        gate.connect(conn, _Quiet, None)
+        cancelled = gate.close()
+        assert len(cancelled) == 1
+        await _settle(gate)
+        await asyncio.sleep(0.05)
+        assert gate._descriptors_held == 0
+        assert conn.fileno() == -1
+        assert not gate._connecting
+    finally:
+        client.close()
+
+
+needs_eager = pytest.mark.skipif(
+    sys.version_info < (3, 12), reason='eager task start is 3.12+')
+
+
+@needs_eager
+@pytest.mark.asyncio
+@pytest.mark.timeout(30)
+async def test_the_connect_runs_its_first_step_inside_the_accept(listener):
+    """The transport is being built before ``connect()`` returns."""
+    gate = _AcceptGate()
+    client = socket.create_connection(listener.getsockname())
+    conn, _ = listener.accept()
+    assert os.get_blocking(conn.fileno())
+    try:
+        gate.connect(conn, _Quiet, None)
+        assert not os.get_blocking(conn.fileno())
+    finally:
+        gate.close()
+        await _settle(gate)
+        client.close()
+
+
+@needs_eager
+@pytest.mark.asyncio
+@pytest.mark.timeout(30)
+async def test_a_connect_finished_in_its_first_step_is_not_tracked(
+        listener, monkeypatch):
+    async def refuse(*_args, **_kwargs):
+        raise ValueError('no transport')
+
+    loop = asyncio.get_running_loop()
+    monkeypatch.setattr(loop, 'connect_accepted_socket', refuse)
+    gate = _AcceptGate()
+    client = socket.create_connection(listener.getsockname())
+    conn, _ = listener.accept()
+    try:
+        for _ in range(3):
+            gate.connect(conn, _Quiet, None)
+        assert not gate._connecting
+        assert gate._descriptors_held == 0
+    finally:
+        client.close()
+
+
+class _Slotted(asyncio.Protocol):
+    """A protocol that cannot carry an admission."""
+
+    __slots__ = ()
+    made = 0
+
+    def connection_made(self, transport):
+        _Slotted.made += 1
+        transport.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.timeout(30)
+async def test_a_protocol_that_cannot_carry_an_admission_is_still_served(listener):
+    gate = _AcceptGate()
+    _Slotted.made = 0
+    client = socket.create_connection(listener.getsockname())
+    conn, _ = listener.accept()
+    try:
+        gate.connect(conn, _Slotted, None)
+        await _settle(gate)
+        await asyncio.sleep(0.05)
+        assert _Slotted.made == 1
+    finally:
         client.close()

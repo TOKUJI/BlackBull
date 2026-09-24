@@ -443,11 +443,13 @@ class _AcceptGate:
 
     def connect(self, conn, factory, ssl_context) -> None:
         """Hand one accepted socket to the loop, counted until it closes."""
-        admission = self.admit()
+        admission = _Admission(self)
         try:
             protocol = factory()
-            if hasattr(protocol, 'admission'):
+            try:
                 protocol.admission = admission
+            except AttributeError:
+                pass    # a protocol that cannot carry it releases on failure only
         except BaseException:
             conn.close()
             admission.release()
@@ -458,8 +460,19 @@ class _AcceptGate:
             task = asyncio.Task(coro, loop=loop, eager_start=True)
         else:
             task = loop.create_task(coro)
+            # Cancelled before its first step, the coroutine never runs its
+            # own cleanup.
+            task.add_done_callback(
+                lambda done: self._never_started(done, conn, admission))
         if not task.done():
             self._connecting.add(task)
+
+    def _never_started(self, task, conn, admission: _Admission) -> None:
+        if task.cancelled():
+            if conn.fileno() != -1:
+                conn.close()
+            admission.release()
+            self._connecting.discard(task)
 
     async def _connected(self, loop, conn, protocol, ssl_context,
                          admission: _Admission) -> None:
