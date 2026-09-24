@@ -371,3 +371,39 @@ def test_an_adopted_fd_takes_the_configured_backlog_once_accepting_opens(
     finally:
         owner.close()
         reset_settings_cache()
+
+
+@pytest.mark.timeout(60)
+@pytest.mark.parametrize('loop', LOOPS)
+def test_an_accepted_connection_is_non_blocking(loop):
+    """The loop's transport sets it; the gate does not have to."""
+    from blackbull.server.server import _AcceptGate
+
+    async def main():
+        transports = []
+
+        class Keep(asyncio.Protocol):
+            admission = None
+
+            def connection_made(self, transport):
+                transports.append(transport)
+
+        listener = socket.socket()
+        listener.bind(('127.0.0.1', 0))
+        listener.listen()
+        client = socket.create_connection(listener.getsockname())
+        conn, _ = listener.accept()
+        assert os.get_blocking(conn.fileno())
+        gate = _AcceptGate()
+        try:
+            gate.connect(conn, Keep, None)
+            await _until(lambda: transports)
+            fd = transports[0].get_extra_info('socket').fileno()
+            assert not os.get_blocking(fd)
+        finally:
+            for transport in transports:
+                transport.close()
+            client.close()
+            listener.close()
+            await asyncio.sleep(0.05)
+    _run(loop, main)

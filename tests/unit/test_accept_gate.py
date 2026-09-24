@@ -135,6 +135,9 @@ async def test_a_cleartext_connect_cancelled_after_connection_made_releases_once
         await asyncio.sleep(0.05)
         assert gate._descriptors_held == 0
         assert conn.fileno() == -1
+        # Cancellation propagates: stop() and callers can tell it from success.
+        assert task.cancelled()
+        assert not gate._connecting
     finally:
         client.close()
 
@@ -156,6 +159,7 @@ async def test_a_failed_tls_handshake_releases_without_connection_lost(
         assert gate._descriptors_held == 0
         assert (_Quiet.made, _Quiet.lost) == (0, 0)
         assert conn.fileno() == -1
+        assert not gate._connecting, 'a finished connect is still tracked'
     finally:
         client.close()
 
@@ -490,3 +494,42 @@ async def test_the_fallback_warning_names_what_failed(
     message = record.getMessage()
     assert f'{failing}()' in message, message
     assert 'BB_MAX_CONNECTIONS' in message
+
+
+# ---------------------------------------------------------------------------
+# A failed connect is reported the way the loop reports its own
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+@pytest.mark.timeout(30)
+@pytest.mark.parametrize('debug', [False, True])
+async def test_a_failed_connect_is_reported_only_in_debug_and_never_as_unretrieved(
+        listener, monkeypatch, debug):
+    import gc
+
+    async def refuse(*_args, **_kwargs):
+        await asyncio.sleep(0)
+        raise ConnectionResetError('peer went away')
+
+    loop = asyncio.get_running_loop()
+    monkeypatch.setattr(loop, 'connect_accepted_socket', refuse)
+    seen = []
+    loop.set_exception_handler(lambda _loop, context: seen.append(context['message']))
+    loop.set_debug(debug)
+    gate = _AcceptGate()
+    client = socket.create_connection(listener.getsockname())
+    conn, _ = listener.accept()
+    try:
+        gate.connect(conn, _Quiet, None)
+        await _settle(gate)
+        await asyncio.sleep(0)
+        gc.collect()
+        await asyncio.sleep(0)
+        assert gate._descriptors_held == 0
+        expected = (['Error on transport creation for incoming connection']
+                    if debug else [])
+        assert seen == expected
+    finally:
+        loop.set_debug(False)
+        loop.set_exception_handler(None)
+        client.close()

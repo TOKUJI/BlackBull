@@ -67,7 +67,8 @@ def _unlink_bound_socket_file(record) -> None:
         if os.stat(path).st_ino == inode:
             os.unlink(path)
     except OSError:
-        pass
+        # Best effort: a file that cannot be removed must not fail shutdown.
+        logger.debug('Socket file %s left in place', path, exc_info=True)
 
 
 def close_sockets(sockets) -> Exception | None:

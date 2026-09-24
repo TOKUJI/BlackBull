@@ -445,7 +445,6 @@ class _AcceptGate:
         """Hand one accepted socket to the loop, counted until it closes."""
         admission = self.admit()
         try:
-            conn.setblocking(False)
             protocol = factory()
             if hasattr(protocol, 'admission'):
                 protocol.admission = admission
@@ -453,32 +452,39 @@ class _AcceptGate:
             conn.close()
             admission.release()
             raise
-        loop = asyncio.get_running_loop()
-        task = loop.create_task(loop.connect_accepted_socket(
-            lambda: protocol, conn, ssl=ssl_context,
-            ssl_handshake_timeout=(_SSL_HANDSHAKE_TIMEOUT
-                                   if ssl_context is not None else None)))
-        self._connecting.add(task)
-        task.add_done_callback(
-            lambda done: self._connected(done, conn, admission))
+        loop = self._loop or asyncio.get_running_loop()
+        coro = self._connected(loop, conn, protocol, ssl_context, admission)
+        if _EAGER_TASKS:
+            task = asyncio.Task(coro, loop=loop, eager_start=True)
+        else:
+            task = loop.create_task(coro)
+        if not task.done():
+            self._connecting.add(task)
 
-    def _connected(self, task: asyncio.Task, conn, admission: _Admission) -> None:
-        self._connecting.discard(task)
-        if not task.cancelled():
-            exc = task.exception()
-            if exc is None:
-                return
-            loop = task.get_loop()
+    async def _connected(self, loop, conn, protocol, ssl_context,
+                         admission: _Admission) -> None:
+        try:
+            await loop.connect_accepted_socket(
+                lambda: protocol, conn, ssl=ssl_context,
+                ssl_handshake_timeout=(_SSL_HANDSHAKE_TIMEOUT
+                                       if ssl_context is not None else None))
+        except BaseException as exc:
+            # A transport closes the socket it was given; this one never got one.
+            if conn.fileno() != -1:
+                conn.close()
+            admission.release()
+            if not isinstance(exc, Exception):
+                raise
+            # Swallowed, as the loop's own accept does: a raise here would
+            # surface as "Task exception was never retrieved".
             if loop.get_debug():
                 loop.call_exception_handler({
                     'message': 'Error on transport creation for incoming '
                                'connection',
                     'exception': exc,
                 })
-        # A transport closes the socket it was given; this one never got one.
-        if conn.fileno() != -1:
-            conn.close()
-        admission.release()
+        finally:
+            self._connecting.discard(asyncio.current_task())
 
     def _hold(self) -> None:
         self._descriptors_held += 1
