@@ -598,9 +598,7 @@ class TestPathPercentDecodingH2:
         assert self._scope('/a%41b?x=1')['raw_path'] == b'/a%41b'
 
     def test_semicolon_params_preserved(self):
-        # Urlsplit (not urlparse) keeps ';params' in the path,
-        # so both path and raw_path carry the sub-delimiter (the latent H2
-        # raw_path-stripping bug is fixed).
+        # Semicolons are path data, not a separate params component.
         scope = self._scope('/cart;sid=abc?x=1')
         assert scope['path'] == '/cart;sid=abc'
         assert scope['raw_path'] == b'/cart;sid=abc'

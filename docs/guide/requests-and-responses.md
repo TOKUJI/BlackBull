@@ -68,17 +68,19 @@ unaffected.
     freshly-derived dict) — the scope is no longer the primary
     representation, so it is generated on demand rather than held.
 
-!!! note "`path` is percent-decoded (since v0.53.0)"
+!!! note "`path` is percent-decoded once"
     `conn.path` (and the underlying `scope['path']`) is the
-    **percent-decoded** request target with the query string removed —
+    **percent-decoded** path component with the query string removed —
     `/files/a%2Fb` arrives as `/files/a/b`, matching the ASGI spec and
     uvicorn.  The **un**decoded bytes are available as
     `conn.raw_path` (`bytes`, query excluded) for the rare consumer
     — reverse proxies, WAFs, cache-key / signature verification — that
     must reproduce the exact received byte sequence.  RFC 3986 `;`
     parameters are preserved in both (`/cart;sid=abc` stays intact).
-    Before v0.53.0 `path` was not decoded; code that re-decoded it
-    itself should drop that step.
+    Leading slashes are preserved: `//group/review` is a path, not an
+    authority. An HTTP/1 absolute target with an empty path, such as
+    `http://example.com?q=ok`, supplies `/` and query `b'q=ok'`.
+    Do not decode `conn.path` again: `/a%252Fb` arrives as `/a%2Fb`.
 
 The sections below cover the same reads on the raw ASGI surface —
 useful inside middleware (which always uses the full form) and for

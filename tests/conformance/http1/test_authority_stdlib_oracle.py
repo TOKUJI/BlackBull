@@ -99,6 +99,18 @@ def _authorities():
 
 
 class TestTheAuthorityGrammarMatchesTheStdlibUrlParser:
+    @pytest.mark.parametrize('suffix', [b'#frag', b'?q=ok', b'/x'])
+    def test_uri_delimiters_end_authority_but_are_invalid_in_host(self, suffix):
+        candidate = b'[::1]' + suffix
+        conn = _ACTOR._parse(
+            b'GET http://' + candidate + b' HTTP/1.1\r\n'
+            b'Host: conflicting.invalid\r\n\r\n')
+        assert conn.headers.get(b'host') == b'[::1]'
+        assert conn.server == ('::1', 80)
+        assert conn.path == ('/x' if suffix == b'/x' else '/')
+        assert conn.query_string == (b'q=ok' if suffix == b'?q=ok' else b'')
+        assert not _accepts_as_host(candidate)
+
     @pytest.mark.parametrize('authority', list(_authorities()), ids=repr)
     def test_every_bracketed_candidate(self, authority):
         assert _accepts(authority) is _expected(authority)
@@ -112,7 +124,7 @@ class TestTheAuthorityGrammarMatchesTheStdlibUrlParser:
         assumed, so the exclusion cannot outlive the difference it names."""
         assert _we_are_stricter(authority)
         if _stdlib_accepts(authority):
-            assert _accepts(authority) is False
+            assert _accepts_as_host(authority) is False
 
     @pytest.mark.parametrize('authority', [
         b'[::1]', b'[::1]:8100', b'[fe80::1%25eth0]', b'[::ffff:1.2.3.4]',
@@ -126,7 +138,9 @@ class TestTheAuthorityGrammarMatchesTheStdlibUrlParser:
         alphabet=''.join(chr(b) for b in range(0x20, 0x7F)), max_size=14,
     ).map(lambda text: b'[' + text.encode('ascii') + b']'))
     def test_generated_authorities(self, authority):
-        assert _accepts(authority) is _expected(authority)
+        # A Host field tests the complete candidate; URI delimiters in an
+        # absolute target would end its authority before validation.
+        assert _accepts_as_host(authority) is _expected(authority)
 
     @settings(max_examples=300, deadline=None)
     @given(authority=st.text(
