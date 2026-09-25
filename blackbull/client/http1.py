@@ -129,13 +129,30 @@ def _te_quoted_string(value: bytes, pos: int) -> int:
     raise ProtocolError('unterminated quoted Transfer-Encoding parameter')
 
 
+def _declared_content_length(headers: Headers) -> int | None:
+    """The message's declared body length, or ``None`` when it declares none.
+
+    A message may repeat the field or comma-combine it, and RFC 9110 §8.6
+    permits that **only** when every value agrees.  Trusting the first is a
+    desync: believe 5 where the sender meant 10 and the surplus five octets
+    become the next keep-alive message's status line.
+
+    [`parse_content_length`][blackbull.protocol.framing.parse_content_length]
+    reports ``ValueError``, which cannot cross into ``blackbull.client`` from
+    ``blackbull.protocol``, so a refusal is raised here in the client's
+    vocabulary.
+    """
+    try:
+        return parse_content_length(headers.getlist(b'content-length'))
+    except ValueError as exc:
+        raise ProtocolError(str(exc)) from exc
+
+
 # Methods for which an empty body still warrants an explicit
-# ``Content-Length: 0`` on the wire.  RFC 9110 §8.6 makes the header optional
-# in this case, but always emitting it removes ambiguity for upstreams
-# (notably reverse proxies that treat absent CL on POST as "read body until
-# close").  Every other method — GET / HEAD / OPTIONS / TRACE / CONNECT, and
-# any method this list does not know — skips the header entirely when no body
-# is present, matching nginx / uvicorn / curl conventions.
+# ``Content-Length: 0`` on the wire.  RFC 9110 §8.6 makes the header optional,
+# but emitting it removes an ambiguity upstreams otherwise face, and matches
+# nginx / uvicorn / curl.  Every other method skips the header when there is
+# no body.
 _BODY_ALLOWED_METHODS = frozenset({b'POST', b'PUT', b'PATCH', b'DELETE'})
 
 
@@ -166,27 +183,20 @@ class HTTP1RequestSender:
         unencodable request target therefore cannot retire an untouched
         keep-alive connection.
 
-        Framing belongs to the sender.  A caller's ``Content-Length`` is a
-        statement about the body this call is about to write, so it is checked
-        against it and then written once, canonically.  A caller's
-        ``Transfer-Encoding`` describes bytes on the transport rather than the
-        payload, so it is dropped and no coding this client cannot produce is
-        ever advertised.  The whole framing field pair is decided here, which
-        is why neither can be left contradicting the other.
-
+        Framing belongs to the sender, so the whole field pair is decided
+        here: a caller's ``Content-Length`` is checked against the body and
+        then written once, canonically, and a caller's ``Transfer-Encoding``
+        is dropped — it describes bytes on the transport rather than the
+        payload, and no coding this client cannot produce is ever advertised.
         A body whose length is known goes out as that many raw octets, a
-        stream included: the declared total is checked as it goes, so the wire
-        never carries more or fewer than the head announced.  A body whose
-        length is not knowable up front is chunk-framed instead.
+        stream included, with the total checked as it goes; one whose length
+        is not knowable up front is chunk-framed instead.
         """
         if b'host' not in headers:
             raise ProtocolError('HTTP/1.1 request requires a Host header')
 
         method_text = str(method)
-        try:
-            declared = parse_content_length(headers.getlist(b'content-length'))
-        except ValueError as exc:
-            raise ProtocolError(str(exc)) from exc
+        declared = _declared_content_length(headers)
         pairs = [(name, value) for name, value in headers
                  if name.lower() not in (b'content-length', b'transfer-encoding')]
 
@@ -515,35 +525,6 @@ class HTTP1ResponseRecipient:
             return b'keep-alive' in options
         return True
 
-    @staticmethod
-    def _declared_length(headers: Headers) -> int | None:
-        """The response's ``Content-Length``, or ``None`` when it has none.
-
-        A response may repeat the field or comma-combine it, and RFC 9110
-        §8.6 permits that **only** when every value agrees.  Trusting the
-        first one is a desync: believe 5 where the peer meant 10 and the
-        surplus five octets become the next keep-alive response's status
-        line.  The server refuses exactly this on the request side
-        (``_validate_message_framing``); this is the same rule facing the
-        other way, including the leading-zero normalisation that makes
-        "005" and "5" agree.
-        """
-        raw = headers.getlist(b'content-length')
-        if not raw:
-            return None
-        values: set[bytes] = set()
-        for _, value in raw:
-            for v in value.split(b','):
-                v = v.strip()
-                if not v or not v.isdigit():
-                    raise ProtocolError(f'invalid Content-Length value {v!r}')
-                values.add(v.lstrip(b'0') or b'0')
-        if len(values) > 1:
-            raise ProtocolError(
-                f'conflicting Content-Length values in response: '
-                f'{sorted(values)!r}')
-        return int(values.pop())
-
     async def _body_read(self, coro, *, payload: bool = False,
                          allow_eof: bool = False):
         """One body read, under both of the body's time bounds.
@@ -754,7 +735,7 @@ class HTTP1ResponseRecipient:
             # over Content-Length.
             return _CLOSE_DELIMITED, None, False, False
 
-        declared = cls._declared_length(headers)
+        declared = _declared_content_length(headers)
         if declared is not None:
             return _DECLARED, declared, True, False
         return _CLOSE_DELIMITED, None, False, False
@@ -991,7 +972,8 @@ class HTTP1ResponseRecipient:
         Reading one line assumed the section was empty.  With real trailers
         the rest stayed buffered, so the next keep-alive response began
         parsing at a trailer field line and took it for a status line — the
-        response-side twin of the desync ``_declared_length`` guards against.
+        response-side twin of the desync ``_declared_content_length``
+        guards against.
 
         Discarded, not surfaced: nothing on ``ClientResponse`` carries them,
         and inventing a field for them here would be a second decision hiding
@@ -1143,7 +1125,8 @@ class HTTP1Client:
         # an unbounded wait per TestOneInput.  None opts out, leaving the
         # caller to impose their own deadline.
         self._connect_timeout = connect_timeout
-        #: Set once a response read stopped part-way.  See [`_abandon`][].
+        #: Set once the connection's byte stream is out of step.  See
+        #: [`_abandon`][].
         self._framing_broken = False
         #: A successful close-delimited response and a successful CONNECT
         #: switch protocols at EOF / the HTTP tunnel boundary.  They are not
@@ -1223,11 +1206,13 @@ class HTTP1Client:
     def _abandon(self) -> None:
         """Stop using this connection: its place in the byte stream is lost.
 
-        A read that stopped part-way leaves the rest of the message on the
-        wire, so the next response read would begin inside it — and a peer
-        whose body is itself a well-formed response gets one delivered for a
-        request the server answered differently.  The server answers the same
-        situation by closing rather than by keep-aliving a desynced stream.
+        A message that stopped part-way leaves the rest of it on the wire — a
+        response read that broke off, or a request body that ran over or under
+        its declared length — so the next response read would begin inside it,
+        and a peer whose body is itself a well-formed response gets one
+        delivered for a request the server answered differently.  The server
+        answers the same situation by closing rather than by keep-aliving a
+        desynced stream.
 
         Deliberately not applied to [`read_response`][], the fault-injection
         primitive: driving a misbehaving peer and then looking at what else it

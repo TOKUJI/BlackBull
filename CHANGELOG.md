@@ -16,7 +16,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   went out as two competing message boundaries.  A stream body with a
   `Content-Length` is now written raw against that total and checked as it
   goes, so an upload of known size need not be buffered.  These refusals raise
-  `ProtocolError` where they raised `ValueError`.
+  `ProtocolError` where they raised `ValueError`.  The same rule now backs the
+  server's response framing, so its `ValueError` for a bad or conflicting
+  `Content-Length` reads `invalid Content-Length value` / `conflicting
+  Content-Length values`.
 - **A failing `@app.on_shutdown` hook now exits `1`** instead of `0` in a
   single-worker process (`app.run()`, the `blackbull` CLI).  `TestClient` and
   `NativeClient` raise it from the `with` block unless the block is already

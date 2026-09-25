@@ -22,6 +22,8 @@ client to the same contract.
 """
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from blackbull.client.exceptions import ConnectionError, ProtocolError
@@ -181,6 +183,22 @@ class TestOneFraming:
             assert framing(w) == [(b'content-length', b'5')]
         assert list(headers) == before
 
+    @pytest.mark.parametrize('name', [b'content-length', b'Content-Length',
+                                      b'CONTENT-LENGTH'])
+    @pytest.mark.asyncio
+    async def test_a_framing_field_is_found_whatever_its_casing(self, name):
+        """RFC 9110 §5.1: the name is case-insensitive, so a caller's casing
+        neither hides the field from the check nor survives into the output."""
+        w = await _send(headers=[(name, b'5')], body=b'hello')
+        assert framing(w) == [(b'content-length', b'5')]
+
+    @pytest.mark.parametrize('name', [b'transfer-encoding',
+                                      b'Transfer-Encoding'])
+    @pytest.mark.asyncio
+    async def test_a_transfer_encoding_is_dropped_whatever_its_casing(self, name):
+        w = await _send(headers=[(name, b'chunked')], body=b'hello')
+        assert framing(w) == [(b'content-length', b'5')]
+
 
 # ---------------------------------------------------------------------------
 # Content-Length is one value, written once, in 1*DIGIT
@@ -219,6 +237,14 @@ class TestContentLengthValue:
     ])
     @pytest.mark.asyncio
     async def test_a_value_that_is_not_one_digit_run_is_refused(self, value):
+        with pytest.raises(ProtocolError):
+            await _send(headers=[(b'content-length', value)], body=b'hello')
+
+    @pytest.mark.parametrize('value', [b'5,', b',5', b'5,,5', b','])
+    @pytest.mark.asyncio
+    async def test_an_empty_comma_member_is_refused(self, value):
+        """A list member is ``1*DIGIT`` after its OWS; an empty one leaves
+        the number of lengths undeclared, which is the CL.CL shape."""
         with pytest.raises(ProtocolError):
             await _send(headers=[(b'content-length', value)], body=b'hello')
 
@@ -263,6 +289,24 @@ class TestMethodBodyPolicy:
             (b'connection', b'upgrade'), (b'upgrade', b'websocket')])
         assert framing(w) == []
 
+    @pytest.mark.parametrize('method,expected', [
+        ('POST', [(b'content-length', b'0')]),
+        ('GET', []),
+    ])
+    @pytest.mark.asyncio
+    async def test_a_transfer_encoding_alone_declares_no_body(self, method,
+                                                              expected):
+        """``Transfer-Encoding`` describes bytes on the transport, and with no
+        body there are none — so it goes and the method's own empty-body
+        policy decides what is left."""
+        assert framing(await _send(method=method, headers=[
+            (b'transfer-encoding', b'chunked')])) == expected
+
+    @pytest.mark.asyncio
+    async def test_an_explicit_zero_length_on_a_body_allowed_method_is_kept(self):
+        w = await _send(method='POST', headers=[(b'content-length', b'0')])
+        assert framing(w) == [(b'content-length', b'0')]
+
 
 # ---------------------------------------------------------------------------
 # A declared-length stream is checked against its declared total
@@ -293,6 +337,18 @@ class TestDeclaredLengthStream:
     async def test_a_stream_that_hits_the_boundary_exactly_is_accepted(self):
         w = await _send(headers=[(b'content-length', b'3')],
                         body=_chunks(b'ab', b'c'))
+        assert w.body == b'abc'
+
+    @pytest.mark.asyncio
+    async def test_an_empty_declared_stream_sends_no_octets(self):
+        w = await _send(headers=[(b'content-length', b'0')], body=_chunks())
+        assert framing(w) == [(b'content-length', b'0')]
+        assert w.body == b''
+
+    @pytest.mark.asyncio
+    async def test_empty_chunks_do_not_contribute_to_the_total(self):
+        w = await _send(headers=[(b'content-length', b'3')],
+                        body=_chunks(b'', b'ab', b'', b'c', b''))
         assert w.body == b'abc'
 
 
@@ -366,8 +422,38 @@ class TestConnectionFate:
             await _call(client, api, headers=[(b'content-length', b'3')],
                         body=_chunks(b'ab'))
 
+        assert bytes(client._writer.data).endswith(b'\r\n\r\nab')  # type: ignore[union-attr]
         assert client._reusable is False
         assert raw.close_calls == 1
+        with pytest.raises(ConnectionError):
+            await client.request('GET', '/next')
+
+    @pytest.mark.asyncio
+    async def test_cancelling_mid_stream_retires_the_connection(self):
+        """Cancellation is nobody's framing error, but two octets of a
+        three-octet body are already out."""
+        client = _client(_Reader(_OK))
+        raw = _RawWriter()
+        client._raw_writer = raw  # type: ignore[assignment]
+        started = asyncio.Event()
+
+        async def slow():
+            yield b'ab'
+            started.set()
+            await asyncio.sleep(3600)
+            yield b'c'
+
+        task = asyncio.ensure_future(client.request(
+            'POST', '/', headers=[(b'content-length', b'3')], body=slow()))
+        await started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert client._reusable is False
+        assert raw.close_calls == 1
+        with pytest.raises(ConnectionError):
+            await client.request('GET', '/next')
 
     @pytest.mark.asyncio
     async def test_a_body_source_that_fails_midway_retires_the_connection(self):
