@@ -360,7 +360,8 @@ _TARGET_ALLOWED_OCTETS = bytes(range(0x21, 0x7F))
 
 
 # RFC 3986 §3.2.2 — IP-literal = "[" IPv6address "]"; the port that may follow
-# it keeps the authority's lax octet rule (the reg-name path's port is BLA-440).
+# it keeps the authority's lax octet rule (the reg-name path's port is read in
+# ``_parse_host_header``).
 # ``IPvFuture`` is not accepted even though §3.2.2 lists it beside
 # ``IPv6address``: nothing emits it, and the one stdlib reading of it is a
 # case-sensitive ``v`` special case with a laxer tail than the production.
@@ -409,7 +410,9 @@ def _parse_host_header(value: bytes, default_port: int) -> tuple[str, int]:
 
     Handles the RFC 3986 §3.2.2 IPv6 bracket form ``[::1]:8100``, where a naive
     ``value.split(b':')`` yields ``int(b'')`` → ``ValueError``.  A missing or
-    non-numeric port falls back to *default_port*.
+    non-numeric port falls back to *default_port*; the reg-name path cuts the
+    host at the first ``:`` (§3.2.2 — a reg-name carries none), so no port text
+    survives in the host.
     """
     # ``_validate_host`` rejects non-ASCII on the request path; ``replace``
     # keeps this total for every other caller.
@@ -426,10 +429,10 @@ def _parse_host_header(value: bytes, default_port: int) -> tuple[str, int]:
             return _dec(host), default_port
         # Unterminated bracket — treat the whole value as the host.
         return _dec(value), default_port
-    host, sep, port_s = value.rpartition(b':')
+    host, sep, port_s = value.partition(b':')
     if sep and port_s.isdigit():
         return _dec(host), int(port_s)
-    return _dec(value), default_port
+    return _dec(host), default_port
 
 
 def _validate_host(headers: 'Headers') -> None:

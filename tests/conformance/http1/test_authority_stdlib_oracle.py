@@ -184,8 +184,60 @@ class TestThePortMatchesTheStdlibUrlParser:
             urlsplit('http://example.com:99999/x').port
 
     def test_a_non_numeric_port_falls_back_to_the_default(self):
-        # The host keeps the unparsed text here; that shape is older than this
-        # grammar and is not what the IP-literal rule is about.
+        # The host side of this shape is pinned in the class below.
         assert _parse_host_header(b'example.com:abc', 80)[1] == 80
         with pytest.raises(ValueError):
             urlsplit('http://example.com:abc/x').port
+
+
+class TestTheHostMatchesTheStdlibUrlParser:
+    """RFC 3986 §3.2.2 — a reg-name contains no ``:``, so the first colon is
+    the port delimiter and the host is what precedes it.  A non-numeric port
+    falls back to the default, but its text must not survive in the host."""
+
+    @pytest.mark.parametrize('value', [
+        b'example.com:abc', b'example.com:', b'a:b:c',
+    ])
+    def test_port_text_never_survives_in_the_host(self, value):
+        host, port = _parse_host_header(value, 80)
+        assert ':' not in host
+        assert host == urlsplit('http://' + value.decode('ascii') + '/x').hostname
+        assert port == 80
+
+    @pytest.mark.parametrize('value,host', [
+        (b'a:b:80', 'a'),
+        (b'example.com:80:90', 'example.com'),
+        (b'a:b:c:d', 'a'),
+        (b':', ''),          # nothing precedes the delimiter
+        (b'::1', ''),        # the tail after the first colon is not digits
+    ])
+    def test_the_first_colon_delimits_the_port(self, value, host):
+        # Oracle hostname where it defines one (`:` / `::1` have none and are
+        # pinned as ''); every port here is missing or invalid, so the
+        # fallback is default_port.
+        assert _parse_host_header(value, 80) == (host, 80)
+
+    @pytest.mark.parametrize('value,host,port', [
+        (b':80', '', 80),
+        (b'abc:80', 'abc', 80),
+        (b'example.com:007', 'example.com', 7),
+        (b'example.com:080', 'example.com', 80),
+        (b'example.com:99999', 'example.com', 99999),
+        (b'example.com', 'example.com', 80),
+        (b'[::1]:abc', '::1', 80),
+        (b'[::1]', '::1', 80),
+        (b'[::1]:', '::1', 80),
+        (b'[::1]:8100', '::1', 8100),
+        (b'[2001:db8::1]', '2001:db8::1', 80),
+    ])
+    def test_the_other_shapes_are_unchanged(self, value, host, port):
+        assert _parse_host_header(value, 80) == (host, port)
+
+    @pytest.mark.parametrize('value,server', [
+        (b'example.com:abc', ('example.com', 80)),
+        (b'[::1]:8100', ('::1', 8100)),   # control: already right on base
+    ])
+    def test_conn_server_carries_the_parsed_host(self, value, server):
+        conn = _ACTOR._parse(
+            b'GET /x HTTP/1.1\r\nHost: ' + value + b'\r\n\r\n')
+        assert conn.server == server
