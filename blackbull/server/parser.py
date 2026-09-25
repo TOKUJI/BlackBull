@@ -96,7 +96,8 @@ def _request_headers_with_host(frame, *, require_present: bool) -> list | None:
     ``http``/``https`` request without ``:authority`` must carry a valid
     ``Host`` field (*require_present*).  The grammar is H1's
     ``_authority_is_valid`` (RFC 3986 §3.2 delimiters, controls and ASCII
-    rule, and §3.2.2's IP-literal); a present ``:authority`` replaces any
+    rule, the §3.2.2 IP-literal, and the ``host [":" port]`` shape), so
+    H/2 refuses what H/1 refuses; a present ``:authority`` replaces any
     literal
     ``Host`` handed to the application, mirroring H1's absolute-form override
     (RFC 9112 §3.2.2) so handlers see one ``host`` under either transport.
