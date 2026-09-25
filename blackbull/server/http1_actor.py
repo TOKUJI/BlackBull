@@ -50,7 +50,7 @@ _MAX_KEEPALIVE_DRAIN = 64 * 1024
 _H1_PATHSEND_EXTENSIONS = {'http.response.pathsend': {}}
 
 # RFC 9112 §4 — HTTP-version = "HTTP/" DIGIT "." DIGIT
-_HTTP_VERSION_RE = re.compile(rb'^HTTP/\d\.\d$')
+_HTTP_VERSION_RE = re.compile(rb'\AHTTP/\d\.\d\Z')
 
 # The RFC 9110 field grammar — the name alphabet and the allowed value
 # octets — is defined once in ``blackbull.protocol.field_grammar``, so HTTP/2
