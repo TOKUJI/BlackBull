@@ -8,13 +8,9 @@ Quart / ASGI 3.0 generally, with one BlackBull convenience
 
 ## Trusted proxy identity
 
-`TrustedProxy` recovers client identity only through configured trusted proxies.
-It walks `Forwarded` (preferred) or `X-Forwarded-For` from right to left and stops
-at the nearest untrusted IP. Configure it before middleware that uses client
-identity or scheme. Proxies must append their observed peer or overwrite the
-chain, overwrite/remove standalone proto and prefix headers, and strip incoming
-`Forwarded` when using XFF. See [reverse-proxy deployment](../deployment/behind-reverse-proxy.md#trusted-proxy-headers)
-for malformed-chain behavior, supported address forms, and safe configurations.
+When using `TrustedProxy`, register it before middleware that reads client IP,
+scheme, or mount prefix. See [reverse-proxy setup](../deployment/behind-reverse-proxy.md#trusted-proxy-headers)
+for the required proxy and trust settings.
 
 ## Writing a middleware
 

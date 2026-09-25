@@ -18,9 +18,23 @@ import re
 
 from ..connection import CONNECTION_STASH_KEY, Connection
 from ..headers import Headers
-from ..protocol.field_grammar import FIELD_VALUE_ALLOWED_SET, TCHAR_SET
+from ..protocol.field_grammar import (
+    FIELD_VALUE_ALLOWED_OCTETS, TCHAR_OCTETS, URI_SCHEME_RE,
+)
 
 _MISS = object()
+_TOKEN = b'[' + re.escape(TCHAR_OCTETS) + b']+'
+_FIELD_CHAR = b'[' + re.escape(FIELD_VALUE_ALLOWED_OCTETS) + b']'
+_QUOTED_CHAR = b'[' + re.escape(FIELD_VALUE_ALLOWED_OCTETS.translate(None, b'"\\')) + b']'
+_FORWARDED_PAIR = re.compile(
+    b'(?P<name>' + _TOKEN + b')=(?:'
+    b'"(?P<quoted>(?:' + _QUOTED_CHAR + rb'|\\' + _FIELD_CHAR + b')*)"'
+    b'|(?P<token>' + _TOKEN + b'))[ \t]*')
+_OWS = re.compile(rb'[ \t]*')
+_QUOTED_PAIR = re.compile(rb'\\(.)', re.DOTALL)
+_OBFUSCATED_PORT = re.compile(r'_[A-Za-z0-9._-]+')
+# C0 controls/SP, DEL, and URI query/fragment/backslash delimiters.
+_INVALID_PREFIX = re.compile(rb'[\x00-\x20\x7f?#\\]')
 
 
 def _parse_forwarded(value: bytes) -> list[dict[bytes, bytes]] | None:
@@ -30,59 +44,37 @@ def _parse_forwarded(value: bytes) -> list[dict[bytes, bytes]] | None:
     has_element = False
     pos = 0
     while pos < len(value):
-        if value[pos] in (32, 9):
-            pos += 1
-            continue
-        if value[pos] == 44:
+        if value[pos] in (32, 9):  # SP or HTAB (OWS)
+            pos = _OWS.match(value, pos).end()
+            if pos == len(value):
+                break
+        octet = value[pos]
+        if octet == 44:  # ',' separates forwarded elements.
             if has_element:
                 elements.append(element)
             element = {}
             has_element = False
             pos += 1
             continue
-        if value[pos] == 59:
-            has_element = True
+        has_element = True
+        if octet == 59:  # ';' permits an empty parameter, but preserves the hop.
             pos += 1
             continue
-        has_element = True
-        start = pos
-        while pos < len(value) and value[pos] in TCHAR_SET:
-            pos += 1
-        name = value[start:pos].lower()
-        if not name or name in element or pos == len(value) or value[pos] != 61:
+        match = _FORWARDED_PAIR.match(value, pos)
+        if match is None:
             return None
-        pos += 1
-        if pos < len(value) and value[pos] == 34:
-            pos += 1
-            out = bytearray()
-            while True:
-                if pos == len(value):
-                    return None
-                octet = value[pos]
-                pos += 1
-                if octet == 34:
-                    break
-                if octet == 92:
-                    if pos == len(value):
-                        return None
-                    octet = value[pos]
-                    pos += 1
-                if octet not in FIELD_VALUE_ALLOWED_SET:
-                    return None
-                out.append(octet)
-            parsed = bytes(out)
+        pos = match.end()
+        if pos < len(value) and value[pos] not in (44, 59):  # ',' or ';'
+            return None
+        name, quoted, token = match.groups()
+        name = name.lower()
+        if name in element:
+            return None
+        if quoted is not None:
+            parsed = _QUOTED_PAIR.sub(rb'\1', quoted) if b'\\' in quoted else quoted
         else:
-            start = pos
-            while pos < len(value) and value[pos] in TCHAR_SET:
-                pos += 1
-            if pos == start:
-                return None
-            parsed = value[start:pos]
+            parsed = token
         element[name] = parsed
-        while pos < len(value) and value[pos] in (32, 9):
-            pos += 1
-        if pos < len(value) and value[pos] not in (44, 59):
-            return None
     if has_element:
         elements.append(element)
     return elements
@@ -99,28 +91,30 @@ def _node_ip(value: bytes, *, forwarded: bool = False) -> str | None:
                 host, separator, tail = text[1:].partition(']')
                 if not separator or (tail and not tail.startswith(':')):
                     return None
-                if ipaddress.ip_address(host).version != 6:
+                addr = ipaddress.ip_address(host)
+                if addr.version != 6:
                     return None
                 port = tail[1:] if tail else None
             else:
                 host, separator, tail = text.partition(':')
-                if ipaddress.ip_address(host).version != 4:
+                addr = ipaddress.ip_address(host)
+                if addr.version != 4:
                     return None
                 port = tail if separator else None
             if port is not None and not (
-                re.fullmatch(r'_[A-Za-z0-9._-]+', port)
+                _OBFUSCATED_PORT.fullmatch(port)
                 or (port.isascii() and port.isdecimal() and len(port) <= 5
                     and int(port) <= 65535)
             ):
                 return None
-            text = host
+            return str(addr)
         return str(ipaddress.ip_address(text))
     except (ValueError, UnicodeError):
         return None
 
 
 def _scheme(value: bytes | None) -> str | None:
-    if value and re.fullmatch(rb'[A-Za-z][A-Za-z0-9+.-]*', value):
+    if value and URI_SCHEME_RE.fullmatch(value):
         return value.decode('ascii').lower()
     return None
 
@@ -134,11 +128,11 @@ def _singleton(headers: Headers, name: bytes) -> bytes:
 
 def _prefix(value: bytes) -> str | None:
     if (not value.startswith(b'/') or value.startswith(b'//')
-            or any(c < 33 or c == 127 or c in b'?#\\' for c in value)):
+            or _INVALID_PREFIX.search(value)):
         return None
     try:
         prefix = value.decode('utf-8')
-        if not prefix.isprintable() or any(c.isspace() for c in prefix):
+        if not prefix.isprintable():
             return None
         return prefix.rstrip('/')
     except UnicodeError:
@@ -185,7 +179,10 @@ class TrustedProxy:
             addr = ipaddress.ip_address(ip)
         except ValueError:
             return False
-        return any(addr in net for net in self._networks)
+        for net in self._networks:
+            if addr in net:
+                return True
+        return False
 
     async def __call__(self, conn, receive, send, call_next) -> None:
         # HTTP and WebSocket both arrive as a native [`Connection`][]; the

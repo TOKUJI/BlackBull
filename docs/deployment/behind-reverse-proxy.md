@@ -1,43 +1,7 @@
 # Behind a reverse proxy
 
-For most production deployments, running BlackBull behind a reverse proxy is
-the simplest topology — the proxy handles TLS termination, static files, and
-load balancing across multiple processes.
-
-This page covers three proxies (nginx, HAProxy, Envoy), the choice between
-them, and the `TrustedProxy` middleware on the BlackBull side that recovers
-client IP and scheme from the proxy's forwarded headers.
-
-## Choosing a proxy
-
-The question that separates them is whether the proxy can speak **HTTP/2 to
-the backend**. BlackBull speaks HTTP/2 natively, so a proxy that downgrades to
-HTTP/1.1 on the back leg throws that away — you get HTTP/2 between client and
-proxy only.
-
-| Proxy | HTTP/2 to backend | Reach for it when |
-|---|---|---|
-| **nginx** | ⚠️ since 1.29.4 (2025-12) — new, [three CVEs so far][nginx-sec] | You already run nginx, and an HTTP/1.1 back leg is fine |
-| **HAProxy** | ✅ stable since 1.9 (2019) | You want the HTTP/2 back leg, high throughput, and a config you can read |
-| **Envoy** | ✅ stable since 2016 | Kubernetes or a service mesh; heavy gRPC; dynamic configuration |
-
-[nginx-sec]: https://nginx.org/en/security_advisories.html
-
-An HTTP/1.1 back leg is a perfectly good default. It is what the nginx section
-below configures, it is what most deployments run, and it costs nothing for
-ordinary request/response traffic. The HTTP/2 back leg earns its keep when the
-proxy would otherwise open many upstream connections — high-concurrency APIs,
-gRPC, or long-lived streams — because multiplexing collapses them onto one.
-
-!!! note "nginx's `proxy_http_version 2` is young"
-    nginx only gained HTTP/2 proxying to the backend in 1.29.4, and the
-    feature has already carried security advisories. HAProxy and Envoy have
-    shipped it for years. If you want the HTTP/2 back leg today, prefer one of
-    those; revisit nginx once the feature has more road behind it.
-
-Not covered: **Caddy** (capable, but little enterprise deployment — ask if you
-need it), **Traefik** (no HTTP/2 backend support), and **Apache httpd** (its
-HTTP/2 proxying has been experimental for a decade).
+Configure BlackBull's trusted proxies and use the examples below to connect
+nginx, HAProxy, or Envoy to its HTTP/1.1 or HTTP/2 listener.
 
 ## Common setup — the BlackBull side
 
@@ -62,46 +26,16 @@ from blackbull import TrustedProxy
 app.use(TrustedProxy(['127.0.0.1', '::1', '10.0.0.0/8']))
 ```
 
-| | Without middleware | With middleware |
-|---|---|---|
-| `conn.client` | the proxy's IP | nearest untrusted IP (from `X-Forwarded-For`) |
-| `conn.scheme` | `'http'` | `'https'` (from `X-Forwarded-Proto`) |
+Set `trusted_proxies` to the proxies' actual source addresses; other peers'
+forwarding headers are ignored. Each trusted proxy must append its observed peer
+or overwrite the address chain.
+`conn.client` identifies the nearest untrusted hop, which may itself be a proxy.
 
-Supported headers, in precedence order:
-
-1. RFC 7239 `Forwarded` — `for=<ip>; proto=<scheme>`
-2. `X-Forwarded-For` — comma-separated IP chain
-3. `X-Forwarded-Proto`
-
-Headers are **only applied when the direct TCP peer is trusted**. Starting
-there, BlackBull walks the chain right to left, stopping at the first untrusted
-IP. That address is not necessarily the original end user. Entries to its left
-cannot supply the client or `Forwarded` scheme. If every listed IP is trusted,
-the leftmost verified IP wins. Repeated fields retain wire order.
-
-Trust only proxies that append their actual observed peer or overwrite the chain.
-An IP allowlist cannot authenticate headers a proxy blindly passes through.
-Proxies using `X-Forwarded-For` must **remove incoming `Forwarded`**, whose
-precedence would otherwise let a client bypass the verified XFF chain.
-
-`Forwarded` accepts IPv4 and quoted bracketed IPv6, optionally with numeric or
-obfuscated ports; recovered client ports are zero. XFF accepts bare IPv4/IPv6.
-A missing, unknown, obfuscated, or invalid node stops traversal at the last
-verified address (or the socket peer if none was verified). A malformed
-`Forwarded` field leaves client and scheme unchanged; it never enables XFF/XFP
-fallback. Empty comma list members are ignored in `Forwarded`; empty XFF members
-stop traversal. Only the selected valid `Forwarded` element supplies `proto`;
-a barrier, missing `proto`, or invalid scheme leaves the input scheme unchanged.
-Proto-only elements are barriers and do not rewrite the scheme.
-
-`X-Forwarded-Proto` and `X-Forwarded-Prefix` are independent assertions from the
-direct proxy: it must overwrite or remove client-supplied values. Each accepts
-only one value; repeated fields and comma lists are ignored. Prefixes must be
-UTF-8 absolute paths without controls, whitespace, backslashes, query or fragment;
-`//` prefixes are rejected, and trailing slashes are removed (`/` becomes empty).
-`Forwarded` suppresses XFP, but not the independent prefix assertion. The examples
-below strip unused prefix headers; if mounting under `/api`, overwrite the prefix
-with `/api` instead. Match the trusted set to the proxies' actual source addresses.
+BlackBull prefers `Forwarded` over `X-Forwarded-For` and `X-Forwarded-Proto`.
+The XFF-based examples below therefore remove incoming `Forwarded` and overwrite
+`X-Forwarded-Proto`. They also remove `X-Forwarded-Prefix`; if mounting under
+`/api`, overwrite it with `/api` instead. Proto and prefix must each be a single
+value, not a list accumulated across proxies.
 
 ## nginx
 
@@ -326,24 +260,6 @@ For gRPC, this is the configuration you want — Envoy will multiplex all RPCs
 onto one upstream connection. See [gRPC](../guide/grpc.md).
 
 ## Docker
-
-```dockerfile
-FROM python:3.13-slim
-WORKDIR /app
-COPY . .
-RUN pip install .
-EXPOSE 8000
-CMD ["python", "app.py", "--port", "8000"]
-```
-
-Environment variables for secrets (never hardcode):
-
-```python
-import os
-DB_URL = os.environ['DATABASE_URL']
-SECRET = os.environ['SECRET_KEY']
-PORT   = int(os.environ.get('PORT', 8000))
-```
 
 In Compose, the proxy reaches BlackBull by service name, so the trusted set
 must cover the Docker network rather than loopback:

@@ -1,4 +1,6 @@
-"""The HTTP field grammar HTTP/1.1 and HTTP/2 share — RFC 9110 §5.5, §5.6.2."""
+"""Shared HTTP field and URI scheme grammar."""
+import re
+
 #: RFC 9110 §5.6.2 tchar — a field name's octets.
 TCHAR_OCTETS = (b"!#$%&'*+-.^_`|~"
                 b'0123456789'
@@ -15,3 +17,6 @@ FIELD_VALUE_ALLOWED_OCTETS = bytes(
 
 #: The same, for per-octet membership.
 FIELD_VALUE_ALLOWED_SET: frozenset[int] = frozenset(FIELD_VALUE_ALLOWED_OCTETS)
+
+#: RFC 3986 §3.1 — URI scheme, also used in HTTP absolute-form targets.
+URI_SCHEME_RE = re.compile(rb'[A-Za-z][A-Za-z0-9+.-]*')
