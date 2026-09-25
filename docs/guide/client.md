@@ -96,6 +96,37 @@ The one exception is `handoff()`, which transfers a CONNECT or 101 transport to
 an `HTTP1UpgradeSession` and moves ownership of closing it with it — see
 [Testing](testing.md#connect-tunnels-and-protocol-upgrades).
 
+## How a request frames its body
+
+Framing is the client's to decide — the rule the
+[server applies to a response](requests-and-responses.md#responses) in the other
+direction. `Content-Length` is a statement about the body you passed to *this*
+call, so it is checked against it and then written once, canonically.
+`Transfer-Encoding` describes bytes on the transport rather than the payload, so
+it is dropped and no coding this client cannot produce is advertised.
+
+| `body=` | what goes out |
+|---|---|
+| `bytes`, non-empty | one `Content-Length: <len>`, raw octets |
+| `bytes`, empty, on `POST` / `PUT` / `PATCH` / `DELETE` | `Content-Length: 0` |
+| `bytes`, empty, on any other method | no framing field |
+| async iterable, with a `Content-Length` | that one field, raw octets, total checked |
+| async iterable, without | `Transfer-Encoding: chunked` |
+
+A `Content-Length` you supply is honoured only where it can be guaranteed. On a
+byte body that means it equals `len(body)`. On an async iterable it is kept and
+the stream is written raw — which is how an upload of known size goes out without
+being buffered. The running total is checked, so a stream that ends short or runs
+over raises `ProtocolError` and retires the connection: the request on the wire
+no longer matches its head.
+
+Two `Content-Length` fields that disagree, a value that is not `1*DIGIT`, or a
+length that contradicts the body are all refused **before a single octet is
+written**, so the connection goes on carrying the next request. None of this
+touches the raw-wire primitives in
+[Driving a misbehaving peer](#driving-a-misbehaving-peer) — `send_header_line`
+will put two `Content-Length` lines on the wire, because that is what it is for.
+
 ## What a call raises
 
 Everything the client itself refuses derives from `ClientError`:
@@ -110,7 +141,10 @@ ClientError
 ```
 
 Roughly: `ProtocolError` and `ResponseTooLarge` come out of reading a response
-on either protocol; `ConnectionError` out of any call once the peer has gone or
+on either protocol, and `ProtocolError` also out of building a request whose
+framing would be ambiguous — see
+[How a request frames its body](#how-a-request-frames-its-body);
+`ConnectionError` out of any call once the peer has gone or
 the context has exited; `StreamReset` only from HTTP/2, only from the
 `request()` whose stream was reset; `HandshakeError` only from
 `WebSocketClient.connect()` and `WebSocketH2Client`'s Extended CONNECT.
