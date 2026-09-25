@@ -178,11 +178,8 @@ def _check_transfer_encoding(headers: Headers) -> None:
             f'this client writes chunked framing only')
 
 
-# Methods for which an empty body still warrants an explicit
-# ``Content-Length: 0`` on the wire.  RFC 9110 §8.6 makes the header optional,
-# but emitting it removes an ambiguity upstreams otherwise face, and matches
-# nginx / uvicorn / curl.  Every other method skips the header when there is
-# no body.
+# Methods for which an empty body still goes out as ``Content-Length: 0``:
+# with no framing field at all an upstream may read a body up to close.
 _BODY_ALLOWED_METHODS = frozenset({b'POST', b'PUT', b'PATCH', b'DELETE'})
 
 
