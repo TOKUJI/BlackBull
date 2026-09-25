@@ -270,7 +270,7 @@ class TestSpecialRequestForms:
         the fresh-URL cost is the one that matters.
         """
         from urllib.parse import urlsplit
-        from blackbull.server.http1_actor import _SCHEME_RE
+        from blackbull.protocol.field_grammar import URI_SCHEME_RE
 
         candidates = [
             bytes([first]) + tail
@@ -279,7 +279,7 @@ class TestSpecialRequestForms:
         ]
         mismatched = [
             candidate for candidate in candidates
-            if bool(_SCHEME_RE.fullmatch(candidate))
+            if bool(URI_SCHEME_RE.fullmatch(candidate))
             is not (urlsplit(candidate.decode('ascii') + '://x').scheme.encode()
                     == candidate.lower())
         ]

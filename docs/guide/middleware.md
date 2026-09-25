@@ -6,6 +6,12 @@ handler's signature.  The shape is the same as Starlette /
 Quart / ASGI 3.0 generally, with one BlackBull convenience
 (`@as_middleware`) layered on top.
 
+## Trusted proxy identity
+
+When using `TrustedProxy`, register it before middleware that reads client IP,
+scheme, or mount prefix. See [reverse-proxy setup](../deployment/behind-reverse-proxy.md#trusted-proxy-headers)
+for the required proxy and trust settings.
+
 ## Writing a middleware
 
 ```python
