@@ -101,9 +101,9 @@ an `HTTP1UpgradeSession` and moves ownership of closing it with it — see
 Framing is the client's to decide — the rule the
 [server applies to a response](requests-and-responses.md#responses) in the other
 direction. `Content-Length` is a statement about the body you passed to *this*
-call, so it is checked against it and then written once, canonically.
-`Transfer-Encoding` describes bytes on the transport rather than the payload, so
-it is dropped and no coding this client cannot produce is advertised.
+call, so it is checked against it and then written once, canonically. A
+`Transfer-Encoding` of your own survives only where the client can honour it
+exactly — the value `chunked` — and is refused otherwise.
 
 | `body=` | what goes out |
 |---|---|
@@ -113,6 +113,9 @@ it is dropped and no coding this client cannot produce is advertised.
 | async iterable, with a `Content-Length` | that one field, raw octets, total checked |
 | async iterable, without | `Transfer-Encoding: chunked` |
 
+A `Content-Length` you pass in survives the empty cases too, so `POST` with an
+explicit `Content-Length: 0` still sends it.
+
 A `Content-Length` you supply is honoured only where it can be guaranteed. On a
 byte body that means it equals `len(body)`. On an async iterable it is kept and
 the stream is written raw — which is how an upload of known size goes out without
@@ -120,10 +123,18 @@ being buffered. The running total is checked, so a stream that ends short or run
 over raises `ProtocolError` and retires the connection: the request on the wire
 no longer matches its head.
 
-Two `Content-Length` fields that disagree, a value that is not `1*DIGIT`, or a
-length that contradicts the body are all refused **before a single octet is
-written**, so the connection goes on carrying the next request. None of this
-touches the raw-wire primitives in
+All of these are refused **before a single octet is written**, so the connection
+goes on carrying the next request: two `Content-Length` fields that disagree, a
+value that is not `1*DIGIT`, a length that contradicts the body, and a
+`Transfer-Encoding` the client would have to rewrite. That last one covers
+anything but a lone `chunked` — a coding the caller applied itself
+(`gzip, chunked`), a parameter, `chunked` twice — and any `Transfer-Encoding`
+beside a `Content-Length`, which RFC 9112 §6.2 forbids a message from carrying.
+
+A body you compressed yourself goes under `Content-Encoding`, framed by a
+`Content-Length` or by `Transfer-Encoding: chunked`; `Transfer-Encoding: gzip`
+is refused rather than quietly delivered as the payload. None of this touches
+the raw-wire primitives in
 [Driving a misbehaving peer](#driving-a-misbehaving-peer) — `send_header_line`
 will put two `Content-Length` lines on the wire, because that is what it is for.
 

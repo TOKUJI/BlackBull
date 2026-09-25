@@ -18,6 +18,7 @@ from ..asgi import ASGIReceiveCallable, ASGISendCallable
 from ..connection import (
     Connection, bind_receive_channel)
 from ..headers import Headers
+from ..protocol.framing import parse_content_length
 from .deadline import ConnectionDeadline
 from .request_target import split_path_query
 from .recipient import (CONNECTION_MUST_CLOSE, CONNECTION_NEEDS_DRAIN,
@@ -266,12 +267,11 @@ def _validate_message_framing(headers: 'Headers') -> int:
     """RFC 9112 §6 — reject framing-header combinations that are unsafe.
 
     These are the rules every smuggling-class incident I'm aware of has
-    exploited.  Specifically:
+    exploited.  The ``Content-Length`` half is
+    [`parse_content_length`][blackbull.protocol.framing.parse_content_length]
+    — the same answer the senders give, so no third reading of the field can
+    drift from them.  What is here is the combination policy:
 
-    * §6.2 — ``Content-Length`` value MUST be ``1*DIGIT`` (no signs, no
-      whitespace, non-empty).
-    * §6.2 — multiple ``Content-Length`` headers MUST all have the same
-      single integer value.  Different values are a CL.CL vector.
     * §6.1 — if both ``Content-Length`` and ``Transfer-Encoding`` are
       present, the message is anomalous.  We reject (the spec also
       allows "ignore CL, use TE"; rejecting is the safer policy).
@@ -298,18 +298,10 @@ def _validate_message_framing(headers: 'Headers') -> int:
 
     declared = 0
     if cls:
-        values: set[bytes] = set()
-        for _, value in cls:
-            for v in value.split(b','):
-                v = v.strip()
-                if not v or not v.isdigit():
-                    raise BadRequestError(f'invalid Content-Length value {v!r}')
-                # Strip leading zeros so "00005" and "5" compare equal.
-                values.add(v.lstrip(b'0') or b'0')
-        if len(values) > 1:
-            raise BadRequestError(
-                f'conflicting Content-Length values: {sorted(values)!r}')
-        declared = int(next(iter(values)))
+        try:
+            declared = parse_content_length(cls) or 0
+        except ValueError as exc:
+            raise BadRequestError(str(exc)) from exc
 
     if tes:
         codings = [c.strip().lower()

@@ -7,19 +7,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **An HTTP/1.1 request now declares exactly one body framing, and a caller's
   framing fields are checked rather than relayed.**  `Content-Length` is
-  written once and must agree with the body across every occurrence;
-  `Transfer-Encoding` is the sender's to choose, so a caller's is dropped and
-  no coding this client cannot produce is advertised.  Previously a fixed body
+  written once and must agree with the body across every occurrence.  A caller
+  `Transfer-Encoding` is honoured only when it is exactly `chunked`, the one
+  framing this client writes, and refused otherwise.  Previously a fixed body
   with a caller `Transfer-Encoding` went out carrying both fields and writing
   an unchunked body, a stream body with a caller `Content-Length` went out
   carrying both fields and writing chunk syntax, and `Content-Length: 5, 9`
   went out as two competing message boundaries.  A stream body with a
   `Content-Length` is now written raw against that total and checked as it
-  goes, so an upload of known size need not be buffered.  These refusals raise
-  `ProtocolError` where they raised `ValueError`.  The same rule now backs the
-  server's response framing, so its `ValueError` for a bad or conflicting
-  `Content-Length` reads `invalid Content-Length value` / `conflicting
-  Content-Length values`.
+  goes, so an upload of known size need not be buffered.
+- **Breaking for callers of `HTTP1RequestSender`.**  A framing refusal raises
+  `ProtocolError` where it raised `ValueError`, and `prepare`'s return value is
+  now internal — its third element is the declared length (`int | None`), not
+  the `chunked` flag it used to be.  A `Transfer-Encoding` of `gzip, chunked`
+  carrying a body the caller compressed itself is refused rather than sent:
+  dropping the coding would deliver compressed octets as the payload.  Use
+  `Content-Encoding` for a content coding.  A bad or conflicting
+  `Content-Length` now reports `invalid Content-Length value` / `conflicting
+  Content-Length values` on every side, values included, since one rule now
+  backs the server's response framing, the server's request framing check, and
+  the client.
 - **A failing `@app.on_shutdown` hook now exits `1`** instead of `0` in a
   single-worker process (`app.run()`, the `blackbull` CLI).  `TestClient` and
   `NativeClient` raise it from the `with` block unless the block is already

@@ -15,10 +15,12 @@ happened to exist — so the two could disagree on the wire:
 * a coding the client cannot produce (``gzip``) was advertised and never
   applied, so the peer could not decode the body it was told to expect.
 
-The server's response sender already owns framing the other way — it drops a
-caller ``Transfer-Encoding``, takes one canonical ``Content-Length``, and runs
-a declared-length stream raw while checking its total.  These tests hold the
-client to the same contract.
+The server's response sender already owns framing the other way — it takes one
+canonical ``Content-Length`` and runs a declared-length stream raw while
+checking its total.  These tests hold the client to that contract.  The one
+difference is ``Transfer-Encoding``: a response sender drops an
+application-supplied field, but a request sender that dropped one would change
+what the body means, so it refuses instead of rewriting.
 """
 from __future__ import annotations
 
@@ -154,19 +156,53 @@ class TestOneFraming:
         assert w.body == b'abc'
 
     @pytest.mark.asyncio
-    async def test_an_unimplemented_transfer_coding_is_never_advertised(self):
-        """`gzip` is not ours to produce, so it must not appear on the wire."""
-        w = await _send(
-            headers=[(b'transfer-encoding', b'gzip, chunked')],
-            body=_chunks(b'aa'))
-        assert framing(w) == [(b'transfer-encoding', b'chunked')]
-        assert w.body == b'2\r\naa\r\n0\r\n\r\n'
+    async def test_a_coding_the_client_cannot_write_is_refused(self):
+        """`gzip, chunked` with a stream the caller compressed itself is a
+        message the client *can* carry — but only by keeping the field.  It
+        writes plain chunked framing, so dropping the coding would deliver the
+        compressed octets as the payload and change what the body means while
+        looking identical.  Refusing says so."""
+        with pytest.raises(ProtocolError):
+            await _send(headers=[(b'transfer-encoding', b'gzip, chunked')],
+                        body=_chunks(b'aa'))
+
+    @pytest.mark.parametrize('value', [
+        b'gzip, chunked',    # a coding the caller applied
+        b'chunked, gzip',    # chunked not last
+        b'chunked; ext=1',   # a parameter we would not write
+        b'chunked, chunked', # chunked applied twice
+        b'gzip',             # no chunked at all
+    ])
+    @pytest.mark.asyncio
+    async def test_only_the_lone_chunked_coding_is_accepted(self, value):
+        with pytest.raises(ProtocolError):
+            await _send(headers=[(b'transfer-encoding', value)],
+                        body=_chunks(b'aa'))
 
     @pytest.mark.asyncio
-    async def test_the_emitted_chunked_field_is_the_one_we_write(self):
-        w = await _send(
-            headers=[(b'transfer-encoding', b'chunked; ext=1')],
-            body=_chunks(b'aa'))
+    async def test_a_transfer_encoding_beside_a_content_length_is_refused(self):
+        """RFC 9112 §6.2 forbids one message from carrying both; which of the
+        two describes the body would be the recipient's guess."""
+        with pytest.raises(ProtocolError):
+            await _send(headers=[(b'transfer-encoding', b'chunked'),
+                                 (b'content-length', b'2')],
+                        body=_chunks(b'aa'))
+
+    @pytest.mark.asyncio
+    async def test_a_refused_transfer_encoding_writes_nothing(self):
+        writer = _Writer()
+        with pytest.raises(ProtocolError):
+            await HTTP1RequestSender(writer).send(
+                'POST', '/x',
+                Headers([(b'host', b'h'),
+                         (b'transfer-encoding', b'gzip, chunked')]),
+                _chunks(b'aa'))
+        assert bytes(writer.data) == b''
+
+    @pytest.mark.asyncio
+    async def test_the_lone_chunked_coding_is_the_one_we_write(self):
+        w = await _send(headers=[(b'transfer-encoding', b'chunked')],
+                        body=_chunks(b'aa'))
         assert framing(w) == [(b'transfer-encoding', b'chunked')]
         assert w.body == b'2\r\naa\r\n0\r\n\r\n'
 

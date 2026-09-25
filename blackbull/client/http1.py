@@ -148,6 +148,36 @@ def _declared_content_length(headers: Headers) -> int | None:
         raise ProtocolError(str(exc)) from exc
 
 
+def _check_transfer_encoding(headers: Headers) -> None:
+    """Refuse a ``Transfer-Encoding`` this client cannot honour exactly.
+
+    Dropping the field is meaning-preserving only when it says ``chunked``
+    and nothing else, because that is the one framing this client writes and
+    the recipient then still receives the octets the caller passed.  A coding
+    the caller applied itself (``gzip, chunked``), a parameter on ``chunked``,
+    or ``chunked`` applied twice describes bytes this client will not write;
+    rewriting the field around them would change what the body *means* without
+    saying so.  ``Content-Encoding`` is where a content coding belongs.
+
+    A ``Transfer-Encoding`` beside a ``Content-Length`` is refused too, which
+    is why RFC 9112 §6.2 forbids a message from carrying both: which one
+    describes the body would be the recipient's guess.
+    """
+    codings = [member.strip(b' \t').lower()
+               for _name, raw in headers.getlist(b'transfer-encoding')
+               for member in raw.split(b',')]
+    if not codings:
+        return
+    if headers.getlist(b'content-length'):
+        raise ProtocolError(
+            'Content-Length and Transfer-Encoding both present; '
+            'RFC 9112 §6.2 forbids a message from carrying both')
+    if codings != [b'chunked']:
+        raise ProtocolError(
+            f'unsupported Transfer-Encoding {b", ".join(codings)!r}: '
+            f'this client writes chunked framing only')
+
+
 # Methods for which an empty body still warrants an explicit
 # ``Content-Length: 0`` on the wire.  RFC 9110 §8.6 makes the header optional,
 # but emitting it removes an ambiguity upstreams otherwise face, and matches
@@ -185,18 +215,22 @@ class HTTP1RequestSender:
 
         Framing belongs to the sender, so the whole field pair is decided
         here: a caller's ``Content-Length`` is checked against the body and
-        then written once, canonically, and a caller's ``Transfer-Encoding``
-        is dropped — it describes bytes on the transport rather than the
-        payload, and no coding this client cannot produce is ever advertised.
+        then written once, canonically.  A caller's ``Transfer-Encoding`` is
+        honoured only where rewriting it cannot change what the body means —
+        the value ``chunked``, the one framing this client writes — and
+        refused otherwise; see ``_check_transfer_encoding``.
         A body whose length is known goes out as that many raw octets, a
         stream included, with the total checked as it goes; one whose length
         is not knowable up front is chunk-framed instead.
+
+        The return value is internal: pass it to [`send_prepared`][] unchanged.
         """
         if b'host' not in headers:
             raise ProtocolError('HTTP/1.1 request requires a Host header')
 
         method_text = str(method)
         declared = _declared_content_length(headers)
+        _check_transfer_encoding(headers)
         pairs = [(name, value) for name, value in headers
                  if name.lower() not in (b'content-length', b'transfer-encoding')]
 
