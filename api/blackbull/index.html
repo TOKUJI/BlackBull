@@ -11646,12 +11646,13 @@ binding.</p>
 
 
         <p>Rewrite <code>conn['client']</code> and <code>conn['scheme']</code> from proxy headers.</p>
-<p>Applied only when the direct TCP peer matches the configured trusted set,
-preventing malicious clients from spoofing <code>X-Forwarded-For</code>.</p>
+<p>Applied only when the direct TCP peer matches the configured trusted set.
+Trusted proxies must append their observed peer or overwrite the chain;
+standalone proto/prefix assertions must replace client-supplied values.</p>
 <p>Supported headers (in precedence order):</p>
 <ol>
 <li>RFC 7239 <code>Forwarded</code> — <code>for=&lt;ip&gt;; proto=&lt;scheme&gt;</code></li>
-<li><code>X-Forwarded-For</code> — comma-separated IP chain; leftmost non-trusted IP wins</li>
+<li><code>X-Forwarded-For</code> — walk right to left to the first untrusted IP</li>
 <li><code>X-Forwarded-Proto</code> — rewrite <code>conn['scheme']</code></li>
 </ol>
 

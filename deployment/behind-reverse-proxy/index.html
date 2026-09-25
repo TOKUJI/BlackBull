@@ -1368,17 +1368,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#choosing-a-proxy" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Choosing a proxy
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#common-setup-the-blackbull-side" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5571,17 +5560,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#choosing-a-proxy" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Choosing a proxy
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#common-setup-the-blackbull-side" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5763,58 +5741,8 @@
 
 
 <h1 id="behind-a-reverse-proxy">Behind a reverse proxy<a class="headerlink" href="#behind-a-reverse-proxy" title="Permanent link">&para;</a></h1>
-<p>For most production deployments, running BlackBull behind a reverse proxy is
-the simplest topology — the proxy handles TLS termination, static files, and
-load balancing across multiple processes.</p>
-<p>This page covers three proxies (nginx, HAProxy, Envoy), the choice between
-them, and the <code>TrustedProxy</code> middleware on the BlackBull side that recovers
-client IP and scheme from the proxy's forwarded headers.</p>
-<h2 id="choosing-a-proxy">Choosing a proxy<a class="headerlink" href="#choosing-a-proxy" title="Permanent link">&para;</a></h2>
-<p>The question that separates them is whether the proxy can speak <strong>HTTP/2 to
-the backend</strong>. BlackBull speaks HTTP/2 natively, so a proxy that downgrades to
-HTTP/1.1 on the back leg throws that away — you get HTTP/2 between client and
-proxy only.</p>
-<table>
-<thead>
-<tr>
-<th>Proxy</th>
-<th>HTTP/2 to backend</th>
-<th>Reach for it when</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><strong>nginx</strong></td>
-<td>⚠️ since 1.29.4 (2025-12) — new, <a href="https://nginx.org/en/security_advisories.html">three CVEs so far</a></td>
-<td>You already run nginx, and an HTTP/1.1 back leg is fine</td>
-</tr>
-<tr>
-<td><strong>HAProxy</strong></td>
-<td>✅ stable since 1.9 (2019)</td>
-<td>You want the HTTP/2 back leg, high throughput, and a config you can read</td>
-</tr>
-<tr>
-<td><strong>Envoy</strong></td>
-<td>✅ stable since 2016</td>
-<td>Kubernetes or a service mesh; heavy gRPC; dynamic configuration</td>
-</tr>
-</tbody>
-</table>
-<p>An HTTP/1.1 back leg is a perfectly good default. It is what the nginx section
-below configures, it is what most deployments run, and it costs nothing for
-ordinary request/response traffic. The HTTP/2 back leg earns its keep when the
-proxy would otherwise open many upstream connections — high-concurrency APIs,
-gRPC, or long-lived streams — because multiplexing collapses them onto one.</p>
-<div class="admonition note">
-<p class="admonition-title">nginx's <code>proxy_http_version 2</code> is young</p>
-<p>nginx only gained HTTP/2 proxying to the backend in 1.29.4, and the
-feature has already carried security advisories. HAProxy and Envoy have
-shipped it for years. If you want the HTTP/2 back leg today, prefer one of
-those; revisit nginx once the feature has more road behind it.</p>
-</div>
-<p>Not covered: <strong>Caddy</strong> (capable, but little enterprise deployment — ask if you
-need it), <strong>Traefik</strong> (no HTTP/2 backend support), and <strong>Apache httpd</strong> (its
-HTTP/2 proxying has been experimental for a decade).</p>
+<p>Configure BlackBull's trusted proxies and use the examples below to connect
+nginx, HAProxy, or Envoy to its HTTP/1.1 or HTTP/2 listener.</p>
 <h2 id="common-setup-the-blackbull-side">Common setup — the BlackBull side<a class="headerlink" href="#common-setup-the-blackbull-side" title="Permanent link">&para;</a></h2>
 <p>Start BlackBull <strong>without</strong> TLS. The proxy handles certificates:</p>
 <div class="highlight"><pre><span></span><code>python<span class="w"> </span>app.py<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span><span class="w">   </span><span class="c1"># plain HTTP; no --cert / --key</span>
@@ -5830,37 +5758,15 @@ HTTP/2 proxying has been experimental for a decade).</p>
 <span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">TrustedProxy</span>
 <span class="n">app</span><span class="o">.</span><span class="n">use</span><span class="p">(</span><span class="n">TrustedProxy</span><span class="p">([</span><span class="s1">'127.0.0.1'</span><span class="p">,</span> <span class="s1">'::1'</span><span class="p">,</span> <span class="s1">'10.0.0.0/8'</span><span class="p">]))</span>
 </code></pre></div>
-<table>
-<thead>
-<tr>
-<th></th>
-<th>Without middleware</th>
-<th>With middleware</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>conn.client</code></td>
-<td>the proxy's IP</td>
-<td>real client IP (from <code>X-Forwarded-For</code>)</td>
-</tr>
-<tr>
-<td><code>conn.scheme</code></td>
-<td><code>'http'</code></td>
-<td><code>'https'</code> (from <code>X-Forwarded-Proto</code>)</td>
-</tr>
-</tbody>
-</table>
-<p>Supported headers, in precedence order:</p>
-<ol>
-<li>RFC 7239 <code>Forwarded</code> — <code>for=&lt;ip&gt;; proto=&lt;scheme&gt;</code></li>
-<li><code>X-Forwarded-For</code> — comma-separated chain; leftmost non-trusted IP wins</li>
-<li><code>X-Forwarded-Proto</code></li>
-</ol>
-<p>Headers are <strong>only applied when the direct TCP peer is in the trusted set</strong>,
-which is what stops a client forging <code>X-Forwarded-For</code> to spoof its own IP.
-Every configuration below sets these headers on the proxy side; the trusted
-set on the BlackBull side must match where the proxy actually connects from.</p>
+<p>Set <code>trusted_proxies</code> to the proxies' actual source addresses; other peers'
+forwarding headers are ignored. Each trusted proxy must append its observed peer
+or overwrite the address chain.
+<code>conn.client</code> identifies the nearest untrusted hop, which may itself be a proxy.</p>
+<p>BlackBull prefers <code>Forwarded</code> over <code>X-Forwarded-For</code> and <code>X-Forwarded-Proto</code>.
+The XFF-based examples below therefore remove incoming <code>Forwarded</code> and overwrite
+<code>X-Forwarded-Proto</code>. They also remove <code>X-Forwarded-Prefix</code>; if mounting under
+<code>/api</code>, overwrite it with <code>/api</code> instead. Proto and prefix must each be a single
+value, not a list accumulated across proxies.</p>
 <h2 id="nginx">nginx<a class="headerlink" href="#nginx" title="Permanent link">&para;</a></h2>
 <p>Terminates TLS and HTTP/2 toward clients, proxies to BlackBull over HTTP/1.1.
 Regular requests, WebSocket upgrades, and Server-Sent Events all work.</p>
@@ -5884,6 +5790,8 @@ Regular requests, WebSocket upgrades, and Server-Sent Events all work.</p>
 <span class="w">        </span><span class="kn">proxy_set_header</span><span class="w">   </span><span class="s">Host</span><span class="w">              </span><span class="nv">$host</span><span class="p">;</span>
 <span class="w">        </span><span class="kn">proxy_set_header</span><span class="w">   </span><span class="s">X-Forwarded-For</span><span class="w">   </span><span class="nv">$proxy_add_x_forwarded_for</span><span class="p">;</span>
 <span class="w">        </span><span class="kn">proxy_set_header</span><span class="w">   </span><span class="s">X-Forwarded-Proto</span><span class="w"> </span><span class="nv">$scheme</span><span class="p">;</span>
+<span class="w">        </span><span class="kn">proxy_set_header</span><span class="w">   </span><span class="s">Forwarded</span><span class="w"> </span><span class="s">""</span><span class="p">;</span>
+<span class="w">        </span><span class="kn">proxy_set_header</span><span class="w">   </span><span class="s">X-Forwarded-Prefix</span><span class="w"> </span><span class="s">""</span><span class="p">;</span>
 <span class="w">        </span><span class="kn">proxy_set_header</span><span class="w">   </span><span class="s">Connection</span><span class="w">        </span><span class="s">""</span><span class="p">;</span><span class="w">   </span><span class="c1"># enable keep-alive upstream</span>
 <span class="w">    </span><span class="p">}</span>
 
@@ -5893,6 +5801,10 @@ Regular requests, WebSocket upgrades, and Server-Sent Events all work.</p>
 <span class="w">        </span><span class="kn">proxy_pass</span><span class="w">         </span><span class="s">http://blackbull</span><span class="p">;</span>
 <span class="w">        </span><span class="kn">proxy_http_version</span><span class="w"> </span><span class="mi">1</span><span class="s">.1</span><span class="p">;</span>
 <span class="w">        </span><span class="kn">proxy_set_header</span><span class="w">   </span><span class="s">Host</span><span class="w">       </span><span class="nv">$host</span><span class="p">;</span>
+<span class="w">        </span><span class="kn">proxy_set_header</span><span class="w">   </span><span class="s">X-Forwarded-For</span><span class="w"> </span><span class="nv">$proxy_add_x_forwarded_for</span><span class="p">;</span>
+<span class="w">        </span><span class="kn">proxy_set_header</span><span class="w">   </span><span class="s">X-Forwarded-Proto</span><span class="w"> </span><span class="nv">$scheme</span><span class="p">;</span>
+<span class="w">        </span><span class="kn">proxy_set_header</span><span class="w">   </span><span class="s">Forwarded</span><span class="w"> </span><span class="s">""</span><span class="p">;</span>
+<span class="w">        </span><span class="kn">proxy_set_header</span><span class="w">   </span><span class="s">X-Forwarded-Prefix</span><span class="w"> </span><span class="s">""</span><span class="p">;</span>
 <span class="w">        </span><span class="kn">proxy_set_header</span><span class="w">   </span><span class="s">Upgrade</span><span class="w">    </span><span class="nv">$http_upgrade</span><span class="p">;</span>
 <span class="w">        </span><span class="kn">proxy_set_header</span><span class="w">   </span><span class="s">Connection</span><span class="w"> </span><span class="s">"upgrade"</span><span class="p">;</span>
 <span class="w">        </span><span class="kn">proxy_read_timeout</span><span class="w"> </span><span class="s">3600s</span><span class="p">;</span><span class="w">     </span><span class="c1"># keep WS connection open</span>
@@ -5903,6 +5815,10 @@ Regular requests, WebSocket upgrades, and Server-Sent Events all work.</p>
 <span class="w">        </span><span class="kn">proxy_pass</span><span class="w">                </span><span class="s">http://blackbull</span><span class="p">;</span>
 <span class="w">        </span><span class="kn">proxy_http_version</span><span class="w">        </span><span class="mi">1</span><span class="s">.1</span><span class="p">;</span>
 <span class="w">        </span><span class="kn">proxy_set_header</span><span class="w">          </span><span class="s">Host</span><span class="w"> </span><span class="nv">$host</span><span class="p">;</span>
+<span class="w">        </span><span class="kn">proxy_set_header</span><span class="w">          </span><span class="s">X-Forwarded-For</span><span class="w"> </span><span class="nv">$proxy_add_x_forwarded_for</span><span class="p">;</span>
+<span class="w">        </span><span class="kn">proxy_set_header</span><span class="w">          </span><span class="s">X-Forwarded-Proto</span><span class="w"> </span><span class="nv">$scheme</span><span class="p">;</span>
+<span class="w">        </span><span class="kn">proxy_set_header</span><span class="w">          </span><span class="s">Forwarded</span><span class="w"> </span><span class="s">""</span><span class="p">;</span>
+<span class="w">        </span><span class="kn">proxy_set_header</span><span class="w">          </span><span class="s">X-Forwarded-Prefix</span><span class="w"> </span><span class="s">""</span><span class="p">;</span>
 <span class="w">        </span><span class="kn">proxy_set_header</span><span class="w">          </span><span class="s">Connection</span><span class="w"> </span><span class="s">""</span><span class="p">;</span>
 <span class="w">        </span><span class="kn">proxy_buffering</span><span class="w">           </span><span class="no">off</span><span class="p">;</span><span class="w">      </span><span class="c1"># flush SSE events immediately</span>
 <span class="w">        </span><span class="kn">proxy_cache</span><span class="w">               </span><span class="no">off</span><span class="p">;</span>
@@ -5934,7 +5850,9 @@ frontend https_in
     bind *:80
     http-request redirect scheme https unless { ssl_fc }
 
-    # Forwarded headers — TrustedProxy reads these.
+    http-request del-header Forwarded
+    http-request del-header X-Forwarded-Prefix
+    # Standalone metadata must replace client-supplied values.
     http-request set-header X-Forwarded-Proto https if { ssl_fc }
     http-request set-header X-Forwarded-Proto http  unless { ssl_fc }
     option forwardfor                       # appends X-Forwarded-For
@@ -5984,10 +5902,12 @@ HTTP/1.1 backend and keep HTTP/2 for the rest:</p>
 <span class="w">        </span><span class="nt">typed_config</span><span class="p">:</span>
 <span class="w">          </span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager</span>
 <span class="w">          </span><span class="nt">stat_prefix</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ingress_http</span>
-<span class="w">          </span><span class="nt">use_remote_address</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">      </span><span class="c1"># populates X-Forwarded-For / -Proto</span>
+<span class="w">          </span><span class="nt">use_remote_address</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">      </span><span class="c1"># appends the observed peer to XFF</span>
+<span class="w">          </span><span class="nt">xff_num_trusted_hops</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0</span><span class="w">        </span><span class="c1"># overwrites client-supplied proto</span>
 <span class="w">          </span><span class="nt">upgrade_configs</span><span class="p">:</span>
 <span class="w">          </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">upgrade_type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">websocket</span><span class="w">     </span><span class="c1"># required for WebSocket</span>
 <span class="w">          </span><span class="nt">route_config</span><span class="p">:</span>
+<span class="w">            </span><span class="nt">request_headers_to_remove</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">forwarded</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">x-forwarded-prefix</span><span class="p p-Indicator">]</span>
 <span class="w">            </span><span class="nt">virtual_hosts</span><span class="p">:</span>
 <span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">backend</span>
 <span class="w">              </span><span class="nt">domains</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">"*"</span><span class="p p-Indicator">]</span>
@@ -6045,19 +5965,6 @@ stays as above:</p>
 <p>For gRPC, this is the configuration you want — Envoy will multiplex all RPCs
 onto one upstream connection. See <a href="../../guide/grpc/">gRPC</a>.</p>
 <h2 id="docker">Docker<a class="headerlink" href="#docker" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="k">FROM</span><span class="w"> </span><span class="s">python:3.13-slim</span>
-<span class="k">WORKDIR</span><span class="w"> </span><span class="s">/app</span>
-<span class="k">COPY</span><span class="w"> </span>.<span class="w"> </span>.
-<span class="k">RUN</span><span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>.
-<span class="k">EXPOSE</span><span class="w"> </span><span class="s">8000</span>
-<span class="k">CMD</span><span class="w"> </span><span class="p">[</span><span class="s2">"python"</span><span class="p">,</span><span class="w"> </span><span class="s2">"app.py"</span><span class="p">,</span><span class="w"> </span><span class="s2">"--port"</span><span class="p">,</span><span class="w"> </span><span class="s2">"8000"</span><span class="p">]</span>
-</code></pre></div>
-<p>Environment variables for secrets (never hardcode):</p>
-<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
-<span class="n">DB_URL</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s1">'DATABASE_URL'</span><span class="p">]</span>
-<span class="n">SECRET</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s1">'SECRET_KEY'</span><span class="p">]</span>
-<span class="n">PORT</span>   <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'PORT'</span><span class="p">,</span> <span class="mi">8000</span><span class="p">))</span>
-</code></pre></div>
 <p>In Compose, the proxy reaches BlackBull by service name, so the trusted set
 must cover the Docker network rather than loopback:</p>
 <div class="highlight"><pre><span></span><code><span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">(</span><span class="n">trusted_proxies</span><span class="o">=</span><span class="p">[</span><span class="s1">'172.16.0.0/12'</span><span class="p">])</span>

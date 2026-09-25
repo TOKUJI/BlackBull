@@ -586,6 +586,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#trusted-proxy-identity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Trusted proxy identity
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#writing-a-middleware" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5626,6 +5637,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#trusted-proxy-identity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Trusted proxy identity
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#writing-a-middleware" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5878,6 +5900,10 @@ auth, body parsing, response shaping — without changing the
 handler's signature.  The shape is the same as Starlette /
 Quart / ASGI 3.0 generally, with one BlackBull convenience
 (<code>@as_middleware</code>) layered on top.</p>
+<h2 id="trusted-proxy-identity">Trusted proxy identity<a class="headerlink" href="#trusted-proxy-identity" title="Permanent link">&para;</a></h2>
+<p>When using <code>TrustedProxy</code>, register it before middleware that reads client IP,
+scheme, or mount prefix. See <a href="../../deployment/behind-reverse-proxy/#trusted-proxy-headers">reverse-proxy setup</a>
+for the required proxy and trust settings.</p>
 <h2 id="writing-a-middleware">Writing a middleware<a class="headerlink" href="#writing-a-middleware" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
 
