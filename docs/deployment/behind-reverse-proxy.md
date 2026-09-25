@@ -64,19 +64,44 @@ app.use(TrustedProxy(['127.0.0.1', '::1', '10.0.0.0/8']))
 
 | | Without middleware | With middleware |
 |---|---|---|
-| `conn.client` | the proxy's IP | real client IP (from `X-Forwarded-For`) |
+| `conn.client` | the proxy's IP | nearest untrusted IP (from `X-Forwarded-For`) |
 | `conn.scheme` | `'http'` | `'https'` (from `X-Forwarded-Proto`) |
 
 Supported headers, in precedence order:
 
 1. RFC 7239 `Forwarded` — `for=<ip>; proto=<scheme>`
-2. `X-Forwarded-For` — comma-separated chain; leftmost non-trusted IP wins
+2. `X-Forwarded-For` — comma-separated IP chain
 3. `X-Forwarded-Proto`
 
-Headers are **only applied when the direct TCP peer is in the trusted set**,
-which is what stops a client forging `X-Forwarded-For` to spoof its own IP.
-Every configuration below sets these headers on the proxy side; the trusted
-set on the BlackBull side must match where the proxy actually connects from.
+Headers are **only applied when the direct TCP peer is trusted**. Starting
+there, BlackBull walks the chain right to left, stopping at the first untrusted
+IP. That address is not necessarily the original end user. Entries to its left
+cannot supply the client or `Forwarded` scheme. If every listed IP is trusted,
+the leftmost verified IP wins. Repeated fields retain wire order.
+
+Trust only proxies that append their actual observed peer or overwrite the chain.
+An IP allowlist cannot authenticate headers a proxy blindly passes through.
+Proxies using `X-Forwarded-For` must **remove incoming `Forwarded`**, whose
+precedence would otherwise let a client bypass the verified XFF chain.
+
+`Forwarded` accepts IPv4 and quoted bracketed IPv6, optionally with numeric or
+obfuscated ports; recovered client ports are zero. XFF accepts bare IPv4/IPv6.
+A missing, unknown, obfuscated, or invalid node stops traversal at the last
+verified address (or the socket peer if none was verified). A malformed
+`Forwarded` field leaves client and scheme unchanged; it never enables XFF/XFP
+fallback. Empty comma list members are ignored in `Forwarded`; empty XFF members
+stop traversal. Only the selected valid `Forwarded` element supplies `proto`;
+a barrier, missing `proto`, or invalid scheme leaves the input scheme unchanged.
+Proto-only elements are barriers and do not rewrite the scheme.
+
+`X-Forwarded-Proto` and `X-Forwarded-Prefix` are independent assertions from the
+direct proxy: it must overwrite or remove client-supplied values. Each accepts
+only one value; repeated fields and comma lists are ignored. Prefixes must be
+UTF-8 absolute paths without controls, whitespace, backslashes, query or fragment;
+`//` prefixes are rejected, and trailing slashes are removed (`/` becomes empty).
+`Forwarded` suppresses XFP, but not the independent prefix assertion. The examples
+below strip unused prefix headers; if mounting under `/api`, overwrite the prefix
+with `/api` instead. Match the trusted set to the proxies' actual source addresses.
 
 ## nginx
 
@@ -104,6 +129,8 @@ server {
         proxy_set_header   Host              $host;
         proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Forwarded "";
+        proxy_set_header   X-Forwarded-Prefix "";
         proxy_set_header   Connection        "";   # enable keep-alive upstream
     }
 
@@ -113,6 +140,10 @@ server {
         proxy_pass         http://blackbull;
         proxy_http_version 1.1;
         proxy_set_header   Host       $host;
+        proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Forwarded "";
+        proxy_set_header   X-Forwarded-Prefix "";
         proxy_set_header   Upgrade    $http_upgrade;
         proxy_set_header   Connection "upgrade";
         proxy_read_timeout 3600s;     # keep WS connection open
@@ -123,6 +154,10 @@ server {
         proxy_pass                http://blackbull;
         proxy_http_version        1.1;
         proxy_set_header          Host $host;
+        proxy_set_header          X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header          X-Forwarded-Proto $scheme;
+        proxy_set_header          Forwarded "";
+        proxy_set_header          X-Forwarded-Prefix "";
         proxy_set_header          Connection "";
         proxy_buffering           off;      # flush SSE events immediately
         proxy_cache               off;
@@ -158,7 +193,9 @@ frontend https_in
     bind *:80
     http-request redirect scheme https unless { ssl_fc }
 
-    # Forwarded headers — TrustedProxy reads these.
+    http-request del-header Forwarded
+    http-request del-header X-Forwarded-Prefix
+    # Standalone metadata must replace client-supplied values.
     http-request set-header X-Forwarded-Proto https if { ssl_fc }
     http-request set-header X-Forwarded-Proto http  unless { ssl_fc }
     option forwardfor                       # appends X-Forwarded-For
@@ -220,10 +257,12 @@ static_resources:
         typed_config:
           "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
           stat_prefix: ingress_http
-          use_remote_address: true      # populates X-Forwarded-For / -Proto
+          use_remote_address: true      # appends the observed peer to XFF
+          xff_num_trusted_hops: 0        # overwrites client-supplied proto
           upgrade_configs:
           - upgrade_type: websocket     # required for WebSocket
           route_config:
+            request_headers_to_remove: [forwarded, x-forwarded-prefix]
             virtual_hosts:
             - name: backend
               domains: ["*"]

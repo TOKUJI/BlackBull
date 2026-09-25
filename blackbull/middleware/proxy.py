@@ -14,47 +14,148 @@ reported, until this middleware decides the hop is trustworthy.
 See ``docs/deployment/behind-reverse-proxy.md`` for the deployment shape.
 """
 import ipaddress
+import re
 
 from ..connection import CONNECTION_STASH_KEY, Connection
 from ..headers import Headers
+from ..protocol.field_grammar import FIELD_VALUE_ALLOWED_SET, TCHAR_SET
 
 _MISS = object()
 
 
-def _parse_forwarded(value: str) -> dict[str, str]:
-    """Parse the leftmost element of an RFC 7239 Forwarded header value.
+def _parse_forwarded(value: bytes) -> list[dict[bytes, bytes]] | None:
+    """Preserve element boundaries; an ambiguous field cannot prove a hop."""
+    elements: list[dict[bytes, bytes]] = []
+    element: dict[bytes, bytes] = {}
+    has_element = False
+    pos = 0
+    while pos < len(value):
+        if value[pos] in (32, 9):
+            pos += 1
+            continue
+        if value[pos] == 44:
+            if has_element:
+                elements.append(element)
+            element = {}
+            has_element = False
+            pos += 1
+            continue
+        if value[pos] == 59:
+            has_element = True
+            pos += 1
+            continue
+        has_element = True
+        start = pos
+        while pos < len(value) and value[pos] in TCHAR_SET:
+            pos += 1
+        name = value[start:pos].lower()
+        if not name or name in element or pos == len(value) or value[pos] != 61:
+            return None
+        pos += 1
+        if pos < len(value) and value[pos] == 34:
+            pos += 1
+            out = bytearray()
+            while True:
+                if pos == len(value):
+                    return None
+                octet = value[pos]
+                pos += 1
+                if octet == 34:
+                    break
+                if octet == 92:
+                    if pos == len(value):
+                        return None
+                    octet = value[pos]
+                    pos += 1
+                if octet not in FIELD_VALUE_ALLOWED_SET:
+                    return None
+                out.append(octet)
+            parsed = bytes(out)
+        else:
+            start = pos
+            while pos < len(value) and value[pos] in TCHAR_SET:
+                pos += 1
+            if pos == start:
+                return None
+            parsed = value[start:pos]
+        element[name] = parsed
+        while pos < len(value) and value[pos] in (32, 9):
+            pos += 1
+        if pos < len(value) and value[pos] not in (44, 59):
+            return None
+    if has_element:
+        elements.append(element)
+    return elements
 
-    RFC 7239 §4 separates forwarded *elements* with ``,`` and the
-    parameters within one element with ``;``.  A chained-proxy header
-    such as ``for=203.0.113.1;proto=https, for=198.51.100.17`` therefore
-    carries two elements; we honour the leftmost (the hop closest to the
-    client) and return its parameters, e.g.
-    ``{'for': '203.0.113.1', 'proto': 'https'}``.
 
-    Splitting on ``;`` alone folds the
-    second element's ``for=`` into the first value, poisoning
-    ``conn['client']``.
-    """
-    first_element = value.split(',', 1)[0]
-    result = {}
-    for part in first_element.split(';'):
-        part = part.strip()
-        if '=' in part:
-            k, v = part.split('=', 1)
-            result[k.strip().lower()] = v.strip().strip('"')
-    return result
+def _node_ip(value: bytes, *, forwarded: bool = False) -> str | None:
+    try:
+        text = value.decode('ascii')
+        if '%' in text:
+            return None
+        if forwarded:
+            port = None
+            if text.startswith('['):
+                host, separator, tail = text[1:].partition(']')
+                if not separator or (tail and not tail.startswith(':')):
+                    return None
+                if ipaddress.ip_address(host).version != 6:
+                    return None
+                port = tail[1:] if tail else None
+            else:
+                host, separator, tail = text.partition(':')
+                if ipaddress.ip_address(host).version != 4:
+                    return None
+                port = tail if separator else None
+            if port is not None and not (
+                re.fullmatch(r'_[A-Za-z0-9._-]+', port)
+                or (port.isascii() and port.isdecimal() and len(port) <= 5
+                    and int(port) <= 65535)
+            ):
+                return None
+            text = host
+        return str(ipaddress.ip_address(text))
+    except (ValueError, UnicodeError):
+        return None
+
+
+def _scheme(value: bytes | None) -> str | None:
+    if value and re.fullmatch(rb'[A-Za-z][A-Za-z0-9+.-]*', value):
+        return value.decode('ascii').lower()
+    return None
+
+
+def _singleton(headers: Headers, name: bytes) -> bytes:
+    fields = headers.getlist(name)
+    if len(fields) != 1 or b',' in fields[0][1]:
+        return b''
+    return fields[0][1].strip(b' \t')
+
+
+def _prefix(value: bytes) -> str | None:
+    if (not value.startswith(b'/') or value.startswith(b'//')
+            or any(c < 33 or c == 127 or c in b'?#\\' for c in value)):
+        return None
+    try:
+        prefix = value.decode('utf-8')
+        if not prefix.isprintable() or any(c.isspace() for c in prefix):
+            return None
+        return prefix.rstrip('/')
+    except UnicodeError:
+        return None
 
 
 class TrustedProxy:
     """Rewrite ``conn['client']`` and ``conn['scheme']`` from proxy headers.
 
-    Applied only when the direct TCP peer matches the configured trusted set,
-    preventing malicious clients from spoofing ``X-Forwarded-For``.
+    Applied only when the direct TCP peer matches the configured trusted set.
+    Trusted proxies must append their observed peer or overwrite the chain;
+    standalone proto/prefix assertions must replace client-supplied values.
 
     Supported headers (in precedence order):
 
     1. RFC 7239 ``Forwarded`` — ``for=<ip>; proto=<scheme>``
-    2. ``X-Forwarded-For`` — comma-separated IP chain; leftmost non-trusted IP wins
+    2. ``X-Forwarded-For`` — walk right to left to the first untrusted IP
     3. ``X-Forwarded-Proto`` — rewrite ``conn['scheme']``
 
     Args:
@@ -112,34 +213,39 @@ class TrustedProxy:
         new_scheme = _MISS
         new_root = _MISS
 
-        forwarded = headers.get(b'forwarded', b'').decode()
-        if forwarded:
-            # RFC 7239 takes precedence over X-Forwarded-*
-            parsed = _parse_forwarded(forwarded)
-            if 'for' in parsed:
-                new_client = [parsed['for'].lstrip('['), 0]
-            if 'proto' in parsed:
-                new_scheme = parsed['proto']
-        else:
-            xff = headers.get(b'x-forwarded-for', b'').decode()
-            if xff:
-                # Walk left-to-right; first non-trusted entry is the real client
-                for candidate in (h.strip() for h in xff.split(',')):
-                    if not self._is_trusted(candidate):
-                        new_client = [candidate, 0]
+        if b'forwarded' in headers:
+            forwarded = b','.join(v for _, v in headers.getlist(b'forwarded'))
+            elements = _parse_forwarded(forwarded)
+            if elements:
+                for element in reversed(elements):
+                    candidate = _node_ip(element.get(b'for', b''), forwarded=True)
+                    if candidate is None:
+                        new_scheme = _MISS
                         break
+                    new_client = [candidate, 0]
+                    scheme = _scheme(element.get(b'proto'))
+                    new_scheme = scheme if scheme is not None else _MISS
+                    if not self._is_trusted(candidate):
+                        break
+        else:
+            fields = headers.getlist(b'x-forwarded-for')
+            if fields:
+                for value in reversed(b','.join(v for _, v in fields).split(b',')):
+                    candidate = _node_ip(value.strip(b' \t'))
+                    if candidate is None:
+                        break
+                    new_client = [candidate, 0]
+                    if not self._is_trusted(candidate):
+                        break
+            scheme = _scheme(_singleton(headers, b'x-forwarded-proto'))
+            if scheme is not None:
+                new_scheme = scheme
 
-            xfp = headers.get(b'x-forwarded-proto', b'').decode()
-            if xfp:
-                new_scheme = xfp.strip().lower()
-
-        # X-Forwarded-Prefix — the reverse-proxy mount prefix, honoured only
-        # here (behind the trusted-peer gate).  The parser layer deliberately
-        # ignores it off the wire; a spoofed prefix from an
-        # untrusted client would otherwise poison URL generation / routing.
-        xf_prefix = headers.get(b'x-forwarded-prefix', b'').decode()
-        if xf_prefix:
-            new_root = xf_prefix.rstrip('/')
+        # Standalone assertions have no standardized correspondence with XFF.
+        # The trusted direct proxy must overwrite client-supplied values.
+        prefix = _prefix(_singleton(headers, b'x-forwarded-prefix'))
+        if prefix is not None:
+            new_root = prefix
 
         if is_conn:
             if new_client is not _MISS:

@@ -47,7 +47,7 @@ async def test_untrusted_peer_ignored():
 
 @pytest.mark.asyncio
 async def test_xff_chain_skips_trusted_hops():
-    """Leftmost non-trusted IP is the real client, not the intermediate proxy."""
+    """A trusted intermediate proxy permits traversal to its observed peer."""
     mw = TrustedProxy(['127.0.0.1', '10.0.0.1'])
     scope = _make_scope('127.0.0.1', {b'x-forwarded-for': b'203.0.113.5, 10.0.0.1'})
     scope, _ = await _call(mw, scope)
@@ -122,31 +122,26 @@ async def test_forwarded_header_for_only():
 
 
 @pytest.mark.asyncio
-async def test_forwarded_multi_element_uses_leftmost():
-    """RFC 7239 §4 — elements are comma-separated; parse the leftmost only.
-
-    Splitting on ';' alone folded the second element's ``for=``
-    into the first value, poisoning ``scope['client']``.
-    """
+async def test_forwarded_multi_element_stops_at_untrusted_hop():
     mw = TrustedProxy('127.0.0.1')
     scope = _make_scope('127.0.0.1', {
         b'forwarded': b'for=203.0.113.1;proto=https, for=198.51.100.17',
     })
     scope, _ = await _call(mw, scope)
-    assert scope['client'] == ['203.0.113.1', 0]
-    assert scope['scheme'] == 'https'
+    assert scope['client'] == ['198.51.100.17', 0]
+    assert scope['scheme'] == 'http'
 
 
 @pytest.mark.asyncio
 async def test_forwarded_multi_element_no_proto_leak():
-    """A trailing element must not leak its params into the leftmost."""
+    """Only the selected element supplies the scheme."""
     mw = TrustedProxy('127.0.0.1')
     scope = _make_scope('127.0.0.1', {
         b'forwarded': b'for=203.0.113.1, for=198.51.100.17;proto=https',
     })
     scope, _ = await _call(mw, scope)
-    assert scope['client'] == ['203.0.113.1', 0]
-    assert scope['scheme'] == 'http'   # proto belongs to the 2nd element → ignored
+    assert scope['client'] == ['198.51.100.17', 0]
+    assert scope['scheme'] == 'https'
 
 
 # ---------------------------------------------------------------------------
