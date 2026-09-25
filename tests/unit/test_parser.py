@@ -242,6 +242,28 @@ class TestParse:
         assert _get_scope(_http_request(version='HTTP/1.1'))['http_version'] == '1.1'
 
     # ------------------------------------------------------------------
+    # HTTP-version token — RFC 9112 §2.3: exactly `HTTP/d.d`.
+    # ------------------------------------------------------------------
+
+    def test_lf_terminated_http_version_rejected(self):
+        """RFC 9112 §2.3 — a version token ending in LF is not `HTTP/d.d`."""
+        from blackbull.server.http1_actor import BadRequestError
+        with pytest.raises(BadRequestError):
+            scope = _get_scope(b'GET / HTTP/1.1\n\r\nHost: h\r\n\r\n')
+            pytest.fail(
+                'LF-terminated HTTP-version was accepted with '
+                f'http_version={scope["http_version"]!r}')
+
+    @pytest.mark.parametrize('version', ['HTTP/1.0', 'HTTP/1.1', 'HTTP/1.2'])
+    def test_http_version_carries_no_cr_or_lf(self, version):
+        """An accepted request's http_version is exactly the DIGIT.DIGIT
+        part of the token — never CR or LF (RFC 9112 §2.3)."""
+        scope = _get_scope(_http_request(version=version))
+        assert scope['http_version'] == version[5:]
+        assert '\n' not in scope['http_version'] and '\r' not in scope['http_version'], (
+            f'http_version must carry no CR or LF; got {scope["http_version"]!r}')
+
+    # ------------------------------------------------------------------
     # Shared-table header validators.
     #
     # Replaced per-byte `any(...)` scans in _parse with the shared

@@ -51,6 +51,15 @@ class TestRequestLine:
         assert r.status != 200, (
             f'bare LF without CR MUST be rejected; got {r.status}')
 
+    def test_lf_terminated_http_version_rejected(self, h1_app):
+        """§2.3/§4: a version token ending in LF (``HTTP/1.1\\n``) is not
+        ``HTTP/DIGIT.DIGIT`` — the LF.CR.LF de-sync class.  MUST NOT yield 200.
+        """
+        r = send_raw('127.0.0.1', h1_app.port,
+                     b'GET / HTTP/1.1\n\r\nHost: localhost\r\n\r\n')
+        assert r.status == 400, (
+            f'LF-terminated HTTP-version must be rejected with 400; got {r.status}')
+
     def test_lowercase_method_accepted_as_unknown(self, h1_app):
         """§9.1 (RFC 9110): methods are case-sensitive; ``get`` is not ``GET``.
 
