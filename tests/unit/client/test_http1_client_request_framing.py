@@ -231,7 +231,7 @@ class TestOneFraming:
     @pytest.mark.parametrize('name', [b'transfer-encoding',
                                       b'Transfer-Encoding'])
     @pytest.mark.asyncio
-    async def test_a_transfer_encoding_is_dropped_whatever_its_casing(self, name):
+    async def test_the_transfer_encoding_name_is_case_insensitive(self, name):
         w = await _send(headers=[(name, b'chunked')], body=b'hello')
         assert framing(w) == [(b'content-length', b'5')]
 
