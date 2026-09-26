@@ -278,6 +278,11 @@ less than one that draws its own boundary:
 - **"No known gaps" is not "no gaps."** A bound that no one has found missing is
   not the same as a bound proven complete. This work is continuing, not
   finished.
+- **The HTTP/2 sender does not implement informational responses.** An
+  interim head is written only when a body event follows it; a second
+  response head arriving first replaces it, and the interim never reaches the
+  wire. Nothing leaks and the frames stay self-consistent, but "Early Hints
+  sent" is not a thing this server does yet.
 
 On the async HTTP client specifically, and after the server ones so the
 contrast is visible:

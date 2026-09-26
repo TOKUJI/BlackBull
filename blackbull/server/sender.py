@@ -1473,8 +1473,9 @@ class HTTP2Sender(BaseSender):
                         buffered_body, False, buffered_status,
                         buffered_headers, self._expect_trailers)
                     if self._suppress_body:
-                        # The head already carried END_STREAM; a DATA after
-                        # it is STREAM_CLOSED, not merely unwanted content.
+                        # No content before the final head: RFC 9113 §8.1
+                        # leaves an informational response part of the same
+                        # exchange.
                         return
                     await self._write_data(
                         payload,
@@ -1487,8 +1488,8 @@ class HTTP2Sender(BaseSender):
                     self._buffered_headers = None
         else:
             if self._suppress_body:
-                # The head already carried END_STREAM; a DATA after it is
-                # STREAM_CLOSED, not merely unwanted content.
+                # No content before the final head: RFC 9113 §8.1 leaves an
+                # informational response part of the same exchange.
                 return
             await self._write_data(
                 payload, end_stream=end_stream and not self._expect_trailers)
