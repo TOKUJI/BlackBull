@@ -1322,7 +1322,10 @@ registered with it need no migration.
 
 
 def _validate_method_token(method: str) -> None:
-    if not method_token_is_valid(method.encode('utf-8')):
+    # ``isascii`` first: encoding a lone surrogate would raise and hide the
+    # message the caller needs.
+    if (not method.isascii()
+            or not method_token_is_valid(method.encode('ascii'))):
         raise ValueError(
             f"Invalid HTTP method token {method!r}: RFC 9110 §5.6.2 requires "
             "a non-empty sequence of visible ASCII tchar characters."

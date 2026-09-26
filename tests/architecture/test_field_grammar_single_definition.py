@@ -35,13 +35,16 @@ from blackbull.protocol.frame_types import (
 
 #: Each reader and the grammar names it imports.
 _READERS = {
-    http1_actor: ('TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS'),
+    http1_actor: ('TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS',
+                  'COMMON_METHODS_OCTETS', 'method_token_is_valid'),
     frame_types: ('TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS'),
     headers_module: ('TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS'),
     recipient: ('TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS'),
     client_http1: ('TCHAR_OCTETS', 'TCHAR_SET', 'FIELD_VALUE_ALLOWED_OCTETS',
                    'FIELD_VALUE_ALLOWED_SET'),
     cache_module: ('TCHAR_SET', 'FIELD_VALUE_ALLOWED_SET'),
+    parser: ('COMMON_METHODS', 'COMMON_SCHEMES', 'URI_SCHEME_RE',
+             'method_token_is_valid'),
     router: ('method_token_is_valid',),
 }
 
@@ -52,6 +55,9 @@ _OWNED_BY_THE_GRAMMAR = frozenset({
     'FIELD_NAME_INVALID_RE', '_FIELD_NAME_INVALID_RE', '_FIELD_NAME_OCTETS',
     'FIELD_VALUE_INVALID_RE', '_FIELD_VALUE_INVALID_RE',
     'FIELD_VALUE_ALLOWED_OCTETS', '_FIELD_VCHAR', '_BLOCK_ALLOWED_OCTETS',
+    'COMMON_METHODS_OCTETS', '_COMMON_METHODS_OCTETS',
+    'COMMON_METHODS', '_COMMON_METHODS',
+    'COMMON_SCHEMES', '_COMMON_SCHEMES',
 })
 
 #: RFC 9110 §5.6.2 — names are lowercase in HTTP/2 (RFC 9113 §8.2).
@@ -113,14 +119,25 @@ def test_every_reader_reads_the_one_definition():
 
 
 def test_the_common_value_fast_path_is_inside_the_grammar():
-    """``parser`` skips the grammar for the values nearly every request
+    """The request paths skip the grammar for the values nearly every request
     carries.  A member that does not satisfy its own rule would be accepted
-    outright, so each set is pinned against the rule it stands in for."""
-    for method in parser._COMMON_METHODS:
+    outright, so every set is pinned against the rule it stands in for."""
+    for method in field_grammar.COMMON_METHODS_OCTETS:
+        assert field_grammar.method_token_is_valid(method), method
+    for method in field_grammar.COMMON_METHODS:
         assert field_grammar.method_token_is_valid(method.encode('utf-8')), method
-    for scheme in parser._COMMON_SCHEMES:
+    for scheme in field_grammar.COMMON_SCHEMES:
         assert field_grammar.URI_SCHEME_RE.fullmatch(
             scheme.encode('utf-8')), scheme
+
+
+def test_the_two_spellings_of_the_common_method_set_are_one_set():
+    """HTTP/1.1 grades a request-line method as octets and HTTP/2 carries
+    ``:method`` as text.  The two spellings name one set; a method reachable
+    through one fast path and not the other would make the transports accept
+    different methods again."""
+    assert field_grammar.COMMON_METHODS == frozenset(
+        method.decode('ascii') for method in field_grammar.COMMON_METHODS_OCTETS)
 
 
 def test_h2_name_rule_is_the_shared_alphabet_lowercased():

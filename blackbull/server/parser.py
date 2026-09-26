@@ -15,7 +15,8 @@ a handler sees.  Field-level validation already happened when the frame parsed
 its payload.
 """
 from ..protocol.frame_types import PseudoHeaders
-from ..protocol.field_grammar import URI_SCHEME_RE, method_token_is_valid
+from ..protocol.field_grammar import (COMMON_METHODS, COMMON_SCHEMES,
+                                      URI_SCHEME_RE, method_token_is_valid)
 import logging
 from ..connection import Connection
 from ..headers import Headers
@@ -23,15 +24,6 @@ from .http1_actor import _TARGET_ALLOWED_OCTETS, _authority_is_valid
 from .request_target import split_path_query
 
 logger = logging.getLogger(__name__)
-
-#: Values nearly every request carries, already known to satisfy the value
-#: grammars below.  Membership on this path skips the ``encode`` + ``translate``
-#: and the regex; anything not listed here still goes through the grammar, so
-#: the accept set is unchanged.  ``tests/architecture/`` pins that every member
-#: really does satisfy its grammar.
-_COMMON_METHODS = frozenset({'GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'OPTIONS',
-                             'PATCH', 'CONNECT', 'TRACE'})
-_COMMON_SCHEMES = frozenset({'https', 'http'})
 
 # Shared empty extensions dict for the plain-HTTP/2 dispatch path — safe only
 # because ``HTTP2Actor._apply_priority_and_extensions`` replaces
@@ -188,7 +180,7 @@ def parse_headers(frame) -> Connection | None:
     # RFC 9110 §9.1 — method = token.  HTTP/1.1 grades its request line with
     # the same rule (``http1_actor._parse``), so the two transports cannot
     # disagree about which methods exist.
-    if (method not in _COMMON_METHODS
+    if (method not in COMMON_METHODS
             and not method_token_is_valid(method.encode('utf-8'))):
         frame._mark_malformed(f'invalid :method {method!r}')
         return None
@@ -208,7 +200,7 @@ def parse_headers(frame) -> Connection | None:
     # that transport grades only an absolute-form target's scheme (BLA-434).
     # Graded whenever the field is present, like ``:path`` above.
     scheme_pseudo = frame.pseudo_headers.get(PseudoHeaders.SCHEME)
-    if (scheme_pseudo is not None and scheme_pseudo not in _COMMON_SCHEMES
+    if (scheme_pseudo is not None and scheme_pseudo not in COMMON_SCHEMES
             and URI_SCHEME_RE.fullmatch(scheme_pseudo.encode('utf-8')) is None):
         frame._mark_malformed(f'invalid :scheme {scheme_pseudo!r}')
         return None
