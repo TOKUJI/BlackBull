@@ -456,20 +456,6 @@ class BaseSender(ABC):
     # its own attributes or pay the ``__dict__`` back.
     __slots__ = ('_writer', '_closed')
 
-    @staticmethod
-    def _content_is_forbidden(status: HTTPStatus | int,
-                              head_mode: bool = False) -> bool:
-        """Whether a response with this status may put content on the wire.
-
-        Final responses only: an informational head is not the response yet,
-        so it is never terminated here.
-
-        One answer for both transports. ``protocol.framing`` holds the set
-        these use; RFC 9110 §15.3.6 adds 205 to it, which a server may not
-        generate content in even though a peer's 205 frames one normally.
-        """
-        return head_mode or status in NO_CONTENT_GENERATED_STATUSES
-
     def __init__(self, writer: AbstractWriter):
         self._writer = writer
         self._closed = False
@@ -826,12 +812,12 @@ class HTTP1Sender(BaseSender):
         self._content_length = None
         self._body_bytes = 0
         self._informational = is_informational(status)
-        self._suppress_body = self._content_is_forbidden(status,
-                                                        self._head_mode)
+        self._suppress_body = (self._head_mode
+                               or status in NO_CONTENT_GENERATED_STATUSES)
 
-        # A different set from ``_content_is_forbidden`` on purpose: this asks
-        # whether the application's Content-Length survives as metadata, and
-        # a 304 sends it again where a 205 does not.
+        # A different set from ``NO_CONTENT_GENERATED_STATUSES`` on purpose:
+        # this asks whether the application's Content-Length survives as
+        # metadata, and a 304 sends it again where a 205 does not.
         keep_length = (not self._informational and code not in (204, 205)
                        and not (self._expect_trailers and not self._head_mode))
         app_length = (parse_content_length(headers.getlist(b'content-length'))
@@ -1193,7 +1179,8 @@ class HTTP2Sender(BaseSender):
         if self._closed:
             return
         headers = headers or []
-        forbidden = self._content_is_forbidden(status, self._head_mode)
+        forbidden = (self._head_mode
+                     or status in NO_CONTENT_GENERATED_STATUSES)
         self._suppress_body = forbidden
         # END_STREAM rides the DATA frame below, never HEADERS — unless the
         # head was promised no content, when there is no DATA to ride on.
@@ -1532,8 +1519,9 @@ class HTTP2Sender(BaseSender):
             return
 
         if self._buffered_status is not None:
-            self._suppress_body = self._content_is_forbidden(
-                self._buffered_status, self._head_mode)
+            self._suppress_body = (
+                self._head_mode
+                or self._buffered_status in NO_CONTENT_GENERATED_STATUSES)
             buffered_body = self._buffered_body
             self._buffered_body = None
             if self._suppress_body:
@@ -1614,7 +1602,8 @@ class HTTP2Sender(BaseSender):
             if self._log_record is not None:
                 self._log_record.status = int(status)
                 self._log_record.response_bytes += len(body)
-            forbidden = self._content_is_forbidden(status, self._head_mode)
+            forbidden = (self._head_mode
+                     or status in NO_CONTENT_GENERATED_STATUSES)
             self._suppress_body = forbidden
             h_bytes = build_response_headers(
                 self._factory.encoder, self._stream_id, status, headers,
