@@ -42,7 +42,7 @@ def __getattr__(name):
 
 import logging
 
-from .protocol.field_grammar import TCHAR_OCTETS
+from .protocol.field_grammar import method_token_is_valid
 logger = logging.getLogger(__name__)
 
 
@@ -1302,12 +1302,6 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
     return _make_extended_wrapper(fn, annotations, plan, depends_plan, converters)
 
 
-# RFC 9110 §5.6.2: token = 1*tchar (visible US-ASCII, no separators), from
-# the one alphabet both transports validate field names against.  A delete
-# table, not a pattern: str.translate is the C-level whole-string check.
-_TCHAR_DELETE = str.maketrans('', '', TCHAR_OCTETS.decode('ascii'))
-
-
 QUERY: str = 'QUERY'
 """The HTTP QUERY method (RFC 10008) — safe, idempotent, cacheable, with a
 request body.
@@ -1328,7 +1322,10 @@ registered with it need no migration.
 
 
 def _validate_method_token(method: str) -> None:
-    if not method or method.translate(_TCHAR_DELETE):
+    # ``isascii`` first: encoding a lone surrogate would raise and hide the
+    # message the caller needs.
+    if (not method.isascii()
+            or not method_token_is_valid(method.encode('ascii'))):
         raise ValueError(
             f"Invalid HTTP method token {method!r}: RFC 9110 §5.6.2 requires "
             "a non-empty sequence of visible ASCII tchar characters."

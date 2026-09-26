@@ -10,6 +10,8 @@ from hypothesis import strategies as st
 
 from blackbull.server.http1_actor import HTTP1Actor as _HTTP1Actor
 from blackbull.server.parser import parse_headers as _real_parse_headers
+from tests.pseudo_header_grammar import (ILLEGAL_METHODS, ILLEGAL_SCHEMES,
+                                         LEGAL_METHODS, LEGAL_SCHEMES)
 
 
 def _parse_headers(frame) -> dict:
@@ -347,13 +349,24 @@ class TestParse:
         assert (b'x-h', good_value) in kv
 
 
-def _make_h2_headers_frame_dispatch(extra_headers: list | None = None,
-                                    path: str = '/') -> object:
+def _h2_frame(fields: list) -> object:
+    """One complete HEADERS block on stream 1, carrying *fields* as given."""
     from hpack import Encoder
     from blackbull.protocol.frame import FrameFactory
     from blackbull.protocol.frame_types import FrameTypes, HeaderFrameFlags
 
-    encoder = Encoder()
+    block = Encoder().encode(fields)
+    flags = HeaderFrameFlags.END_HEADERS | HeaderFrameFlags.END_STREAM
+    raw = (len(block).to_bytes(3, 'big')
+           + FrameTypes.HEADERS
+           + bytes([flags])
+           + (1).to_bytes(4, 'big')
+           + block)
+    return FrameFactory().load(raw)
+
+
+def _make_h2_headers_frame_dispatch(extra_headers: list | None = None,
+                                    path: str = '/') -> object:
     header_list = [
         (b':method', b'GET'),
         (b':path',   path.encode('utf-8')),
@@ -362,16 +375,7 @@ def _make_h2_headers_frame_dispatch(extra_headers: list | None = None,
     ]
     if extra_headers:
         header_list.extend(extra_headers)
-
-    block = encoder.encode(header_list)
-    flags = HeaderFrameFlags.END_HEADERS | HeaderFrameFlags.END_STREAM
-    stream_id = 1
-    raw = (len(block).to_bytes(3, 'big')
-           + FrameTypes.HEADERS
-           + bytes([flags])
-           + stream_id.to_bytes(4, 'big')
-           + block)
-    return FrameFactory().load(raw)
+    return _h2_frame(header_list)
 
 
 class TestHTTP2ScopeFields:
@@ -405,15 +409,7 @@ class TestParseHeadersNoneContract:
 
     @staticmethod
     def _headers_frame(fields: list) -> object:
-        from hpack import Encoder
-        from blackbull.protocol.frame import FrameFactory
-        from blackbull.protocol.frame_types import FrameTypes, HeaderFrameFlags
-
-        block = Encoder().encode(fields)
-        flags = HeaderFrameFlags.END_HEADERS | HeaderFrameFlags.END_STREAM
-        raw = (len(block).to_bytes(3, 'big') + FrameTypes.HEADERS
-               + bytes([flags]) + (1).to_bytes(4, 'big') + block)
-        return FrameFactory().load(raw)
+        return _h2_frame(fields)
 
     def test_missing_authority_and_host_returns_none(self):
         # no :authority, no Host — https requires one of the two
@@ -772,3 +768,94 @@ class TestOneFieldGrammarForBothTransports:
         scope = _parse_headers(
             _make_h2_headers_frame_dispatch([(b'x-foo', b'value\x80\xff')]))
         assert (b'x-foo', b'value\x80\xff') in scope['headers']
+
+
+class TestPseudoHeaderGrammarBeyondFieldOctets:
+    """RFC 9110 §9.1 and RFC 3986 §3.1 — ``:method`` is a token and
+    ``:scheme`` is a URI scheme.  Neither rule is expressible over the shared
+    field octets of ``field_grammar``, which is why they are graded
+    separately."""
+
+    @staticmethod
+    def _request(method: bytes = b'GET', scheme: bytes = b'https') -> object:
+        return _h2_frame([(b':method', method), (b':path', b'/'),
+                          (b':scheme', scheme), (b':authority', b'example.com')])
+
+    @pytest.mark.parametrize('method', ILLEGAL_METHODS)
+    def test_a_non_token_method_is_malformed(self, method):
+        frame = self._request(method=method)
+        assert _real_parse_headers(frame) is None
+        assert frame.malformed
+        assert ':method' in (frame.malformed_reason or '')
+
+    @pytest.mark.parametrize('scheme', ILLEGAL_SCHEMES)
+    def test_a_non_scheme_scheme_is_malformed(self, scheme):
+        frame = self._request(scheme=scheme)
+        assert _real_parse_headers(frame) is None
+        assert frame.malformed
+        assert ':scheme' in (frame.malformed_reason or '')
+
+    @pytest.mark.parametrize('method', LEGAL_METHODS)
+    def test_a_token_method_is_accepted(self, method):
+        conn = _real_parse_headers(self._request(method=method))
+        assert conn is not None
+        assert conn.method == method.decode()
+
+    @pytest.mark.parametrize('scheme', LEGAL_SCHEMES)
+    def test_a_uri_scheme_is_accepted(self, scheme):
+        conn = _real_parse_headers(self._request(scheme=scheme))
+        assert conn is not None
+        assert conn.scheme == scheme.decode()
+
+    def test_the_method_rule_is_not_the_field_value_rule(self):
+        """The octets the method grammar refuses are still §5.5 field-content,
+        and an underscore is even a §5.6.2 tchar — so ``field_grammar``'s two
+        octet rules accept them and only the method/scheme grammars refuse."""
+        from blackbull.protocol.frame_types import (
+            field_name_is_valid, field_value_is_valid)
+
+        assert field_value_is_valid(b'M<T')
+        assert field_value_is_valid(b'a_b')
+        assert field_name_is_valid(b'a_b')
+        assert _real_parse_headers(self._request(method=b'M<T')) is None
+        assert _real_parse_headers(self._request(scheme=b'a_b')) is None
+
+
+class TestH1H2MethodAcceptSetParity:
+    """RFC 9110 §9.1 — one method accept set, whichever transport carried the
+    request.  HTTP/1.1 grades its request-line method as a token; HTTP/2 has
+    to refuse the same values in ``:method``."""
+
+    @staticmethod
+    def _h1_accepts(method: bytes) -> bool:
+        from blackbull.server.http1_actor import BadRequestError
+        try:
+            conn = object.__new__(_HTTP1Actor)._parse(
+                b'%s / HTTP/1.1\r\nHost: x\r\n\r\n' % method)
+        except BadRequestError:
+            return False
+        return conn is not None
+
+    @staticmethod
+    def _h2_accepts(method: bytes) -> bool:
+        frame = _h2_frame([(b':method', method), (b':path', b'/'),
+                           (b':scheme', b'https'),
+                           (b':authority', b'example.com')])
+        return _real_parse_headers(frame) is not None and not frame.malformed
+
+    def test_the_two_transports_accept_the_same_method_octets(self):
+        """Sweeps every octet at the leading, inner and trailing position
+        rather than naming a few separators, so the two alphabets cannot drift
+        apart again without this failing."""
+
+        def shapes(octet: bytes) -> tuple[bytes, ...]:
+            return octet + b'MT', b'M' + octet + b'T', b'MT' + octet
+
+        assert all(self._h1_accepts(s) and self._h2_accepts(s)
+                   for s in shapes(b'.')), 'the sweep must not pass vacuously'
+        for code in range(256):
+            for method in shapes(bytes([code])):
+                assert self._h1_accepts(method) == self._h2_accepts(method), (
+                    f'transports disagree on method {method!r}')
+        assert not self._h1_accepts(b'')
+        assert not self._h2_accepts(b'')
