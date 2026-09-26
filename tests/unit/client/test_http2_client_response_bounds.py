@@ -135,6 +135,16 @@ def _frames_of(c: HTTP2Client, kind) -> list:
 
 async def _feed_data(c: HTTP2Client, stream_id: int, payload: bytes, *,
                      end_stream: bool = False) -> None:
+    """One DATA frame, after the response has been opened.
+
+    The bounds under test here are the body's, so the peer is a conforming
+    one: §8.1 puts content after the final head, and a client that refuses
+    content arriving before it is right to.  Opening the response first keeps
+    every assertion about the bound rather than about the order.
+    """
+    pending = c._responses.get(stream_id)
+    if pending is not None and not pending.final_seen:
+        await _feed_headers(c, stream_id, [])
     frame = c._factory.create(FrameTypes.DATA, 1 if end_stream else 0,
                               stream_id, data=payload)
     await c._on_response_data(frame)
@@ -142,12 +152,15 @@ async def _feed_data(c: HTTP2Client, stream_id: int, payload: bytes, *,
 
 async def _feed_headers(c: HTTP2Client, stream_id: int,
                         headers: list[tuple[str, str]], *,
-                        end_stream: bool = False, status: int = 200) -> None:
-    """A response head.  *status* below 200 makes it an interim response,
-    which must not start the progress clock."""
+                        end_stream: bool = False,
+                        status: int | None = 200) -> None:
+    """A response head.  *status* below 200 makes it an informational
+    response, which must not start the progress clock; ``None`` omits
+    ``:status`` so the frame is a trailer section (RFC 9113 §8.1)."""
     frame = c._factory.create(FrameTypes.HEADERS, 5 if end_stream else 4,
                               stream_id)
-    frame.pseudo_headers[PseudoHeaders.STATUS] = str(status)
+    if status is not None:
+        frame.pseudo_headers[PseudoHeaders.STATUS] = str(status)
     frame.headers.extend(headers)
     await c._on_response_headers(frame)
 
@@ -256,20 +269,27 @@ class TestTheHeaderAggregate:
     def _section(n: int) -> list[tuple[str, str]]:
         return [(f'x-pad-{i}', 'v' * 100) for i in range(n)]
 
+    async def _sections(self, c, n: int) -> None:
+        """*n* field sections in §8.1's order: one informational head, the
+        final head, then trailers.  The aggregate is what is under test and
+        all three kinds count against it."""
+        await _feed_headers(c, 1, self._section(10), status=103)
+        await _feed_headers(c, 1, self._section(10))
+        for i in range(n - 2):
+            await _feed_headers(c, 1, self._section(10), status=None,
+                                end_stream=(i == n - 3))
+
     async def test_off_by_default_repeated_headers_are_accepted(self):
         c = _client()
         future = _pending(c)
-        for _ in range(20):
-            await _feed_headers(c, 1, self._section(10))
-        await _feed_headers(c, 1, [], end_stream=True)
+        await self._sections(c, 21)
         assert (await _resolved(future)).status
 
     async def test_headers_accumulating_past_the_cap_are_refused(self, monkeypatch):
         monkeypatch.setenv('BB_CLIENT_HEAD_MAX_TOTAL', '4096')
         c = _client()
         future = _pending(c)
-        for _ in range(20):
-            await _feed_headers(c, 1, self._section(10))
+        await self._sections(c, 21)
         with pytest.raises(ResponseTooLarge):
             await _resolved(future)
 
@@ -285,8 +305,7 @@ class TestTheHeaderAggregate:
         monkeypatch.setenv('BB_CLIENT_HEAD_MAX_TOTAL', '4096')
         c = _client()
         future = _pending(c)
-        for _ in range(20):
-            await _feed_headers(c, 1, self._section(10))
+        await self._sections(c, 21)
         with pytest.raises(ResponseTooLarge):
             await _resolved(future)
         assert _frames_of(c, FrameTypes.RST_STREAM)

@@ -140,6 +140,25 @@ the raw-wire primitives in
 [Driving a misbehaving peer](#driving-a-misbehaving-peer) — `send_header_line`
 will put two `Content-Length` lines on the wire, because that is what it is for.
 
+## What counts as a response
+
+`request()` returns only a well-formed final response, on either protocol.
+The order is RFC 9113 §8.1's — zero or more informational `1xx` heads, one
+final head, the body, then an optional trailer section — and every part is
+checked: `:status` is present and three ASCII digits, content appears only
+where RFC 9110 §9.3 allows it (a `HEAD` response and `204` / `304` carry
+none, whatever they declare), a declared `Content-Length` matches the body
+exactly, and a trailer section carries no pseudo-header field.
+
+A response that breaks the rule raises `ProtocolError`. Under HTTP/2 that
+refuses the stream alone — `RST_STREAM`, the connection and its other streams
+survive. `res.headers` holds the final head's fields only and `res.trailers`
+the trailer section: RFC 9113 §8.1 keeps the two field sections apart, and
+gRPC puts `grpc-status` in the trailer. Folding them together, as this client
+did, left a caller unable to tell which section a field came from.
+Informational heads are read and discarded, which is what the HTTP/1.1 reader
+has always done with them.
+
 ## What a call raises
 
 Everything the client itself refuses derives from `ClientError`:

@@ -25,6 +25,7 @@ from ..protocol.frame_types import (DEFAULT_INITIAL_WINDOW_SIZE, ErrorCodes,
                                     HeaderFrameFlags, PseudoHeaders,
                                     SettingFrameFlags)
 from ..headers import Headers
+from ..protocol.framing import parse_content_length
 from ..server.cap_log import log_cap_hit
 from ..server.rate_window import ByteRateFloor
 from ..server.recipient import AbstractReader, AsyncioReader
@@ -153,13 +154,17 @@ class ClientResponse:
     """A complete HTTP response received by the client.
 
     ``status`` is the HTTP status code (parsed from the ``:status`` pseudo-header).
-    ``headers`` are the regular response headers as a ``Headers`` instance
-    (bytes-keyed, lowercase-indexed).  ``body`` is the concatenation of all
-    DATA-frame payloads received on the stream.
+    ``headers`` are the *final head's* regular fields as a ``Headers`` instance
+    (bytes-keyed, lowercase-indexed).  ``trailers`` is the trailer section that
+    followed the body: RFC 9113 §8.1 makes it a separate field section, and
+    gRPC puts ``grpc-status`` in it, so it is held apart rather than folded
+    into ``headers`` where its provenance would be lost.  ``body`` is the
+    concatenation of all DATA-frame payloads received on the stream.
     """
     status: int
     headers: Headers
     body: bytes
+    trailers: Headers = field(default_factory=lambda: Headers([]))
 
 
 class _Phase(Enum):
@@ -181,7 +186,23 @@ class _PendingResponse:
     """In-flight response state, keyed by stream_id in ``HTTP2Client._responses``."""
     future: asyncio.Future
     status: int = 0
+    #: The request method, so RFC 9110 §9.3's body rules can be applied to the
+    #: response: a HEAD response carries no body whatever it declares.
+    method: str = 'GET'
+    #: Where the response is in RFC 9113 §8.1's order.  HEADERS before
+    #: ``final_seen`` are informational and contribute nothing to ``headers``;
+    #: HEADERS after it are the trailer section and contribute nothing either.
+    final_seen: bool = False
+    trailer_seen: bool = False
+    #: The declared body length, when the response declares one.  Compared
+    #: against the DATA total at completion, and never against a response that
+    #: may not carry content — see ``method``.
+    declared: int | None = None
     headers: list[tuple[bytes, bytes]] = field(default_factory=list)
+    #: The trailer section's fields, kept apart from ``headers`` — RFC 9113
+    #: §8.1 makes them a different field section and gRPC puts ``grpc-status``
+    #: here.
+    trailer_fields: list[tuple[bytes, bytes]] = field(default_factory=list)
     body_parts: list[bytes] = field(default_factory=list)
     unacked: int = 0
     #: Response-body octets accepted so far, against BB_CLIENT_BODY_MAX_TOTAL.
@@ -502,7 +523,8 @@ class HTTP2Client:
         stream_id = self._allocate_stream_id()
         loop = asyncio.get_running_loop()
         future: asyncio.Future[ClientResponse] = loop.create_future()
-        self._responses[stream_id] = _PendingResponse(future=future)
+        self._responses[stream_id] = _PendingResponse(
+            future=future, method=str(method))
 
         # END_STREAM rides the HEADERS only when there is no body; with one
         # it goes on the trailing DATA instead.
@@ -1412,26 +1434,46 @@ class HTTP2Client:
             # caller's ResponseTooLarge with a write error.
             logger.debug('could not send RST_STREAM for stream %d', stream_id)
 
+    async def _reject_response(self, stream_id: int,
+                               error: Exception) -> None:
+        """Refuse one response whose *meaning* the peer got wrong.
+
+        A cap refusal in [`_refuse_stream`][] is this client's own budget; this
+        is the peer breaching RFC 9113 §8.1, so the frame carries
+        ``PROTOCOL_ERROR`` (§8.1.1) and ``blackbull.caps`` is not told — a
+        malformed response is not a limit being reached.
+
+        Everything released here is what `_complete` would otherwise own:
+        the pending entry (and with it the deadline and the upload it cancels),
+        and the flow-control credit for DATA already consumed, which
+        [`_on_response_data`][] has returned by the time this runs.
+        """
+        pending = self._drop_pending(stream_id)
+        if pending is None:
+            return
+        if not pending.future.done():
+            pending.future.set_exception(error)
+        try:
+            await self._send_raw_frame(
+                self._factory.rst_stream(stream_id, ErrorCodes.PROTOCOL_ERROR))
+        except Exception:
+            # The refusal already happened; a peer that has gone away cannot
+            # also be told about it, and raising here would replace the
+            # caller's ProtocolError with a write error.
+            logger.debug('could not send RST_STREAM for stream %d', stream_id)
+
+    @staticmethod
+    def _response_error(stream_id: int, reason: str) -> ProtocolError:
+        return ProtocolError(
+            f'malformed HTTP/2 response on stream {stream_id}: {reason}')
+
     async def _on_response_headers(self, frame) -> None:
         pending = self._responses.get(frame.stream_id)
         if pending is None:
             logger.debug('HEADERS for unknown stream %d — dropping', frame.stream_id)
             return
-        status_str = frame.pseudo_headers.get(PseudoHeaders.STATUS)
-        if status_str is not None:
-            try:
-                pending.status = int(status_str)
-            except (TypeError, ValueError):
-                pending.future.set_exception(
-                    ProtocolError(f'invalid :status pseudo-header: {status_str!r}'))
-                self._drop_pending(frame.stream_id)
-                return
-        # This one comparison is also what keeps the head clock running across
-        # a 1xx, since only the handover disarms it: a peer that sends 103 and
-        # then goes quiet stays bounded by the phase it never left.  Field
-        # lines count either way — they accumulate whatever they announce.
-        if pending.status >= 200:
-            self._arm_deadline(frame.stream_id, _Phase.BODY)
+        # Every field line counts against the aggregate, whatever the section:
+        # §8.1 gives a response up to three of them and none is free.
         max_headers = get_settings().client_head_max_total
         for name, value in frame.headers:
             name, value = _to_bytes(name), _to_bytes(value)
@@ -1445,11 +1487,69 @@ class HTTP2Client:
                         f'BB_CLIENT_HEAD_MAX_TOTAL={max_headers}'),
                     ErrorCodes.ENHANCE_YOUR_CALM)
                 return
-            pending.headers.append((name, value))
+
+        if pending.final_seen or pending.trailer_seen:
+            # RFC 9113 §8.1 — anything after the final head is the trailer
+            # section, and §8.1.1 forbids a pseudo-header field in it.
+            if frame.pseudo_headers:
+                await self._reject_response(frame.stream_id, self._response_error(
+                    frame.stream_id,
+                    'a pseudo-header field in the trailer section'))
+                return
+            pending.trailer_seen = True
+            for name, value in frame.headers:
+                pending.trailer_fields.append(
+                    (_to_bytes(name), _to_bytes(value)))
+            if frame.end_stream:
+                if await self._settle_body_rate(frame.stream_id, pending, 0):
+                    return
+                await self._complete(frame.stream_id)
+            return
+
+        status_str = frame.pseudo_headers.get(PseudoHeaders.STATUS)
+        if status_str is None:
+            await self._reject_response(frame.stream_id, self._response_error(
+                frame.stream_id, 'no :status pseudo-header field'))
+            return
+        status = _parse_status(status_str)
+        if status is None:
+            await self._reject_response(frame.stream_id, self._response_error(
+                frame.stream_id,
+                f':status is not three ASCII digits: {status_str!r}'))
+            return
+        if status < 200:
+            # An informational response is not a final one (§8.1), so it may
+            # not end the stream and it announces nothing about the body.  This
+            # one comparison is also what keeps the head clock running across a
+            # 1xx, since only the handover disarms it: a peer that sends 103
+            # and then goes quiet stays bounded by the phase it never left.
+            if frame.end_stream:
+                await self._reject_response(frame.stream_id, self._response_error(
+                    frame.stream_id,
+                    'an informational response carried END_STREAM'))
+                return
+            return
+        pending.status = status
+        pending.final_seen = True
+        try:
+            pending.declared = parse_content_length(
+                (name, value) for name, value in frame.headers
+                if _to_bytes(name).lower() == b'content-length')
+        except ValueError as exc:
+            await self._reject_response(
+                frame.stream_id, self._response_error(frame.stream_id, str(exc)))
+            return
+        self._arm_deadline(frame.stream_id, _Phase.BODY)
+        # Only the final head reaches the caller: §8.1 gives a response an
+        # informational section and a trailer section beside it, and folding
+        # either into these would put another response's fields in the
+        # response the caller asked for.
+        for name, value in frame.headers:
+            pending.headers.append((_to_bytes(name), _to_bytes(value)))
         if frame.end_stream:
             if await self._settle_body_rate(frame.stream_id, pending, 0):
                 return
-            self._complete(frame.stream_id)
+            await self._complete(frame.stream_id)
 
     async def _settle_body_rate(self, stream_id: int,
                                 pending: '_PendingResponse',
@@ -1492,6 +1592,29 @@ class HTTP2Client:
             await self._credit_connection(frame.length)
             return
         payload = frame.payload
+        if not pending.final_seen or pending.trailer_seen:
+            # §8.1's order: content follows the final head and precedes the
+            # trailer section.  These octets still bought window, so the
+            # credit further down is still returned — the refusal is about
+            # what the response means, not about the flow-control account.
+            await self._reject_response(frame.stream_id, self._response_error(
+                frame.stream_id, 'a DATA frame outside the response body'))
+            await self._credit_connection(frame.length)
+            return
+        if payload and not _response_has_content(pending.method, pending.status):
+            await self._reject_response(frame.stream_id, self._response_error(
+                frame.stream_id,
+                f'content on a {pending.status} response to {pending.method}'))
+            await self._credit_connection(frame.length)
+            return
+        if (payload and pending.declared is not None
+                and pending.body_seen + len(payload) > pending.declared):
+            await self._reject_response(frame.stream_id, self._response_error(
+                frame.stream_id,
+                f'body longer than the declared Content-Length '
+                f'{pending.declared}'))
+            await self._credit_connection(frame.length)
+            return
         max_body = get_settings().client_body_max_total
         if max_body and pending.body_seen + len(payload) > max_body:
             # Checked before the append: the cap bounds memory, so the frame
@@ -1544,7 +1667,7 @@ class HTTP2Client:
         if frame.end_stream:
             if await self._settle_body_rate(frame.stream_id, pending, 0):
                 return
-            self._complete(frame.stream_id)
+            await self._complete(frame.stream_id)
 
     async def _credit_received(self, stream_id: int, pending: '_PendingResponse',
                                n: int, *, end_stream: bool) -> None:
@@ -1580,14 +1703,28 @@ class HTTP2Client:
                 self._factory.window_update(0, self._unacked_conn))
             self._unacked_conn = 0
 
-    def _complete(self, stream_id: int) -> None:
+    async def _complete(self, stream_id: int) -> None:
+        pending = self._responses.get(stream_id)
+        if pending is None:
+            return
+        if (pending.declared is not None
+                and _response_has_content(pending.method, pending.status)
+                and pending.body_seen != pending.declared):
+            # A short body is only detectable here, at END_STREAM: the peer
+            # may simply be slow.  The long one was refused as it arrived.
+            await self._reject_response(stream_id, self._response_error(
+                stream_id,
+                f'declared Content-Length {pending.declared}, received '
+                f'{pending.body_seen} body octets'))
+            return
         pending = self._drop_pending(stream_id, aborted=False)
         if pending is None or pending.future.done():
             return
         response = ClientResponse(
-            status=pending.status or HTTPStatus.OK,
+            status=pending.status,
             headers=Headers(pending.headers),
             body=b''.join(pending.body_parts),
+            trailers=Headers(pending.trailer_fields),
         )
         pending.future.set_result(response)
 
@@ -1680,3 +1817,20 @@ def _to_str(value: str | bytes) -> str:
 
 def _to_bytes(value: str | bytes) -> bytes:
     return value.encode('ascii') if isinstance(value, str) else bytes(value)
+
+
+def _parse_status(value: str) -> int | None:
+    """The ``:status`` of RFC 9110 §15, or ``None`` if it is not one.
+
+    The same three-ASCII-digit rule the HTTP/1.1 reader applies to a status
+    line, and deliberately no wider: a value range enforced on one transport
+    only is an accept set the two transports disagree on.
+    """
+    if len(value) != 3 or not value.isdigit() or not value.isascii():
+        return None
+    return int(value)
+
+
+def _response_has_content(method: str, status: int) -> bool:
+    """Whether this response may carry content at all (RFC 9110 §9.3)."""
+    return method.upper() != 'HEAD' and status not in (204, 304)
