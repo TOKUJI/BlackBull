@@ -21,8 +21,6 @@ FRAMING = ROOT / 'protocol' / 'framing.py'
 INLINE = (
     'status in (204',          # response_has_content
     'status not in (204',      # response_has_content
-    'code in (204',            # response_has_content, written over a code
-    'code not in (204, 205, 304',
     '100 <= status',           # is_informational
     'status < 200',            # is_informational
     "== 'HEAD'",               # method_is

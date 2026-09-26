@@ -815,14 +815,18 @@ class HTTP1Sender(BaseSender):
         # The method arrives as ``_head_mode`` rather than as a method, so
         # the shared rule is asked about the status alone; ``_head_mode`` is
         # OR-ed back in just below.  205 is a generation rule and not a
-        # framing one: RFC 9110 §15.3.7 forbids a server to generate content
-        # in one where §9.3.2 would still frame it, so it is refused here and
+        # framing one: RFC 9110 §15.3.6 forbids a server to generate content
+        # in one where RFC 9112 §6.3 would still frame it, so it is refused
+        # here and
         # left out of ``response_has_content`` — a client must still read a
         # peer's 205 to its declared length to stay in step with it.
         content_forbidden = (not response_has_content(None, status)
                              or code == 205)
         self._suppress_body = self._head_mode or content_forbidden
 
+        # A different set from ``content_forbidden`` on purpose: this asks
+        # whether the application's Content-Length survives as metadata, and
+        # a 304 sends it again where a 205 does not.
         keep_length = (not self._informational and code not in (204, 205)
                        and not (self._expect_trailers and not self._head_mode))
         app_length = (parse_content_length(headers.getlist(b'content-length'))

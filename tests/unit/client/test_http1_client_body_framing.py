@@ -81,6 +81,23 @@ class TestChunkSizeGrammar:
         assert res.body == b'hello'
 
 
+class TestBodylessStatuses:
+    @pytest.mark.asyncio
+    async def test_a_205_body_is_consumed_so_the_next_response_stays_aligned(
+            self):
+        """RFC 9110 §15.3.6 forbids a server to generate content in a 205,
+        but RFC 9112 §6.3 still frames one. Calling it bodyless would leave
+        those octets in the buffer for the next response to be misparsed
+        as — the desync this reader exists to avoid."""
+        reader = _CannedReader(
+            b'HTTP/1.1 205 Reset Content\r\ncontent-length: 3\r\n\r\nabc'
+            b'HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nhi')
+        first = await HTTP1ResponseRecipient().receive(reader)
+        assert (first.status, first.body) == (205, b'abc')
+        second = await HTTP1ResponseRecipient().receive(reader)
+        assert (second.status, second.body) == (200, b'hi')
+
+
 class TestTrailerSection:
     @pytest.mark.asyncio
     async def test_trailers_do_not_desync_the_next_response(self):
