@@ -121,7 +121,9 @@ def test_every_reader_reads_the_one_definition():
 def test_the_common_value_fast_path_is_inside_the_grammar():
     """The request paths skip the grammar for the values nearly every request
     carries.  A member that does not satisfy its own rule would be accepted
-    outright, so every set is pinned against the rule it stands in for."""
+    outright, so every set is pinned against the rule it stands in for; the
+    H/2 parser also hands a ``COMMON_SCHEMES`` hit on without case mapping,
+    so the members are lowercase (RFC 3986 §3.1)."""
     for method in field_grammar.COMMON_METHODS_OCTETS:
         assert field_grammar.method_token_is_valid(method), method
     for method in field_grammar.COMMON_METHODS:
@@ -129,6 +131,7 @@ def test_the_common_value_fast_path_is_inside_the_grammar():
     for scheme in field_grammar.COMMON_SCHEMES:
         assert field_grammar.URI_SCHEME_RE.fullmatch(
             scheme.encode('utf-8')), scheme
+        assert scheme == scheme.lower(), scheme
 
 
 def test_the_two_spellings_of_the_common_method_set_are_one_set():

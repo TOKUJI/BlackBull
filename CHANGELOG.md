@@ -5,6 +5,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+- **An HTTP/2 `:scheme` is read case-insensitively, and the application sees
+  it lowercase.**  A scheme is case-insensitive and its canonical form is
+  lowercase (RFC 3986 §3.1, RFC 9110 §4.2.3), but the host rule compared the
+  value against lowercase literals, so `:scheme: HTTPS`
+  with neither `:authority` nor `Host` was accepted and reached a handler
+  with no host at all — the very request `:scheme: https` answers `missing
+  :authority and Host` for.  The same unnormalized value mapped an RFC 8441
+  Extended CONNECT to `ws` rather than `wss`, and arrived as `conn.scheme`,
+  where `scope['scheme'] == 'https'` is how secure-cookie and redirect
+  decisions read it.  The parser normalizes the scheme to lowercase once
+  (RFC 3986 §3.1), so the host rule, the WebSocket mapping and the
+  application read one spelling.
+
 - **An HTTP/2 request's `:method` must be a token and its `:scheme` a URI
   scheme.**  `G,ET` used to reach the router and the access log over HTTP/2
   while HTTP/1.1 refused it on its request line, and `a_b` was taken as a

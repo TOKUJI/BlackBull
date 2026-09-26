@@ -805,7 +805,7 @@ class TestPseudoHeaderGrammarBeyondFieldOctets:
     def test_a_uri_scheme_is_accepted(self, scheme):
         conn = _real_parse_headers(self._request(scheme=scheme))
         assert conn is not None
-        assert conn.scheme == scheme.decode()
+        assert conn.scheme == scheme.decode().lower()
 
     def test_the_method_rule_is_not_the_field_value_rule(self):
         """The octets the method grammar refuses are still §5.5 field-content,
@@ -819,6 +819,24 @@ class TestPseudoHeaderGrammarBeyondFieldOctets:
         assert field_name_is_valid(b'a_b')
         assert _real_parse_headers(self._request(method=b'M<T')) is None
         assert _real_parse_headers(self._request(scheme=b'a_b')) is None
+
+
+class TestSchemeCaseIsNotSignificant:
+    """RFC 3986 §3.1 and RFC 9110 §4.2.3 — a scheme is case-insensitive and
+    its canonical form is lowercase, so ``conn.scheme``/``scope['scheme']``
+    hand the application that spelling whatever the peer sent."""
+
+    @staticmethod
+    def _request(fields: list) -> object:
+        return _h2_frame([(b':method', b'GET'), (b':path', b'/')] + fields)
+
+    @pytest.mark.parametrize('scheme', [b'HTTPS', b'Https', b'HTTP'])
+    def test_the_application_sees_a_lowercase_scheme(self, scheme):
+        conn = _real_parse_headers(self._request(
+            [(b':scheme', scheme), (b':authority', b'example.com')]))
+        assert conn is not None
+        assert conn.scheme == scheme.decode().lower()
+        assert conn.as_scope()['scheme'] == scheme.decode().lower()
 
 
 class TestH1H2MethodAcceptSetParity:
