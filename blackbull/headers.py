@@ -181,13 +181,11 @@ class Headers:
         """Return a new Headers containing all pairs from *self* then *other*."""
         return Headers(list(self._list) + list(other._list))
 
-    # ---- Structured Fields accessors (RFC 9651) --------------------------
+    def get_combined(self, name: bytes) -> bytes | None:
+        """Return values joined by ``, ``, or ``None`` when absent.
 
-    def _sf_value(self, name: bytes) -> bytes | None:
-        """Combined field value for *name* (RFC 9651 §4.2 step 1), or ``None``.
-
-        Multiple field lines are joined with ``b', '`` before parsing, as
-        the RFC requires for List- and Dictionary-typed fields.
+        Use only for fields allowing comma combination. For fields such as
+        Set-Cookie, use ``getlist`` instead. A single empty value returns ``b''``.
         """
         pairs = self._index.get(name)
         if pairs is None:
@@ -197,6 +195,8 @@ class Headers:
         if len(pairs) == 1:
             return pairs[0][1]
         return b', '.join(value for _, value in pairs)
+
+    # ---- Structured Fields accessors (RFC 9651) --------------------------
 
     def get_sf_item(self, name: bytes) -> sf.Item | None:
         """Parse *name* as a Structured Field Item (RFC 9651).
@@ -209,7 +209,7 @@ class Headers:
 
             headers.get_sf_item(b'deprecation')   # (Date(1659578233), {})
         """
-        value = self._sf_value(name)
+        value = self.get_combined(name)
         if value is None:
             return None
         try:
@@ -228,7 +228,7 @@ class Headers:
 
             headers.get_sf_list(b'accept-query')  # [('a', {}), ('b', {})]
         """
-        value = self._sf_value(name)
+        value = self.get_combined(name)
         if value is None:
             return None
         try:
@@ -248,7 +248,7 @@ class Headers:
 
             headers.get_sf_dict(b'priority')      # {'u': (2, {}), 'i': (True, {})}
         """
-        value = self._sf_value(name)
+        value = self.get_combined(name)
         if value is None:
             return None
         try:

@@ -641,11 +641,12 @@ class TestRequestDirectives:
         await _run(mw, _scope(headers=[(b'pragma', b'no-cache')]), cn)
         assert counter['n'] == 2
 
-    async def test_pragma_is_ignored_when_cache_control_is_present(self):
+    @pytest.mark.parametrize('cache_control', [b'max-age=600', b''])
+    async def test_pragma_is_ignored_when_cache_control_is_present(self, cache_control):
         mw = Cache()
         cn, counter = _make_handler()
         await _run(mw, _scope(), cn)
-        await _run(mw, _scope(headers=[(b'cache-control', b'max-age=600'),
+        await _run(mw, _scope(headers=[(b'cache-control', cache_control),
                                        (b'pragma', b'no-cache')]), cn)
         assert counter['n'] == 1
 

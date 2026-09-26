@@ -24,7 +24,7 @@ from http import HTTPStatus
 from blackbull.connection import Connection
 from blackbull.env import get_settings, Environment
 from blackbull.native import NativeResponse
-from .accept_encoding import accept_encoding_value, parse_accept_encoding
+from ._accept_encoding import select_encoding
 
 
 # Common web-asset MIME types that may be missing from the host's
@@ -177,12 +177,10 @@ class StaticFiles:
     # stat on every request.
     _STAT_TTL_S = float(os.environ.get('BB_STATIC_STAT_TTL_S', '1.0'))
 
-    # Server preference order for precompressed variant selection.
-    # Matches blackbull.middleware.compression's order (br > zstd > gzip).
-    _ENCODING_SUFFIXES: tuple[tuple[bytes, str], ...] = (
-        (b'br',   '.br'),
-        (b'zstd', '.zst'),
-        (b'gzip', '.gz'),
+    _ENCODING_SUFFIXES: tuple[tuple[str, str], ...] = (
+        ('br',   '.br'),
+        ('zstd', '.zst'),
+        ('gzip', '.gz'),
     )
 
     def __init__(self, directory: str | None = None, *,
@@ -249,7 +247,7 @@ class StaticFiles:
         # the from-disk-every-request contract extends to the sibling
         # existence check.
         # Key = original request path string, Value = dict of available encodings.
-        self._sibling_cache: dict[str, dict[bytes, str]] = {}
+        self._sibling_cache: dict[str, dict[str, str]] = {}
 
     @property
     def _root(self) -> Path:
@@ -346,11 +344,9 @@ class StaticFiles:
         """
         if conn.headers.getlist(b'range'):
             return target, b''
-        accept = accept_encoding_value(conn.headers)
+        accept = conn.headers.get_combined(b'accept-encoding')
         if not accept:
             return target, b''
-        accepted = parse_accept_encoding(accept)
-        wildcard = accepted.get(b'*', False)
 
         # Sibling existence: cached if `cache=True`, recomputed every
         # request otherwise (so the from-disk-every-request contract
@@ -371,10 +367,9 @@ class StaticFiles:
                 if os.path.isfile(sibling):
                     siblings[enc] = sibling
 
-        for enc, _suffix in self._ENCODING_SUFFIXES:
-            sibling = siblings.get(enc)
-            if sibling is not None and accepted.get(enc, wildcard):
-                return sibling, enc
+        encoding = select_encoding(accept, siblings)
+        if encoding is not None:
+            return siblings[encoding], encoding.encode()
         return target, b''
 
     async def _serve(self, conn, send, path: str):

@@ -5,6 +5,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+- Dynamic compression and precompressed static files honor `Accept-Encoding`
+  refusals (`q=0`), wildcard acceptance, and repeated fields consistently.
+  Malformed qualities or parameters refuse the named coding, including when
+  `*` would otherwise allow it.
+
 - **A failing `@app.on_shutdown` hook now exits `1`** instead of `0` in a
   single-worker process (`app.run()`, the `blackbull` CLI).  `TestClient` and
   `NativeClient` raise it from the `with` block unless the block is already

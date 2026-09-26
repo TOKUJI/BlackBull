@@ -104,15 +104,24 @@ async def test_acceptance_on_cache_miss_and_hit(tmp_path, fields, encoding, path
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('path', ['dynamic', 'static'])
-@pytest.mark.parametrize('codecs', [('gzip',), ('zstd', 'gzip'), ('br', 'zstd', 'gzip')])
-@pytest.mark.parametrize('fields', [
-    [b'*'],
-    [b'br;q=0.1,zstd;q=0.5,gzip;q=1'],
-    [b'*', b'br;q=0'],
-    [b'br;q=0,zstd;q=0,*'],
-    [b'br;q=0', b'zstd;q=0', b'gzip;q=0', b'*'],
+@pytest.mark.parametrize(('codecs', 'fields', 'expected'), [
+    (('gzip',), [b'*'], 'gzip'),
+    (('zstd', 'gzip'), [b'*'], 'zstd'),
+    (('br', 'zstd', 'gzip'), [b'*'], 'br'),
+    (('gzip',), [b'br;q=0.1,zstd;q=0.5,gzip;q=1'], 'gzip'),
+    (('zstd', 'gzip'), [b'br;q=0.1,zstd;q=0.5,gzip;q=1'], 'zstd'),
+    (('br', 'zstd', 'gzip'), [b'br;q=0.1,zstd;q=0.5,gzip;q=1'], 'br'),
+    (('gzip',), [b'*', b'br;q=0'], 'gzip'),
+    (('zstd', 'gzip'), [b'*', b'br;q=0'], 'zstd'),
+    (('br', 'zstd', 'gzip'), [b'*', b'br;q=0'], 'zstd'),
+    (('gzip',), [b'br;q=0,zstd;q=0,*'], 'gzip'),
+    (('zstd', 'gzip'), [b'br;q=0,zstd;q=0,*'], 'gzip'),
+    (('br', 'zstd', 'gzip'), [b'br;q=0,zstd;q=0,*'], 'gzip'),
+    (('gzip',), [b'br;q=0', b'zstd;q=0', b'gzip;q=0', b'*'], ''),
+    (('zstd', 'gzip'), [b'br;q=0', b'zstd;q=0', b'gzip;q=0', b'*'], ''),
+    (('br', 'zstd', 'gzip'), [b'br;q=0', b'zstd;q=0', b'gzip;q=0', b'*'], ''),
 ])
-async def test_available_codec_preference_and_refusals(tmp_path, path, codecs, fields):
+async def test_available_codec_preference_and_refusals(tmp_path, path, codecs, fields, expected):
     compressors = {'gzip': gzip.compress}
     decompressors = {'gzip': gzip.decompress}
     if 'br' in codecs:
@@ -132,10 +141,6 @@ async def test_available_codec_preference_and_refusals(tmp_path, path, codecs, f
         for name in codecs:
             (tmp_path / ('body.txt' + suffixes[name])).write_bytes(compressors[name](BODY))
         middleware = StaticFiles(str(tmp_path), cache=True)
-    refused = {name for name in codecs
-               if name.encode() + b';q=0' in b','.join(fields).split(b',')}
-    expected = next((name for name in ('br', 'zstd', 'gzip')
-                     if name in codecs and name not in refused), '')
     for _ in range(2):
         status, headers, payload = await _response(
             middleware, fields, dynamic=path == 'dynamic')

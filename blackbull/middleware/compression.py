@@ -23,7 +23,7 @@ from ..connection import Connection
 from ..headers import Headers
 from ..native import NativeResponse
 from ..server.cap_log import log_cap_hit
-from .accept_encoding import accept_encoding_value, parse_accept_encoding
+from ._accept_encoding import select_encoding
 from .utils import as_middleware
 
 _MIN_SIZE = 100  # default minimum body size to bother compressing
@@ -40,7 +40,6 @@ _BROTLI_QUALITY = 4
 # fall-back instead of unbounded executor queue growth.  ``0`` disables.
 import os as _os  # noqa: PLC0415
 _MAX_INFLIGHT = max((_os.cpu_count() or 1) * 2, 4)
-_SERVER_PREFERENCE = ['br', 'zstd', 'gzip']  # server-side priority order
 
 # Content-Type prefixes whose payloads are already compressed or binary and
 # should not be re-compressed (compressing them wastes CPU with no size gain).
@@ -230,13 +229,8 @@ class Compression:
         cache = self._codec_cache
         if accept_header in cache:
             return cache[accept_header]
-        accepted = parse_accept_encoding(accept_header)
-        wildcard = accepted.get(b'*', False)
-        result: tuple[str, Callable[[bytes], bytes]] | None = None
-        for codec in _SERVER_PREFERENCE:
-            if accepted.get(codec.encode(), wildcard) and codec in self._available:
-                result = (codec, self._available[codec])
-                break
+        codec = select_encoding(accept_header, self._available)
+        result = (codec, self._available[codec]) if codec is not None else None
         if len(cache) < 256:
             cache[accept_header] = result
         return result
@@ -338,7 +332,7 @@ class Compression:
             await call_next(conn, receive, send)
             return
 
-        accept = accept_encoding_value(conn.headers)
+        accept = conn.headers.get_combined(b'accept-encoding') or b''
         selection = self._select_codec(accept)
         if selection is None:
             # No codec the client accepts (e.g. no/identity Accept-Encoding).

@@ -278,8 +278,8 @@ closes the connection itself.
 
 Compresses HTTP response bodies using an accepted codec in server preference
 order: brotli > zstd > gzip. `q=0` excludes a codec even when `*` permits others;
-positive q values do not change this order. Malformed entries and conflicting
-duplicates cannot authorize a refused codec.
+positive q values do not change this order. A malformed quality or parameter
+refuses its named codec; a refusal in any duplicate also takes precedence.
 
 ```python
 from blackbull.middleware import compress
