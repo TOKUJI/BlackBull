@@ -16,6 +16,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   method.  An empty `:scheme`, which the builder silently turned into
   `https`, is refused for the same reason; `:scheme` is still defaulted only
   where plain CONNECT omits it (RFC 9113 §8.5).
+
+- **An HTTP/2 response is now complete only when it is a well-formed final
+  response.**  `request()` used to resolve on the first `END_STREAM` whatever
+  had arrived before it: a body with no head at all, a head with no
+  `:status`, an informational `103` that ended the stream, a body that
+  contradicted its own `Content-Length`, and content on a `HEAD` response
+  each reached the caller as a successful response.  RFC 9113 §8.1's order is
+  now enforced — informational heads, one final head, the body, then an
+  optional trailer section — with `:status` required and three ASCII digits,
+  RFC 9110 §9.3's body rules, and a declared `Content-Length` matched against
+  the body.  A response that breaks it raises `ProtocolError` and resets that
+  stream alone; the connection and its other streams survive.  The order is
+  worth about 1 µs per response on top of the old handler, measured
+  round-paired against an in-session A/A floor of 0.3 µs
+  (`bench/h2_client_response_ab.py`); that is the cost of the check, and it
+  is why the field section is normalised once rather than per check.
+- **Breaking for HTTP/2 client callers.**  `res.headers` now holds the final
+  head's fields only, and the trailer section arrives in the new
+  `res.trailers`.  The two had been folded together, so a caller could not
+  tell which field section a field came from — gRPC's `grpc-status` lives in
+  the trailer, and now reads as `res.trailers.get(b'grpc-status')`.
+  Informational heads are read and discarded, which is what the HTTP/1.1
+  reader has always done with them.  A `Content-Length` on a response that
+  may not carry content is kept as metadata and is not compared against a
+  body there is none of.
+
 - **An HTTP/1.1 request now declares exactly one body framing, and a caller's
   framing fields are checked rather than relayed.**  `Content-Length` is
   written once and must agree with the body across every occurrence.  A caller
