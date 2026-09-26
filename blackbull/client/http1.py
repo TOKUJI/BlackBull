@@ -27,7 +27,9 @@ from ..server.recipient import (AbstractReader, AsyncioReader,
 from ..protocol.field_grammar import (
     FIELD_VALUE_ALLOWED_OCTETS, FIELD_VALUE_ALLOWED_SET, TCHAR_OCTETS,
     TCHAR_SET)
-from ..protocol.framing import parse_content_length, parse_status
+from ..protocol.framing import (is_informational, method_is,
+                                parse_content_length, parse_status,
+                                response_has_content)
 from ..server.sender import AbstractWriter, AsyncioWriter
 from ._connect import DEFAULT_CONNECT_TIMEOUT, open_connection as _open_connection
 from .exceptions import ConnectionError, ProtocolError, ResponseTooLarge
@@ -486,7 +488,7 @@ class HTTP1ResponseRecipient:
         while True:
             version, status, headers = await self._read_message_head(reader)
             if (not skip_interim or status == 101
-                    or not 100 <= status < 200):
+                    or not is_informational(status)):
                 return version, status, headers
             seen += 1
             if limit and seen > limit:
@@ -649,14 +651,6 @@ class HTTP1ResponseRecipient:
         return data
 
     @staticmethod
-    def _method_is(request_method: str | bytes | HTTPMethod | None,
-                   expected: str) -> bool:
-        if isinstance(request_method, bytes):
-            return request_method == expected.encode('ascii')
-        return (request_method is not None
-                and str(request_method) == expected)
-
-    @staticmethod
     def _parse_transfer_encoding(
             fields: list[tuple[bytes, bytes]],) -> list[bytes]:
         """Parse repeated/comma-combined ``Transfer-Encoding`` fields.
@@ -728,12 +722,9 @@ class HTTP1ResponseRecipient:
         Content-Length; a non-chunked final coding therefore remains
         close-delimited rather than accidentally trusting Content-Length.
         """
-        body_forbidden = (
-            100 <= status < 200 or status in (204, 304)
-            or cls._method_is(request_method, 'HEAD')
-        )
+        body_forbidden = not response_has_content(request_method, status)
         successful_connect = (
-            cls._method_is(request_method, 'CONNECT')
+            method_is(request_method, 'CONNECT')
             and 200 <= status < 300
         )
         protocol_switched = status == 101 or successful_connect
@@ -785,7 +776,7 @@ class HTTP1ResponseRecipient:
         mode, _declared, framing_reusable, tunnel = framing
         self.reusable = framing_reusable and response_persistent
         self.protocol_switched = tunnel
-        self.tunnel = tunnel and self._method_is(request_method, 'CONNECT')
+        self.tunnel = tunnel and method_is(request_method, 'CONNECT')
         self.connection_exhausted = mode == _CLOSE_DELIMITED
 
     async def _read_head_and_policy(

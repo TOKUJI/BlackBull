@@ -27,7 +27,7 @@ from itertools import chain
 from typing import NoReturn
 
 from ..protocol import hpack_fastpath
-from ..protocol.framing import parse_content_length
+from ..protocol.framing import is_informational, parse_content_length
 from ..protocol.frame_types import (FrameTypes, HeaderFrameFlags, DataFrameFlags,
                                     FrameBase, PseudoHeaders,
                                     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE)
@@ -116,16 +116,6 @@ def _http_date() -> bytes:
         _HTTP_DATE = formatdate(timeval=now, localtime=False, usegmt=True).encode('ascii')
         _HTTP_DATE_TS = now
     return _HTTP_DATE
-
-
-def _is_informational(status) -> bool:
-    """True for a 1xx status — a provisional response, not the final one.
-
-    An interim response shares the sender with the final response that must
-    still follow it, so it neither completes the exchange nor commits a
-    status, and it carries no content framing (RFC 9110 §8.6, §15.2).
-    """
-    return int(status) < 200
 
 
 def _has_header(items, name: bytes) -> bool:
@@ -650,7 +640,7 @@ class HTTP1Sender(BaseSender):
                     self._log_record.status = int(status)
                     self._log_record.response_bytes += len(body)
                 await self._flush(status, h, body)
-                if not _is_informational(status):
+                if not is_informational(status):
                     self._completed = True
 
             case NativeResponse():
@@ -820,7 +810,7 @@ class HTTP1Sender(BaseSender):
         self._chunked = False
         self._content_length = None
         self._body_bytes = 0
-        self._informational = _is_informational(status)
+        self._informational = is_informational(status)
         content_forbidden = self._informational or code in (204, 205, 304)
         self._suppress_body = self._head_mode or content_forbidden
 
@@ -892,7 +882,7 @@ class HTTP1Sender(BaseSender):
         headers = self._ensure_framing_headers(
             status, headers, len(body), more_body)
         self._track_content_length(len(body), more_body)
-        if not _is_informational(status):
+        if not is_informational(status):
             self._started = True
         self._ensure_date_header(headers)
 
@@ -955,7 +945,7 @@ class HTTP1Sender(BaseSender):
         headers = self._ensure_framing_headers(
             status, headers, size, more_body=False)
         self._track_content_length(size, more_body=False)
-        if not _is_informational(status):
+        if not is_informational(status):
             self._started = True
         self._ensure_date_header(headers)
 
@@ -968,7 +958,7 @@ class HTTP1Sender(BaseSender):
 
         if self._suppress_body:
             await self._write(head)
-            return not _is_informational(status)
+            return not is_informational(status)
 
         await self._write(head)
 
@@ -983,7 +973,7 @@ class HTTP1Sender(BaseSender):
                             raise ConnectionResetError(
                                 'sendfile made no valid forward progress')
                         offset += sent
-                    return not _is_informational(status)
+                    return not is_informational(status)
                 except NotImplementedError:
                     # TLS / unsupported transport — fall back to read+write.
                     f.seek(offset)
@@ -1001,7 +991,7 @@ class HTTP1Sender(BaseSender):
             # safely replace this response on the same connection.
             self._poisoned = True
             raise
-        return not _is_informational(status)
+        return not is_informational(status)
 
 
 class FlowControlStalled(Exception):

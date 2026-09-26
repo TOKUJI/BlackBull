@@ -118,8 +118,9 @@ def _read_reply(response) -> GrpcReply:
     protocol says an omitted trailer means, and inventing UNKNOWN here
     would report a failure the server never sent.
     """
-    # gRPC puts these in the trailer section; a path that fails before the
-    # handler runs may put them in the head instead.
+    # gRPC puts these in the trailer section. A Trailers-Only response — one
+    # from a path that fails before the handler runs — has only the head, so
+    # its status travels there instead.
     raw_status = (response.trailers.get(b'grpc-status', b'')
                   or response.headers.get(b'grpc-status', b''))
     status = GrpcStatus(int(raw_status)) if raw_status else GrpcStatus.OK
