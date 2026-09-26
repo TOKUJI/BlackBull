@@ -1298,19 +1298,24 @@ class HTTP2Actor(Actor):
         a later CONTINUATION frame.
         """
         if stream.conn is not None:
-            # RFC 9113 §8.1 — a second field section is trailers, not a new
-            # request.  They are not surfaced to the app, so only the
-            # END_STREAM transition is observable.  Handling it here is what
-            # makes single-frame and fragmented trailers share one recipient,
-            # and what stops a second handler from starting.
-            if not header_frame.end_stream:
+            # RFC 9113 §8.1 — a second field section is trailers: it must end
+            # the request and reach no handler; a malformed one earns the
+            # head's verdict.
+            if not header_frame.end_stream or header_frame.malformed:
+                if _DEBUG:
+                    logger.debug(
+                        'Stream %d refused trailing field section — %s',
+                        stream.stream_id,
+                        header_frame.malformed_reason
+                        or 'section does not end the request')
+                self._retire_stream(stream.stream_id, via_rst=True)
                 await self.send_frame(self.factory.rst_stream(
                     stream.stream_id, ErrorCodes.PROTOCOL_ERROR))
-            else:
-                stream.on_data_received(end_stream=True)
-                recipient = self._recipients.get(stream.stream_id)
-                if recipient is not None:
-                    recipient.put_end_of_stream()
+                return True
+            stream.on_data_received(end_stream=True)
+            recipient = self._recipients.get(stream.stream_id)
+            if recipient is not None:
+                recipient.put_end_of_stream()
             return True
 
         if self._active_stream_count >= self.max_concurrent_streams:

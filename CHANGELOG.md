@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+- **A malformed trailing field section is refused like a malformed head.**
+  RFC 9113 §8.1 calls the trailer section a field section, so §8.2.1 grades
+  it — but only the request head carried the verdict.  A trailer value with
+  SP or HTAB at either end (or a NUL, a CR, an uppercase field name) was
+  flagged at the frame layer and then ignored: the request completed and the
+  handler ran as if the peer had sent nothing malformed.  The trailing
+  section now earns the request's own verdict, `RST_STREAM(PROTOCOL_ERROR)`,
+  and the stream is retired instead of completed.
+
 - **An HTTP/2 `:scheme` is read case-insensitively, and the application sees
   it lowercase.**  A scheme is case-insensitive and its canonical form is
   lowercase (RFC 3986 §3.1, RFC 9110 §4.2.3), but the host rule compared the
