@@ -27,6 +27,7 @@ from itertools import chain
 from typing import NoReturn
 
 from ..protocol import hpack_fastpath
+from ..protocol.framing import parse_content_length
 from ..protocol.frame_types import (FrameTypes, HeaderFrameFlags, DataFrameFlags,
                                     FrameBase, PseudoHeaders,
                                     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE)
@@ -125,22 +126,6 @@ def _is_informational(status) -> bool:
     status, and it carries no content framing (RFC 9110 §8.6, §15.2).
     """
     return int(status) < 200
-
-
-def _parse_content_length(headers: Headers) -> int | None:
-    """Return one unambiguous Content-Length value from response headers."""
-    values: list[int] = []
-    for _name, raw in headers.getlist(b'content-length'):
-        for member in raw.split(b','):
-            value = member.strip(b' \t')
-            if not value or not value.isdigit():
-                raise ValueError('invalid Content-Length response header')
-            values.append(int(value))
-    if not values:
-        return None
-    if any(value != values[0] for value in values[1:]):
-        raise ValueError('conflicting Content-Length response headers')
-    return values[0]
 
 
 def _has_header(items, name: bytes) -> bool:
@@ -841,7 +826,8 @@ class HTTP1Sender(BaseSender):
 
         keep_length = (not self._informational and code not in (204, 205)
                        and not (self._expect_trailers and not self._head_mode))
-        app_length = _parse_content_length(headers) if keep_length else None
+        app_length = (parse_content_length(headers.getlist(b'content-length'))
+                      if keep_length else None)
         pairs = [
             (name, value) for name, value in headers
             if name.lower() not in (b'content-length', b'transfer-encoding')

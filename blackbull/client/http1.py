@@ -14,7 +14,7 @@ import ssl as _ssl
 from collections.abc import AsyncIterable, AsyncIterator
 from time import monotonic as _monotonic
 from http import HTTPMethod
-from typing import Union
+from typing import NamedTuple, Union
 
 import logging
 from ..env import get_settings
@@ -27,6 +27,7 @@ from ..server.recipient import (AbstractReader, AsyncioReader,
 from ..protocol.field_grammar import (
     FIELD_VALUE_ALLOWED_OCTETS, FIELD_VALUE_ALLOWED_SET, TCHAR_OCTETS,
     TCHAR_SET)
+from ..protocol.framing import parse_content_length
 from ..server.sender import AbstractWriter, AsyncioWriter
 from ._connect import DEFAULT_CONNECT_TIMEOUT, open_connection as _open_connection
 from .exceptions import ConnectionError, ProtocolError, ResponseTooLarge
@@ -49,9 +50,21 @@ logger = logging.getLogger(__name__)
 
 
 # Type for request bodies — either a complete byte string or an async iterable
-# of byte chunks (the streaming case, encoded as Transfer-Encoding: chunked).
+# of byte chunks (the streaming case, chunk-framed unless the caller declared a
+# length for it).
 RequestBody = Union[bytes, bytearray, memoryview, AsyncIterable[bytes]]
-_PreparedRequest = tuple[bytes, bytes | AsyncIterable[bytes], bool]
+
+
+class _PreparedRequest(NamedTuple):
+    """What [`prepare`][] settled: the head, the body, and the one length
+    that bounds it."""
+
+    head: bytes
+    body: bytes | AsyncIterable[bytes]
+    #: Total the body must reach, or ``None`` when it is chunk-framed and so
+    #: announces no total.
+    declared: int | None
+
 
 # CRLF as used throughout RFC 7230.
 #: Slice size for streaming a ``Content-Length`` body.  Matches the
@@ -116,24 +129,69 @@ def _te_quoted_string(value: bytes, pos: int) -> int:
     raise ProtocolError('unterminated quoted Transfer-Encoding parameter')
 
 
-# Methods for which an empty body still warrants an
-# explicit ``Content-Length: 0`` on the wire.  RFC 9110 §8.6 makes the
-# header optional in this case, but always emitting it removes ambiguity
-# for upstreams (notably reverse proxies that treat absent CL on POST as
-# "read body until close").  Methods listed in BODY_LESS_METHODS instead
-# skip the header entirely when no body is present, matching nginx /
-# uvicorn / curl conventions.
+def _declared_content_length(headers: Headers) -> int | None:
+    """The message's declared body length, or ``None`` when it declares none.
+
+    A message may repeat the field or comma-combine it, and RFC 9110 §8.6
+    permits that **only** when every value agrees.  Trusting the first is a
+    desync: believe 5 where the sender meant 10 and the surplus five octets
+    become the next keep-alive message's status line.
+
+    [`parse_content_length`][blackbull.protocol.framing.parse_content_length]
+    reports ``ValueError``, which cannot cross into ``blackbull.client`` from
+    ``blackbull.protocol``, so a refusal is raised here in the client's
+    vocabulary.
+    """
+    try:
+        return parse_content_length(headers.getlist(b'content-length'))
+    except ValueError as exc:
+        raise ProtocolError(str(exc)) from exc
+
+
+def _check_transfer_encoding(headers: Headers) -> None:
+    """Refuse a ``Transfer-Encoding`` this client cannot honour exactly.
+
+    Dropping the field is meaning-preserving only when it says ``chunked``
+    and nothing else, because that is the one framing this client writes and
+    the recipient then still receives the octets the caller passed.  A coding
+    the caller applied itself (``gzip, chunked``), a parameter on ``chunked``,
+    or ``chunked`` applied twice describes bytes this client will not write;
+    rewriting the field around them would change what the body *means* without
+    saying so.  ``Content-Encoding`` is where a content coding belongs.
+
+    A ``Transfer-Encoding`` beside a ``Content-Length`` is refused too,
+    because RFC 9112 §6.2 forbids a message from carrying both: which one
+    describes the body would be the recipient's guess.
+    """
+    codings = [member.strip(b' \t').lower()
+               for _name, raw in headers.getlist(b'transfer-encoding')
+               for member in raw.split(b',')]
+    if not codings:
+        return
+    if headers.getlist(b'content-length'):
+        raise ProtocolError(
+            'Content-Length and Transfer-Encoding both present; '
+            'RFC 9112 §6.2 forbids a message from carrying both')
+    if codings != [b'chunked']:
+        raise ProtocolError(
+            f'unsupported Transfer-Encoding {b", ".join(codings)!r}: '
+            f'this client writes chunked framing only')
+
+
+# Methods for which an empty body still goes out as ``Content-Length: 0``:
+# some origins and intermediaries answer 411 when a body-bearing method
+# carries no length at all.
 _BODY_ALLOWED_METHODS = frozenset({b'POST', b'PUT', b'PATCH', b'DELETE'})
-_BODY_LESS_METHODS = frozenset({b'GET', b'HEAD', b'OPTIONS', b'TRACE', b'CONNECT'})
 
 
 class HTTP1RequestSender:
     """Writes an HTTP/1.1 request — request line, headers, body — to an ``AbstractWriter``.
 
-    Adds ``Content-Length`` automatically for fixed-size byte bodies; switches
-    to ``Transfer-Encoding: chunked`` for ``AsyncIterable`` bodies.  The
-    ``Host`` header MUST be present (RFC 7230 §5.4) — the helper raises
-    ``ProtocolError`` if it is not.
+    Owns the request's framing: a byte body is sent under one
+    ``Content-Length``, an ``AsyncIterable`` body under that length when the
+    caller declared one and under ``Transfer-Encoding: chunked`` when it did
+    not.  The ``Host`` header MUST be present (RFC 7230 §5.4) — the helper
+    raises ``ProtocolError`` if it is not.
     """
 
     def __init__(self, writer: AbstractWriter) -> None:
@@ -152,103 +210,85 @@ class HTTP1RequestSender:
         succeeds.  A caller error such as a mismatched Content-Length or an
         unencodable request target therefore cannot retire an untouched
         keep-alive connection.
+
+        Framing belongs to the sender, so the whole field pair is decided
+        here: a caller's ``Content-Length`` is checked against the body and
+        then written once, canonically.  A caller's ``Transfer-Encoding`` is
+        honoured only where rewriting it cannot change what the body means —
+        the value ``chunked``, the one framing this client writes — and
+        refused otherwise; see ``_check_transfer_encoding``.
+        A body whose length is known goes out as that many raw octets, a
+        stream included, with the total checked as it goes; one whose length
+        is not knowable up front is chunk-framed instead.
+
+        The return value is internal: pass it to [`send_prepared`][] unchanged.
         """
         if b'host' not in headers:
             raise ProtocolError('HTTP/1.1 request requires a Host header')
 
         method_text = str(method)
+        declared = _declared_content_length(headers)
+        _check_transfer_encoding(headers)
+        pairs = [(name, value) for name, value in headers
+                 if name.lower() not in (b'content-length', b'transfer-encoding')]
+
         if isinstance(body, (bytes, bytearray, memoryview)):
             fixed_body = bytes(body)
-            cls._normalize_content_length(method_text, headers, fixed_body)
-            return cls._build_start(method_text, path, headers), fixed_body, False
+            expected = len(fixed_body)
+            if declared is not None and declared != expected:
+                raise ProtocolError(
+                    f'caller-supplied Content-Length ({declared}) does not '
+                    f'match body length ({expected} bytes); rejecting to '
+                    f'avoid CL.CL smuggling on the wire')
+            if (declared is not None or expected > 0
+                    or method_text.upper().encode() in _BODY_ALLOWED_METHODS):
+                pairs.append((b'content-length', str(expected).encode()))
+            return _PreparedRequest(
+                cls._build_start(method_text, path, pairs), fixed_body, expected)
 
-        if b'transfer-encoding' not in headers:
-            headers.append(b'transfer-encoding', b'chunked')
-        return cls._build_start(method_text, path, headers), body, True
+        if declared is None:
+            pairs.append((b'transfer-encoding', b'chunked'))
+            return _PreparedRequest(
+                cls._build_start(method_text, path, pairs), body, None)
+        pairs.append((b'content-length', str(declared).encode()))
+        return _PreparedRequest(
+            cls._build_start(method_text, path, pairs), body, declared)
 
     async def send_prepared(self, prepared: _PreparedRequest) -> None:
         """Write a request returned by [`prepare`][]."""
-        head, body, chunked = prepared
+        head, body, declared = prepared
         await self._writer.write(head)
-        if not chunked:
-            assert isinstance(body, bytes)
+        if isinstance(body, bytes):
             if body:
                 await self._writer.write(body)
             return
 
-        assert not isinstance(body, bytes)
+        if declared is None:
+            async for chunk in body:
+                if chunk:
+                    await self._writer.write(
+                        f'{len(chunk):x}'.encode() + _CRLF + chunk + _CRLF)
+            await self._writer.write(b'0' + _CRLF + _CRLF)
+            return
+
+        # A declared-length stream: raw octets, held to the total the head
+        # announced.  Crossing it is caught before the octets go out; falling
+        # short is caught once the body is spent.  Either way the request on
+        # the wire no longer matches its head, so the caller must not reuse
+        # this connection.
+        sent = 0
         async for chunk in body:
-            if chunk:
-                await self._writer.write(
-                    f'{len(chunk):x}'.encode() + _CRLF + chunk + _CRLF)
-        await self._writer.write(b'0' + _CRLF + _CRLF)
+            if not chunk:
+                continue
+            if sent + len(chunk) > declared:
+                raise ProtocolError('request body exceeds Content-Length')
+            sent += len(chunk)
+            await self._writer.write(chunk)
+        if sent != declared:
+            raise ProtocolError('request body is shorter than Content-Length')
 
     @staticmethod
-    def _normalize_content_length(method: str, headers: Headers,
-                                  body: bytes) -> None:
-        """Emit / validate the ``Content-Length`` header for the request.
-
-        Replaces the previous "add CL only if body is
-        truthy and no CL already present" rule, which let an empty POST go
-        out without any framing header at all (RFC-legal but confuses
-        reverse proxies) and silently sent inconsistent framing if the
-        caller pre-passed a CL that didn't match the body.
-
-        New rules:
-          * If the caller pre-passed a ``Content-Length`` header, verify
-            it parses as an int and equals ``len(body)``.  Raise
-            ``ValueError`` on mismatch — duplicate / mismatched CL is a
-            CL.CL smuggling vector and the right thing to do is fail
-            loudly, not silently send something the peer will reject.
-          * Otherwise, for body-allowed methods (POST/PUT/PATCH/DELETE),
-            always emit ``Content-Length: N`` — including ``0`` for an
-            empty body.  This matches nginx/curl and avoids absent-CL
-            ambiguity.
-          * For body-less methods (GET/HEAD/OPTIONS/TRACE/CONNECT) with
-            an empty body, skip the header entirely.  An empty GET should
-            not carry ``Content-Length: 0`` because some upstream proxies
-            treat that as suspicious.
-          * For unknown / custom methods, fall back to the "emit when
-            body is non-empty" rule — the safe path for forwards
-            compatibility.
-        """
-        cl_actual = len(body)
-        method_upper = method.upper().encode() if isinstance(method, str) else method.upper()
-
-        if b'content-length' in headers:
-            cl_existing = headers.get(b'content-length')
-            try:
-                cl_int = int(cl_existing)
-            except ValueError as exc:
-                raise ValueError(
-                    f'caller-supplied Content-Length is not an integer: '
-                    f'{cl_existing!r}'
-                ) from exc
-            if cl_int != cl_actual:
-                raise ValueError(
-                    f'caller-supplied Content-Length ({cl_int}) does not '
-                    f'match body length ({cl_actual} bytes); rejecting '
-                    f'to avoid CL.CL smuggling on the wire'
-                )
-            return
-
-        # No caller-supplied Content-Length — decide whether to add one.
-        if cl_actual > 0:
-            headers.append(b'content-length', str(cl_actual).encode())
-            return
-        if method_upper in _BODY_ALLOWED_METHODS:
-            # Empty body on a body-allowed method — still emit CL: 0.
-            headers.append(b'content-length', b'0')
-            return
-        if method_upper in _BODY_LESS_METHODS:
-            # GET/HEAD/etc. with no body — skip the header by design.
-            return
-        # Unknown method: forwards-compatible fallback — omit CL on an
-        # empty body.
-        return
-
-    @staticmethod
-    def _build_start(method: str, path: str, headers: Headers) -> bytes:
+    def _build_start(method: str, path: str, headers: HeaderList) -> bytes:
         chunks: list[bytes] = [f'{method} {path} HTTP/1.1'.encode() + _CRLF]
         for k, v in headers:
             chunks.append(k + b': ' + v + _CRLF)
@@ -517,35 +557,6 @@ class HTTP1ResponseRecipient:
             return b'keep-alive' in options
         return True
 
-    @staticmethod
-    def _declared_length(headers: Headers) -> int | None:
-        """The response's ``Content-Length``, or ``None`` when it has none.
-
-        A response may repeat the field or comma-combine it, and RFC 9110
-        §8.6 permits that **only** when every value agrees.  Trusting the
-        first one is a desync: believe 5 where the peer meant 10 and the
-        surplus five octets become the next keep-alive response's status
-        line.  The server refuses exactly this on the request side
-        (``_validate_message_framing``); this is the same rule facing the
-        other way, including the leading-zero normalisation that makes
-        "005" and "5" agree.
-        """
-        raw = headers.getlist(b'content-length')
-        if not raw:
-            return None
-        values: set[bytes] = set()
-        for _, value in raw:
-            for v in value.split(b','):
-                v = v.strip()
-                if not v or not v.isdigit():
-                    raise ProtocolError(f'invalid Content-Length value {v!r}')
-                values.add(v.lstrip(b'0') or b'0')
-        if len(values) > 1:
-            raise ProtocolError(
-                f'conflicting Content-Length values in response: '
-                f'{sorted(values)!r}')
-        return int(values.pop())
-
     async def _body_read(self, coro, *, payload: bool = False,
                          allow_eof: bool = False):
         """One body read, under both of the body's time bounds.
@@ -756,7 +767,7 @@ class HTTP1ResponseRecipient:
             # over Content-Length.
             return _CLOSE_DELIMITED, None, False, False
 
-        declared = cls._declared_length(headers)
+        declared = _declared_content_length(headers)
         if declared is not None:
             return _DECLARED, declared, True, False
         return _CLOSE_DELIMITED, None, False, False
@@ -993,7 +1004,8 @@ class HTTP1ResponseRecipient:
         Reading one line assumed the section was empty.  With real trailers
         the rest stayed buffered, so the next keep-alive response began
         parsing at a trailer field line and took it for a status line — the
-        response-side twin of the desync ``_declared_length`` guards against.
+        response-side twin of the desync ``_declared_content_length``
+        guards against.
 
         Discarded, not surfaced: nothing on ``ClientResponse`` carries them,
         and inventing a field for them here would be a second decision hiding
@@ -1145,7 +1157,8 @@ class HTTP1Client:
         # an unbounded wait per TestOneInput.  None opts out, leaving the
         # caller to impose their own deadline.
         self._connect_timeout = connect_timeout
-        #: Set once a response read stopped part-way.  See [`_abandon`][].
+        #: Set once the connection's byte stream is out of step.  See
+        #: [`_abandon`][].
         self._framing_broken = False
         #: A successful close-delimited response and a successful CONNECT
         #: switch protocols at EOF / the HTTP tunnel boundary.  They are not
@@ -1225,11 +1238,13 @@ class HTTP1Client:
     def _abandon(self) -> None:
         """Stop using this connection: its place in the byte stream is lost.
 
-        A read that stopped part-way leaves the rest of the message on the
-        wire, so the next response read would begin inside it — and a peer
-        whose body is itself a well-formed response gets one delivered for a
-        request the server answered differently.  The server answers the same
-        situation by closing rather than by keep-aliving a desynced stream.
+        A message that stopped part-way leaves the rest of it on the wire — a
+        response read that broke off, or a request body that ran over or under
+        its declared length — so the next response read would begin inside it,
+        and a peer whose body is itself a well-formed response gets one
+        delivered for a request the server answered differently.  The server
+        answers the same situation by closing rather than by keep-aliving a
+        desynced stream.
 
         Deliberately not applied to [`read_response`][], the fault-injection
         primitive: driving a misbehaving peer and then looking at what else it
