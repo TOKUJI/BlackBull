@@ -72,15 +72,18 @@ def method_is(method: str | bytes | HTTPMethod | None, expected: str) -> bool:
 
 def response_has_content(method: str | bytes | HTTPMethod | None,
                          status: int) -> bool:
-    """Whether a response to *method* with *status* may carry content.
+    """How the body length of a response to *method* with *status* is found.
 
-    One answer for both directions of the wire. RFC 9110 §9.3.1 says a HEAD
-    response has none, §9.3.2 a 204 or 304, and §15.3.7 forbids a server to
-    generate any in a 205 — the last is a generation rule rather than a
-    framing one, and both halves of the tree already acted on it, so a
-    response that carries one is refused rather than read. An informational
-    response carries none either (§15.2), but only because it is not the
-    response at all yet.
+    RFC 9110 §9.3.2: a HEAD response (§9.3.1), a 204 or a 304 (§9.3.3) has
+    none whatever the field sections say, and an informational response
+    carries none either (§15.2) because it is not the response yet.
+
+    This is the framing question and it stops there. §15.3.7 also forbids a
+    *server* to generate content in a 205, but §9.3.2 still frames one
+    normally, so a peer that sends one has to be read to the length it
+    declared — leaving those octets behind would desynchronise the reader
+    from the very peer that was already misbehaving. The generation rule
+    lives on the sender beside it, not in here.
     """
-    return (not is_informational(status) and status not in (204, 205, 304)
+    return (not is_informational(status) and status not in (204, 304)
             and not method_is(method, 'HEAD'))

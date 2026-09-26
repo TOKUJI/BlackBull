@@ -275,6 +275,7 @@ class TestTheBodyRules:
 
     @pytest.mark.parametrize('status', ['204', '304'])
     async def test_a_body_on_a_bodyless_status_is_refused(self, status):
+        """RFC 9110 §9.3.2 — these carry none whatever the fields say."""
         _refused(await _call(_Peer().settings()
                              .headers({PseudoHeaders.STATUS: status}, [],
                                       end_stream=False)
@@ -286,6 +287,17 @@ class TestTheBodyRules:
                               .headers({PseudoHeaders.STATUS: status}, [],
                                        end_stream=True)))
         assert res.status == int(status) and res.body == b''
+
+    async def test_a_body_on_a_205_is_read_not_refused(self):
+        """RFC 9110 §15.3.7 forbids a *server* to generate content in a 205,
+        but §9.3.2 still frames one. The reader takes it to its declared
+        length so it stays in step with a peer that was already wrong —
+        dropping the octets is what desynchronises a reader."""
+        res = _ok(await _call(_Peer().settings()
+                              .headers({PseudoHeaders.STATUS: '205'},
+                                       [(b'content-length', b'1')])
+                              .data(b'x', end_stream=True)))
+        assert res.body == b'x'
 
     async def test_a_bodyless_response_accepts_content_length_as_metadata(self):
         """RFC 9110 §9.3.2 — on HEAD the length describes the GET body."""

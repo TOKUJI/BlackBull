@@ -814,8 +814,13 @@ class HTTP1Sender(BaseSender):
         self._informational = is_informational(status)
         # The method arrives as ``_head_mode`` rather than as a method, so
         # the shared rule is asked about the status alone; ``_head_mode`` is
-        # OR-ed back in just below.
-        content_forbidden = not response_has_content(None, status)
+        # OR-ed back in just below.  205 is a generation rule and not a
+        # framing one: RFC 9110 §15.3.7 forbids a server to generate content
+        # in one where §9.3.2 would still frame it, so it is refused here and
+        # left out of ``response_has_content`` — a client must still read a
+        # peer's 205 to its declared length to stay in step with it.
+        content_forbidden = (not response_has_content(None, status)
+                             or code == 205)
         self._suppress_body = self._head_mode or content_forbidden
 
         keep_length = (not self._informational and code not in (204, 205)
