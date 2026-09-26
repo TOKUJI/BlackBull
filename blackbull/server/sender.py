@@ -811,9 +811,8 @@ class HTTP1Sender(BaseSender):
         self._chunked = False
         self._content_length = None
         self._body_bytes = 0
-        # One classification of `status`, reused by every question below:
-        # a 1xx is both provisional and contentless, so asking again would
-        # scan the same status twice.
+        # A 1xx is provisional and contentless both, so one classification
+        # answers every question below.
         informational = is_informational(status)
         self._informational = informational
         self._suppress_body = (self._head_mode or informational

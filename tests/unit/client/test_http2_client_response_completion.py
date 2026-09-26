@@ -399,9 +399,6 @@ class TestTheRefusalIsAStreamError:
         assert not [r for r in caplog.records if getattr(r, 'cap', None)]
 
 
-# ----------------------------------------------------------------------
-# C6 — one rule per concept (BLA-461 / BLA-462 / BLA-463)
-# ----------------------------------------------------------------------
 
 class TestTheMethodIsCaseSensitive:
     async def test_a_lowercase_head_is_not_a_head_response(self):
