@@ -125,3 +125,19 @@ async def test_an_informational_head_leaves_the_stream_open_for_the_final_one():
     await sender(b'hello', HTTPStatus.OK)
     await asyncio.sleep(0)
     assert _wire(writer) == [(1, 0), (1, 0), (0, 1)]
+
+
+async def test_the_dict_arm_completes_a_final_response_after_an_interim_one():
+    """The buffered arms accept a second `start`: a terminal body event
+    arriving while the interim head is still the only thing written must not
+    mark the stream finished, or the final response is dropped and the
+    stream leaks."""
+    sender, writer = _sender()
+    await sender({'type': 'http.response.start', 'status': 103, 'headers': []})
+    await sender({'type': 'http.response.body', 'body': b'',
+                  'more_body': False})
+    await sender({'type': 'http.response.start', 'status': 200, 'headers': []})
+    await sender({'type': 'http.response.body', 'body': b'hello',
+                  'more_body': False})
+    await asyncio.sleep(0)
+    assert _wire(writer) == [(1, 0), (1, 0), (0, 1)]

@@ -1494,7 +1494,7 @@ class HTTP2Sender(BaseSender):
                 payload, end_stream=end_stream and not self._expect_trailers)
         if self._log_record is not None and end_stream:
             self._log_record.mark('body_arm_out')
-        if end_stream and not self._expect_trailers:
+        if end_stream and not self._expect_trailers and not self._suppress_body:
             self._end_stream_sent = True
 
     async def _handle_trailers(
