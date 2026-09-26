@@ -811,14 +811,18 @@ class HTTP1Sender(BaseSender):
         self._chunked = False
         self._content_length = None
         self._body_bytes = 0
-        self._informational = is_informational(status)
-        self._suppress_body = (self._head_mode
+        # One classification of `status`, reused by every question below:
+        # a 1xx is both provisional and contentless, so asking again would
+        # scan the same status twice.
+        informational = is_informational(status)
+        self._informational = informational
+        self._suppress_body = (self._head_mode or informational
                                or status in NO_CONTENT_GENERATED_STATUSES)
 
         # A different set from ``NO_CONTENT_GENERATED_STATUSES`` on purpose:
         # this asks whether the application's Content-Length survives as
         # metadata, and a 304 sends it again where a 205 does not.
-        keep_length = (not self._informational and code not in (204, 205)
+        keep_length = (not informational and code not in (204, 205)
                        and not (self._expect_trailers and not self._head_mode))
         app_length = (parse_content_length(headers.getlist(b'content-length'))
                       if keep_length else None)
@@ -827,7 +831,7 @@ class HTTP1Sender(BaseSender):
             if name.lower() not in (b'content-length', b'transfer-encoding')
         ]
 
-        if self._informational or code == 204:
+        if informational or code == 204:
             self._expect_trailers = False
         elif code == 205:
             self._expect_trailers = False
@@ -1528,13 +1532,14 @@ class HTTP2Sender(BaseSender):
                 # RFC 9112 §6.3 rule 1: such a response "cannot contain a
                 # message body or trailer section". The head terminates it.
                 head_status = self._buffered_status
+                informational = is_informational(head_status)
                 await self._write(build_response_headers(
                     self._factory.encoder, self._stream_id,
                     head_status, self._buffered_headers or [],
-                    end_stream=not is_informational(head_status)))
+                    end_stream=not informational))
                 self._buffered_status = None
                 self._buffered_headers = None
-                if not is_informational(head_status):
+                if not informational:
                     self._end_stream_sent = True
                 return
             h_bytes = build_response_headers(
