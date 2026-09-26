@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+- **An HTTP/2 request's `:method` must be a token and its `:scheme` a URI
+  scheme.**  `G,ET` used to reach the router and the access log over HTTP/2
+  while HTTP/1.1 refused it on its request line, and `a_b` was taken as a
+  scheme although no URI grammar admits an underscore.  A value outside
+  RFC 9110 §9.1 or RFC 3986 §3.1 is now malformed and answered with
+  `RST_STREAM(PROTOCOL_ERROR)`.  An empty `:method`, which the request
+  builder silently turned into `HEAD`, is refused the way an empty `:path`
+  already was — an HTTP/2 peer relying on that placeholder has to send a
+  method.
 - **An HTTP/1.1 request now declares exactly one body framing, and a caller's
   framing fields are checked rather than relayed.**  `Content-Length` is
   written once and must agree with the body across every occurrence.  A caller

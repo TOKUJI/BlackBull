@@ -9,11 +9,13 @@ the actor answers RST_STREAM.
 
 The request-level pseudo-header rules (RFC 9113 §8.3.1) live here: which
 pseudo-headers must be present, that ``:status`` may not appear in a request,
-and the ``:authority`` / ``Host`` authority grammar that decides the ``host``
+the value grammars of ``:method``, ``:scheme`` and ``:path``, and the
+``:authority`` / ``Host`` authority grammar that decides the ``host``
 a handler sees.  Field-level validation already happened when the frame parsed
 its payload.
 """
 from ..protocol.frame_types import PseudoHeaders
+from ..protocol.field_grammar import URI_SCHEME_RE, method_token_is_valid
 import logging
 from ..connection import Connection
 from ..headers import Headers
@@ -174,6 +176,12 @@ def parse_headers(frame) -> Connection | None:
     if method is None:
         frame._mark_malformed('missing :method')
         return None
+    # RFC 9110 §9.1 — method = token.  HTTP/1.1 grades its request line with
+    # the same rule (``http1_actor._parse``), so the two transports cannot
+    # disagree about which methods exist.
+    if not method_token_is_valid(method.encode('utf-8')):
+        frame._mark_malformed(f'invalid :method {method!r}')
+        return None
 
     # RFC 9112 §2.1 with RFC 3986 — the visible-ASCII rule HTTP/1.1 applies to
     # its request-target, so the transports cannot disagree about a path
@@ -184,6 +192,15 @@ def parse_headers(frame) -> Connection | None:
             and path_pseudo.encode('utf-8').translate(
                 None, _TARGET_ALLOWED_OCTETS)):
         frame._mark_malformed(f'invalid :path {path_pseudo!r}')
+        return None
+
+    # RFC 3986 §3.1 — the scheme grammar.  No HTTP/1.1 counterpart to match:
+    # that transport grades only an absolute-form target's scheme (BLA-434).
+    # Graded whenever the field is present, like ``:path`` above.
+    scheme_pseudo = frame.pseudo_headers.get(PseudoHeaders.SCHEME)
+    if (scheme_pseudo is not None
+            and URI_SCHEME_RE.fullmatch(scheme_pseudo.encode('utf-8')) is None):
+        frame._mark_malformed(f'invalid :scheme {scheme_pseudo!r}')
         return None
 
     if method != 'CONNECT':
@@ -230,10 +247,9 @@ def parse_headers(frame) -> Connection | None:
     if p := frame.pseudo_headers.get(PseudoHeaders.PATH):
         path, raw_path, query_string = _split_h2_path(p)
 
-    # An absent or empty ``:scheme`` falls back to 'https'.  Absence is
-    # already rejected above for non-CONNECT requests, so this only covers
-    # CONNECT and the empty-value case.
-    scheme = frame.pseudo_headers.get(PseudoHeaders.SCHEME) or 'https'
+    # ``:scheme`` is present and valid by here, except on CONNECT (§8.5 omits
+    # it) — which is what the default is for.
+    scheme = frame.pseudo_headers.get(PseudoHeaders.SCHEME, 'https')
 
     # Plain CONNECT is excluded from the host check: §8.5 gives its
     # ``:authority`` tunnel semantics, and the presence rule only binds
@@ -252,14 +268,8 @@ def parse_headers(frame) -> Connection | None:
             return None
         headers = Headers.from_lowered(raw_headers)
 
-    # A spec-illegal empty ``:method`` falls back to 'HEAD' instead of being
-    # rejected the way an empty ``:path`` is.  That asymmetry is a known
-    # conformance gap, deliberately left alone — closing it is a behaviour
-    # change, not a cleanup.
-    effective_method = method or 'HEAD'
-
     # ``root_path`` is NOT taken from the client-controlled X-Forwarded-Prefix;
     # only TrustedProxy sets it after verifying the peer.  Both branches leave
     # it at the field default ('') — the RFC-safe empty mount.
-    return _build_h2_connection(effective_method, path, raw_path,
+    return _build_h2_connection(method, path, raw_path,
                                 query_string, headers, scheme)

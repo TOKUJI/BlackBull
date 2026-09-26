@@ -387,7 +387,8 @@ class TestG5ConnectionSpecificHeadersForbidden:
 # ═══════════════════════════════════════════════════════════════════════
 
 async def _check_malformed(fields):
-    """Drive a HEADERS block and require RST_STREAM(PROTOCOL_ERROR) on 1."""
+    """Drive a HEADERS block and require RST_STREAM(PROTOCOL_ERROR) on 1,
+    with the application never entered."""
     handler, app = _make_h2_actor()
     h = _make_headers_frame(1, end_stream=True, fields=fields)
     settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
@@ -399,6 +400,8 @@ async def _check_malformed(fields):
                 and frame.FrameType() == FrameTypes.RST_STREAM
                 and frame.stream_id == 1
                 and frame.error_code == ErrorCodes.PROTOCOL_ERROR):
+            assert app.await_count == 0, (
+                f'malformed request with fields {fields} reached the handler')
             return
     pytest.fail(f'Malformed request with fields {fields} was not rejected '
                 f'with RST_STREAM(PROTOCOL_ERROR)')
@@ -491,6 +494,64 @@ class TestG6PathOctets:
             if hasattr(call.args[0], 'FrameType')
             and call.args[0].FrameType() == FrameTypes.RST_STREAM
         ]
+
+
+class TestG6MethodAndSchemeGrammar:
+    """RFC 9113 §8.3.1 with RFC 9110 §9.1 and RFC 3986 §3.1 — ``:method`` is a
+    token and ``:scheme`` is a URI scheme.  §8.2.1's field octets admit a
+    separator and an underscore, so neither rule falls out of field validity;
+    HTTP/1.1 grades its request-line method with the same token rule, so the
+    two transports must refuse the same methods."""
+
+    @staticmethod
+    def _fields(method: bytes = b'GET', scheme: bytes = b'https') -> list:
+        return [(b':method', method), (b':path', b'/'),
+                (b':scheme', scheme), (b':authority', b'example.com')]
+
+    @staticmethod
+    async def _accepted(fields):
+        handler, app = _make_h2_actor()
+        h = _make_headers_frame(1, end_stream=True, fields=fields)
+        handler.receive = AsyncMock(side_effect=[
+            _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b''), h, None])
+        await handler.run()
+        assert app.await_count == 1
+        assert not _sent_rst_streams(handler, 1)
+
+    @pytest.mark.parametrize('method', [
+        b'M\tT', b'M T', b'M(T', b'M)T', b'M,T', b'M/T', b'M:T', b'M;T',
+        b'M<T', b'M=T', b'M>T', b'M?T', b'M@T', b'M[T', b'M\\T', b'M]T',
+        b'M{T', b'M}T', b'M"T', b'',
+    ])
+    @pytest.mark.asyncio
+    async def test_a_method_that_is_not_a_token_is_malformed(self, method):
+        """RFC 9110 §5.6.2 token = 1*tchar — every separator, HTAB/SP and the
+        empty value are outside it."""
+        await _check_malformed(self._fields(method=method))
+
+    @pytest.mark.parametrize('scheme', [
+        b'1http', b'ht,tp', b'ht tp', b'a_b', b'a:b', b'a/b', b'a;b',
+        b'a?b', b'a@b', b'a[b', b'a\\b', b'a]b', b'a{b', b'a}b', b'a"b',
+        b'a(b', b'a)b', b'a<b', b'a>b', b'a=b', b'a\tb', b'',
+    ])
+    @pytest.mark.asyncio
+    async def test_a_scheme_that_is_not_a_uri_scheme_is_malformed(self, scheme):
+        """RFC 3986 §3.1 scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ).
+        ``a_b`` is the telling one: an underscore is a §5.6.2 tchar, so only
+        the scheme grammar refuses it."""
+        await _check_malformed(self._fields(scheme=scheme))
+
+    @pytest.mark.parametrize('method', [b'GET', b'HEAD', b'M-SEARCH', b'X.Y',
+                                        b'1', b'gEt'])
+    @pytest.mark.asyncio
+    async def test_a_token_method_is_accepted(self, method):
+        await self._accepted(self._fields(method=method))
+
+    @pytest.mark.parametrize('scheme', [b'https', b'http', b'h', b'a+b-c.d',
+                                        b'HTTP'])
+    @pytest.mark.asyncio
+    async def test_a_uri_scheme_is_accepted(self, scheme):
+        await self._accepted(self._fields(scheme=scheme))
 
 
 def _make_raw_headers_frame(block: bytes, stream_id: int = 1) -> bytes:

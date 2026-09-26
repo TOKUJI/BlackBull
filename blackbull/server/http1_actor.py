@@ -60,7 +60,8 @@ _HTTP_VERSION_RE = re.compile(rb'\AHTTP/\d\.\d\Z')
 # `tests/unit/test_parse_octet_tables.py` audits the name table against the
 # frozenset form of it, octet for octet.
 from ..protocol.field_grammar import (
-    FIELD_VALUE_ALLOWED_OCTETS, TCHAR_OCTETS, URI_SCHEME_RE)
+    FIELD_VALUE_ALLOWED_OCTETS, TCHAR_OCTETS, URI_SCHEME_RE,
+    method_token_is_valid)
 
 
 
@@ -878,8 +879,9 @@ class HTTP1Actor(Actor):
                 f'got {len(parts)}: {request_line!r}')
         method, path, version = parts
 
-        # Method (§4 / RFC 9110 §9.1) — case-sensitive token of 1+ tchar.
-        if not method or method.translate(None, TCHAR_OCTETS):
+        # Method (§4 / RFC 9110 §9.1) — the same rule HTTP/2 grades `:method`
+        # with, so the transports cannot disagree about which methods exist.
+        if not method_token_is_valid(method):
             raise BadRequestError(f'invalid method {method!r}')
 
         # HTTP-version (§2.5) — exactly ``HTTP/d.d``.

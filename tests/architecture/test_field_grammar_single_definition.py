@@ -111,13 +111,23 @@ def test_every_reader_reads_the_one_definition():
                 module.__name__, name)
 
 
-def test_the_router_method_check_is_the_same_alphabet():
+def test_the_router_method_check_is_the_same_rule():
     """The router's input is a ``str``, so it cannot use the bytes table; its
-    delete table is built from the same alphabet, and this pins the two."""
+    delete table is built from the same alphabet.  Both halves of the rule are
+    pinned against ``method_token_is_valid`` — the alphabet and the ``1*tchar``
+    non-emptiness — because the emptiness half is not an alphabet and would
+    drift on its own."""
     wrong = [c for c in range(256)
              if (chr(c).translate(router._TCHAR_DELETE) == '')
              is not (c in field_grammar.TCHAR_SET)]
     assert wrong == []
+    for token in (b'', *(bytes([c]) for c in range(256))):
+        try:
+            router._validate_method_token(token.decode('latin-1'))
+            accepted = True
+        except ValueError:
+            accepted = False
+        assert accepted is field_grammar.method_token_is_valid(token), token
 
 
 def test_h2_name_rule_is_the_shared_alphabet_lowercased():

@@ -20,3 +20,13 @@ FIELD_VALUE_ALLOWED_SET: frozenset[int] = frozenset(FIELD_VALUE_ALLOWED_OCTETS)
 
 #: RFC 3986 §3.1 — URI scheme, also used in HTTP absolute-form targets.
 URI_SCHEME_RE = re.compile(rb'[A-Za-z][A-Za-z0-9+.-]*')
+
+
+def method_token_is_valid(value: bytes) -> bool:
+    """RFC 9110 §9.1 method = token (§5.6.2 token = 1*tchar).
+
+    Both transports grade their method with this — HTTP/1.1 its request line,
+    HTTP/2 ``:method`` — so a method one of them refuses cannot run on the
+    other.
+    """
+    return bool(value) and not value.translate(None, TCHAR_OCTETS)
