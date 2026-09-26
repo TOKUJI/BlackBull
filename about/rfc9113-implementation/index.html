@@ -6324,7 +6324,10 @@ its request-target.  <code>:method</code> is an RFC 9110 §9.1 token and <code>:
 field validity alone lets <code>G,ET</code> and <code>a_b</code> through, and HTTP/1.1 refuses the
 first on its request line, so the transports would otherwise accept different
 methods.  The scheme rule has no HTTP/1.1 counterpart to match: that
-transport grades only an absolute-form target's scheme.
+transport grades only an absolute-form target's scheme.  A scheme is
+case-insensitive and its canonical form is lowercase (RFC 3986 §3.1, RFC 9110
+§4.2.3), so <code>:scheme</code> is taken in that one spelling and the host rule, the
+RFC 8441 ws/wss mapping and <code>conn.scheme</code> all read it.
 <code>:authority</code> is validated and surfaced by <code>_request_headers_with_host() in
 parser.py</code> (v0.54.0): an <code>http(s)</code> request carrying neither <code>:authority</code> nor
 <code>Host</code> is malformed, as is an authority containing userinfo, RFC 3986 §3.2
