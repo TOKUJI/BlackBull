@@ -293,6 +293,22 @@ class TestTheHeaderAggregate:
         with pytest.raises(ResponseTooLarge):
             await _resolved(future)
 
+    @pytest.mark.parametrize('cap', [1069, 2139, 3209],
+                             ids=['informational-head', 'final-head',
+                                  'trailer-section'])
+    async def test_every_section_kind_counts_toward_the_aggregate(
+            self, monkeypatch, cap):
+        """The aggregate covers all three kinds of field section, not just
+        whichever one the loop happens to reach first.  One section is 1070
+        bytes, so each cap admits one fewer than the kind named in the id and
+        refuses at it."""
+        monkeypatch.setenv('BB_CLIENT_HEAD_MAX_TOTAL', str(cap))
+        c = _client()
+        future = _pending(c)
+        await self._sections(c, 3)
+        with pytest.raises(ResponseTooLarge):
+            await _resolved(future)
+
     async def test_one_legal_section_is_not_refused(self, monkeypatch):
         """The cap is on the aggregate; a single section inside it must pass."""
         monkeypatch.setenv('BB_CLIENT_HEAD_MAX_TOTAL', '4096')

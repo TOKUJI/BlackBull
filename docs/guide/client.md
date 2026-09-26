@@ -148,19 +148,21 @@ head, the body, then a single optional trailer section — and every part is
 checked: `:status` is present and three ASCII digits, content appears only
 where RFC 9110 §9.3 allows it (a `HEAD` response and `204` / `304` carry
 none, whatever they declare), a declared `Content-Length` matches the body
-exactly, and a trailer section carries no pseudo-header or framing field.
+exactly, and a trailer section carries no pseudo-header field and no
+`Content-Length`. A response that breaks one of these raises `ProtocolError`.
+A hop-by-hop field such as `Transfer-Encoding` is refused earlier and
+separately, by the frame layer, as a `StreamReset`.
 The HTTP/1.1 reader is the laxer of the two: it reads no body for `HEAD` /
 `204` / `304` and refuses a malformed status line, but it cannot refuse
 octets a peer sends where content should not be.
 
-A response that breaks the rule raises `ProtocolError`. Under HTTP/2 that
-refuses the stream alone — `RST_STREAM`, the connection and its other streams
-survive. `res.headers` holds the final head's fields only and `res.trailers`
-the trailer section: RFC 9113 §8.1 keeps the two field sections apart, and
-gRPC puts `grpc-status` in the trailer. Folding them together, as this client
-did, left a caller unable to tell which section a field came from.
-Informational heads are read and discarded, which is what the HTTP/1.1 reader
-has always done with them.
+A refusal under HTTP/2 takes the stream alone — `RST_STREAM`, the connection
+and its other streams survive. `res.headers` holds the final head's fields
+only and `res.trailers` the trailer section: RFC 9113 §8.1 keeps the two
+field sections apart, and gRPC puts `grpc-status` in the trailer. Folding
+them together, as this client did, left a caller unable to tell which
+section a field came from. Informational heads are read and discarded, which
+is what the HTTP/1.1 reader has always done with them.
 
 ## What a call raises
 

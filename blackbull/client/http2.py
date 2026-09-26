@@ -594,7 +594,7 @@ class HTTP2Client:
         # restart the clock the answer just handed off, and charge the body
         # phase with a head phase that had ended.
         pending = self._responses.get(stream_id)
-        if pending is not None and pending.status < 200:
+        if pending is not None and not pending.final_seen:
             self._arm_deadline(stream_id, _Phase.HEAD)
 
         try:
@@ -1335,8 +1335,8 @@ class HTTP2Client:
         §What the client waits for.
 
         A 1xx is not the handover, and there is deliberately no branch here
-        saying so: it falls out of ``_on_response_headers`` arming only at
-        ``status >= 200``, which is where the reasoning lives.
+        saying so: it falls out of ``_on_response_headers`` arming only once
+        the final head is seen, which is where the reasoning lives.
 
         ``_FRAME_READ_TIMEOUT`` does not cover either phase.  It bounds the
         remainder of a frame whose 9-byte header has arrived, so a peer
