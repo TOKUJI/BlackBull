@@ -200,10 +200,18 @@ def parse_headers(frame) -> Connection | None:
     # that transport grades only an absolute-form target's scheme (BLA-434).
     # Graded whenever the field is present, like ``:path`` above.
     scheme_pseudo = frame.pseudo_headers.get(PseudoHeaders.SCHEME)
-    if (scheme_pseudo is not None and scheme_pseudo not in COMMON_SCHEMES
-            and URI_SCHEME_RE.fullmatch(scheme_pseudo.encode('utf-8')) is None):
+    if scheme_pseudo is None:
+        scheme = 'https'                # CONNECT omits :scheme (RFC 9113 §8.5)
+    elif scheme_pseudo in COMMON_SCHEMES:
+        scheme = scheme_pseudo          # members are lowercase — test-pinned
+    elif URI_SCHEME_RE.fullmatch(scheme_pseudo.encode('utf-8')) is None:
         frame._mark_malformed(f'invalid :scheme {scheme_pseudo!r}')
         return None
+    else:
+        # RFC 3986 §3.1 — an uppercase spelling is equivalent and the
+        # canonical form is lowercase.  The grammar kept the value ASCII, so
+        # this maps ASCII case only.
+        scheme = scheme_pseudo.lower()
 
     if method != 'CONNECT':
         if PseudoHeaders.SCHEME not in frame.pseudo_headers:
@@ -226,7 +234,6 @@ def parse_headers(frame) -> Connection | None:
         # guard (``Cache``'s cacheable-methods check, for one).  Routing and
         # lifecycle events are unaffected — ``BlackBull._dispatch`` branches on
         # ``conn.type`` before any method-based dispatch.
-        scheme_pseudo = frame.pseudo_headers.get(PseudoHeaders.SCHEME, 'https')
         path, raw_path, query_string = '', b'', b''
         if p := frame.pseudo_headers.get(PseudoHeaders.PATH):
             path, raw_path, query_string = _split_h2_path(p)
@@ -240,7 +247,7 @@ def parse_headers(frame) -> Connection | None:
         # bridge, not stored here.
         return Connection(
             type='websocket', method=method,
-            scheme='wss' if scheme_pseudo == 'https' else 'ws',
+            scheme='wss' if scheme == 'https' else 'ws',
             path=path, raw_path=raw_path, query_string=query_string,
             headers=Headers.from_lowered(raw_headers), http_version='2',
         )
@@ -248,10 +255,6 @@ def parse_headers(frame) -> Connection | None:
     path, raw_path, query_string = '', b'', b''
     if p := frame.pseudo_headers.get(PseudoHeaders.PATH):
         path, raw_path, query_string = _split_h2_path(p)
-
-    # ``:scheme`` is present and valid by here, except on CONNECT (§8.5 omits
-    # it) — which is what the default is for.
-    scheme = frame.pseudo_headers.get(PseudoHeaders.SCHEME, 'https')
 
     # Plain CONNECT is excluded from the host check: §8.5 gives its
     # ``:authority`` tunnel semantics, and the presence rule only binds
