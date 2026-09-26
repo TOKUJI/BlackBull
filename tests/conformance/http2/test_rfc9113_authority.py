@@ -267,6 +267,44 @@ class TestAuthorityIpLiteral:
         assert 1 not in _rst_streams(handler)
 
 
+class TestAuthorityRegName:
+    """RFC 3986 §3.2.2 — a reg-name authority is ``host [":" port]``.
+
+    ``_authority_is_valid`` is shared with H/1's Host path, so H/2 holds the
+    same grammar: no host, or a port that is not ``*DIGIT``, is malformed."""
+
+    @pytest.mark.parametrize('authority', [
+        b'good.com:evil', b'a:b:80', b'example.com:80:90', b'::1', b':',
+        b':80', b'example.com:80x',
+    ])
+    @pytest.mark.asyncio
+    async def test_invalid_reg_name_in_authority_is_malformed(self, authority):
+        handler, app = await _run_with_headers(
+            _PSEUDO_TRIO + [(b':authority', authority)])
+        _assert_malformed(handler)
+        assert app.await_count == 0
+
+    @pytest.mark.parametrize('authority', [
+        b'good.com:evil', b'a:b:80', b'::1', b':80',
+    ])
+    @pytest.mark.asyncio
+    async def test_invalid_reg_name_in_host_fallback_is_malformed(self, authority):
+        handler, app = await _run_with_headers(
+            _PSEUDO_TRIO + [(b'host', authority)])
+        _assert_malformed(handler)
+        assert app.await_count == 0
+
+    @pytest.mark.parametrize('authority', [
+        b'good.com:8100', b'good.com:', b'good.com',
+    ])
+    @pytest.mark.asyncio
+    async def test_valid_reg_name_in_authority_is_accepted(self, authority):
+        handler, app = await _run_with_headers(
+            _PSEUDO_TRIO + [(b':authority', authority)])
+        assert app.await_count == 1
+        assert 1 not in _rst_streams(handler)
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # F.1b — ASGI mapping: :authority → host in scope.headers
 # ═══════════════════════════════════════════════════════════════════════

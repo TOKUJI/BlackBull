@@ -7,9 +7,9 @@ a port" rule.  It parses and caches a whole URL, so it is an oracle here and
 never the call site (the same reasoning as the scheme oracle in
 ``tests/unit/test_audit_sprint63.py``).
 
-Our verdict is allowed to be *stricter* than the oracle in exactly four ways,
-each stated in ``_we_are_stricter`` and asserted below rather than filtered
-away.  Every other disagreement is a defect on one side or the other.
+Our verdict is allowed to be *stricter* than the oracle in exactly five
+ways, each stated in ``_we_are_stricter`` and asserted below rather than
+filtered away.  Every other disagreement is a defect on one side or the other.
 
 The enumerated sweep is the regression: it is what a bracketed string with no
 IPv6 grammar behind it (`[::1`, `[]`, `[zz]`, `[::1]x`, `[1.2.3.4]`) fails.
@@ -74,18 +74,26 @@ def _stdlib_accepts(authority: bytes) -> bool:
 
 
 def _we_are_stricter(authority: bytes) -> bool:
-    """The four deliberate one-way differences from ``urlsplit``.
+    """The five deliberate one-way differences from ``urlsplit``.
 
     An empty authority, an ``IPvFuture`` literal, a forbidden octet, and a
     bracket that is not the one pair of an IP-literal — urlsplit accepts the
     last of those whenever the brackets happen to balance, as in
-    ``[::1]:[80]``.
+    ``[::1]:[80]``.  The fifth is a reg-name that is not ``host [":" port]``
+    (no host, or a port that is not ``*DIGIT``): urlsplit still reads a
+    hostname out of it, where RFC 9112 §7.2 wants a 400.
     """
     if not authority or _IPV_FUTURE.match(authority):
         return True
     if any(byte in _HOST_FORBIDDEN_BYTES for byte in authority):
         return True
-    return authority.count(b'[') > 1 or authority.count(b']') > 1
+    if authority.count(b'[') > 1 or authority.count(b']') > 1:
+        return True
+    if not authority.startswith(b'['):
+        host, sep, port = authority.partition(b':')
+        if not host or (sep and port and not port.isdigit()):
+            return True
+    return False
 
 
 def _expected(authority: bytes) -> bool:
@@ -118,6 +126,9 @@ class TestTheAuthorityGrammarMatchesTheStdlibUrlParser:
     @pytest.mark.parametrize('authority', [
         b'', b'[v1.foo]', b'[v1.foo]:8100', b'[::1\t]', b'[::1] x',
         b'user@[::1]', b'[::1]#frag', b'[[]', b'[::1]:80]', b'[::1]:[80]',
+        # A reg-name that is not ``host [":" port]`` (§3.2.2): no host, or a
+        # port tail that is not ``*DIGIT``.
+        b'good.com:evil', b'a:b:80', b'2001:db8::1', b'::1', b':', b':80',
     ])
     def test_the_deliberate_differences_are_real(self, authority):
         """Stricter means rejected where the oracle accepts — proved, not
@@ -184,8 +195,73 @@ class TestThePortMatchesTheStdlibUrlParser:
             urlsplit('http://example.com:99999/x').port
 
     def test_a_non_numeric_port_falls_back_to_the_default(self):
-        # The host keeps the unparsed text here; that shape is older than this
-        # grammar and is not what the IP-literal rule is about.
+        # The host side of this shape is pinned in the class below.
         assert _parse_host_header(b'example.com:abc', 80)[1] == 80
         with pytest.raises(ValueError):
             urlsplit('http://example.com:abc/x').port
+
+
+class TestTheHostMatchesTheStdlibUrlParser:
+    """RFC 3986 §3.2.2 — a reg-name contains no ``:``, so the first colon is
+    the port delimiter and the host is what precedes it.  A non-numeric port
+    is refused before this parser runs (``TestAnInvalidRegNameIsRejected``);
+    the cut below is what the valid empty-port form still needs."""
+
+    @pytest.mark.parametrize('value', [
+        b'example.com:abc', b'example.com:', b'a:b:c',
+    ])
+    def test_port_text_never_survives_in_the_host(self, value):
+        host, port = _parse_host_header(value, 80)
+        assert ':' not in host
+        assert host == urlsplit('http://' + value.decode('ascii') + '/x').hostname
+        assert port == 80
+
+    @pytest.mark.parametrize('value,host,port', [
+        (b'abc:80', 'abc', 80),
+        (b'example.com:007', 'example.com', 7),
+        (b'example.com:080', 'example.com', 80),
+        (b'example.com:99999', 'example.com', 99999),
+        (b'example.com', 'example.com', 80),
+        (b'[::1]:abc', '::1', 80),
+        (b'[::1]', '::1', 80),
+        (b'[::1]:', '::1', 80),
+        (b'[::1]:8100', '::1', 8100),
+        (b'[2001:db8::1]', '2001:db8::1', 80),
+    ])
+    def test_the_other_shapes_are_unchanged(self, value, host, port):
+        assert _parse_host_header(value, 80) == (host, port)
+
+    @pytest.mark.parametrize('value,server', [
+        (b'example.com:', ('example.com', 80)),   # the empty port still cuts
+        (b'[::1]:8100', ('::1', 8100)),   # control: already right on base
+    ])
+    def test_conn_server_carries_the_parsed_host(self, value, server):
+        conn = _ACTOR._parse(
+            b'GET /x HTTP/1.1\r\nHost: ' + value + b'\r\n\r\n')
+        assert conn.server == server
+
+
+class TestAnInvalidRegNameIsRejected:
+    """RFC 9112 §7.2 — an authority that is not ``host [":" port]`` is an
+    invalid Host field-value and gets a 400, on both H1 paths.  Normalising
+    it instead would hand the app a ``conn.server`` indistinguishable from a
+    valid authority."""
+
+    _INVALID = [
+        b'good.com:evil', b'example.com:abc', b'a:b:c', b'a:b:80',
+        b'example.com:80:90', b'a:b:c:d', b'2001:db8::1', b'::1',
+        b':', b':80', b'example.com:80x',
+    ]
+
+    @pytest.mark.parametrize('authority', _INVALID, ids=repr)
+    def test_the_host_field_rejects_it(self, authority):
+        with pytest.raises(BadRequestError):
+            _ACTOR._parse(
+                b'GET /x HTTP/1.1\r\nHost: ' + authority + b'\r\n\r\n')
+
+    @pytest.mark.parametrize('authority', _INVALID, ids=repr)
+    def test_the_absolute_form_authority_rejects_it(self, authority):
+        with pytest.raises(BadRequestError):
+            _ACTOR._parse(
+                b'GET http://' + authority + b'/x HTTP/1.1\r\n'
+                b'Host: localhost\r\n\r\n')

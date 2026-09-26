@@ -1297,6 +1297,17 @@ class TestRouterEdgeCases:
         with pytest.raises(ValueError):
             router.route_fn(methods=['GET\n'], path='/x')
 
+    def test_route_fn_surrogate_method_gets_the_token_message(self):
+        """A lone surrogate is refused by the token message, not by a codec.
+
+        ``str.encode('utf-8')`` raises ``UnicodeEncodeError`` for one, which
+        would hide the guidance the message exists to give; only visible ASCII
+        may reach the octet rule at all.
+        """
+        router = Router()
+        with pytest.raises(ValueError, match='Invalid HTTP method token'):
+            router.route_fn(methods=['\ud800'], path='/x')
+
     def test_register_chain_non_middleware_in_middle_raises(self):
         router = Router()
 

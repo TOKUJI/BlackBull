@@ -96,6 +96,74 @@ The one exception is `handoff()`, which transfers a CONNECT or 101 transport to
 an `HTTP1UpgradeSession` and moves ownership of closing it with it — see
 [Testing](testing.md#connect-tunnels-and-protocol-upgrades).
 
+## How a request frames its body
+
+Framing is the client's to decide — the rule the
+[server applies to a response](requests-and-responses.md#responses) in the other
+direction. `Content-Length` is a statement about the body you passed to *this*
+call, so it is checked against it and then written once, canonically. A
+`Transfer-Encoding` of your own is accepted only when it is exactly `chunked`,
+and refused otherwise. Accepting it does not echo it: a byte body still goes
+out under `Content-Length`, and only a body that has to be streamed is written
+chunked.
+
+| `body=` | what goes out |
+|---|---|
+| `bytes`, non-empty | one `Content-Length: <len>`, raw octets |
+| `bytes`, empty, on `POST` / `PUT` / `PATCH` / `DELETE` | `Content-Length: 0` |
+| `bytes`, empty, on any other method | no framing field |
+| async iterable, with a `Content-Length` | that one field, raw octets, total checked |
+| async iterable, without | `Transfer-Encoding: chunked` |
+
+A `Content-Length` you pass in survives the empty cases too, so `POST` with an
+explicit `Content-Length: 0` still sends it.
+
+A `Content-Length` you supply is honoured only where it can be guaranteed. On a
+byte body that means it equals `len(body)`. On an async iterable it is kept and
+the stream is written raw — which is how an upload of known size goes out without
+being buffered. The running total is checked, so a stream that ends short or runs
+over raises `ProtocolError` and retires the connection: the request on the wire
+no longer matches its head.
+
+All of these are refused **before a single octet is written**, so the connection
+goes on carrying the next request: two `Content-Length` fields that disagree, a
+value that is not `1*DIGIT`, a length that contradicts the body, and a
+`Transfer-Encoding` the client would have to rewrite. That last one covers
+anything but a lone `chunked` — a coding the caller applied itself
+(`gzip, chunked`), a parameter, `chunked` twice — and any `Transfer-Encoding`
+beside a `Content-Length`, which RFC 9112 §6.2 forbids a message from carrying.
+
+A body you compressed yourself goes under `Content-Encoding`, framed by a
+`Content-Length` or by `Transfer-Encoding: chunked`; `Transfer-Encoding: gzip`
+is refused rather than quietly delivered as the payload. None of this touches
+the raw-wire primitives in
+[Driving a misbehaving peer](#driving-a-misbehaving-peer) — `send_header_line`
+will put two `Content-Length` lines on the wire, because that is what it is for.
+
+## What counts as a response
+
+Under HTTP/2, `request()` returns only a well-formed final response. The
+order is RFC 9113 §8.1's — zero or more informational `1xx` heads, one final
+head, the body, then a single optional trailer section — and every part is
+checked: `:status` is present and three ASCII digits, content appears only
+where RFC 9110 §9.3 allows it (a `HEAD` response and `204` / `304` carry
+none, whatever they declare), a declared `Content-Length` matches the body
+exactly, and a trailer section carries no pseudo-header field and no
+`Content-Length`. A response that breaks one of these raises `ProtocolError`.
+A hop-by-hop field such as `Transfer-Encoding` is refused earlier and
+separately, by the frame layer, as a `StreamReset`.
+The HTTP/1.1 reader is the laxer of the two: it reads no body for `HEAD` /
+`204` / `304` and refuses a malformed status line, but it cannot refuse
+octets a peer sends where content should not be.
+
+A refusal under HTTP/2 takes the stream alone — `RST_STREAM`, the connection
+and its other streams survive. `res.headers` holds the final head's fields
+only and `res.trailers` the trailer section: RFC 9113 §8.1 keeps the two
+field sections apart, and gRPC puts `grpc-status` in the trailer. Folding
+them together, as this client did, left a caller unable to tell which
+section a field came from. Informational heads are read and discarded, which
+is what the HTTP/1.1 reader has always done with them.
+
 ## What a call raises
 
 Everything the client itself refuses derives from `ClientError`:
@@ -110,7 +178,10 @@ ClientError
 ```
 
 Roughly: `ProtocolError` and `ResponseTooLarge` come out of reading a response
-on either protocol; `ConnectionError` out of any call once the peer has gone or
+on either protocol, and `ProtocolError` also out of building a request whose
+framing would be ambiguous — see
+[How a request frames its body](#how-a-request-frames-its-body);
+`ConnectionError` out of any call once the peer has gone or
 the context has exited; `StreamReset` only from HTTP/2, only from the
 `request()` whose stream was reset; `HandshakeError` only from
 `WebSocketClient.connect()` and `WebSocketH2Client`'s Extended CONNECT.

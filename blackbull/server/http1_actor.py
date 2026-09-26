@@ -18,6 +18,7 @@ from ..asgi import ASGIReceiveCallable, ASGISendCallable
 from ..connection import (
     Connection, bind_receive_channel)
 from ..headers import Headers
+from ..protocol.framing import parse_content_length
 from .deadline import ConnectionDeadline
 from .request_target import split_path_query
 from .recipient import (CONNECTION_MUST_CLOSE, CONNECTION_NEEDS_DRAIN,
@@ -59,7 +60,8 @@ _HTTP_VERSION_RE = re.compile(rb'\AHTTP/\d\.\d\Z')
 # `tests/unit/test_parse_octet_tables.py` audits the name table against the
 # frozenset form of it, octet for octet.
 from ..protocol.field_grammar import (
-    FIELD_VALUE_ALLOWED_OCTETS, TCHAR_OCTETS, URI_SCHEME_RE)
+    COMMON_METHODS_OCTETS, FIELD_VALUE_ALLOWED_OCTETS, TCHAR_OCTETS,
+    URI_SCHEME_RE, method_token_is_valid)
 
 
 
@@ -266,12 +268,11 @@ def _validate_message_framing(headers: 'Headers') -> int:
     """RFC 9112 §6 — reject framing-header combinations that are unsafe.
 
     These are the rules every smuggling-class incident I'm aware of has
-    exploited.  Specifically:
+    exploited.  The ``Content-Length`` half is
+    [`parse_content_length`][blackbull.protocol.framing.parse_content_length]
+    — the same answer the senders give, so no third reading of the field can
+    drift from them.  What is here is the combination policy:
 
-    * §6.2 — ``Content-Length`` value MUST be ``1*DIGIT`` (no signs, no
-      whitespace, non-empty).
-    * §6.2 — multiple ``Content-Length`` headers MUST all have the same
-      single integer value.  Different values are a CL.CL vector.
     * §6.1 — if both ``Content-Length`` and ``Transfer-Encoding`` are
       present, the message is anomalous.  We reject (the spec also
       allows "ignore CL, use TE"; rejecting is the safer policy).
@@ -298,18 +299,10 @@ def _validate_message_framing(headers: 'Headers') -> int:
 
     declared = 0
     if cls:
-        values: set[bytes] = set()
-        for _, value in cls:
-            for v in value.split(b','):
-                v = v.strip()
-                if not v or not v.isdigit():
-                    raise BadRequestError(f'invalid Content-Length value {v!r}')
-                # Strip leading zeros so "00005" and "5" compare equal.
-                values.add(v.lstrip(b'0') or b'0')
-        if len(values) > 1:
-            raise BadRequestError(
-                f'conflicting Content-Length values: {sorted(values)!r}')
-        declared = int(next(iter(values)))
+        try:
+            declared = parse_content_length(cls) or 0
+        except ValueError as exc:
+            raise BadRequestError(str(exc)) from exc
 
     if tes:
         codings = [c.strip().lower()
@@ -351,16 +344,23 @@ _HOST_FORBIDDEN_BYTES = (
 # make a Host value invalid, and the octet it reports decides which rule
 # applies.  Folding them in here rather than testing for them separately is
 # what keeps the ASCII rule (BLA-293) on the single pass it already paid for.
+#
+# RFC 3986 §3.2.2 — the host is required, and outside the brackets a
+# reg-name carries no ``:``: the one colon is the port delimiter and its tail
+# is ``*DIGIT``.  A missing host or a non-digit port tail is refused here too,
+# on the same pass.
 _AUTHORITY_SCAN_BYTES = _HOST_FORBIDDEN_BYTES | {0x5B, 0x5D}  # '[' ']'
 _AUTHORITY_SCAN_RE = re.compile(
-    b'[' + re.escape(bytes(sorted(_AUTHORITY_SCAN_BYTES))) + b']')
+    b'[' + re.escape(bytes(sorted(_AUTHORITY_SCAN_BYTES))) + b']'
+    b'|\\A:|:[0-9]*[^0-9]')
 
 # RFC 9112 §2.1 / RFC 3986 — a request-target may carry only visible ASCII.
 _TARGET_ALLOWED_OCTETS = bytes(range(0x21, 0x7F))
 
 
 # RFC 3986 §3.2.2 — IP-literal = "[" IPv6address "]"; the port that may follow
-# it keeps the authority's lax octet rule (the reg-name path's port is BLA-440).
+# it keeps the authority's lax octet rule (the reg-name path's port is
+# validated in ``_authority_is_valid``).
 # ``IPvFuture`` is not accepted even though §3.2.2 lists it beside
 # ``IPv6address``: nothing emits it, and the one stdlib reading of it is a
 # case-sensitive ``v`` special case with a laxer tail than the production.
@@ -394,9 +394,10 @@ def _ip_literal_is_valid(value: bytes) -> bool:
 def _authority_is_valid(value: bytes) -> bool:
     """RFC 3986 §3.2 — whether *value* is a URI authority.
 
-    The one scan decides: a forbidden octet refuses the value, and a bracket
-    hands it to §3.2.2's IP-literal grammar.  Neither caller reads a reason,
-    so the message it raises names the value and nothing finer.
+    The one scan decides: a forbidden octet, a missing host, or a port tail
+    that is not ``*DIGIT`` refuses the value, and a bracket hands it to
+    §3.2.2's IP-literal grammar.  Neither caller reads a reason, so the
+    message it raises names the value and nothing finer.
     """
     match = _AUTHORITY_SCAN_RE.search(value)
     if match is None:
@@ -409,7 +410,9 @@ def _parse_host_header(value: bytes, default_port: int) -> tuple[str, int]:
 
     Handles the RFC 3986 §3.2.2 IPv6 bracket form ``[::1]:8100``, where a naive
     ``value.split(b':')`` yields ``int(b'')`` → ``ValueError``.  A missing or
-    non-numeric port falls back to *default_port*.
+    non-numeric port falls back to *default_port*; the reg-name path cuts the
+    host at the first ``:`` (§3.2.2 — a reg-name carries none), so no port text
+    survives in the host.
     """
     # ``_validate_host`` rejects non-ASCII on the request path; ``replace``
     # keeps this total for every other caller.
@@ -426,10 +429,10 @@ def _parse_host_header(value: bytes, default_port: int) -> tuple[str, int]:
             return _dec(host), default_port
         # Unterminated bracket — treat the whole value as the host.
         return _dec(value), default_port
-    host, sep, port_s = value.rpartition(b':')
+    host, sep, port_s = value.partition(b':')
     if sep and port_s.isdigit():
         return _dec(host), int(port_s)
-    return _dec(value), default_port
+    return _dec(host), default_port
 
 
 def _validate_host(headers: 'Headers') -> None:
@@ -876,8 +879,12 @@ class HTTP1Actor(Actor):
                 f'got {len(parts)}: {request_line!r}')
         method, path, version = parts
 
-        # Method (§4 / RFC 9110 §9.1) — case-sensitive token of 1+ tchar.
-        if not method or method.translate(None, TCHAR_OCTETS):
+        # Method (§4 / RFC 9110 §9.1) — the same rule HTTP/2 grades `:method`
+        # with, so the transports cannot disagree about which methods exist.
+        # A common method skips the rule: the set lies inside it, which
+        # tests/architecture pins.
+        if (method not in COMMON_METHODS_OCTETS
+                and not method_token_is_valid(method)):
             raise BadRequestError(f'invalid method {method!r}')
 
         # HTTP-version (§2.5) — exactly ``HTTP/d.d``.

@@ -10,6 +10,78 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Malformed qualities or parameters refuse the named coding, including when
   `*` would otherwise allow it.
 
+- **An HTTP/2 `:scheme` is read case-insensitively, and the application sees
+  it lowercase.**  A scheme is case-insensitive and its canonical form is
+  lowercase (RFC 3986 §3.1, RFC 9110 §4.2.3), but the host rule compared the
+  value against lowercase literals, so `:scheme: HTTPS`
+  with neither `:authority` nor `Host` was accepted and reached a handler
+  with no host at all — the very request `:scheme: https` answers `missing
+  :authority and Host` for.  The same unnormalized value mapped an RFC 8441
+  Extended CONNECT to `ws` rather than `wss`, and arrived as `conn.scheme`,
+  where `scope['scheme'] == 'https'` is how secure-cookie and redirect
+  decisions read it.  The parser normalizes the scheme to lowercase once
+  (RFC 3986 §3.1), so the host rule, the WebSocket mapping and the
+  application read one spelling.
+
+- **An HTTP/2 request's `:method` must be a token and its `:scheme` a URI
+  scheme.**  `G,ET` used to reach the router and the access log over HTTP/2
+  while HTTP/1.1 refused it on its request line, and `a_b` was taken as a
+  scheme although no URI grammar admits an underscore.  A value outside
+  RFC 9110 §9.1 or RFC 3986 §3.1 is now malformed and answered with
+  `RST_STREAM(PROTOCOL_ERROR)`.  An empty `:method`, which the request
+  builder silently turned into `HEAD`, is refused the way an empty `:path`
+  already was — an HTTP/2 peer relying on that placeholder has to send a
+  method.  An empty `:scheme`, which the builder silently turned into
+  `https`, is refused for the same reason; `:scheme` is still defaulted only
+  where plain CONNECT omits it (RFC 9113 §8.5).
+
+- **An HTTP/2 response is now complete only when it is a well-formed final
+  response.**  `request()` used to resolve on the first `END_STREAM` whatever
+  had arrived before it: a body with no head at all, a head with no
+  `:status`, an informational `103` that ended the stream, a body that
+  contradicted its own `Content-Length`, and content on a `HEAD` response
+  each reached the caller as a successful response.  RFC 9113 §8.1's order is
+  now enforced — informational heads, one final head, the body, then an
+  optional trailer section — with `:status` required and three ASCII digits,
+  RFC 9110 §9.3's body rules, and a declared `Content-Length` matched against
+  the body.  A response that breaks it raises `ProtocolError` and resets that
+  stream alone; the connection and its other streams survive.  The order is
+  worth about 1 µs per response on top of the old handler, measured
+  round-paired against an in-session A/A floor of 0.3 µs
+  (`bench/h2_client_response_ab.py`); that is the cost of the check, and it
+  is why the field section is normalised once rather than per check.
+- **Breaking for HTTP/2 client callers.**  `res.headers` now holds the final
+  head's fields only, and the trailer section arrives in the new
+  `res.trailers`.  The two had been folded together, so a caller could not
+  tell which field section a field came from — gRPC's `grpc-status` lives in
+  the trailer, and now reads as `res.trailers.get(b'grpc-status')`.
+  Informational heads are read and discarded, which is what the HTTP/1.1
+  reader has always done with them.  A `Content-Length` on a response that
+  may not carry content is kept as metadata and is not compared against a
+  body there is none of.
+
+- **An HTTP/1.1 request now declares exactly one body framing, and a caller's
+  framing fields are checked rather than relayed.**  `Content-Length` is
+  written once and must agree with the body across every occurrence.  A caller
+  `Transfer-Encoding` is honoured only when it is exactly `chunked`, the one
+  framing this client writes, and refused otherwise.  Previously a fixed body
+  with a caller `Transfer-Encoding` went out carrying both fields and writing
+  an unchunked body, a stream body with a caller `Content-Length` went out
+  carrying both fields and writing chunk syntax, and `Content-Length: 5, 9`
+  went out as two competing message boundaries.  A stream body with a
+  `Content-Length` is now written raw against that total and checked as it
+  goes, so an upload of known size need not be buffered.
+- **Breaking for HTTP/1.1 client callers.**  A framing refusal raises
+  `ProtocolError` where it raised `ValueError`, and `prepare`'s return value is
+  now internal — its third element is the declared length (`int | None`), not
+  the `chunked` flag it used to be.  A `Transfer-Encoding` of `gzip, chunked`
+  carrying a body the caller compressed itself is refused rather than sent:
+  dropping the coding would deliver compressed octets as the payload.  Use
+  `Content-Encoding` for a content coding.  A bad or conflicting
+  `Content-Length` now reports `invalid Content-Length value` / `conflicting
+  Content-Length values` on every side, values included, since one rule now
+  backs the server's response framing, the server's request framing check, and
+  the client.
 - **A failing `@app.on_shutdown` hook now exits `1`** instead of `0` in a
   single-worker process (`app.run()`, the `blackbull` CLI).  `TestClient` and
   `NativeClient` raise it from the `with` block unless the block is already

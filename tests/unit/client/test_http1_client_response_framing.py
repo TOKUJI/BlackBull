@@ -828,12 +828,12 @@ async def test_preflight_content_length_failure_leaves_connection_reusable(api):
     bad_headers = [(b'content-length', b'2')]
 
     if api == 'request':
-        with pytest.raises(ValueError):
+        with pytest.raises(ProtocolError):
             await client.request('POST', '/', headers=bad_headers, body=b'x')
     else:
         body_stream = client.stream(
             'POST', '/', headers=bad_headers, body=b'x')
-        with pytest.raises(ValueError):
+        with pytest.raises(ProtocolError):
             await anext(body_stream)
 
     assert bytes(client._writer.data) == b''  # type: ignore[union-attr]

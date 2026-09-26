@@ -30,7 +30,7 @@ Read-side surface:
 
 | member | value |
 |---|---|
-| `conn.method` / `conn.path` / `conn.scheme` | `str` (`path` is **percent-decoded** — see below) |
+| `conn.method` / `conn.path` / `conn.scheme` | `str` (`path` is **percent-decoded** — see below; a request BlackBull parsed carries `scheme` lowercase) |
 | `conn.client` | `(host, port)` tuple, or `None` |
 | `conn.path_params` | `dict[str, str]` of matched `{placeholder}` values |
 | `conn.headers` | case-insensitive [`Headers`](#reading-request-headers) view |
