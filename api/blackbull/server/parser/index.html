@@ -5537,7 +5537,8 @@ CONNECT — or <code>None</code> when the request is malformed, having marked th
 the actor answers RST_STREAM.</p>
 <p>The request-level pseudo-header rules (RFC 9113 §8.3.1) live here: which
 pseudo-headers must be present, that <code>:status</code> may not appear in a request,
-and the <code>:authority</code> / <code>Host</code> authority grammar that decides the <code>host</code>
+the value grammars of <code>:method</code>, <code>:scheme</code> and <code>:path</code>, and the
+<code>:authority</code> / <code>Host</code> authority grammar that decides the <code>host</code>
 a handler sees.  Field-level validation already happened when the frame parsed
 its payload.</p>
 
