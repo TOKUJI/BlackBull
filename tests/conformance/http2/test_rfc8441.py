@@ -266,7 +266,8 @@ class TestExtendedConnectHandshake:
         await handler.run()
         assert captured['path'] == '/chat-room'
 
-    async def test_scope_scheme_wss_for_https(self):
+    @pytest.mark.parametrize('scheme', ['https', 'HTTPS'])
+    async def test_scope_scheme_wss_for_https(self, scheme):
         captured = {}
 
         async def app(conn, receive, send):
@@ -277,13 +278,14 @@ class TestExtendedConnectHandshake:
 
         handler, _, _ = _make_h2_actor(app)
         frames = [_client_settings(),
-                  _make_extended_connect_frame(scheme='https'),
+                  _make_extended_connect_frame(scheme=scheme),
                   None]
         handler.receive = AsyncMock(side_effect=frames)
         await handler.run()
         assert captured['scheme'] == 'wss'
 
-    async def test_scope_scheme_ws_for_http(self):
+    @pytest.mark.parametrize('scheme', ['http', 'HTTP'])
+    async def test_scope_scheme_ws_for_http(self, scheme):
         captured = {}
 
         async def app(conn, receive, send):
@@ -294,7 +296,7 @@ class TestExtendedConnectHandshake:
 
         handler, _, _ = _make_h2_actor(app)
         frames = [_client_settings(),
-                  _make_extended_connect_frame(scheme='http'),
+                  _make_extended_connect_frame(scheme=scheme),
                   None]
         handler.receive = AsyncMock(side_effect=frames)
         await handler.run()
