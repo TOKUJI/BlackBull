@@ -18,7 +18,7 @@ from ..asgi import ASGIReceiveCallable, ASGISendCallable
 from ..connection import (
     Connection, bind_receive_channel)
 from ..headers import Headers
-from ..protocol.framing import parse_content_length
+from ..protocol.framing import method_is, parse_content_length
 from .deadline import ConnectionDeadline
 from .request_target import split_path_query
 from .recipient import (CONNECTION_MUST_CLOSE, CONNECTION_NEEDS_DRAIN,
@@ -1287,7 +1287,7 @@ class HTTP1Actor(Actor):
         # ``scope['method']`` too would force materialization for nothing.
         # The access log keeps the original HEAD, from the request line.
         send._log_record = log_record
-        send._head_mode = (conn.method == 'HEAD')
+        send._head_mode = method_is(conn.method, 'HEAD')
         if send._head_mode:
             conn.method = 'GET'
 

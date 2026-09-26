@@ -27,7 +27,8 @@ from itertools import chain
 from typing import NoReturn
 
 from ..protocol import hpack_fastpath
-from ..protocol.framing import is_informational, parse_content_length
+from ..protocol.framing import (is_informational, parse_content_length,
+                                response_has_content)
 from ..protocol.frame_types import (FrameTypes, HeaderFrameFlags, DataFrameFlags,
                                     FrameBase, PseudoHeaders,
                                     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE)
@@ -811,7 +812,10 @@ class HTTP1Sender(BaseSender):
         self._content_length = None
         self._body_bytes = 0
         self._informational = is_informational(status)
-        content_forbidden = self._informational or code in (204, 205, 304)
+        # The method arrives as ``_head_mode`` rather than as a method, so
+        # the shared rule is asked about the status alone; ``_head_mode`` is
+        # OR-ed back in just below.
+        content_forbidden = not response_has_content(None, status)
         self._suppress_body = self._head_mode or content_forbidden
 
         keep_length = (not self._informational and code not in (204, 205)

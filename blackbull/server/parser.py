@@ -14,6 +14,7 @@ a handler sees.  Field-level validation already happened when the frame parsed
 its payload.
 """
 from ..protocol.frame_types import PseudoHeaders
+from ..protocol.framing import method_is
 import logging
 from ..connection import Connection
 from ..headers import Headers
@@ -199,7 +200,7 @@ def parse_headers(frame) -> Connection | None:
 
     protocol = frame.pseudo_headers.get(PseudoHeaders.PROTOCOL, '')
 
-    if method == 'CONNECT' and protocol == 'websocket':
+    if method_is(method, 'CONNECT') and protocol == 'websocket':
         # RFC 8441 §4 — Extended CONNECT bootstrapping WebSocket over HTTP/2.
         # ``method`` is the true wire value, never a placeholder: it IS read
         # for websocket-typed Connections, by ``AccessLogRecord.from_conn``
@@ -243,7 +244,7 @@ def parse_headers(frame) -> Connection | None:
     # field name malformed and ``HeadersFrame.parse_payload`` rejects the
     # frame before the pair reaches ``frame.headers``, so the list is
     # lowercase by protocol.  The injected ``host`` is a lowercase literal.
-    if method == 'CONNECT':
+    if method_is(method, 'CONNECT'):
         headers = Headers.from_lowered(frame.headers)
     else:
         raw_headers = _request_headers_with_host(

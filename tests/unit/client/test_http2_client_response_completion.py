@@ -418,13 +418,18 @@ class TestTheInterimResponsesAreBounded:
         assert res.status == 200
 
     async def test_interim_responses_past_the_limit_are_refused(
-            self, monkeypatch):
+            self, monkeypatch, caplog):
+        import logging
         monkeypatch.setenv('BB_CLIENT_MAX_INTERIM_RESPONSES', '3')
+        caplog.set_level(logging.WARNING, logger='blackbull.caps')
         outcome = await _call(self._interim(4)
                               .headers({PseudoHeaders.STATUS: '200'}, [],
                                        end_stream=True))
         assert isinstance(outcome, tuple), outcome
         assert isinstance(outcome[0], ResponseTooLarge), outcome[0]
+        assert [(r.cap, r.protocol, r.requested, r.limit)
+                for r in caplog.records if getattr(r, 'cap', None)] == [
+            ('client_max_interim_responses', 'http2', 4, 3)]
 
 
 class TestTheStatusIsUsable:

@@ -49,7 +49,12 @@ def parse_status(value: str | bytes) -> int | None:
 
 
 def is_informational(status: int | str) -> bool:
-    """Whether *status* is an informational (1xx) response — RFC 9110 §15."""
+    """Whether *status* is an informational (1xx) response — RFC 9110 §15.
+
+    An informational response is provisional: it shares its sender with the
+    final response that must still follow, so it commits no status, completes
+    no exchange, and carries no content framing.
+    """
     return 100 <= int(status) < 200
 
 
@@ -69,9 +74,13 @@ def response_has_content(method: str | bytes | HTTPMethod | None,
                          status: int) -> bool:
     """Whether a response to *method* with *status* may carry content.
 
-    RFC 9110 §9.3.2: a HEAD response and a 204 or 304 carry none, whatever
-    they declare. An informational response carries none either (§15.2),
-    but only because it is not the response at all yet.
+    One answer for both directions of the wire. RFC 9110 §9.3.1 says a HEAD
+    response has none, §9.3.2 a 204 or 304, and §15.3.7 forbids a server to
+    generate any in a 205 — the last is a generation rule rather than a
+    framing one, and both halves of the tree already acted on it, so a
+    response that carries one is refused rather than read. An informational
+    response carries none either (§15.2), but only because it is not the
+    response at all yet.
     """
-    return (not is_informational(status) and status not in (204, 304)
+    return (not is_informational(status) and status not in (204, 205, 304)
             and not method_is(method, 'HEAD'))

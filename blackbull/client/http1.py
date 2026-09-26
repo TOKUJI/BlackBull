@@ -997,9 +997,8 @@ class HTTP1ResponseRecipient:
         response-side twin of the desync ``_declared_content_length``
         guards against.
 
-        Discarded, not surfaced: nothing on ``ClientResponse`` carries them,
-        and inventing a field for them here would be a second decision hiding
-        inside a framing fix.
+        Discarded, not surfaced: ``ClientResponse.trailers`` exists, but this
+        reader never fills it, so it is empty on every HTTP/1.1 response.
         """
         total = 0
         while True:
