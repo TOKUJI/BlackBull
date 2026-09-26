@@ -1578,9 +1578,14 @@ class HTTP2Sender(BaseSender):
             if self._log_record is not None:
                 self._log_record.status = int(status)
                 self._log_record.response_bytes += len(body)
+            forbidden = self._content_is_forbidden(status, self._head_mode)
             h_bytes = build_response_headers(
                 self._factory.encoder, self._stream_id, status, headers,
-                end_stream=False)
+                end_stream=forbidden)
+            if forbidden:
+                await self._write(h_bytes)
+                self._end_stream_sent = True
+                return
 
             total = len(body)
             sid_bytes = self._stream_id.to_bytes(4, 'big')
