@@ -28,3 +28,25 @@ def parse_content_length(fields: Iterable[tuple[bytes, bytes]]
         raise ValueError(
             f'conflicting Content-Length values: {sorted(set(values))!r}')
     return values[0]
+
+
+def parse_status(value: str | bytes) -> int | None:
+    """A status code as RFC 9110 §15 writes one, or ``None`` if it is not.
+
+    Three ASCII digits and nothing else.  There is deliberately no 100-599
+    bound: a range one transport enforces and the other does not is an accept
+    set the two disagree on, and neither protocol draws one here.
+    """
+    if isinstance(value, bytes):
+        try:
+            value = value.decode('ascii')
+        except UnicodeDecodeError:
+            return None
+    if len(value) != 3 or not value.isdigit() or not value.isascii():
+        return None
+    return int(value)
+
+
+def is_informational(status: int) -> bool:
+    """Whether *status* is an informational (1xx) response — RFC 9110 §15."""
+    return 100 <= status < 200

@@ -297,7 +297,9 @@ async def test_client_stream_reset_during_upload_does_not_return_send_credit():
         await _turn()
         await _turn()
         assert writer.body(3) == b'world'
-        client._complete(3)
+        client._responses[3].final_seen = True
+        client._responses[3].status = 200
+        await client._complete(3)
         await second
     finally:
         tasks = [first] + ([second] if second is not None else [])

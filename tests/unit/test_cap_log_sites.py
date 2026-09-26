@@ -768,9 +768,12 @@ async def _refused_h2(monkeypatch, env, value, feed):
 
 @pytest.mark.asyncio
 async def test_client_body_max_total_logs_on_http2(caps_caplog, monkeypatch):
-    from blackbull.protocol.frame_types import FrameTypes
+    from blackbull.protocol.frame_types import FrameTypes, PseudoHeaders
 
     async def _feed(c):
+        head = c._factory.create(FrameTypes.HEADERS, 4, 1)
+        head.pseudo_headers[PseudoHeaders.STATUS] = '200'
+        await c._on_response_headers(head)
         frame = c._factory.create(FrameTypes.DATA, 0, 1, data=b'x' * 5000)
         await c._on_response_data(frame)
 

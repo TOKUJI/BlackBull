@@ -27,7 +27,7 @@ from ..server.recipient import (AbstractReader, AsyncioReader,
 from ..protocol.field_grammar import (
     FIELD_VALUE_ALLOWED_OCTETS, FIELD_VALUE_ALLOWED_SET, TCHAR_OCTETS,
     TCHAR_SET)
-from ..protocol.framing import parse_content_length
+from ..protocol.framing import parse_content_length, parse_status
 from ..server.sender import AbstractWriter, AsyncioWriter
 from ._connect import DEFAULT_CONNECT_TIMEOUT, open_connection as _open_connection
 from .exceptions import ConnectionError, ProtocolError, ResponseTooLarge
@@ -509,10 +509,9 @@ class HTTP1ResponseRecipient:
         if version not in (b'HTTP/1.0', b'HTTP/1.1'):
             raise ProtocolError(f'unsupported response version: {version!r}')
         # RFC 9112 §4: status-code is exactly three ASCII decimal digits.
-        if (len(parts[1]) != 3 or not parts[1].isdigit()
-                or not parts[1].isascii()):
+        status = parse_status(parts[1])
+        if status is None:
             raise ProtocolError(f'invalid status code: {parts[1]!r}')
-        status = int(parts[1])
 
         pairs: list[tuple[bytes, bytes]] = []
         for line in lines[1:]:
