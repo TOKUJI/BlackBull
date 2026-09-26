@@ -117,6 +117,8 @@ def test_print_per_instance_sizes(capsys):
     # size above ~200 bytes here would suggest slots have been broken.
     # 208 rather than 200: `HTTP2Sender` carries `_head_mode` and
     # `_suppress_body`, the two facts the content rules need at write time.
+    # `_suppress_body` also tells the drop guard whether the missing content
+    # was the sender doing its job, so it cannot be recomputed away.
     for name, size in sizes.items():
         assert size < 208, (
             f'{name} is {size} bytes — far above the slots-equipped '

@@ -48,14 +48,22 @@ def parse_status(value: str | bytes) -> int | None:
     return int(value)
 
 
-def is_informational(status: int | str) -> bool:
+#: RFC 9112 §6.3 rule 1 — a response to HEAD and any of these has no body and
+#: no trailer section, whatever the field sections say.
+NO_CONTENT_STATUSES: frozenset[int] = frozenset(range(100, 200)) | {204, 304}
+#: What a server may not generate content in. RFC 9110 §15.3.6 adds 205 to
+#: the set above, and only to what it sends.
+NO_CONTENT_GENERATED_STATUSES: frozenset[int] = NO_CONTENT_STATUSES | {205}
+
+
+def is_informational(status: int) -> bool:
     """Whether *status* is an informational (1xx) response — RFC 9110 §15.
 
     An informational response is provisional: it shares its sender with the
     final response that must still follow, so it commits no status, completes
     no exchange, and carries no content framing.
     """
-    return 100 <= int(status) < 200
+    return 100 <= status < 200
 
 
 def method_is(method: str | bytes | HTTPMethod | None, expected: str) -> bool:
@@ -65,7 +73,9 @@ def method_is(method: str | bytes | HTTPMethod | None, expected: str) -> bool:
     `HEAD` and folding the two together changes whether a response may
     carry content.
     """
-    if isinstance(method, bytes):
+    if method.__class__ is str:
+        return method == expected
+    if method.__class__ is bytes:
         return method == expected.encode('ascii')
     return method is not None and str(method) == expected
 
@@ -85,5 +95,4 @@ def response_has_content(method: str | bytes | HTTPMethod | None,
     reader from the very peer that was already misbehaving. The generation
     rule lives on the sender beside it, not in here.
     """
-    return (not is_informational(status) and status not in (204, 304)
-            and not method_is(method, 'HEAD'))
+    return status not in NO_CONTENT_STATUSES and not method_is(method, 'HEAD')

@@ -904,7 +904,7 @@ class HTTP1Actor(Actor):
         # (CONNECT only), and asterisk (``*``, server-wide OPTIONS).
         authority_override: bytes | None = None
         asterisk_form = False
-        if method == b'CONNECT':
+        if method_is(method, 'CONNECT'):
             # authority-form target (§3.2.3) — tunnel establishment, which
             # BlackBull does not implement.  Answer 501, not a spurious 404.
             raise NotImplementedFramingError(

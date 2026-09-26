@@ -289,11 +289,12 @@ contrast is visible:
 
 - **A peer that sends content where RFC 9112 §6.3 rule 1 says there is none —
   a 204, a 304 or a HEAD response carrying a body — is not refused over
-  HTTP/1.1.** Those octets are dropped and the connection is reused, which is
-  the shape a desync would take. The reader trusts the rule rather than the
-  peer here; a 205 is consumed to its declared length precisely because the
-  rule does not cover one. HTTP/2 refuses such frames instead, because frames
-  are self-delimiting and no boundary is at stake.
+  HTTP/1.1.** Those octets are left unread and are parsed as the start of the
+  next response: a `ProtocolError` in the usual case, and a response taken for
+  another when the leftover happens to look like one. The reader trusts the
+  rule rather than the peer here; a 205 is consumed to its declared length
+  precisely because the rule does not cover one. HTTP/2 refuses such frames
+  instead, because frames are self-delimiting and no boundary is at stake.
 
 - **It does not follow redirects and does not pool connections.** Neither
   exists in `blackbull/client/` — so neither is bounded *or* unbounded, and a

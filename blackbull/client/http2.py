@@ -1559,6 +1559,9 @@ class HTTP2Client:
             pending.interim_seen += 1
             limit = get_settings().client_max_interim_responses
             if limit and pending.interim_seen > limit:
+                # ENHANCE_YOUR_CALM rather than CANCEL: the budget bounds how
+                # much response the peer may generate, like the header
+                # aggregate does, and CANCEL is for a client's own limits.
                 await self._refuse_stream(
                     frame.stream_id, 'client_max_interim_responses',
                     pending.interim_seen, limit,

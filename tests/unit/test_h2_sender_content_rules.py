@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from http import HTTPStatus
 
 import pytest
@@ -141,3 +142,21 @@ async def test_the_dict_arm_completes_a_final_response_after_an_interim_one():
                   'more_body': False})
     await asyncio.sleep(0)
     assert _wire(writer) == [(1, 0), (1, 0), (0, 1)]
+
+
+async def test_a_head_response_is_quiet_about_the_chunks_it_suppresses(caplog):
+    """Suppressing the body is the sender doing its job, not an application
+    mistake, so it logs nothing. Without this the message blames the app once
+    per chunk — a HEAD of a large file becomes a warning per 64 KiB."""
+    sender, writer = _sender(head_mode=True)
+    with caplog.at_level('WARNING'):
+        await sender({'type': 'http.response.start', 'status': 200,
+                      'headers': [], 'trailers': True})
+        for _ in range(3):
+            await sender({'type': 'http.response.body', 'body': b'x',
+                          'more_body': True})
+        await sender({'type': 'http.response.trailers',
+                      'headers': [(b'x-t', b'1')], 'more_trailers': False})
+    await asyncio.sleep(0)
+    assert _wire(writer) == [(1, 1)]
+    assert caplog.records == []

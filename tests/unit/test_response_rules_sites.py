@@ -13,6 +13,8 @@ copies hid.
 """
 from pathlib import Path
 
+from blackbull.protocol import framing
+
 ROOT = Path(__file__).resolve().parents[2] / 'blackbull'
 FRAMING = ROOT / 'protocol' / 'framing.py'
 
@@ -27,6 +29,12 @@ INLINE = (
     '== "HEAD"',
     "!= 'HEAD'",
     "== 'CONNECT'",            # method_is
+    '== "CONNECT"',
+    "!= 'CONNECT'",
+    "== b'HEAD'",              # method_is — a b' spelling escapes the list
+    "== b'CONNECT'",
+    "!= b'HEAD'",
+    "!= b'CONNECT'",
 )
 
 
@@ -53,3 +61,11 @@ def test_no_transport_writes_a_rule_by_hand():
         for spelling in INLINE:
             assert spelling not in text, (
                 f'{path.name} writes {spelling!r} instead of the shared rule')
+
+
+def test_the_contentless_sets_are_pinned():
+    """The frozensets are a lookup table for the rule, not a second rule to
+    reason about: these two lines are what keeps them equal to it."""
+    assert framing.NO_CONTENT_STATUSES == frozenset(range(100, 200)) | {204, 304}
+    assert framing.NO_CONTENT_GENERATED_STATUSES - framing.NO_CONTENT_STATUSES == {
+        205}

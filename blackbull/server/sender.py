@@ -27,8 +27,8 @@ from itertools import chain
 from typing import NoReturn
 
 from ..protocol import hpack_fastpath
-from ..protocol.framing import (is_informational, parse_content_length,
-                                response_has_content)
+from ..protocol.framing import (NO_CONTENT_GENERATED_STATUSES, is_informational,
+                                parse_content_length)
 from ..protocol.frame_types import (FrameTypes, HeaderFrameFlags, DataFrameFlags,
                                     FrameBase, PseudoHeaders,
                                     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE)
@@ -464,13 +464,11 @@ class BaseSender(ABC):
         Final responses only: an informational head is not the response yet,
         so it is never terminated here.
 
-        One answer for both transports. ``protocol.framing.response_has_content``
-        supplies the framing statuses and HEAD; RFC 9110 §15.3.6 adds 205,
-        which a server may not generate content in even though a peer's 205
-        frames one normally.
+        One answer for both transports. ``protocol.framing`` holds the set
+        these use; RFC 9110 §15.3.6 adds 205 to it, which a server may not
+        generate content in even though a peer's 205 frames one normally.
         """
-        return (head_mode or status == 205
-                or not response_has_content(None, status))
+        return head_mode or status in NO_CONTENT_GENERATED_STATUSES
 
     def __init__(self, writer: AbstractWriter):
         self._writer = writer
@@ -1606,11 +1604,12 @@ class HTTP2Sender(BaseSender):
         if isinstance(body, bytes):
             # RFC 9113 §8.1, as in the dict branch below.
             if self._end_stream_sent:
-                logger.warning(
-                    'HTTP2Sender: dropping bytes write on stream %d — '
-                    'END_STREAM already sent (ASGI app sent a body after '
-                    'the response was complete)',
-                    self._stream_id)
+                if not self._suppress_body:
+                    logger.warning(
+                        'HTTP2Sender: dropping bytes write on stream %d — '
+                        'END_STREAM already sent (ASGI app sent a body after '
+                        'the response was complete)',
+                        self._stream_id)
                 return
             if self._log_record is not None:
                 self._log_record.status = int(status)
@@ -1644,11 +1643,12 @@ class HTTP2Sender(BaseSender):
 
         elif isinstance(body, NativeResponse):
             if self._end_stream_sent:
-                logger.warning(
-                    'HTTP2Sender: dropping NativeResponse on stream %d — '
-                    'END_STREAM already sent (ASGI app sent a response after '
-                    'the response was complete)',
-                    self._stream_id)
+                if not self._suppress_body:
+                    logger.warning(
+                        'HTTP2Sender: dropping NativeResponse on stream %d — '
+                        'END_STREAM already sent (ASGI app sent a response after '
+                        'the response was complete)',
+                        self._stream_id)
                 return
             if body._header is not None:
                 header_pairs = list(body._header)
@@ -1683,10 +1683,11 @@ class HTTP2Sender(BaseSender):
             # the peer would treat as a stream error.  Application bug to
             # surface; sender's job is to not make it worse on the wire.
             if self._end_stream_sent:
-                logger.warning(
-                    'HTTP2Sender: dropping %r on stream %d — END_STREAM already '
-                    'sent (ASGI app sent an event after the response was complete)',
-                    event_type, self._stream_id)
+                if not self._suppress_body:
+                    logger.warning(
+                        'HTTP2Sender: dropping %r on stream %d — END_STREAM already '
+                        'sent (ASGI app sent an event after the response was complete)',
+                        event_type, self._stream_id)
                 return
 
             if event_type == ASGIEvent.HTTP_RESPONSE_START:
