@@ -456,6 +456,19 @@ class BaseSender(ABC):
     # its own attributes or pay the ``__dict__`` back.
     __slots__ = ('_writer', '_closed')
 
+    @staticmethod
+    def _content_is_forbidden(status: HTTPStatus | int,
+                              head_mode: bool = False) -> bool:
+        """Whether a response with this status may put content on the wire.
+
+        One answer for both transports. ``protocol.framing.response_has_content``
+        supplies the framing statuses and HEAD; RFC 9110 §15.3.6 adds 205,
+        which a server may not generate content in even though a peer's 205
+        frames one normally.
+        """
+        return (head_mode or status == 205
+                or not response_has_content(None, status))
+
     def __init__(self, writer: AbstractWriter):
         self._writer = writer
         self._closed = False
@@ -812,17 +825,8 @@ class HTTP1Sender(BaseSender):
         self._content_length = None
         self._body_bytes = 0
         self._informational = is_informational(status)
-        # The method arrives as ``_head_mode`` rather than as a method, so
-        # the shared rule is asked about the status alone; ``_head_mode`` is
-        # OR-ed back in just below.  205 is a generation rule and not a
-        # framing one: RFC 9110 §15.3.6 forbids a server to generate content
-        # in one where RFC 9112 §6.3 would still frame it, so it is refused
-        # here and
-        # left out of ``response_has_content`` — a client must still read a
-        # peer's 205 to its declared length to stay in step with it.
-        content_forbidden = (not response_has_content(None, status)
-                             or code == 205)
-        self._suppress_body = self._head_mode or content_forbidden
+        self._suppress_body = self._content_is_forbidden(status,
+                                                        self._head_mode)
 
         # A different set from ``content_forbidden`` on purpose: this asks
         # whether the application's Content-Length survives as metadata, and
@@ -1074,6 +1078,7 @@ class HTTP2Sender(BaseSender):
         '_flow_control_cap',
         '_buffered_status', '_buffered_headers', '_expect_trailers',
         '_buffered_body', '_buffered_trailers', '_auto_flush_task',
+        '_head_mode',
         '_log_record',
     )
 
@@ -1082,8 +1087,10 @@ class HTTP2Sender(BaseSender):
                  conn_window: 'ConnectionWindow | None' = None,
                  initial_window: int | None = None,
                  flow_control_timeout: float | None = None,
-                 flow_control_cap: str = 'write_timeout'):
+                 flow_control_cap: str = 'write_timeout',
+                 head_mode: bool = False):
         super().__init__(writer)
+        self._head_mode = head_mode
         self._factory = factory
         self._stream_id = stream_id
         self._push_callback = push_callback
@@ -1183,10 +1190,16 @@ class HTTP2Sender(BaseSender):
         if self._closed:
             return
         headers = headers or []
-        # END_STREAM rides the DATA frame below, never HEADERS.
+        forbidden = self._content_is_forbidden(status, self._head_mode)
+        # END_STREAM rides the DATA frame below, never HEADERS — unless the
+        # head was promised no content, when there is no DATA to ride on.
         h_bytes = build_response_headers(
             self._factory.encoder, self._stream_id, status, headers,
-            end_stream=False)
+            end_stream=forbidden)
+        if forbidden:
+            await self._write(h_bytes)
+            self._end_stream_sent = True
+            return
 
         total = len(body)
         sid_bytes = self._stream_id.to_bytes(4, 'big')
@@ -1804,12 +1817,14 @@ class SenderFactory:
               push_callback=None,
               conn_window: 'ConnectionWindow | None' = None,
               initial_window: int | None = None,
-              flow_control_timeout: float | None = None) -> HTTP2Sender:
+              flow_control_timeout: float | None = None,
+              head_mode: bool = False) -> HTTP2Sender:
         return HTTP2Sender(SenderFactory._ensure_writer(stream_writer),
                            factory, stream_id, push_callback,
                            conn_window=conn_window,
                            initial_window=initial_window,
-                           flow_control_timeout=flow_control_timeout)
+                           flow_control_timeout=flow_control_timeout,
+                           head_mode=head_mode)
 
     @staticmethod
     def websocket(stream_writer, *, compressor=None) -> WebSocketSender:
