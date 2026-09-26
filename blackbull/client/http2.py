@@ -13,7 +13,7 @@ import ssl as _ssl
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import Enum
-from http import HTTPMethod, HTTPStatus
+from http import HTTPMethod
 from time import monotonic as _monotonic
 
 from hpack import HPACKError, OversizedHeaderListError
@@ -25,7 +25,8 @@ from ..protocol.frame_types import (DEFAULT_INITIAL_WINDOW_SIZE, ErrorCodes,
                                     HeaderFrameFlags, PseudoHeaders,
                                     SettingFrameFlags)
 from ..headers import Headers
-from ..protocol.framing import parse_content_length
+from ..protocol.framing import (is_informational, parse_content_length,
+                                parse_status)
 from ..server.cap_log import log_cap_hit
 from ..server.rate_window import ByteRateFloor
 from ..server.recipient import AbstractReader, AsyncioReader
@@ -1489,13 +1490,25 @@ class HTTP2Client:
                 return
 
         if pending.final_seen or pending.trailer_seen:
-            # RFC 9113 §8.1 — anything after the final head is the trailer
-            # section, and §8.1.1 forbids a pseudo-header field in it.
-            if frame.pseudo_headers:
-                await self._reject_response(frame.stream_id, self._response_error(
-                    frame.stream_id,
-                    'a pseudo-header field in the trailer section'))
-                return
+            # RFC 9113 §8.1 gives a response exactly one trailer section and
+            # §8.1.1 turns a framing violation into a stream error.  It also
+            # forbids a pseudo-header field here, and RFC 9110 §6.5 a framing
+            # field: honouring a `Content-Length` in a trailer would let it
+            # redeliver a length the body has already contradicted.
+            breached = (
+                (pending.trailer_seen, 'a second trailer section'),
+                (bool(frame.pseudo_headers),
+                 'a pseudo-header field in the trailer section'),
+                (any(_to_bytes(name).lower() == b'content-length'
+                     for name, _value in frame.headers),
+                 'a framing field in the trailer section'),
+            )
+            for gone_wrong, reason in breached:
+                if gone_wrong:
+                    await self._reject_response(
+                        frame.stream_id,
+                        self._response_error(frame.stream_id, reason))
+                    return
             pending.trailer_seen = True
             for name, value in frame.headers:
                 pending.trailer_fields.append(
@@ -1511,13 +1524,13 @@ class HTTP2Client:
             await self._reject_response(frame.stream_id, self._response_error(
                 frame.stream_id, 'no :status pseudo-header field'))
             return
-        status = _parse_status(status_str)
+        status = parse_status(status_str)
         if status is None:
             await self._reject_response(frame.stream_id, self._response_error(
                 frame.stream_id,
                 f':status is not three ASCII digits: {status_str!r}'))
             return
-        if status < 200:
+        if is_informational(status):
             # An informational response is not a final one (§8.1), so it may
             # not end the stream and it announces nothing about the body.  This
             # one comparison is also what keeps the head clock running across a
@@ -1817,18 +1830,6 @@ def _to_str(value: str | bytes) -> str:
 
 def _to_bytes(value: str | bytes) -> bytes:
     return value.encode('ascii') if isinstance(value, str) else bytes(value)
-
-
-def _parse_status(value: str) -> int | None:
-    """The ``:status`` of RFC 9110 §15, or ``None`` if it is not one.
-
-    The same three-ASCII-digit rule the HTTP/1.1 reader applies to a status
-    line, and deliberately no wider: a value range enforced on one transport
-    only is an accept set the two transports disagree on.
-    """
-    if len(value) != 3 or not value.isdigit() or not value.isascii():
-        return None
-    return int(value)
 
 
 def _response_has_content(method: str, status: int) -> bool:

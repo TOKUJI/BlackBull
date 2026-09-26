@@ -182,6 +182,14 @@ class TestTheStatusIsRequired:
         _refused(await _call(_Peer().settings()
                              .headers({}, [], end_stream=True, status=status)))
 
+    async def test_a_status_below_100_is_a_final_head(self):
+        """RFC 9110 §15 draws no range and the HTTP/1.1 reader accepts one:
+        only 1xx is informational, so ``099`` ends the response."""
+        res = _ok(await _call(_Peer().settings()
+                              .headers({PseudoHeaders.STATUS: '099'}, [],
+                                       end_stream=True)))
+        assert res.status == 99
+
 
 # ----------------------------------------------------------------------
 # C2 — order
@@ -225,6 +233,21 @@ class TestTheOrderIsEnforced:
         assert res.status == 200 and res.body == b'x'
         assert res.headers.getlist(b'x-checksum') == []
         assert [v for _n, v in res.trailers.getlist(b'x-checksum')] == [b'1']
+
+    async def test_a_second_trailer_section_is_refused(self):
+        _refused(await _call(_Peer().settings()
+                             .headers({PseudoHeaders.STATUS: '200'}, [],
+                                      end_stream=False)
+                             .headers({}, [(b'x-a', b'1')], end_stream=False)
+                             .headers({}, [(b'x-b', b'2')], end_stream=True)))
+
+    async def test_a_framing_field_in_the_trailers_is_refused(self):
+        _refused(await _call(_Peer().settings()
+                             .headers({PseudoHeaders.STATUS: '200'}, [],
+                                      end_stream=False)
+                             .data(b'abc', end_stream=False)
+                             .headers({}, [(b'content-length', b'99')],
+                                      end_stream=True)))
 
 
 # ----------------------------------------------------------------------

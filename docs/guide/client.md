@@ -142,13 +142,16 @@ will put two `Content-Length` lines on the wire, because that is what it is for.
 
 ## What counts as a response
 
-`request()` returns only a well-formed final response, on either protocol.
-The order is RFC 9113 §8.1's — zero or more informational `1xx` heads, one
-final head, the body, then an optional trailer section — and every part is
+Under HTTP/2, `request()` returns only a well-formed final response. The
+order is RFC 9113 §8.1's — zero or more informational `1xx` heads, one final
+head, the body, then a single optional trailer section — and every part is
 checked: `:status` is present and three ASCII digits, content appears only
 where RFC 9110 §9.3 allows it (a `HEAD` response and `204` / `304` carry
 none, whatever they declare), a declared `Content-Length` matches the body
-exactly, and a trailer section carries no pseudo-header field.
+exactly, and a trailer section carries no pseudo-header or framing field.
+The HTTP/1.1 reader is the laxer of the two: it reads no body for `HEAD` /
+`204` / `304` and refuses a malformed status line, but it cannot refuse
+octets a peer sends where content should not be.
 
 A response that breaks the rule raises `ProtocolError`. Under HTTP/2 that
 refuses the stream alone — `RST_STREAM`, the connection and its other streams

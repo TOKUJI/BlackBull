@@ -270,14 +270,14 @@ class TestTheHeaderAggregate:
         return [(f'x-pad-{i}', 'v' * 100) for i in range(n)]
 
     async def _sections(self, c, n: int) -> None:
-        """*n* field sections in §8.1's order: one informational head, the
-        final head, then trailers.  The aggregate is what is under test and
-        all three kinds count against it."""
-        await _feed_headers(c, 1, self._section(10), status=103)
+        """*n* field sections in §8.1's order: informational heads, the final
+        head, then the one trailer section a response is allowed.  The
+        aggregate is what is under test and all three kinds count against it."""
+        for _ in range(n - 2):
+            await _feed_headers(c, 1, self._section(10), status=103)
         await _feed_headers(c, 1, self._section(10))
-        for i in range(n - 2):
-            await _feed_headers(c, 1, self._section(10), status=None,
-                                end_stream=(i == n - 3))
+        await _feed_headers(c, 1, self._section(10), status=None,
+                            end_stream=True)
 
     async def test_off_by_default_repeated_headers_are_accepted(self):
         c = _client()
