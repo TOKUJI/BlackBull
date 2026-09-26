@@ -5890,10 +5890,11 @@ column.</p>
 </table>
 <p>One client bound is not in that grid, because it is not one of the three.
 <code>BB_CLIENT_MAX_INTERIM_RESPONSES</code> (8) bounds how many <code>1xx</code> heads may precede
-the final one on HTTP/1.1: a <strong>count</strong>, and what owns the aggregate of the two
-per-head bounds above it, each of which is spent afresh on every interim.
-HTTP/2 needs no such number — every interim section adds to the same
-<code>BB_CLIENT_HEAD_MAX_TOTAL</code>.</p>
+the final one, on either transport: a <strong>count</strong>, and what owns the aggregate of
+the two per-head bounds above it, each of which is spent afresh on every
+interim. It is also the only bound an HTTP/2 interim section with no fields
+has — one of those charges nothing to <code>BB_CLIENT_HEAD_MAX_TOTAL</code>, which is
+what owns the aggregate once fields are present.</p>
 <p>Full descriptions: <a href="../../reference/env-vars/">Environment variables</a>.</p>
 <h3 id="four-limits-that-are-less-obvious-than-they-look">Four limits that are less obvious than they look<a class="headerlink" href="#four-limits-that-are-less-obvious-than-they-look" title="Permanent link">&para;</a></h3>
 <p><strong>A message is bounded by what your handler receives, not by what the wire
@@ -6208,13 +6209,30 @@ less than one that draws its own boundary:</p>
 <li><strong>"No known gaps" is not "no gaps."</strong> A bound that no one has found missing is
   not the same as a bound proven complete. This work is continuing, not
   finished.</li>
+<li><strong>The HTTP/2 sender does not implement informational responses.</strong> An
+  interim head is written only when a body event follows it; a second
+  response head arriving first replaces it, and the interim never reaches the
+  wire. Nothing leaks and the frames stay self-consistent, but "Early Hints
+  sent" is not a thing this server does yet.</li>
 </ul>
 <p>On the async HTTP client specifically, and after the server ones so the
 contrast is visible:</p>
 <ul>
-<li><strong>It does not follow redirects and does not pool connections.</strong> Neither
+<li>
+<p><strong>A peer that sends content where RFC 9112 §6.3 rule 1 says there is none —
+  a 204, a 304 or a HEAD response carrying a body — is not refused over
+  HTTP/1.1.</strong> Those octets are left unread and are parsed as the start of the
+  next response: a <code>ProtocolError</code> in the usual case, and a response taken for
+  another when the leftover happens to look like one. The reader trusts the
+  rule rather than the peer here; a 205 is consumed to its declared length
+  precisely because the rule does not cover one. HTTP/2 refuses such frames
+  instead, because frames are self-delimiting and no boundary is at stake.</p>
+</li>
+<li>
+<p><strong>It does not follow redirects and does not pool connections.</strong> Neither
   exists in <code>blackbull/client/</code> — so neither is bounded <em>or</em> unbounded, and a
-  report that one of them is unsafe is a feature request.</li>
+  report that one of them is unsafe is a feature request.</p>
+</li>
 <li><strong>A buffered response body costs about twice the cap in peak memory.</strong>
   Reaching ~1× means <code>stream()</code>, which exposes no status, no headers and sits
   outside the cap — so today a caller can have ~1× <em>or</em> all three, never both.</li>

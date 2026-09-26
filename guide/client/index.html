@@ -5927,8 +5927,9 @@ and its other streams survive. <code>res.headers</code> holds the final head's f
 only and <code>res.trailers</code> the trailer section: RFC 9113 §8.1 keeps the two
 field sections apart, and gRPC puts <code>grpc-status</code> in the trailer. Folding
 them together, as this client did, left a caller unable to tell which
-section a field came from. Informational heads are read and discarded, which
-is what the HTTP/1.1 reader has always done with them.</p>
+section a field came from. The HTTP/1.1 client discards trailers as it reads
+them, so <code>res.trailers</code> is always empty there. Informational heads are read
+and discarded, which is what the HTTP/1.1 reader has always done with them.</p>
 <h2 id="what-a-call-raises">What a call raises<a class="headerlink" href="#what-a-call-raises" title="Permanent link">&para;</a></h2>
 <p>Everything the client itself refuses derives from <code>ClientError</code>:</p>
 <div class="highlight"><pre><span></span><code>ClientError
