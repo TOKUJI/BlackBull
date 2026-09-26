@@ -9,7 +9,9 @@ table and the Host scan, against their frozenset forms; for the target scan,
 against a literal copy of the original predicate.
 
 The Host regex now reports the IP-literal brackets as well (RFC 3986 §3.2.2),
-so its sweep is against the forbidden set plus those two octets.
+and flags the two reg-name shapes the grammar refuses (no host; a port tail
+that is not ``*DIGIT``), so its single-octet sweep is the forbidden set, the
+two brackets, and the colon that opens those shapes.
 """
 import pytest
 
@@ -57,9 +59,12 @@ def test_target_table_accepts_a_realistic_target():
 
 
 def test_authority_scan_classifies_all_256_octets_identically():
+    # Beyond the octet table the scan names two authority shapes, so a lone
+    # colon is flagged on its own (it opens both); every other single octet
+    # must classify exactly as the table.
     mismatched = [b for b in range(256)
                   if bool(_AUTHORITY_SCAN_RE.search(bytes([b])))
-                  is not (b in _AUTHORITY_SCAN_BYTES)]
+                  is not (b in _AUTHORITY_SCAN_BYTES or b == 0x3A)]
     assert mismatched == []
 
 
