@@ -1476,8 +1476,18 @@ class HTTP2Client:
         # Every field line counts against the aggregate, whatever the section:
         # §8.1 gives a response up to three of them and none is free.
         max_headers = get_settings().client_head_max_total
+        # §8.2.1 makes an uppercase field name malformed and
+        # `HeadersFrame.parse_payload` rejects the frame before it reaches
+        # `frame.headers`, so the names are lowercase by protocol.  They are
+        # normalised once here and every later check, and the stored section,
+        # read these lists rather than converting each field again.
+        fields: list[tuple[bytes, bytes]] = []
+        lengths: list[tuple[bytes, bytes]] = []
         for name, value in frame.headers:
             name, value = _to_bytes(name), _to_bytes(value)
+            fields.append((name, value))
+            if name == b'content-length':
+                lengths.append((name, value))
             pending.headers_seen += len(name) + len(value)
             if max_headers and pending.headers_seen > max_headers:
                 await self._refuse_stream(
@@ -1499,8 +1509,7 @@ class HTTP2Client:
                 (pending.trailer_seen, 'a second trailer section'),
                 (bool(frame.pseudo_headers),
                  'a pseudo-header field in the trailer section'),
-                (any(_to_bytes(name).lower() == b'content-length'
-                     for name, _value in frame.headers),
+                (bool(lengths),
                  'a framing field in the trailer section'),
             )
             for gone_wrong, reason in breached:
@@ -1510,9 +1519,7 @@ class HTTP2Client:
                         self._response_error(frame.stream_id, reason))
                     return
             pending.trailer_seen = True
-            for name, value in frame.headers:
-                pending.trailer_fields.append(
-                    (_to_bytes(name), _to_bytes(value)))
+            pending.trailer_fields = fields
             if frame.end_stream:
                 if await self._settle_body_rate(frame.stream_id, pending, 0):
                     return
@@ -1545,9 +1552,7 @@ class HTTP2Client:
         pending.status = status
         pending.final_seen = True
         try:
-            pending.declared = parse_content_length(
-                (name, value) for name, value in frame.headers
-                if _to_bytes(name).lower() == b'content-length')
+            pending.declared = parse_content_length(lengths)
         except ValueError as exc:
             await self._reject_response(
                 frame.stream_id, self._response_error(frame.stream_id, str(exc)))
@@ -1557,8 +1562,7 @@ class HTTP2Client:
         # informational section and a trailer section beside it, and folding
         # either into these would put another response's fields in the
         # response the caller asked for.
-        for name, value in frame.headers:
-            pending.headers.append((_to_bytes(name), _to_bytes(value)))
+        pending.headers = fields
         if frame.end_stream:
             if await self._settle_body_rate(frame.stream_id, pending, 0):
                 return
@@ -1735,9 +1739,9 @@ class HTTP2Client:
             return
         response = ClientResponse(
             status=pending.status,
-            headers=Headers(pending.headers),
+            headers=Headers.from_lowered(pending.headers),
             body=b''.join(pending.body_parts),
-            trailers=Headers(pending.trailer_fields),
+            trailers=Headers.from_lowered(pending.trailer_fields),
         )
         pending.future.set_result(response)
 
