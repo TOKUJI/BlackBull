@@ -356,7 +356,7 @@ protocol rather than a row per cap:
 | `BB_CLIENT_BODY_TIMEOUT` | one body read outlasted its deadline | no frame for that stream inside the deadline | — |
 | `BB_CLIENT_BODY_MAX_TOTAL` | a declared `Content-Length` over the cap, or the running total of a chunked or close-delimited body | the running total, checked before a DATA payload is held | — |
 | `BB_CLIENT_MIN_BODY_RATE` | body arriving below the floor past the grace period — `requested` is the observed rate in bytes/second | DATA payload arriving below the floor; each stream is reset independently | — |
-| `BB_CLIENT_MAX_INTERIM_RESPONSES` | too many `1xx` responses before the final one | — `BB_CLIENT_HEAD_MAX_TOTAL` owns that aggregate | — |
+| `BB_CLIENT_MAX_INTERIM_RESPONSES` | too many `1xx` responses before the final one | too many `1xx` sections before the final one — one with no fields charges nothing to `BB_CLIENT_HEAD_MAX_TOTAL` | — |
 | `BB_CLIENT_RAW_QUEUE_DEPTH` | — no raw-stream hatch | the raw-stream queue is full | — |
 | `BB_CLIENT_H2_MAX_FRAME_SIZE` | — no frame | the declared frame length is over the cap | — |
 | `BB_CLIENT_H2_MAX_HEADER_LIST_SIZE` | — no field section | the decoded field section is over the cap.  `requested` is a **lower bound**, not the figure: hpack reports the limit it refused at and never the total it reached.  A tight one — it charges each entry and compares immediately, so it raises on the entry that crosses and the section is provably just over the limit | — |

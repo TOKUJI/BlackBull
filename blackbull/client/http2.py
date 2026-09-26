@@ -26,7 +26,7 @@ from ..protocol.frame_types import (DEFAULT_INITIAL_WINDOW_SIZE, ErrorCodes,
                                     SettingFrameFlags)
 from ..headers import Headers
 from ..protocol.framing import (is_informational, parse_content_length,
-                                parse_status)
+                                parse_status, response_has_content)
 from ..server.cap_log import log_cap_hit
 from ..server.rate_window import ByteRateFloor
 from ..server.recipient import AbstractReader, AsyncioReader
@@ -195,6 +195,10 @@ class _PendingResponse:
     #: HEADERS after it are the trailer section and contribute nothing either.
     final_seen: bool = False
     trailer_seen: bool = False
+    #: Informational heads seen for this response.  Each is read and thrown
+    #: away, and the count is what stops a peer feeding an unbounded stream
+    #: of them where a field byte would have been counted.
+    interim_seen: int = 0
     #: The declared body length, when the response declares one.  Compared
     #: against the DATA total at completion, and never against a response that
     #: may not carry content — see ``method``.
@@ -1508,7 +1512,9 @@ class HTTP2Client:
             breached = (
                 (pending.trailer_seen, 'a second trailer section'),
                 (bool(frame.pseudo_headers),
-                 'a pseudo-header field in the trailer section'),
+                 'a second final head'
+                 if PseudoHeaders.STATUS in frame.pseudo_headers
+                 else 'a pseudo-header field in the trailer section'),
                 (bool(lengths),
                  'a framing field in the trailer section'),
             )
@@ -1537,12 +1543,34 @@ class HTTP2Client:
                 frame.stream_id,
                 f':status is not three ASCII digits: {status_str!r}'))
             return
+        if status == 101:
+            # RFC 9113 §8.6 reserves the protocol switch for HTTP/1.1, so a
+            # peer offering one here is not switching anything — it is
+            # sending a status this transport cannot carry.
+            await self._reject_response(frame.stream_id, self._response_error(
+                frame.stream_id, '101 is not usable over HTTP/2'))
+            return
         if is_informational(status):
             # An informational response is not a final one (§8.1), so it may
             # not end the stream and it announces nothing about the body.  This
             # one comparison is also what keeps the head clock running across a
             # 1xx, since only the handover disarms it: a peer that sends 103
             # and then goes quiet stays bounded by the phase it never left.
+            pending.interim_seen += 1
+            limit = get_settings().client_max_interim_responses
+            if limit and pending.interim_seen > limit:
+                # ENHANCE_YOUR_CALM rather than CANCEL: the budget bounds how
+                # much response the peer may generate, like the header
+                # aggregate does, and CANCEL is for a client's own limits.
+                await self._refuse_stream(
+                    frame.stream_id, 'client_max_interim_responses',
+                    pending.interim_seen, limit,
+                    ResponseTooLarge(
+                        f'peer sent more than '
+                        f'BB_CLIENT_MAX_INTERIM_RESPONSES={limit} interim '
+                        f'responses'),
+                    ErrorCodes.ENHANCE_YOUR_CALM)
+                return
             if frame.end_stream:
                 await self._reject_response(frame.stream_id, self._response_error(
                     frame.stream_id,
@@ -1618,7 +1646,7 @@ class HTTP2Client:
                 frame.stream_id, 'a DATA frame outside the response body'))
             await self._credit_connection(frame.length)
             return
-        if payload and not _response_has_content(pending.method, pending.status):
+        if payload and not response_has_content(pending.method, pending.status):
             await self._reject_response(frame.stream_id, self._response_error(
                 frame.stream_id,
                 f'content on a {pending.status} response to {pending.method}'))
@@ -1725,7 +1753,7 @@ class HTTP2Client:
         if pending is None:
             return
         if (pending.declared is not None
-                and _response_has_content(pending.method, pending.status)
+                and response_has_content(pending.method, pending.status)
                 and pending.body_seen != pending.declared):
             # A short body is only detectable here, at END_STREAM: the peer
             # may simply be slow.  The long one was refused as it arrived.
@@ -1834,8 +1862,3 @@ def _to_str(value: str | bytes) -> str:
 
 def _to_bytes(value: str | bytes) -> bytes:
     return value.encode('ascii') if isinstance(value, str) else bytes(value)
-
-
-def _response_has_content(method: str, status: int) -> bool:
-    """Whether this response may carry content at all (RFC 9110 §9.3)."""
-    return method.upper() != 'HEAD' and status not in (204, 304)

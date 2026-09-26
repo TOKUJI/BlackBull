@@ -1370,7 +1370,7 @@ _CLIENT_CAPS: dict[str, frozenset[str]] = {
     'client_head_max_line':           frozenset({'http1'}),
     'client_head_max_total':          frozenset({'http1', 'http2'}),
     'client_head_timeout':            frozenset({'http1', 'http2'}),
-    'client_max_interim_responses':   frozenset({'http1'}),
+    'client_max_interim_responses':   frozenset({'http1', 'http2'}),
     'client_min_body_rate':           frozenset({'http1', 'http2'}),
     'client_raw_queue_depth':         frozenset({'http2'}),
     # These are enforced by the shared transport/recipient primitives after
@@ -1397,9 +1397,6 @@ _CLIENT_NOT_A_CAP: dict[str, str] = {
 #: Absences that are deliberate, so the equality above is a decision and
 #: not a snapshot:
 #:
-#: - ``client_max_interim_responses`` has no HTTP/2 site because each
-#:   interim HEADERS block adds to the same ``headers_seen`` total as the
-#:   final one, so ``client_head_max_total`` already owns the aggregate.
 #: - ``client_head_max_line`` has no HTTP/2 site because HTTP/2 has no
 #:   field *line* — the section is the unit, bounded by
 #:   ``client_h2_max_header_list_size``.
