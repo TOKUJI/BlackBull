@@ -1484,6 +1484,10 @@ class HTTP2Sender(BaseSender):
                     self._buffered_status = None
                     self._buffered_headers = None
         else:
+            if self._suppress_body:
+                # The head already carried END_STREAM; a DATA after it is
+                # STREAM_CLOSED, not merely unwanted content.
+                return
             await self._write_data(
                 payload, end_stream=end_stream and not self._expect_trailers)
         if self._log_record is not None and end_stream:

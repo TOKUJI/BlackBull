@@ -75,6 +75,19 @@ async def test_the_buffered_path_keeps_the_rules_too():
     assert writer.body() == b''
 
 
+async def test_no_frame_follows_end_stream_on_a_bodyless_status():
+    """A second body chunk after the head already carried END_STREAM would be
+    STREAM_CLOSED — a protocol error, not merely unwanted content."""
+    sender, writer = _sender()
+    await sender({'type': 'http.response.start', 'status': 205, 'headers': [],
+                  'trailers': True})
+    await sender({'type': 'http.response.body', 'body': b'ab',
+                  'more_body': True})
+    await sender({'type': 'http.response.body', 'body': b'cd',
+                  'more_body': True})
+    assert [kind for kind, _, _, _ in writer.frames] == [1]
+
+
 async def test_a_trailer_section_does_not_reach_a_bodyless_status():
     """RFC 9112 §6.3 rule 1 — such a response "cannot contain a message body
     or trailer section", so the head terminates it and the trailers never
