@@ -553,6 +553,21 @@ class TestG6MethodAndSchemeGrammar:
     async def test_a_uri_scheme_is_accepted(self, scheme):
         await self._accepted(self._fields(scheme=scheme))
 
+    @pytest.mark.xfail(
+        reason='BLA-460 — RFC 9113 §8.3.1 makes :scheme case-insensitive, so '
+               'HTTPS is an https request and needs an :authority or a Host '
+               "field; parser.py's require_present compares it against "
+               'lowercase literals.  Closing BLA-460 turns this green, at '
+               'which point the strict marker must come off.',
+        strict=True,
+    )
+    @pytest.mark.asyncio
+    async def test_an_uppercase_scheme_still_requires_an_authority(self):
+        """The scheme may be uppercase — ``test_a_uri_scheme_is_accepted``
+        defends that.  What must be refused is the missing authority."""
+        await _check_malformed([(b':method', b'GET'), (b':path', b'/'),
+                                (b':scheme', b'HTTPS')])
+
 
 def _make_raw_headers_frame(block: bytes, stream_id: int = 1) -> bytes:
     """A HEADERS frame carrying *block* exactly as it arrived on the wire."""
