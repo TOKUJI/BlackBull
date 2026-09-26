@@ -172,9 +172,10 @@ are the difference between the label and the whole truth:
    typical single-loop value.
 
    Connections beyond the cap wait in the accept queue and each receives a
-   `503`, on the default event loop.  Under `BB_UVLOOP=1` a burst beyond the
-   cap can leave clients unanswered; see [Sizing the connection cap under
-   uvloop](../deployment/unix-and-fd.md#sizing-the-connection-cap-under-uvloop).
+   `503`, on every event loop.  A TLS connection counts from accept, while its
+   handshake is still running.  Under `auto`, 48 descriptors stay for the
+   process's own use — listeners, connection pools, open files; if yours holds
+   more, set the cap explicitly.
 
 3. **An MQTT session that never expires is bounded by the total, not by the
    clock.** §3.1.2.11.2 defines a Session Expiry Interval of `0xFFFFFFFF` as

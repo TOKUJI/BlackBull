@@ -19,9 +19,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - On Linux, an `AF_UNIX` listener whose accept queue is full when accepting
   opens logs one `socket_backlog` warning on `blackbull.caps`, adopted fds
   included unless created in another network namespace.
-- A burst beyond `BB_MAX_CONNECTIONS` no longer exhausts file descriptors on
-  the default event loop.  Under `BB_UVLOOP=1`, see *Sizing the connection cap
-  under uvloop*.
+- A burst beyond `BB_MAX_CONNECTIONS` no longer exhausts file descriptors,
+  and each refused client reads its `503`, on every event loop, uvloop
+  included.  A TLS connection counts toward the cap from accept, while its
+  handshake runs, and `Server.stop()` closes connections still in their
+  handshake.
 
 - Added client-owned write and WebSocket size bounds, and applied the
   response minimum-body-rate floor to HTTP/2 streams.
