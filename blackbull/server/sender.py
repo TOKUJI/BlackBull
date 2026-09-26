@@ -1158,6 +1158,7 @@ class HTTP2Sender(BaseSender):
         self._expect_trailers = False
         self._buffered_body = None
         self._buffered_trailers = None
+        self._suppress_body = False
         self._log_record = None
         self._auto_flush_task = None
 
@@ -1200,7 +1201,7 @@ class HTTP2Sender(BaseSender):
         # head was promised no content, when there is no DATA to ride on.
         h_bytes = build_response_headers(
             self._factory.encoder, self._stream_id, status, headers,
-            end_stream=forbidden)
+            end_stream=forbidden and not is_informational(status))
         if forbidden:
             await self._write(h_bytes)
             self._end_stream_sent = True
@@ -1527,6 +1528,7 @@ class HTTP2Sender(BaseSender):
         if self._suppress_body and self._buffered_status is None:
             # RFC 9112 §6.3 rule 1: no trailer section either. The head
             # already carried END_STREAM, so there is nothing left to say.
+            self._expect_trailers = False
             return
 
         if self._buffered_status is not None:
@@ -1540,12 +1542,11 @@ class HTTP2Sender(BaseSender):
                 await self._write(build_response_headers(
                     self._factory.encoder, self._stream_id,
                     self._buffered_status, self._buffered_headers or [],
-                    end_stream=True))
+                    end_stream=not is_informational(self._buffered_status)))
                 self._buffered_status = None
                 self._buffered_headers = None
                 self._end_stream_sent = True
                 return
-            buffered_body = None if self._suppress_body else buffered_body
             h_bytes = build_response_headers(
                 self._factory.encoder, self._stream_id,
                 self._buffered_status, self._buffered_headers or [],
@@ -1614,7 +1615,7 @@ class HTTP2Sender(BaseSender):
             self._suppress_body = forbidden
             h_bytes = build_response_headers(
                 self._factory.encoder, self._stream_id, status, headers,
-                end_stream=forbidden)
+                end_stream=forbidden and not is_informational(status))
             if forbidden:
                 await self._write(h_bytes)
                 self._end_stream_sent = True

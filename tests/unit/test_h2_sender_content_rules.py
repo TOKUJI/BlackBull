@@ -1,6 +1,7 @@
 """A server sender keeps the content rules it advertises (RFC 9110 §15.3.6)."""
 from __future__ import annotations
 
+import asyncio
 from http import HTTPStatus
 
 import pytest
@@ -64,15 +65,25 @@ async def test_content_still_reaches_the_wire_on_an_ordinary_status():
     assert writer.body() == b'abc'
 
 
+def _wire(writer: _Writer) -> list[tuple[int, int]]:
+    """(frame kind, END_STREAM bit) for every frame written."""
+    return [(kind, flags & 0x1) for kind, flags, _, _ in writer.frames]
+
+
 async def test_the_buffered_path_keeps_the_rules_too():
     """The ASGI arms are the ones production uses, and they write through
-    `​_write_response_start_and_body` rather than the bytes arm above."""
+    `_write_response_start_and_body` rather than the bytes arm above.
+
+    The flush is scheduled rather than synchronous, so the assert waits a
+    tick: without it this test passes against a sender whose rules have been
+    deleted outright."""
     sender, writer = _sender()
     await sender({'type': 'http.response.start', 'status': 204, 'headers': [],
                   'trailers': True})
     await sender({'type': 'http.response.body', 'body': b'x',
                   'more_body': True})
-    assert writer.body() == b''
+    await asyncio.sleep(0)
+    assert _wire(writer) == [(1, 1)]
 
 
 async def test_no_frame_follows_end_stream_on_a_bodyless_status():
@@ -85,7 +96,8 @@ async def test_no_frame_follows_end_stream_on_a_bodyless_status():
                   'more_body': True})
     await sender({'type': 'http.response.body', 'body': b'cd',
                   'more_body': True})
-    assert [kind for kind, _, _, _ in writer.frames] == [1]
+    await asyncio.sleep(0)
+    assert _wire(writer) == [(1, 1)]
 
 
 async def test_a_trailer_section_does_not_reach_a_bodyless_status():
@@ -95,6 +107,9 @@ async def test_a_trailer_section_does_not_reach_a_bodyless_status():
     sender, writer = _sender()
     await sender({'type': 'http.response.start', 'status': 204, 'headers': [],
                   'trailers': True})
+    await sender({'type': 'http.response.body', 'body': b'ab',
+                  'more_body': True})
     await sender({'type': 'http.response.trailers',
                   'headers': [(b'x-t', b'1')], 'more_trailers': False})
-    assert [kind for kind, _, _, _ in writer.frames if kind == 1] == [1]
+    await asyncio.sleep(0)
+    assert _wire(writer) == [(1, 1)]
