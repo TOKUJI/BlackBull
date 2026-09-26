@@ -155,8 +155,9 @@ regardless of file size.
 If a file `app.js` has a sibling on disk like `app.js.br`,
 `app.js.zst`, or `app.js.gz`, `StaticFiles` will serve the
 sibling (with the right `Content-Encoding` header) when the
-client's `Accept-Encoding` allows it.  Preference order is
-`br > zstd > gzip`.
+client's `Accept-Encoding` allows it, using the same
+[acceptance rules as dynamic compression](middleware.md#compression-compress).
+Preference order is `br > zstd > gzip`.
 
 ```
 public/

@@ -23,6 +23,7 @@ from ..connection import Connection
 from ..headers import Headers
 from ..native import NativeResponse
 from ..server.cap_log import log_cap_hit
+from .accept_encoding import accept_encoding_value, parse_accept_encoding
 from .utils import as_middleware
 
 _MIN_SIZE = 100  # default minimum body size to bother compressing
@@ -218,44 +219,22 @@ class Compression:
         # peer can't grow it unboundedly.
         self._codec_cache: dict[bytes, tuple[str, Callable[[bytes], bytes]] | None] = {}
 
-    @staticmethod
-    def _parse_accept_encoding(header: bytes) -> list[str]:
-        """Parse Accept-Encoding and return codec names sorted by descending q-value.
-
-        Example: b'br;q=1.0, gzip;q=0.8' → ['br', 'gzip']
-        """
-        result: list[tuple[float, str]] = []
-        for token in header.split(b','):
-            parts = token.strip().split(b';')
-            name = parts[0].strip().lower().decode('ascii', errors='ignore')
-            q = 1.0
-            for param in parts[1:]:
-                param = param.strip()
-                if param.startswith(b'q='):
-                    try:
-                        q = float(param[2:])
-                    except ValueError:
-                        pass  # malformed q-value → keep the default quality.
-            if name:
-                result.append((q, name))
-        result.sort(key=lambda x: x[0], reverse=True)
-        return [name for _, name in result]
-
     def _select_codec(self, accept_header: bytes) -> tuple[str, Callable[[bytes], bytes]] | None:
         """Pick the best codec that the client accepts and the server has installed.
 
         Server preference order (br > zstd > gzip) is applied among the
-        codecs the client lists, regardless of their q-values, because the
+        accepted codecs, regardless of positive q-values, because the
         server knows which codec yields better compression.
         Returns ``None`` when there is no overlap.
         """
         cache = self._codec_cache
         if accept_header in cache:
             return cache[accept_header]
-        accepted = set(self._parse_accept_encoding(accept_header))
+        accepted = parse_accept_encoding(accept_header)
+        wildcard = accepted.get(b'*', False)
         result: tuple[str, Callable[[bytes], bytes]] | None = None
         for codec in _SERVER_PREFERENCE:
-            if codec in accepted and codec in self._available:
+            if accepted.get(codec.encode(), wildcard) and codec in self._available:
                 result = (codec, self._available[codec])
                 break
         if len(cache) < 256:
@@ -359,7 +338,7 @@ class Compression:
             await call_next(conn, receive, send)
             return
 
-        accept = conn.headers.get(b'accept-encoding', b'')
+        accept = accept_encoding_value(conn.headers)
         selection = self._select_codec(accept)
         if selection is None:
             # No codec the client accepts (e.g. no/identity Accept-Encoding).
