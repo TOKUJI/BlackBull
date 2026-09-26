@@ -242,6 +242,10 @@ for headers that may repeat:
 `(name, value)` pairs in insertion order, or `[]` if the header
 is absent.
 
+For comma-list fields such as `accept-encoding`, `.get_combined(name)` returns
+all values joined with `b', '`, or `None` when absent. Use `.getlist` for
+`set-cookie` and `cookie`, which cannot be combined this way.
+
 !!! note "Why `cookie` needs `getlist` on HTTP/2"
     HTTP/1.1 combines all cookies into a single
     `Cookie: a=1; b=2` field.  HTTP/2 sends each cookie as a

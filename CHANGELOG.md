@@ -5,6 +5,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+- Dynamic compression and precompressed static files honor `Accept-Encoding`
+  refusals (`q=0`), wildcard acceptance, and repeated fields consistently.
+  Malformed qualities or parameters refuse the named coding, including when
+  `*` would otherwise allow it.
+
 - **An HTTP/2 `:scheme` is read case-insensitively, and the application sees
   it lowercase.**  A scheme is case-insensitive and its canonical form is
   lowercase (RFC 3986 §3.1, RFC 9110 §4.2.3), but the host rule compared the
