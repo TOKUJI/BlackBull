@@ -127,7 +127,6 @@ class _Peer:
 async def _call(peer: _Peer, method: str = 'GET'):
     """Run the peer's bytes through the public request(); return the outcome."""
     reader = asyncio.StreamReader()
-    reader.feed_data(peer.wire)
     client = HTTP2Client._adopt('localhost', 80, reader, _MemWriter())
     rst: list = []
     orig = client._factory.rst_stream
@@ -139,7 +138,14 @@ async def _call(peer: _Peer, method: str = 'GET'):
     client._factory.rst_stream = watch          # type: ignore[assignment]
     try:
         async with client:
-            return await asyncio.wait_for(client.request(method, '/'), 2.0)
+            task = asyncio.ensure_future(client.request(method, '/'))
+            # The wire must reach the receive loop only once request() has
+            # claimed stream 1: bytes buffered before that are consumed first,
+            # and every frame lands on a stream nobody has opened yet.
+            while not client._responses and not task.done():
+                await asyncio.sleep(0)
+            reader.feed_data(peer.wire)
+            return await asyncio.wait_for(task, 2.0)
     except Exception as exc:
         return exc, rst
     return None, rst
