@@ -103,7 +103,8 @@ async def test_no_frame_follows_end_stream_on_a_bodyless_status():
 async def test_a_trailer_section_does_not_reach_a_bodyless_status():
     """RFC 9112 §6.3 rule 1 — such a response "cannot contain a message body
     or trailer section", so the head terminates it and the trailers never
-    leave. This is the Trailers-Only shape a gRPC error takes."""
+    leave. The head terminates the response in place of the trailing section,
+    which is the shape a gRPC error takes."""
     sender, writer = _sender()
     await sender({'type': 'http.response.start', 'status': 204, 'headers': [],
                   'trailers': True})
@@ -113,3 +114,14 @@ async def test_a_trailer_section_does_not_reach_a_bodyless_status():
                   'headers': [(b'x-t', b'1')], 'more_trailers': False})
     await asyncio.sleep(0)
     assert _wire(writer) == [(1, 1)]
+
+
+async def test_an_informational_head_leaves_the_stream_open_for_the_final_one():
+    """An informational response is not the response yet: it carries no
+    END_STREAM, so the final response must still be able to close the stream.
+    Marking the stream finished here would leak it."""
+    sender, writer = _sender()
+    await sender(b'', HTTPStatus.CONTINUE)
+    await sender(b'hello', HTTPStatus.OK)
+    await asyncio.sleep(0)
+    assert _wire(writer) == [(1, 0), (1, 0), (0, 1)]

@@ -1204,7 +1204,8 @@ class HTTP2Sender(BaseSender):
             end_stream=forbidden and not is_informational(status))
         if forbidden:
             await self._write(h_bytes)
-            self._end_stream_sent = True
+            if not is_informational(status):
+                self._end_stream_sent = True
             return
 
         total = len(body)
@@ -1539,13 +1540,15 @@ class HTTP2Sender(BaseSender):
             if self._suppress_body:
                 # RFC 9112 §6.3 rule 1: such a response "cannot contain a
                 # message body or trailer section". The head terminates it.
+                head_status = self._buffered_status
                 await self._write(build_response_headers(
                     self._factory.encoder, self._stream_id,
-                    self._buffered_status, self._buffered_headers or [],
-                    end_stream=not is_informational(self._buffered_status)))
+                    head_status, self._buffered_headers or [],
+                    end_stream=not is_informational(head_status)))
                 self._buffered_status = None
                 self._buffered_headers = None
-                self._end_stream_sent = True
+                if not is_informational(head_status):
+                    self._end_stream_sent = True
                 return
             h_bytes = build_response_headers(
                 self._factory.encoder, self._stream_id,
@@ -1618,7 +1621,8 @@ class HTTP2Sender(BaseSender):
                 end_stream=forbidden and not is_informational(status))
             if forbidden:
                 await self._write(h_bytes)
-                self._end_stream_sent = True
+                if not is_informational(status):
+                    self._end_stream_sent = True
                 return
 
             total = len(body)
