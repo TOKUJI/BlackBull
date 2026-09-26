@@ -16,7 +16,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   RFC 9110 §9.3's body rules, and a declared `Content-Length` matched against
   the body.  A response that breaks it raises `ProtocolError` and resets that
   stream alone; the connection and its other streams survive.  The order is
-  worth about 1.3 µs per response on top of the old handler, measured
+  worth about 1 µs per response on top of the old handler, measured
   round-paired against an in-session A/A floor of 0.3 µs
   (`bench/h2_client_response_ab.py`); that is the cost of the check, and it
   is why the field section is normalised once rather than per check.
