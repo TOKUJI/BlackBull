@@ -1303,14 +1303,25 @@ class HTTP2Actor(Actor):
             # END_STREAM transition is observable.  Handling it here is what
             # makes single-frame and fragmented trailers share one recipient,
             # and what stops a second handler from starting.
-            if not header_frame.end_stream:
+            #
+            # §8.2.1 grades the trailing field section like the head's, and a
+            # section that does not end the request is not a trailer at all.
+            # The retire is the verdict's own, not the write's side effect.
+            if not header_frame.end_stream or header_frame.malformed:
+                if _DEBUG:
+                    logger.debug(
+                        'Stream %d refused trailing field section — %s',
+                        stream.stream_id,
+                        header_frame.malformed_reason
+                        or 'section does not end the request')
+                self._retire_stream(stream.stream_id, via_rst=True)
                 await self.send_frame(self.factory.rst_stream(
                     stream.stream_id, ErrorCodes.PROTOCOL_ERROR))
-            else:
-                stream.on_data_received(end_stream=True)
-                recipient = self._recipients.get(stream.stream_id)
-                if recipient is not None:
-                    recipient.put_end_of_stream()
+                return True
+            stream.on_data_received(end_stream=True)
+            recipient = self._recipients.get(stream.stream_id)
+            if recipient is not None:
+                recipient.put_end_of_stream()
             return True
 
         if self._active_stream_count >= self.max_concurrent_streams:
