@@ -167,17 +167,25 @@ class TestOneFraming:
                         body=_chunks(b'aa'))
 
     @pytest.mark.parametrize('value', [
-        b'gzip, chunked',    # a coding the caller applied
         b'chunked, gzip',    # chunked not last
         b'chunked; ext=1',   # a parameter we would not write
         b'chunked, chunked', # chunked applied twice
+        b'chunked, ',        # a trailing comma is a second, empty member
         b'gzip',             # no chunked at all
+        b'',                 # an empty value is a list of one empty member
     ])
     @pytest.mark.asyncio
     async def test_only_the_lone_chunked_coding_is_accepted(self, value):
         with pytest.raises(ProtocolError):
             await _send(headers=[(b'transfer-encoding', value)],
                         body=_chunks(b'aa'))
+
+    @pytest.mark.asyncio
+    async def test_a_refused_transfer_encoding_is_refused_for_a_byte_body_too(
+            self):
+        with pytest.raises(ProtocolError):
+            await _send(headers=[(b'transfer-encoding', b'gzip, chunked')],
+                        body=b'aa')
 
     @pytest.mark.asyncio
     async def test_a_transfer_encoding_beside_a_content_length_is_refused(self):

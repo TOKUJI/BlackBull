@@ -159,8 +159,8 @@ def _check_transfer_encoding(headers: Headers) -> None:
     rewriting the field around them would change what the body *means* without
     saying so.  ``Content-Encoding`` is where a content coding belongs.
 
-    A ``Transfer-Encoding`` beside a ``Content-Length`` is refused too, which
-    is why RFC 9112 §6.2 forbids a message from carrying both: which one
+    A ``Transfer-Encoding`` beside a ``Content-Length`` is refused too,
+    because RFC 9112 §6.2 forbids a message from carrying both: which one
     describes the body would be the recipient's guess.
     """
     codings = [member.strip(b' \t').lower()
@@ -179,7 +179,8 @@ def _check_transfer_encoding(headers: Headers) -> None:
 
 
 # Methods for which an empty body still goes out as ``Content-Length: 0``:
-# with no framing field at all an upstream may read a body up to close.
+# some origins and intermediaries answer 411 when a body-bearing method
+# carries no length at all.
 _BODY_ALLOWED_METHODS = frozenset({b'POST', b'PUT', b'PATCH', b'DELETE'})
 
 

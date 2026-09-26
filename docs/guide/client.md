@@ -102,8 +102,10 @@ Framing is the client's to decide — the rule the
 [server applies to a response](requests-and-responses.md#responses) in the other
 direction. `Content-Length` is a statement about the body you passed to *this*
 call, so it is checked against it and then written once, canonically. A
-`Transfer-Encoding` of your own survives only where the client can honour it
-exactly — the value `chunked` — and is refused otherwise.
+`Transfer-Encoding` of your own is accepted only when it is exactly `chunked`,
+and refused otherwise. Accepting it does not echo it: a byte body still goes
+out under `Content-Length`, and only a body that has to be streamed is written
+chunked.
 
 | `body=` | what goes out |
 |---|---|

@@ -16,7 +16,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   went out as two competing message boundaries.  A stream body with a
   `Content-Length` is now written raw against that total and checked as it
   goes, so an upload of known size need not be buffered.
-- **Breaking for callers of `HTTP1RequestSender`.**  A framing refusal raises
+- **Breaking for HTTP/1.1 client callers.**  A framing refusal raises
   `ProtocolError` where it raised `ValueError`, and `prepare`'s return value is
   now internal — its third element is the declared length (`int | None`), not
   the `chunked` flag it used to be.  A `Transfer-Encoding` of `gzip, chunked`
