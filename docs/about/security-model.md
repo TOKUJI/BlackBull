@@ -91,10 +91,11 @@ column.
 
 One client bound is not in that grid, because it is not one of the three.
 `BB_CLIENT_MAX_INTERIM_RESPONSES` (8) bounds how many `1xx` heads may precede
-the final one on HTTP/1.1: a **count**, and what owns the aggregate of the two
-per-head bounds above it, each of which is spent afresh on every interim.
-HTTP/2 needs no such number — every interim section adds to the same
-`BB_CLIENT_HEAD_MAX_TOTAL`.
+the final one, on either transport: a **count**, and what owns the aggregate of
+the two per-head bounds above it, each of which is spent afresh on every
+interim. It is also the only bound an HTTP/2 interim section with no fields
+has — one of those charges nothing to `BB_CLIENT_HEAD_MAX_TOTAL`, which is
+what owns the aggregate once fields are present.
 
 Full descriptions: [Environment variables](../reference/env-vars.md).
 
