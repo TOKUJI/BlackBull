@@ -115,8 +115,10 @@ def test_print_per_instance_sizes(capsys):
     # A ``__dict__``-equipped instance picks up ~56 bytes from the
     # PyDictObject header alone on CPython 3.12, so any per-instance
     # size above ~200 bytes here would suggest slots have been broken.
+    # 208 rather than 200: `HTTP2Sender` carries `_head_mode` and
+    # `_suppress_body`, the two facts the content rules need at write time.
     for name, size in sizes.items():
-        assert size < 200, (
+        assert size < 208, (
             f'{name} is {size} bytes — far above the slots-equipped '
             f'baseline (~48-96 bytes); check that __slots__ is still in '
             f'effect.'

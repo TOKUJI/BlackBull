@@ -62,3 +62,26 @@ async def test_content_still_reaches_the_wire_on_an_ordinary_status():
     sender, writer = _sender()
     await sender(b'abc', HTTPStatus.OK)
     assert writer.body() == b'abc'
+
+
+async def test_the_buffered_path_keeps_the_rules_too():
+    """The ASGI arms are the ones production uses, and they write through
+    `​_write_response_start_and_body` rather than the bytes arm above."""
+    sender, writer = _sender()
+    await sender({'type': 'http.response.start', 'status': 204, 'headers': [],
+                  'trailers': True})
+    await sender({'type': 'http.response.body', 'body': b'x',
+                  'more_body': True})
+    assert writer.body() == b''
+
+
+async def test_a_trailer_section_does_not_reach_a_bodyless_status():
+    """RFC 9112 §6.3 rule 1 — such a response "cannot contain a message body
+    or trailer section", so the head terminates it and the trailers never
+    leave. This is the Trailers-Only shape a gRPC error takes."""
+    sender, writer = _sender()
+    await sender({'type': 'http.response.start', 'status': 204, 'headers': [],
+                  'trailers': True})
+    await sender({'type': 'http.response.trailers',
+                  'headers': [(b'x-t', b'1')], 'more_trailers': False})
+    assert [kind for kind, _, _, _ in writer.frames if kind == 1] == [1]

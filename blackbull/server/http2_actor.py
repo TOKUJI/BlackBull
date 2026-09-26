@@ -1363,6 +1363,10 @@ class HTTP2Actor(Actor):
 
         stream.expected_content_length = _extract_content_length(conn)
         stream.conn = conn
+        # Before anything can refuse the request and write its own response:
+        # that response owes the same content rules as the application's.
+        self.make_sender(stream.stream_id,
+                         head_mode=method_is(conn.method, 'HEAD'))
 
         # Guarded inline rather than behind a predicate: a stream is a request,
         # and a method call to answer "no" measured 21 executed instructions

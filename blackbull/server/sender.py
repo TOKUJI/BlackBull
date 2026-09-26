@@ -461,6 +461,9 @@ class BaseSender(ABC):
                               head_mode: bool = False) -> bool:
         """Whether a response with this status may put content on the wire.
 
+        Final responses only: an informational head is not the response yet,
+        so it is never terminated here.
+
         One answer for both transports. ``protocol.framing.response_has_content``
         supplies the framing statuses and HEAD; RFC 9110 §15.3.6 adds 205,
         which a server may not generate content in even though a peer's 205
@@ -828,7 +831,7 @@ class HTTP1Sender(BaseSender):
         self._suppress_body = self._content_is_forbidden(status,
                                                         self._head_mode)
 
-        # A different set from ``content_forbidden`` on purpose: this asks
+        # A different set from ``_content_is_forbidden`` on purpose: this asks
         # whether the application's Content-Length survives as metadata, and
         # a 304 sends it again where a 205 does not.
         keep_length = (not self._informational and code not in (204, 205)
@@ -1078,7 +1081,7 @@ class HTTP2Sender(BaseSender):
         '_flow_control_cap',
         '_buffered_status', '_buffered_headers', '_expect_trailers',
         '_buffered_body', '_buffered_trailers', '_auto_flush_task',
-        '_head_mode',
+        '_head_mode', '_suppress_body',
         '_log_record',
     )
 
@@ -1091,6 +1094,7 @@ class HTTP2Sender(BaseSender):
                  head_mode: bool = False):
         super().__init__(writer)
         self._head_mode = head_mode
+        self._suppress_body = False
         self._factory = factory
         self._stream_id = stream_id
         self._push_callback = push_callback
@@ -1191,6 +1195,7 @@ class HTTP2Sender(BaseSender):
             return
         headers = headers or []
         forbidden = self._content_is_forbidden(status, self._head_mode)
+        self._suppress_body = forbidden
         # END_STREAM rides the DATA frame below, never HEADERS — unless the
         # head was promised no content, when there is no DATA to ride on.
         h_bytes = build_response_headers(
@@ -1465,6 +1470,10 @@ class HTTP2Sender(BaseSender):
                     await self._write_response_start_and_body(
                         buffered_body, False, buffered_status,
                         buffered_headers, self._expect_trailers)
+                    if self._suppress_body:
+                        # The head already carried END_STREAM; a DATA after
+                        # it is STREAM_CLOSED, not merely unwanted content.
+                        return
                     await self._write_data(
                         payload,
                         end_stream=end_stream and not self._expect_trailers)
@@ -1511,9 +1520,28 @@ class HTTP2Sender(BaseSender):
             headers = self._buffered_trailers
             self._buffered_trailers = None
 
+        if self._suppress_body and self._buffered_status is None:
+            # RFC 9112 §6.3 rule 1: no trailer section either. The head
+            # already carried END_STREAM, so there is nothing left to say.
+            return
+
         if self._buffered_status is not None:
+            self._suppress_body = self._content_is_forbidden(
+                self._buffered_status, self._head_mode)
             buffered_body = self._buffered_body
             self._buffered_body = None
+            if self._suppress_body:
+                # RFC 9112 §6.3 rule 1: such a response "cannot contain a
+                # message body or trailer section". The head terminates it.
+                await self._write(build_response_headers(
+                    self._factory.encoder, self._stream_id,
+                    self._buffered_status, self._buffered_headers or [],
+                    end_stream=True))
+                self._buffered_status = None
+                self._buffered_headers = None
+                self._end_stream_sent = True
+                return
+            buffered_body = None if self._suppress_body else buffered_body
             h_bytes = build_response_headers(
                 self._factory.encoder, self._stream_id,
                 self._buffered_status, self._buffered_headers or [],
@@ -1579,6 +1607,7 @@ class HTTP2Sender(BaseSender):
                 self._log_record.status = int(status)
                 self._log_record.response_bytes += len(body)
             forbidden = self._content_is_forbidden(status, self._head_mode)
+            self._suppress_body = forbidden
             h_bytes = build_response_headers(
                 self._factory.encoder, self._stream_id, status, headers,
                 end_stream=forbidden)
