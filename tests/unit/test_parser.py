@@ -10,6 +10,8 @@ from hypothesis import strategies as st
 
 from blackbull.server.http1_actor import HTTP1Actor as _HTTP1Actor
 from blackbull.server.parser import parse_headers as _real_parse_headers
+from tests.pseudo_header_grammar import (ILLEGAL_METHODS, ILLEGAL_SCHEMES,
+                                         LEGAL_METHODS, LEGAL_SCHEMES)
 
 
 def _parse_headers(frame) -> dict:
@@ -779,37 +781,27 @@ class TestPseudoHeaderGrammarBeyondFieldOctets:
         return _h2_frame([(b':method', method), (b':path', b'/'),
                           (b':scheme', scheme), (b':authority', b'example.com')])
 
-    @pytest.mark.parametrize('method', [
-        b'M\tT', b'M T', b'M(T', b'M)T', b'M,T', b'M/T', b'M:T', b'M;T',
-        b'M<T', b'M=T', b'M>T', b'M?T', b'M@T', b'M[T', b'M\\T', b'M]T',
-        b'M{T', b'M}T', b'M"T', b'',
-    ])
+    @pytest.mark.parametrize('method', ILLEGAL_METHODS)
     def test_a_non_token_method_is_malformed(self, method):
         frame = self._request(method=method)
         assert _real_parse_headers(frame) is None
         assert frame.malformed
         assert ':method' in (frame.malformed_reason or '')
 
-    @pytest.mark.parametrize('scheme', [
-        b'1http', b'ht,tp', b'ht tp', b'a_b', b'a:b', b'a/b', b'a;b',
-        b'a?b', b'a@b', b'a[b', b'a\\b', b'a]b', b'a{b', b'a}b', b'a"b',
-        b'a(b', b'a)b', b'a<b', b'a>b', b'a=b', b'a\tb', b'',
-    ])
+    @pytest.mark.parametrize('scheme', ILLEGAL_SCHEMES)
     def test_a_non_scheme_scheme_is_malformed(self, scheme):
         frame = self._request(scheme=scheme)
         assert _real_parse_headers(frame) is None
         assert frame.malformed
         assert ':scheme' in (frame.malformed_reason or '')
 
-    @pytest.mark.parametrize('method', [b'GET', b'HEAD', b'M-SEARCH', b'X.Y',
-                                        b'1', b'gEt'])
+    @pytest.mark.parametrize('method', LEGAL_METHODS)
     def test_a_token_method_is_accepted(self, method):
         conn = _real_parse_headers(self._request(method=method))
         assert conn is not None
         assert conn.method == method.decode()
 
-    @pytest.mark.parametrize('scheme', [b'https', b'http', b'h', b'a+b-c.d',
-                                        b'HTTP'])
+    @pytest.mark.parametrize('scheme', LEGAL_SCHEMES)
     def test_a_uri_scheme_is_accepted(self, scheme):
         conn = _real_parse_headers(self._request(scheme=scheme))
         assert conn is not None
@@ -836,10 +828,11 @@ class TestH1H2MethodAcceptSetParity:
 
     @staticmethod
     def _h1_accepts(method: bytes) -> bool:
+        from blackbull.server.http1_actor import BadRequestError
         try:
             conn = object.__new__(_HTTP1Actor)._parse(
                 b'%s / HTTP/1.1\r\nHost: x\r\n\r\n' % method)
-        except Exception:
+        except BadRequestError:
             return False
         return conn is not None
 

@@ -19,6 +19,8 @@ from hpack import Encoder
 
 from blackbull.server.http2_actor import HTTP2Actor
 from blackbull.server.recipient import AbstractReader, IncompleteReadError
+from tests.pseudo_header_grammar import (ILLEGAL_METHODS, ILLEGAL_SCHEMES,
+                                         LEGAL_METHODS, LEGAL_SCHEMES)
 from blackbull.server.sender import AsyncioWriter
 from blackbull.protocol.frame import FrameFactory
 from blackbull.protocol.frame_types import (
@@ -518,37 +520,22 @@ class TestG6MethodAndSchemeGrammar:
         assert app.await_count == 1
         assert not _sent_rst_streams(handler, 1)
 
-    @pytest.mark.parametrize('method', [
-        b'M\tT', b'M T', b'M(T', b'M)T', b'M,T', b'M/T', b'M:T', b'M;T',
-        b'M<T', b'M=T', b'M>T', b'M?T', b'M@T', b'M[T', b'M\\T', b'M]T',
-        b'M{T', b'M}T', b'M"T', b'',
-    ])
+    @pytest.mark.parametrize('method', ILLEGAL_METHODS)
     @pytest.mark.asyncio
     async def test_a_method_that_is_not_a_token_is_malformed(self, method):
-        """RFC 9110 §5.6.2 token = 1*tchar — every separator, HTAB/SP and the
-        empty value are outside it."""
         await _check_malformed(self._fields(method=method))
 
-    @pytest.mark.parametrize('scheme', [
-        b'1http', b'ht,tp', b'ht tp', b'a_b', b'a:b', b'a/b', b'a;b',
-        b'a?b', b'a@b', b'a[b', b'a\\b', b'a]b', b'a{b', b'a}b', b'a"b',
-        b'a(b', b'a)b', b'a<b', b'a>b', b'a=b', b'a\tb', b'',
-    ])
+    @pytest.mark.parametrize('scheme', ILLEGAL_SCHEMES)
     @pytest.mark.asyncio
     async def test_a_scheme_that_is_not_a_uri_scheme_is_malformed(self, scheme):
-        """RFC 3986 §3.1 scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ).
-        ``a_b`` is the telling one: an underscore is a §5.6.2 tchar, so only
-        the scheme grammar refuses it."""
         await _check_malformed(self._fields(scheme=scheme))
 
-    @pytest.mark.parametrize('method', [b'GET', b'HEAD', b'M-SEARCH', b'X.Y',
-                                        b'1', b'gEt'])
+    @pytest.mark.parametrize('method', LEGAL_METHODS)
     @pytest.mark.asyncio
     async def test_a_token_method_is_accepted(self, method):
         await self._accepted(self._fields(method=method))
 
-    @pytest.mark.parametrize('scheme', [b'https', b'http', b'h', b'a+b-c.d',
-                                        b'HTTP'])
+    @pytest.mark.parametrize('scheme', LEGAL_SCHEMES)
     @pytest.mark.asyncio
     async def test_a_uri_scheme_is_accepted(self, scheme):
         await self._accepted(self._fields(scheme=scheme))

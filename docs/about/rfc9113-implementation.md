@@ -612,7 +612,7 @@ Pseudo-headers are parsed and validated before dispatch.  **§8.3.1 Request
 Pseudo-Headers** — `:method`, `:scheme`, `:path`, `:authority`; the `:path`
 split for pushed requests lives in `HTTP2Actor._handle_push()`, and a
 request's `:path` is graded with the visible-ASCII rule HTTP/1.1 applies to
-its request-target.  `:method` is a RFC 9110 §9.1 token and `:scheme` a RFC
+its request-target.  `:method` is an RFC 9110 §9.1 token and `:scheme` an RFC
 3986 §3.1 scheme, each graded wherever the field is present — §5.5/§5.6.2
 field validity alone lets `G,ET` and `a_b` through, and HTTP/1.1 refuses the
 first on its request line, so the transports would otherwise accept different

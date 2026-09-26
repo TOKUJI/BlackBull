@@ -13,7 +13,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `RST_STREAM(PROTOCOL_ERROR)`.  An empty `:method`, which the request
   builder silently turned into `HEAD`, is refused the way an empty `:path`
   already was — an HTTP/2 peer relying on that placeholder has to send a
-  method.
+  method.  An empty `:scheme`, which the builder silently turned into
+  `https`, is refused for the same reason; `:scheme` is still defaulted only
+  where plain CONNECT omits it (RFC 9113 §8.5).
 - **An HTTP/1.1 request now declares exactly one body framing, and a caller's
   framing fields are checked rather than relayed.**  `Content-Length` is
   written once and must agree with the body across every occurrence.  A caller

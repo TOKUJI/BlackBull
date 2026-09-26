@@ -26,6 +26,7 @@ import blackbull.middleware.cache as cache_module
 import blackbull.protocol.frame_types as frame_types
 import blackbull.router as router
 import blackbull.server.http1_actor as http1_actor
+import blackbull.server.parser as parser
 import blackbull.server.recipient as recipient
 from blackbull.protocol import field_grammar
 from blackbull.protocol.frame_types import (
@@ -41,7 +42,7 @@ _READERS = {
     client_http1: ('TCHAR_OCTETS', 'TCHAR_SET', 'FIELD_VALUE_ALLOWED_OCTETS',
                    'FIELD_VALUE_ALLOWED_SET'),
     cache_module: ('TCHAR_SET', 'FIELD_VALUE_ALLOWED_SET'),
-    router: ('TCHAR_OCTETS',),
+    router: ('method_token_is_valid',),
 }
 
 #: The names the grammar owns.  A reader that assigns one of these has
@@ -111,23 +112,15 @@ def test_every_reader_reads_the_one_definition():
                 module.__name__, name)
 
 
-def test_the_router_method_check_is_the_same_rule():
-    """The router's input is a ``str``, so it cannot use the bytes table; its
-    delete table is built from the same alphabet.  Both halves of the rule are
-    pinned against ``method_token_is_valid`` — the alphabet and the ``1*tchar``
-    non-emptiness — because the emptiness half is not an alphabet and would
-    drift on its own."""
-    wrong = [c for c in range(256)
-             if (chr(c).translate(router._TCHAR_DELETE) == '')
-             is not (c in field_grammar.TCHAR_SET)]
-    assert wrong == []
-    for token in (b'', *(bytes([c]) for c in range(256))):
-        try:
-            router._validate_method_token(token.decode('latin-1'))
-            accepted = True
-        except ValueError:
-            accepted = False
-        assert accepted is field_grammar.method_token_is_valid(token), token
+def test_the_common_value_fast_path_is_inside_the_grammar():
+    """``parser`` skips the grammar for the values nearly every request
+    carries.  A member that does not satisfy its own rule would be accepted
+    outright, so each set is pinned against the rule it stands in for."""
+    for method in parser._COMMON_METHODS:
+        assert field_grammar.method_token_is_valid(method.encode('utf-8')), method
+    for scheme in parser._COMMON_SCHEMES:
+        assert field_grammar.URI_SCHEME_RE.fullmatch(
+            scheme.encode('utf-8')), scheme
 
 
 def test_h2_name_rule_is_the_shared_alphabet_lowercased():
