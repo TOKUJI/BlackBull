@@ -1224,6 +1224,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#how-a-request-frames-its-body" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How a request frames its body
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-a-call-raises" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3951,6 +3962,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/protocol/framing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    framing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/protocol/hpack_fastpath/" class="md-nav__link">
         
   
@@ -5588,6 +5627,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#how-a-request-frames-its-body" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How a request frames its body
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-a-call-raises" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5776,6 +5826,66 @@ performed rather than blaming the peer.</p>
 <p>The one exception is <code>handoff()</code>, which transfers a CONNECT or 101 transport to
 an <code>HTTP1UpgradeSession</code> and moves ownership of closing it with it — see
 <a href="../testing/#connect-tunnels-and-protocol-upgrades">Testing</a>.</p>
+<h2 id="how-a-request-frames-its-body">How a request frames its body<a class="headerlink" href="#how-a-request-frames-its-body" title="Permanent link">&para;</a></h2>
+<p>Framing is the client's to decide — the rule the
+<a href="../requests-and-responses/#responses">server applies to a response</a> in the other
+direction. <code>Content-Length</code> is a statement about the body you passed to <em>this</em>
+call, so it is checked against it and then written once, canonically. A
+<code>Transfer-Encoding</code> of your own is accepted only when it is exactly <code>chunked</code>,
+and refused otherwise. Accepting it does not echo it: a byte body still goes
+out under <code>Content-Length</code>, and only a body that has to be streamed is written
+chunked.</p>
+<table>
+<thead>
+<tr>
+<th><code>body=</code></th>
+<th>what goes out</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>bytes</code>, non-empty</td>
+<td>one <code>Content-Length: &lt;len&gt;</code>, raw octets</td>
+</tr>
+<tr>
+<td><code>bytes</code>, empty, on <code>POST</code> / <code>PUT</code> / <code>PATCH</code> / <code>DELETE</code></td>
+<td><code>Content-Length: 0</code></td>
+</tr>
+<tr>
+<td><code>bytes</code>, empty, on any other method</td>
+<td>no framing field</td>
+</tr>
+<tr>
+<td>async iterable, with a <code>Content-Length</code></td>
+<td>that one field, raw octets, total checked</td>
+</tr>
+<tr>
+<td>async iterable, without</td>
+<td><code>Transfer-Encoding: chunked</code></td>
+</tr>
+</tbody>
+</table>
+<p>A <code>Content-Length</code> you pass in survives the empty cases too, so <code>POST</code> with an
+explicit <code>Content-Length: 0</code> still sends it.</p>
+<p>A <code>Content-Length</code> you supply is honoured only where it can be guaranteed. On a
+byte body that means it equals <code>len(body)</code>. On an async iterable it is kept and
+the stream is written raw — which is how an upload of known size goes out without
+being buffered. The running total is checked, so a stream that ends short or runs
+over raises <code>ProtocolError</code> and retires the connection: the request on the wire
+no longer matches its head.</p>
+<p>All of these are refused <strong>before a single octet is written</strong>, so the connection
+goes on carrying the next request: two <code>Content-Length</code> fields that disagree, a
+value that is not <code>1*DIGIT</code>, a length that contradicts the body, and a
+<code>Transfer-Encoding</code> the client would have to rewrite. That last one covers
+anything but a lone <code>chunked</code> — a coding the caller applied itself
+(<code>gzip, chunked</code>), a parameter, <code>chunked</code> twice — and any <code>Transfer-Encoding</code>
+beside a <code>Content-Length</code>, which RFC 9112 §6.2 forbids a message from carrying.</p>
+<p>A body you compressed yourself goes under <code>Content-Encoding</code>, framed by a
+<code>Content-Length</code> or by <code>Transfer-Encoding: chunked</code>; <code>Transfer-Encoding: gzip</code>
+is refused rather than quietly delivered as the payload. None of this touches
+the raw-wire primitives in
+<a href="#driving-a-misbehaving-peer">Driving a misbehaving peer</a> — <code>send_header_line</code>
+will put two <code>Content-Length</code> lines on the wire, because that is what it is for.</p>
 <h2 id="what-a-call-raises">What a call raises<a class="headerlink" href="#what-a-call-raises" title="Permanent link">&para;</a></h2>
 <p>Everything the client itself refuses derives from <code>ClientError</code>:</p>
 <div class="highlight"><pre><span></span><code>ClientError
@@ -5786,7 +5896,10 @@ an <code>HTTP1UpgradeSession</code> and moves ownership of closing it with it �
 └── StreamReset        the peer sent RST_STREAM (carries .stream_id, .error_code)
 </code></pre></div>
 <p>Roughly: <code>ProtocolError</code> and <code>ResponseTooLarge</code> come out of reading a response
-on either protocol; <code>ConnectionError</code> out of any call once the peer has gone or
+on either protocol, and <code>ProtocolError</code> also out of building a request whose
+framing would be ambiguous — see
+<a href="#how-a-request-frames-its-body">How a request frames its body</a>;
+<code>ConnectionError</code> out of any call once the peer has gone or
 the context has exited; <code>StreamReset</code> only from HTTP/2, only from the
 <code>request()</code> whose stream was reset; <code>HandshakeError</code> only from
 <code>WebSocketClient.connect()</code> and <code>WebSocketH2Client</code>'s Extended CONNECT.</p>

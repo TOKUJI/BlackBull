@@ -4123,6 +4123,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../protocol/framing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    framing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../protocol/hpack_fastpath/" class="md-nav__link">
         
   
@@ -6521,10 +6549,11 @@ need them.</p>
 
 
         <p>Writes an HTTP/1.1 request — request line, headers, body — to an <code>AbstractWriter</code>.</p>
-<p>Adds <code>Content-Length</code> automatically for fixed-size byte bodies; switches
-to <code>Transfer-Encoding: chunked</code> for <code>AsyncIterable</code> bodies.  The
-<code>Host</code> header MUST be present (RFC 7230 §5.4) — the helper raises
-<code>ProtocolError</code> if it is not.</p>
+<p>Owns the request's framing: a byte body is sent under one
+<code>Content-Length</code>, an <code>AsyncIterable</code> body under that length when the
+caller declared one and under <code>Transfer-Encoding: chunked</code> when it did
+not.  The <code>Host</code> header MUST be present (RFC 7230 §5.4) — the helper
+raises <code>ProtocolError</code> if it is not.</p>
 
 
 
@@ -6567,6 +6596,20 @@ to <code>Transfer-Encoding: chunked</code> for <code>AsyncIterable</code> bodies
 succeeds.  A caller error such as a mismatched Content-Length or an
 unencodable request target therefore cannot retire an untouched
 keep-alive connection.</p>
+<p>Framing belongs to the sender, so the whole field pair is decided
+here: a caller's <code>Content-Length</code> is checked against the body and
+then written once, canonically.  A caller's <code>Transfer-Encoding</code> is
+honoured only where rewriting it cannot change what the body means —
+the value <code>chunked</code>, the one framing this client writes — and
+refused otherwise; see <code>_check_transfer_encoding</code>.
+A body whose length is known goes out as that many raw octets, a
+stream included, with the total checked as it goes; one whose length
+is not knowable up front is chunk-framed instead.</p>
+<p>The return value is internal: pass it to <a class="autorefs autorefs-internal" title="send_prepared(prepared)
+
+  
+      async
+  " href="#blackbull.client.http1.HTTP1RequestSender.send_prepared"><code>send_prepared</code></a> unchanged.</p>
 
 
     </div>
