@@ -5758,9 +5758,12 @@ exchanges over multiple concurrent streams.</p>
 
         <p>A complete HTTP response received by the client.</p>
 <p><code>status</code> is the HTTP status code (parsed from the <code>:status</code> pseudo-header).
-<code>headers</code> are the regular response headers as a <code>Headers</code> instance
-(bytes-keyed, lowercase-indexed).  <code>body</code> is the concatenation of all
-DATA-frame payloads received on the stream.</p>
+<code>headers</code> are the <em>final head's</em> regular fields as a <code>Headers</code> instance
+(bytes-keyed, lowercase-indexed).  <code>trailers</code> is the trailer section that
+followed the body: RFC 9113 §8.1 makes it a separate field section, and
+gRPC puts <code>grpc-status</code> in it, so it is held apart rather than folded
+into <code>headers</code> where its provenance would be lost.  <code>body</code> is the
+concatenation of all DATA-frame payloads received on the stream.</p>
 
 
 

@@ -3843,10 +3843,32 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.protocol.framing.is_informational" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        is_informational
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.protocol.framing.parse_content_length" class="md-nav__link">
     <span class="md-ellipsis">
       
         parse_content_length
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.protocol.framing.parse_status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        parse_status
       
     </span>
   </a>
@@ -5473,10 +5495,32 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.protocol.framing.is_informational" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        is_informational
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.protocol.framing.parse_content_length" class="md-nav__link">
     <span class="md-ellipsis">
       
         parse_content_length
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.protocol.framing.parse_status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        parse_status
       
     </span>
   </a>
@@ -5551,6 +5595,24 @@ every occurrence.  A message that carries two boundaries does not have one.</p>
 <div class="doc doc-object doc-function">
 
 
+<h3 id="blackbull.protocol.framing.is_informational" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">is_informational</span><span class="p">(</span><span class="n">status</span><span class="p">)</span></code>
+
+<a href="#blackbull.protocol.framing.is_informational" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Whether <em>status</em> is an informational (1xx) response — RFC 9110 §15.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h3 id="blackbull.protocol.framing.parse_content_length" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">parse_content_length</span><span class="p">(</span><span class="n">fields</span><span class="p">)</span></code>
 
@@ -5563,6 +5625,27 @@ every occurrence.  A message that carries two boundaries does not have one.</p>
 <p>Occurrences are <code>#field-value</code> lists too, so each member counts.  Raises
 <code>ValueError</code> when a member is not <code>1*DIGIT</code> or the members disagree;
 the message names the values it could not reconcile.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.protocol.framing.parse_status" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">parse_status</span><span class="p">(</span><span class="n">value</span><span class="p">)</span></code>
+
+<a href="#blackbull.protocol.framing.parse_status" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>A status code as RFC 9110 §15 writes one, or <code>None</code> if it is not.</p>
+<p>Three ASCII digits and nothing else.  There is deliberately no 100-599
+bound: a range one transport enforces and the other does not is an accept
+set the two disagree on, and neither protocol draws one here.</p>
 
 
     </div>

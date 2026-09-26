@@ -1235,6 +1235,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#what-counts-as-a-response" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What counts as a response
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-a-call-raises" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5638,6 +5649,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#what-counts-as-a-response" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What counts as a response
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-a-call-raises" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5886,6 +5908,27 @@ is refused rather than quietly delivered as the payload. None of this touches
 the raw-wire primitives in
 <a href="#driving-a-misbehaving-peer">Driving a misbehaving peer</a> — <code>send_header_line</code>
 will put two <code>Content-Length</code> lines on the wire, because that is what it is for.</p>
+<h2 id="what-counts-as-a-response">What counts as a response<a class="headerlink" href="#what-counts-as-a-response" title="Permanent link">&para;</a></h2>
+<p>Under HTTP/2, <code>request()</code> returns only a well-formed final response. The
+order is RFC 9113 §8.1's — zero or more informational <code>1xx</code> heads, one final
+head, the body, then a single optional trailer section — and every part is
+checked: <code>:status</code> is present and three ASCII digits, content appears only
+where RFC 9110 §9.3 allows it (a <code>HEAD</code> response and <code>204</code> / <code>304</code> carry
+none, whatever they declare), a declared <code>Content-Length</code> matches the body
+exactly, and a trailer section carries no pseudo-header field and no
+<code>Content-Length</code>. A response that breaks one of these raises <code>ProtocolError</code>.
+A hop-by-hop field such as <code>Transfer-Encoding</code> is refused earlier and
+separately, by the frame layer, as a <code>StreamReset</code>.
+The HTTP/1.1 reader is the laxer of the two: it reads no body for <code>HEAD</code> /
+<code>204</code> / <code>304</code> and refuses a malformed status line, but it cannot refuse
+octets a peer sends where content should not be.</p>
+<p>A refusal under HTTP/2 takes the stream alone — <code>RST_STREAM</code>, the connection
+and its other streams survive. <code>res.headers</code> holds the final head's fields
+only and <code>res.trailers</code> the trailer section: RFC 9113 §8.1 keeps the two
+field sections apart, and gRPC puts <code>grpc-status</code> in the trailer. Folding
+them together, as this client did, left a caller unable to tell which
+section a field came from. Informational heads are read and discarded, which
+is what the HTTP/1.1 reader has always done with them.</p>
 <h2 id="what-a-call-raises">What a call raises<a class="headerlink" href="#what-a-call-raises" title="Permanent link">&para;</a></h2>
 <p>Everything the client itself refuses derives from <code>ClientError</code>:</p>
 <div class="highlight"><pre><span></span><code>ClientError
