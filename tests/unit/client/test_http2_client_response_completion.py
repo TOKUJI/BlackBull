@@ -27,7 +27,7 @@ import asyncio
 
 import pytest
 
-from blackbull.client.exceptions import ProtocolError
+from blackbull.client.exceptions import ProtocolError, ResponseTooLarge
 from blackbull.client.http2 import HTTP2Client
 from blackbull.protocol.frame import FrameFactory
 from blackbull.protocol.frame_types import (DataFrameFlags, ErrorCodes,
@@ -385,3 +385,63 @@ class TestTheRefusalIsAStreamError:
         caplog.set_level(logging.WARNING, logger='blackbull.caps')
         await _call(_Peer().settings().data(b'x'))
         assert not [r for r in caplog.records if getattr(r, 'cap', None)]
+
+
+# ----------------------------------------------------------------------
+# C6 — one rule per concept (BLA-461 / BLA-462 / BLA-463)
+# ----------------------------------------------------------------------
+
+class TestTheMethodIsCaseSensitive:
+    async def test_a_lowercase_head_is_not_a_head_response(self):
+        """RFC 9110 §9.1: `head` is not `HEAD`, so this response may carry
+        content."""
+        res = _ok(await _call(_Peer().settings()
+                              .headers({PseudoHeaders.STATUS: '200'},
+                                       [(b'content-length', b'1')])
+                              .data(b'x'), 'head'))
+        assert res.body == b'x'
+
+
+class TestTheInterimResponsesAreBounded:
+    @staticmethod
+    def _interim(n: int) -> _Peer:
+        peer = _Peer().settings()
+        for _ in range(n):
+            peer.headers({PseudoHeaders.STATUS: '103'}, [])
+        return peer
+
+    async def test_interim_responses_up_to_the_limit_complete(self, monkeypatch):
+        monkeypatch.setenv('BB_CLIENT_MAX_INTERIM_RESPONSES', '3')
+        res = _ok(await _call(self._interim(3)
+                              .headers({PseudoHeaders.STATUS: '200'}, [],
+                                       end_stream=True)))
+        assert res.status == 200
+
+    async def test_interim_responses_past_the_limit_are_refused(
+            self, monkeypatch):
+        monkeypatch.setenv('BB_CLIENT_MAX_INTERIM_RESPONSES', '3')
+        outcome = await _call(self._interim(4)
+                              .headers({PseudoHeaders.STATUS: '200'}, [],
+                                       end_stream=True))
+        assert isinstance(outcome, tuple), outcome
+        assert isinstance(outcome[0], ResponseTooLarge), outcome[0]
+
+
+class TestTheStatusIsUsable:
+    async def test_status_101_is_refused(self):
+        """RFC 9113 §8.6 — HTTP/2 does not use 101, so it is malformed here
+        where HTTP/1.1 makes it a protocol switch."""
+        exc = _refused(await _call(_Peer().settings()
+                                   .headers({PseudoHeaders.STATUS: '101'}, [],
+                                            end_stream=True)))
+        assert '101 is not usable over HTTP/2' in str(exc)
+
+
+class TestTheOrderNamesWhatHappened:
+    async def test_a_second_final_head_says_so(self):
+        exc = _refused(await _call(_Peer().settings()
+                                   .headers({PseudoHeaders.STATUS: '200'}, [],
+                                            end_stream=False)
+                                   .headers({PseudoHeaders.STATUS: '200'}, [],
+                                            end_stream=True)))
+        assert 'second final head' in str(exc)
