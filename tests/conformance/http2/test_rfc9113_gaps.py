@@ -868,9 +868,6 @@ class TestG13FieldCharacterValidation:
     ])
     @pytest.mark.asyncio
     async def test_a_malformed_trailer_field_is_malformed(self, bad_field):
-        """RFC 9113 §8.1 — the trailing field section is a field section, so
-        §8.2.1 grades it too, and §8.1.1 gives the request the verdict a
-        malformed head gets."""
         handler, app = _make_h2_actor()
         head = _make_headers_frame(1, end_stream=False)
         trailers = _make_headers_frame(1, end_stream=True, fields=[bad_field])
@@ -888,8 +885,6 @@ class TestG13FieldCharacterValidation:
 
     @pytest.mark.asyncio
     async def test_a_valid_trailer_field_section_is_accepted(self):
-        """The complement the refusal must not overreach: a conforming
-        trailing field section still completes the request."""
         handler, app = _make_h2_actor()
         head = _make_headers_frame(1, end_stream=False)
         trailers = _make_headers_frame(

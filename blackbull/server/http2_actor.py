@@ -1298,15 +1298,9 @@ class HTTP2Actor(Actor):
         a later CONTINUATION frame.
         """
         if stream.conn is not None:
-            # RFC 9113 §8.1 — a second field section is trailers, not a new
-            # request.  They are not surfaced to the app, so only the
-            # END_STREAM transition is observable.  Handling it here is what
-            # makes single-frame and fragmented trailers share one recipient,
-            # and what stops a second handler from starting.
-            #
-            # §8.2.1 grades the trailing field section like the head's, and a
-            # section that does not end the request is not a trailer at all.
-            # The retire is the verdict's own, not the write's side effect.
+            # RFC 9113 §8.1 — a second field section is trailers: it must end
+            # the request and reach no handler; a malformed one earns the
+            # head's verdict.
             if not header_frame.end_stream or header_frame.malformed:
                 if _DEBUG:
                     logger.debug(
