@@ -24,6 +24,7 @@ from http import HTTPStatus
 from blackbull.connection import Connection
 from blackbull.env import get_settings, Environment
 from blackbull.native import NativeResponse
+from ._accept_encoding import select_encoding
 
 
 # Common web-asset MIME types that may be missing from the host's
@@ -176,12 +177,10 @@ class StaticFiles:
     # stat on every request.
     _STAT_TTL_S = float(os.environ.get('BB_STATIC_STAT_TTL_S', '1.0'))
 
-    # Server preference order for precompressed variant selection.
-    # Matches blackbull.middleware.compression's order (br > zstd > gzip).
-    _ENCODING_SUFFIXES: tuple[tuple[bytes, str], ...] = (
-        (b'br',   '.br'),
-        (b'zstd', '.zst'),
-        (b'gzip', '.gz'),
+    _ENCODING_SUFFIXES: tuple[tuple[str, str], ...] = (
+        ('br',   '.br'),
+        ('zstd', '.zst'),
+        ('gzip', '.gz'),
     )
 
     def __init__(self, directory: str | None = None, *,
@@ -248,7 +247,7 @@ class StaticFiles:
         # the from-disk-every-request contract extends to the sibling
         # existence check.
         # Key = original request path string, Value = dict of available encodings.
-        self._sibling_cache: dict[str, dict[bytes, str]] = {}
+        self._sibling_cache: dict[str, dict[str, str]] = {}
 
     @property
     def _root(self) -> Path:
@@ -327,26 +326,6 @@ class StaticFiles:
 
         await self._serve(conn, send, target)
 
-    @staticmethod
-    def _client_accepts(accept_header: bytes, encoding: bytes) -> bool:
-        """Cheap Accept-Encoding parser — True iff `encoding` is offered with q>0."""
-        if not accept_header:
-            return False
-        for token in accept_header.split(b','):
-            parts = token.strip().split(b';')
-            if parts[0].strip().lower() != encoding:
-                continue
-            for param in parts[1:]:
-                p = param.strip()
-                if p.startswith(b'q='):
-                    try:
-                        if float(p[2:]) <= 0:
-                            return False
-                    except ValueError:
-                        pass  # malformed q-value → treat as acceptable.
-            return True
-        return False
-
     def _negotiate(self, conn, target: str) -> tuple[str, bytes]:
         """Pick which file to serve and what Content-Encoding to advertise.
 
@@ -363,13 +342,9 @@ class StaticFiles:
         per-request ``os.path.isfile`` syscalls for ``.br`` / ``.zst`` /
         ``.gz`` siblings happen only once per path.
         """
-        accept = b''
-        for k, v in conn.headers:
-            kl = k.lower()
-            if kl == b'range':
-                return target, b''
-            if kl == b'accept-encoding':
-                accept = v.lower()
+        if conn.headers.getlist(b'range'):
+            return target, b''
+        accept = conn.headers.get_combined(b'accept-encoding')
         if not accept:
             return target, b''
 
@@ -392,10 +367,9 @@ class StaticFiles:
                 if os.path.isfile(sibling):
                     siblings[enc] = sibling
 
-        for enc, _suffix in self._ENCODING_SUFFIXES:
-            sibling = siblings.get(enc)
-            if sibling is not None and self._client_accepts(accept, enc):
-                return sibling, enc
+        encoding = select_encoding(accept, siblings)
+        if encoding is not None:
+            return siblings[encoding], encoding.encode()
         return target, b''
 
     async def _serve(self, conn, send, path: str):

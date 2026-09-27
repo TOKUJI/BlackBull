@@ -5,6 +5,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+- Dynamic compression and precompressed static files honor `Accept-Encoding`
+  refusals (`q=0`), wildcard acceptance, and repeated fields consistently.
+  Malformed qualities or parameters refuse the named coding, including when
+  `*` would otherwise allow it.
+
 - **A malformed trailing field section is refused like a malformed head.**
   RFC 9113 §8.1 calls the trailer section a field section, so §8.2.1 grades
   it — but only the request head carried the verdict.  A trailer value with

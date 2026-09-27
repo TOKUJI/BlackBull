@@ -226,40 +226,8 @@ class TestWebsocketMiddleware:
 
 
 # ---------------------------------------------------------------------------
-# compress() — Accept-Encoding parsing
+# compress() — codec selection
 # ---------------------------------------------------------------------------
-
-class TestAcceptEncodingParsing:
-    """Compression._parse_accept_encoding must return codec names
-    sorted by descending q-value."""
-
-    def _parse(self, header: str) -> list[str]:
-        return Compression._parse_accept_encoding(header.encode())
-
-    def test_single_codec(self):
-        assert self._parse('gzip') == ['gzip']
-
-    def test_multiple_no_q(self):
-        result = self._parse('gzip, br')
-        assert set(result) == {'gzip', 'br'}
-
-    def test_q_values_sorted_descending(self):
-        result = self._parse('gzip;q=0.8, br;q=1.0, zstd;q=0.9')
-        assert result == ['br', 'zstd', 'gzip']
-
-    def test_implicit_q1_beats_explicit_lower(self):
-        result = self._parse('br, gzip;q=0.5')
-        assert result[0] == 'br'
-        assert result[-1] == 'gzip'
-
-    def test_empty_header_returns_empty(self):
-        assert self._parse('') == []
-
-    def test_wildcard_included(self):
-        result = self._parse('*;q=0.1, gzip')
-        assert 'gzip' in result
-        assert '*' in result
-
 
 class TestCodecSelection:
     """Compression._select_codec must prefer br > zstd > gzip

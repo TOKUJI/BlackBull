@@ -2,6 +2,29 @@ import pytest
 from blackbull.headers import Headers
 
 
+@pytest.mark.parametrize(('pairs', 'expected'), [
+    ([], None),
+    ([(b'Example', b'')], b''),
+    ([(b'Example', b'alpha')], b'alpha'),
+    ([(b'Example', b'alpha'), (b'example', b'beta')], b'alpha, beta'),
+    ([(b'Example', b''), (b'example', b'beta')], b', beta'),
+    ([(b'Example', b'alpha'), (b'other', b'ignored'),
+      (b'EXAMPLE', b''), (b'example', b'beta')], b'alpha, , beta'),
+])
+def test_combined_list_field(pairs, expected):
+    headers = Headers(pairs)
+    assert headers.get_combined(b'example') == expected
+    assert headers.get_combined(b'EXAMPLE') == expected
+    assert list(headers) == pairs
+
+
+def test_combined_field_observes_append():
+    headers = Headers([(b'Example', b'alpha')])
+    assert headers.get_combined(b'example') == b'alpha'
+    headers.append(b'EXAMPLE', b'beta')
+    assert headers.get_combined(b'example') == b'alpha, beta'
+
+
 @pytest.fixture
 def h():
     return Headers([(b'content-type', b'text/html'), (b'x-custom', b'a')])
