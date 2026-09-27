@@ -27,7 +27,7 @@ from .messages import (
     MQTTPublish, MQTTPuback, MQTTPubrec, MQTTPubrel, MQTTPubcomp,
     MQTTSubscribe, MQTTSuback,
     MQTTUnsubscribe, MQTTUnsuback, MQTTPingresp, MQTTAuth,
-    ProtocolLevel, ReasonCode,
+    ProtocolLevel, ReasonCode, SESSION_EXPIRY_NEVER,
     topic_matches_filter, validate_topic_name, validate_topic_filter, encode_packet,
 )
 
@@ -37,8 +37,6 @@ logger = logging.getLogger(__name__)
 # PUBLISH→PUBREC, outbound PUBLISH→PUBREL — reads as one word rather than a
 # bare string literal scattered across the handlers.
 _QOS2_IN_PUBREC_SENT = 'PUBREC_SENT'      # inbound: PUBREC sent, awaiting PUBREL
-#: §3.1.2.11.2 — the Session Expiry Interval meaning "does not expire".
-_EXPIRY_NEVER = 0xFFFFFFFF
 
 _QOS2_OUT_PUBLISH_SENT = 'PUBLISH_SENT'   # outbound: PUBLISH sent, awaiting PUBREC
 _QOS2_OUT_PUBREL_SENT = 'PUBREL_SENT'     # outbound: PUBREL sent, awaiting PUBCOMP
@@ -259,8 +257,7 @@ def _new_broker_session() -> dict[str, Any]:
         # instant it resolves to.  They are separate because the interval is
         # session state that survives a reconnect, while the deadline only
         # exists while the client is *away*: ``None`` means either connected
-        # or 0xFFFFFFFF ("does not expire"), and both are states no sweep
-        # may collect.
+        # or never expires, and both are states no sweep may collect.
         '_expiry': 0,
         '_expires_at': None,
         '_next_pid': 0,
@@ -560,9 +557,10 @@ class BrokerActor(Actor):
             return
 
         # §3.1.4-3 — a second CONNECT for a Client Identifier that is already
-        # connected takes the session over: the previous Network Connection MUST
-        # be disconnected (DISCONNECT 0x8E, then close).  Dropping its
-        # id(conn) → client_id mapping first also neutralises that connection's
+        # connected takes the session over: the previous Network Connection
+        # MUST be disconnected (DISCONNECT with SESSION_TAKEN_OVER, then
+        # close).  Dropping its id(conn) → client_id mapping first also
+        # neutralises that connection's
         # teardown Detach (it early-returns on the missing id), so the taken-over
         # client's Will is not published (§3.1.2.5) and the new session is left
         # untouched.
@@ -608,7 +606,7 @@ class BrokerActor(Actor):
                     session.setdefault(key, default)
                 # §3.1.2.11.2 — the interval this CONNECT declares *is* the
                 # session's interval.  Taking the larger of old and new meant
-                # one connection at 0xFFFFFFFF pinned the session for the
+                # one connection declaring SESSION_EXPIRY_NEVER pinned the
                 # life of the process and the client could never take it
                 # back.
                 session['_expiry'] = expiry
@@ -666,16 +664,17 @@ class BrokerActor(Actor):
         for index, (topic_filter, qos) in enumerate(subscribe.subscriptions):
             # §3.8.3 / §4.7 / §4.8.2 — a syntactically invalid Topic Filter
             # (including a malformed ``$share`` form) is rejected per-entry
-            # with 0x8F; the SUBACK still carries one reason code per
-            # requested filter, so ordering with the remaining entries is kept.
+            # with TOPIC_FILTER_INVALID; the SUBACK still carries one reason
+            # code per requested filter, so ordering with the remaining
+            # entries is kept.
             if not _valid_filter(topic_filter):
                 reason_codes.append(ReasonCode.TOPIC_FILTER_INVALID)
                 continue
             opts = dict(options[index]) if index < len(options) else {}
             share = _parse_share(topic_filter)
             # §3.8.3.1 [MQTT-3.8.3-4] — No Local on a Shared Subscription is a
-            # Protocol Error: per §4.13 the server sends DISCONNECT 0x82 and
-            # closes the connection (no SUBACK).
+            # Protocol Error: per §4.13 the server sends DISCONNECT with
+            # PROTOCOL_ERROR and closes the connection (no SUBACK).
             if share is not None and opts.get('no_local'):
                 await self._disconnect(conn, ReasonCode.PROTOCOL_ERROR)
                 return
@@ -688,7 +687,7 @@ class BrokerActor(Actor):
             # occupies no new slot, and locking a client out of changing the
             # QoS of a subscription it already has would leave it worse off
             # than one that never subscribed while freeing nothing.  §3.9.3
-            # makes 0x97 a valid SUBACK reason code, so the refusal travels
+            # makes QUOTA_EXCEEDED a valid SUBACK reason code, so the refusal travels
             # in the acknowledgement the client is already waiting for.
             if (self._max_subscriptions
                     and not existed
@@ -789,8 +788,9 @@ class BrokerActor(Actor):
         if session is None:
             return
         # §3.10.4 / §4.7.3 — the same per-entry check as SUBSCRIBE (§3.8.3):
-        # an invalid filter is answered 0x8F and removes nothing.  The codec
-        # bounds the field's length; what a legal filter *is* stays one rule,
+        # an invalid filter is answered TOPIC_FILTER_INVALID and removes
+        # nothing.  The codec bounds the field's length; what a legal filter
+        # *is* stays one rule,
         # in `validate_topic_filter`.
         accepted = {t for t in unsubscribe.topics if _valid_filter(t)}
         session['subscriptions'] = [
@@ -812,7 +812,8 @@ class BrokerActor(Actor):
             await self._disconnect(conn, ReasonCode.MALFORMED_PACKET)
             return
         # §3.3.2.1 — a Topic Name is literal: non-empty, no wildcards, no null.
-        # An invalid one is rejected (0x90) and neither routed nor retained.
+        # An invalid one is rejected (TOPIC_NAME_INVALID) and neither routed
+        # nor retained.
         if not validate_topic_name(publish.topic):
             await self._reject_publish(conn, publish, ReasonCode.TOPIC_NAME_INVALID)
             return
@@ -1101,10 +1102,10 @@ class BrokerActor(Actor):
                 [s[0] for s in session['subscriptions']])
             self._arm_expiry_timer()
             return
-        # The session outlives the connection from here.  0xFFFFFFFF means it
+        # The session outlives the connection from here.  SESSION_EXPIRY_NEVER
         # never expires (§3.1.2.11.2), so it gets no deadline — the *total*
         # cap, not the clock, is what bounds that case.
-        if declared != _EXPIRY_NEVER:
+        if declared != SESSION_EXPIRY_NEVER:
             session['_expires_at'] = \
                 asyncio.get_running_loop().time() + declared
             self._arm_expiry_timer()

@@ -24,6 +24,8 @@ Key behaviours:
 import pytest
 
 from blackbull.mqtt.messages import (
+    PropertyId,
+    ReasonCode,
     MQTTAuth, MQTTConnect, MQTTConnack,
     encode_packet, decode_packet,
     MQTTReasonCode,
@@ -200,7 +202,7 @@ class TestPropertiesPerPacketType:
             assert decoded.properties['user_properties'] == [('app', 'test')]
 
         # Test user properties on all ACK packet types
-        _encode_decode_user_props(MQTTConnack, session_present=False, reason_code=0)
+        _encode_decode_user_props(MQTTConnack, session_present=False, reason_code=ReasonCode.SUCCESS)
         _encode_decode_user_props(MQTTConnect, client_id='up', clean_start=True, keep_alive=60)
 
 
@@ -223,15 +225,14 @@ class TestAuthPacket:
     def test_auth_fixed_header_flags(self):
         """§3.15.1 — AUTH fixed header flags MUST be 0x00."""
         auth = MQTTAuth(
-            reason_code=0x18,  # Continue authentication
+            reason_code=ReasonCode.CONTINUE_AUTHENTICATION,
             properties={
                 'authentication_method': 'SCRAM-SHA-256',
                 'authentication_data': b'client-first-message',
             },
         )
         wire = encode_packet(auth)
-        assert (wire[0] & 0x0F) == 0x00, \
-            "AUTH fixed header flags must be 0x00 per §3.15.1"
+        assert (wire[0] & 0x0F) == 0
 
     @pytest.mark.parametrize("auth_method", [
         'SCRAM-SHA-1',
@@ -243,7 +244,7 @@ class TestAuthPacket:
     def test_auth_with_authentication_method(self, auth_method):
         """§3.15.2.2 — AUTH carries Authentication Method and Data."""
         auth = MQTTAuth(
-            reason_code=0x18,
+            reason_code=ReasonCode.CONTINUE_AUTHENTICATION,
             properties={
                 'authentication_method': auth_method,
                 'authentication_data': b'some-auth-data',
@@ -256,7 +257,7 @@ class TestAuthPacket:
     def test_auth_continue_authentication(self):
         """§3.15.2.1 — AUTH reason code 0x18: Continue Authentication."""
         auth = MQTTAuth(
-            reason_code=0x18,  # Continue authentication
+            reason_code=ReasonCode.CONTINUE_AUTHENTICATION,
             properties={
                 'authentication_method': 'SCRAM-SHA-256',
                 'authentication_data': b'server-first-message',
@@ -264,12 +265,12 @@ class TestAuthPacket:
         )
         wire = encode_packet(auth)
         decoded = decode_packet(wire)
-        assert decoded.reason_code == 0x18
+        assert decoded.reason_code == ReasonCode.CONTINUE_AUTHENTICATION
 
     def test_auth_re_authenticate(self):
         """§3.15.2.1 / §4.12.2 — AUTH reason code 0x19: Re-authentication."""
         auth = MQTTAuth(
-            reason_code=0x19,  # Re-authenticate
+            reason_code=ReasonCode.REAUTHENTICATE,
             properties={
                 'authentication_method': 'SCRAM-SHA-256',
                 'authentication_data': b'reauth-data',
@@ -277,12 +278,12 @@ class TestAuthPacket:
         )
         wire = encode_packet(auth)
         decoded = decode_packet(wire)
-        assert decoded.reason_code == 0x19
+        assert decoded.reason_code == ReasonCode.REAUTHENTICATE
 
     def test_auth_success(self):
         """§3.15.2.1 — AUTH reason code 0x00: Success (authentication complete)."""
         auth = MQTTAuth(
-            reason_code=0x00,
+            reason_code=ReasonCode.SUCCESS,
             properties={
                 'authentication_method': 'SCRAM-SHA-256',
                 'authentication_data': b'final-server-proof',
@@ -290,7 +291,7 @@ class TestAuthPacket:
         )
         wire = encode_packet(auth)
         decoded = decode_packet(wire)
-        assert decoded.reason_code == 0x00
+        assert decoded.reason_code == ReasonCode.SUCCESS
 
     def test_auth_without_reason_code(self):
         """§3.15.2 — AUTH without a reason code (pre-5.0 compatibility)."""
@@ -353,7 +354,9 @@ class TestEnhancedAuthenticationFlow:
 
     def test_auth_failure_reason_codes(self):
         """§4.12.1 — Authentication failure reason codes."""
-        for code in (0x86, 0x87, 0x8C):
+        for code in (ReasonCode.BAD_USER_NAME_OR_PASSWORD,
+                     ReasonCode.NOT_AUTHORIZED,
+                     ReasonCode.BAD_AUTHENTICATION_METHOD):
             auth = MQTTAuth(
                 reason_code=code,
                 properties={

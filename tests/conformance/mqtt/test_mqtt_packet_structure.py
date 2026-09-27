@@ -15,69 +15,35 @@ Key sections covered:
   - §2.2.1 Remaining Length (variable byte integer encoding)
   - §1.5.1 Variable Byte Integer (normative encoding rules)
 
-Packet type values (§2.1.1 Table 2-1):
-  1=CONNECT, 2=CONNACK, 3=PUBLISH, 4=PUBACK, 5=PUBREC, 6=PUBREL,
-  7=PUBCOMP, 8=SUBSCRIBE, 9=SUBACK, 10=UNSUBSCRIBE, 11=UNSUBACK,
-  12=PINGREQ, 13=PINGRESP, 14=DISCONNECT, 15=AUTH
+Packet types are named via MQTTPacketType (§2.1.1 Table 2-1).
 """
 
 import pytest
 import struct
+
+from blackbull.mqtt.messages import (
+    PropertyId, ReasonCode,
+    MQTTPacketType, PublishFlagBits, RESERVED_FLAGS_0010, PUBLISH_QOS_SHIFT,
+)
+
+
+def first_byte(packet_type, flags=0):
+    """§2.1.1 — first octet: type in bits 7-4, flags in bits 3-0."""
+    return int(packet_type) << 4 | flags
+
+
+ALL_PUBLISH_FLAGS = (int(PublishFlagBits.DUP) | (2 << PUBLISH_QOS_SHIFT)
+                     | int(PublishFlagBits.RETAIN))
 
 # ---------------------------------------------------------------------------
 # Expected module under test — MQTT 5 packet codec will live here:
 #   blackbull/mqtt/messages.py
 #
 # For TDD, we import from the expected module (tests will fail until
-# the implementation is written).  Where the module does not exist yet,
-# we define the expected API as test-time constants.
+# the implementation is written).
 # ---------------------------------------------------------------------------
 
-# MQTT 5.0 Control Packet Type constants (§2.1.1 Table 2-1)
-MQTT_PACKET_CONNECT     = 1
-MQTT_PACKET_CONNACK     = 2
-MQTT_PACKET_PUBLISH     = 3
-MQTT_PACKET_PUBACK      = 4
-MQTT_PACKET_PUBREC      = 5
-MQTT_PACKET_PUBREL      = 6
-MQTT_PACKET_PUBCOMP     = 7
-MQTT_PACKET_SUBSCRIBE   = 8
-MQTT_PACKET_SUBACK      = 9
-MQTT_PACKET_UNSUBSCRIBE = 10
-MQTT_PACKET_UNSUBACK    = 11
-MQTT_PACKET_PINGREQ     = 12
-MQTT_PACKET_PINGRESP    = 13
-MQTT_PACKET_DISCONNECT  = 14
-MQTT_PACKET_AUTH        = 15
 
-# MQTT 5.0 Property Identifiers (§2.2.2.2 Table 2-3)
-PROP_PAYLOAD_FORMAT_INDICATOR          = 0x01
-PROP_MESSAGE_EXPIRY_INTERVAL           = 0x02
-PROP_CONTENT_TYPE                      = 0x03
-PROP_RESPONSE_TOPIC                    = 0x08
-PROP_CORRELATION_DATA                  = 0x09
-PROP_SUBSCRIPTION_IDENTIFIER           = 0x0B
-PROP_SESSION_EXPIRY_INTERVAL           = 0x11
-PROP_ASSIGNED_CLIENT_IDENTIFIER        = 0x12
-PROP_SERVER_KEEP_ALIVE                 = 0x13
-PROP_AUTHENTICATION_METHOD             = 0x15
-PROP_AUTHENTICATION_DATA               = 0x16
-PROP_REQUEST_PROBLEM_INFORMATION       = 0x17
-PROP_WILL_DELAY_INTERVAL               = 0x18
-PROP_REQUEST_RESPONSE_INFORMATION      = 0x19
-PROP_RESPONSE_INFORMATION              = 0x1A
-PROP_SERVER_REFERENCE                  = 0x1C
-PROP_REASON_STRING                     = 0x1F
-PROP_RECEIVE_MAXIMUM                   = 0x21
-PROP_TOPIC_ALIAS_MAXIMUM               = 0x22
-PROP_TOPIC_ALIAS                       = 0x23
-PROP_MAXIMUM_QOS                       = 0x24
-PROP_RETAIN_AVAILABLE                  = 0x25
-PROP_USER_PROPERTY                     = 0x26
-PROP_MAXIMUM_PACKET_SIZE               = 0x27
-PROP_WILDCARD_SUBSCRIPTION_AVAILABLE   = 0x28
-PROP_SUBSCRIPTION_IDENTIFIER_AVAILABLE = 0x29
-PROP_SHARED_SUBSCRIPTION_AVAILABLE     = 0x2A
 
 
 # ============================================================================
@@ -160,21 +126,21 @@ class TestFixedHeader:
 
     # §2.1.1 Table 2-1 — Control Packet Types
     @pytest.mark.parametrize("packet_type,expected_name", [
-        (MQTT_PACKET_CONNECT,     'CONNECT'),
-        (MQTT_PACKET_CONNACK,     'CONNACK'),
-        (MQTT_PACKET_PUBLISH,     'PUBLISH'),
-        (MQTT_PACKET_PUBACK,      'PUBACK'),
-        (MQTT_PACKET_PUBREC,      'PUBREC'),
-        (MQTT_PACKET_PUBREL,      'PUBREL'),
-        (MQTT_PACKET_PUBCOMP,     'PUBCOMP'),
-        (MQTT_PACKET_SUBSCRIBE,   'SUBSCRIBE'),
-        (MQTT_PACKET_SUBACK,      'SUBACK'),
-        (MQTT_PACKET_UNSUBSCRIBE, 'UNSUBSCRIBE'),
-        (MQTT_PACKET_UNSUBACK,    'UNSUBACK'),
-        (MQTT_PACKET_PINGREQ,     'PINGREQ'),
-        (MQTT_PACKET_PINGRESP,    'PINGRESP'),
-        (MQTT_PACKET_DISCONNECT,  'DISCONNECT'),
-        (MQTT_PACKET_AUTH,        'AUTH'),
+        (1, 'CONNECT'),
+        (2, 'CONNACK'),
+        (3, 'PUBLISH'),
+        (4, 'PUBACK'),
+        (5, 'PUBREC'),
+        (6, 'PUBREL'),
+        (7, 'PUBCOMP'),
+        (8, 'SUBSCRIBE'),
+        (9, 'SUBACK'),
+        (10, 'UNSUBSCRIBE'),
+        (11, 'UNSUBACK'),
+        (12, 'PINGREQ'),
+        (13, 'PINGRESP'),
+        (14, 'DISCONNECT'),
+        (15, 'AUTH'),
     ])
     def test_packet_type_from_name(self, packet_type, expected_name):
         """§2.1.1 Table 2-1 — All 15 control packet types are recognized."""
@@ -183,22 +149,26 @@ class TestFixedHeader:
 
     # §2.1.1 — Control Packet Type occupies bits 7-4 of byte 1
     @pytest.mark.parametrize("raw_byte,expected_type", [
-        (0x10, MQTT_PACKET_CONNECT),     # CONNECT: type=1, flags=0
-        (0x20, MQTT_PACKET_CONNACK),     # CONNACK: type=2, flags=0
-        (0x30, MQTT_PACKET_PUBLISH),     # PUBLISH: type=3, flags=0
-        (0x3D, MQTT_PACKET_PUBLISH),     # PUBLISH: type=3, flags=0xD (all PUBLISH flags)
-        (0x40, MQTT_PACKET_PUBACK),      # PUBACK: type=4, flags=0
-        (0x50, MQTT_PACKET_PUBREC),      # PUBREC: type=5, flags=0
-        (0x62, MQTT_PACKET_PUBREL),      # PUBREL: type=6, flags=2 (fixed)
-        (0x70, MQTT_PACKET_PUBCOMP),     # PUBCOMP: type=7, flags=0
-        (0x82, MQTT_PACKET_SUBSCRIBE),   # SUBSCRIBE: type=8, flags=2 (fixed)
-        (0x90, MQTT_PACKET_SUBACK),      # SUBACK: type=9, flags=0
-        (0xA2, MQTT_PACKET_UNSUBSCRIBE), # UNSUBSCRIBE: type=10, flags=2 (fixed)
-        (0xB0, MQTT_PACKET_UNSUBACK),    # UNSUBACK: type=11, flags=0
-        (0xC0, MQTT_PACKET_PINGREQ),     # PINGREQ: type=12, flags=0
-        (0xD0, MQTT_PACKET_PINGRESP),    # PINGRESP: type=13, flags=0
-        (0xE0, MQTT_PACKET_DISCONNECT),  # DISCONNECT: type=14, flags=0
-        (0xF0, MQTT_PACKET_AUTH),        # AUTH: type=15, flags=0
+        (first_byte(MQTTPacketType.CONNECT), MQTTPacketType.CONNECT),
+        (first_byte(MQTTPacketType.CONNACK), MQTTPacketType.CONNACK),
+        (first_byte(MQTTPacketType.PUBLISH), MQTTPacketType.PUBLISH),
+        (first_byte(MQTTPacketType.PUBLISH, ALL_PUBLISH_FLAGS),
+         MQTTPacketType.PUBLISH),
+        (first_byte(MQTTPacketType.PUBACK), MQTTPacketType.PUBACK),
+        (first_byte(MQTTPacketType.PUBREC), MQTTPacketType.PUBREC),
+        (first_byte(MQTTPacketType.PUBREL, RESERVED_FLAGS_0010),
+         MQTTPacketType.PUBREL),
+        (first_byte(MQTTPacketType.PUBCOMP), MQTTPacketType.PUBCOMP),
+        (first_byte(MQTTPacketType.SUBSCRIBE, RESERVED_FLAGS_0010),
+         MQTTPacketType.SUBSCRIBE),
+        (first_byte(MQTTPacketType.SUBACK), MQTTPacketType.SUBACK),
+        (first_byte(MQTTPacketType.UNSUBSCRIBE, RESERVED_FLAGS_0010),
+         MQTTPacketType.UNSUBSCRIBE),
+        (first_byte(MQTTPacketType.UNSUBACK), MQTTPacketType.UNSUBACK),
+        (first_byte(MQTTPacketType.PINGREQ), MQTTPacketType.PINGREQ),
+        (first_byte(MQTTPacketType.PINGRESP), MQTTPacketType.PINGRESP),
+        (first_byte(MQTTPacketType.DISCONNECT), MQTTPacketType.DISCONNECT),
+        (first_byte(MQTTPacketType.AUTH), MQTTPacketType.AUTH),
     ])
     def test_extract_packet_type_from_byte1(self, raw_byte, expected_type):
         """§2.1.1 — Packet type extracted from bits 7-4 of the first byte."""
@@ -207,10 +177,12 @@ class TestFixedHeader:
 
     # §2.1.1 — Flags occupy bits 3-0 of byte 1
     @pytest.mark.parametrize("raw_byte,expected_flags", [
-        (0x10, 0x0),  # CONNECT: no flags
-        (0x30, 0x0),  # PUBLISH: DUP=0, QoS=0, RETAIN=0
-        (0x38, 0x8),  # PUBLISH: DUP=0, QoS=1 (0x2<<1=0x4), RETAIN=0 → flags=4... hmm
-        (0x3D, 0xD),  # PUBLISH: DUP=1, QoS=2, RETAIN=1 → bits 3-0 = 1101 = 0xD
+        (first_byte(MQTTPacketType.CONNECT), 0),
+        (first_byte(MQTTPacketType.PUBLISH), 0),
+        (first_byte(MQTTPacketType.PUBLISH, PublishFlagBits.DUP),
+         PublishFlagBits.DUP),
+        (first_byte(MQTTPacketType.PUBLISH, ALL_PUBLISH_FLAGS),
+         ALL_PUBLISH_FLAGS),
     ])
     def test_extract_flags_from_byte1(self, raw_byte, expected_flags):
         """§2.1.1 — Flags occupy bits 3-0 of the first byte."""
@@ -262,14 +234,14 @@ class TestPropertiesEncoding:
 
     @pytest.mark.parametrize("prop_id,prop_name,value", [
         # §2.2.2.2 Table 2-3 — Byte properties
-        (PROP_PAYLOAD_FORMAT_INDICATOR, 'payload_format_indicator', 1),
-        (PROP_REQUEST_PROBLEM_INFORMATION, 'request_problem_information', 1),
-        (PROP_REQUEST_RESPONSE_INFORMATION, 'request_response_information', 0),
-        (PROP_MAXIMUM_QOS, 'maximum_qos', 2),
-        (PROP_RETAIN_AVAILABLE, 'retain_available', 1),
-        (PROP_WILDCARD_SUBSCRIPTION_AVAILABLE, 'wildcard_subscription_available', 1),
-        (PROP_SUBSCRIPTION_IDENTIFIER_AVAILABLE, 'subscription_identifier_available', 1),
-        (PROP_SHARED_SUBSCRIPTION_AVAILABLE, 'shared_subscription_available', 1),
+        (PropertyId.PAYLOAD_FORMAT_INDICATOR, 'payload_format_indicator', 1),
+        (PropertyId.REQUEST_PROBLEM_INFORMATION, 'request_problem_information', 1),
+        (PropertyId.REQUEST_RESPONSE_INFORMATION, 'request_response_information', 0),
+        (PropertyId.MAXIMUM_QOS, 'maximum_qos', 2),
+        (PropertyId.RETAIN_AVAILABLE, 'retain_available', 1),
+        (PropertyId.WILDCARD_SUBSCRIPTION_AVAILABLE, 'wildcard_subscription_available', 1),
+        (PropertyId.SUBSCRIPTION_IDENTIFIER_AVAILABLE, 'subscription_identifier_available', 1),
+        (PropertyId.SHARED_SUBSCRIPTION_AVAILABLE, 'shared_subscription_available', 1),
     ])
     def test_encode_decode_byte_property(self, prop_id, prop_name, value):
         """§2.2.2.2 Table 2-3 — Single-byte properties round-trip."""
@@ -281,13 +253,13 @@ class TestPropertiesEncoding:
 
     @pytest.mark.parametrize("prop_id,prop_name,value", [
         # §2.2.2.2 Table 2-3 — Four-Byte Integer properties
-        (PROP_MESSAGE_EXPIRY_INTERVAL, 'message_expiry_interval', 3600),
-        (PROP_SESSION_EXPIRY_INTERVAL, 'session_expiry_interval', 86400),
-        (PROP_WILL_DELAY_INTERVAL, 'will_delay_interval', 30),
-        (PROP_MAXIMUM_PACKET_SIZE, 'maximum_packet_size', 268435455),
-        (PROP_TOPIC_ALIAS_MAXIMUM, 'topic_alias_maximum', 16),
-        (PROP_SERVER_KEEP_ALIVE, 'server_keep_alive', 60),
-        (PROP_RECEIVE_MAXIMUM, 'receive_maximum', 65535),
+        (PropertyId.MESSAGE_EXPIRY_INTERVAL, 'message_expiry_interval', 3600),
+        (PropertyId.SESSION_EXPIRY_INTERVAL, 'session_expiry_interval', 86400),
+        (PropertyId.WILL_DELAY_INTERVAL, 'will_delay_interval', 30),
+        (PropertyId.MAXIMUM_PACKET_SIZE, 'maximum_packet_size', 268435455),
+        (PropertyId.TOPIC_ALIAS_MAXIMUM, 'topic_alias_maximum', 16),
+        (PropertyId.SERVER_KEEP_ALIVE, 'server_keep_alive', 60),
+        (PropertyId.RECEIVE_MAXIMUM, 'receive_maximum', 65535),
     ])
     def test_encode_decode_four_byte_integer_property(self, prop_id, prop_name, value):
         """§2.2.2.2 Table 2-3 — Four-Byte Integer properties round-trip."""
@@ -299,13 +271,13 @@ class TestPropertiesEncoding:
 
     @pytest.mark.parametrize("prop_id,prop_name,value", [
         # §2.2.2.2 Table 2-3 — UTF-8 String properties
-        (PROP_CONTENT_TYPE, 'content_type', 'application/json'),
-        (PROP_RESPONSE_TOPIC, 'response_topic', 'replies/client1'),
-        (PROP_ASSIGNED_CLIENT_IDENTIFIER, 'assigned_client_identifier', 'auto-abc123'),
-        (PROP_AUTHENTICATION_METHOD, 'authentication_method', 'SCRAM-SHA-256'),
-        (PROP_RESPONSE_INFORMATION, 'response_information', 'broker1.example.com'),
-        (PROP_SERVER_REFERENCE, 'server_reference', 'node-2'),
-        (PROP_REASON_STRING, 'reason_string', 'Not authorized'),
+        (PropertyId.CONTENT_TYPE, 'content_type', 'application/json'),
+        (PropertyId.RESPONSE_TOPIC, 'response_topic', 'replies/client1'),
+        (PropertyId.ASSIGNED_CLIENT_IDENTIFIER, 'assigned_client_identifier', 'auto-abc123'),
+        (PropertyId.AUTHENTICATION_METHOD, 'authentication_method', 'SCRAM-SHA-256'),
+        (PropertyId.RESPONSE_INFORMATION, 'response_information', 'broker1.example.com'),
+        (PropertyId.SERVER_REFERENCE, 'server_reference', 'node-2'),
+        (PropertyId.REASON_STRING, 'reason_string', 'Not authorized'),
     ])
     def test_encode_decode_utf8_string_property(self, prop_id, prop_name, value):
         """§2.2.2.2 Table 2-3 — UTF-8 Encoded String properties round-trip."""
@@ -317,8 +289,8 @@ class TestPropertiesEncoding:
 
     @pytest.mark.parametrize("prop_id,prop_name,value", [
         # §2.2.2.2 Table 2-3 — Binary Data properties
-        (PROP_CORRELATION_DATA, 'correlation_data', b'\x01\x02\x03\x04'),
-        (PROP_AUTHENTICATION_DATA, 'authentication_data', b'\xde\xad\xbe\xef'),
+        (PropertyId.CORRELATION_DATA, 'correlation_data', b'\x01\x02\x03\x04'),
+        (PropertyId.AUTHENTICATION_DATA, 'authentication_data', b'\xde\xad\xbe\xef'),
     ])
     def test_encode_decode_binary_data_property(self, prop_id, prop_name, value):
         """§2.2.2.2 Table 2-3 — Binary Data properties round-trip."""
@@ -390,7 +362,7 @@ class TestPacketRoundTrip:
         )
         original = MQTTConnack(
             session_present=False,
-            reason_code=0,  # Success
+            reason_code=ReasonCode.SUCCESS,
             properties={'server_keep_alive': 120, 'receive_maximum': 100},
         )
         wire = encode_packet(original)
@@ -462,12 +434,12 @@ class TestPacketRoundTrip:
         from blackbull.mqtt.messages import (
             MQTTPuback, encode_packet, decode_packet,
         )
-        original = MQTTPuback(packet_id=42, reason_code=0)
+        original = MQTTPuback(packet_id=42, reason_code=ReasonCode.SUCCESS)
         wire = encode_packet(original)
         decoded = decode_packet(wire)
         assert isinstance(decoded, MQTTPuback)
         assert decoded.packet_id == 42
-        assert decoded.reason_code == 0
+        assert decoded.reason_code == ReasonCode.SUCCESS
 
     # §3.5 — PUBREC packet (QoS 2 step 1)
     def test_pubrec_packet_round_trip(self):
@@ -475,7 +447,7 @@ class TestPacketRoundTrip:
         from blackbull.mqtt.messages import (
             MQTTPubrec, encode_packet, decode_packet,
         )
-        original = MQTTPubrec(packet_id=99, reason_code=0)
+        original = MQTTPubrec(packet_id=99, reason_code=ReasonCode.SUCCESS)
         wire = encode_packet(original)
         decoded = decode_packet(wire)
         assert isinstance(decoded, MQTTPubrec)
@@ -490,13 +462,13 @@ class TestPacketRoundTrip:
         from blackbull.mqtt.messages import (
             MQTTPubrel, encode_packet, decode_packet,
         )
-        original = MQTTPubrel(packet_id=99, reason_code=0)
+        original = MQTTPubrel(packet_id=99, reason_code=ReasonCode.SUCCESS)
         wire = encode_packet(original)
         decoded = decode_packet(wire)
         assert isinstance(decoded, MQTTPubrel)
         assert decoded.packet_id == 99
-        # §3.6.1 — Fixed header flags must be 0x2
-        assert (wire[0] & 0x0F) == 0x02
+        # §3.6.1 — fixed flags
+        assert (wire[0] & 0x0F) == RESERVED_FLAGS_0010
 
     # §3.7 — PUBCOMP packet (QoS 2 step 3)
     def test_pubcomp_packet_round_trip(self):
@@ -504,7 +476,7 @@ class TestPacketRoundTrip:
         from blackbull.mqtt.messages import (
             MQTTPubcomp, encode_packet, decode_packet,
         )
-        original = MQTTPubcomp(packet_id=99, reason_code=0)
+        original = MQTTPubcomp(packet_id=99, reason_code=ReasonCode.SUCCESS)
         wire = encode_packet(original)
         decoded = decode_packet(wire)
         assert isinstance(decoded, MQTTPubcomp)
@@ -539,13 +511,13 @@ class TestPacketRoundTrip:
         )
         original = MQTTSuback(
             packet_id=1,
-            reason_codes=[0, 0x80],  # Granted QoS 0, Unspecified error
+            reason_codes=[ReasonCode.SUCCESS, ReasonCode.UNSPECIFIED_ERROR],  # Granted QoS 0, Unspecified error
         )
         wire = encode_packet(original)
         decoded = decode_packet(wire)
         assert isinstance(decoded, MQTTSuback)
         assert decoded.packet_id == 1
-        assert decoded.reason_codes == [0, 0x80]
+        assert decoded.reason_codes == [ReasonCode.SUCCESS, ReasonCode.UNSPECIFIED_ERROR]
 
     # §3.10 — UNSUBSCRIBE packet
     def test_unsubscribe_packet_round_trip(self):
@@ -572,7 +544,7 @@ class TestPacketRoundTrip:
         from blackbull.mqtt.messages import (
             MQTTUnsuback, encode_packet, decode_packet,
         )
-        original = MQTTUnsuback(packet_id=2, reason_codes=[0])
+        original = MQTTUnsuback(packet_id=2, reason_codes=[ReasonCode.SUCCESS])
         wire = encode_packet(original)
         decoded = decode_packet(wire)
         assert isinstance(decoded, MQTTUnsuback)
@@ -616,11 +588,11 @@ class TestPacketRoundTrip:
         from blackbull.mqtt.messages import (
             MQTTDisconnect, encode_packet, decode_packet,
         )
-        original = MQTTDisconnect(reason_code=0)
+        original = MQTTDisconnect(reason_code=ReasonCode.SUCCESS)
         wire = encode_packet(original)
         decoded = decode_packet(wire)
         assert isinstance(decoded, MQTTDisconnect)
-        assert decoded.reason_code == 0
+        assert decoded.reason_code == ReasonCode.SUCCESS
 
     # §3.15 — AUTH packet (MQTT 5.0 only)
     def test_auth_packet_round_trip(self):
@@ -632,14 +604,14 @@ class TestPacketRoundTrip:
             MQTTAuth, encode_packet, decode_packet,
         )
         original = MQTTAuth(
-            reason_code=0x18,  # Continue authentication
+            reason_code=ReasonCode.CONTINUE_AUTHENTICATION,
             properties={'authentication_method': 'SCRAM-SHA-256',
                         'authentication_data': b'client-proof'},
         )
         wire = encode_packet(original)
         decoded = decode_packet(wire)
         assert isinstance(decoded, MQTTAuth)
-        assert decoded.reason_code == 0x18
+        assert decoded.reason_code == ReasonCode.CONTINUE_AUTHENTICATION
         assert decoded.properties['authentication_method'] == 'SCRAM-SHA-256'
 
 
@@ -724,12 +696,13 @@ class TestReasonCodes:
     §3.11.2.1 (UNSUBACK), §3.14.2.1 (DISCONNECT), §3.15.2.1 (AUTH).
     """
 
-    # Reason-code byte values follow MQTT 5.0 OASIS §2.4 Table 2-9 exactly
-    # (the high error range is sparse: 0x8C, then 0x8D..0xA2).  0x00 has the
-    # canonical name 'Success'; in a DISCONNECT it is also read as "Normal
-    # disconnection", but the code's single canonical name is 'Success'.
-    @pytest.mark.parametrize("code,expected_name", [
+    # §2.4 の独立転記 — 実装の enum から導かず、数値と名前の対応を検証する。
+    # ReasonCode.SUCCESS の正準ラベルは 'Success' で、DISCONNECT では
+    # "Normal disconnection" とも読まれる。
+    TABLE_2_9 = [
         (0x00, 'Success'),
+        (0x01, 'Granted QoS 1'),
+        (0x02, 'Granted QoS 2'),
         (0x04, 'Disconnect with Will Message'),
         (0x10, 'No matching subscribers'),  # PUBACK/PUBREC reason code
         (0x11, 'No subscription existed'),  # UNSUBACK
@@ -746,6 +719,7 @@ class TestReasonCodes:
         (0x88, 'Server unavailable'),
         (0x89, 'Server busy'),
         (0x8A, 'Banned'),
+        (0x8B, 'Server shutting down'),
         (0x8C, 'Bad authentication method'),
         (0x8D, 'Keep Alive timeout'),
         (0x8E, 'Session taken over'),
@@ -769,23 +743,33 @@ class TestReasonCodes:
         (0xA0, 'Maximum connect time'),
         (0xA1, 'Subscription Identifiers not supported'),
         (0xA2, 'Wildcard Subscriptions not supported'),
-    ])
+    ]
+
+    @pytest.mark.parametrize("code,expected_name", TABLE_2_9)
     def test_reason_code_recognized(self, code, expected_name):
         """All MQTT 5.0 reason codes are recognized by name."""
         from blackbull.mqtt.messages import MQTTReasonCode
         rc = MQTTReasonCode(code)
         assert rc.name == expected_name
 
-    def test_reason_code_less_than_0x80_is_success(self):
-        """§3.x — Reason codes < 0x80 indicate success/normal."""
-        from blackbull.mqtt.messages import MQTTReasonCode
-        for code in (0x00, 0x01, 0x04, 0x10, 0x11, 0x18, 0x19):
-            rc = MQTTReasonCode(code)
-            assert rc.is_success, f"Code 0x{code:02X} should be success"
+    def test_the_table_covers_the_whole_registry(self):
+        assert {code for code, _ in self.TABLE_2_9} == \
+            {int(rc) for rc in ReasonCode}
 
-    def test_reason_code_0x80_or_above_is_error(self):
-        """§3.x — Reason codes >= 0x80 indicate error."""
+    def test_a_code_below_unspecified_error_reports_success(self):
         from blackbull.mqtt.messages import MQTTReasonCode
-        for code in (0x80, 0x81, 0x82, 0x8F, 0x99):
-            rc = MQTTReasonCode(code)
-            assert rc.is_error, f"Code 0x{code:02X} should be error"
+        for code in (ReasonCode.SUCCESS, ReasonCode.GRANTED_QOS_1,
+                     ReasonCode.GRANTED_QOS_2, ReasonCode.DISCONNECT_WITH_WILL,
+                     ReasonCode.NO_MATCHING_SUBSCRIBERS,
+                     ReasonCode.NO_SUBSCRIPTION_EXISTED,
+                     ReasonCode.CONTINUE_AUTHENTICATION,
+                     ReasonCode.REAUTHENTICATE):
+            assert MQTTReasonCode(int(code)).is_success
+
+    def test_a_code_from_unspecified_error_up_reports_error(self):
+        from blackbull.mqtt.messages import MQTTReasonCode
+        for code in (ReasonCode.UNSPECIFIED_ERROR, ReasonCode.MALFORMED_PACKET,
+                     ReasonCode.PROTOCOL_ERROR,
+                     ReasonCode.TOPIC_FILTER_INVALID,
+                     ReasonCode.PAYLOAD_FORMAT_INVALID):
+            assert MQTTReasonCode(int(code)).is_error

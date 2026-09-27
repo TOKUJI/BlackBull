@@ -295,8 +295,10 @@ async def test_duplicate_connect_closes_once_without_changing_client_id():
     await attach(broker, peer, 'owner', will_topic='sentinel', will_payload=b'will')
     await attach(broker, peer, 'new-id')
     await broker._handle(Detach(sender=peer, graceful=False))
-    assert [p.reason_code for p in peer.packets() if isinstance(p, MQTTConnack)] == [0]
-    assert [p.reason_code for p in peer.packets() if isinstance(p, MQTTDisconnect)] == [0x82]
+    assert [p.reason_code for p in peer.packets()
+            if isinstance(p, MQTTConnack)] == [ReasonCode.SUCCESS]
+    assert [p.reason_code for p in peer.packets()
+            if isinstance(p, MQTTDisconnect)] == [ReasonCode.PROTOCOL_ERROR]
     assert len([m for m in peer.messages if isinstance(m, Close)]) == 1
     assert [p.payload for p in observer.packets() if isinstance(p, MQTTPublish)] == [b'will']
     assert 'owner' not in broker._clients

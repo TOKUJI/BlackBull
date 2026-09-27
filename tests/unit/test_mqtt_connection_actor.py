@@ -14,6 +14,7 @@ import pytest
 from blackbull.mqtt.broker import BrokerActor
 from blackbull.mqtt.connection import serve_connection
 from blackbull.mqtt.messages import (
+    ReasonCode,
     MQTTConnect, MQTTConnack, MQTTPublish, MQTTPuback,
     MQTTSubscribe, MQTTPingreq, MQTTPingresp, MQTTDisconnect,
     encode_packet, decode_packet,
@@ -104,7 +105,7 @@ async def test_connect_round_trips_connack():
         await asyncio.sleep(0.1)
         pkts = writer.pop_packets()
         await _drain(task)
-    assert any(isinstance(p, MQTTConnack) and p.reason_code == 0 for p in pkts)
+    assert any(isinstance(p, MQTTConnack) and p.reason_code == ReasonCode.SUCCESS for p in pkts)
 
 
 async def test_pingreq_answered_locally():
@@ -124,7 +125,7 @@ async def test_disconnect_detaches_client():
         reader = _FakeReader()
         writer, task = await _serve(broker, reader, _ctx())
         reader.feed_packet(MQTTConnect(client_id='c1', clean_start=True, keep_alive=60))
-        reader.feed_packet(MQTTDisconnect(reason_code=0x00))
+        reader.feed_packet(MQTTDisconnect(reason_code=ReasonCode.SUCCESS))
         await asyncio.sleep(0.1)
         await _drain(task)
         # Graceful disconnect with default expiry → session pruned, no live client.
@@ -276,4 +277,4 @@ async def test_unsupported_version_rejected():
         await asyncio.sleep(0.1)
         pkts = writer.pop_packets()
         await _drain(task)
-    assert any(isinstance(p, MQTTConnack) and p.reason_code == 0x84 for p in pkts)
+    assert any(isinstance(p, MQTTConnack) and p.reason_code == ReasonCode.UNSUPPORTED_PROTOCOL_VERSION for p in pkts)

@@ -16,6 +16,7 @@ import asyncio
 import pytest
 
 from blackbull.mqtt.messages import (
+    ReasonCode,
     MQTTConnect, MQTTConnack,
     MQTTPublish, MQTTPuback,
     MQTTSubscribe, MQTTSuback,
@@ -121,7 +122,7 @@ class TestFlowControlReceiveMaximum:
         """§3.2.2.3.1 — Server advertises Receive Maximum in CONNACK."""
         connack = MQTTConnack(
             session_present=False,
-            reason_code=0x00,
+            reason_code=ReasonCode.SUCCESS,
             properties={'receive_maximum': 65535},
         )
         wire = encode_packet(connack)
@@ -257,7 +258,7 @@ class TestTopicAlias:
         """§3.2.2.3.6 — Server advertises Topic Alias Maximum."""
         connack = MQTTConnack(
             session_present=False,
-            reason_code=0x00,
+            reason_code=ReasonCode.SUCCESS,
             properties={'topic_alias_maximum': 8},
         )
         wire = encode_packet(connack)
@@ -393,7 +394,7 @@ class TestMaximumQoSLimiting:
         for max_qos in (0, 1, 2):
             connack = MQTTConnack(
                 session_present=False,
-                reason_code=0x00,
+                reason_code=ReasonCode.SUCCESS,
                 properties={'maximum_qos': max_qos},
             )
             wire = encode_packet(connack)
@@ -409,12 +410,12 @@ class TestMaximumQoSLimiting:
         # Client requested QoS 2, server granted QoS 1 (due to Maximum QoS = 1)
         suback = MQTTSuback(
             packet_id=1,
-            reason_codes=[0x01],  # Granted QoS 1 (downgraded from 2)
+            reason_codes=[ReasonCode.GRANTED_QOS_1],  # Granted QoS 1 (downgraded from 2)
             properties={'reason_string': 'QoS 2 not available; granted QoS 1'},
         )
         wire = encode_packet(suback)
         decoded = decode_packet(wire)
-        assert decoded.reason_codes == [0x01]
+        assert decoded.reason_codes == [ReasonCode.GRANTED_QOS_1]
 
 
 # ============================================================================
@@ -521,7 +522,7 @@ class TestServerRedirection:
         """§3.2.2.3.2 — CONNACK with Server Reference for redirection."""
         connack = MQTTConnack(
             session_present=False,
-            reason_code=0x94,  # Use another server
+            reason_code=ReasonCode.TOPIC_ALIAS_INVALID,
             properties={
                 'reason_string': 'Please connect to node-2',
                 'server_reference': 'node-2.example.com:1883',
@@ -529,13 +530,13 @@ class TestServerRedirection:
         )
         wire = encode_packet(connack)
         decoded = decode_packet(wire)
-        assert decoded.reason_code == 0x94
+        assert decoded.reason_code == ReasonCode.TOPIC_ALIAS_INVALID
         assert decoded.properties['server_reference'] == 'node-2.example.com:1883'
 
     def test_disconnect_with_server_reference(self, mqtt):
         """§3.14.2.2 — DISCONNECT with Server Reference."""
         disconnect = MQTTDisconnect(
-            reason_code=0x95,  # Server moved
+            reason_code=ReasonCode.PACKET_TOO_LARGE,
             properties={
                 'reason_string': 'Server permanently moved',
                 'server_reference': 'new-broker.example.com:8883',
@@ -543,7 +544,7 @@ class TestServerRedirection:
         )
         wire = encode_packet(disconnect)
         decoded = decode_packet(wire)
-        assert decoded.reason_code == 0x95
+        assert decoded.reason_code == ReasonCode.PACKET_TOO_LARGE
         assert decoded.properties['server_reference'] == 'new-broker.example.com:8883'
 
 

@@ -15,6 +15,7 @@ Reference: MQTT Version 5.0, OASIS Standard
 import pytest
 
 from blackbull.mqtt.messages import (
+    ReasonCode,
     MQTTConnect, MQTTConnack, MQTTDisconnect,
     MQTTPublish, MQTTSubscribe, MQTTSuback,
     encode_packet, decode_packet,
@@ -87,7 +88,7 @@ class TestServerCapabilities:
         for val in (0, 1):
             connack = MQTTConnack(
                 session_present=False,
-                reason_code=0x00,
+                reason_code=ReasonCode.SUCCESS,
                 properties={'retain_available': val},
             )
             wire = encode_packet(connack)
@@ -99,7 +100,7 @@ class TestServerCapabilities:
         for val in (0, 1):
             connack = MQTTConnack(
                 session_present=False,
-                reason_code=0x00,
+                reason_code=ReasonCode.SUCCESS,
                 properties={'wildcard_subscription_available': val},
             )
             wire = encode_packet(connack)
@@ -111,7 +112,7 @@ class TestServerCapabilities:
         for val in (0, 1):
             connack = MQTTConnack(
                 session_present=False,
-                reason_code=0x00,
+                reason_code=ReasonCode.SUCCESS,
                 properties={'subscription_identifier_available': val},
             )
             wire = encode_packet(connack)
@@ -123,7 +124,7 @@ class TestServerCapabilities:
         for val in (0, 1):
             connack = MQTTConnack(
                 session_present=False,
-                reason_code=0x00,
+                reason_code=ReasonCode.SUCCESS,
                 properties={'shared_subscription_available': val},
             )
             wire = encode_packet(connack)
@@ -134,7 +135,7 @@ class TestServerCapabilities:
         """§3.2.2.3.2 — CONNACK with all capability flags."""
         connack = MQTTConnack(
             session_present=False,
-            reason_code=0x00,
+            reason_code=ReasonCode.SUCCESS,
             properties={
                 'retain_available': 1,
                 'wildcard_subscription_available': 1,
@@ -224,7 +225,7 @@ class TestMaximumPacketSize:
         """§3.2.2.3.4 — CONNACK with Maximum Packet Size."""
         connack = MQTTConnack(
             session_present=False,
-            reason_code=0x00,
+            reason_code=ReasonCode.SUCCESS,
             properties={'maximum_packet_size': 65536},  # 64 KB
         )
         wire = encode_packet(connack)
@@ -246,12 +247,12 @@ class TestMaximumPacketSize:
     def test_packet_too_large_disconnect_reason(self, mqtt):
         """§3.14.2.1 — DISCONNECT reason code 0x8E: Packet too large."""
         disconnect = MQTTDisconnect(
-            reason_code=0x8E,
+            reason_code=ReasonCode.SESSION_TAKEN_OVER,
             properties={'reason_string': 'Packet exceeds maximum allowed size'},
         )
         wire = encode_packet(disconnect)
         decoded = decode_packet(wire)
-        assert decoded.reason_code == 0x8E
+        assert decoded.reason_code == ReasonCode.SESSION_TAKEN_OVER
 
 
 # ============================================================================
@@ -396,7 +397,7 @@ class TestDisconnectSessionExpiry:
     def test_disconnect_with_shorter_session_expiry(self, mqtt):
         """§3.14.2.2 — Client reduces Session Expiry on DISCONNECT."""
         disconnect = MQTTDisconnect(
-            reason_code=0x00,
+            reason_code=ReasonCode.SUCCESS,
             properties={'session_expiry_interval': 0},  # Expire immediately
         )
         wire = encode_packet(disconnect)
@@ -406,7 +407,7 @@ class TestDisconnectSessionExpiry:
     def test_disconnect_with_longer_session_expiry(self, mqtt):
         """§3.14.2.2 — Client extends Session Expiry on DISCONNECT."""
         disconnect = MQTTDisconnect(
-            reason_code=0x00,
+            reason_code=ReasonCode.SUCCESS,
             properties={'session_expiry_interval': 86400},  # 24 hours
         )
         wire = encode_packet(disconnect)
@@ -442,7 +443,7 @@ class TestResponseInformation:
         """§3.2.2.3.2 — Server provides Response Information."""
         connack = MQTTConnack(
             session_present=False,
-            reason_code=0x00,
+            reason_code=ReasonCode.SUCCESS,
             properties={'response_information': 'responses/client-abc123'},
         )
         wire = encode_packet(connack)
@@ -464,6 +465,5 @@ class TestReservedPacketTypes:
     def test_packet_type_0_is_forbidden(self, mqtt):
         """§2.1.1 — Control Packet Type 0 is reserved."""
         from blackbull.mqtt.messages import extract_packet_type
-        # 0x00 would mean type=0
         with pytest.raises(ValueError, match='[Rr]eserved|[Ff]orbidden|[Uu]nknown'):
             extract_packet_type(0x00)

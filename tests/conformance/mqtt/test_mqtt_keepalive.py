@@ -27,6 +27,7 @@ import time
 import pytest
 
 from blackbull.mqtt.messages import (
+    ReasonCode,
     MQTTConnect, MQTTConnack,
     MQTTPingreq, MQTTPingresp,
     encode_packet, decode_packet,
@@ -247,7 +248,7 @@ class TestServerKeepAlive:
         """§3.2.2.3.2 — Server Keep Alive overrides client's Keep Alive."""
         connack = MQTTConnack(
             session_present=False,
-            reason_code=0x00,
+            reason_code=ReasonCode.SUCCESS,
             properties={'server_keep_alive': 120},
         )
         wire = encode_packet(connack)
@@ -258,7 +259,7 @@ class TestServerKeepAlive:
         """§3.2.2.3.2 — If absent, client's Keep Alive value is used."""
         connack = MQTTConnack(
             session_present=False,
-            reason_code=0x00,
+            reason_code=ReasonCode.SUCCESS,
         )
         wire = encode_packet(connack)
         decoded = decode_packet(wire)

@@ -13,6 +13,7 @@ import asyncio
 import pytest
 
 from blackbull.mqtt.messages import (
+    ReasonCode,
     MQTTConnect, MQTTConnack, MQTTDisconnect,
     MQTTPublish, MQTTPuback, MQTTPubrec, MQTTPubrel, MQTTPubcomp,
     MQTTSubscribe, MQTTSuback,
@@ -147,7 +148,7 @@ class TestScenarioSingleClientFullLifecycle:
         ))
 
         # Step 5: DISCONNECT
-        reader.feed_packet(MQTTDisconnect(reason_code=0x00))
+        reader.feed_packet(MQTTDisconnect(reason_code=ReasonCode.SUCCESS))
 
         task = asyncio.create_task(actor.run())
         await asyncio.sleep(0.15)
@@ -278,7 +279,7 @@ class TestScenarioSessionPersistence:
             packet_id=1,
             subscriptions=[('alerts/system', 1)],
         ))
-        reader1.feed_packet(MQTTDisconnect(reason_code=0x00))
+        reader1.feed_packet(MQTTDisconnect(reason_code=ReasonCode.SUCCESS))
 
         task1 = asyncio.create_task(actor1.run())
         await asyncio.sleep(0.1)
@@ -512,7 +513,7 @@ class TestScenarioKeepAlive:
         ))
         reader.feed_packet(MQTTPingreq())
         reader.feed_packet(MQTTPingreq())  # second ping
-        reader.feed_packet(MQTTDisconnect(reason_code=0x00))
+        reader.feed_packet(MQTTDisconnect(reason_code=ReasonCode.SUCCESS))
 
         task = asyncio.create_task(actor.run())
         await asyncio.sleep(0.15)
