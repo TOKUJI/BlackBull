@@ -1696,12 +1696,6 @@ class HTTP2Sender(BaseSender):
                         'the response was complete)',
                         self._stream_id)
                 return
-            if body.push is not None:
-                if self._push_callback is not None:
-                    await self._push_callback(body.push, self._stream_id)
-                else:
-                    logger.warning('push sent but no push handler registered')
-                return
             if body._header is not None:
                 header_pairs = list(body._header)
                 _validate_response_header_fields(header_pairs)
@@ -1725,6 +1719,11 @@ class HTTP2Sender(BaseSender):
             if body.trailers is not None and not self._end_stream_sent:
                 await self._handle_trailers(
                     list(body.trailers), body.more_trailers)
+            if body.push is not None:
+                if self._push_callback is not None:
+                    await self._push_callback(body.push, self._stream_id)
+                else:
+                    logger.warning('push sent but no push handler registered')
 
         elif isinstance(body, dict):
             event_type = body.get('type', '')
