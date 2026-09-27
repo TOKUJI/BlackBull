@@ -1223,6 +1223,23 @@ class TestContentlessResponsesDoNotClaimABoundary:
         assert recipient.reusable is False
 
     @pytest.mark.asyncio
+    async def test_a_boundary_violation_survives_a_protocol_switch(self):
+        """A peer that named a boundary it cannot have does not get the
+        transport handed to it, whatever the next head says it is switching
+        to. The verdict is `reusable`, and it is read before the handoff."""
+        from blackbull.client.http1 import HTTP1Client
+
+        reader = _Reader(b'HTTP/1.1 100 Continue\r\nContent-Length: 5\r\n'
+                         b'\r\nHTTP/1.1 101 Switching Protocols\r\n\r\n')
+        recipient = HTTP1ResponseRecipient(request_method='GET')
+        response = await recipient.receive(reader)
+        assert response.status == 101
+
+        assert recipient.protocol_switched is False, \
+            'an ambiguous connection is not switching anything'
+        assert recipient.reusable is False
+
+    @pytest.mark.asyncio
     async def test_a_304_keeps_the_length_it_only_describes(self):
         reader = _Reader(b'HTTP/1.1 304 Not Modified\r\nContent-Length: 17\r\n'
                          b'\r\n')

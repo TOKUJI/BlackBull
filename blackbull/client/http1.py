@@ -803,8 +803,12 @@ class HTTP1ResponseRecipient:
         mode, _declared, framing_reusable, tunnel = framing
         self.reusable = (framing_reusable and response_persistent
                          and not self._boundary_declared)
-        self.protocol_switched = tunnel
-        self.tunnel = tunnel and method_is(request_method, 'CONNECT')
+        # A peer that named a boundary it cannot have is not switching
+        # anything: what follows is as ambiguous as a next response would be,
+        # so it gets no handoff either.
+        switched = tunnel and not self._boundary_declared
+        self.protocol_switched = switched
+        self.tunnel = switched and method_is(request_method, 'CONNECT')
         self.connection_exhausted = mode == _CLOSE_DELIMITED
 
     async def _read_head_and_policy(

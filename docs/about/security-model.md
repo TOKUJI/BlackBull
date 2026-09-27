@@ -289,12 +289,16 @@ contrast is visible:
 
 - **A peer that sends content where RFC 9112 §6.3 rule 1 says there is none —
   a 204, a 304 or a HEAD response carrying a body — is not refused over
-  HTTP/1.1.** Those octets are left unread and are parsed as the start of the
-  next response: a `ProtocolError` in the usual case, and a response taken for
-  another when the leftover happens to look like one. The reader trusts the
-  rule rather than the peer here; a 205 is consumed to its declared length
-  precisely because the rule does not cover one. HTTP/2 refuses such frames
-  instead, because frames are self-delimiting and no boundary is at stake.
+  HTTP/1.1, unless it also declares a boundary.** Those octets are left
+  unread and are parsed as the start of the next response: a `ProtocolError`
+  in the usual case, and a response taken for another when the leftover
+  happens to look like one. The reader trusts the rule rather than the peer
+  here; a 205 is consumed to its declared length precisely because the rule
+  does not cover one. HTTP/2 refuses such frames instead, because frames are
+  self-delimiting and no boundary is at stake. The one exception is the next
+  bullet: a message that names the boundary the rule forbids it to have is
+  refused, because there the leftover and the next response cannot be told
+  apart at all.
 - **A 204 or a 1xx that declares a boundary is the one shape that is
   refused.** RFC 9112 §6.1 forbids `Content-Length` and `Transfer-Encoding`
   in one, so what follows cannot be told apart from the next response; the
