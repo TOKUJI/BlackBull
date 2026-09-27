@@ -1215,7 +1215,6 @@ class TestContentlessResponsesDoNotClaimABoundary:
         (b'HTTP/1.1 200 Connection Established\r\n'
          b'Transfer-Encoding: chunked\r\n\r\n', 'CONNECT'),
     ], ids=['101-cl', 'connect-te'])
-    @pytest.mark.asyncio
     async def test_the_switch_head_naming_a_boundary_gets_no_handoff(
             self, status_line, request_method):
         """RFC 9112 §6.1 forbids the field in any 1xx, and RFC 9110 §9.3.6
