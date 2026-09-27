@@ -3806,6 +3806,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.mqtt.messages.PropertyId" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PropertyId
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.mqtt.messages.PropertyInfo" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6155,6 +6166,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.mqtt.messages.PropertyId" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PropertyId
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.mqtt.messages.PropertyInfo" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -7269,10 +7291,10 @@ be answered with PUBCOMP (§3.6).</p>
 
 
 
-        <p>An MQTT 5.0 reason code (§2.4).</p>
+        <p>An MQTT 5.0 reason code (§2.4) as received.</p>
 <p>A thin <code>int</code> subclass so any byte value (0-255) is representable without
-raising — undefined codes report <code>name == 'Unknown'</code>.  Codes <code>&lt; 0x80</code>
-are success/normal; <code>&gt;= 0x80</code> are errors (§2.4).</p>
+raising — undefined codes report <code>name == 'Unknown'</code>.  Known values name
+themselves through <a class="autorefs autorefs-internal" href="#blackbull.mqtt.messages.ReasonCode"><code>ReasonCode</code></a>.</p>
 
 
 
@@ -7529,6 +7551,54 @@ without it raises.</p>
 
 
 
+<h3 id="blackbull.mqtt.messages.PropertyId" class="doc doc-heading">
+            <code>PropertyId</code>
+
+
+<a href="#blackbull.mqtt.messages.PropertyId" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="enum.IntEnum">IntEnum</span></code></p>
+
+
+
+        <p>§2.2.2.2 Table 2-3 property identifiers.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
 <h3 id="blackbull.mqtt.messages.PropertyInfo" class="doc doc-heading">
             <code>PropertyInfo</code>
 
@@ -7735,10 +7805,7 @@ without it raises.</p>
 
 
 
-        <p>The subset of §2.4 reason codes the broker references by name.</p>
-<p>The single definition of these <em>values</em>; <a class="autorefs autorefs-internal" href="#blackbull.mqtt.messages.MQTTReasonCode"><code>MQTTReasonCode</code></a> carries
-the full §2.4 registry and the human-readable names.  Naming a member
-here is what keeps a code from drifting between modules.</p>
+        <p>§2.4 reason codes — the one definition of each value and name.</p>
 
 
 

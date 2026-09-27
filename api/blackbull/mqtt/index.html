@@ -6440,9 +6440,10 @@ callback receives a <a class="autorefs autorefs-internal" title="Message
 
 
         <p>Recognise an MQTT connection from its first byte.</p>
-<p>Every MQTT session opens with a CONNECT packet whose fixed-header first
-byte is <code>0x10</code> (type 1, flags 0).  That is unambiguous against the HTTP
-request line and the HTTP/2 preface, both of which start with ASCII text.</p>
+<p>Every MQTT session opens with a CONNECT packet — fixed-header first byte
+<code>int(MQTTPacketType.CONNECT) &lt;&lt; 4</code>, flags 0.  That is unambiguous
+against the HTTP request line and the HTTP/2 preface, both of which
+start with ASCII text.</p>
 
 
 
