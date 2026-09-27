@@ -242,6 +242,15 @@ revalidation of a large asset costs no disk I/O.  Pass
   `400 Bad Request`.
 - **Directory listing**: Requests for bare directories return
   `404`; no directory listing is ever served.
+- **Precompressed variants**: the boundary applies to the file finally
+  selected — original, index or a `.br` / `.zst` / `.gz` sibling — so a
+  sibling symlink resolving outside the root answers `400` before it is
+  cached, opened or sent.  Symlinks resolving inside the root keep
+  serving.  The check re-runs on every request: a variant swapped between
+  requests is refused on the next one.  A swap inside the single-request
+  window between the check and the open is not closed — the same window
+  the requested target has always had — so do not leave the served tree
+  writable by untrusted users.
 
 ## Inspecting registered roots
 
