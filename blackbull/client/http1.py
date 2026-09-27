@@ -90,18 +90,6 @@ _CLOSE_DELIMITED = 'close'
 _HEXDIG = frozenset(b'0123456789abcdefABCDEF')
 
 
-def _declares_a_boundary(headers: Headers) -> bool:
-    """Whether the message claims octets its content rule says it cannot.
-
-    RFC 9112 §6.1 forbids both fields in a 1xx or a 204.  ``Content-Length:
-    0`` agrees with having no content, so nothing is claimed and nothing is
-    at stake; anything else names a boundary this message cannot have.
-    """
-    if headers.getlist(b'transfer-encoding'):
-        return True
-    declared = _declared_content_length(headers)
-    return declared is not None and declared != 0
-
 # Empty list members are tolerated for interoperability, but the parser must
 # not spend unbounded work on a peer sending only commas.  The head-size budget
 # remains the total byte bound; this is only a small structural sanity bound.
@@ -504,12 +492,11 @@ class HTTP1ResponseRecipient:
             if (not skip_interim or status == 101
                     or not is_informational(status)):
                 return version, status, headers
-            if _declares_a_boundary(headers):
-                # RFC 9112 §6.1: the head named a boundary this message
-                # cannot have, and what follows cannot be told apart from the
-                # final response being answered.  Carry that into the
-                # connection's fate rather than trusting the framing of a
-                # peer that got this wrong.
+            # ``Content-Length: 0`` claims no boundary, which is why it is
+            # not refused.  What follows cannot be told apart from the final
+            # response being answered.
+            if (headers.getlist(b'transfer-encoding')
+                    or (_declared_content_length(headers) or 0) != 0):
                 self._boundary_declared = True
             seen += 1
             if limit and seen > limit:
@@ -749,20 +736,19 @@ class HTTP1ResponseRecipient:
             and 200 <= status < 300
         )
         protocol_switched = status == 101 or successful_connect
+        transfer_fields = headers.getlist(b'transfer-encoding')
         if body_forbidden or successful_connect:
+            # Content-Length is parsed only here and below, never hoisted:
+            # `_declared_content_length` can refuse a malformed numeral, and a
+            # HEAD or a 304 must not be made to parse one to stay contentless.
             if (is_informational(status) or status == 204) \
-                    and _declares_a_boundary(headers):
-                # RFC 9112 §6.1: this message names a boundary it cannot
-                # have, and the octets that follow cannot be told apart from
-                # the next response. A peer that got this wrong is not
-                # switching anything either. A successful CONNECT is not in
-                # this list: RFC 9110 §9.3.6 has the tunnel begin at the
-                # header terminator and tells the client to ignore these
-                # fields, so nothing is ambiguous to ignore them for.
+                    and (transfer_fields or (_declared_content_length(headers) or 0) != 0):
+                # RFC 9112 §6.1. A successful CONNECT is absent on purpose:
+                # RFC 9110 §9.3.6 has the tunnel begin at the header
+                # terminator and tells the client to ignore these fields.
                 return _NO_BODY, None, False, False
             return _NO_BODY, None, not protocol_switched, protocol_switched
 
-        transfer_fields = headers.getlist(b'transfer-encoding')
         if transfer_fields:
             if headers.getlist(b'content-length'):
                 # RFC 9112 §6.3 item 3 gives the precedence *and* says the
