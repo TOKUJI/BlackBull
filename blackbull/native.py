@@ -195,6 +195,7 @@ class NativeResponse:
         'file_path',
         'more_body',
         'more_trailers',
+        'push',
         'status',
         'trailers',
     )
@@ -206,7 +207,8 @@ class NativeResponse:
                  trailers: list[tuple[bytes, bytes]] | None = None,
                  more_trailers: bool = False,
                  expects_trailers: bool = False,
-                 file_path: str | None = None) -> None:
+                 file_path: str | None = None,
+                 push: list | None = None) -> None:
         self.status = status
         # Write the slot directly rather than going through the ``header``
         # property.  The setter is a descriptor call plus an isinstance test,
@@ -227,6 +229,11 @@ class NativeResponse:
         # (``StaticFiles``) can stay native and still get zero-copy.
         # Mutually exclusive with ``body``: the bytes come from the file.
         self.file_path = file_path
+        # A promised request (HTTP/2 PUSH_PROMISE). Carried natively rather
+        # than as an ASGI dict so a non-ASGI server never holds one. A peer
+        # that cannot be pushed to simply gets nothing — industry practice,
+        # and what keeps an unsupported request from breaking the response.
+        self.push = push
 
     # --- fast constructors for framework-owned producers -------------------
     #
