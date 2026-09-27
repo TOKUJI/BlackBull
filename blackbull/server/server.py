@@ -415,8 +415,8 @@ class LifespanManager:
                     raise RuntimeError(
                         event.get('message', 'Lifespan startup failed'))
                 self._startup_acked = True
-                # Attached at the ack: a task already dead schedules the
-                # report now, which a create-time callback would miss.
+                # Attached at the ack so a task already dead schedules the
+                # report now; a create-time callback would miss it.
                 self._task.add_done_callback(self._lifespan_task_ended)
                 return self
             if self._task.done():
@@ -438,8 +438,8 @@ class LifespanManager:
             raise
 
     def _lifespan_task_ended(self, task: asyncio.Task) -> None:
-        # A task dying after its startup ack is visible here and not only at
-        # shutdown: the server serves the whole time in between (BLA-446).
+        # The death is visible here and not only at shutdown — the server
+        # serves the whole time in between (BLA-446).
         if (self._startup_acked and not task.cancelled()
                 and task.exception() is not None):
             logger.error('Lifespan task failed after startup: %r',
