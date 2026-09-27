@@ -207,3 +207,47 @@ async def test_an_interim_head_reaches_the_wire_before_the_final_one():
     payload = b''.join(e.get('body', b'') for e in events
                        if e['type'] == 'http.response.body')
     assert gzip.decompress(payload) == BODY, 'the final response lost compression'
+
+
+@pytest.mark.asyncio
+async def test_a_middleware_emitting_asgi_dicts_still_gets_compressed():
+    """Third-party ASGI middleware predates the native seam and hands
+    ``http.response.start`` dicts down.  The contract says the middleware's
+    inner send wrapper sees only the native representation, so this pins
+    whether a dict reaching the middleware band is normalised before the
+    next layer — and therefore whether the dict branch there is a live
+    compat surface or a shape that can no longer occur."""
+    middleware = Compression(min_size=1)
+    middleware._available = {'gzip': gzip.compress}
+    conn = Connection(method='GET', path='/body.txt', raw_path=b'/body.txt',
+                      headers=Headers([(b'Accept-Encoding', b'gzip')]),
+                      type='http')
+    events = []
+
+    async def send(event):
+        if isinstance(event, NativeResponse):
+            events.extend(event.to_asgi())
+        else:
+            events.append(event)
+
+    async def asgi_middleware(conn, receive, send, call_next):
+        """A third-party shape: emits plain ASGI dicts, not NativeResponse."""
+        async def dict_send(event):
+            await send(event)
+        await call_next(conn, receive, dict_send)
+
+    async def handler(conn, receive, send):
+        await send(NativeResponse(status=200,
+                                  header=[(b'content-type', b'text/plain')],
+                                  body=BODY))
+
+    await asgi_middleware(conn, _receive, send,
+                          lambda c, r, s: middleware(c, r, s, handler))
+
+    starts = [e for e in events if e['type'] == 'http.response.start']
+    assert starts, events
+    payload = b''.join(e.get('body', b'') for e in events
+                       if e['type'] == 'http.response.body')
+    assert gzip.decompress(payload) == BODY
+    assert b'accept-encoding' in dict(starts[0]['headers']).get(
+        b'vary', b'').lower(), starts
