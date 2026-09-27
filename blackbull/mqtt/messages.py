@@ -271,6 +271,9 @@ _REASON_CODE_LABELS: dict[ReasonCode, str] = {
 assert set(_REASON_CODE_LABELS) == set(ReasonCode), \
     'every §2.4 code carries exactly one label'
 
+# §2.4 — この値以上がエラー側。閾値は UNSPECIFIED_ERROR から導く。
+_ERROR_THRESHOLD = int(ReasonCode.UNSPECIFIED_ERROR)
+
 
 class MQTTReasonCode(int):
     """An MQTT 5.0 reason code (§2.4) as received.
@@ -289,18 +292,15 @@ class MQTTReasonCode(int):
 
     @property
     def name(self) -> str:  # type: ignore[override]
-        try:
-            return _REASON_CODE_LABELS[ReasonCode(int(self))]
-        except ValueError:
-            return 'Unknown'
+        return _REASON_CODE_LABELS.get(self, 'Unknown')
 
     @property
     def is_success(self) -> bool:
-        return int(self) < int(ReasonCode.UNSPECIFIED_ERROR)
+        return self < _ERROR_THRESHOLD
 
     @property
     def is_error(self) -> bool:
-        return int(self) >= int(ReasonCode.UNSPECIFIED_ERROR)
+        return self >= _ERROR_THRESHOLD
 
     def __repr__(self) -> str:
         return f'MQTTReasonCode(0x{int(self):02X}: {self.name})'
@@ -485,17 +485,19 @@ _PROPERTY_SPECS: tuple[tuple[int, str, str, str], ...] = (
 
 # §2.2.2.2 Table 2-3 — {identifier: name}.  Exactly 27 entries.
 PROPERTY_IDENTIFIERS: dict[int, str] = {
-    pid: ident for pid, ident, _key, _wt in _PROPERTY_SPECS
+    int(pid): ident for pid, ident, _key, _wt in _PROPERTY_SPECS
 }
 
+# wire の int で引く表なのでキーは int に正規化する(値は enum から導出)。
 _PROP_BY_ID: dict[int, PropertyInfo] = {
-    pid: PropertyInfo(pid, ident, wt) for pid, ident, _key, wt in _PROPERTY_SPECS
+    int(pid): PropertyInfo(pid, ident, wt)
+    for pid, ident, _key, wt in _PROPERTY_SPECS
 }
 _PROP_BY_KEY: dict[str, tuple[int, str]] = {
     key: (pid, wt) for pid, _ident, key, wt in _PROPERTY_SPECS
 }
 _PROP_ID_TO_KEY: dict[int, str] = {
-    pid: key for pid, _ident, key, _wt in _PROPERTY_SPECS
+    int(pid): key for pid, _ident, key, _wt in _PROPERTY_SPECS
 }
 
 
@@ -668,7 +670,7 @@ class MQTTConnack(MQTTMessage):
 
     packet_type: ClassVar[MQTTPacketType] = MQTTPacketType.CONNACK
     session_present: bool = False
-    reason_code: int = 0
+    reason_code: int = ReasonCode.SUCCESS
     properties: dict[str, Any] = field(default_factory=dict)
 
 
@@ -718,7 +720,7 @@ class MQTTPublish(MQTTMessage):
 class _PacketIdAck(MQTTMessage):
     """Shared shape for PUBACK/PUBREC/PUBREL/PUBCOMP (§3.4-§3.7)."""
     packet_id: int
-    reason_code: int = 0
+    reason_code: int = ReasonCode.SUCCESS
     properties: dict[str, Any] = field(default_factory=dict)
 
 

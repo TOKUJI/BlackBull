@@ -13,6 +13,9 @@ from .connection import serve_connection
 from .messages import MQTTPacketType
 from .tap import Tap, TapActor, compile_tap
 
+#: §2.1.1 — CONNECT の固定先頭バイト(種別 1・フラグ 0)。
+_CONNECT_FIRST_BYTE = int(MQTTPacketType.CONNECT) << 4
+
 logger = logging.getLogger(__name__)
 
 
@@ -39,8 +42,7 @@ class MQTTProtocolDetector(ProtocolDetector):
     """
 
     def detect(self, first_bytes: bytes, alpn: str | None) -> bool:
-        return (bool(first_bytes)
-                and first_bytes[0] == (int(MQTTPacketType.CONNECT) << 4))
+        return bool(first_bytes) and first_bytes[0] == _CONNECT_FIRST_BYTE
 
     @property
     def protocol_name(self) -> str:
