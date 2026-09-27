@@ -1209,25 +1209,36 @@ class TestContentlessResponsesDoNotClaimABoundary:
         assert reader.remaining == b'odd', 'the reader consumed what it refuses'
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize('status_line,request_method', [
-        (b'HTTP/1.1 101 Switching Protocols\r\nContent-Length: 5\r\n\r\n',
-         'GET'),
-        (b'HTTP/1.1 200 Connection Established\r\n'
-         b'Transfer-Encoding: chunked\r\n\r\n', 'CONNECT'),
-    ], ids=['101-cl', 'connect-te'])
-    async def test_the_switch_head_naming_a_boundary_gets_no_handoff(
-            self, status_line, request_method):
-        """RFC 9112 §6.1 forbids the field in any 1xx, and RFC 9110 §9.3.6
-        in a 2xx to CONNECT. The switch head that names a boundary it cannot
-        have is no more a switch than a preceding one is."""
-        reader = _Reader(status_line)
-        recipient = HTTP1ResponseRecipient(request_method=request_method)
+    @pytest.mark.asyncio
+    async def test_a_101_naming_a_boundary_gets_no_handoff(self):
+        """RFC 9112 §6.1 forbids the field in any 1xx. A switch head that
+        names a boundary it cannot have is no more a switch than a preceding
+        one is."""
+        reader = _Reader(b'HTTP/1.1 101 Switching Protocols\r\n'
+                         b'Content-Length: 5\r\n\r\n')
+        recipient = HTTP1ResponseRecipient(request_method='GET')
 
         response = await recipient.receive(reader)
 
-        assert response.status == int(status_line.split()[1])
+        assert response.status == 101
         assert recipient.protocol_switched is False
         assert recipient.reusable is False
+
+    @pytest.mark.asyncio
+    async def test_a_successful_connect_ignores_the_fields_it_must_ignore(self):
+        """RFC 9110 §9.3.6: the tunnel begins at the header terminator and
+        the client MUST ignore Content-Length and Transfer-Encoding in a 2xx
+        to CONNECT. Ignoring is what makes them harmless — there is no
+        boundary to be ambiguous about, so the handoff stands."""
+        reader = _Reader(b'HTTP/1.1 200 Connection Established\r\n'
+                         b'Transfer-Encoding: chunked\r\n\r\n')
+        recipient = HTTP1ResponseRecipient(request_method='CONNECT')
+
+        response = await recipient.receive(reader)
+
+        assert response.status == 200
+        assert recipient.protocol_switched is True
+        assert recipient.tunnel is True
 
     @pytest.mark.asyncio
     async def test_an_interim_head_claiming_a_boundary_retires_the_connection(self):

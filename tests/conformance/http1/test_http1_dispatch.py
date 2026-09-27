@@ -357,6 +357,34 @@ class TestHTTP11KeepAlive:
 
         assert call_count == 1
 
+    @pytest.mark.parametrize('version,expected', [
+        ('HTTP/1.1', b'HTTP/1.1 103 '),
+        ('HTTP/1.0', b''),
+    ], ids=['1.1-gets-the-interim', '1.0-does-not'])
+    async def test_an_app_interim_head_goes_only_to_a_peer_that_can_read_it(
+            self, version, expected):
+        """RFC 9110 §15.2 gives a 1xx to clients that speak HTTP/1.1. The
+        request line is the only place the sender learns which kind it has,
+        and the actor is the one that read it."""
+
+        async def app(scope, receive, send):
+            await send({'type': 'http.response.start', 'status': 103,
+                        'headers': []})
+            await send({'type': 'http.response.start', 'status': 200,
+                        'headers': [(b'content-length', b'2')]})
+            await send({'type': 'http.response.body', 'body': b'ok'})
+
+        raw = _http_request(version=version)
+        actor, writer = _make_actor(raw, app)
+        await actor.run()
+
+        wire = bytes(writer.written)
+        if expected:
+            assert wire.startswith(expected), wire
+        else:
+            assert wire.startswith(b'HTTP/1.1 200 '), wire
+            assert b'103' not in wire, wire
+
     @pytest.mark.parametrize('events', [
         [{'type': 'http.response.start', 'status': 200, 'headers': []}],
         [

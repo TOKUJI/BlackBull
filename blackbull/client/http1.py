@@ -750,14 +750,15 @@ class HTTP1ResponseRecipient:
         )
         protocol_switched = status == 101 or successful_connect
         if body_forbidden or successful_connect:
-            if _declares_a_boundary(headers) and (
-                    is_informational(status) or status == 204
-                    or successful_connect):
-                # RFC 9112 §6.1 and RFC 9110 §9.3.6: this message names a
-                # boundary it cannot have, and the octets that follow cannot
-                # be told apart from the next response — or from what a
-                # tunnel would carry. A peer that got this wrong is not
-                # switching anything either.
+            if (is_informational(status) or status == 204) \
+                    and _declares_a_boundary(headers):
+                # RFC 9112 §6.1: this message names a boundary it cannot
+                # have, and the octets that follow cannot be told apart from
+                # the next response. A peer that got this wrong is not
+                # switching anything either. A successful CONNECT is not in
+                # this list: RFC 9110 §9.3.6 has the tunnel begin at the
+                # header terminator and tells the client to ignore these
+                # fields, so nothing is ambiguous to ignore them for.
                 return _NO_BODY, None, False, False
             return _NO_BODY, None, not protocol_switched, protocol_switched
 

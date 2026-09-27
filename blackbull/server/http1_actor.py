@@ -700,6 +700,10 @@ class HTTP1Actor(Actor):
 
                 try:
                     conn = self._parse(self._request)
+                    # RFC 9110 §15.2 gives a 1xx to clients that speak
+                    # HTTP/1.1, and the request line is the only place that
+                    # says which kind this peer is.
+                    send.supports_interim = conn.http_version != '1.0'
                 except HeaderTooLargeError as exc:
                     # The per-line limit, hit during parse.
                     logger.warning('431 Request Header Fields Too Large: %s', exc)

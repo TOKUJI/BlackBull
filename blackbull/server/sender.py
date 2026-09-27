@@ -546,6 +546,7 @@ class HTTP1Sender(BaseSender):
     """
 
     __slots__ = (
+        'supports_interim',
         '_buffered_status', '_buffered_headers', '_chunked',
         '_expect_trailers', '_head_mode', '_log_record', '_started',
         '_completed', '_trailers_started', '_content_length',
@@ -553,8 +554,10 @@ class HTTP1Sender(BaseSender):
         '_response_started', '_poisoned',
     )
 
-    def __init__(self, writer: AbstractWriter):
+    def __init__(self, writer: AbstractWriter, *,
+                 supports_interim: bool = True):
         super().__init__(writer)
+        self.supports_interim = supports_interim
         self._buffered_status: HTTPStatus | None = None
         self._buffered_headers: Headers | None = None
         self._chunked: bool = False
@@ -928,13 +931,19 @@ class HTTP1Sender(BaseSender):
 
     async def _send_interim(self, status: HTTPStatus,
                             headers: HeaderList) -> None:
-        """Write an interim head now and leave the response open for its
+        """Settle an interim head now and leave the response open for its
         final one.  RFC 9110 §15.2 puts an interim response before the final
         one on the same response, so buffering it until a body event would let
-        the next head overwrite it.  Both event arms funnel here."""
-        await self._write(self._render_start(
-            status,
-            self._ensure_framing_headers(status, headers, 0, more_body=False)))
+        the next head overwrite it.  Both event arms funnel here.
+
+        An HTTP/1.0 peer is sent nothing: §15.2 gives a 1xx to clients that
+        speak HTTP/1.1, and the state is settled the same way because the
+        interim still has no content and the final head still follows."""
+        if self.supports_interim:
+            await self._write(self._render_start(
+                status,
+                self._ensure_framing_headers(
+                    status, headers, 0, more_body=False)))
         self._buffered_status = None
         self._buffered_headers = None
         self._expect_trailers = False
@@ -1903,8 +1912,9 @@ class SenderFactory:
         return AsyncioWriter(stream_writer)
 
     @staticmethod
-    def http1(stream_writer) -> HTTP1Sender:
-        return HTTP1Sender(SenderFactory._ensure_writer(stream_writer))
+    def http1(stream_writer, *, supports_interim: bool = True) -> HTTP1Sender:
+        return HTTP1Sender(SenderFactory._ensure_writer(stream_writer),
+                           supports_interim=supports_interim)
 
     @staticmethod
     def http2(stream_writer, factory, stream_id: int,
