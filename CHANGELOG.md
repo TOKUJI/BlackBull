@@ -5,6 +5,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+- **Precompressed static variants are held to the served root.**  A
+  `<path>.<suffix>` sibling resolving outside the root — a symlink, say —
+  answers `400` before it is cached, opened or sent.  Inward symlinks and
+  every compressed variant keep serving.
+
 - Dynamic compression and precompressed static files honor `Accept-Encoding`
   refusals (`q=0`), wildcard acceptance, and repeated fields consistently.
   Malformed qualities or parameters refuse the named coding, including when

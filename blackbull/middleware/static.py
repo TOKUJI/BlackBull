@@ -302,7 +302,7 @@ class StaticFiles:
         # comparison against the pre-computed ``<root>/`` form — no
         # ``PurePath.relative_to`` allocation per request.
         target = os.path.realpath(os.path.join(self._root_str, decoded.lstrip('/')))
-        if target != self._root_str and not target.startswith(self._root_sep):
+        if not self._inside_root(target):
             await self._respond(send, HTTPStatus.BAD_REQUEST)
             return
 
@@ -314,8 +314,7 @@ class StaticFiles:
             # target so a crafted ``index`` can't escape the root.
             if self._index and os.path.isdir(target):
                 candidate = os.path.realpath(os.path.join(target, self._index))
-                if ((candidate == self._root_str or candidate.startswith(self._root_sep))
-                        and os.path.isfile(candidate)):
+                if self._inside_root(candidate) and os.path.isfile(candidate):
                     await self._serve(conn, send, candidate)
                     return
             if call_next:
@@ -325,6 +324,25 @@ class StaticFiles:
             return
 
         await self._serve(conn, send, target)
+
+    def _inside_root(self, resolved: str) -> bool:
+        """The one boundary definition: request target, index candidate and
+        any variant selection are judged here."""
+        return resolved == self._root_str or resolved.startswith(self._root_sep)
+
+    def _selection_within_root(self, served_path: str,
+                               verified_path: str) -> bool:
+        """Whether the final selection may be cached and sent.
+
+        Equal to ``verified_path``, or a plain sibling of it, is covered by
+        the walk in ``__call__`` — only a symlinked variant can leave the
+        root, so only it walks again, every request.  A swap inside one
+        request races the open; the window the requested target has always
+        had.
+        """
+        if served_path == verified_path or not os.path.islink(served_path):
+            return True
+        return self._inside_root(os.path.realpath(served_path))
 
     def _negotiate(self, conn, target: str) -> tuple[str, bytes]:
         """Pick which file to serve and what Content-Encoding to advertise.
@@ -373,8 +391,12 @@ class StaticFiles:
         return target, b''
 
     async def _serve(self, conn, send, path: str):
-        # Pick variant (precompressed sibling if available + accepted).
+        # Pick the variant, then hold the final selection to the root
+        # boundary before anything below can cache, open or send it.
         served_path, content_encoding = self._negotiate(conn, path)
+        if not self._selection_within_root(served_path, path):
+            await self._respond(send, HTTPStatus.BAD_REQUEST)
+            return
 
         body: bytes | None
         mime: bytes
