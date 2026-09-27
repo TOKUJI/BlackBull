@@ -36,6 +36,29 @@ def _scripted_app(*, startup: str | None = ASGIEvent.LIFESPAN_STARTUP_COMPLETE,
     return app
 
 
+@pytest.mark.asyncio
+@pytest.mark.timeout(60)
+async def test_a_task_death_after_startup_is_reported_at_once(caplog):
+    manager = LifespanManager(
+        _scripted_app(raise_after_ack=RuntimeError('boom')))
+    with pytest.raises(RuntimeError):
+        async with manager:
+            await asyncio.wait({manager._task}, timeout=PATIENCE)
+            await asyncio.sleep(0)
+            assert any('failed after startup' in r.getMessage()
+                       for r in caplog.records), (
+                'the death surfaced only at shutdown')
+
+
+@pytest.mark.asyncio
+@pytest.mark.timeout(60)
+async def test_a_healthy_lifespan_is_not_reported(caplog):
+    async with LifespanManager(_scripted_app()):
+        await asyncio.sleep(0)
+    assert not any('failed after startup' in r.getMessage()
+                   for r in caplog.records)
+
+
 async def _cancel_leftover_task(manager: LifespanManager) -> None:
     task = manager._task
     if task is not None and not task.done():
