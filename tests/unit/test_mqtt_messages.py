@@ -21,7 +21,8 @@ from blackbull.mqtt.messages import (
     MQTTPingreq, MQTTPingresp,
     MQTTDisconnect, MQTTAuth,
     # Enums
-    MQTTPacketType, MQTTReasonCode, ProtocolLevel,
+    MQTTPacketType, MQTTReasonCode, ProtocolLevel, ReasonCode,
+    RESERVED_FLAGS_0010,
     # Codec
     encode_packet, decode_packet,
 )
@@ -38,21 +39,19 @@ class TestPacketTypeEnum:
         """§2.1.1 Table 2-1 — Exactly 15 packet types are defined."""
         assert len(MQTTPacketType) == 15
 
-    @pytest.mark.parametrize("ptype,name", [
-        (1, 'CONNECT'), (2, 'CONNACK'), (3, 'PUBLISH'), (4, 'PUBACK'),
-        (5, 'PUBREC'), (6, 'PUBREL'), (7, 'PUBCOMP'), (8, 'SUBSCRIBE'),
-        (9, 'SUBACK'), (10, 'UNSUBSCRIBE'), (11, 'UNSUBACK'),
-        (12, 'PINGREQ'), (13, 'PINGRESP'), (14, 'DISCONNECT'), (15, 'AUTH'),
-    ])
-    def test_packet_type_name(self, ptype, name):
-        assert MQTTPacketType(ptype).name == name
+    def test_the_packet_type_names_sit_in_table_2_1_order(self):
+        assert [t.name for t in MQTTPacketType] == [
+            'CONNECT', 'CONNACK', 'PUBLISH', 'PUBACK', 'PUBREC', 'PUBREL',
+            'PUBCOMP', 'SUBSCRIBE', 'SUBACK', 'UNSUBSCRIBE', 'UNSUBACK',
+            'PINGREQ', 'PINGRESP', 'DISCONNECT', 'AUTH',
+        ]
 
     def test_packet_type_from_raw_byte(self):
         """Extract type from first byte of fixed header (bits 7-4)."""
-        # CONNECT: 0x10 → type=1 (0x10 >> 4)
-        assert MQTTPacketType(0x10 >> 4) == MQTTPacketType.CONNECT
-        # PUBREL: 0x62 → type=6 ((0x62 >> 4) & 0x0F)
-        assert MQTTPacketType((0x62 >> 4) & 0x0F) == MQTTPacketType.PUBREL
+        connect = int(MQTTPacketType.CONNECT) << 4
+        assert MQTTPacketType(connect >> 4) == MQTTPacketType.CONNECT
+        pubrel = (int(MQTTPacketType.PUBREL) << 4) | RESERVED_FLAGS_0010
+        assert MQTTPacketType((pubrel >> 4) & 0x0F) == MQTTPacketType.PUBREL
 
 
 # ============================================================================
@@ -62,20 +61,30 @@ class TestPacketTypeEnum:
 class TestReasonCodeEnum:
     """MQTTReasonCode enum — all MQTT 5.0 reason codes."""
 
-    def test_success_is_0x00(self):
-        assert MQTTReasonCode(0x00).name == 'Success'
-        assert MQTTReasonCode(0x00).is_success is True
-        assert MQTTReasonCode(0x00).is_error is False
+    def test_the_success_code_reports_success(self):
+        success = MQTTReasonCode(int(ReasonCode.SUCCESS))
+        assert success.name == 'Success'
+        assert success.is_success is True
+        assert success.is_error is False
 
-    def test_error_codes_ge_0x80(self):
-        for code in (0x80, 0x81, 0x87, 0x8F, 0x99):
-            reason = MQTTReasonCode(code)
+    def test_the_error_codes_report_error(self):
+        for code in (ReasonCode.UNSPECIFIED_ERROR, ReasonCode.MALFORMED_PACKET,
+                     ReasonCode.NOT_AUTHORIZED,
+                     ReasonCode.TOPIC_FILTER_INVALID,
+                     ReasonCode.PAYLOAD_FORMAT_INVALID):
+            reason = MQTTReasonCode(int(code))
             assert reason.is_error is True
             assert reason.is_success is False
 
+    def test_a_code_and_its_label_cannot_drift(self):
+        assert MQTTReasonCode(int(ReasonCode.TOPIC_FILTER_INVALID)).name \
+            == 'Topic Filter invalid'
+        assert MQTTReasonCode(int(ReasonCode.TOPIC_NAME_INVALID)).name \
+            == 'Topic Name invalid'
+
     def test_unknown_reason_code_handled(self):
         """Undefined reason codes should not crash but return 'Unknown'."""
-        rc = MQTTReasonCode(0x50)  # 0x50 is not a defined MQTT 5.0 reason code
+        rc = MQTTReasonCode(0x50)  # 0x50 には定義済みの名前が無い
         assert rc.name.startswith('Unknown') or rc.is_error is None
 
 
@@ -162,9 +171,9 @@ class TestMessageEquality:
         assert p1 != p3
 
     def test_suback_equality(self):
-        s1 = MQTTSuback(packet_id=5, reason_codes=[0, 1])
-        s2 = MQTTSuback(packet_id=5, reason_codes=[0, 1])
-        s3 = MQTTSuback(packet_id=5, reason_codes=[0, 2])
+        s1 = MQTTSuback(packet_id=5, reason_codes=[ReasonCode.SUCCESS, ReasonCode.GRANTED_QOS_1])
+        s2 = MQTTSuback(packet_id=5, reason_codes=[ReasonCode.SUCCESS, ReasonCode.GRANTED_QOS_1])
+        s3 = MQTTSuback(packet_id=5, reason_codes=[ReasonCode.SUCCESS, ReasonCode.GRANTED_QOS_2])
         assert s1 == s2
         assert s1 != s3
 

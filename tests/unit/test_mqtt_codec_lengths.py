@@ -19,6 +19,8 @@ import pytest
 
 from blackbull.mqtt.connection import PacketFramer
 from blackbull.mqtt.messages import (
+    RESERVED_FLAGS_0010,
+    ReasonCode,
     MQTTAuth,
     MQTTConnect,
     MQTTConnack,
@@ -37,7 +39,6 @@ from blackbull.mqtt.messages import (
 )
 
 # §2.1.3 — PUBREL, SUBSCRIBE and UNSUBSCRIBE reserve these fixed-header flags.
-_RESERVED_0010 = 0x2
 
 
 def packet(packet_type: MQTTPacketType, body: bytes = b'', flags: int = 0) -> bytes:
@@ -84,16 +85,16 @@ SHORTER_THAN_THE_TYPE_REQUIRES = [
     ('puback-empty', packet(MQTTPacketType.PUBACK)),
     ('puback-one-octet', packet(MQTTPacketType.PUBACK, b'\x00')),
     ('pubrec-empty', packet(MQTTPacketType.PUBREC)),
-    ('pubrel-empty', packet(MQTTPacketType.PUBREL, flags=_RESERVED_0010)),
+    ('pubrel-empty', packet(MQTTPacketType.PUBREL, flags=RESERVED_FLAGS_0010)),
     ('pubcomp-one-octet', packet(MQTTPacketType.PUBCOMP, b'\x01')),
     ('publish-qos1-no-packet-id', packet(
         MQTTPacketType.PUBLISH, _utf8(b'a'), flags=0x2)),
     ('publish-qos1-one-octet-id', packet(
         MQTTPacketType.PUBLISH, _utf8(b'a') + b'\x01', flags=0x2)),
     ('subscribe-no-filter', packet(
-        MQTTPacketType.SUBSCRIBE, _ack_body(props=b''), flags=_RESERVED_0010)),
+        MQTTPacketType.SUBSCRIBE, _ack_body(props=b''), flags=RESERVED_FLAGS_0010)),
     ('unsubscribe-no-filter', packet(
-        MQTTPacketType.UNSUBSCRIBE, _ack_body(props=b''), flags=_RESERVED_0010)),
+        MQTTPacketType.UNSUBSCRIBE, _ack_body(props=b''), flags=RESERVED_FLAGS_0010)),
     ('suback-no-reason-code', packet(MQTTPacketType.SUBACK, _ack_body(props=b''))),
     ('unsuback-no-reason-code', packet(MQTTPacketType.UNSUBACK, _ack_body(props=b''))),
     ('connack-flags-only', packet(MQTTPacketType.CONNACK, b'\x00')),
@@ -105,28 +106,28 @@ ZERO_PACKET_IDENTIFIER = [
     ('puback', packet(MQTTPacketType.PUBACK, _ack_body(packet_id=0))),
     ('pubrec', packet(MQTTPacketType.PUBREC, _ack_body(packet_id=0))),
     ('pubrel', packet(MQTTPacketType.PUBREL, _ack_body(packet_id=0),
-                      flags=_RESERVED_0010)),
+                      flags=RESERVED_FLAGS_0010)),
     ('pubcomp', packet(MQTTPacketType.PUBCOMP, _ack_body(packet_id=0))),
     ('publish-qos1', packet(MQTTPacketType.PUBLISH,
                             _publish_body(topic=b'a', packet_id=0), flags=0x2)),
     ('subscribe', packet(MQTTPacketType.SUBSCRIBE,
                          _ack_body(packet_id=0, props=b'') + _ONE_FILTER,
-                         flags=_RESERVED_0010)),
+                         flags=RESERVED_FLAGS_0010)),
     ('suback', packet(MQTTPacketType.SUBACK,
                       _ack_body(packet_id=0, props=b'') + b'\x00')),
     ('unsubscribe', packet(MQTTPacketType.UNSUBSCRIBE,
                            _ack_body(packet_id=0, props=b'') + _ONE_FILTER,
-                           flags=_RESERVED_0010)),
+                           flags=RESERVED_FLAGS_0010)),
     ('unsuback', packet(MQTTPacketType.UNSUBACK,
                         _ack_body(packet_id=0, props=b'') + b'\x00')),
 ]
 
 BYTES_AFTER_THE_LAST_FIELD = [
     ('puback-after-properties', packet(
-        MQTTPacketType.PUBACK, _ack_body(reason=0, props=b'', surplus=b'\xff'))),
+        MQTTPacketType.PUBACK, _ack_body(reason=ReasonCode.SUCCESS, props=b'', surplus=b'\xff'))),
     ('pubrel-after-reason', packet(
-        MQTTPacketType.PUBREL, _ack_body(reason=0, props=b'', surplus=b'\x00'),
-        flags=_RESERVED_0010)),
+        MQTTPacketType.PUBREL, _ack_body(reason=ReasonCode.SUCCESS, props=b'', surplus=b'\x00'),
+        flags=RESERVED_FLAGS_0010)),
     ('connack-after-properties', packet(
         MQTTPacketType.CONNACK, b'\x00\x00' + _props() + b'\xff')),
     ('disconnect-after-properties', packet(
@@ -180,21 +181,21 @@ def test_ping_carries_no_body(label, wire):
 def test_a_shortened_ack_still_decodes():
     """§3.4.2.1 — Remaining Length 2 omits the reason code and properties."""
     message, consumed = decode_packet(packet(MQTTPacketType.PUBACK, b'\x00\x07'))
-    assert message == MQTTPuback(packet_id=7, reason_code=0, properties={})
+    assert message == MQTTPuback(packet_id=7, reason_code=ReasonCode.SUCCESS, properties={})
     assert consumed == 4
 
 
 def test_a_reason_only_ack_still_decodes():
     """Remaining Length 3 carries a reason code and no properties."""
     message, _ = decode_packet(packet(MQTTPacketType.PUBACK, b'\x00\x07\x10'))
-    assert message == MQTTPuback(packet_id=7, reason_code=0x10, properties={})
+    assert message == MQTTPuback(packet_id=7, reason_code=ReasonCode.NO_MATCHING_SUBSCRIBERS, properties={})
 
 
 def test_an_ack_with_properties_still_decodes():
     message, _ = decode_packet(packet(
         MQTTPacketType.PUBACK,
-        _ack_body(packet_id=7, reason=0, props=b'\x1f\x00\x00')))
-    assert message == MQTTPuback(packet_id=7, reason_code=0,
+        _ack_body(packet_id=7, reason=ReasonCode.SUCCESS, props=b'\x1f\x00\x00')))
+    assert message == MQTTPuback(packet_id=7, reason_code=ReasonCode.SUCCESS,
                                  properties={'reason_string': ''})
 
 
@@ -206,22 +207,22 @@ def test_a_packet_identifier_of_one_is_legal():
 def test_empty_and_reason_only_disconnect_and_auth_still_decode():
     assert decode_packet(packet(MQTTPacketType.DISCONNECT))[0] == MQTTDisconnect()
     assert decode_packet(packet(MQTTPacketType.DISCONNECT, b'\x00'))[0] == \
-        MQTTDisconnect(reason_code=0)
+        MQTTDisconnect(reason_code=ReasonCode.SUCCESS)
     assert decode_packet(packet(MQTTPacketType.AUTH))[0] == MQTTAuth()
     assert decode_packet(packet(MQTTPacketType.AUTH, b'\x18'))[0] == \
-        MQTTAuth(reason_code=0x18)
+        MQTTAuth(reason_code=ReasonCode.CONTINUE_AUTHENTICATION)
 
 
 def test_a_connack_with_an_empty_properties_block_still_decodes():
     """§3.2.2 — MQTT 5 CONNACK ends with a Property Length, minimum 3 octets."""
     assert decode_packet(packet(MQTTPacketType.CONNACK, b'\x01\x00\x00'))[0] == \
-        MQTTConnack(session_present=True, reason_code=0, properties={})
+        MQTTConnack(session_present=True, reason_code=ReasonCode.SUCCESS, properties={})
 
 
 def test_legal_payloads_still_decode():
     subscribe = packet(MQTTPacketType.SUBSCRIBE,
                        _ack_body(props=b'') + _ONE_FILTER,
-                       flags=_RESERVED_0010)
+                       flags=RESERVED_FLAGS_0010)
     assert decode_packet(subscribe)[0] == MQTTSubscribe(
         packet_id=1, subscriptions=[('a/b', 0)], properties={},
         subscription_options=[{'qos': 0, 'no_local': False,
@@ -229,15 +230,15 @@ def test_legal_payloads_still_decode():
                                'retain_handling': 0}])
     unsubscribe = packet(MQTTPacketType.UNSUBSCRIBE,
                          _ack_body(props=b'') + _utf8(b'a/b'),
-                         flags=_RESERVED_0010)
+                         flags=RESERVED_FLAGS_0010)
     assert decode_packet(unsubscribe)[0] == MQTTUnsubscribe(
         packet_id=1, topics=['a/b'], properties={})
     suback = packet(MQTTPacketType.SUBACK, _ack_body(props=b'') + b'\x01')
     assert decode_packet(suback)[0] == MQTTSuback(
-        packet_id=1, reason_codes=[1], properties={})
+        packet_id=1, reason_codes=[ReasonCode.GRANTED_QOS_1], properties={})
     unsuback = packet(MQTTPacketType.UNSUBACK, _ack_body(props=b'') + b'\x00')
     assert decode_packet(unsuback)[0] == MQTTUnsuback(
-        packet_id=1, reason_codes=[0], properties={})
+        packet_id=1, reason_codes=[ReasonCode.SUCCESS], properties={})
     publish = packet(MQTTPacketType.PUBLISH,
                      _publish_body(topic=b'a/b', packet_id=9, payload=b'body'),
                      flags=0x2)
@@ -266,10 +267,10 @@ def test_a_legal_message_round_trips():
     messages = [
         MQTTConnect(client_id='x', clean_start=True, keep_alive=60),
         MQTTPuback(packet_id=3),
-        MQTTSuback(packet_id=3, reason_codes=[0, 1]),
-        MQTTUnsuback(packet_id=3, reason_codes=[0]),
+        MQTTSuback(packet_id=3, reason_codes=[ReasonCode.SUCCESS, ReasonCode.GRANTED_QOS_1]),
+        MQTTUnsuback(packet_id=3, reason_codes=[ReasonCode.SUCCESS]),
         MQTTPublish(topic='a/b', payload=b'x', qos=1, packet_id=4),
-        MQTTDisconnect(reason_code=0x8E),
+        MQTTDisconnect(reason_code=ReasonCode.SESSION_TAKEN_OVER),
     ]
     for message in messages:
         assert decode_packet(encode_packet(message))[0] == message

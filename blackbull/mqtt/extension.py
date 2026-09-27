@@ -10,6 +10,7 @@ from ..extension import Extension
 from ..server.protocol_registry import ProtocolDetector
 from .broker import BrokerActor
 from .connection import serve_connection
+from .messages import MQTTPacketType
 from .tap import Tap, TapActor, compile_tap
 
 logger = logging.getLogger(__name__)
@@ -31,13 +32,15 @@ class Subscription(NamedTuple):
 class MQTTProtocolDetector(ProtocolDetector):
     """Recognise an MQTT connection from its first byte.
 
-    Every MQTT session opens with a CONNECT packet whose fixed-header first
-    byte is ``0x10`` (type 1, flags 0).  That is unambiguous against the HTTP
-    request line and the HTTP/2 preface, both of which start with ASCII text.
+    Every MQTT session opens with a CONNECT packet — fixed-header first byte
+    ``int(MQTTPacketType.CONNECT) << 4``, flags 0.  That is unambiguous
+    against the HTTP request line and the HTTP/2 preface, both of which
+    start with ASCII text.
     """
 
     def detect(self, first_bytes: bytes, alpn: str | None) -> bool:
-        return bool(first_bytes) and first_bytes[0] == 0x10
+        return (bool(first_bytes)
+                and first_bytes[0] == (int(MQTTPacketType.CONNECT) << 4))
 
     @property
     def protocol_name(self) -> str:

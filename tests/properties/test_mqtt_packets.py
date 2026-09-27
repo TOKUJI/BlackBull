@@ -13,6 +13,7 @@ import pytest
 from hypothesis import given, strategies as st
 
 from blackbull.mqtt.messages import (
+    ReasonCode,
     encode_variable_byte_integer,
     decode_variable_byte_integer,
     encode_packet,
@@ -49,9 +50,9 @@ qos = st.sampled_from([0, 1, 2])
 
 # Reason codes
 reason_code = st.sampled_from([
-    0x00, 0x10, 0x11, 0x80, 0x81, 0x82, 0x83, 0x84, 0x85,
-    0x86, 0x87, 0x88, 0x89, 0x8A, 0x8C, 0x8D, 0x8E, 0x8F,
-    0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, 0x98, 0x99,
+    ReasonCode.SUCCESS, ReasonCode.NO_MATCHING_SUBSCRIBERS, ReasonCode.NO_SUBSCRIPTION_EXISTED, ReasonCode.UNSPECIFIED_ERROR, ReasonCode.MALFORMED_PACKET, ReasonCode.PROTOCOL_ERROR, ReasonCode.IMPLEMENTATION_SPECIFIC_ERROR, ReasonCode.UNSUPPORTED_PROTOCOL_VERSION, ReasonCode.CLIENT_IDENTIFIER_NOT_VALID,
+    ReasonCode.BAD_USER_NAME_OR_PASSWORD, ReasonCode.NOT_AUTHORIZED, ReasonCode.SERVER_UNAVAILABLE, ReasonCode.SERVER_BUSY, ReasonCode.BANNED, ReasonCode.BAD_AUTHENTICATION_METHOD, ReasonCode.KEEP_ALIVE_TIMEOUT, ReasonCode.SESSION_TAKEN_OVER, ReasonCode.TOPIC_FILTER_INVALID,
+    ReasonCode.TOPIC_NAME_INVALID, ReasonCode.PACKET_IDENTIFIER_IN_USE, ReasonCode.PACKET_IDENTIFIER_NOT_FOUND, ReasonCode.RECEIVE_MAXIMUM_EXCEEDED, ReasonCode.TOPIC_ALIAS_INVALID, ReasonCode.PACKET_TOO_LARGE, ReasonCode.MESSAGE_RATE_TOO_HIGH, ReasonCode.QUOTA_EXCEEDED, ReasonCode.ADMINISTRATIVE_ACTION, ReasonCode.PAYLOAD_FORMAT_INVALID,
 ])
 
 
@@ -143,13 +144,19 @@ def test_fixed_header_type_and_flags(topic, qos, data):
 def test_suback_reason_code_count(num_subs, pid):
     """§3.9 — SUBACK contains one Reason Code per Topic Filter."""
     reason_codes = st.lists(
-        st.sampled_from([0x00, 0x01, 0x02, 0x80, 0x90]),
+        st.sampled_from([ReasonCode.SUCCESS, ReasonCode.GRANTED_QOS_1,
+                         ReasonCode.GRANTED_QOS_2,
+                         ReasonCode.UNSPECIFIED_ERROR,
+                         ReasonCode.TOPIC_NAME_INVALID]),
         min_size=num_subs,
         max_size=num_subs,
     )
     # Cannot use @given on the inner list easily; generate manually
     import random
-    rc_list = [random.choice([0x00, 0x01, 0x02, 0x80]) for _ in range(num_subs)]
+    rc_list = [random.choice([ReasonCode.SUCCESS, ReasonCode.GRANTED_QOS_1,
+                              ReasonCode.GRANTED_QOS_2,
+                              ReasonCode.UNSPECIFIED_ERROR])
+               for _ in range(num_subs)]
     suback = MQTTSuback(packet_id=pid, reason_codes=rc_list)
     wire = encode_packet(suback)
     decoded = decode_packet(wire)

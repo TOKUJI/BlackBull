@@ -27,6 +27,8 @@ import asyncio
 import pytest
 
 from blackbull.mqtt.messages import (
+    SESSION_EXPIRY_NEVER,
+    ReasonCode,
     MQTTConnect, MQTTConnack, MQTTDisconnect,
     MQTTSubscribe, MQTTSuback,
     MQTTPublish,
@@ -120,7 +122,7 @@ class TestCleanStart:
         """§3.2.2.3 — Session Present = True when a prior session was found."""
         connack = MQTTConnack(
             session_present=True,
-            reason_code=0x00,
+            reason_code=ReasonCode.SUCCESS,
         )
         assert connack.session_present is True
 
@@ -128,7 +130,7 @@ class TestCleanStart:
         """§3.2.2.3 — Session Present = False for Clean Start or no prior session."""
         connack = MQTTConnack(
             session_present=False,
-            reason_code=0x00,
+            reason_code=ReasonCode.SUCCESS,
         )
         assert connack.session_present is False
 
@@ -144,7 +146,7 @@ class TestSessionExpiryInterval:
     the connection is closed.
 
     0 or absent = session ends immediately on disconnect.
-    0xFFFFFFFF = session never expires (retained indefinitely).
+    SESSION_EXPIRY_NEVER = session never expires (retained indefinitely).
     """
 
     def test_session_expiry_set_to_3600(self, mqtt):
@@ -183,16 +185,16 @@ class TestSessionExpiryInterval:
         assert 'session_expiry_interval' not in decoded.properties
 
     def test_session_expiry_maximum_never_expires(self, mqtt):
-        """§3.1.2.4 — 0xFFFFFFFF = session never expires."""
+        """§3.1.2.4 — SESSION_EXPIRY_NEVER = session never expires."""
         connect = MQTTConnect(
             client_id='se-forever',
             clean_start=False,
             keep_alive=60,
-            properties={'session_expiry_interval': 0xFFFFFFFF},
+            properties={'session_expiry_interval': SESSION_EXPIRY_NEVER},
         )
         wire = encode_packet(connect)
         decoded = decode_packet(wire)
-        assert decoded.properties['session_expiry_interval'] == 0xFFFFFFFF
+        assert decoded.properties['session_expiry_interval'] == SESSION_EXPIRY_NEVER
 
 
 # ============================================================================
@@ -293,7 +295,7 @@ class TestSessionExpiryOnDisconnect:
         """§3.14.2.2 — DISCONNECT can include Session Expiry Interval
         to override the value set in CONNECT."""
         disconnect = MQTTDisconnect(
-            reason_code=0x00,
+            reason_code=ReasonCode.SUCCESS,
             properties={'session_expiry_interval': 7200},
         )
         wire = encode_packet(disconnect)

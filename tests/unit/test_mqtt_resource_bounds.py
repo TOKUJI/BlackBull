@@ -24,6 +24,7 @@ from blackbull.mqtt.broker import (
 )
 from blackbull.mqtt.connection import MQTT5Actor, PacketFramer, PacketTooLarge
 from blackbull.mqtt.messages import (
+    MQTTPacketType,
     MQTTConnack, MQTTConnect, MQTTDisconnect, MQTTPuback, MQTTPublish,
     MQTTSubscribe, ReasonCode, encode_packet, encode_variable_byte_integer,
 )
@@ -103,7 +104,8 @@ def _ctx():
                            protocol='mqtt')
 
 
-def _oversized_header(declared: int, packet_type: int = 0x30) -> bytes:
+def _oversized_header(declared: int,
+                      packet_type: int = int(MQTTPacketType.PUBLISH) << 4) -> bytes:
     """A fixed header declaring *declared* body bytes, and nothing else.
 
     The point of building it by hand: the test must never allocate the
@@ -183,7 +185,7 @@ class TestPacketSizeBound:
         framer.feed(packet)
         assert len(list(framer)) == 1
 
-    async def test_connection_answers_disconnect_0x95_and_closes(self):
+    async def test_connection_answers_disconnect_with_packet_too_large_and_closes(self):
         """§3.14.2.1 — 0x95 Packet Too Large, then the connection ends."""
         reader = _Reader(_oversized_header(64 * 1024 * 1024) + b'\x00' * 50)
         writer = _Writer()
@@ -204,7 +206,7 @@ class TestPacketSizeBound:
         assert ReasonCode.PACKET_TOO_LARGE in sent, (
             f'DISCONNECT did not carry 0x95: {sent!r}')
 
-    async def test_junk_is_left_to_the_resync_not_answered_with_0x95(self):
+    async def test_junk_is_left_to_the_resync_not_answered_with_packet_too_large(self):
         """A size gate must not spend a fatal answer on a guess.
 
         The gate closes the connection, so it may only judge bytes that

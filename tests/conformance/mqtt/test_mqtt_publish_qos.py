@@ -19,6 +19,8 @@ import asyncio
 import pytest
 
 from blackbull.mqtt.messages import (
+    RESERVED_FLAGS_0010,
+    ReasonCode,
     MQTTConnect, MQTTConnack, MQTTDisconnect,
     MQTTPublish, MQTTPuback, MQTTPubrec, MQTTPubrel, MQTTPubcomp,
     MQTTSubscribe, MQTTSuback,
@@ -230,19 +232,19 @@ class TestPublishQoS1:
         assert len(pubacks) >= 1, "Expected PUBACK after QoS 1 PUBLISH"
         assert pubacks[0].packet_id == 100, \
             "PUBACK Packet Identifier must match PUBLISH Packet Identifier"
-        assert pubacks[0].reason_code == 0x00, \
+        assert pubacks[0].reason_code == ReasonCode.SUCCESS, \
             "QoS 1 PUBACK should have reason code Success (0x00)"
 
     # §3.4.2.1 — PUBACK with error reason code
     @pytest.mark.parametrize("error_code", [
-        0x10,  # No matching subscribers
-        0x80,  # Unspecified error
-        0x83,  # Implementation specific error
-        0x87,  # Not authorized
-        0x8D,  # Topic Name invalid
-        0x8E,  # Packet too large
-        0x8F,  # Quota exceeded
-        0x91,  # Payload format invalid
+        ReasonCode.NO_MATCHING_SUBSCRIBERS,
+        ReasonCode.UNSPECIFIED_ERROR,
+        ReasonCode.IMPLEMENTATION_SPECIFIC_ERROR,
+        ReasonCode.NOT_AUTHORIZED,
+        ReasonCode.KEEP_ALIVE_TIMEOUT,
+        ReasonCode.SESSION_TAKEN_OVER,
+        ReasonCode.TOPIC_FILTER_INVALID,
+        ReasonCode.PACKET_IDENTIFIER_IN_USE,
     ])
     def test_puback_error_reason_codes(self, error_code):
         """§3.4.2.1 — PUBACK can carry error reason codes."""
@@ -329,13 +331,13 @@ class TestPublishQoS2:
 
     # §3.5.2.1 — PUBREC reason codes
     @pytest.mark.parametrize("error_code", [
-        0x00,  # Success
-        0x10,  # No matching subscribers
-        0x80,  # Unspecified error
-        0x83,  # Implementation specific error
-        0x87,  # Not authorized
-        0x8D,  # Topic Name invalid
-        0x8E,  # Packet too large
+        ReasonCode.SUCCESS,
+        ReasonCode.NO_MATCHING_SUBSCRIBERS,
+        ReasonCode.UNSPECIFIED_ERROR,
+        ReasonCode.IMPLEMENTATION_SPECIFIC_ERROR,
+        ReasonCode.NOT_AUTHORIZED,
+        ReasonCode.KEEP_ALIVE_TIMEOUT,
+        ReasonCode.SESSION_TAKEN_OVER,
     ])
     def test_pubrec_reason_codes(self, error_code):
         """§3.5.2.1 — PUBREC can carry error reason codes."""
@@ -347,16 +349,15 @@ class TestPublishQoS2:
 
     # §3.6.1 — PUBREL fixed header flags MUST be 0x02
     def test_pubrel_fixed_header_flags(self, mqtt):
-        """§3.6.1 — PUBREL fixed header bits 3-0 MUST be 0b0010 (0x2)."""
-        pubrel = MQTTPubrel(packet_id=300, reason_code=0x00)
+        """§3.6.1 — PUBREL fixed header bits 3-0 MUST be RESERVED_FLAGS_0010."""
+        pubrel = MQTTPubrel(packet_id=300, reason_code=ReasonCode.SUCCESS)
         wire = encode_packet(pubrel)
-        assert (wire[0] & 0x0F) == 0x02, \
-            "PUBREL fixed header flags must be 0x02 per §3.6.1"
+        assert (wire[0] & 0x0F) == RESERVED_FLAGS_0010
 
     # §3.6.2.1 — PUBREL reason codes
     @pytest.mark.parametrize("error_code", [
-        0x00,  # Success
-        0x92,  # Packet Identifier not found
+        ReasonCode.SUCCESS,
+        ReasonCode.PACKET_IDENTIFIER_NOT_FOUND,
     ])
     def test_pubrel_reason_codes(self, error_code):
         """§3.6.2.1 — PUBREL can carry reason codes."""
@@ -367,8 +368,8 @@ class TestPublishQoS2:
 
     # §3.7.2.1 — PUBCOMP reason codes
     @pytest.mark.parametrize("error_code", [
-        0x00,  # Success
-        0x92,  # Packet Identifier not found
+        ReasonCode.SUCCESS,
+        ReasonCode.PACKET_IDENTIFIER_NOT_FOUND,
     ])
     def test_pubcomp_reason_codes(self, error_code):
         """§3.7.2.1 — PUBCOMP can carry reason codes."""

@@ -84,11 +84,11 @@ class TestSharedSubscribeAccepted:
         await _attach(broker, conn, client_id='c1')
         await _subscribe(broker, conn, 1, [('$share/g/t', 1)])
         suback = [p for p in conn.packets() if isinstance(p, MQTTSuback)][0]
-        assert suback.reason_codes == [1]  # granted QoS, not 0x9E
+        assert suback.reason_codes == [ReasonCode.GRANTED_QOS_1]  # granted QoS, not 0x9E
         assert [s[0] for s in broker._sessions['c1']['subscriptions']] == \
             ['$share/g/t']
 
-    async def test_malformed_share_filters_rejected_0x8f(self):
+    async def test_malformed_share_filters_rejected_with_topic_filter_invalid(self):
         """§4.8.2 — no filter part, empty ShareName, wildcard ShareName, and
         an empty filter portion are all 0x8F per-entry rejections."""
         broker, conn = BrokerActor(), RecordingConn()
@@ -253,7 +253,7 @@ class TestSharedMembership:
 # ===========================================================================
 
 class TestSharedNoLocal:
-    async def test_no_local_on_shared_disconnects_0x82(self):
+    async def test_no_local_on_shared_disconnects_with_protocol_error(self):
         broker, conn = BrokerActor(), RecordingConn()
         await _attach(broker, conn, client_id='c1')
         conn.outbox.clear()
@@ -275,7 +275,7 @@ class TestSharedNoLocal:
         await _subscribe(broker, conn, 1, [('t', 0)],
                          options=[{'no_local': True}])
         suback = [p for p in conn.packets() if isinstance(p, MQTTSuback)][0]
-        assert suback.reason_codes == [0]
+        assert suback.reason_codes == [ReasonCode.SUCCESS]
 
 
 # ===========================================================================

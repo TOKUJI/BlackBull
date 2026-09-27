@@ -25,6 +25,7 @@ import asyncio
 import pytest
 
 from blackbull.mqtt.messages import (
+    ReasonCode,
     MQTTConnect, MQTTConnack, MQTTDisconnect,
     MQTTPublish,
     encode_packet, decode_packet,
@@ -250,20 +251,20 @@ class TestWillMessageDelivery:
         This is verified in test_connect.py: the DISCONNECT with 0x00
         is a graceful close, not a Will-triggering event.
         """
-        disconnect = MQTTDisconnect(reason_code=0x00)
+        disconnect = MQTTDisconnect(reason_code=ReasonCode.SUCCESS)
         wire = encode_packet(disconnect)
         decoded = decode_packet(wire)
-        assert decoded.reason_code == 0x00
+        assert decoded.reason_code == ReasonCode.SUCCESS
 
     def test_disconnect_with_will_message_reason_code(self, mqtt):
         """§3.14.2.1 — DISCONNECT reason code 0x04 triggers Will Message."""
         disconnect = MQTTDisconnect(
-            reason_code=0x04,  # Disconnect with Will Message
+            reason_code=ReasonCode.DISCONNECT_WITH_WILL,
             properties={'reason_string': 'Client requested Will delivery'},
         )
         wire = encode_packet(disconnect)
         decoded = decode_packet(wire)
-        assert decoded.reason_code == 0x04
+        assert decoded.reason_code == ReasonCode.DISCONNECT_WITH_WILL
 
 
 # ============================================================================

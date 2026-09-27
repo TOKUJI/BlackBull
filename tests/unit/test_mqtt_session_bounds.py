@@ -27,12 +27,11 @@ from blackbull.mqtt.broker import (
 )
 from blackbull.mqtt.messages import (
     MQTTConnack, MQTTConnect, MQTTPublish, MQTTSubscribe, ReasonCode,
+    SESSION_EXPIRY_NEVER,
 )
 
 pytestmark = pytest.mark.asyncio
 
-#: §3.1.2.11.2 — the one interval that means "this session never expires".
-_NEVER = 0xFFFFFFFF
 
 
 class RecordingConn(Actor):
@@ -163,7 +162,7 @@ class TestSessionTableBound:
         with caplog.at_level('WARNING', logger='blackbull.caps'):
             for i in range(6):
                 conn = RecordingConn()
-                await _attach(broker, conn, client_id=f'c{i}', expiry=_NEVER)
+                await _attach(broker, conn, client_id=f'c{i}', expiry=SESSION_EXPIRY_NEVER)
                 await _detach(broker, conn)
 
         assert len(broker._sessions) == 3, (
@@ -174,14 +173,14 @@ class TestSessionTableBound:
         assert hits, 'a refused session that nobody can observe'
         assert hits[0].limit == 3
 
-    async def test_the_refusal_reaches_the_client_as_connack_0x97(self):
+    async def test_the_refusal_reaches_the_client_as_connack_quota_exceeded(self):
         broker = BrokerActor(max_sessions=1)
         first = RecordingConn()
-        await _attach(broker, first, client_id='a', expiry=_NEVER)
+        await _attach(broker, first, client_id='a', expiry=SESSION_EXPIRY_NEVER)
         await _detach(broker, first)
 
         second = RecordingConn()
-        await _attach(broker, second, client_id='b', expiry=_NEVER)
+        await _attach(broker, second, client_id='b', expiry=SESSION_EXPIRY_NEVER)
 
         assert second.connack().reason_code == ReasonCode.QUOTA_EXCEEDED
         assert second.connack().session_present is False
@@ -191,11 +190,11 @@ class TestSessionTableBound:
         """A rejection that half-registers the client is a second leak."""
         broker = BrokerActor(max_sessions=1)
         first = RecordingConn()
-        await _attach(broker, first, client_id='a', expiry=_NEVER)
+        await _attach(broker, first, client_id='a', expiry=SESSION_EXPIRY_NEVER)
         await _detach(broker, first)
 
         second = RecordingConn()
-        await _attach(broker, second, client_id='b', expiry=_NEVER,
+        await _attach(broker, second, client_id='b', expiry=SESSION_EXPIRY_NEVER,
                       will_topic='w', will_payload=b'x')
 
         assert 'b' not in broker._sessions
@@ -208,12 +207,12 @@ class TestSessionTableBound:
         broker = BrokerActor(max_sessions=2)
         for cid in ('a', 'b'):
             conn = RecordingConn()
-            await _attach(broker, conn, client_id=cid, expiry=_NEVER)
+            await _attach(broker, conn, client_id=cid, expiry=SESSION_EXPIRY_NEVER)
             await _detach(broker, conn)
 
         again = RecordingConn()
         await _attach(broker, again, client_id='a', clean_start=False,
-                      expiry=_NEVER)
+                      expiry=SESSION_EXPIRY_NEVER)
 
         assert again.connack().reason_code == ReasonCode.SUCCESS
         assert again.connack().session_present is True
@@ -229,7 +228,7 @@ class TestSessionTableBound:
             asyncio.get_running_loop().time() - 0.001
 
         fresh = RecordingConn()
-        await _attach(broker, fresh, client_id='new', expiry=_NEVER)
+        await _attach(broker, fresh, client_id='new', expiry=SESSION_EXPIRY_NEVER)
 
         assert fresh.connack().reason_code == ReasonCode.SUCCESS
         assert 'old' not in broker._sessions
@@ -238,7 +237,7 @@ class TestSessionTableBound:
         broker = BrokerActor(max_sessions=0)
         for i in range(12):
             conn = RecordingConn()
-            await _attach(broker, conn, client_id=f'c{i}', expiry=_NEVER)
+            await _attach(broker, conn, client_id=f'c{i}', expiry=SESSION_EXPIRY_NEVER)
             await _detach(broker, conn)
         assert len(broker._sessions) == 12
 
@@ -293,7 +292,7 @@ class TestSessionExpiry:
         """An MQTT extension with no expiring session pays no idle wakeup."""
         broker = BrokerActor()
         conn = RecordingConn()
-        await _attach(broker, conn, client_id='c', expiry=_NEVER)
+        await _attach(broker, conn, client_id='c', expiry=SESSION_EXPIRY_NEVER)
         await _detach(broker, conn)
         assert broker._expiry_timer is None
 
@@ -330,7 +329,7 @@ class TestSessionExpiry:
         """
         broker = BrokerActor()
         first = RecordingConn()
-        await _attach(broker, first, client_id='c', expiry=_NEVER)
+        await _attach(broker, first, client_id='c', expiry=SESSION_EXPIRY_NEVER)
         await _detach(broker, first)
 
         second = RecordingConn()
@@ -370,7 +369,7 @@ class TestSessionExpiry:
         """§3.14.2.2.2 — DISCONNECT carries a Session Expiry Interval too."""
         broker = BrokerActor()
         conn = RecordingConn()
-        await _attach(broker, conn, client_id='c', expiry=_NEVER)
+        await _attach(broker, conn, client_id='c', expiry=SESSION_EXPIRY_NEVER)
         await _detach(broker, conn, expiry=0)
         assert 'c' not in broker._sessions
 
@@ -380,5 +379,5 @@ class TestSessionExpiry:
         broker = BrokerActor()
         conn = RecordingConn()
         await _attach(broker, conn, client_id='c', expiry=0)
-        await _detach(broker, conn, expiry=_NEVER)
+        await _detach(broker, conn, expiry=SESSION_EXPIRY_NEVER)
         assert 'c' not in broker._sessions

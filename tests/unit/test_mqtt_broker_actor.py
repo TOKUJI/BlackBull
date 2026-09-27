@@ -16,6 +16,7 @@ from blackbull.mqtt.broker import (
     _new_broker_session,
 )
 from blackbull.mqtt.messages import (
+    ReasonCode,
     MQTTConnect, MQTTConnack, MQTTPublish, MQTTPuback, MQTTPubrec,
     MQTTPubcomp, MQTTSubscribe, MQTTSuback, MQTTUnsubscribe, MQTTUnsuback,
 )
@@ -54,7 +55,7 @@ async def test_connect_replies_connack_success():
     pkts = conn.packets()
     assert len(pkts) == 1
     assert isinstance(pkts[0], MQTTConnack)
-    assert pkts[0].reason_code == 0x00
+    assert pkts[0].reason_code == ReasonCode.SUCCESS
     assert pkts[0].session_present is False
 
 
@@ -66,7 +67,7 @@ async def test_connect_unsupported_version_rejected_and_closed():
         sender=conn))
     # CONNACK 0x84 then Close
     assert isinstance(conn.outbox[0], Send)
-    assert conn.outbox[0].packet.reason_code == 0x84
+    assert conn.outbox[0].packet.reason_code == ReasonCode.UNSUPPORTED_PROTOCOL_VERSION
     assert isinstance(conn.outbox[1], Close)
 
 
@@ -79,7 +80,7 @@ async def test_subscribe_acked_with_granted_qos():
     subacks = [p for p in conn.packets() if isinstance(p, MQTTSuback)]
     assert len(subacks) == 1
     assert subacks[0].packet_id == 10
-    assert subacks[0].reason_codes == [1]
+    assert subacks[0].reason_codes == [ReasonCode.GRANTED_QOS_1]
 
 
 async def test_subscribe_persists_options_in_session():

@@ -114,10 +114,11 @@ class PacketFramer:
         bytes is the decoder's verdict to give, one step later.
 
         **Only applied when the framer is synchronised.**  The gate's
-        answer is fatal — ``DISCONNECT 0x95`` and close — so it must only
-        judge bytes that really are a packet header.  After a resync the
-        buffer starts at a *guess*, and junk read as a Remaining Length
-        decodes to something enormous about as often as not; answering
+        answer is fatal — ``DISCONNECT`` with ``ReasonCode.PACKET_TOO_LARGE``
+        and close — so it must only judge bytes that really are a packet
+        header.  After a resync the buffer starts at a *guess*, and junk
+        read as a Remaining Length decodes to something enormous about as
+        often as not; answering
         that would turn a desync the framer can recover from into a
         connection the peer cannot re-establish its way out of.  A fresh
         connection begins at a boundary, and every successful decode ends
