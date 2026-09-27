@@ -126,21 +126,21 @@ class TestFixedHeader:
 
     # §2.1.1 Table 2-1 — Control Packet Types
     @pytest.mark.parametrize("packet_type,expected_name", [
-        (MQTTPacketType.CONNECT,     'CONNECT'),
-        (MQTTPacketType.CONNACK,     'CONNACK'),
-        (MQTTPacketType.PUBLISH,     'PUBLISH'),
-        (MQTTPacketType.PUBACK,      'PUBACK'),
-        (MQTTPacketType.PUBREC,      'PUBREC'),
-        (MQTTPacketType.PUBREL,      'PUBREL'),
-        (MQTTPacketType.PUBCOMP,     'PUBCOMP'),
-        (MQTTPacketType.SUBSCRIBE,   'SUBSCRIBE'),
-        (MQTTPacketType.SUBACK,      'SUBACK'),
-        (MQTTPacketType.UNSUBSCRIBE, 'UNSUBSCRIBE'),
-        (MQTTPacketType.UNSUBACK,    'UNSUBACK'),
-        (MQTTPacketType.PINGREQ,     'PINGREQ'),
-        (MQTTPacketType.PINGRESP,    'PINGRESP'),
-        (MQTTPacketType.DISCONNECT,  'DISCONNECT'),
-        (MQTTPacketType.AUTH,        'AUTH'),
+        (1, 'CONNECT'),
+        (2, 'CONNACK'),
+        (3, 'PUBLISH'),
+        (4, 'PUBACK'),
+        (5, 'PUBREC'),
+        (6, 'PUBREL'),
+        (7, 'PUBCOMP'),
+        (8, 'SUBSCRIBE'),
+        (9, 'SUBACK'),
+        (10, 'UNSUBSCRIBE'),
+        (11, 'UNSUBACK'),
+        (12, 'PINGREQ'),
+        (13, 'PINGRESP'),
+        (14, 'DISCONNECT'),
+        (15, 'AUTH'),
     ])
     def test_packet_type_from_name(self, packet_type, expected_name):
         """§2.1.1 Table 2-1 — All 15 control packet types are recognized."""
@@ -696,56 +696,65 @@ class TestReasonCodes:
     §3.11.2.1 (UNSUBACK), §3.14.2.1 (DISCONNECT), §3.15.2.1 (AUTH).
     """
 
-    # The canonical label of ReasonCode.SUCCESS is 'Success'; a DISCONNECT
-    # also reads it as "Normal disconnection".
-    @pytest.mark.parametrize("code,expected_name", [
-        (ReasonCode.SUCCESS, 'Success'),
-        (ReasonCode.DISCONNECT_WITH_WILL, 'Disconnect with Will Message'),
-        (ReasonCode.NO_MATCHING_SUBSCRIBERS, 'No matching subscribers'),  # PUBACK/PUBREC reason code
-        (ReasonCode.NO_SUBSCRIPTION_EXISTED, 'No subscription existed'),  # UNSUBACK
-        (ReasonCode.CONTINUE_AUTHENTICATION, 'Continue authentication'),  # AUTH
-        (ReasonCode.REAUTHENTICATE, 'Re-authenticate'),          # AUTH
-        (ReasonCode.UNSPECIFIED_ERROR, 'Unspecified error'),
-        (ReasonCode.MALFORMED_PACKET, 'Malformed Packet'),
-        (ReasonCode.PROTOCOL_ERROR, 'Protocol Error'),
-        (ReasonCode.IMPLEMENTATION_SPECIFIC_ERROR, 'Implementation specific error'),
-        (ReasonCode.UNSUPPORTED_PROTOCOL_VERSION, 'Unsupported Protocol Version'),
-        (ReasonCode.CLIENT_IDENTIFIER_NOT_VALID, 'Client Identifier not valid'),
-        (ReasonCode.BAD_USER_NAME_OR_PASSWORD, 'Bad User Name or Password'),
-        (ReasonCode.NOT_AUTHORIZED, 'Not authorized'),
-        (ReasonCode.SERVER_UNAVAILABLE, 'Server unavailable'),
-        (ReasonCode.SERVER_BUSY, 'Server busy'),
-        (ReasonCode.BANNED, 'Banned'),
-        (ReasonCode.SERVER_SHUTTING_DOWN, 'Server shutting down'),
-        (ReasonCode.BAD_AUTHENTICATION_METHOD, 'Bad authentication method'),
-        (ReasonCode.KEEP_ALIVE_TIMEOUT, 'Keep Alive timeout'),
-        (ReasonCode.SESSION_TAKEN_OVER, 'Session taken over'),
-        (ReasonCode.TOPIC_FILTER_INVALID, 'Topic Filter invalid'),
-        (ReasonCode.TOPIC_NAME_INVALID, 'Topic Name invalid'),
-        (ReasonCode.PACKET_IDENTIFIER_IN_USE, 'Packet Identifier in use'),
-        (ReasonCode.PACKET_IDENTIFIER_NOT_FOUND, 'Packet Identifier not found'),
-        (ReasonCode.RECEIVE_MAXIMUM_EXCEEDED, 'Receive Maximum exceeded'),
-        (ReasonCode.TOPIC_ALIAS_INVALID, 'Topic Alias invalid'),
-        (ReasonCode.PACKET_TOO_LARGE, 'Packet too large'),
-        (ReasonCode.MESSAGE_RATE_TOO_HIGH, 'Message rate too high'),
-        (ReasonCode.QUOTA_EXCEEDED, 'Quota exceeded'),
-        (ReasonCode.ADMINISTRATIVE_ACTION, 'Administrative action'),
-        (ReasonCode.PAYLOAD_FORMAT_INVALID, 'Payload format invalid'),
-        (ReasonCode.RETAIN_NOT_SUPPORTED, 'Retain not supported'),
-        (ReasonCode.QOS_NOT_SUPPORTED, 'QoS not supported'),
-        (ReasonCode.USE_ANOTHER_SERVER, 'Use another server'),
-        (ReasonCode.SERVER_MOVED, 'Server moved'),
-        (ReasonCode.SHARED_SUBSCRIPTIONS_NOT_SUPPORTED, 'Shared Subscriptions not supported'),
-        (ReasonCode.CONNECTION_RATE_EXCEEDED, 'Connection rate exceeded'),
-        (ReasonCode.MAXIMUM_CONNECT_TIME, 'Maximum connect time'),
-        (ReasonCode.SUBSCRIPTION_IDENTIFIERS_NOT_SUPPORTED, 'Subscription Identifiers not supported'),
-        (ReasonCode.WILDCARD_SUBSCRIPTIONS_NOT_SUPPORTED, 'Wildcard Subscriptions not supported'),
-    ])
+    # §2.4 の独立転記 — 実装の enum から導かず、数値と名前の対応を検証する。
+    # ReasonCode.SUCCESS の正準ラベルは 'Success' で、DISCONNECT では
+    # "Normal disconnection" とも読まれる。
+    TABLE_2_9 = [
+        (0x00, 'Success'),
+        (0x01, 'Granted QoS 1'),
+        (0x02, 'Granted QoS 2'),
+        (0x04, 'Disconnect with Will Message'),
+        (0x10, 'No matching subscribers'),  # PUBACK/PUBREC reason code
+        (0x11, 'No subscription existed'),  # UNSUBACK
+        (0x18, 'Continue authentication'),  # AUTH
+        (0x19, 'Re-authenticate'),          # AUTH
+        (0x80, 'Unspecified error'),
+        (0x81, 'Malformed Packet'),
+        (0x82, 'Protocol Error'),
+        (0x83, 'Implementation specific error'),
+        (0x84, 'Unsupported Protocol Version'),
+        (0x85, 'Client Identifier not valid'),
+        (0x86, 'Bad User Name or Password'),
+        (0x87, 'Not authorized'),
+        (0x88, 'Server unavailable'),
+        (0x89, 'Server busy'),
+        (0x8A, 'Banned'),
+        (0x8B, 'Server shutting down'),
+        (0x8C, 'Bad authentication method'),
+        (0x8D, 'Keep Alive timeout'),
+        (0x8E, 'Session taken over'),
+        (0x8F, 'Topic Filter invalid'),
+        (0x90, 'Topic Name invalid'),
+        (0x91, 'Packet Identifier in use'),
+        (0x92, 'Packet Identifier not found'),
+        (0x93, 'Receive Maximum exceeded'),
+        (0x94, 'Topic Alias invalid'),
+        (0x95, 'Packet too large'),
+        (0x96, 'Message rate too high'),
+        (0x97, 'Quota exceeded'),
+        (0x98, 'Administrative action'),
+        (0x99, 'Payload format invalid'),
+        (0x9A, 'Retain not supported'),
+        (0x9B, 'QoS not supported'),
+        (0x9C, 'Use another server'),
+        (0x9D, 'Server moved'),
+        (0x9E, 'Shared Subscriptions not supported'),
+        (0x9F, 'Connection rate exceeded'),
+        (0xA0, 'Maximum connect time'),
+        (0xA1, 'Subscription Identifiers not supported'),
+        (0xA2, 'Wildcard Subscriptions not supported'),
+    ]
+
+    @pytest.mark.parametrize("code,expected_name", TABLE_2_9)
     def test_reason_code_recognized(self, code, expected_name):
         """All MQTT 5.0 reason codes are recognized by name."""
         from blackbull.mqtt.messages import MQTTReasonCode
         rc = MQTTReasonCode(code)
         assert rc.name == expected_name
+
+    def test_the_table_covers_the_whole_registry(self):
+        assert {code for code, _ in self.TABLE_2_9} == \
+            {int(rc) for rc in ReasonCode}
 
     def test_a_code_below_unspecified_error_reports_success(self):
         from blackbull.mqtt.messages import MQTTReasonCode
