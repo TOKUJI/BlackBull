@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+- **A multi-worker master's exit code reflects its workers' ends.**  A stop
+  in which any worker failed to clean up exits non-zero (previously 0);
+  workers that died during normal operation and were respawned do not
+  affect it.
 - **Precompressed static variants are held to the served root.**  A
   `<path>.<suffix>` sibling resolving outside the root — a symlink, say —
   answers `400` before it is cached, opened or sent.  Inward symlinks and
