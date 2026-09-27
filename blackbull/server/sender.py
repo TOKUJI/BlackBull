@@ -438,6 +438,34 @@ _SenderBody = _SenderEvent | bytes | NativeResponse
 _WSSenderEvent = WebSocketSendEvent | WebSocketCloseEvent | WebSocketAcceptEvent
 
 
+def _native_from_asgi(event):
+    """One dict → [`NativeResponse`][blackbull.native.NativeResponse].
+
+    Every shape but a promised request and an unknown one is expressible
+    natively, so the senders keep a single code path and the ASGI spelling
+    exists only here.  The rest is handed back unchanged for the senders to
+    decide on.
+    """
+    kind = event.get('type')
+    if kind == ASGIEvent.HTTP_RESPONSE_START:
+        return NativeResponse(
+            status=int(event.get('status', HTTPStatus.OK)),
+            header=list(event.get('headers') or []),
+            expects_trailers=bool(event.get('trailers', False)))
+    if kind == ASGIEvent.HTTP_RESPONSE_BODY:
+        # A missing body is a spec violation; an empty one keeps the response
+        # completing where a skipped body would hang it.
+        return NativeResponse(body=event.get('body') or b'',
+                              more_body=bool(event.get('more_body', False)))
+    if kind == ASGIEvent.HTTP_RESPONSE_TRAILERS:
+        return NativeResponse(trailers=list(event.get('headers') or []),
+                              more_trailers=bool(event.get('more_trailers',
+                                                          False)))
+    if kind == ASGIEvent.HTTP_RESPONSE_PATHSEND:
+        return NativeResponse(file_path=event['path'])
+    return event
+
+
 class BaseSender(ABC):
     """Abstract base for ASGI-event → wire-format senders.
 
@@ -636,6 +664,9 @@ class HTTP1Sender(BaseSender):
             # splice a second status line into the unfinished message.
             self._poisoned = True
             return
+
+        if isinstance(body, dict):
+            body = _native_from_asgi(body)
 
         match body:
             case bytes():
