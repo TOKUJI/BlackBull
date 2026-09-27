@@ -705,6 +705,9 @@ class HTTP1Sender(BaseSender):
                     # content, so a body event cannot end it. The next `start`
                     # recomputes this.
                     self._suppress_body = True
+                    if self._log_record is not None:
+                        self._log_record.status = body.get('status', '-')
+                        self._log_record.mark('start_arm_out')
                     return
                 if self._log_record is not None:
                     self._log_record.status = body.get('status', '-')
