@@ -707,10 +707,6 @@ class HTTP1Sender(BaseSender):
                                 elif hkl == b'content-encoding':
                                     self._log_record.resp_content_encoding = hv
                         self._log_record.mark('start_arm_out')
-                if body.push is not None:
-                    logger.warning(
-                        'HTTP1Sender: push sent on HTTP/1; dropped')
-                    return
                 if body.file_path is not None:
                     if await self._pathsend(body.file_path):
                         self._completed = True
@@ -722,6 +718,9 @@ class HTTP1Sender(BaseSender):
                     self._response_started = True
                     await self._handle_trailers(
                         body.trailers, body.more_trailers)
+                if body.push is not None:
+                    logger.warning(
+                        'HTTP1Sender: push sent on HTTP/1; dropped')
 
             case {'type': str() as event_type}:
                 logger.warning('HTTP1Sender: unknown event type %r', event_type)
