@@ -5970,6 +5970,13 @@ revalidation of a large asset costs no disk I/O.  Pass
   <code>400 Bad Request</code>.</li>
 <li><strong>Directory listing</strong>: Requests for bare directories return
   <code>404</code>; no directory listing is ever served.</li>
+<li><strong>Precompressed variants</strong>: the check applies to the file finally
+  selected — original, index or a <code>.br</code> / <code>.zst</code> / <code>.gz</code> sibling.  A
+  sibling symlink resolving outside the root answers <code>400</code> before it is
+  cached, opened or sent; symlinks resolving inside keep serving.  It
+  re-runs every request (a swap between requests is refused on the next
+  one) but not within one request — do not leave the served tree writable
+  by untrusted users.</li>
 </ul>
 <h2 id="inspecting-registered-roots">Inspecting registered roots<a class="headerlink" href="#inspecting-registered-roots" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="n">app</span><span class="o">.</span><span class="n">static</span><span class="p">(</span><span class="s1">'/a'</span><span class="p">,</span> <span class="s1">'public/a'</span><span class="p">)</span>
