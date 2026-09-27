@@ -654,13 +654,7 @@ class HTTP1Sender(BaseSender):
                     header_pairs = list(body._header)
                     _validate_response_header_fields(header_pairs)
                     self._response_started = True
-                    # A head that never got content is complete.  The four response arms
-                    # spell this out rather than share it; search for the other copies
-                    # before editing one of them.
-                    if self._buffered_status is not None:
-                        await self._send_interim(
-                            self._buffered_status,
-                            self._buffered_headers)
+                    await self._settle_buffered_head()
                     self._buffered_status = HTTPStatus(body.status)
                     # Preserve the ASGI start `trailers: True` flag so a
                     # terminal body before the trailers event withholds the
@@ -694,13 +688,7 @@ class HTTP1Sender(BaseSender):
                 header_pairs = list(body.get('headers', []))
                 _validate_response_header_fields(header_pairs)
                 self._response_started = True
-                    # A head that never got content is complete.  The four response arms
-                    # spell this out rather than share it; search for the other copies
-                    # before editing one of them.
-                if self._buffered_status is not None:
-                    await self._send_interim(
-                        self._buffered_status,
-                        self._buffered_headers)
+                await self._settle_buffered_head()
                 self._buffered_status = HTTPStatus(body.get('status', HTTPStatus.OK))
                 self._expect_trailers = bool(body.get('trailers', False))
                 self._buffered_headers = Headers(header_pairs)
@@ -931,6 +919,11 @@ class HTTP1Sender(BaseSender):
             await self._write_many((head, body))
         else:
             await self._write(head)
+
+    async def _settle_buffered_head(self) -> None:
+        if self._buffered_status is not None:
+            await self._send_interim(self._buffered_status,
+                                    self._buffered_headers)
 
     async def _send_interim(self, status: HTTPStatus,
                             headers: HeaderList) -> None:
@@ -1304,6 +1297,11 @@ class HTTP2Sender(BaseSender):
         self._buffered_status = None
         self._buffered_headers = None
         await self._write_response_start_and_body(body, False, status, headers, expect)
+
+    async def _settle_buffered_head(self) -> None:
+        if self._buffered_status is not None:
+            await self._send_interim(self._buffered_status,
+                                    self._buffered_headers)
 
     async def _send_interim(self, status: HTTPStatus,
                             headers: list[tuple[bytes, bytes]],
@@ -1706,10 +1704,7 @@ class HTTP2Sender(BaseSender):
             if body._header is not None:
                 header_pairs = list(body._header)
                 _validate_response_header_fields(header_pairs)
-                if self._buffered_status is not None:
-                    await self._send_interim(
-                        self._buffered_status,
-                        self._buffered_headers)
+                await self._settle_buffered_head()
                 self._buffered_status = HTTPStatus(body.status)
                 self._buffered_headers = header_pairs
                 self._expect_trailers = body.expects_trailers
@@ -1750,10 +1745,7 @@ class HTTP2Sender(BaseSender):
             if event_type == ASGIEvent.HTTP_RESPONSE_START:
                 header_pairs = list(body.get('headers', []))
                 _validate_response_header_fields(header_pairs)
-                if self._buffered_status is not None:
-                    await self._send_interim(
-                        self._buffered_status,
-                        self._buffered_headers)
+                await self._settle_buffered_head()
                 self._buffered_status = HTTPStatus(body.get('status', 200))
                 self._buffered_headers = header_pairs
                 self._expect_trailers = bool(body.get('trailers', False))
