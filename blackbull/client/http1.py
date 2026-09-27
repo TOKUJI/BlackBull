@@ -729,6 +729,14 @@ class HTTP1ResponseRecipient:
         )
         protocol_switched = status == 101 or successful_connect
         if body_forbidden or successful_connect:
+            if (is_informational(status) or status == 204) and (
+                    headers.getlist(b'transfer-encoding')
+                    or headers.getlist(b'content-length')):
+                # RFC 9112 §6.1 forbids both fields in a 1xx or a 204.  A
+                # peer sending one declared a boundary this message cannot
+                # have, and the octets that follow cannot be told apart from
+                # the next response, so this connection is not reusable.
+                return _NO_BODY, None, False, protocol_switched
             return _NO_BODY, None, not protocol_switched, protocol_switched
 
         transfer_fields = headers.getlist(b'transfer-encoding')

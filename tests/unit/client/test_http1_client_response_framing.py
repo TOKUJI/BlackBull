@@ -1124,3 +1124,70 @@ async def test_websocket_client_handshake_preserves_101_prebuffer(monkeypatch):
     assert raw.close_calls == 0
     await client.__aexit__(None, None, None)
     assert raw.close_calls == 1
+
+
+class TestContentlessResponsesDoNotClaimABoundary:
+    """RFC 9112 §6.3 rule 1 — a message without content declares no length.
+
+    §6.1 forbids ``Content-Length`` and ``Transfer-Encoding`` in a 1xx or a
+    204, so a peer sending one has declared a boundary this message cannot
+    have.  The octets that would follow are indistinguishable from the next
+    response, and a connection that cannot tell them apart is not reusable.
+    A HEAD or 304 is different: there the length is metadata about the
+    representation, and keep-alive survives it.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_204_claiming_content_is_not_reusable(self):
+        reader = _Reader(b'HTTP/1.1 204 No Content\r\nContent-Length: 3\r\n'
+                         b'\r\nodd')
+        recipient = HTTP1ResponseRecipient(request_method='GET')
+
+        response = await recipient.receive(reader)
+
+        assert response.body == b''
+        assert recipient.reusable is False
+
+    @pytest.mark.asyncio
+    async def test_a_204_claiming_chunked_is_not_reusable(self):
+        reader = _Reader(b'HTTP/1.1 204 No Content\r\n'
+                         b'Transfer-Encoding: chunked\r\n\r\n0\r\n\r\n')
+        recipient = HTTP1ResponseRecipient(request_method='GET')
+
+        response = await recipient.receive(reader)
+
+        assert response.body == b''
+        assert recipient.reusable is False
+
+    @pytest.mark.asyncio
+    async def test_a_204_without_a_boundary_is_reusable(self):
+        reader = _Reader(b'HTTP/1.1 204 No Content\r\n\r\n'
+                         b'HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n')
+        recipient = HTTP1ResponseRecipient(request_method='GET')
+
+        response = await recipient.receive(reader)
+
+        assert response.body == b''
+        assert recipient.reusable is True
+
+    @pytest.mark.asyncio
+    async def test_a_head_response_keeps_the_length_it_only_describes(self):
+        reader = _Reader(b'HTTP/1.1 200 OK\r\nContent-Length: 17\r\n\r\n'
+                         b'HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n')
+        recipient = HTTP1ResponseRecipient(request_method='HEAD')
+
+        response = await recipient.receive(reader)
+
+        assert response.body == b''
+        assert recipient.reusable is True
+
+    @pytest.mark.asyncio
+    async def test_a_304_keeps_the_length_it_only_describes(self):
+        reader = _Reader(b'HTTP/1.1 304 Not Modified\r\nContent-Length: 17\r\n'
+                         b'\r\n')
+        recipient = HTTP1ResponseRecipient(request_method='GET')
+
+        response = await recipient.receive(reader)
+
+        assert response.body == b''
+        assert recipient.reusable is True
