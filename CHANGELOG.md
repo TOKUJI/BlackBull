@@ -5,6 +5,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+- **A lifespan task that dies after its startup ack is reported at once**,
+  not only at shutdown.  Serving continues; the shutdown failure still
+  surfaces exactly as before.
 - **A multi-worker master's exit code reflects its workers' ends.**  A stop
   in which any worker failed to clean up exits non-zero (previously 0);
   workers that died during normal operation and were respawned do not
