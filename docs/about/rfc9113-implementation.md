@@ -582,7 +582,10 @@ after every pre-dispatch mutation of the `Connection` (e.g. late
 Malformed requests are RST PROTOCOL_ERROR *before the application sees them*,
 checked at two points: the direct-HEADERS path in
 `HTTP2Actor._on_headers_frame()` and the post-CONTINUATION path in
-`HTTP2Actor._on_continuation_frame()`.  Content-length is validated by
+`HTTP2Actor._on_continuation_frame()`.  The trailing field section is a field
+section too (§8.1), so `_complete_header_block()`'s trailers branch grades it
+with §8.2.1 and gives the request the same verdict instead of completing it.
+Content-length is validated by
 accumulating `stream.received_data_bytes`: excess on any frame → immediate RST;
 deficit at END_STREAM → RST (padding excluded).  *Because* §8.1.1 makes the
 server, not the app, responsible for rejecting framing-level malformation — a

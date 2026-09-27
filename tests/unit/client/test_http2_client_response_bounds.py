@@ -279,7 +279,11 @@ class TestTheHeaderAggregate:
         await _feed_headers(c, 1, self._section(10), status=None,
                             end_stream=True)
 
-    async def test_off_by_default_repeated_headers_are_accepted(self):
+    async def test_off_by_default_repeated_headers_are_accepted(
+            self, monkeypatch):
+        # The aggregate is the subject here; the interim cap counts sections
+        # too and would refuse first.
+        monkeypatch.setenv('BB_CLIENT_MAX_INTERIM_RESPONSES', '0')
         c = _client()
         future = _pending(c)
         await self._sections(c, 21)
@@ -287,6 +291,7 @@ class TestTheHeaderAggregate:
 
     async def test_headers_accumulating_past_the_cap_are_refused(self, monkeypatch):
         monkeypatch.setenv('BB_CLIENT_HEAD_MAX_TOTAL', '4096')
+        monkeypatch.setenv('BB_CLIENT_MAX_INTERIM_RESPONSES', '0')
         c = _client()
         future = _pending(c)
         await self._sections(c, 21)

@@ -17,6 +17,7 @@ from ..actor import Actor, Message
 from ..event_aggregator import EventAggregator
 from ..logger import log, debug_gate
 from ..protocol.frame import FrameFactory
+from ..protocol.framing import method_is
 from ..protocol.frame_types import (
     ErrorCodes, FrameBase, FrameTypes,
     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE,
@@ -408,7 +409,7 @@ class HTTP2Actor(Actor):
         self._next_push_stream_id += 2
         return sid
 
-    def make_sender(self, stream_id: int):
+    def make_sender(self, stream_id: int, head_mode: bool | None = None):
         if stream_id not in self._senders:
             sender = SenderFactory.http2(
                 self._writer, self.factory, stream_id,
@@ -418,8 +419,12 @@ class HTTP2Actor(Actor):
                 # SETTINGS received before this stream opened may have moved it.
                 initial_window=self._peer_initial_window_size,
                 flow_control_timeout=self._write_timeout,
+                head_mode=bool(head_mode),
             )
             self._senders[stream_id] = sender
+        elif head_mode is not None:
+            # Cached before the request head said what the method was.
+            self._senders[stream_id]._head_mode = head_mode
         return self._senders[stream_id]
 
     def _make_stream_recipient(self, stream_id: int) -> HTTP2Recipient:
@@ -1298,19 +1303,24 @@ class HTTP2Actor(Actor):
         a later CONTINUATION frame.
         """
         if stream.conn is not None:
-            # RFC 9113 §8.1 — a second field section is trailers, not a new
-            # request.  They are not surfaced to the app, so only the
-            # END_STREAM transition is observable.  Handling it here is what
-            # makes single-frame and fragmented trailers share one recipient,
-            # and what stops a second handler from starting.
-            if not header_frame.end_stream:
+            # RFC 9113 §8.1 — a second field section is trailers: it must end
+            # the request and reach no handler; a malformed one earns the
+            # head's verdict.
+            if not header_frame.end_stream or header_frame.malformed:
+                if _DEBUG:
+                    logger.debug(
+                        'Stream %d refused trailing field section — %s',
+                        stream.stream_id,
+                        header_frame.malformed_reason
+                        or 'section does not end the request')
+                self._retire_stream(stream.stream_id, via_rst=True)
                 await self.send_frame(self.factory.rst_stream(
                     stream.stream_id, ErrorCodes.PROTOCOL_ERROR))
-            else:
-                stream.on_data_received(end_stream=True)
-                recipient = self._recipients.get(stream.stream_id)
-                if recipient is not None:
-                    recipient.put_end_of_stream()
+                return True
+            stream.on_data_received(end_stream=True)
+            recipient = self._recipients.get(stream.stream_id)
+            if recipient is not None:
+                recipient.put_end_of_stream()
             return True
 
         if self._active_stream_count >= self.max_concurrent_streams:
@@ -1358,6 +1368,10 @@ class HTTP2Actor(Actor):
 
         stream.expected_content_length = _extract_content_length(conn)
         stream.conn = conn
+        # Before anything can refuse the request and write its own response:
+        # that response owes the same content rules as the application's.
+        self.make_sender(stream.stream_id,
+                         head_mode=method_is(conn.method, 'HEAD'))
 
         # Guarded inline rather than behind a predicate: a stream is a request,
         # and a method call to answer "no" measured 21 executed instructions
@@ -1595,7 +1609,9 @@ class HTTP2Actor(Actor):
         conn = stream.conn
         assert conn is not None
         conn.connection_id = self._connection_id or new_connection_id()
-        stream_send = self.make_sender(stream.stream_id)
+        stream_send = self.make_sender(stream.stream_id,
+                                       head_mode=method_is(conn.method,
+                                                           'HEAD'))
 
         async def _ws_send_200(subprotocol=None):
             headers = []

@@ -17,6 +17,7 @@ its payload.
 from ..protocol.frame_types import PseudoHeaders
 from ..protocol.field_grammar import (COMMON_METHODS, COMMON_SCHEMES,
                                       URI_SCHEME_RE, method_token_is_valid)
+from ..protocol.framing import method_is
 import logging
 from ..connection import Connection
 from ..headers import Headers
@@ -213,7 +214,8 @@ def parse_headers(frame) -> Connection | None:
         # this maps ASCII case only.
         scheme = scheme_pseudo.lower()
 
-    if method != 'CONNECT':
+    connect = method_is(method, 'CONNECT')
+    if not connect:
         if PseudoHeaders.SCHEME not in frame.pseudo_headers:
             frame._mark_malformed('missing :scheme')
             return None
@@ -226,7 +228,7 @@ def parse_headers(frame) -> Connection | None:
 
     protocol = frame.pseudo_headers.get(PseudoHeaders.PROTOCOL, '')
 
-    if method == 'CONNECT' and protocol == 'websocket':
+    if connect and protocol == 'websocket':
         # RFC 8441 §4 — Extended CONNECT bootstrapping WebSocket over HTTP/2.
         # ``method`` is the true wire value, never a placeholder: it IS read
         # for websocket-typed Connections, by ``AccessLogRecord.from_conn``
@@ -264,7 +266,7 @@ def parse_headers(frame) -> Connection | None:
     # field name malformed and ``HeadersFrame.parse_payload`` rejects the
     # frame before the pair reaches ``frame.headers``, so the list is
     # lowercase by protocol.  The injected ``host`` is a lowercase literal.
-    if method == 'CONNECT':
+    if connect:
         headers = Headers.from_lowered(frame.headers)
     else:
         raw_headers = _request_headers_with_host(

@@ -861,6 +861,42 @@ class TestG13FieldCharacterValidation:
         assert app.await_count == 1
         assert not _sent_rst_streams(handler, 1)
 
+    @pytest.mark.parametrize('bad_field', [
+        (b'x-trailer', b' value'), (b'x-trailer', b'value '),
+        (b'x-trailer', b'value\x00'), (b'x-trailer', b'value\r'),
+        (b'X-Trailer', b'value'),
+    ])
+    @pytest.mark.asyncio
+    async def test_a_malformed_trailer_field_is_malformed(self, bad_field):
+        handler, app = _make_h2_actor()
+        head = _make_headers_frame(1, end_stream=False)
+        trailers = _make_headers_frame(1, end_stream=True, fields=[bad_field])
+        settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
+        handler.receive = AsyncMock(
+            side_effect=[settings, head, trailers, None])
+        await handler.run()
+
+        assert [f.error_code for f in _sent_rst_streams(handler, 1)] \
+            == [ErrorCodes.PROTOCOL_ERROR], \
+            f'Trailer violation ({bad_field!r}) was not answered with ' \
+            f'RST_STREAM(PROTOCOL_ERROR)'
+        assert app.await_count == 0, \
+            f'Trailer violation ({bad_field!r}) reached the application'
+
+    @pytest.mark.asyncio
+    async def test_a_valid_trailer_field_section_is_accepted(self):
+        handler, app = _make_h2_actor()
+        head = _make_headers_frame(1, end_stream=False)
+        trailers = _make_headers_frame(
+            1, end_stream=True, fields=[(b'x-trailer', b'value')])
+        settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
+        handler.receive = AsyncMock(
+            side_effect=[settings, head, trailers, None])
+        await handler.run()
+
+        assert app.await_count == 1
+        assert not _sent_rst_streams(handler, 1)
+
     @staticmethod
     async def _check_malformed_field(bad_field, description):
         handler, app = _make_h2_actor()

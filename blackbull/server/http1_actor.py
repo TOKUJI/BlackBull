@@ -18,7 +18,7 @@ from ..asgi import ASGIReceiveCallable, ASGISendCallable
 from ..connection import (
     Connection, bind_receive_channel)
 from ..headers import Headers
-from ..protocol.framing import parse_content_length
+from ..protocol.framing import method_is, parse_content_length
 from .deadline import ConnectionDeadline
 from .request_target import split_path_query
 from .recipient import (CONNECTION_MUST_CLOSE, CONNECTION_NEEDS_DRAIN,
@@ -904,7 +904,7 @@ class HTTP1Actor(Actor):
         # (CONNECT only), and asterisk (``*``, server-wide OPTIONS).
         authority_override: bytes | None = None
         asterisk_form = False
-        if method == b'CONNECT':
+        if method_is(method, 'CONNECT'):
             # authority-form target (§3.2.3) — tunnel establishment, which
             # BlackBull does not implement.  Answer 501, not a spurious 404.
             raise NotImplementedFramingError(
@@ -1292,7 +1292,7 @@ class HTTP1Actor(Actor):
         # ``scope['method']`` too would force materialization for nothing.
         # The access log keeps the original HEAD, from the request line.
         send._log_record = log_record
-        send._head_mode = (conn.method == 'HEAD')
+        send._head_mode = method_is(conn.method, 'HEAD')
         if send._head_mode:
             conn.method = 'GET'
 

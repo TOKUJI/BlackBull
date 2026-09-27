@@ -161,8 +161,9 @@ and its other streams survive. `res.headers` holds the final head's fields
 only and `res.trailers` the trailer section: RFC 9113 §8.1 keeps the two
 field sections apart, and gRPC puts `grpc-status` in the trailer. Folding
 them together, as this client did, left a caller unable to tell which
-section a field came from. Informational heads are read and discarded, which
-is what the HTTP/1.1 reader has always done with them.
+section a field came from. The HTTP/1.1 client discards trailers as it reads
+them, so `res.trailers` is always empty there. Informational heads are read
+and discarded, which is what the HTTP/1.1 reader has always done with them.
 
 ## What a call raises
 
