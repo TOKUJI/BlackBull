@@ -530,7 +530,7 @@ class MultiWorkerServer:
             p.start()
             logger.info('Spawned worker %d (PID %d)', worker_id, p.pid)
         except BaseException:
-            unreclaimed, cleanup_error = self._reclaim_processes(
+            unreclaimed, _ends, cleanup_error = self._reclaim_processes(
                 [p], self._cleanup_deadline_value(),
                 terminate=True)
             if not unreclaimed:
@@ -572,7 +572,7 @@ class MultiWorkerServer:
                 try:
                     replacement = self._spawn_worker(i)
                 except BaseException:
-                    _unreclaimed, cleanup_error = self._reclaim_processes(
+                    _unreclaimed, _ends, cleanup_error = self._reclaim_processes(
                         [p], self._cleanup_deadline_value(),
                         terminate=False)
                     if cleanup_error is not None:
@@ -581,7 +581,7 @@ class MultiWorkerServer:
                     raise
                 self._processes[i] = replacement
                 self._remove_pending_process(replacement)
-                unreclaimed, cleanup_error = self._reclaim_processes(
+                unreclaimed, _ends, cleanup_error = self._reclaim_processes(
                     [p], time.monotonic() + self._shutdown_timeout,
                     terminate=False)
                 self._pending_processes.extend(
@@ -624,9 +624,13 @@ class MultiWorkerServer:
             self._cleanup_deadline = time.monotonic() + self._shutdown_timeout
         return self._cleanup_deadline
 
-    def _terminate_all(self) -> Exception | None:
-        """Ask every running child to stop, continuing after any error."""
+    def _terminate_all(self) -> tuple[list, Exception | None]:
+        """Ask every running child to stop, continuing after any error.
+
+        Returns the children actually signalled: one already dead died
+        during normal operation, which carries no shutdown verdict."""
         errors = []
+        signaled = []
         processes = self._owned_processes()
         logger.info('Sending SIGTERM to %d worker(s)', len(processes))
         for p in processes:
@@ -636,15 +640,19 @@ class MultiWorkerServer:
                 continue
             try:
                 p.terminate()
+                signaled.append(p)
             except Exception as exc:
                 errors.append(exc)
                 logger.exception('Failed to terminate worker')
-        return combine_cleanup_errors(*errors)
+        return signaled, combine_cleanup_errors(*errors)
 
     def _reclaim_processes(self, processes, deadline: float, *, terminate: bool):
-        """Reap and close process objects without exceeding *deadline*."""
+        """Reap and close process objects without exceeding *deadline*.
+
+        Returns each reaped process with its exit code, read before close."""
         errors = []
         unreclaimed = []
+        ends = []
         for p in processes:
             alive, state_error = self._process_is_alive(p)
             errors.append(state_error)
@@ -680,6 +688,10 @@ class MultiWorkerServer:
                     'worker did not stop before the deadline'))
                 continue
             try:
+                ends.append((p, p.exitcode))
+            except Exception:
+                ends.append((p, None))
+            try:
                 p.close()
             except ValueError:
                 # A closed Process has no resources left to reclaim.
@@ -688,21 +700,27 @@ class MultiWorkerServer:
                 errors.append(exc)
                 logger.exception('Failed to close worker process')
                 unreclaimed.append(p)
-        return unreclaimed, combine_cleanup_errors(*errors)
+        return unreclaimed, ends, combine_cleanup_errors(*errors)
 
     def _shutdown_all(self) -> Exception | None:
         deadline = self._cleanup_deadline_value()
-        termination_error = self._terminate_all()
+        signaled, termination_error = self._terminate_all()
         watcher_error = self._stop_watcher()
         processes = self._owned_processes()
-        unreclaimed, reclaim_error = self._reclaim_processes(
+        unreclaimed, ends, reclaim_error = self._reclaim_processes(
             processes, deadline, terminate=False)
         self._processes = []
         self._pending_processes = unreclaimed
         if not unreclaimed:
             logger.info('All workers stopped')
+        # A stop whose signalled worker did not end 0 must not exit 0 (BLA-452).
+        failed = [f'{p.name} (exit {code})' for p, code in ends
+                  if any(p is s for s in signaled) and code not in (0, None)]
+        worker_error = (RuntimeError(
+            f'worker(s) failed to shut down cleanly: {", ".join(failed)}')
+            if failed else None)
         return combine_cleanup_errors(
-            termination_error, watcher_error, reclaim_error)
+            worker_error, termination_error, watcher_error, reclaim_error)
 
     def _stop_watcher(self) -> Exception | None:
         if self._watcher is None:
