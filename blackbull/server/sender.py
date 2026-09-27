@@ -1684,12 +1684,26 @@ class HTTP2Sender(BaseSender):
                 return
 
             if event_type == ASGIEvent.HTTP_RESPONSE_START:
-                # Buffered, not written: HEADERS coalesces with the first body.
                 header_pairs = list(body.get('headers', []))
                 _validate_response_header_fields(header_pairs)
                 self._buffered_status = HTTPStatus(body.get('status', 200))
                 self._buffered_headers = header_pairs
                 self._expect_trailers = bool(body.get('trailers', False))
+                if is_informational(self._buffered_status):
+                    # RFC 9113 §8.1: an interim response is part of the
+                    # exchange it answers and does not end the stream, so it
+                    # is written as it is accepted.  Waiting for a body event
+                    # to flush it would let the next `start` overwrite it and
+                    # the interim response would never be sent.
+                    await self.send_response_headers(
+                        self._buffered_status, header_pairs)
+                    self._buffered_status = None
+                    self._buffered_headers = None
+                    self._expect_trailers = False
+                    # RFC 9112 §6.3 rule 1, and the reason the stream stays
+                    # open: an interim response carries no content, so a body
+                    # event cannot end it. The next `start` recomputes this.
+                    self._suppress_body = True
                 if self._log_record is not None:
                     self._log_record.status = body.get('status', '-')
                     self._log_record.mark('start_arm_in')

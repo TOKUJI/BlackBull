@@ -278,11 +278,10 @@ less than one that draws its own boundary:
 - **"No known gaps" is not "no gaps."** A bound that no one has found missing is
   not the same as a bound proven complete. This work is continuing, not
   finished.
-- **The HTTP/2 sender does not implement informational responses.** An
-  interim head is written only when a body event follows it; a second
-  response head arriving first replaces it, and the interim never reaches the
-  wire. Nothing leaks and the frames stay self-consistent, but "Early Hints
-  sent" is not a thing this server does yet.
+- **The server does not send `100 (Continue)`.** It reads whatever request
+  body follows without asking first, so a client that would have waited for
+  the permission signal sends its body regardless. That is a lost
+  optimization, not a lost guarantee.
 
 On the async HTTP client specifically, and after the server ones so the
 contrast is visible:

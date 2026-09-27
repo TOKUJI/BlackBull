@@ -144,6 +144,20 @@ async def test_the_dict_arm_completes_a_final_response_after_an_interim_one():
     assert _wire(writer) == [(1, 0), (1, 0), (0, 1)]
 
 
+async def test_an_interim_head_is_written_before_the_next_one_arrives():
+    """RFC 9113 §8.1: "Interim responses ... do not end the stream" and are
+    part of the exchange they answer.  An interim head is written when it is
+    accepted.  Buffering it until a body event lets the next `start`
+    overwrite it, and the interim response is never sent at all."""
+    sender, writer = _sender()
+    await sender({'type': 'http.response.start', 'status': 103, 'headers': []})
+    await sender({'type': 'http.response.start', 'status': 200, 'headers': []})
+    await sender({'type': 'http.response.body', 'body': b'hello',
+                  'more_body': False})
+    await asyncio.sleep(0)
+    assert _wire(writer) == [(1, 0), (1, 0), (0, 1)]
+
+
 async def test_a_head_response_is_quiet_about_the_chunks_it_suppresses(caplog):
     """Suppressing the body is the sender doing its job, not an application
     mistake, so it logs nothing. Without this the message blames the app once
