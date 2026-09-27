@@ -23,8 +23,7 @@ pytestmark = [
     pytest.mark.skipif(os.name != 'posix', reason='needs fd passing (fd://)'),
 ]
 
-#: Repo root, for the child's ``import blackbull``: this checkout has no
-#: installed package, so the child needs the same sys.path the tests run with.
+#: Repo root, the cwd the child runs in.
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 #: A connect that succeeds and then says nothing is the defect, not a slow
@@ -163,7 +162,7 @@ class Server:
 
     def __init__(self, tmp_path: Path, *, workers: int, reuseport: int,
                  inherited_fd: int | None = None, port: int | None = None,
-                 unshare_net: bool = False):
+                 unshare_net: bool = False, child_env=None):
         kwargs = [f'workers={workers}']
         if inherited_fd is not None:
             kwargs.append(f'inherited_fd={inherited_fd}')
@@ -173,12 +172,8 @@ class Server:
         script.write_text(_CHILD.format(kwargs=', '.join(kwargs)))
         self.log_path = tmp_path / f'server-{time.monotonic_ns()}.log'
         self._log = open(self.log_path, 'w', buffering=1)
-        env = dict(os.environ)
-        env['PYTHONPATH'] = os.pathsep.join(
-            [str(_REPO_ROOT)] + [p for p in [env.get('PYTHONPATH')] if p])
-        env['PYTHONUNBUFFERED'] = '1'
-        env['BB_ACCESS_LOG'] = '0'
-        env['BB_SOCKET_REUSEPORT'] = str(reuseport)
+        env = child_env({'PYTHONUNBUFFERED': '1', 'BB_ACCESS_LOG': '0',
+                         'BB_SOCKET_REUSEPORT': str(reuseport)})
         # The worker count is an argument here; an inherited BB_WORKERS would
         # only be read when it is not.
         env.pop('BB_WORKERS', None)
@@ -328,13 +323,13 @@ def _assert_creator_conflict_refusal(server: Server, creator: socket.socket,
 @pytest.mark.timeout(_HARD_TIMEOUT)
 def test_a_creator_held_tcp_listener_is_refused(
         tmp_path: Path, host_family: int, host: str, v6only: int | None,
-        creator_reuseport: bool):
+        creator_reuseport: bool, child_env):
     """Every TCP family shape leaves connections with the creator."""
     creator = _tcp_listener(host_family, host, v6only,
                             reuseport=creator_reuseport)
     port = creator.getsockname()[1]
     adopted = os.dup(creator.fileno())
-    server = Server(tmp_path, workers=2, reuseport=1, inherited_fd=adopted)
+    server = Server(tmp_path, workers=2, reuseport=1, inherited_fd=adopted, child_env=child_env)
     os.close(adopted)
     try:
         _assert_creator_conflict_refusal(server, creator, port)
@@ -344,7 +339,7 @@ def test_a_creator_held_tcp_listener_is_refused(
 
 
 @pytest.mark.timeout(_HARD_TIMEOUT)
-def test_a_socket_from_another_network_namespace_is_refused(tmp_path: Path):
+def test_a_socket_from_another_network_namespace_is_refused(tmp_path: Path, child_env):
     """The adopted socket keeps the network namespace it was bound in."""
     if not _can_unshare_net():
         pytest.skip('needs a user and network namespace (unshare -rn)')
@@ -352,7 +347,7 @@ def test_a_socket_from_another_network_namespace_is_refused(tmp_path: Path):
     port = creator.getsockname()[1]
     adopted = os.dup(creator.fileno())
     server = Server(tmp_path, workers=2, reuseport=1, inherited_fd=adopted,
-                    unshare_net=True)
+                    unshare_net=True, child_env=child_env)
     os.close(adopted)
     try:
         outcome = _settle(server, port)
@@ -373,7 +368,7 @@ def test_a_socket_from_another_network_namespace_is_refused(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.timeout(_HARD_TIMEOUT)
-def test_a_released_listener_keeps_its_per_worker_sockets(tmp_path: Path):
+def test_a_released_listener_keeps_its_per_worker_sockets(tmp_path: Path, child_env):
     """The creator drops its own copy before the server binds, as
     ``systemd-socket-activate`` does."""
     creator = _tcp_listener()
@@ -381,7 +376,7 @@ def test_a_released_listener_keeps_its_per_worker_sockets(tmp_path: Path):
     creator_inode = os.fstat(creator.fileno()).st_ino
     adopted = os.dup(creator.fileno())
     creator.close()
-    server = Server(tmp_path, workers=2, reuseport=1, inherited_fd=adopted)
+    server = Server(tmp_path, workers=2, reuseport=1, inherited_fd=adopted, child_env=child_env)
     os.close(adopted)
     try:
         outcome = _settle(server, port)
@@ -420,7 +415,7 @@ def test_a_released_listener_keeps_its_per_worker_sockets(tmp_path: Path):
 
 
 @pytest.mark.timeout(_HARD_TIMEOUT)
-def test_a_released_named_host_listener_keeps_its_address(tmp_path: Path):
+def test_a_released_named_host_listener_keeps_its_address(tmp_path: Path, child_env):
     """The fd carries the interface its creator chose; the re-bind must not
     widen it to every interface."""
     creator = _tcp_listener(socket.AF_INET, '127.0.0.1', v6only=None)
@@ -428,7 +423,7 @@ def test_a_released_named_host_listener_keeps_its_address(tmp_path: Path):
     bound = {row['address'] for row in _listen_rows(port)}
     adopted = os.dup(creator.fileno())
     creator.close()
-    server = Server(tmp_path, workers=2, reuseport=1, inherited_fd=adopted)
+    server = Server(tmp_path, workers=2, reuseport=1, inherited_fd=adopted, child_env=child_env)
     os.close(adopted)
     try:
         outcome = _settle(server, port, hosts=('127.0.0.1',))
@@ -449,7 +444,7 @@ def test_a_released_named_host_listener_keeps_its_address(tmp_path: Path):
 
 
 @pytest.mark.timeout(_HARD_TIMEOUT)
-def test_a_released_reuseport_listener_still_gets_per_worker_sockets(tmp_path: Path):
+def test_a_released_reuseport_listener_still_gets_per_worker_sockets(tmp_path: Path, child_env):
     """Released with ``SO_REUSEPORT`` set: membership alone must not read as
     "still held"."""
     creator = _tcp_listener(reuseport=True)
@@ -457,7 +452,7 @@ def test_a_released_reuseport_listener_still_gets_per_worker_sockets(tmp_path: P
     creator_inode = os.fstat(creator.fileno()).st_ino
     adopted = os.dup(creator.fileno())
     creator.close()
-    server = Server(tmp_path, workers=2, reuseport=1, inherited_fd=adopted)
+    server = Server(tmp_path, workers=2, reuseport=1, inherited_fd=adopted, child_env=child_env)
     os.close(adopted)
     try:
         outcome = _settle(server, port)
@@ -488,7 +483,7 @@ def test_a_released_reuseport_listener_still_gets_per_worker_sockets(tmp_path: P
 )
 @pytest.mark.timeout(_HARD_TIMEOUT)
 def test_a_released_ipv6_only_listener_keeps_its_family(
-        tmp_path: Path, creator_reuseport: bool):
+        tmp_path: Path, creator_reuseport: bool, child_env):
     """Re-binding an adopted IPv6-only socket must not widen its reach."""
     creator = _tcp_listener(socket.AF_INET6, '::', v6only=1,
                             reuseport=creator_reuseport)
@@ -496,7 +491,7 @@ def test_a_released_ipv6_only_listener_keeps_its_family(
     creator_inode = os.fstat(creator.fileno()).st_ino
     adopted = os.dup(creator.fileno())
     creator.close()
-    server = Server(tmp_path, workers=2, reuseport=1, inherited_fd=adopted)
+    server = Server(tmp_path, workers=2, reuseport=1, inherited_fd=adopted, child_env=child_env)
     os.close(adopted)
     try:
         outcome = _settle(server, port, hosts=('::1',))
@@ -525,9 +520,9 @@ def test_a_released_ipv6_only_listener_keeps_its_family(
 
 
 @pytest.mark.timeout(_HARD_TIMEOUT)
-def test_reuseport_still_makes_per_worker_sockets_on_a_free_port(tmp_path: Path):
+def test_reuseport_still_makes_per_worker_sockets_on_a_free_port(tmp_path: Path, child_env):
     """No adoption at all: the per-worker listeners are the feature."""
-    server = Server(tmp_path, workers=2, reuseport=1, port=0)
+    server = Server(tmp_path, workers=2, reuseport=1, port=0, child_env=child_env)
     try:
         port = None
         deadline = time.monotonic() + _UP_BUDGET
@@ -560,13 +555,13 @@ def test_reuseport_still_makes_per_worker_sockets_on_a_free_port(tmp_path: Path)
 
 
 @pytest.mark.timeout(_HARD_TIMEOUT)
-def test_a_creator_held_listener_still_serves_without_reuseport(tmp_path: Path):
+def test_a_creator_held_listener_still_serves_without_reuseport(tmp_path: Path, child_env):
     """``BB_SOCKET_REUSEPORT=0`` shares the held socket instead of re-binding
     it — the way out the refusal names."""
     creator = _tcp_listener()
     port = creator.getsockname()[1]
     adopted = os.dup(creator.fileno())
-    server = Server(tmp_path, workers=2, reuseport=0, inherited_fd=adopted)
+    server = Server(tmp_path, workers=2, reuseport=0, inherited_fd=adopted, child_env=child_env)
     os.close(adopted)
     try:
         outcome = _settle(server, port)
@@ -579,12 +574,12 @@ def test_a_creator_held_listener_still_serves_without_reuseport(tmp_path: Path):
 
 
 @pytest.mark.timeout(_HARD_TIMEOUT)
-def test_one_worker_with_a_creator_held_listener_still_serves(tmp_path: Path):
+def test_one_worker_with_a_creator_held_listener_still_serves(tmp_path: Path, child_env):
     """``workers=1`` adopts the fd as-is, with no re-bind to attempt."""
     creator = _tcp_listener()
     port = creator.getsockname()[1]
     adopted = os.dup(creator.fileno())
-    server = Server(tmp_path, workers=1, reuseport=1, inherited_fd=adopted)
+    server = Server(tmp_path, workers=1, reuseport=1, inherited_fd=adopted, child_env=child_env)
     os.close(adopted)
     try:
         outcome = _settle(server, port)

@@ -221,7 +221,7 @@ def _scenario_result(
     return (False, f'{reason}: {output[-_REASON_LIMIT:]}' if output else reason)
 
 
-def _run_scenario(name: str) -> tuple[bool, str]:
+def _run_scenario(name: str, env: dict[str, str]) -> tuple[bool, str]:
     """Run scenario *name* in a subprocess with a timeout guard.
 
     Returns ``(True, '')`` when the scenario exits zero, ``(False, reason)``
@@ -231,6 +231,7 @@ def _run_scenario(name: str) -> tuple[bool, str]:
         completed = subprocess.run(
             [_SUBPROCESS_PYTHON, __file__, name],
             capture_output=True, text=True, errors='replace', timeout=_TIMEOUT,
+            env=env,
             cwd=str(pathlib.Path(__file__).parents[3]),
         )
     except subprocess.TimeoutExpired:
@@ -285,40 +286,42 @@ def test_a_long_failure_keeps_the_tail_of_the_output():
     assert not ok and reason.endswith('LAST LINE')
 
 
-def test_a_crashing_scenario_fails_the_runner():
+def test_a_crashing_scenario_fails_the_runner(child_env):
     """End to end: the CLI exits nonzero, and the runner must say so."""
-    ok, reason = _run_scenario('no-such-scenario')
+    ok, reason = _run_scenario('no-such-scenario', child_env())
     assert not ok
     assert reason.startswith('exited 1')
     assert len(reason) > len('exited 1')     # the child's own words came too
 
 
-def test_a_hanging_scenario_is_reported_as_a_deadlock(monkeypatch):
+def test_a_hanging_scenario_is_reported_as_a_deadlock(monkeypatch, child_env):
+    env = child_env()
+
     def hang(*args, **kwargs):
         raise subprocess.TimeoutExpired(args[0], _TIMEOUT)
 
     monkeypatch.setattr(subprocess, 'run', hang)
-    ok, reason = _run_scenario('step1')
+    ok, reason = _run_scenario('step1', env)
     assert not ok and 'timeout' in reason and 'deadlock' in reason
 
 
-def test_a_failed_step_fails_the_wrapper(monkeypatch):
+def test_a_failed_step_fails_the_wrapper(monkeypatch, child_env):
     """The negative control for a step reporting a failure."""
     monkeypatch.setattr(sys.modules[__name__], '_run_scenario',
-                        lambda name: (False, 'boom'))
+                        lambda name, env=None: (False, 'boom'))
     with pytest.raises(AssertionError, match='STEP 1 FAILED'):
-        test_h2_flow_control_deadlocks()
+        test_h2_flow_control_deadlocks(child_env)
 
 
 # ====================================================================
 # Test
 # ====================================================================
 
-def test_h2_flow_control_deadlocks():
+def test_h2_flow_control_deadlocks(child_env):
     """RFC 9113 flow-control compliance — three sequential checks."""
 
     # Step 1 — RFC 9113 §6.9: receiver must credit sender via WINDOW_UPDATE.
-    ok, reason = _run_scenario('step1')
+    ok, reason = _run_scenario('step1', child_env())
     assert ok, (
         f'STEP 1 FAILED ({reason})\n'
         f'RFC 9113 §6.9: receiver must send WINDOW_UPDATE for consumed DATA.\n'
@@ -327,7 +330,7 @@ def test_h2_flow_control_deadlocks():
         f'Fix: emit stream + connection WINDOW_UPDATE after appending body.')
 
     # Step 2 — RFC 9113 §6.9: sender must resume on WINDOW_UPDATE arrival.
-    ok, reason = _run_scenario('step2')
+    ok, reason = _run_scenario('step2', child_env())
     assert ok, (
         f'STEP 2 FAILED ({reason})\n'
         f'RFC 9113 §6.9: sender must resume when WINDOW_UPDATE arrives.\n'
@@ -335,7 +338,7 @@ def test_h2_flow_control_deadlocks():
         f'Fix: re-check window after Event.clear(), break if credit > 0.')
 
     # Step 3 — RFC 9113 §5.1: WU on CLOSED stream MUST be silently ignored.
-    ok, reason = _run_scenario('step3')
+    ok, reason = _run_scenario('step3', child_env())
     assert ok, (
         f'STEP 3 FAILED ({reason})\n'
         f'RFC 9113 §5.1: WINDOW_UPDATE on CLOSED stream MUST be silently '
@@ -346,7 +349,7 @@ def test_h2_flow_control_deadlocks():
     # Step 4 — RFC 9113 §6.9: large *bidirectional* payload (128 KiB each
     # way) forces multiple WINDOW_UPDATE refills in both directions at once,
     # not just the single-refill boundary of steps 1-2.
-    ok, reason = _run_scenario('step4')
+    ok, reason = _run_scenario('step4', child_env())
     assert ok, (
         f'STEP 4 FAILED ({reason})\n'
         f'RFC 9113 §6.9: sustained bidirectional flow control — 128 KiB up '
