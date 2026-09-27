@@ -60,7 +60,7 @@ def _wait_until(predicate, deadline: float, poll: float = 0.1):
 
 
 @pytest.mark.timeout(45)
-def test_cli_serves_blackbull_app(tmp_path: Path):
+def test_cli_serves_blackbull_app(tmp_path: Path, child_env):
     """``blackbull module:app`` resolves a BlackBull instance and serves it."""
     blackbull = shutil.which('blackbull')
     assert blackbull, "'blackbull' console script is not on PATH — run 'pip install -e .'"
@@ -77,9 +77,7 @@ def test_cli_serves_blackbull_app(tmp_path: Path):
             return b'cli-v1'
     ''').lstrip())
 
-    env = os.environ.copy()
-    env['BB_ACCESS_LOG'] = '0'
-    env['PYTHONUNBUFFERED'] = '1'
+    env = child_env({'BB_ACCESS_LOG': '0', 'PYTHONUNBUFFERED': '1'})
 
     log_path = tmp_path / 'subprocess.log'
     log_fh = open(log_path, 'w', buffering=1)
@@ -114,7 +112,7 @@ def test_cli_serves_blackbull_app(tmp_path: Path):
 
 
 @pytest.mark.timeout(45)
-def test_cli_serves_over_unix_domain_socket(tmp_path: Path):
+def test_cli_serves_over_unix_domain_socket(tmp_path: Path, child_env):
     """``blackbull module:app --bind unix:/path`` serves traffic through AF_UNIX.
 
     Nginx → BlackBull deployments use UDS to avoid exposing
@@ -134,9 +132,7 @@ def test_cli_serves_over_unix_domain_socket(tmp_path: Path):
             return b'uds-v1'
     ''').lstrip())
 
-    env = os.environ.copy()
-    env['BB_ACCESS_LOG'] = '0'
-    env['PYTHONUNBUFFERED'] = '1'
+    env = child_env({'BB_ACCESS_LOG': '0', 'PYTHONUNBUFFERED': '1'})
 
     log_path = tmp_path / 'subprocess.log'
     log_fh = open(log_path, 'w', buffering=1)
@@ -196,7 +192,7 @@ def test_cli_serves_over_unix_domain_socket(tmp_path: Path):
 
 
 @pytest.mark.timeout(45)
-def test_cli_serves_raw_asgi_callable(tmp_path: Path):
+def test_cli_serves_raw_asgi_callable(tmp_path: Path, child_env):
     """``blackbull`` can serve a plain ASGI callable (no BlackBull instance).
 
     This is the path the benchmark harness takes —
@@ -223,9 +219,7 @@ def test_cli_serves_raw_asgi_callable(tmp_path: Path):
                 await send({'type': 'http.response.body', 'body': b''})
     ''').lstrip())
 
-    env = os.environ.copy()
-    env['BB_ACCESS_LOG'] = '0'
-    env['PYTHONUNBUFFERED'] = '1'
+    env = child_env({'BB_ACCESS_LOG': '0', 'PYTHONUNBUFFERED': '1'})
     # BlackBull is a native-Connection framework — its server hands
     # the app a typed ``Connection`` by default. A *raw* ASGI callable (no
     # BlackBull instance) reads ``scope['type']``/``scope['path']``, so it must
@@ -316,20 +310,13 @@ _CLI_ENTRY = 'from blackbull.cli import main; raise SystemExit(main())'
 _SLOW_SECONDS = 1.0
 
 
-def _repo_root() -> str:
-    import blackbull
-    return str(Path(blackbull.__file__).resolve().parent.parent)
-
-
-def _spawn_server(tmp_path: Path, body: str, port: int,
+def _spawn_server(tmp_path: Path, body: str, port: int, child_env,
                   extra_env: dict | None = None) -> subprocess.Popen:
     (tmp_path / 'shutdown_app.py').write_text(
         _SHUTDOWN_APP.format(body=body, hold=_SLOW_SECONDS).lstrip())
 
-    env = os.environ.copy()
-    env['BB_ACCESS_LOG'] = '0'
-    env['PYTHONUNBUFFERED'] = '1'
-    env['PYTHONPATH'] = os.pathsep.join([str(tmp_path), _repo_root()])
+    env = child_env({'BB_ACCESS_LOG': '0', 'PYTHONUNBUFFERED': '1',
+                     'PYTHONPATH': str(tmp_path)})
     env.update(extra_env or {})
 
     proc = subprocess.Popen(
@@ -357,9 +344,9 @@ def _reap(proc: subprocess.Popen) -> subprocess.CompletedProcess:
 
 
 def _serve_then_signal(tmp_path: Path, body: str,
-                       sig: int) -> subprocess.CompletedProcess:
+                       sig: int, child_env) -> subprocess.CompletedProcess:
     port = _free_port()
-    proc = _spawn_server(tmp_path, body, port)
+    proc = _spawn_server(tmp_path, body, port, child_env)
     proc.send_signal(sig)
     return _reap(proc)
 
@@ -367,9 +354,9 @@ def _serve_then_signal(tmp_path: Path, body: str,
 @pytest.mark.parametrize('sig', [signal.SIGINT, signal.SIGTERM],
                          ids=['sigint', 'sigterm'])
 @pytest.mark.timeout(60)
-def test_a_failing_shutdown_hook_exits_non_zero(tmp_path: Path, sig: int):
+def test_a_failing_shutdown_hook_exits_non_zero(tmp_path: Path, sig: int, child_env):
     done = _serve_then_signal(
-        tmp_path, "raise RuntimeError('flush to disk failed')", sig)
+        tmp_path, "raise RuntimeError('flush to disk failed')", sig, child_env)
     assert 'SHUTDOWN_HOOK_RAN' in done.stderr, (
         f'the shutdown hook never ran on {signal.Signals(sig).name}\n'
         f'{done.stderr[-2000:]}')
@@ -381,8 +368,8 @@ def test_a_failing_shutdown_hook_exits_non_zero(tmp_path: Path, sig: int):
 @pytest.mark.parametrize('sig', [signal.SIGINT, signal.SIGTERM],
                          ids=['sigint', 'sigterm'])
 @pytest.mark.timeout(60)
-def test_a_clean_shutdown_hook_still_exits_zero(tmp_path: Path, sig: int):
-    done = _serve_then_signal(tmp_path, 'return', sig)
+def test_a_clean_shutdown_hook_still_exits_zero(tmp_path: Path, sig: int, child_env):
+    done = _serve_then_signal(tmp_path, 'return', sig, child_env)
     assert 'SHUTDOWN_HOOK_RAN' in done.stderr, (
         f'the shutdown hook never ran on {signal.Signals(sig).name}\n'
         f'{done.stderr[-2000:]}')
@@ -391,9 +378,9 @@ def test_a_clean_shutdown_hook_still_exits_zero(tmp_path: Path, sig: int):
 
 
 @pytest.mark.timeout(60)
-def test_sigterm_lets_a_request_in_flight_finish(tmp_path: Path):
+def test_sigterm_lets_a_request_in_flight_finish(tmp_path: Path, child_env):
     port = _free_port()
-    proc = _spawn_server(tmp_path, 'return', port)
+    proc = _spawn_server(tmp_path, 'return', port, child_env)
     pending: list = []
     caller = threading.Thread(
         target=lambda: pending.append(_get(port, '/slow')), daemon=True)
@@ -424,9 +411,9 @@ def _reap_or_kill(proc: subprocess.Popen) -> tuple[subprocess.CompletedProcess, 
 
 
 @pytest.mark.timeout(90)
-def test_sigterm_during_a_parked_lifespan_startup_still_stops(tmp_path: Path):
+def test_sigterm_during_a_parked_lifespan_startup_still_stops(tmp_path: Path, child_env):
     port = _free_port()
-    proc = _spawn_server(tmp_path, 'return', port, {'PARK_STARTUP': '60'})
+    proc = _spawn_server(tmp_path, 'return', port, child_env, {'PARK_STARTUP': '60'})
     time.sleep(1.5)
     assert proc.poll() is None, 'the server exited before the signal'
     started = time.monotonic()
@@ -445,9 +432,9 @@ def test_sigterm_during_a_parked_lifespan_startup_still_stops(tmp_path: Path):
 
 @pytest.mark.timeout(90)
 def test_an_applications_sigterm_handler_still_runs_and_sets_the_status(
-        tmp_path: Path):
+        tmp_path: Path, child_env):
     port = _free_port()
-    proc = _spawn_server(tmp_path, 'return', port, {'OWN_SIGTERM_HANDLER': '1'})
+    proc = _spawn_server(tmp_path, 'return', port, child_env, {'OWN_SIGTERM_HANDLER': '1'})
     proc.send_signal(signal.SIGTERM)
     done, killed = _reap_or_kill(proc)
     assert not killed, done.stderr[-2000:]
@@ -459,9 +446,9 @@ def test_an_applications_sigterm_handler_still_runs_and_sets_the_status(
 
 @pytest.mark.timeout(90)
 def test_the_shutdown_hook_runs_before_an_applications_sigterm_handler(
-        tmp_path: Path):
+        tmp_path: Path, child_env):
     port = _free_port()
-    proc = _spawn_server(tmp_path, 'return', port, {'OWN_SIGTERM_HANDLER': '1'})
+    proc = _spawn_server(tmp_path, 'return', port, child_env, {'OWN_SIGTERM_HANDLER': '1'})
     proc.send_signal(signal.SIGTERM)
     done, killed = _reap_or_kill(proc)
     assert not killed, done.stderr[-2000:]
@@ -472,9 +459,9 @@ def test_the_shutdown_hook_runs_before_an_applications_sigterm_handler(
 
 
 @pytest.mark.timeout(90)
-def test_two_sigterms_run_the_handler_twice_and_the_shutdown_once(tmp_path: Path):
+def test_two_sigterms_run_the_handler_twice_and_the_shutdown_once(tmp_path: Path, child_env):
     port = _free_port()
-    proc = _spawn_server(tmp_path, 'return', port, {'OWN_SIGTERM_HANDLER': 'stay'})
+    proc = _spawn_server(tmp_path, 'return', port, child_env, {'OWN_SIGTERM_HANDLER': 'stay'})
     pending: list = []
     caller = threading.Thread(
         target=lambda: pending.append(_get(port, '/slow')), daemon=True)

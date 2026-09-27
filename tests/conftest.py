@@ -1,6 +1,8 @@
 import multiprocessing
 import os
 import pathlib
+import subprocess
+import sys
 import pytest
 import pytest_asyncio
 
@@ -108,3 +110,38 @@ def manage_cert_and_key():
         )
 
     yield
+
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture
+def child_env():
+    """Environment for a test's child process (BLA-448).
+
+    A neighbouring worktree's editable install can answer a child's
+    ``import blackbull`` for the tree under test, and a green run then
+    proves nothing about that tree.  ``make`` pins ``PYTHONPATH`` ahead of
+    the caller's entries and probes the resolution the child will see,
+    failing if it lands outside the repository root."""
+
+    def make(extra: dict[str, str] | None = None) -> dict[str, str]:
+        env = os.environ.copy()
+        want = (extra or {}).get('PYTHONPATH', '').split(os.pathsep)
+        have = env.get('PYTHONPATH', '').split(os.pathsep)
+        env['PYTHONPATH'] = os.pathsep.join(
+            [str(REPO_ROOT)] + [p for p in want + have if p])
+        probe = subprocess.run(
+            [sys.executable, '-c', 'import blackbull; print(blackbull.__file__)'],
+            env=env, capture_output=True, text=True, errors='replace',
+            timeout=30)
+        found = (probe.stdout or '').strip()
+        assert probe.returncode == 0 and found, probe.stderr
+        resolved = pathlib.Path(found)
+        assert resolved.resolve().is_relative_to(REPO_ROOT), (
+            f'child would import blackbull from {resolved}, not this checkout')
+        env.update({k: v for k, v in (extra or {}).items()
+                    if k != 'PYTHONPATH'})
+        return env
+
+    return make
