@@ -229,10 +229,7 @@ class NativeResponse:
         # (``StaticFiles``) can stay native and still get zero-copy.
         # Mutually exclusive with ``body``: the bytes come from the file.
         self.file_path = file_path
-        # A promised request (HTTP/2 PUSH_PROMISE). Carried natively rather
-        # than as an ASGI dict so a non-ASGI server never holds one. A peer
-        # that cannot be pushed to simply gets nothing — industry practice,
-        # and what keeps an unsupported request from breaking the response.
+        # An HTTP/2 promised request; dropped where push is unavailable.
         self.push = push
 
     # --- fast constructors for framework-owned producers -------------------
@@ -267,6 +264,7 @@ class NativeResponse:
         self.more_trailers = False
         self.expects_trailers = False
         self.file_path = None
+        self.push = None
         return self
 
     @classmethod
@@ -290,6 +288,7 @@ class NativeResponse:
         self.more_trailers = False
         self.expects_trailers = True
         self.file_path = None
+        self.push = None
         return self
 
     # --- header: DX view, or None when absent -----------------------------

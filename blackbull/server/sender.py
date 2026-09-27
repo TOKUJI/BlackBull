@@ -679,6 +679,10 @@ class HTTP1Sender(BaseSender):
                                 elif hkl == b'content-encoding':
                                     self._log_record.resp_content_encoding = hv
                         self._log_record.mark('start_arm_out')
+                if body.push is not None:
+                    logger.warning(
+                        'HTTP1Sender: push sent on HTTP/1; dropped')
+                    return
                 if body.file_path is not None:
                     if await self._pathsend(body.file_path):
                         self._completed = True
@@ -1696,6 +1700,12 @@ class HTTP2Sender(BaseSender):
                         'END_STREAM already sent (ASGI app sent a response after '
                         'the response was complete)',
                         self._stream_id)
+                return
+            if body.push is not None:
+                if self._push_callback is not None:
+                    await self._push_callback(body.push, self._stream_id)
+                else:
+                    logger.warning('push sent but no push handler registered')
                 return
             if body._header is not None:
                 header_pairs = list(body._header)
