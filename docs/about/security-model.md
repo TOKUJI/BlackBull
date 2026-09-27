@@ -289,7 +289,8 @@ contrast is visible:
 
 - **A peer that sends content where RFC 9112 §6.3 rule 1 says there is none —
   a 204, a 304 or a HEAD response carrying a body — is not refused over
-  HTTP/1.1, unless it also declares a boundary.** Those octets are left
+  HTTP/1.1, unless it also declares a boundary the rule forbids it to
+  have.** Those octets are left
   unread and are parsed as the start of the next response: a `ProtocolError`
   in the usual case, and a response taken for another when the leftover
   happens to look like one. The reader trusts the rule rather than the peer

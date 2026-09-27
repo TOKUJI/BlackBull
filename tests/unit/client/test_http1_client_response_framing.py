@@ -1209,6 +1209,28 @@ class TestContentlessResponsesDoNotClaimABoundary:
         assert reader.remaining == b'odd', 'the reader consumed what it refuses'
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize('status_line,request_method', [
+        (b'HTTP/1.1 101 Switching Protocols\r\nContent-Length: 5\r\n\r\n',
+         'GET'),
+        (b'HTTP/1.1 200 Connection Established\r\n'
+         b'Transfer-Encoding: chunked\r\n\r\n', 'CONNECT'),
+    ], ids=['101-cl', 'connect-te'])
+    @pytest.mark.asyncio
+    async def test_the_switch_head_naming_a_boundary_gets_no_handoff(
+            self, status_line, request_method):
+        """RFC 9112 §6.1 forbids the field in any 1xx, and RFC 9110 §9.3.6
+        in a 2xx to CONNECT. The switch head that names a boundary it cannot
+        have is no more a switch than a preceding one is."""
+        reader = _Reader(status_line)
+        recipient = HTTP1ResponseRecipient(request_method=request_method)
+
+        response = await recipient.receive(reader)
+
+        assert response.status == int(status_line.split()[1])
+        assert recipient.protocol_switched is False
+        assert recipient.reusable is False
+
+    @pytest.mark.asyncio
     async def test_an_interim_head_claiming_a_boundary_retires_the_connection(self):
         """The interim heads the production path skips are the ones a peer
         would hide a second response inside, so the boundary check belongs
@@ -1224,11 +1246,9 @@ class TestContentlessResponsesDoNotClaimABoundary:
 
     @pytest.mark.asyncio
     async def test_a_boundary_violation_survives_a_protocol_switch(self):
-        """A peer that named a boundary it cannot have does not get the
-        transport handed to it, whatever the next head says it is switching
-        to. The verdict is `reusable`, and it is read before the handoff."""
-        from blackbull.client.http1 import HTTP1Client
-
+        """A peer that named a boundary it cannot have is not switching
+        anything, so no handoff is offered. `_record_framing` settles that
+        once, with the same verdict that retires the connection."""
         reader = _Reader(b'HTTP/1.1 100 Continue\r\nContent-Length: 5\r\n'
                          b'\r\nHTTP/1.1 101 Switching Protocols\r\n\r\n')
         recipient = HTTP1ResponseRecipient(request_method='GET')
