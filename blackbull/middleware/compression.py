@@ -18,7 +18,6 @@ import functools
 import gzip
 import threading
 from collections.abc import Callable
-from ..asgi import ASGIEvent
 from ..connection import Connection
 from ..headers import Headers
 from ..native import NativeResponse
@@ -314,14 +313,6 @@ class Compression:
             # of every body event just to have the next line's `isinstance`
             # reject it — a per-chunk cost on a streamed response, for a
             # wrapper that only ever cares about the start event.
-            elif isinstance(event, dict) and \
-                    event.get('type') == ASGIEvent.HTTP_RESPONSE_START:
-                headers = Headers(event.get('headers', []))
-                if _is_compressible_content_type(headers) and \
-                        not headers.get(b'content-encoding'):
-                    hdrs = list(event.get('headers', []))
-                    _merge_vary(hdrs)
-                    event = {**event, 'headers': hdrs}
             await send(event)
         return vary_send
 

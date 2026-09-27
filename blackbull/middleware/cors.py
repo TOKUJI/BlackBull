@@ -7,7 +7,6 @@ cross-origin response to page script.  A request with no ``Origin``, or an
 middleware never refuses a request, because the enforcement happens in the
 browser.
 """
-from ..asgi import ASGIEvent
 from ..native import NativeResponse
 from ..connection import Connection
 from .utils import as_middleware
@@ -123,11 +122,6 @@ class CORS:
                 # raw slot for the check, view for the guarded append.
                 if event._header is not None:
                     event.header.append(cors_hdrs)
-            elif isinstance(event, dict) and \
-                    event.get('type') == ASGIEvent.HTTP_RESPONSE_START:
-                existing = list(event.get('headers', []))
-                existing.extend(cors_hdrs)
-                event = {**event, 'headers': existing}
             await send(event)
 
         return cors_send
