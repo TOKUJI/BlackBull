@@ -1315,9 +1315,8 @@ class HTTP2Sender(BaseSender):
         self._buffered_status = None
         self._buffered_headers = None
         self._expect_trailers = False
-        # RFC 9112 §6.3 rule 1, and the reason the stream stays open: an
-        # interim response carries no content, so a body event cannot end it.
-        # The next `start` recomputes this.
+        # RFC 9112 §6.3 rule 1: an interim carries no content, so a body
+        # event cannot end it.
         self._suppress_body = True
 
     async def send_response_headers(

@@ -492,9 +492,8 @@ class HTTP1ResponseRecipient:
             if (not skip_interim or status == 101
                     or not is_informational(status)):
                 return version, status, headers
-            # ``Content-Length: 0`` claims no boundary, which is why it is
-            # not refused.  What follows cannot be told apart from the final
-            # response being answered.
+            # Content-Length: 0 claims no boundary. What follows cannot be
+            # told apart from the final response being answered.
             if (headers.getlist(b'transfer-encoding')
                     or (_declared_content_length(headers) or 0) != 0):
                 self._boundary_declared = True
@@ -737,15 +736,13 @@ class HTTP1ResponseRecipient:
         )
         protocol_switched = status == 101 or successful_connect
         if body_forbidden or successful_connect:
-            # Content-Length is parsed only here and below, never hoisted:
-            # `_declared_content_length` can refuse a malformed numeral, and a
-            # HEAD or a 304 must not be made to parse one to stay contentless.
+            # Never hoisted: `_declared_content_length` can refuse, and a
+            # HEAD or a 304 must not be made to parse one.
             if (is_informational(status) or status == 204) \
                     and (headers.getlist(b'transfer-encoding')
                          or (_declared_content_length(headers) or 0) != 0):
-                # RFC 9112 §6.1. A successful CONNECT is absent on purpose:
-                # RFC 9110 §9.3.6 has the tunnel begin at the header
-                # terminator and tells the client to ignore these fields.
+                # RFC 9112 §6.1. A successful CONNECT is absent: RFC 9110
+                # §9.3.6 has the client ignore these fields.
                 return _NO_BODY, None, False, False
             return _NO_BODY, None, not protocol_switched, protocol_switched
 
@@ -795,8 +792,7 @@ class HTTP1ResponseRecipient:
         self.reusable = (framing_reusable and response_persistent
                          and not self._boundary_declared)
         # A peer that named a boundary it cannot have is not switching
-        # anything: what follows is as ambiguous as a next response would be,
-        # so it gets no handoff either.
+        # anything, so it gets no handoff either.
         switched = tunnel and not self._boundary_declared
         self.protocol_switched = switched
         self.tunnel = switched and method_is(request_method, 'CONNECT')

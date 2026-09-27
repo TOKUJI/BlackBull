@@ -469,12 +469,8 @@ class Compression:
                     return
 
                 if is_informational(int(event.status)):
-                    # RFC 9110 §15.2: an interim response precedes the final
-                    # one on the same response. It carries no content, so
-                    # there is nothing to compress and no decision that needs
-                    # a body — holding it waits for one that cannot come, and
-                    # the interim never reaches the wire. The final response
-                    # behind it is still undecided and still compresses.
+                    # An interim carries no content, so holding it for a
+                    # body waits for one that cannot come.
                     await send(event)
                     return
 
