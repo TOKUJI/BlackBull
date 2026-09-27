@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+- **A lifespan task that dies after its startup ack is reported at once**,
+  not only at shutdown.  Serving continues; the shutdown failure still
+  surfaces exactly as before.
+- **A multi-worker master's exit code reflects its workers' ends.**  A stop
+  in which any worker failed to clean up exits non-zero (previously 0);
+  workers that died during normal operation and were respawned do not
+  affect it.
 - **Precompressed static variants are held to the served root.**  A
   `<path>.<suffix>` sibling resolving outside the root — a symlink, say —
   answers `400` before it is cached, opened or sent.  Inward symlinks and

@@ -385,6 +385,7 @@ class LifespanManager:
         self._receive_q: asyncio.Queue = asyncio.Queue()
         self._send_q:    asyncio.Queue = asyncio.Queue()
         self._task = None
+        self._startup_acked = False
         self._cleanup_budget = (cleanup_budget
                                 or _AsyncCleanupBudget(cleanup_timeout))
 
@@ -413,6 +414,10 @@ class LifespanManager:
                 if event.get('type') == ASGIEvent.LIFESPAN_STARTUP_FAILED:
                     raise RuntimeError(
                         event.get('message', 'Lifespan startup failed'))
+                self._startup_acked = True
+                # Attached at the ack so a task already dead schedules the
+                # report now; a create-time callback would miss it.
+                self._task.add_done_callback(self._lifespan_task_ended)
                 return self
             if self._task.done():
                 exc = self._task.exception()
@@ -432,6 +437,14 @@ class LifespanManager:
                 logger.error('Lifespan startup rollback failed: %s', cleanup_error)
             raise
 
+    def _lifespan_task_ended(self, task: asyncio.Task) -> None:
+        # The death is visible here and not only at shutdown — the server
+        # serves the whole time in between (BLA-446).
+        if (self._startup_acked and not task.cancelled()
+                and task.exception() is not None):
+            logger.error('Lifespan task failed after startup: %r',
+                         task.exception(), exc_info=task.exception())
+
     @staticmethod
     def _shutdown_failure(event) -> Exception | None:
         if event.get('type') == ASGIEvent.LIFESPAN_SHUTDOWN_FAILED:
@@ -442,6 +455,7 @@ class LifespanManager:
         return None
 
     async def __aexit__(self, exc_type, exc, traceback):
+        self._startup_acked = False
         task = self._task
         if task is None:
             return False
