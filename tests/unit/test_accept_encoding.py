@@ -172,3 +172,38 @@ async def test_cache_keeps_every_accept_encoding_field(tmp_path, path):
         assert status == 200
         assert headers.get(b'content-encoding') == expected
         assert (gzip.decompress(payload) if expected else payload) == BODY
+
+
+@pytest.mark.asyncio
+async def test_an_interim_head_reaches_the_wire_before_the_final_one():
+    """RFC 9113 §8.1 / RFC 9110 §15.2: an interim response is part of the
+    response it precedes. It carries no content, so there is nothing to
+    compress and no decision that needs a body — holding it waits for a body
+    that cannot come, and the interim never reaches the wire. The response
+    behind it must keep compressing."""
+    middleware = Compression(min_size=1)
+    middleware._available = {'gzip': gzip.compress}
+    conn = Connection(method='GET', path='/body.txt', raw_path=b'/body.txt',
+                      headers=Headers([(b'Accept-Encoding', b'gzip')]),
+                      type='http')
+    events = []
+
+    async def send(event):
+        events.extend(
+            event.to_asgi() if isinstance(event, NativeResponse) else [event])
+
+    async def handler(conn, receive, send):
+        await send(NativeResponse(status=103,
+                                  header=[(b'link', b'</s.css>; rel=preload')]))
+        await send(NativeResponse(status=200,
+                                  header=[(b'content-type', b'text/plain')],
+                                  body=BODY))
+
+    await middleware(conn, _receive, send, handler)
+
+    starts = [e for e in events if e['type'] == 'http.response.start']
+    assert [s['status'] for s in starts] == [103, 200], starts
+    assert dict(starts[0]['headers']).get(b'link') == b'</s.css>; rel=preload'
+    payload = b''.join(e.get('body', b'') for e in events
+                       if e['type'] == 'http.response.body')
+    assert gzip.decompress(payload) == BODY, 'the final response lost compression'

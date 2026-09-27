@@ -168,16 +168,12 @@ class TestInterimResponses:
 # ----------------------------------------------------------------------
 
 class TestBodylessResponses:
-    @pytest.mark.parametrize('head', [
-        b'HTTP/1.1 204 No Content\r\ncontent-length: 5\r\n\r\n',
-        b'HTTP/1.1 304 Not Modified\r\ncontent-length: 5\r\n\r\n',
-        b'HTTP/1.1 204 No Content\r\ntransfer-encoding: chunked\r\n\r\n',
-    ], ids=['204-cl', '304-cl', '204-te'])
     @pytest.mark.asyncio
-    async def test_a_bodyless_status_does_not_eat_the_next_response(self, head):
-        """The sharpest form: it does not raise, and the second response still
-        *looks* right — parsed from whatever survived the theft."""
-        reader = _Canned(head + _NEXT)
+    async def test_a_304_describing_a_length_does_not_eat_the_next(self):
+        """A 304's length is metadata about the representation, so the
+        connection stays open and the next response still parses."""
+        reader = _Canned(b'HTTP/1.1 304 Not Modified\r\ncontent-length: 5\r\n'
+                         b'\r\n' + _NEXT)
         recipient = HTTP1ResponseRecipient()
 
         first = await _within(recipient.receive(reader))
@@ -185,6 +181,23 @@ class TestBodylessResponses:
         second = await _within(recipient.receive(reader))
         assert (second.status, second.body) == (201, b'ok'), \
             'the second response began inside the first'
+
+    @pytest.mark.parametrize('head', [
+        b'HTTP/1.1 204 No Content\r\ncontent-length: 5\r\n\r\n',
+        b'HTTP/1.1 204 No Content\r\ntransfer-encoding: chunked\r\n\r\n',
+    ], ids=['204-cl', '204-te'])
+    @pytest.mark.asyncio
+    async def test_a_204_claiming_a_boundary_refuses_the_connection(self, head):
+        """RFC 9112 §6.1 forbids both fields in a 204.  Whatever follows
+        cannot be told apart from the next response, so the reader refuses
+        rather than parsing the second response out of the first's theft."""
+        reader = _Canned(head + _NEXT)
+        recipient = HTTP1ResponseRecipient()
+
+        first = await _within(recipient.receive(reader))
+        assert first.body == b''
+        with pytest.raises(ConnectionError):
+            await _within(recipient.receive(reader))
 
     @pytest.mark.asyncio
     async def test_a_head_response_is_empty_and_does_not_stall(self):

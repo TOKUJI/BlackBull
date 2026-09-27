@@ -1124,3 +1124,158 @@ async def test_websocket_client_handshake_preserves_101_prebuffer(monkeypatch):
     assert raw.close_calls == 0
     await client.__aexit__(None, None, None)
     assert raw.close_calls == 1
+
+
+class TestContentlessResponsesDoNotClaimABoundary:
+    """RFC 9112 §6.3 rule 1 — a message without content declares no length.
+
+    §6.1 forbids ``Content-Length`` and ``Transfer-Encoding`` in a 1xx or a
+    204, so a peer sending one has declared a boundary this message cannot
+    have.  The octets that would follow are indistinguishable from the next
+    response, and a connection that cannot tell them apart is not reusable.
+    A HEAD or 304 is different: there the length is metadata about the
+    representation, and keep-alive survives it.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_204_claiming_content_is_not_reusable(self):
+        reader = _Reader(b'HTTP/1.1 204 No Content\r\nContent-Length: 3\r\n'
+                         b'\r\nodd')
+        recipient = HTTP1ResponseRecipient(request_method='GET')
+
+        response = await recipient.receive(reader)
+
+        assert response.body == b''
+        assert recipient.reusable is False
+
+    @pytest.mark.asyncio
+    async def test_a_204_claiming_chunked_is_not_reusable(self):
+        reader = _Reader(b'HTTP/1.1 204 No Content\r\n'
+                         b'Transfer-Encoding: chunked\r\n\r\n0\r\n\r\n')
+        recipient = HTTP1ResponseRecipient(request_method='GET')
+
+        response = await recipient.receive(reader)
+
+        assert response.body == b''
+        assert recipient.reusable is False
+
+    @pytest.mark.asyncio
+    async def test_a_204_without_a_boundary_is_reusable(self):
+        reader = _Reader(b'HTTP/1.1 204 No Content\r\n\r\n'
+                         b'HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n')
+        recipient = HTTP1ResponseRecipient(request_method='GET')
+
+        response = await recipient.receive(reader)
+
+        assert response.body == b''
+        assert recipient.reusable is True
+
+    @pytest.mark.asyncio
+    async def test_a_head_response_keeps_the_length_it_only_describes(self):
+        reader = _Reader(b'HTTP/1.1 200 OK\r\nContent-Length: 17\r\n\r\n'
+                         b'HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n')
+        recipient = HTTP1ResponseRecipient(request_method='HEAD')
+
+        response = await recipient.receive(reader)
+
+        assert response.body == b''
+        assert recipient.reusable is True
+
+    @pytest.mark.asyncio
+    async def test_a_204_claiming_zero_length_is_still_reusable(self):
+        """``Content-Length: 0`` agrees with having no content, so nothing is
+        claimed and no boundary is at stake. Real peers send it; retiring the
+        connection would cost keep-alive for no ambiguity."""
+        reader = _Reader(b'HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n'
+                         b'\r\n')
+        recipient = HTTP1ResponseRecipient(request_method='GET')
+
+        response = await recipient.receive(reader)
+
+        assert response.body == b''
+        assert recipient.reusable is True
+
+    @pytest.mark.asyncio
+    async def test_the_octets_after_a_refused_204_are_left_unread(self):
+        """Refusing is not consuming. If the reader ate the leftover before
+        refusing, a silent regression would look like the right answer."""
+        head = (b'HTTP/1.1 204 No Content\r\nContent-Length: 3\r\n\r\n')
+        reader = _Reader(head + b'odd')
+        recipient = HTTP1ResponseRecipient(request_method='GET')
+
+        await recipient.receive(reader)
+
+        assert recipient.reusable is False
+        assert reader.remaining == b'odd', 'the reader consumed what it refuses'
+
+    @pytest.mark.asyncio
+    @pytest.mark.asyncio
+    async def test_a_101_naming_a_boundary_gets_no_handoff(self):
+        """RFC 9112 §6.1 forbids the field in any 1xx. A switch head that
+        names a boundary it cannot have is no more a switch than a preceding
+        one is."""
+        reader = _Reader(b'HTTP/1.1 101 Switching Protocols\r\n'
+                         b'Content-Length: 5\r\n\r\n')
+        recipient = HTTP1ResponseRecipient(request_method='GET')
+
+        response = await recipient.receive(reader)
+
+        assert response.status == 101
+        assert recipient.protocol_switched is False
+        assert recipient.reusable is False
+
+    @pytest.mark.asyncio
+    async def test_a_successful_connect_ignores_the_fields_it_must_ignore(self):
+        """RFC 9110 §9.3.6: the tunnel begins at the header terminator and
+        the client MUST ignore Content-Length and Transfer-Encoding in a 2xx
+        to CONNECT. Ignoring is what makes them harmless — there is no
+        boundary to be ambiguous about, so the handoff stands."""
+        reader = _Reader(b'HTTP/1.1 200 Connection Established\r\n'
+                         b'Transfer-Encoding: chunked\r\n\r\n')
+        recipient = HTTP1ResponseRecipient(request_method='CONNECT')
+
+        response = await recipient.receive(reader)
+
+        assert response.status == 200
+        assert recipient.protocol_switched is True
+        assert recipient.tunnel is True
+
+    @pytest.mark.asyncio
+    async def test_an_interim_head_claiming_a_boundary_retires_the_connection(self):
+        """The interim heads the production path skips are the ones a peer
+        would hide a second response inside, so the boundary check belongs
+        where they are read — not only where a framed 1xx could arrive."""
+        reader = _Reader(b'HTTP/1.1 100 Continue\r\nContent-Length: 51\r\n'
+                         b'\r\nHTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n')
+        recipient = HTTP1ResponseRecipient(request_method='GET')
+
+        response = await recipient.receive(reader)
+
+        assert response.status == 200
+        assert recipient.reusable is False
+
+    @pytest.mark.asyncio
+    async def test_a_boundary_violation_survives_a_protocol_switch(self):
+        """A peer that named a boundary it cannot have is not switching
+        anything, so no handoff is offered. `_record_framing` settles that
+        once, with the same verdict that retires the connection."""
+        reader = _Reader(b'HTTP/1.1 100 Continue\r\nContent-Length: 5\r\n'
+                         b'\r\nHTTP/1.1 101 Switching Protocols\r\n\r\n')
+        recipient = HTTP1ResponseRecipient(request_method='GET')
+        response = await recipient.receive(reader)
+        assert response.status == 101
+
+        assert recipient.protocol_switched is False, \
+            'an ambiguous connection is not switching anything'
+        assert recipient.reusable is False
+
+    @pytest.mark.asyncio
+    async def test_a_304_keeps_the_length_it_only_describes(self):
+        reader = _Reader(b'HTTP/1.1 304 Not Modified\r\nContent-Length: 17\r\n'
+                         b'\r\n')
+        recipient = HTTP1ResponseRecipient(request_method='GET')
+
+        response = await recipient.receive(reader)
+
+        assert response.body == b''
+        assert recipient.reusable is True

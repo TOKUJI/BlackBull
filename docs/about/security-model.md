@@ -278,23 +278,34 @@ less than one that draws its own boundary:
 - **"No known gaps" is not "no gaps."** A bound that no one has found missing is
   not the same as a bound proven complete. This work is continuing, not
   finished.
-- **The HTTP/2 sender does not implement informational responses.** An
-  interim head is written only when a body event follows it; a second
-  response head arriving first replaces it, and the interim never reaches the
-  wire. Nothing leaks and the frames stay self-consistent, but "Early Hints
-  sent" is not a thing this server does yet.
+- **The server sends `100 (Continue)` only to HTTP/1.1.** An HTTP/1.0 client
+  gets no interim response at all and its `Expect` is ignored (COMP-NO-1XX-HTTP10),
+  so a client that waits for the signal stalls until its own timeout. The
+  server also never originates a `103 (Early Hints)`: it sends what the
+  application sends and infers nothing before then.
 
 On the async HTTP client specifically, and after the server ones so the
 contrast is visible:
 
 - **A peer that sends content where RFC 9112 §6.3 rule 1 says there is none —
   a 204, a 304 or a HEAD response carrying a body — is not refused over
-  HTTP/1.1.** Those octets are left unread and are parsed as the start of the
-  next response: a `ProtocolError` in the usual case, and a response taken for
-  another when the leftover happens to look like one. The reader trusts the
-  rule rather than the peer here; a 205 is consumed to its declared length
-  precisely because the rule does not cover one. HTTP/2 refuses such frames
-  instead, because frames are self-delimiting and no boundary is at stake.
+  HTTP/1.1, unless it also declares a boundary the rule forbids it to
+  have.** Those octets are left
+  unread and are parsed as the start of the next response: a `ProtocolError`
+  in the usual case, and a response taken for another when the leftover
+  happens to look like one. The reader trusts the rule rather than the peer
+  here; a 205 is consumed to its declared length precisely because the rule
+  does not cover one. HTTP/2 refuses such frames instead, because frames are
+  self-delimiting and no boundary is at stake. The one exception is the next
+  bullet: a message that names the boundary the rule forbids it to have is
+  refused, because there the leftover and the next response cannot be told
+  apart at all.
+- **A 204 or a 1xx that declares a boundary is the one shape that is
+  refused.** RFC 9112 §6.1 forbids `Content-Length` and `Transfer-Encoding`
+  in one, so what follows cannot be told apart from the next response; the
+  connection is retired and the reader refuses it. A 204 with no boundary, or
+  with `Content-Length: 0`, still leaves its octets to the next response:
+  nothing is declared, so nothing is refused.
 
 - **It does not follow redirects and does not pool connections.** Neither
   exists in `blackbull/client/` — so neither is bounded *or* unbounded, and a

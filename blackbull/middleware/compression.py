@@ -22,6 +22,7 @@ from ..asgi import ASGIEvent
 from ..connection import Connection
 from ..headers import Headers
 from ..native import NativeResponse
+from ..protocol.framing import is_informational
 from ..server.cap_log import log_cap_hit
 from ._accept_encoding import select_encoding
 from .utils import as_middleware
@@ -465,6 +466,12 @@ class Compression:
                         event.status, event._header, event._body,
                         original=event)
                     start_forwarded = True
+                    return
+
+                if is_informational(int(event.status)):
+                    # An interim carries no content, so holding it for a
+                    # body waits for one that cannot come.
+                    await send(event)
                     return
 
                 if (not streaming and not skip_compression

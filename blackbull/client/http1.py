@@ -89,6 +89,7 @@ _CLOSE_DELIMITED = 'close'
 #: whitespace, and a negative numeral reached ``readexactly()``.
 _HEXDIG = frozenset(b'0123456789abcdefABCDEF')
 
+
 # Empty list members are tolerated for interoperability, but the parser must
 # not spend unbounded work on a peer sending only commas.  The head-size budget
 # remains the total byte bound; this is only a small structural sanity bound.
@@ -322,6 +323,7 @@ class HTTP1ResponseRecipient:
         #: CONNECT tunnel.  Those outcomes are not framing errors, but the
         #: HTTP/1.1 connection cannot be used for another request.
         self.reusable = True
+        self._boundary_declared = False
         #: A successful CONNECT changes the transport into a tunnel.  It is
         #: non-reusable for HTTP, but closing the writer would discard the
         #: tunnel rather than merely retiring the HTTP protocol.
@@ -490,6 +492,11 @@ class HTTP1ResponseRecipient:
             if (not skip_interim or status == 101
                     or not is_informational(status)):
                 return version, status, headers
+            # Content-Length: 0 claims no boundary. What follows cannot be
+            # told apart from the final response being answered.
+            if (headers.getlist(b'transfer-encoding')
+                    or (_declared_content_length(headers) or 0) != 0):
+                self._boundary_declared = True
             seen += 1
             if limit and seen > limit:
                 log_cap_hit('client_max_interim_responses', requested=seen,
@@ -729,6 +736,14 @@ class HTTP1ResponseRecipient:
         )
         protocol_switched = status == 101 or successful_connect
         if body_forbidden or successful_connect:
+            # Never hoisted: `_declared_content_length` can refuse, and a
+            # HEAD or a 304 must not be made to parse one.
+            if (is_informational(status) or status == 204) \
+                    and (headers.getlist(b'transfer-encoding')
+                         or (_declared_content_length(headers) or 0) != 0):
+                # RFC 9112 §6.1. A successful CONNECT is absent: RFC 9110
+                # §9.3.6 has the client ignore these fields.
+                return _NO_BODY, None, False, False
             return _NO_BODY, None, not protocol_switched, protocol_switched
 
         transfer_fields = headers.getlist(b'transfer-encoding')
@@ -774,9 +789,13 @@ class HTTP1ResponseRecipient:
         different operators.
         """
         mode, _declared, framing_reusable, tunnel = framing
-        self.reusable = framing_reusable and response_persistent
-        self.protocol_switched = tunnel
-        self.tunnel = tunnel and method_is(request_method, 'CONNECT')
+        self.reusable = (framing_reusable and response_persistent
+                         and not self._boundary_declared)
+        # A peer that named a boundary it cannot have is not switching
+        # anything, so it gets no handoff either.
+        switched = tunnel and not self._boundary_declared
+        self.protocol_switched = switched
+        self.tunnel = switched and method_is(request_method, 'CONNECT')
         self.connection_exhausted = mode == _CLOSE_DELIMITED
 
     async def _read_head_and_policy(
