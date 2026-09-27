@@ -316,6 +316,7 @@ async def test_the_native_arm_sends_the_interim_head_it_accepts():
     sender = HTTP1Sender(writer)
     await sender(NativeResponse(status=103, header=[]))
     await sender(NativeResponse(status=200, header=[], body=b'x'))
+    await sender({'type': 'http.response.body', 'body': b'ok'})
 
     first, second = bytes(writer.data).split(b'HTTP/1.1 200 OK', 1)
     assert first.startswith(b'HTTP/1.1 103 '), first

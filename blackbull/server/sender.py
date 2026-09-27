@@ -654,16 +654,15 @@ class HTTP1Sender(BaseSender):
                     header_pairs = list(body._header)
                     _validate_response_header_fields(header_pairs)
                     self._response_started = True
+                    if self._buffered_status is not None:
+                        await self._send_interim(
+                            self._buffered_status, self._buffered_headers)
                     self._buffered_status = HTTPStatus(body.status)
                     # Preserve the ASGI start `trailers: True` flag so a
                     # terminal body before the trailers event withholds the
                     # terminal chunk (lossless full-form compat).
                     self._expect_trailers = body.expects_trailers
                     self._buffered_headers = Headers(header_pairs)
-                    if is_informational(self._buffered_status):
-                        await self._send_interim(
-                            self._buffered_status, self._buffered_headers)
-                        return
                     if self._log_record is not None:
                         self._log_record.status = body.status
                         self._log_record.mark('start_arm_in')
@@ -691,13 +690,12 @@ class HTTP1Sender(BaseSender):
                 header_pairs = list(body.get('headers', []))
                 _validate_response_header_fields(header_pairs)
                 self._response_started = True
+                if self._buffered_status is not None:
+                    await self._send_interim(
+                        self._buffered_status, self._buffered_headers)
                 self._buffered_status = HTTPStatus(body.get('status', HTTPStatus.OK))
                 self._expect_trailers = bool(body.get('trailers', False))
                 self._buffered_headers = Headers(header_pairs)
-                if is_informational(self._buffered_status):
-                    await self._send_interim(
-                        self._buffered_status, self._buffered_headers)
-                    return
                 if self._log_record is not None:
                     self._log_record.status = body.get('status', '-')
                     self._log_record.mark('start_arm_in')
@@ -931,10 +929,12 @@ class HTTP1Sender(BaseSender):
 
     async def _send_interim(self, status: HTTPStatus,
                             headers: HeaderList) -> None:
-        """Settle an interim head now and leave the response open for its
-        final one.  RFC 9110 §15.2 puts an interim response before the final
-        one on the same response, so buffering it until a body event would let
-        the next head overwrite it.  Both event arms funnel here.
+        """Settle a head that never got content, and leave the response
+        open for its final one.  RFC 9110 §15.2 puts an interim response
+        before the final one on the same response, so leaving it buffered
+        would let the next head overwrite it.  A `start` settles the one
+        before it, and the flush that already classifies the status does the
+        work — nothing is asked twice.
 
         An HTTP/1.0 peer is sent nothing: §15.2 gives a 1xx to clients that
         speak HTTP/1.1, and the state is settled the same way because the
@@ -1699,13 +1699,12 @@ class HTTP2Sender(BaseSender):
             if body._header is not None:
                 header_pairs = list(body._header)
                 _validate_response_header_fields(header_pairs)
+                if self._buffered_status is not None:
+                    await self._send_interim(
+                        self._buffered_status, self._buffered_headers)
                 self._buffered_status = HTTPStatus(body.status)
                 self._buffered_headers = header_pairs
                 self._expect_trailers = body.expects_trailers
-                if is_informational(self._buffered_status):
-                    await self._send_interim(
-                        self._buffered_status, header_pairs)
-                    return
                 if self._log_record is not None:
                     self._log_record.status = body.status
                     self._log_record.mark('start_arm_in')
@@ -1743,19 +1742,13 @@ class HTTP2Sender(BaseSender):
             if event_type == ASGIEvent.HTTP_RESPONSE_START:
                 header_pairs = list(body.get('headers', []))
                 _validate_response_header_fields(header_pairs)
+                if self._buffered_status is not None:
+                    await self._send_interim(
+                        self._buffered_status, self._buffered_headers)
                 self._buffered_status = HTTPStatus(body.get('status', 200))
                 self._buffered_headers = header_pairs
                 self._expect_trailers = bool(body.get('trailers', False))
-                interim = is_informational(self._buffered_status)
-                if interim:
-                    # RFC 9113 §8.1: an interim response is part of the
-                    # exchange it answers and does not end the stream, so it
-                    # is written as it is accepted.  Waiting for a body event
-                    # to flush it would let the next `start` overwrite it and
-                    # the interim response would never be sent.
-                    await self._send_interim(
-                        self._buffered_status, header_pairs)
-                if not interim and self._log_record is not None:
+                if self._log_record is not None:
                     self._log_record.status = body.get('status', '-')
                     self._log_record.mark('start_arm_in')
                     for hk, hv in body.get('headers', []):

@@ -181,6 +181,7 @@ async def test_an_interim_head_drops_the_fields_the_rule_forbids():
         (b'transfer-encoding', b'chunked'),
         (b'link', b'</s.css>; rel=preload'),
     ]})
+    await sender({'type': 'http.response.start', 'status': 200, 'headers': []})
     await asyncio.sleep(0)
     fields = dict(_decoded(writer)[0][1])
     assert fields[':status'] == '103', fields
