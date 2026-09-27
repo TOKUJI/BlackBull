@@ -653,20 +653,17 @@ class HTTP1Sender(BaseSender):
         if self._completed or self._poisoned:
             return
 
-        begins_response = (
-            isinstance(body, bytes)
-            or (isinstance(body, NativeResponse) and body._header is not None)
-            or (isinstance(body, dict)
-                and body.get('type') == ASGIEvent.HTTP_RESPONSE_START)
-        )
+        if isinstance(body, dict):
+            body = _native_from_asgi(body)
+
+        begins_response = (isinstance(body, bytes)
+                           or (isinstance(body, NativeResponse)
+                               and body._header is not None))
         if self._started and begins_response:
             # Once final headers are on the wire, another response head would
             # splice a second status line into the unfinished message.
             self._poisoned = True
             return
-
-        if isinstance(body, dict):
-            body = _native_from_asgi(body)
 
         match body:
             case bytes():
@@ -725,42 +722,6 @@ class HTTP1Sender(BaseSender):
                     self._response_started = True
                     await self._handle_trailers(
                         body.trailers, body.more_trailers)
-
-            case {'type': ASGIEvent.HTTP_RESPONSE_START}:
-                header_pairs = list(body.get('headers', []))
-                _validate_response_header_fields(header_pairs)
-                self._response_started = True
-                await self._settle_buffered_head()
-                self._buffered_status = HTTPStatus(body.get('status', HTTPStatus.OK))
-                self._expect_trailers = bool(body.get('trailers', False))
-                self._buffered_headers = Headers(header_pairs)
-                if self._log_record is not None:
-                    self._log_record.status = body.get('status', '-')
-                    self._log_record.mark('start_arm_in')
-                    for hk, hv in body.get('headers', []):
-                        if isinstance(hk, bytes):
-                            hkl = hk.lower()
-                            if hkl == b'content-type':
-                                self._log_record.resp_content_type = hv
-                            elif hkl == b'content-encoding':
-                                self._log_record.resp_content_encoding = hv
-                    self._log_record.mark('start_arm_out')
-
-            case {'type': ASGIEvent.HTTP_RESPONSE_BODY}:
-                self._response_started = True
-                await self._handle_body_content(body.get('body', b''),
-                                                body.get('more_body', False))
-
-            case {'type': ASGIEvent.HTTP_RESPONSE_TRAILERS}:
-                self._response_started = True
-                await self._handle_trailers(
-                    body.get('headers', []),
-                    bool(body.get('more_trailers', False)))
-
-            case {'type': ASGIEvent.HTTP_RESPONSE_PATHSEND}:
-                self._response_started = True
-                if await self._pathsend(body['path']):
-                    self._completed = True
 
             case {'type': str() as event_type}:
                 logger.warning('HTTP1Sender: unknown event type %r', event_type)
@@ -1681,6 +1642,9 @@ class HTTP2Sender(BaseSender):
             await self._write(body.save())
             return
 
+        if isinstance(body, dict):
+            body = _native_from_asgi(body)
+
         if isinstance(body, bytes):
             # RFC 9113 §8.1, as in the dict branch below.
             if self._end_stream_sent:
@@ -1779,35 +1743,7 @@ class HTTP2Sender(BaseSender):
                         event_type, self._stream_id)
                 return
 
-            if event_type == ASGIEvent.HTTP_RESPONSE_START:
-                header_pairs = list(body.get('headers', []))
-                _validate_response_header_fields(header_pairs)
-                await self._settle_buffered_head()
-                self._buffered_status = HTTPStatus(body.get('status', 200))
-                self._buffered_headers = header_pairs
-                self._expect_trailers = bool(body.get('trailers', False))
-                if self._log_record is not None:
-                    self._log_record.status = body.get('status', '-')
-                    self._log_record.mark('start_arm_in')
-                    for hk, hv in body.get('headers', []):
-                        if isinstance(hk, bytes):
-                            hkl = hk.lower()
-                            if hkl == b'content-type':
-                                self._log_record.resp_content_type = hv
-                            elif hkl == b'content-encoding':
-                                self._log_record.resp_content_encoding = hv
-                    self._log_record.mark('start_arm_out')
-
-            elif event_type == ASGIEvent.HTTP_RESPONSE_BODY:
-                await self._handle_body_content(
-                    body.get('body', b''), not body.get('more_body', False))
-
-            elif event_type == ASGIEvent.HTTP_RESPONSE_TRAILERS:
-                await self._handle_trailers(
-                    list(body.get('headers', [])),
-                    bool(body.get('more_trailers', False)))
-
-            elif event_type == ASGIEvent.HTTP_RESPONSE_PUSH:
+            if event_type == ASGIEvent.HTTP_RESPONSE_PUSH:
                 if self._push_callback is not None:
                     await self._push_callback(body, self._stream_id)
                 else:
