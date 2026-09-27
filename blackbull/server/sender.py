@@ -460,6 +460,13 @@ class BaseSender(ABC):
         self._writer = writer
         self._closed = False
 
+    async def _settle_buffered_head(self) -> None:
+        """A head that never got content is complete — settle it before the
+        next one would overwrite it."""
+        if self._buffered_status is not None:
+            await self._send_interim(self._buffered_status,
+                                    self._buffered_headers)
+
     def mark_client_gone(self) -> None:
         """The peer is gone — drop further writes instead of raising.
 
@@ -920,11 +927,6 @@ class HTTP1Sender(BaseSender):
         else:
             await self._write(head)
 
-    async def _settle_buffered_head(self) -> None:
-        if self._buffered_status is not None:
-            await self._send_interim(self._buffered_status,
-                                    self._buffered_headers)
-
     async def _send_interim(self, status: HTTPStatus,
                             headers: HeaderList) -> None:
         """Settle a head that never got content, and leave the response
@@ -1297,11 +1299,6 @@ class HTTP2Sender(BaseSender):
         self._buffered_status = None
         self._buffered_headers = None
         await self._write_response_start_and_body(body, False, status, headers, expect)
-
-    async def _settle_buffered_head(self) -> None:
-        if self._buffered_status is not None:
-            await self._send_interim(self._buffered_status,
-                                    self._buffered_headers)
 
     async def _send_interim(self, status: HTTPStatus,
                             headers: list[tuple[bytes, bytes]],
