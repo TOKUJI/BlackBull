@@ -6162,8 +6162,10 @@ waiting for a <code>websocket.connect</code> that is already gone.  See
 semantics, including what happens if the handler also calls <code>accept()</code> or
 closes the connection itself.</p>
 <h3 id="compression-compress"><code>Compression</code> / <code>compress</code><a class="headerlink" href="#compression-compress" title="Permanent link">&para;</a></h3>
-<p>Compresses HTTP response bodies using the codec the client prefers
-(brotli &gt; zstd &gt; gzip, based on <code>Accept-Encoding</code>):</p>
+<p>Compresses HTTP response bodies using an accepted codec in server preference
+order: brotli &gt; zstd &gt; gzip. <code>q=0</code> excludes a codec even when <code>*</code> permits others;
+positive q values do not change this order. A malformed quality or parameter
+refuses its named codec; a refusal in any duplicate also takes precedence.</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.middleware</span><span class="w"> </span><span class="kn">import</span> <span class="n">compress</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.middleware.compression</span><span class="w"> </span><span class="kn">import</span> <span class="n">Compression</span>
 

@@ -6310,6 +6310,9 @@ for headers that may repeat:</p>
 <p><code>.getlist</code> returns <code>list[tuple[bytes, bytes]]</code> — the full
 <code>(name, value)</code> pairs in insertion order, or <code>[]</code> if the header
 is absent.</p>
+<p>For comma-list fields such as <code>accept-encoding</code>, <code>.get_combined(name)</code> returns
+all values joined with <code>b', '</code>, or <code>None</code> when absent. Use <code>.getlist</code> for
+<code>set-cookie</code> and <code>cookie</code>, which cannot be combined this way.</p>
 <div class="admonition note">
 <p class="admonition-title">Why <code>cookie</code> needs <code>getlist</code> on HTTP/2</p>
 <p>HTTP/1.1 combines all cookies into a single

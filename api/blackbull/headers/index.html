@@ -3090,6 +3090,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.headers.Headers.get_combined" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_combined
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.headers.Headers.get_sf_dict" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5665,6 +5676,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.headers.Headers.get_combined" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_combined
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.headers.Headers.get_sf_dict" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5970,6 +5992,26 @@ the shortcut.  Do not pass a list you intend to keep mutating.</p>
         <p>Return the first value for <em>name</em>, or <em>default</em> if absent.</p>
 <p>Mirrors <code>dict.get(key, default)</code>: single value, optional default.
 For headers that may repeat use <code>getlist(name)</code>.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.headers.Headers.get_combined" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">get_combined</span><span class="p">(</span><span class="n">name</span><span class="p">)</span></code>
+
+<a href="#blackbull.headers.Headers.get_combined" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return values joined by <code>,</code>, or <code>None</code> when absent.</p>
+<p>Use only for fields allowing comma combination. For fields such as
+Set-Cookie, use <code>getlist</code> instead. A single empty value returns <code>b''</code>.</p>
 
 
     </div>

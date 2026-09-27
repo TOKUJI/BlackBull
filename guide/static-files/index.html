@@ -5905,8 +5905,9 @@ regardless of file size.</p>
 <p>If a file <code>app.js</code> has a sibling on disk like <code>app.js.br</code>,
 <code>app.js.zst</code>, or <code>app.js.gz</code>, <code>StaticFiles</code> will serve the
 sibling (with the right <code>Content-Encoding</code> header) when the
-client's <code>Accept-Encoding</code> allows it.  Preference order is
-<code>br &gt; zstd &gt; gzip</code>.</p>
+client's <code>Accept-Encoding</code> allows it, using the same
+<a href="../middleware/#compression-compress">acceptance rules as dynamic compression</a>.
+Preference order is <code>br &gt; zstd &gt; gzip</code>.</p>
 <div class="highlight"><pre><span></span><code>public/
   app.js          # 50 KiB original
   app.js.br       # 12 KiB pre-compressed (served when Accept-Encoding: br)
