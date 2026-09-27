@@ -176,6 +176,9 @@ class NativeWSMessage:
 
 
 class NativeResponse:
+    # Set per instance only when a request is promised; the common response
+    # pays nothing for a shape it never uses.
+    push = None
     """A response on the native send path: header and/or body and/or trailers.
 
     ``header`` is ``None`` when absent (never ``[]`` — presence is decided by
@@ -195,7 +198,6 @@ class NativeResponse:
         'file_path',
         'more_body',
         'more_trailers',
-        'push',
         'status',
         'trailers',
     )
@@ -229,8 +231,8 @@ class NativeResponse:
         # (``StaticFiles``) can stay native and still get zero-copy.
         # Mutually exclusive with ``body``: the bytes come from the file.
         self.file_path = file_path
-        # An HTTP/2 promised request; dropped where push is unavailable.
-        self.push = push
+        if push is not None:
+            self.push = push
 
     # --- fast constructors for framework-owned producers -------------------
     #
@@ -264,7 +266,6 @@ class NativeResponse:
         self.more_trailers = False
         self.expects_trailers = False
         self.file_path = None
-        self.push = None
         return self
 
     @classmethod
@@ -288,7 +289,6 @@ class NativeResponse:
         self.more_trailers = False
         self.expects_trailers = True
         self.file_path = None
-        self.push = None
         return self
 
     # --- header: DX view, or None when absent -----------------------------
