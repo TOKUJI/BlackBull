@@ -627,9 +627,8 @@ class MultiWorkerServer:
     def _terminate_all(self) -> tuple[list, Exception | None]:
         """Ask every running child to stop, continuing after any error.
 
-        Returns the children actually signalled: one already dead at this
-        point died during normal operation — the monitor respawns those —
-        and carries no shutdown verdict."""
+        Returns the children actually signalled: one already dead died
+        during normal operation, which carries no shutdown verdict."""
         errors = []
         signaled = []
         processes = self._owned_processes()
@@ -650,8 +649,7 @@ class MultiWorkerServer:
     def _reclaim_processes(self, processes, deadline: float, *, terminate: bool):
         """Reap and close process objects without exceeding *deadline*.
 
-        Returns each reaped process with its exit code, read before the
-        handle is closed."""
+        Returns each reaped process with its exit code, read before close."""
         errors = []
         unreclaimed = []
         ends = []
@@ -715,8 +713,7 @@ class MultiWorkerServer:
         self._pending_processes = unreclaimed
         if not unreclaimed:
             logger.info('All workers stopped')
-        # The stop's verdict covers each signalled worker's own end: a stop
-        # whose worker failed to clean up must not exit 0 (BLA-452).
+        # A stop whose signalled worker did not end 0 must not exit 0 (BLA-452).
         failed = [f'{p.name} (exit {code})' for p, code in ends
                   if any(p is s for s in signaled) and code not in (0, None)]
         worker_error = (RuntimeError(
