@@ -22,6 +22,7 @@ from ..asgi import ASGIEvent
 from ..connection import Connection
 from ..headers import Headers
 from ..native import NativeResponse
+from ..protocol.framing import is_informational
 from ..server.cap_log import log_cap_hit
 from ._accept_encoding import select_encoding
 from .utils import as_middleware
@@ -465,6 +466,16 @@ class Compression:
                         event.status, event._header, event._body,
                         original=event)
                     start_forwarded = True
+                    return
+
+                if is_informational(int(event.status)):
+                    # RFC 9110 §15.2: an interim response precedes the final
+                    # one on the same response. It carries no content, so
+                    # there is nothing to compress and no decision that needs
+                    # a body — holding it waits for one that cannot come, and
+                    # the interim never reaches the wire. The final response
+                    # behind it is still undecided and still compresses.
+                    await send(event)
                     return
 
                 if (not streaming and not skip_compression
