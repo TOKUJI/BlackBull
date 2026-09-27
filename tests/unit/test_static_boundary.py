@@ -1,11 +1,8 @@
 """Every static selection ends inside the configured root (BLA-334).
 
-The requested target and the index candidate take the realpath + root walk
-in ``__call__``; the file they did not pick — a precompressed sibling
-``<path>.<suffix>`` — must take the same walk before it can reach the cache,
-the open or the pathsend below.  These tests pin that one funnel covers
-every branch (each suffix, cache on/off, cache hit, the above-threshold
-streaming arm, Range), and that inward symlinks keep serving: containment,
+The target and the index candidate take the walk in ``__call__``; the
+variant picked in their place must be held to it too before reaching the
+cache, the open or the pathsend.  Inward symlinks keep serving: containment,
 not symlink-freedom, is the contract.
 """
 import gzip

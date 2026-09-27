@@ -326,27 +326,21 @@ class StaticFiles:
         await self._serve(conn, send, target)
 
     def _inside_root(self, resolved: str) -> bool:
-        """Whether a realpath'd candidate stays within the served root.
-
-        The one boundary definition — the request target, the index
-        candidate and any variant selection are judged here, so a new
-        selection path cannot quietly grow a weaker check.
-        """
+        """The one boundary definition: request target, index candidate and
+        any variant selection are judged here."""
         return resolved == self._root_str or resolved.startswith(self._root_sep)
 
     def _selection_within_root(self, served_path: str,
                                verified_path: str) -> bool:
-        """Whether the file ``_serve`` finally picked may be cached and sent.
+        """Whether the final selection may be cached and sent.
 
-        ``verified_path`` already took the walk above in ``__call__``, so a
-        selection equal to it needs no second walk — but a variant chosen in
-        its place does: ``<path>.<suffix>`` may be a symlink out of the root,
-        and the sibling memo records existence only.  The walk runs per
-        request, so a variant swapped between requests is refused on the next
-        one; a swap inside a single request races the open the same way the
-        requested target always has.
+        Equal to ``verified_path``, or a plain sibling of it, is covered by
+        the walk in ``__call__`` — only a symlinked variant can leave the
+        root, so only it walks again, every request.  A swap inside one
+        request races the open; the window the requested target has always
+        had.
         """
-        if served_path == verified_path:
+        if served_path == verified_path or not os.path.islink(served_path):
             return True
         return self._inside_root(os.path.realpath(served_path))
 
@@ -397,9 +391,8 @@ class StaticFiles:
         return target, b''
 
     async def _serve(self, conn, send, path: str):
-        # Pick variant (precompressed sibling if available + accepted),
-        # then hold the final selection to the root boundary — whatever
-        # the cache, the open and the streaming arms below do with it.
+        # Pick the variant, then hold the final selection to the root
+        # boundary before anything below can cache, open or send it.
         served_path, content_encoding = self._negotiate(conn, path)
         if not self._selection_within_root(served_path, path):
             await self._respond(send, HTTPStatus.BAD_REQUEST)
