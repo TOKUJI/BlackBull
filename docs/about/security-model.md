@@ -278,10 +278,11 @@ less than one that draws its own boundary:
 - **"No known gaps" is not "no gaps."** A bound that no one has found missing is
   not the same as a bound proven complete. This work is continuing, not
   finished.
-- **The server does not send `100 (Continue)`.** It reads whatever request
-  body follows without asking first, so a client that would have waited for
-  the permission signal sends its body regardless. That is a lost
-  optimization, not a lost guarantee.
+- **The server sends `100 (Continue)` only to HTTP/1.1.** An HTTP/1.0 client
+  gets no interim response at all and its `Expect` is ignored (COMP-NO-1XX-HTTP10),
+  so a client that waits for the signal stalls until its own timeout. The
+  server also never originates a `103 (Early Hints)`: it sends what the
+  application sends and infers nothing before then.
 
 On the async HTTP client specifically, and after the server ones so the
 contrast is visible:
@@ -294,6 +295,12 @@ contrast is visible:
   rule rather than the peer here; a 205 is consumed to its declared length
   precisely because the rule does not cover one. HTTP/2 refuses such frames
   instead, because frames are self-delimiting and no boundary is at stake.
+- **A 204 or a 1xx that declares a boundary is the one shape that is
+  refused.** RFC 9112 §6.1 forbids `Content-Length` and `Transfer-Encoding`
+  in one, so what follows cannot be told apart from the next response; the
+  connection is retired and the reader refuses it. A 204 with no boundary, or
+  with `Content-Length: 0`, still leaves its octets to the next response:
+  nothing is declared, so nothing is refused.
 
 - **It does not follow redirects and does not pool connections.** Neither
   exists in `blackbull/client/` — so neither is bounded *or* unbounded, and a

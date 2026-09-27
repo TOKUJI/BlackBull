@@ -657,6 +657,10 @@ class HTTP1Sender(BaseSender):
                     # terminal chunk (lossless full-form compat).
                     self._expect_trailers = body.expects_trailers
                     self._buffered_headers = Headers(header_pairs)
+                    if is_informational(self._buffered_status):
+                        await self._send_interim(
+                            self._buffered_status, self._buffered_headers)
+                        return
                     if self._log_record is not None:
                         self._log_record.status = body.status
                         self._log_record.mark('start_arm_in')
@@ -688,26 +692,8 @@ class HTTP1Sender(BaseSender):
                 self._expect_trailers = bool(body.get('trailers', False))
                 self._buffered_headers = Headers(header_pairs)
                 if is_informational(self._buffered_status):
-                    # RFC 9110 §15.2: an interim response precedes the final
-                    # one on the same response, so it is written as it is
-                    # accepted. Waiting for a body event to flush it would let
-                    # the next `start` overwrite it and the interim response
-                    # would never be sent.
-                    await self._write(self._render_start(
-                        self._buffered_status,
-                        self._ensure_framing_headers(
-                            self._buffered_status, self._buffered_headers,
-                            0, more_body=False)))
-                    self._buffered_status = None
-                    self._buffered_headers = None
-                    self._expect_trailers = False
-                    # RFC 9112 §6.3 rule 1: an interim response carries no
-                    # content, so a body event cannot end it. The next `start`
-                    # recomputes this.
-                    self._suppress_body = True
-                    if self._log_record is not None:
-                        self._log_record.status = body.get('status', '-')
-                        self._log_record.mark('start_arm_out')
+                    await self._send_interim(
+                        self._buffered_status, self._buffered_headers)
                     return
                 if self._log_record is not None:
                     self._log_record.status = body.get('status', '-')
@@ -939,6 +925,22 @@ class HTTP1Sender(BaseSender):
             await self._write_many((head, body))
         else:
             await self._write(head)
+
+    async def _send_interim(self, status: HTTPStatus,
+                            headers: HeaderList) -> None:
+        """Write an interim head now and leave the response open for its
+        final one.  RFC 9110 §15.2 puts an interim response before the final
+        one on the same response, so buffering it until a body event would let
+        the next head overwrite it.  Both event arms funnel here."""
+        await self._write(self._render_start(
+            status,
+            self._ensure_framing_headers(status, headers, 0, more_body=False)))
+        self._buffered_status = None
+        self._buffered_headers = None
+        self._expect_trailers = False
+        # RFC 9112 §6.3 rule 1: an interim response carries no content, so a
+        # body event cannot end it. The next `start` recomputes this.
+        self._suppress_body = True
 
     def _render_start(self, status: HTTPStatus, headers: HeaderList) -> bytes:
         """Build the status line + headers + blank-line as a single bytes blob."""
@@ -1287,6 +1289,26 @@ class HTTP2Sender(BaseSender):
         self._buffered_status = None
         self._buffered_headers = None
         await self._write_response_start_and_body(body, False, status, headers, expect)
+
+    async def _send_interim(self, status: HTTPStatus,
+                            headers: list[tuple[bytes, bytes]],
+                            ) -> None:
+        """Write an interim head now and leave the stream open for its final
+        one.  Both event arms funnel here.  RFC 9112 §6.1 forbids
+        Content-Length and Transfer-Encoding in a contentless message, and
+        transfer-encoding is connection-specific: RFC 9113 §8.2.2 keeps it
+        out of HTTP/2 entirely."""
+        kept = [(hk, hv) for hk, hv in headers
+                if hk.lower() not in (b'content-length',
+                                      b'transfer-encoding')]
+        await self.send_response_headers(status, kept)
+        self._buffered_status = None
+        self._buffered_headers = None
+        self._expect_trailers = False
+        # RFC 9112 §6.3 rule 1, and the reason the stream stays open: an
+        # interim response carries no content, so a body event cannot end it.
+        # The next `start` recomputes this.
+        self._suppress_body = True
 
     async def send_response_headers(
         self, status: HTTPStatus, headers: list[tuple[bytes, bytes]],
@@ -1671,6 +1693,10 @@ class HTTP2Sender(BaseSender):
                 self._buffered_status = HTTPStatus(body.status)
                 self._buffered_headers = header_pairs
                 self._expect_trailers = body.expects_trailers
+                if is_informational(self._buffered_status):
+                    await self._send_interim(
+                        self._buffered_status, header_pairs)
+                    return
                 if self._log_record is not None:
                     self._log_record.status = body.status
                     self._log_record.mark('start_arm_in')
@@ -1711,22 +1737,16 @@ class HTTP2Sender(BaseSender):
                 self._buffered_status = HTTPStatus(body.get('status', 200))
                 self._buffered_headers = header_pairs
                 self._expect_trailers = bool(body.get('trailers', False))
-                if is_informational(self._buffered_status):
+                interim = is_informational(self._buffered_status)
+                if interim:
                     # RFC 9113 §8.1: an interim response is part of the
                     # exchange it answers and does not end the stream, so it
                     # is written as it is accepted.  Waiting for a body event
                     # to flush it would let the next `start` overwrite it and
                     # the interim response would never be sent.
-                    await self.send_response_headers(
+                    await self._send_interim(
                         self._buffered_status, header_pairs)
-                    self._buffered_status = None
-                    self._buffered_headers = None
-                    self._expect_trailers = False
-                    # RFC 9112 §6.3 rule 1, and the reason the stream stays
-                    # open: an interim response carries no content, so a body
-                    # event cannot end it. The next `start` recomputes this.
-                    self._suppress_body = True
-                if self._log_record is not None:
+                if not interim and self._log_record is not None:
                     self._log_record.status = body.get('status', '-')
                     self._log_record.mark('start_arm_in')
                     for hk, hv in body.get('headers', []):

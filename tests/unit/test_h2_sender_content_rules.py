@@ -66,6 +66,18 @@ async def test_content_still_reaches_the_wire_on_an_ordinary_status():
     assert writer.body() == b'abc'
 
 
+def _decoded(writer: _Writer) -> list[tuple[int, dict]]:
+    """(frame kind, decoded field block) for the HEADERS frames written."""
+    import hpack
+    out = []
+    decoder = hpack.Decoder()
+    for kind, _, _sid, payload in writer.frames:
+        if kind == 1:
+            pairs = decoder.decode(payload)
+            out.append((kind, {str(k): str(v) for k, v in pairs}))
+    return out
+
+
 def _wire(writer: _Writer) -> list[tuple[int, int]]:
     """(frame kind, END_STREAM bit) for every frame written."""
     return [(kind, flags & 0x1) for kind, flags, _, _ in writer.frames]
@@ -156,6 +168,39 @@ async def test_an_interim_head_is_written_before_the_next_one_arrives():
                   'more_body': False})
     await asyncio.sleep(0)
     assert _wire(writer) == [(1, 0), (1, 0), (0, 1)]
+
+
+async def test_an_interim_head_drops_the_fields_the_rule_forbids():
+    """RFC 9112 §6.1 forbids Content-Length and Transfer-Encoding in a
+    contentless message, and RFC 9113 §8.2.2 keeps connection-specific
+    fields out of HTTP/2 entirely. A strict peer treats one as a protocol
+    error, so the sender must not forward what the application supplied."""
+    sender, writer = _sender()
+    await sender({'type': 'http.response.start', 'status': 103, 'headers': [
+        (b'content-length', b'5'),
+        (b'transfer-encoding', b'chunked'),
+        (b'link', b'</s.css>; rel=preload'),
+    ]})
+    await asyncio.sleep(0)
+    fields = dict(_decoded(writer)[0][1])
+    assert fields[':status'] == '103', fields
+    assert 'content-length' not in fields, fields
+    assert 'transfer-encoding' not in fields, fields
+    assert fields['link'] == '</s.css>; rel=preload', fields
+
+
+async def test_the_native_arm_sends_the_interim_head_it_accepts():
+    """The native arm does what the dict arm does — or the docstring that
+    says so is a lie. A `NativeResponse` for an interim head must reach the
+    wire instead of being overwritten by the final one."""
+    from blackbull.server.sender import NativeResponse
+
+    sender, writer = _sender()
+    await sender(NativeResponse(status=103, header=[(b'link', b'</s.css>')]))
+    await sender(NativeResponse(status=200, header=[], body=b'x'))
+    await asyncio.sleep(0)
+    statuses = [dict(f)[':status'] for _, f in _decoded(writer)]
+    assert statuses[:2] == ['103', '200'], statuses
 
 
 async def test_a_head_response_is_quiet_about_the_chunks_it_suppresses(caplog):

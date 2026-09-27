@@ -306,6 +306,23 @@ async def test_an_interim_head_is_written_before_the_next_one_arrives():
 
 
 @pytest.mark.asyncio
+async def test_the_native_arm_sends_the_interim_head_it_accepts():
+    """The native arm does what the dict arm does. A `NativeResponse` for an
+    interim head must reach the wire instead of being overwritten by the
+    final one."""
+    from blackbull.server.sender import NativeResponse
+
+    writer = MemoryWriter()
+    sender = HTTP1Sender(writer)
+    await sender(NativeResponse(status=103, header=[]))
+    await sender(NativeResponse(status=200, header=[], body=b'x'))
+
+    first, second = bytes(writer.data).split(b'HTTP/1.1 200 OK', 1)
+    assert first.startswith(b'HTTP/1.1 103 '), first
+    assert second.endswith(b'\r\n\r\nx')
+
+
+@pytest.mark.asyncio
 async def test_head_keeps_computed_length_but_discards_body_and_app_te():
     sender, wire = await _send_fixed(
         'dict', [(b'transfer-encoding', b'gzip')], head=True)

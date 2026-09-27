@@ -1182,6 +1182,47 @@ class TestContentlessResponsesDoNotClaimABoundary:
         assert recipient.reusable is True
 
     @pytest.mark.asyncio
+    async def test_a_204_claiming_zero_length_is_still_reusable(self):
+        """``Content-Length: 0`` agrees with having no content, so nothing is
+        claimed and no boundary is at stake. Real peers send it; retiring the
+        connection would cost keep-alive for no ambiguity."""
+        reader = _Reader(b'HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n'
+                         b'\r\n')
+        recipient = HTTP1ResponseRecipient(request_method='GET')
+
+        response = await recipient.receive(reader)
+
+        assert response.body == b''
+        assert recipient.reusable is True
+
+    @pytest.mark.asyncio
+    async def test_the_octets_after_a_refused_204_are_left_unread(self):
+        """Refusing is not consuming. If the reader ate the leftover before
+        refusing, a silent regression would look like the right answer."""
+        head = (b'HTTP/1.1 204 No Content\r\nContent-Length: 3\r\n\r\n')
+        reader = _Reader(head + b'odd')
+        recipient = HTTP1ResponseRecipient(request_method='GET')
+
+        await recipient.receive(reader)
+
+        assert recipient.reusable is False
+        assert reader.remaining == b'odd', 'the reader consumed what it refuses'
+
+    @pytest.mark.asyncio
+    async def test_an_interim_head_claiming_a_boundary_retires_the_connection(self):
+        """The interim heads the production path skips are the ones a peer
+        would hide a second response inside, so the boundary check belongs
+        where they are read — not only where a framed 1xx could arrive."""
+        reader = _Reader(b'HTTP/1.1 100 Continue\r\nContent-Length: 51\r\n'
+                         b'\r\nHTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n')
+        recipient = HTTP1ResponseRecipient(request_method='GET')
+
+        response = await recipient.receive(reader)
+
+        assert response.status == 200
+        assert recipient.reusable is False
+
+    @pytest.mark.asyncio
     async def test_a_304_keeps_the_length_it_only_describes(self):
         reader = _Reader(b'HTTP/1.1 304 Not Modified\r\nContent-Length: 17\r\n'
                          b'\r\n')

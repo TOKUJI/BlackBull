@@ -89,6 +89,19 @@ _CLOSE_DELIMITED = 'close'
 #: whitespace, and a negative numeral reached ``readexactly()``.
 _HEXDIG = frozenset(b'0123456789abcdefABCDEF')
 
+
+def _declares_a_boundary(headers: Headers) -> bool:
+    """Whether the message claims octets its content rule says it cannot.
+
+    RFC 9112 §6.1 forbids both fields in a 1xx or a 204.  ``Content-Length:
+    0`` agrees with having no content, so nothing is claimed and nothing is
+    at stake; anything else names a boundary this message cannot have.
+    """
+    if headers.getlist(b'transfer-encoding'):
+        return True
+    declared = _declared_content_length(headers)
+    return declared is not None and declared != 0
+
 # Empty list members are tolerated for interoperability, but the parser must
 # not spend unbounded work on a peer sending only commas.  The head-size budget
 # remains the total byte bound; this is only a small structural sanity bound.
@@ -322,6 +335,7 @@ class HTTP1ResponseRecipient:
         #: CONNECT tunnel.  Those outcomes are not framing errors, but the
         #: HTTP/1.1 connection cannot be used for another request.
         self.reusable = True
+        self._boundary_declared = False
         #: A successful CONNECT changes the transport into a tunnel.  It is
         #: non-reusable for HTTP, but closing the writer would discard the
         #: tunnel rather than merely retiring the HTTP protocol.
@@ -490,6 +504,13 @@ class HTTP1ResponseRecipient:
             if (not skip_interim or status == 101
                     or not is_informational(status)):
                 return version, status, headers
+            if _declares_a_boundary(headers):
+                # RFC 9112 §6.1: the head named a boundary this message
+                # cannot have, and what follows cannot be told apart from the
+                # final response being answered.  Carry that into the
+                # connection's fate rather than trusting the framing of a
+                # peer that got this wrong.
+                self._boundary_declared = True
             seen += 1
             if limit and seen > limit:
                 log_cap_hit('client_max_interim_responses', requested=seen,
@@ -729,11 +750,9 @@ class HTTP1ResponseRecipient:
         )
         protocol_switched = status == 101 or successful_connect
         if body_forbidden or successful_connect:
-            if (is_informational(status) or status == 204) and (
-                    headers.getlist(b'transfer-encoding')
-                    or headers.getlist(b'content-length')):
-                # RFC 9112 §6.1 forbids both fields in a 1xx or a 204.  A
-                # peer sending one declared a boundary this message cannot
+            if (is_informational(status) or status == 204) \
+                    and _declares_a_boundary(headers):
+                # A peer sending one declared a boundary this message cannot
                 # have, and the octets that follow cannot be told apart from
                 # the next response, so this connection is not reusable.
                 return _NO_BODY, None, False, protocol_switched
@@ -782,7 +801,8 @@ class HTTP1ResponseRecipient:
         different operators.
         """
         mode, _declared, framing_reusable, tunnel = framing
-        self.reusable = framing_reusable and response_persistent
+        self.reusable = (framing_reusable and response_persistent
+                         and not self._boundary_declared)
         self.protocol_switched = tunnel
         self.tunnel = tunnel and method_is(request_method, 'CONNECT')
         self.connection_exhausted = mode == _CLOSE_DELIMITED
