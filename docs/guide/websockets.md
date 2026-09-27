@@ -296,19 +296,19 @@ modelling a partial frame.  The declarations change nothing at runtime.
 ## permessage-deflate (RFC 7692)
 
 `permessage-deflate` compression is negotiated automatically when
-the client offers it on the handshake.  The server replies with
-`Sec-WebSocket-Extensions: permessage-deflate;
-server_no_context_takeover; client_no_context_takeover` — the
-no-context-takeover flags trade a small compression-ratio penalty
-for bounded per-connection memory (each side resets its deflate
-state between messages instead of keeping it for the whole
-connection).
+the client offers it on the handshake.  The response echoes only the
+constraints the offer carried; an offer the server cannot serve is
+declined and the next offer (or a plain uncompressed connection) wins
+(RFC 7692 §7.1.1).  Declined: unknown or repeated parameters, values
+outside bare `8`–`15`, and windows this runtime's zlib cannot
+instantiate — `8`, on CPython.  A constraint is never widened past
+what the client offered.
 
 | Aspect | Behaviour |
 |---|---|
 | Default | On — matches modern browsers, Node `ws`, Python `websockets`, aiohttp. |
 | Disable | `BB_WS_PERMESSAGE_DEFLATE=0`.  The handshake still succeeds; just no extension is negotiated. |
-| Per-message-deflate strategy | Both `server_no_context_takeover` and `client_no_context_takeover` always advertised. |
+| Per-message-deflate strategy | Context takeover is accepted by default; `*_no_context_takeover` is honoured when the client offers it. |
 | RSV1 bit | Set on compressed data frames per §7 of the RFC; clients without the negotiated extension that send RSV1 are rejected as protocol violations. |
 
 ### Handshakes that carry a body are refused

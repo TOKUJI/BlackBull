@@ -22,11 +22,6 @@ import zlib
 from .ws_codec import MessageTooLarge
 
 
-# RFC 7692 §7.1 — the four parameters that may appear in the offer/response.
-# We accept any window_bits value the peer offers in [8, 15]; we never demand
-# a window-bits restriction ourselves.
-_VALID_WBITS_RANGE = range(8, 16)
-
 # Raw DEFLATE (no zlib header / trailer) — wbits negative selects this mode
 # in CPython's zlib.  RFC 7692 §7.2 strips the four trailing bytes
 # ``\x00\x00\xff\xff`` from each compressed message; the inflate side appends
@@ -56,8 +51,7 @@ def negotiate(offer_header: bytes | None) -> tuple[DeflateParams | None, bytes |
 
     Policy: accept context-takeover by default on both sides (better
     compression).  Honour ``server_no_context_takeover`` and
-    ``client_no_context_takeover`` when the client asks for them.  Ignore
-    unknown parameter names — that's what RFC 7692 §5.1 calls for.
+    ``client_no_context_takeover`` when the client asks for them.
 
     ``offer_header`` is the raw bytes of the client's
     ``Sec-WebSocket-Extensions`` header (or ``None`` when absent).  The
@@ -67,79 +61,106 @@ def negotiate(offer_header: bytes | None) -> tuple[DeflateParams | None, bytes |
     if not offer_header:
         return None, None
 
-    for raw_offer in _split_offers(offer_header):
-        try:
-            name, params = _parse_offer(raw_offer)
-        except ValueError:
-            continue
-        if name != b'permessage-deflate':
-            continue
-
-        # Reject offers with invalid window-bits *values* (e.g. =7 / =16).
-        # Empty values (no `=`) are fine — the peer signals support, we pick.
-        sb = params.get(b'server_max_window_bits')
-        cb = params.get(b'client_max_window_bits')
-        if sb is not None and sb is not _EMPTY and sb not in _VALID_WBITS_RANGE:
-            continue
-        if cb is not None and cb is not _EMPTY and cb not in _VALID_WBITS_RANGE:
-            continue
-
-        accepted = DeflateParams(
-            server_no_context_takeover=b'server_no_context_takeover' in params,
-            client_no_context_takeover=b'client_no_context_takeover' in params,
-            server_max_window_bits=sb if isinstance(sb, int) else 15,
-            client_max_window_bits=cb if isinstance(cb, int) else 15,
-        )
-        return accepted, _render(accepted)
+    for raw_offer in offer_header.split(b','):
+        accepted = _accept_offer(raw_offer)
+        if accepted is not None:
+            return accepted, _render(accepted)
     return None, None
 
 
-class _Empty:
-    """Sentinel for parameters that appear without an ``=value``."""
-    __slots__ = ()
-    def __repr__(self) -> str:  # pragma: no cover - debug only
-        return '<empty>'
+def _accept_offer(raw_offer: bytes) -> DeflateParams | None:
+    """Parse one ``;``-separated offer and validate it; ``None`` declines.
 
-_EMPTY = _Empty()
+    RFC 7692 §7.1.1 requires declining an offer with a parameter not
+    defined for an offer, an invalid value, a repeated name, or a
+    configuration the server does not support — including a window this
+    runtime's zlib cannot instantiate (8, on CPython, measured into
+    ``_SERVED_WBITS`` once per process).  An unusable window declines the
+    offer; it is never rounded up past the peer's constraint.
 
-
-def _split_offers(header: bytes) -> list[bytes]:
-    """Split a Sec-WebSocket-Extensions header into individual offers.
-
-    Multiple extensions are separated by ``,``; offer parameters by ``;``.
-    We keep this lexical and don't try to validate the whole RFC 7230 grammar
-    — the offers we actually accept go through [`_parse_offer`][] next.
+    One pass over the offer, in three stages per parameter: lexical
+    splitting, the §7.1.1 checks, and the params assembly.
     """
-    return [p.strip() for p in header.split(b',') if p.strip()]
-
-
-def _parse_offer(offer: bytes) -> tuple[bytes, dict[bytes, object]]:
-    """Parse a single offer of the form ``name; key=value; flag``.
-
-    Returns the extension name and a dict of parameters.  Values are
-    coerced to ``int`` for window-bits parameters, kept as bytes otherwise.
-    Bare flag parameters (no ``=``) map to ``_EMPTY``.
-    """
-    parts = [p.strip() for p in offer.split(b';') if p.strip()]
-    if not parts:
-        raise ValueError('empty offer')
-    name = parts[0].lower()
-    params: dict[bytes, object] = {}
-    for raw in parts[1:]:
-        if b'=' in raw:
-            key, _, value = raw.partition(b'=')
+    seen: set[bytes] = set()
+    snc = cnc = False
+    sb = cb = None
+    is_extension_name = True
+    for raw in raw_offer.split(b';'):
+        part = raw.strip()
+        if not part:
+            continue
+        if is_extension_name:
+            is_extension_name = False
+            if part.lower() != b'permessage-deflate':
+                return None
+            continue
+        # Lexical: key=value with an optional quoted value.
+        if b'=' in part:
+            key, _, value = part.partition(b'=')
             key = key.strip().lower()
-            value = value.strip().strip(b'"')
-            if key in (b'server_max_window_bits', b'client_max_window_bits'):
-                try:
-                    params[key] = int(value)
-                except ValueError as exc:
-                    raise ValueError(f'invalid integer for {key!r}: {value!r}') from exc
-            else:
-                params[key] = value
+            value = value.strip()
+            if value.startswith(b'"'):
+                if len(value) < 2 or not value.endswith(b'"'):
+                    return None
+                value = value[1:-1]
+            has_value = True
         else:
-            params[raw.strip().lower()] = _EMPTY
-    return name, params
+            key = part.lower()
+            has_value = False
+        # §7.1.1 checks: a repeated name, a value where none is allowed,
+        # or an out-of-range window declines the offer.
+        if key in seen:
+            return None
+        seen.add(key)
+        if key in (b'server_no_context_takeover', b'client_no_context_takeover'):
+            if has_value:
+                return None
+            if key == b'server_no_context_takeover':
+                snc = True
+            else:
+                cnc = True
+        elif key in (b'server_max_window_bits', b'client_max_window_bits'):
+            if key == b'server_max_window_bits' and not has_value:
+                return None       # §7.1.2.1: an offer carries the value
+            if has_value:
+                # A bare 8-15 decimal: ASCII digits, no leading zero.
+                if not value.isdigit() or value.startswith(b'0'):
+                    return None
+                w = int(value)
+                if not 8 <= w <= 15:
+                    return None
+                if key == b'server_max_window_bits':
+                    sb = w
+                else:
+                    cb = w
+        else:
+            return None
+    # Assembly: absent constraints stay at the defaults.
+    server_w = sb if sb is not None else 15
+    client_w = cb if cb is not None else 15
+    if server_w not in _SERVED_WBITS or client_w not in _SERVED_WBITS:
+        return None
+    return DeflateParams(
+        server_no_context_takeover=snc,
+        client_no_context_takeover=cnc,
+        server_max_window_bits=server_w,
+        client_max_window_bits=client_w,
+    )
+
+
+# The windows whose codecs this runtime can build and use: measured once
+# per process after the codec classes below, never per handshake.
+def _measure_served_wbits() -> frozenset[int]:
+    served = set()
+    for w in range(8, 16):
+        try:
+            out = OutboundCompressor(w, reset_per_message=False)
+            inc = InboundDecompressor(w, reset_per_message=False)
+            if inc.decompress(out.compress(b'x')) == b'x':
+                served.add(w)
+        except (ValueError, zlib.error):
+            pass
+    return frozenset(served)
 
 
 def _render(p: DeflateParams) -> bytes:
@@ -232,3 +253,6 @@ class OutboundCompressor:
         if self._reset_per_message:
             self._deflater = zlib.compressobj(wbits=self._wbits, level=zlib.Z_DEFAULT_COMPRESSION)
         return out
+
+
+_SERVED_WBITS = _measure_served_wbits()
