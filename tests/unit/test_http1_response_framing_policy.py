@@ -288,6 +288,24 @@ async def test_informational_body_is_discarded_before_the_final_response():
 
 
 @pytest.mark.asyncio
+async def test_an_interim_head_is_written_before_the_next_one_arrives():
+    """RFC 9110 §15.2: an interim response precedes the final one on the
+    same response. Buffering the head until a body event lets the next
+    `start` overwrite it, and the interim response is never sent."""
+    writer = MemoryWriter()
+    sender = HTTP1Sender(writer)
+    await sender({'type': 'http.response.start', 'status': 103, 'headers': []})
+    await sender({'type': 'http.response.start', 'status': 200,
+                  'headers': [(b'content-length', b'3')]})
+    await sender({'type': 'http.response.body', 'body': b'yes'})
+
+    out = bytes(writer.data)
+    first, second = out.split(b'HTTP/1.1 200 OK', 1)
+    assert first.startswith(b'HTTP/1.1 103 '), first
+    assert second.endswith(b'\r\n\r\nyes')
+
+
+@pytest.mark.asyncio
 async def test_head_keeps_computed_length_but_discards_body_and_app_te():
     sender, wire = await _send_fixed(
         'dict', [(b'transfer-encoding', b'gzip')], head=True)

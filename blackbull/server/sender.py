@@ -687,6 +687,25 @@ class HTTP1Sender(BaseSender):
                 self._buffered_status = HTTPStatus(body.get('status', HTTPStatus.OK))
                 self._expect_trailers = bool(body.get('trailers', False))
                 self._buffered_headers = Headers(header_pairs)
+                if is_informational(self._buffered_status):
+                    # RFC 9110 §15.2: an interim response precedes the final
+                    # one on the same response, so it is written as it is
+                    # accepted. Waiting for a body event to flush it would let
+                    # the next `start` overwrite it and the interim response
+                    # would never be sent.
+                    await self._write(self._render_start(
+                        self._buffered_status,
+                        self._ensure_framing_headers(
+                            self._buffered_status, self._buffered_headers,
+                            0, more_body=False)))
+                    self._buffered_status = None
+                    self._buffered_headers = None
+                    self._expect_trailers = False
+                    # RFC 9112 §6.3 rule 1: an interim response carries no
+                    # content, so a body event cannot end it. The next `start`
+                    # recomputes this.
+                    self._suppress_body = True
+                    return
                 if self._log_record is not None:
                     self._log_record.status = body.get('status', '-')
                     self._log_record.mark('start_arm_in')
