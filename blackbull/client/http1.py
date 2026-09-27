@@ -736,19 +736,20 @@ class HTTP1ResponseRecipient:
             and 200 <= status < 300
         )
         protocol_switched = status == 101 or successful_connect
-        transfer_fields = headers.getlist(b'transfer-encoding')
         if body_forbidden or successful_connect:
             # Content-Length is parsed only here and below, never hoisted:
             # `_declared_content_length` can refuse a malformed numeral, and a
             # HEAD or a 304 must not be made to parse one to stay contentless.
             if (is_informational(status) or status == 204) \
-                    and (transfer_fields or (_declared_content_length(headers) or 0) != 0):
+                    and (headers.getlist(b'transfer-encoding')
+                         or (_declared_content_length(headers) or 0) != 0):
                 # RFC 9112 §6.1. A successful CONNECT is absent on purpose:
                 # RFC 9110 §9.3.6 has the tunnel begin at the header
                 # terminator and tells the client to ignore these fields.
                 return _NO_BODY, None, False, False
             return _NO_BODY, None, not protocol_switched, protocol_switched
 
+        transfer_fields = headers.getlist(b'transfer-encoding')
         if transfer_fields:
             if headers.getlist(b'content-length'):
                 # RFC 9112 §6.3 item 3 gives the precedence *and* says the
