@@ -68,6 +68,9 @@ def test_cli_serves_blackbull_app(tmp_path: Path, child_env):
     port = _free_port()
     script = tmp_path / 'cli_app.py'
     script.write_text(textwrap.dedent('''
+        import blackbull, os, pathlib
+        assert pathlib.Path(blackbull.__file__).resolve().is_relative_to(
+            pathlib.Path(os.environ['BB_TEST_TREE_ROOT'])), blackbull.__file__
         from blackbull import BlackBull
 
         app = BlackBull()
@@ -125,6 +128,9 @@ def test_cli_serves_over_unix_domain_socket(tmp_path: Path, child_env):
     sock_path = tmp_path / 'bb.sock'
     script = tmp_path / 'uds_app.py'
     script.write_text(textwrap.dedent('''
+        import blackbull, os, pathlib
+        assert pathlib.Path(blackbull.__file__).resolve().is_relative_to(
+            pathlib.Path(os.environ['BB_TEST_TREE_ROOT'])), blackbull.__file__
         from blackbull import BlackBull
         app = BlackBull()
         @app.route(path='/version')
@@ -205,6 +211,9 @@ def test_cli_serves_raw_asgi_callable(tmp_path: Path, child_env):
     port = _free_port()
     script = tmp_path / 'raw_asgi_app.py'
     script.write_text(textwrap.dedent('''
+        import blackbull, os, pathlib
+        assert pathlib.Path(blackbull.__file__).resolve().is_relative_to(
+            pathlib.Path(os.environ['BB_TEST_TREE_ROOT'])), blackbull.__file__
         # Bare-bones ASGI 3.0 callable — no framework.
         async def app(scope, receive, send):
             if scope['type'] != 'http':

@@ -123,7 +123,10 @@ def child_env():
     ``import blackbull`` for the tree under test, and a green run then
     proves nothing about that tree.  ``make`` pins ``PYTHONPATH`` ahead of
     the caller's entries and probes the resolution the child will see,
-    failing if it lands outside the repository root."""
+    failing if it lands outside the repository root.  ``BB_TEST_TREE_ROOT``
+    lets a child assert the same in its own process — a console script
+    runs the interpreter its shebang names, which the probe cannot share.
+    """
 
     def make(extra: dict[str, str] | None = None) -> dict[str, str]:
         env = os.environ.copy()
@@ -131,8 +134,10 @@ def child_env():
         have = env.get('PYTHONPATH', '').split(os.pathsep)
         env['PYTHONPATH'] = os.pathsep.join(
             [str(REPO_ROOT)] + [p for p in want + have if p])
+        env['BB_TEST_TREE_ROOT'] = str(REPO_ROOT)
         probe = subprocess.run(
-            [sys.executable, '-c', 'import blackbull; print(blackbull.__file__)'],
+            [sys.executable, '-c',
+             "import importlib.util as u; print(u.find_spec('blackbull').origin)"],
             env=env, capture_output=True, text=True, errors='replace',
             timeout=30)
         found = (probe.stdout or '').strip()
