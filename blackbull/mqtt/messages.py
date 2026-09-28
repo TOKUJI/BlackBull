@@ -337,10 +337,10 @@ def decode_variable_byte_integer(data: bytes) -> tuple[int, int]:
     for byte in data:
         value += (byte & 0x7F) * multiplier
         consumed += 1
-        if multiplier > 128 * 128 * 128:
-            raise MQTTDecodeError('Variable Byte Integer too long')
         if (byte & 0x80) == 0:
             return value, consumed
+        if consumed == 4:
+            raise MQTTDecodeError('Variable Byte Integer too long')
         multiplier *= 128
     raise IncompletePacket('Variable Byte Integer continues past buffer')
 
@@ -1319,7 +1319,7 @@ def decode_packet(data: bytes) -> MQTTMessage:
             raise MQTTDecodeError(
                 f'Reserved flag bits 0x{flags:X} invalid for {packet_type.name}')
 
-    remaining_length, rl_consumed = decode_variable_byte_integer(data[1:])
+    remaining_length, rl_consumed = decode_variable_byte_integer(data[1:5])
     header_len = 1 + rl_consumed
     total = header_len + remaining_length
     if total > len(data):

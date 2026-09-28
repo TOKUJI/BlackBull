@@ -142,27 +142,18 @@ recording the capture position) and bound to keyword arguments at dispatch.
 
 ## Reading the wire: `PacketFramer`
 
-TCP is a byte stream, so a single read may contain several MQTT packets, a
-partial packet, or malformed input. `PacketFramer` yields each fully decoded
-packet and keeps trailing incomplete bytes for the next feed. A complete
-packet with a truncated inner field is malformed, not an incomplete read.
-Malformed input terminates the connection; no bytes are scanned for a new
-packet boundary. Refusals follow CONNECT admission through the broker FIFO:
-before admission the connection closes silently, and after admission its sole
-writer sends DISCONNECT after CONNACK. Broker retirement and the serving task's
-Detach barrier own session cleanup and writer completion.
+`PacketFramer` retains incomplete packets and rejects malformed input without
+resynchronizing. A complete packet with a truncated inner field is malformed,
+not an incomplete read. Refusals follow CONNECT admission through the broker
+FIFO: silent close before admission, otherwise DISCONNECT after CONNACK through
+the sole writer. Broker retirement and the serving task's Detach barrier own
+session cleanup and writer completion.
 
 The live reader drains packets before each 4096-byte read, bounding buffered
 wire input by an incomplete fixed header or capped partial packet, plus one
 read chunk when the cap is enabled. Direct `PacketFramer.feed()` callers own
 their feed sizes; the packet cap is not a separate aggregate buffer limit.
 Keep Alive owns receive idleness, not a total packet-assembly deadline.
-
-!!! note "Why the framer still copies at the decode boundary"
-    `PacketFramer` snapshots its buffer with `bytes(...)` before each decode
-    because the codec's `decode_packet` input contract is deliberately `bytes`
-    (enforced by beartype). A zero-copy framer would mean widening that contract
-    to the buffer protocol. The snapshot includes buffered trailing packets.
 
 ## Relationship to the framework actor model
 

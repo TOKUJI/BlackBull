@@ -334,3 +334,27 @@ async def test_malformed_connection_fires_will_once_and_leaves_no_tasks():
             assert writer.pop_packets()[-1].reason_code == ReasonCode.MALFORMED_PACKET
         finally:
             await _drain(task, sub_task)
+
+
+@pytest.mark.parametrize('cap', [0, 1048576])
+async def test_four_remaining_length_continuations_close_without_more_input(cap, monkeypatch):
+    from blackbull.env import reset_settings_cache
+
+    monkeypatch.setenv('BB_MQTT_MAX_PACKET_SIZE', str(cap))
+    reset_settings_cache()
+    try:
+        async with _running_broker() as broker:
+            reader = _FakeReader()
+            writer, task = await _serve(broker, reader, _ctx())
+            reader.feed_packet(MQTTConnect(client_id='bad-length', clean_start=True, keep_alive=0))
+            reader._buf.extend(b'\x30\x80\x80\x80\x80')
+            try:
+                await asyncio.wait_for(asyncio.shield(task), 1)
+                packets = writer.pop_packets()
+                assert [type(p) for p in packets] == [MQTTConnack, MQTTDisconnect]
+                assert packets[-1].reason_code == ReasonCode.MALFORMED_PACKET
+                assert not broker._clients
+            finally:
+                await _drain(task)
+    finally:
+        reset_settings_cache()

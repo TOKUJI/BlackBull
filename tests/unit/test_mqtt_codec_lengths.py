@@ -25,6 +25,7 @@ from blackbull.mqtt.messages import (
     MQTTConnect,
     MQTTConnack,
     MQTTDecodeError,
+    IncompletePacket,
     MQTTDisconnect,
     MQTTPacketType,
     MQTTPuback,
@@ -34,9 +35,30 @@ from blackbull.mqtt.messages import (
     MQTTUnsuback,
     MQTTUnsubscribe,
     decode_packet,
+    decode_variable_byte_integer,
     encode_packet,
     encode_variable_byte_integer,
 )
+
+
+@pytest.mark.parametrize('length', [1, 2, 3])
+def test_variable_integer_continuations_remain_incomplete(length):
+    with pytest.raises(IncompletePacket):
+        decode_variable_byte_integer(b'\x80' * length)
+
+
+def test_fourth_variable_integer_continuation_is_malformed_without_a_fifth_byte():
+    with pytest.raises(MQTTDecodeError):
+        decode_variable_byte_integer(b'\x80' * 4)
+    assert decode_variable_byte_integer(b'\xff\xff\xff\x7f') == (268435455, 4)
+
+
+@pytest.mark.parametrize('cap', [0, 1048576])
+def test_framer_rejects_fourth_remaining_length_continuation_without_more_input(cap):
+    framer = PacketFramer(max_packet_size=cap)
+    framer.feed(b'\x30\x80\x80\x80\x80')
+    with pytest.raises(MQTTDecodeError):
+        list(framer)
 
 # §2.1.3 — PUBREL, SUBSCRIBE and UNSUBSCRIBE reserve these fixed-header flags.
 
