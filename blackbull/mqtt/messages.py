@@ -1084,9 +1084,7 @@ def _decode_connect(body: bytes, flags: int) -> MQTTConnect:
     # §3.1.2 — Protocol Level (1), Connect Flags (1) and Keep Alive (2) are a
     # fixed 4-byte block after the protocol name.  A CONNECT whose declared
     # Remaining Length stops short of them must be rejected as a Malformed
-    # Packet (§1.5.5, §4.13) — a raw ``body[pos]`` here would raise IndexError,
-    # which the framer's ``except`` does not catch, unwinding ``read_loop``
-    # and dropping the connection instead of resyncing.
+    # Packet (§1.5.5, §4.13).
     if pos + 4 > len(body):
         raise MQTTDecodeError('CONNECT truncated before the fixed header fields')
     proto_level = body[pos]
@@ -1312,8 +1310,7 @@ def decode_packet(data: bytes) -> MQTTMessage:
 
     # §2.1.3 — reserved fixed-header flag bits.  PUBLISH carries DUP/QoS/RETAIN;
     # PUBREL/SUBSCRIBE/UNSUBSCRIBE MUST be 0b0010; all others MUST be 0b0000.
-    # A mismatch is a Malformed Packet — also the signal the actor's resync uses
-    # to skip junk bytes.
+    # A mismatch is a Malformed Packet.
     if packet_type != MQTTPacketType.PUBLISH:
         expected = RESERVED_FLAGS_0010 if packet_type in (
             MQTTPacketType.PUBREL, MQTTPacketType.SUBSCRIBE,
@@ -1336,9 +1333,7 @@ def decode_packet(data: bytes) -> MQTTMessage:
     # the whole declared packet.  An inner decoder that still claims "need more"
     # (IncompletePacket) or indexes past the body (IndexError) means the packet's
     # contents are inconsistent with its declared length — a Malformed Packet
-    # (§1.5.5, §4.13), not a short read.  Both must surface as MQTTDecodeError so
-    # the framer resyncs (drops a byte) instead of stalling forever on a body
-    # that will never grow, or unwinding read_loop on an uncaught IndexError.
+    # (§1.5.5, §4.13), not a short read.
     try:
         msg = decoder(body, flags)
     except IncompletePacket as exc:

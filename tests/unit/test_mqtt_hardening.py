@@ -73,20 +73,18 @@ async def _unsubscribe(broker, conn, packet_id, topics):
 class TestConnectDecodeBounds:
     async def test_connect_truncated_after_protocol_name_is_malformed(self):
         """A CONNECT whose Remaining Length covers only the protocol name must
-        raise MQTTDecodeError (which the framer resyncs on), not an IndexError
+        raise MQTTDecodeError, not an IndexError
         that unwinds the read loop."""
         # 0x10 = CONNECT, RL=6, body = 2-byte-len-prefixed "MQTT" only.
         packet = b'\x10\x06\x00\x04MQTT'
         with pytest.raises(MQTTDecodeError):
             decode_packet(packet)
 
-    async def test_framer_resyncs_past_a_truncated_connect(self):
-        """The framer drops the malformed CONNECT byte-by-byte and does not
-        raise IncompletePacket forever (which would stall the connection)."""
+    async def test_framer_rejects_a_truncated_connect(self):
         framer = PacketFramer()
         framer.feed(b'\x10\x06\x00\x04MQTT')
-        # Draining the framer must terminate without raising.
-        assert list(framer) == []
+        with pytest.raises(MQTTDecodeError):
+            list(framer)
 
 
 # ===========================================================================

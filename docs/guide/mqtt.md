@@ -251,9 +251,18 @@ Normal broker and connection mailbox shutdowns emit DEBUG lifecycle logs under
 
 **The packet limit is judged from the header.** MQTT 5 lets a peer declare a
 Remaining Length of 268,435,455 bytes (256 MiB) and then deliver it slowly. The
-check runs as soon as the fixed header is readable, so the payload is never
-buffered — the broker refuses on what the peer *claimed*, not on what it
-managed to send.
+check runs as soon as the fixed header is readable, at every packet boundary.
+The cap counts the entire wire packet, including its fixed header; equality
+is accepted and zero disables the cap. Coalesced packets are judged separately.
+Bytes already delivered in the current read can be buffered, but an oversized
+declaration never causes another read for its body.
+
+Malformed packets end the connection without attempting resynchronization or
+forwarding trailing packets. Before CONNECT admission refusals close silently;
+after admission the writer sends DISCONNECT with Malformed Packet (`0x81`) or
+Packet Too Large (`0x95`), after CONNACK. Keep Alive owns the existing receive
+idle deadline after CONNECT; there is no total packet-assembly deadline, and
+Keep Alive zero disables that idle check.
 
 **The backlog exists because flow control is not a licence to forget.** When a
 client's `Receive Maximum` window is full, matching messages are held rather

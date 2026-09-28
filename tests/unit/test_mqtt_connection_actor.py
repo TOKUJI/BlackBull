@@ -16,7 +16,7 @@ from blackbull.mqtt.connection import serve_connection
 from blackbull.mqtt.messages import (
     ReasonCode,
     MQTTConnect, MQTTConnack, MQTTPublish, MQTTPuback,
-    MQTTSubscribe, MQTTPingreq, MQTTPingresp, MQTTDisconnect,
+    MQTTSubscribe, MQTTSuback, MQTTPingreq, MQTTPingresp, MQTTDisconnect,
     encode_packet, decode_packet,
 )
 from blackbull.server.protocol_registry import ProtocolContext
@@ -278,3 +278,59 @@ async def test_unsupported_version_rejected():
         pkts = writer.pop_packets()
         await _drain(task)
     assert any(isinstance(p, MQTTConnack) and p.reason_code == ReasonCode.UNSUPPORTED_PROTOCOL_VERSION for p in pkts)
+
+
+@pytest.mark.parametrize('connected', [False, True])
+@pytest.mark.parametrize('wire,reason', [
+    (b'\x00\x00', ReasonCode.MALFORMED_PACKET),
+    (b'\xc1\x00', ReasonCode.MALFORMED_PACKET),
+    (b'\x30\x80\x80\x80\x80', ReasonCode.MALFORMED_PACKET),
+    (b'\x10\x06\x00\x04MQTT', ReasonCode.MALFORMED_PACKET),
+    (b'\x30\xff\xff\xff\x7f', ReasonCode.PACKET_TOO_LARGE),
+])
+async def test_invalid_wire_ends_connection_without_forwarding_trailing_packet(connected, wire, reason):
+    async with _running_broker() as broker:
+        reader = _FakeReader()
+        writer, task = await _serve(broker, reader, _ctx())
+        if connected:
+            reader.feed_packet(MQTTConnect(client_id='bad-wire', clean_start=True, keep_alive=60))
+        reader._buf.extend(wire)
+        reader.feed_packet(MQTTPingreq())
+        try:
+            await asyncio.wait_for(asyncio.shield(task), 1)
+            packets = writer.pop_packets()
+            if connected:
+                assert [type(p) for p in packets] == [MQTTConnack, MQTTDisconnect]
+                assert packets[-1].reason_code == reason
+            else:
+                assert packets == []
+            assert not broker._clients
+        finally:
+            await _drain(task)
+
+
+async def test_malformed_connection_fires_will_once_and_leaves_no_tasks():
+    async with _running_broker() as broker:
+        subscriber = _FakeReader()
+        sub_writer, sub_task = await _serve(broker, subscriber, _ctx('sub'))
+        subscriber.feed_packet(MQTTConnect(client_id='sub', clean_start=True, keep_alive=60))
+        subscriber.feed_packet(MQTTSubscribe(packet_id=1, subscriptions=[('will', 0)]))
+        async with asyncio.timeout(1):
+            while not any(isinstance(p, MQTTSuback) for p in sub_writer.pop_packets()):
+                await asyncio.sleep(0)
+        tasks_before = asyncio.all_tasks()
+        reader = _FakeReader()
+        writer, task = await _serve(broker, reader, _ctx('bad'))
+        reader.feed_packet(MQTTConnect(client_id='bad', clean_start=True, keep_alive=60,
+                                       will_topic='will', will_payload=b'gone'))
+        reader._buf.extend(b'\xc1\x00')
+        try:
+            await asyncio.wait_for(asyncio.shield(task), 1)
+            await asyncio.sleep(0)
+            delivered = [p for p in sub_writer.pop_packets() if isinstance(p, MQTTPublish)]
+            assert [(p.topic, p.payload) for p in delivered] == [('will', b'gone')]
+            assert 'bad' not in broker._clients
+            assert asyncio.all_tasks() <= tasks_before
+            assert writer.pop_packets()[-1].reason_code == ReasonCode.MALFORMED_PACKET
+        finally:
+            await _drain(task, sub_task)

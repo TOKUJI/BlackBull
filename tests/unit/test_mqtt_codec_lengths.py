@@ -282,17 +282,19 @@ def test_a_malformed_packet_never_reaches_the_framer():
                     + BYTES_AFTER_THE_LAST_FIELD + BODY_MUST_BE_ABSENT):
         framer = PacketFramer()
         framer.feed(wire)
-        assert list(framer) == [], wire.hex()
+        with pytest.raises(MQTTDecodeError):
+            list(framer)
 
 
-def test_the_packet_behind_a_malformed_one_still_decodes():
-    """Its deficit may not be taken from the next packet's octets."""
+def test_the_packet_behind_a_malformed_one_is_not_decoded():
+    """Malformed input terminates framing at the original boundary."""
     valid = packet(MQTTPacketType.PUBACK, b'\x00\x01')
     for _, wire in (SHORTER_THAN_THE_TYPE_REQUIRES + ZERO_PACKET_IDENTIFIER
                     + BYTES_AFTER_THE_LAST_FIELD + BODY_MUST_BE_ABSENT):
         framer = PacketFramer()
         framer.feed(wire + valid)
-        assert list(framer) == [MQTTPuback(packet_id=1)], wire.hex()
+        with pytest.raises(MQTTDecodeError):
+            next(iter(framer))
 
 
 def test_a_body_the_message_class_refuses_is_a_decode_error():

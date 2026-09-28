@@ -268,7 +268,7 @@ BB_H2_WS_MAX_STREAMS_PER_CONNECTION = 5
 # --- MQTT ----------------------------------------------------------------------
 
 BB_MQTT_MAX_PACKET_SIZE = 1024 * 1024
-"""Maximum size of one inbound control packet, advertised as `Maximum Packet Size` (§3.2.2.3.6).  Checked against the declared Remaining Length as soon as the fixed header is readable, so an over-size packet is refused **without buffering its payload** — MQTT 5 lets a peer declare 268,435,455 bytes (256 MiB) and then dribble them.  Over the cap the broker answers `DISCONNECT` with **0x95 (Packet Too Large)** and closes.  `0` disables."""
+"""Maximum wire size of one inbound control packet, including its fixed header, advertised as `Maximum Packet Size` (§3.2.2.3.6). Checked as soon as Remaining Length is complete, without waiting for the body. Above the cap the connection closes: silently before CONNECT admission, otherwise with `DISCONNECT` **0x95 (Packet Too Large)** after CONNACK. Equality is accepted; `0` disables."""
 
 BB_MQTT_BROKER_INBOX_MAXSIZE = 1024
 """Positive bound on messages waiting in the worker's MQTT broker inbox. Readers await admission at capacity; the broker logs the cap hit. Independent of session QoS backlog. Invalid values, including zero, use the default."""
@@ -332,4 +332,3 @@ BB_PHASE_TRACE = '0'
 
 BB_DEADLINE_TICK_MS = '300'
 """Polling interval (milliseconds) for the per-process deadline scanner that enforces `BB_HEADER_TIMEOUT`, `BB_BODY_TIMEOUT`, `BB_WRITE_TIMEOUT`, and `BB_KEEP_ALIVE_TIMEOUT`.  One shared timer for the whole process instead of one per request, which is why enabling those timeouts costs nothing per request.  Smaller = tighter timeout granularity at a small CPU cost; larger = more slack but cheaper."""
-
