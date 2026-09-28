@@ -1,0 +1,278 @@
+"""§3.2.2.3.7 [MQTT-3.2.2-16] — zero-length Client Identifier.
+
+A server that accepts a zero-byte Client Identifier assigns one the client
+can see (Assigned Client Identifier in the success CONNACK) and later
+reconnect with.  Assignment is not a takeover: an identifier handed out
+this way must not collide with — and must never retire — a live or offline
+session that already holds that name, including names that merely look
+like the server's own.
+"""
+
+from __future__ import annotations
+
+import asyncio
+
+import pytest
+
+from blackbull.actor import Actor
+from blackbull.mqtt.broker import BrokerActor, Attach, Detach, Send, Close
+
+from blackbull.mqtt.messages import (
+    MQTTConnect,
+    MQTTConnack,
+    MQTTDisconnect,
+    ReasonCode,
+    encode_packet,
+)
+
+pytestmark = pytest.mark.asyncio
+
+
+class RecordingConn(Actor):
+    def __init__(self) -> None:
+        super().__init__()
+        self.outbox = []
+
+    async def send(self, msg) -> None:
+        self.outbox.append(msg)
+
+    def packets(self):
+        return [m.packet for m in self.outbox if isinstance(m, Send)]
+
+
+def _connect(client_id='', clean_start=True, **kw):
+    return MQTTConnect(client_id=client_id, clean_start=clean_start,
+                       keep_alive=kw.pop('keep_alive', 60), **kw)
+
+
+async def _attach(broker, conn, **kw):
+    await broker._handle(Attach(connect=_connect(**kw), sender=conn))
+
+
+async def _detach(broker, conn):
+    await broker._handle(Detach(graceful=True, sender=conn))
+
+
+def _assigned(connack):
+    return (connack.properties or {}).get('assigned_client_identifier')
+
+
+def _success_size(connack):
+    """The wire size of the CONNACK this broker would send for these
+    properties — the number the peer's Maximum Packet Size is compared to."""
+    return len(encode_packet(MQTTConnack(
+        session_present=False, reason_code=ReasonCode.SUCCESS,
+        properties=dict(connack.properties or {}))))
+
+
+class TestAssignedIdentifier:
+    async def test_an_empty_client_id_gets_an_identifier_in_the_connack(self):
+        broker, conn = BrokerActor(), RecordingConn()
+        await _attach(broker, conn)
+        ack = conn.packets()[0]
+        assert isinstance(ack, MQTTConnack)
+        assert ack.reason_code == ReasonCode.SUCCESS
+        assert _assigned(ack)
+
+    async def test_the_assigned_identifier_takes_over_no_existing_connection(self):
+        broker = BrokerActor()
+        holder, empty = RecordingConn(), RecordingConn()
+        await _attach(broker, holder, client_id='auto-1')
+        await _attach(broker, empty)
+        assert _assigned(empty.packets()[0]) != 'auto-1'
+        assert all(not isinstance(p, MQTTDisconnect) for p in holder.packets())
+
+    async def test_the_assigned_identifier_skips_a_live_session(self):
+        broker, live = BrokerActor(), RecordingConn()
+        await _attach(broker, live, client_id='auto-1')
+        fresh = RecordingConn()
+        await _attach(broker, fresh)
+        assigned = _assigned(fresh.packets()[0])
+        assert assigned and assigned != 'auto-1'
+
+    async def test_the_assigned_identifier_skips_an_offline_session(self):
+        broker, first = BrokerActor(), RecordingConn()
+        await _attach(broker, first, client_id='auto-1', clean_start=False,
+                      properties={'session_expiry_interval': 3600})
+        await _detach(broker, first)          # connection gone; session stays
+        fresh = RecordingConn()
+        await _attach(broker, fresh)
+        assigned = _assigned(fresh.packets()[0])
+        assert assigned and assigned != 'auto-1'
+
+    async def test_two_empty_ids_never_collide(self):
+        broker = BrokerActor()
+        a, b = RecordingConn(), RecordingConn()
+        await _attach(broker, a)
+        await _attach(broker, b)
+        first, second = _assigned(a.packets()[0]), _assigned(b.packets()[0])
+        assert first and second and first != second
+
+    async def test_two_queued_empty_id_connects_both_get_identifiers(self):
+        """Both CONNECTs sit in the inbox before either is processed."""
+        broker = BrokerActor()
+        a, b = RecordingConn(), RecordingConn()
+        await broker.send(Attach(connect=_connect(), sender=a))
+        await broker.send(Attach(connect=_connect(), sender=b))
+        drained = asyncio.Event()
+        await broker.send(Detach(graceful=True, sender=RecordingConn(),
+                                 processed=drained))
+        task = asyncio.create_task(broker.run())
+        try:
+            await asyncio.wait_for(drained.wait(), 5)
+        finally:
+            task.cancel()
+        first, second = _assigned(a.packets()[0]), _assigned(b.packets()[0])
+        assert first and second and first != second
+        assert not any(isinstance(p, MQTTDisconnect)
+                       for p in a.packets() + b.packets())
+
+    async def test_an_empty_id_with_clean_start_zero_still_starts_fresh(self):
+        broker, conn = BrokerActor(), RecordingConn()
+        await _attach(broker, conn, clean_start=False)
+        ack = conn.packets()[0]
+        assert ack.reason_code == ReasonCode.SUCCESS
+        assert ack.session_present is False
+        assert _assigned(ack)
+
+    async def test_the_client_can_reconnect_with_the_assigned_identifier(self):
+        broker, conn = BrokerActor(), RecordingConn()
+        await _attach(broker, conn,
+                      properties={'session_expiry_interval': 3600})
+        assigned = _assigned(conn.packets()[0])
+        await _detach(broker, conn)          # connection drops; session stays
+        again = RecordingConn()
+        await _attach(broker, again, client_id=assigned, clean_start=False)
+        assert again.packets()[0].session_present is True
+
+    async def test_the_default_expiry_session_does_not_outlive_the_connection(self):
+        broker, conn = BrokerActor(), RecordingConn()
+        await _attach(broker, conn)
+        assigned = _assigned(conn.packets()[0])
+        await _detach(broker, conn)
+        assert broker._sessions == {}
+        again = RecordingConn()
+        await _attach(broker, again, client_id=assigned, clean_start=False)
+        assert again.packets()[0].session_present is False
+
+    async def test_a_clean_start_empty_id_starts_a_fresh_session(self):
+        broker, conn = BrokerActor(), RecordingConn()
+        await _attach(broker, conn,
+                      properties={'session_expiry_interval': 3600})
+        assigned = _assigned(conn.packets()[0])
+        await _detach(broker, conn)          # session survives with its state
+        again = RecordingConn()
+        await _attach(broker, again, client_id=assigned, clean_start=True)
+        assert again.packets()[0].session_present is False
+
+
+class TestQuotaAndPeerLimits:
+    async def test_a_full_table_leaves_nothing_behind_for_an_empty_id(self):
+        broker = BrokerActor()
+        broker._max_sessions = 1
+        taken = RecordingConn()
+        await _attach(broker, taken, client_id='c1')
+        refused = RecordingConn()
+        await _attach(broker, refused)
+        ack = refused.packets()[0]
+        assert isinstance(ack, MQTTConnack)
+        assert ack.reason_code == ReasonCode.QUOTA_EXCEEDED
+        assert set(broker._sessions) == {'c1'}
+
+    async def test_a_free_slot_admits_an_empty_id_at_the_cap(self):
+        broker = BrokerActor()
+        broker._max_sessions = 2
+        await _attach(broker, RecordingConn(), client_id='c1')
+        conn = RecordingConn()
+        await _attach(broker, conn)
+        ack = conn.packets()[0]
+        assert ack.reason_code == ReasonCode.SUCCESS
+        assert set(broker._sessions) == {'c1', _assigned(ack)}
+
+    async def test_the_assigned_connack_fits_the_peer_packet_limit(self):
+        broker, probe = BrokerActor(), RecordingConn()
+        await _attach(broker, probe)
+        size = _success_size(probe.packets()[0])
+        broker, conn = BrokerActor(), RecordingConn()
+        await _attach(broker, conn,
+                      properties={'maximum_packet_size': size})
+        assert _assigned(conn.packets()[0])
+
+    async def test_an_unfittable_assigned_connack_is_refused_without_a_session(self):
+        broker, probe = BrokerActor(), RecordingConn()
+        await _attach(broker, probe)
+        size = _success_size(probe.packets()[0])
+        broker, conn = BrokerActor(), RecordingConn()
+        await _attach(broker, conn, will_topic='w',
+                      properties={'maximum_packet_size': size - 1})
+        # §3.14 [MQTT-3.14.0-1] — DISCONNECT only ever follows a CONNACK,
+        # so the refusal is a CONNACK carrying an error code.
+        ack = conn.packets()[0]
+        assert isinstance(ack, MQTTConnack)
+        assert ack.reason_code == ReasonCode.PACKET_TOO_LARGE
+        assert not any(isinstance(p, MQTTDisconnect) for p in conn.packets())
+        assert any(isinstance(m, Close) for m in conn.outbox)
+        await _detach(broker, conn)          # teardown must find nothing
+        assert broker._sessions == {}
+        assert broker._clients == {}
+        assert broker._client_by_conn == {}
+        assert broker._wills == {}
+
+    async def test_a_tiny_limit_gets_a_close_and_nothing_else(self):
+        broker, conn = BrokerActor(), RecordingConn()
+        await _attach(broker, conn, will_topic='w',
+                      properties={'maximum_packet_size': 2})
+        assert conn.packets() == []
+        assert any(isinstance(m, Close) for m in conn.outbox)
+        assert broker._sessions == {}
+        assert broker._clients == {}
+        assert broker._client_by_conn == {}
+        assert broker._wills == {}
+
+    async def test_the_packet_limit_is_answered_before_the_quota(self):
+        broker, probe = BrokerActor(), RecordingConn()
+        await _attach(broker, probe)
+        size = _success_size(probe.packets()[0])
+        broker = BrokerActor()
+        broker._max_sessions = 1
+        await _attach(broker, RecordingConn(), client_id='c1')
+        conn = RecordingConn()
+        await _attach(broker, conn,
+                      properties={'maximum_packet_size': size - 1})
+        # The success CONNACK can never reach this peer, so the packet
+        # limit answers the CONNECT before the quota has a say.
+        ack = conn.packets()[0]
+        assert isinstance(ack, MQTTConnack)
+        assert ack.reason_code == ReasonCode.PACKET_TOO_LARGE
+        assert set(broker._sessions) == {'c1'}
+
+    async def test_a_zero_maximum_packet_size_cannot_bypass_the_check(self):
+        broker, conn = BrokerActor(), RecordingConn()
+        await _attach(broker, conn, will_topic='w',
+                      properties={'maximum_packet_size': 0})
+        assert conn.packets() == []
+        assert any(isinstance(m, Close) for m in conn.outbox)
+        assert broker._sessions == {}
+        assert broker._clients == {}
+        assert broker._client_by_conn == {}
+        assert broker._wills == {}
+
+
+class TestExplicitIdentifiersAreUnchanged:
+    async def test_an_explicit_identifier_still_takes_over(self):
+        broker = BrokerActor()
+        first, second = RecordingConn(), RecordingConn()
+        await _attach(broker, first, client_id='c1')
+        await _attach(broker, second, client_id='c1')
+        assert any(isinstance(p, MQTTDisconnect)
+                   and p.reason_code == ReasonCode.SESSION_TAKEN_OVER
+                   for p in first.packets())
+        assert second.packets()[0].reason_code == ReasonCode.SUCCESS
+
+    async def test_an_auto_looking_explicit_identifier_is_an_ordinary_name(self):
+        broker = BrokerActor()
+        first, second = RecordingConn(), RecordingConn()
+        await _attach(broker, first, client_id='auto-2')
+        await _attach(broker, second, client_id='auto-2')
+        assert any(isinstance(p, MQTTDisconnect) for p in first.packets())
+        assert _assigned(second.packets()[0]) is None

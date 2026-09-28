@@ -530,14 +530,47 @@ class BrokerActor(Actor):
             return
 
         client_id = connect.client_id
-        if not client_id:
-            self._auto_seq += 1
-            client_id = f'auto-{self._auto_seq}'
 
         # Collect what has already expired before deciding anything about
-        # this CONNECT: whether the session resumes, and whether the table
-        # is full, must both be answered against live state only.
+        # this CONNECT: whether the session resumes, whether the table is
+        # full, and which identifiers are free must all be answered against
+        # live state only.
         self._sweep_expired()
+
+        connack_props = self._connack_properties()
+        ack: Send | None = None
+        if not client_id:
+            # §3.2.2.3.7 [MQTT-3.2.2-16] — the client must see what it was
+            # assigned, in a CONNACK the peer can receive: nothing larger
+            # than its Maximum Packet Size may be sent (§3.1.2.11.3), so
+            # the reply is measured before anything is registered and the
+            # CONNECT refused if it cannot fit — no nameless or unusable
+            # session may outlive the refusal.  A fresh allocation never
+            # resumes a session, so ``session_present`` is False in every
+            # outcome below and the encoded bytes stay valid until sent.
+            client_id = self._allocate_client_id()
+            connack_props['assigned_client_identifier'] = client_id
+            ack = Send(packet=MQTTConnack(
+                session_present=False, reason_code=ReasonCode.SUCCESS,
+                properties=connack_props))
+            limit = connect.properties.get('maximum_packet_size')
+            if limit is not None:
+                ack._encoded = encode_packet(ack.packet)
+                if len(ack._encoded) > limit:
+                    # [MQTT-3.14.0-1] — DISCONNECT only ever follows a
+                    # CONNACK, so the refusal is a CONNACK with an error
+                    # code (§3.2.2.3).  When even that cannot fit the
+                    # declared limit, close without one rather than send
+                    # what the peer cannot receive.
+                    reject = Send(packet=MQTTConnack(
+                        session_present=False,
+                        reason_code=ReasonCode.PACKET_TOO_LARGE))
+                    reject._encoded = encode_packet(reject.packet)
+                    if len(reject._encoded) <= limit:
+                        await conn.send(reject)
+                    await conn.send(Close(
+                        reason_code=ReasonCode.PACKET_TOO_LARGE))
+                    return
 
         # The *total* column.  Checked before any registration below, so a
         # refusal leaves no half-attached client behind — and only for a
@@ -633,9 +666,11 @@ class BrokerActor(Actor):
         session.setdefault('receive_maximum', 65535)
         session.setdefault('outbound_queue', deque())
 
-        await conn.send(Send(packet=MQTTConnack(
-            session_present=session_present, reason_code=ReasonCode.SUCCESS,
-            properties=self._connack_properties())))
+        if ack is None:
+            ack = Send(packet=MQTTConnack(
+                session_present=session_present, reason_code=ReasonCode.SUCCESS,
+                properties=connack_props))
+        await conn.send(ack)
 
         # §4.4 — retransmit any unacknowledged outbound messages queued while
         # the client was offline (QoS 1 + QoS 2, with DUP set on PUBLISH frames).
@@ -936,6 +971,21 @@ class BrokerActor(Actor):
             rap = bool(opts.get('retain_as_published'))
             await self._deliver(conn, session, publish, qos,
                                 retain=(rap and publish.retain))
+
+    def _allocate_client_id(self) -> str:
+        """§3.2.2.3.7 [MQTT-3.2.2-16] — a Client Identifier no session holds.
+
+        Live and offline sessions both reserve their names, so an
+        identifier that merely looks allocated — ``auto-1`` and friends —
+        is skipped, never taken over.  The counter only orders candidates;
+        the tables decide.
+        """
+        while True:
+            self._auto_seq += 1
+            candidate = f'auto-{self._auto_seq}'
+            if (candidate not in self._sessions
+                    and candidate not in self._clients):
+                return candidate
 
     def _connack_properties(self) -> dict[str, Any]:
         """§3.2.2.3 — state the limits, so a conforming client stays inside them.

@@ -104,7 +104,12 @@ Server-only packet types received from the client also end admission instead
 of being skipped; a non-CONNECT first command cannot establish a connection.
 Reconnecting requires a **new** network connection, which can resume an existing
 session. Session takeover invalidates the old actor, so its delayed commands
-cannot publish or alter the replacement session, even while its writer flushes.
+cannot publish or alter the replacement session, even while its writer
+flushes. A zero-length Client Identifier never takes part in that: the
+broker assigns an unused identifier and reports it in CONNACK. If the
+CONNACK carrying it cannot fit the peer's Maximum Packet Size, the
+connection is refused with `0x95` — or closed outright when even that
+reply cannot fit — without creating a session.
 Broker-initiated protocol-error closure retires admission before processing the
 next command. Client DISCONNECT and transport failures use the FIFO `Detach`
 boundary: commands ordered before it were admitted while the connection was
@@ -134,6 +139,7 @@ conformance matrix:
 | Will (LWT) | delivered on abnormal disconnect; suppressed on a normal `DISCONNECT` (`0x00`) |
 | Keep-alive | PINGREQ / PINGRESP; an idle connection is closed (Will fired) at 1.5× the negotiated Keep Alive (§3.1.2.10) |
 | Session takeover | a second CONNECT for a live Client Identifier disconnects the prior connection with `0x8E` (§3.1.4) |
+| Client Identifier | a zero-length Client Identifier is assigned an identifier no live or offline session holds, returned in CONNACK as `Assigned Client Identifier` (§3.2.2.3.7) — assignment skips existing names, it never takes them over |
 | Properties | the full MQTT 5 property set (§2.2.2.2) on every packet that carries properties |
 | Sessions | subscriptions and pending QoS state preserved across reconnects with Clean Start = 0 |
 | Flow control | the client's `Receive Maximum` (§3.1.2.11.3) is enforced in the outbound direction; the broker's own is advertised in CONNACK as a promise to conforming clients |
