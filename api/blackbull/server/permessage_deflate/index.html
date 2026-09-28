@@ -5918,8 +5918,7 @@ deciding whether to reset the deflater between messages.</p>
 </ul>
 <p>Policy: accept context-takeover by default on both sides (better
 compression).  Honour <code>server_no_context_takeover</code> and
-<code>client_no_context_takeover</code> when the client asks for them.  Ignore
-unknown parameter names — that's what RFC 7692 §5.1 calls for.</p>
+<code>client_no_context_takeover</code> when the client asks for them.</p>
 <p><code>offer_header</code> is the raw bytes of the client's
 <code>Sec-WebSocket-Extensions</code> header (or <code>None</code> when absent).  The
 client may send multiple comma-separated offers; we pick the first one
