@@ -159,7 +159,9 @@ def _measure_served_wbits() -> frozenset[int]:
             if inc.decompress(out.compress(b'x')) == b'x':
                 served.add(w)
         except (ValueError, zlib.error):
-            pass
+            # Some runtimes/zlib builds do not support every window size.
+            # This probe intentionally skips unsupported values.
+            continue
     return frozenset(served)
 
 
