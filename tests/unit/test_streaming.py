@@ -192,32 +192,29 @@ class TestHTTP1SenderPathsend:
         assert body == b'body'
 
     @pytest.mark.asyncio
-    async def test_rejects_mismatched_content_length_before_wire(self, tmp_path):
+    @pytest.mark.parametrize('start_kwargs, match, extra_state', [
+        ({'headers': [(b'content-length', b'5')]}, 'Content-Length', False),
+        ({'headers': [], 'trailers': True}, 'pathsend.*trailers', True),
+    ], ids=['TestHTTP1SenderPathsend.test_rejects_mismatched_content_length_before_wire',
+            'TestHTTP1SenderPathsend.test_rejects_trailers_before_pathsend_writes_headers'])
+    async def test_pathsend_defect_is_rejected_before_wire(self, tmp_path, start_kwargs,
+                                                           match, extra_state):
+        """A pathsend contradicting the declared framing raises ValueError
+        before anything hits the wire: no bytes, no sendfile.  The trailers
+        row also pins that the sender stays untouched (never started, never
+        completed)."""
         path = self._write_tmp(tmp_path, 'body.bin', b'body')
         w = _SendfileBytesWriter()
         s = HTTP1Sender(w)
-        await s({'type': 'http.response.start', 'status': 200,
-                 'headers': [(b'content-length', b'5')]})
+        await s({'type': 'http.response.start', 'status': 200, **start_kwargs})
 
-        with pytest.raises(ValueError, match='Content-Length'):
+        with pytest.raises(ValueError, match=match):
             await s({'type': 'http.response.pathsend', 'path': path})
         assert w.data == b''
         assert w.sendfile_calls == []
-
-    @pytest.mark.asyncio
-    async def test_rejects_trailers_before_pathsend_writes_headers(self, tmp_path):
-        path = self._write_tmp(tmp_path, 'body.bin', b'body')
-        w = _SendfileBytesWriter()
-        s = HTTP1Sender(w)
-        await s({'type': 'http.response.start', 'status': 200,
-                 'headers': [], 'trailers': True})
-
-        with pytest.raises(ValueError, match='pathsend.*trailers'):
-            await s({'type': 'http.response.pathsend', 'path': path})
-        assert w.data == b''
-        assert w.sendfile_calls == []
-        assert s._started is False
-        assert s._completed is False
+        if extra_state:
+            assert s._started is False
+            assert s._completed is False
 
     @pytest.mark.asyncio
     async def test_partial_sendfile_is_retried_to_completion(self, tmp_path):
@@ -411,7 +408,15 @@ class TestStreamingResponse:
 
 class TestCompressionStreaming:
     @pytest.mark.asyncio
-    async def test_streaming_not_compressed(self):
+    @pytest.mark.parametrize('body_events, check_body', [
+        ([{'type': 'http.response.body', 'body': b'x' * 200, 'more_body': True},
+          {'type': 'http.response.body', 'body': b'y' * 200, 'more_body': False}], False),
+        ([{'type': 'http.response.body', 'body': b'hello world', 'more_body': False}], True),
+    ], ids=['TestCompressionStreaming.test_streaming_not_compressed',
+            'TestCompressionStreaming.test_single_body_still_compressed'])
+    async def test_streaming_response_compression(self, body_events, check_body):
+        """A streamed (multi-chunk) response is never compressed; a single
+        body still is — and decompresses back to the original."""
         mw = Compression(min_size=1)
         from blackbull.connection import Connection
         scope = Connection.from_scope({
@@ -422,8 +427,8 @@ class TestCompressionStreaming:
 
         async def call_next(scope, receive, send):
             await send({'type': 'http.response.start', 'status': 200, 'headers': []})
-            await send({'type': 'http.response.body', 'body': b'x' * 200, 'more_body': True})
-            await send({'type': 'http.response.body', 'body': b'y' * 200, 'more_body': False})
+            for event in body_events:
+                await send(event)
 
         async def send(event):
             # The middleware is ``@as_middleware``-decorated, so it emits the
@@ -438,40 +443,14 @@ class TestCompressionStreaming:
 
         start = next(e for e in received if e.get('type') == 'http.response.start')
         encoding_headers = [v for k, v in start.get('headers', []) if k == b'content-encoding']
-        assert not encoding_headers
+        if check_body:
+            import gzip
+            assert b'gzip' in encoding_headers
 
-    @pytest.mark.asyncio
-    async def test_single_body_still_compressed(self):
-        import gzip
-        mw = Compression(min_size=1)
-        from blackbull.connection import Connection
-        scope = Connection.from_scope({
-            'type': 'http',
-            'headers': [(b'accept-encoding', b'gzip')],
-        })
-        received: list = []
-
-        async def call_next(scope, receive, send):
-            await send({'type': 'http.response.start', 'status': 200, 'headers': []})
-            await send({'type': 'http.response.body', 'body': b'hello world', 'more_body': False})
-
-        async def send(event):
-            # The middleware is ``@as_middleware``-decorated, so it emits the
-            # H1 native contract (NativeResponse); these tests inspect the
-            # ASGI event shape, so normalise the seam away here.
-            if isinstance(event, NativeResponse):
-                received.extend(event.to_asgi())
-            else:
-                received.append(event)
-
-        await mw(scope, None, send, call_next)
-
-        start = next(e for e in received if e.get('type') == 'http.response.start')
-        encoding_headers = [v for k, v in start.get('headers', []) if k == b'content-encoding']
-        assert b'gzip' in encoding_headers
-
-        body_event = next(e for e in received if e.get('type') == 'http.response.body')
-        assert gzip.decompress(body_event['body']) == b'hello world'
+            body_event = next(e for e in received if e.get('type') == 'http.response.body')
+            assert gzip.decompress(body_event['body']) == b'hello world'
+        else:
+            assert not encoding_headers
 
 
 # ---------------------------------------------------------------------------

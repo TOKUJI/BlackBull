@@ -637,30 +637,14 @@ async def test_partial_stream_cancellation_poison_connection():
 
 
 @pytest.mark.asyncio
-async def test_stream_cancellation_while_waiting_for_chunk_size_poison_closes():
-    reader = _BlockingAfterHeadReader(
-        _head(200, headers=b'Transfer-Encoding: chunked\r\n'),
-        b'3\r\none\r\n')
-    client = _client(reader)
-    raw = _RawWriter()
-    client._raw_writer = raw
-    stream = client.stream('GET', '/')
-
-    assert await anext(stream) == b'one'
-    pending = asyncio.create_task(anext(stream))
-    await asyncio.sleep(0)
-    pending.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await pending
-
-    assert client._framing_broken is True
-    assert raw.close_calls == 1
-    assert reader.remaining == b''
-
-
-@pytest.mark.asyncio
-async def test_stream_cancellation_while_waiting_for_close_eof_poison_closes():
-    reader = _BlockingAfterHeadReader(_head(200), b'one')
+@pytest.mark.parametrize(
+    'head, after',
+    [(_head(200, headers=b'Transfer-Encoding: chunked\r\n'), b'3\r\none\r\n'),
+     (_head(200), b'one')],
+    ids=['test_stream_cancellation_while_waiting_for_chunk_size_poison_closes',
+         'test_stream_cancellation_while_waiting_for_close_eof_poison_closes'])
+async def test_stream_cancellation_while_blocked_poison_closes(head, after):
+    reader = _BlockingAfterHeadReader(head, after)
     client = _client(reader)
     raw = _RawWriter()
     client._raw_writer = raw

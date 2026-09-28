@@ -250,9 +250,16 @@ def test_heavy_cleans_resolver_if_create_fails_after_writing_cidfile(harness):
     assert (root / 'resolver-cleanup').read_text() == 'resolver-removed\n'
 
 
-def test_heavy_term_during_create_recovers_resolver_from_cidfile(harness):
+@pytest.mark.parametrize('resolver_kw', [
+    {'create_exit': 143, 'create_interrupt': True},
+    {'exit_code': 143, 'interrupt': True},
+], ids=['test_heavy_term_during_create_recovers_resolver_from_cidfile',
+        'test_heavy_term_during_resolver_cleans_up_and_fails'])
+def test_heavy_term_cleans_up_resolver(harness, resolver_kw):
+    """A TERM during container create (recovered from the cidfile) and one
+    during the resolver itself both remove the resolver and exit 143."""
     root, _, _, _ = harness
-    _resolver(harness, create_exit=143, create_interrupt=True)
+    _resolver(harness, **resolver_kw)
 
     completed = _run(harness, 'autobahn_heavy.sh')
 
@@ -269,16 +276,6 @@ def test_heavy_rejects_empty_resolver_cid_before_any_batch(harness):
 
     assert completed.returncode != 0
     assert not (root / 'runner-calls').exists()
-
-
-def test_heavy_term_during_resolver_cleans_up_and_fails(harness):
-    root, _, _, _ = harness
-    _resolver(harness, exit_code=143, interrupt=True)
-
-    completed = _run(harness, 'autobahn_heavy.sh')
-
-    assert completed.returncode == 143
-    assert (root / 'resolver-cleanup').read_text() == 'resolver-removed\n'
 
 
 def test_heavy_fails_if_resolver_container_cannot_be_removed(harness):

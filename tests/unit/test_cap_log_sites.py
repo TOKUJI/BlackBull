@@ -156,13 +156,22 @@ def _make_actor(raw: bytes, app=None, *,
 # ----------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_ws_max_frame_payload_logs(caps_caplog):
+@pytest.mark.parametrize('frame, expect_log', [
+    # Forge one masked frame whose declared length blows past the cap.
+    # read_frame_header reads 2 bytes; length=126 forces the 2-byte
+    # extended length read.  FIN=1, opcode=2 (binary), masked=1; the
+    # extended length is 0xFFFF — well over our test cap.
+    (bytes([0x82, 0xFE]) + (0xFFFF).to_bytes(2, 'big') + b'\x00\x00\x00\x00', True),
+    # Small frame: FIN=1, opcode=2 (binary), masked=1, len=5, mask + 5 bytes payload
+    (bytes([0x82, 0x85]) + b'\x00\x00\x00\x00' + b'hello', False),
+], ids=['test_ws_max_frame_payload_logs',
+        'test_ws_max_frame_payload_no_log_under_cap'])
+async def test_ws_max_frame_payload_cap_log(caps_caplog, frame, expect_log):
+    """A frame declaring a payload past max_frame_payload logs a
+    ws_max_frame_payload cap hit; a frame within the cap must NOT log."""
     from blackbull.server.recipient import WebSocketRecipient, AbstractReader
     from blackbull.server.sender import AbstractWriter
 
-    # Forge a fake reader that produces one masked frame whose declared
-    # length blows past the cap.  read_frame_header reads 2 bytes;
-    # length=126 forces a 2-byte extended length read.
     class _Reader(AbstractReader):
         def __init__(self, data: bytes):
             self._buf = bytearray(data)
@@ -190,9 +199,6 @@ async def test_ws_max_frame_payload_logs(caps_caplog):
         async def close(self) -> None:
             pass
 
-    # FIN=1, opcode=2 (binary), masked=1, length=126 -> extended 2-byte
-    # length follows.  Set extended length to 0xFFFF — well over our test cap.
-    frame = bytes([0x82, 0xFE]) + (0xFFFF).to_bytes(2, 'big') + b'\x00\x00\x00\x00'
     reader = _Reader(frame)
     writer = _Writer()
 
@@ -207,47 +213,10 @@ async def test_ws_max_frame_payload_logs(caps_caplog):
     # exits cleanly); the cap-hit log fires before that handling.
     await recipient._read_loop()
 
-    assert len(_records_for(caps_caplog, 'ws_max_frame_payload')) >= 1
-
-
-@pytest.mark.asyncio
-async def test_ws_max_frame_payload_no_log_under_cap(caps_caplog):
-    """A frame within the payload cap must NOT trigger a cap-hit log."""
-    from blackbull.server.recipient import WebSocketRecipient, AbstractReader as _AR
-
-    class _Reader(_AR):
-        def __init__(self, data: bytes):
-            self._buf = bytearray(data)
-        async def read(self, n: int) -> bytes:
-            raise NotImplementedError
-        async def readuntil(self, sep: bytes) -> bytes:
-            raise NotImplementedError
-        async def readexactly(self, n: int) -> bytes:
-            if len(self._buf) < n:
-                raise asyncio.IncompleteReadError(bytes(self._buf), n)
-            out = bytes(self._buf[:n])
-            del self._buf[:n]
-            return out
-
-    class _Writer(AbstractWriter):
-        async def write(self, data: bytes) -> None: pass
-        async def writelines(self, parts) -> None: pass
-        async def close(self) -> None: pass
-
-    # Small frame: FIN=1, opcode=2 (binary), masked=1, len=5, mask + 5 bytes payload
-    frame = bytes([0x82, 0x85]) + b'\x00\x00\x00\x00' + b'hello'
-    reader = _Reader(frame)
-    writer = _Writer()
-
-    recipient = WebSocketRecipient(
-        reader=reader, writer=writer,
-        conn=_conn([], '/ws'),
-        max_frame_payload=1024,
-    )
-    recipient._event_queue = asyncio.Queue()
-    await recipient._read_loop()
-
-    assert _records_for(caps_caplog, 'ws_max_frame_payload') == []
+    if expect_log:
+        assert len(_records_for(caps_caplog, 'ws_max_frame_payload')) >= 1
+    else:
+        assert _records_for(caps_caplog, 'ws_max_frame_payload') == []
 
 
 # ----------------------------------------------------------------------

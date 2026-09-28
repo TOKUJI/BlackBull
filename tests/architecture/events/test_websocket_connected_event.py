@@ -122,8 +122,14 @@ async def _drive_ws_session_with_message(app, path: str, *, message: str) -> Non
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_websocket_connected_fires_after_accept():
-    """websocket_connected fires after the app sends websocket.accept."""
+@pytest.mark.parametrize('accept, check', [
+    ({'type': 'websocket.accept'}, 'name'),
+    ({'type': 'websocket.accept', 'subprotocol': 'chat'}, 'subprotocol'),
+], ids=['test_websocket_connected_fires_after_accept',
+        'test_websocket_connected_subprotocol'])
+async def test_websocket_connected_fires_and_carries_subprotocol(accept, check):
+    """websocket_connected fires after the app sends websocket.accept, and
+    detail['subprotocol'] reflects the subprotocol from websocket.accept."""
     app = BlackBull()
     captured: list[Event] = []
     seen = asyncio.Event()
@@ -136,7 +142,7 @@ async def test_websocket_connected_fires_after_accept():
     @app.route(path='/ws', scheme=Scheme.websocket)
     async def ws_handler(scope, receive, send):
         await receive()  # websocket.connect
-        await send({'type': 'websocket.accept'})
+        await send(accept)
         await send({'type': 'websocket.close'})
 
     await _drive_ws_session(app, '/ws')
@@ -144,7 +150,10 @@ async def test_websocket_connected_fires_after_accept():
     await asyncio.wait_for(seen.wait(), timeout=2.0)
     await asyncio.sleep(0.2)
     assert len(captured) == 1
-    assert captured[0].name == 'websocket_connected'
+    if check == 'name':
+        assert captured[0].name == 'websocket_connected'
+    else:
+        assert captured[0].detail['subprotocol'] == 'chat'
 
 
 # ---------------------------------------------------------------------------
@@ -181,36 +190,6 @@ async def test_websocket_connected_detail_shape():
     assert isinstance(d['client_ip'], str)
     assert d['path'] == '/ws'
     assert d['subprotocol'] is None  # no subprotocol in accept
-
-
-# ---------------------------------------------------------------------------
-# Subprotocol propagation
-# ---------------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_websocket_connected_subprotocol():
-    """detail['subprotocol'] reflects the subprotocol from websocket.accept."""
-    app = BlackBull()
-    captured: list[Event] = []
-    seen = asyncio.Event()
-
-    @app.on('websocket_connected')
-    async def observer(event: Event):
-        captured.append(event)
-        seen.set()
-
-    @app.route(path='/ws', scheme=Scheme.websocket)
-    async def ws_handler(scope, receive, send):
-        await receive()
-        await send({'type': 'websocket.accept', 'subprotocol': 'chat'})
-        await send({'type': 'websocket.close'})
-
-    await _drive_ws_session(app, '/ws')
-
-    await asyncio.wait_for(seen.wait(), timeout=2.0)
-    await asyncio.sleep(0.2)
-    assert len(captured) == 1
-    assert captured[0].detail['subprotocol'] == 'chat'
 
 
 # ---------------------------------------------------------------------------

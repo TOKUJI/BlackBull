@@ -126,14 +126,23 @@ def test_ab_launch_detaches_remote_runner_and_returns(tmp_path):
     assert 'ab_expected_results' in command
 
 
-def test_ab_launch_records_expected_lines_for_selected_phases(tmp_path):
+@pytest.mark.parametrize('rounds, phases, expected_lines, expected_results', [
+    ('4', 'real', '17\n', '1\n'),
+    ('1', 'null\nreal', '9\n', None),
+], ids=['test_ab_launch_records_expected_lines_for_selected_phases',
+        'test_ab_launch_counts_phases_across_shell_whitespace'])
+def test_ab_launch_records_expected_lines(tmp_path, rounds, phases,
+                                         expected_lines, expected_results):
+    """ab.sh launch derives ab_expected_lines and ab_expected_results from
+    ROUNDS and PHASES — phases counted across shell whitespace, and the
+    results count only emitted for the selected-phase shape."""
     env = _fake_aws_tools(tmp_path)
     state = tmp_path / 'state'
     state.write_text('SERVER_PUBLIC_IP=fake\n')
     env.update({
         'STATE_FILE': str(state),
-        'ROUNDS': '4',
-        'PHASES': 'real',
+        'ROUNDS': rounds,
+        'PHASES': phases,
         'AB_LAUNCH_TIMEOUT': '2',
     })
 
@@ -148,35 +157,11 @@ def test_ab_launch_records_expected_lines_for_selected_phases(tmp_path):
 
     assert (
         Path(env['FAKE_REMOTE']) / 'bench' / 'results' / 'ab_expected_lines'
-    ).read_text() == '17\n'
-    assert (
-        Path(env['FAKE_REMOTE']) / 'bench' / 'results' / 'ab_expected_results'
-    ).read_text() == '1\n'
-
-
-def test_ab_launch_counts_phases_across_shell_whitespace(tmp_path):
-    env = _fake_aws_tools(tmp_path)
-    state = tmp_path / 'state'
-    state.write_text('SERVER_PUBLIC_IP=fake\n')
-    env.update({
-        'STATE_FILE': str(state),
-        'ROUNDS': '1',
-        'PHASES': 'null\nreal',
-        'AB_LAUNCH_TIMEOUT': '2',
-    })
-
-    subprocess.run(
-        ('bash', str(ROOT / 'bench/aws/ab.sh'), 'launch'),
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=5,
-        env=env,
-    )
-
-    assert (
-        Path(env['FAKE_REMOTE']) / 'bench' / 'results' / 'ab_expected_lines'
-    ).read_text() == '9\n'
+    ).read_text() == expected_lines
+    if expected_results is not None:
+        assert (
+            Path(env['FAKE_REMOTE']) / 'bench' / 'results' / 'ab_expected_results'
+        ).read_text() == expected_results
 
 
 @pytest.mark.parametrize(
@@ -730,14 +715,21 @@ def test_ab_finish_complete_state_contract(
     assert actual_polls == expected_polls
 
 
-def test_ab_finish_fails_when_remote_poll_fails(tmp_path):
+@pytest.mark.parametrize('fail_key, log_message', [
+    ('FAKE_SSH_POLL_FAIL', 'failed to poll remote runner state'),
+    ('FAKE_SSH_METADATA_FAIL', 'failed to read launch metadata'),
+], ids=['test_ab_finish_fails_when_remote_poll_fails',
+        'test_ab_finish_fails_when_launch_metadata_cannot_be_read'])
+def test_ab_finish_fails_when_remote_setup_fails(tmp_path, fail_key, log_message):
+    """ab.sh finish fails with the 'finish failed; details ->' breadcrumb and
+    logs the reason — a failed remote poll or unreadable launch metadata."""
     env = _fake_aws_tools(tmp_path)
     state = tmp_path / 'state'
     state.write_text('SERVER_PUBLIC_IP=fake\n')
     finish_log = tmp_path / 'finish.log'
     env.update({
         'STATE_FILE': str(state),
-        'FAKE_SSH_POLL_FAIL': '1',
+        fail_key: '1',
         'AB_FINISH_LOG': str(finish_log),
     })
 
@@ -751,10 +743,27 @@ def test_ab_finish_fails_when_remote_poll_fails(tmp_path):
 
     assert completed.returncode == 1
     assert 'finish failed; details ->' in completed.stderr
-    assert 'failed to poll remote runner state' in finish_log.read_text()
+    assert log_message in finish_log.read_text()
 
 
-def test_ab_finish_fails_when_remote_result_list_fails(tmp_path):
+@pytest.mark.parametrize('extra_env, extra_files, log_message', [
+    ({'FAKE_SSH_RESULT_LIST_FAIL': '1'}, {}, 'failed to list remote A/B results'),
+    ({'FAKE_SCP_DOWNLOAD_FAIL': '1'}, {}, 'failed to copy A/B result'),
+    ({}, {'ab_expected_lines': '65\n', 'ab_expected_results': '1\n',
+          'ab_runner.status.required': '', 'ab_runner.status': '1\n'},
+     'remote A/B runner failed (status=1)'),
+    ({}, {'ab_expected_lines': '65\n', 'ab_expected_results': '1\n',
+          'ab_runner.status.required': ''},
+     'success marker is missing'),
+], ids=['test_ab_finish_fails_when_remote_result_list_fails',
+        'test_ab_finish_fails_when_result_copy_fails',
+        'test_ab_finish_fails_when_runner_status_is_nonzero',
+        'test_ab_finish_fails_when_new_runner_success_marker_is_missing'])
+def test_ab_finish_fails_on_remote_result_defect(tmp_path, extra_env, extra_files,
+                                                log_message):
+    """ab.sh finish fails with the breadcrumb and the reason logged for every
+    unusable remote result: an unlistable dir, an uncopyable file, a nonzero
+    runner status, or a missing success marker."""
     env = _fake_aws_tools(tmp_path)
     state = tmp_path / 'state'
     state.write_text('SERVER_PUBLIC_IP=fake\n')
@@ -762,72 +771,8 @@ def test_ab_finish_fails_when_remote_result_list_fails(tmp_path):
     results = remote / 'bench' / 'results'
     (results / 'ab-commit-smoke').mkdir()
     (results / 'ab-commit-smoke' / 'raw.tsv').write_text('header\n' + 'row\n' * 64)
-    finish_log = tmp_path / 'finish.log'
-    env.update({
-        'STATE_FILE': str(state),
-        'FAKE_SSH_RESULT_LIST_FAIL': '1',
-        'AB_POLLS': '1',
-        'AB_POLL_INTERVAL': '0',
-        'AB_FINISH_LOG': str(finish_log),
-        'TEARDOWN': '0',
-    })
-
-    completed = subprocess.run(
-        ('bash', str(ROOT / 'bench/aws/ab.sh'), 'finish'),
-        capture_output=True,
-        text=True,
-        timeout=5,
-        env=env,
-    )
-
-    assert completed.returncode == 1
-    assert 'finish failed; details ->' in completed.stderr
-    assert 'failed to list remote A/B results' in finish_log.read_text()
-
-
-def test_ab_finish_fails_when_result_copy_fails(tmp_path):
-    env = _fake_aws_tools(tmp_path)
-    state = tmp_path / 'state'
-    state.write_text('SERVER_PUBLIC_IP=fake\n')
-    remote = Path(env['FAKE_REMOTE'])
-    results = remote / 'bench' / 'results'
-    (results / 'ab-commit-smoke').mkdir()
-    (results / 'ab-commit-smoke' / 'raw.tsv').write_text('header\n' + 'row\n' * 64)
-    finish_log = tmp_path / 'finish.log'
-    env.update({
-        'STATE_FILE': str(state),
-        'FAKE_SCP_DOWNLOAD_FAIL': '1',
-        'AB_POLLS': '1',
-        'AB_POLL_INTERVAL': '0',
-        'AB_FINISH_LOG': str(finish_log),
-        'TEARDOWN': '0',
-    })
-
-    completed = subprocess.run(
-        ('bash', str(ROOT / 'bench/aws/ab.sh'), 'finish'),
-        capture_output=True,
-        text=True,
-        timeout=5,
-        env=env,
-    )
-
-    assert completed.returncode == 1
-    assert 'finish failed; details ->' in completed.stderr
-    assert 'failed to copy A/B result' in finish_log.read_text()
-
-
-def test_ab_finish_fails_when_runner_status_is_nonzero(tmp_path):
-    env = _fake_aws_tools(tmp_path)
-    state = tmp_path / 'state'
-    state.write_text('SERVER_PUBLIC_IP=fake\n')
-    remote = Path(env['FAKE_REMOTE'])
-    results = remote / 'bench' / 'results'
-    (results / 'ab-commit-smoke').mkdir()
-    (results / 'ab-commit-smoke' / 'raw.tsv').write_text('header\n' + 'row\n' * 64)
-    (results / 'ab_expected_lines').write_text('65\n')
-    (results / 'ab_expected_results').write_text('1\n')
-    (results / 'ab_runner.status.required').write_text('')
-    (results / 'ab_runner.status').write_text('1\n')
+    for name, content in extra_files.items():
+        (results / name).write_text(content)
     finish_log = tmp_path / 'finish.log'
     env.update({
         'STATE_FILE': str(state),
@@ -835,7 +780,7 @@ def test_ab_finish_fails_when_runner_status_is_nonzero(tmp_path):
         'AB_POLL_INTERVAL': '0',
         'AB_FINISH_LOG': str(finish_log),
         'TEARDOWN': '0',
-    })
+    } | extra_env)
 
     completed = subprocess.run(
         ('bash', str(ROOT / 'bench/aws/ab.sh'), 'finish'),
@@ -847,100 +792,21 @@ def test_ab_finish_fails_when_runner_status_is_nonzero(tmp_path):
 
     assert completed.returncode == 1
     assert 'finish failed; details ->' in completed.stderr
-    assert 'remote A/B runner failed (status=1)' in finish_log.read_text()
+    assert log_message in finish_log.read_text()
 
 
-def test_ab_finish_fails_when_new_runner_success_marker_is_missing(tmp_path):
+@pytest.mark.parametrize('expected_lines', ['missing\n', '0\n'],
+                         ids=['test_ab_finish_fails_on_malformed_launch_metadata',
+                              'test_ab_finish_fails_on_zero_launch_metadata'])
+def test_ab_finish_fails_on_invalid_launch_metadata(tmp_path, expected_lines):
+    """ab.sh finish rejects invalid launch metadata — a non-numeric
+    ab_expected_lines and a zero one alike — and logs the rejection."""
     env = _fake_aws_tools(tmp_path)
     state = tmp_path / 'state'
     state.write_text('SERVER_PUBLIC_IP=fake\n')
     remote = Path(env['FAKE_REMOTE'])
     results = remote / 'bench' / 'results'
-    (results / 'ab-commit-smoke').mkdir()
-    (results / 'ab-commit-smoke' / 'raw.tsv').write_text('header\n' + 'row\n' * 64)
-    (results / 'ab_expected_lines').write_text('65\n')
-    (results / 'ab_expected_results').write_text('1\n')
-    (results / 'ab_runner.status.required').write_text('')
-    finish_log = tmp_path / 'finish.log'
-    env.update({
-        'STATE_FILE': str(state),
-        'AB_POLLS': '1',
-        'AB_POLL_INTERVAL': '0',
-        'AB_FINISH_LOG': str(finish_log),
-        'TEARDOWN': '0',
-    })
-
-    completed = subprocess.run(
-        ('bash', str(ROOT / 'bench/aws/ab.sh'), 'finish'),
-        capture_output=True,
-        text=True,
-        timeout=5,
-        env=env,
-    )
-
-    assert completed.returncode == 1
-    assert 'finish failed; details ->' in completed.stderr
-    assert 'success marker is missing' in finish_log.read_text()
-
-
-def test_ab_finish_fails_when_launch_metadata_cannot_be_read(tmp_path):
-    env = _fake_aws_tools(tmp_path)
-    state = tmp_path / 'state'
-    state.write_text('SERVER_PUBLIC_IP=fake\n')
-    finish_log = tmp_path / 'finish.log'
-    env.update({
-        'STATE_FILE': str(state),
-        'FAKE_SSH_METADATA_FAIL': '1',
-        'AB_FINISH_LOG': str(finish_log),
-    })
-
-    completed = subprocess.run(
-        ('bash', str(ROOT / 'bench/aws/ab.sh'), 'finish'),
-        capture_output=True,
-        text=True,
-        timeout=5,
-        env=env,
-    )
-
-    assert completed.returncode == 1
-    assert 'finish failed; details ->' in completed.stderr
-    assert 'failed to read launch metadata' in finish_log.read_text()
-
-
-def test_ab_finish_fails_on_malformed_launch_metadata(tmp_path):
-    env = _fake_aws_tools(tmp_path)
-    state = tmp_path / 'state'
-    state.write_text('SERVER_PUBLIC_IP=fake\n')
-    remote = Path(env['FAKE_REMOTE'])
-    results = remote / 'bench' / 'results'
-    (results / 'ab_expected_lines').write_text('missing\n')
-    (results / 'ab_expected_results').write_text('1\n')
-    (results / 'ab_runner.status.required').write_text('')
-    finish_log = tmp_path / 'finish.log'
-    env.update({
-        'STATE_FILE': str(state),
-        'AB_FINISH_LOG': str(finish_log),
-    })
-
-    completed = subprocess.run(
-        ('bash', str(ROOT / 'bench/aws/ab.sh'), 'finish'),
-        capture_output=True,
-        text=True,
-        timeout=5,
-        env=env,
-    )
-
-    assert completed.returncode == 1
-    assert 'invalid launch metadata' in finish_log.read_text()
-
-
-def test_ab_finish_fails_on_zero_launch_metadata(tmp_path):
-    env = _fake_aws_tools(tmp_path)
-    state = tmp_path / 'state'
-    state.write_text('SERVER_PUBLIC_IP=fake\n')
-    remote = Path(env['FAKE_REMOTE'])
-    results = remote / 'bench' / 'results'
-    (results / 'ab_expected_lines').write_text('0\n')
+    (results / 'ab_expected_lines').write_text(expected_lines)
     (results / 'ab_expected_results').write_text('1\n')
     (results / 'ab_runner.status.required').write_text('')
     finish_log = tmp_path / 'finish.log'

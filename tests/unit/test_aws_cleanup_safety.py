@@ -6,6 +6,8 @@ import re
 import shutil
 import subprocess
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -373,19 +375,8 @@ esac
     assert Path(f"{state}.clean").read_text() == "verified\n"
 
 
-def test_up_does_not_modify_reused_security_group(tmp_path: Path) -> None:
-    aws_dir = tmp_path / "bench" / "aws"
-    bin_dir = tmp_path / "bin"
-    aws_dir.mkdir(parents=True)
-    bin_dir.mkdir()
-    shutil.copy2(ROOT / "bench/aws/up.sh", aws_dir / "up.sh")
-    shutil.copy2(ROOT / "bench/aws/down.sh", aws_dir / "down.sh")
-    (aws_dir / "config.sh").write_text(mock_config())
-    (aws_dir / "mock-key").write_text("fixture")
-    write_executable(bin_dir / "curl", "#!/usr/bin/env bash\nprintf '203.0.113.1\\n'\n")
-    write_executable(
-        bin_dir / "aws",
-        r'''#!/usr/bin/env bash
+@pytest.mark.parametrize("mock_aws, extra_env", [
+    (r'''#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >> "$MOCK_LOG"
 case "$*" in
@@ -403,40 +394,8 @@ case "$*" in
     *run-instances*) exit 8 ;;
     *) : ;;
 esac
-''',
-    )
-    state = aws_dir / "mock-state"
-    log = tmp_path / "calls.log"
-    env = os.environ | {
-        "PATH": f"{bin_dir}:{os.environ['PATH']}",
-        "STATE_FILE": str(state),
-        "MOCK_LOG": str(log),
-    }
-
-    result = run(aws_dir / "up.sh", env=env)
-
-    calls = log.read_text()
-    assert result.returncode != 0
-    assert "authorize-security-group-ingress" not in calls
-    assert "delete-security-group" not in calls
-    assert "run-instances" not in calls
-
-
-def test_up_rejects_reused_security_group_with_partial_benchmark_range(
-    tmp_path: Path,
-) -> None:
-    aws_dir = tmp_path / "bench" / "aws"
-    bin_dir = tmp_path / "bin"
-    aws_dir.mkdir(parents=True)
-    bin_dir.mkdir()
-    shutil.copy2(ROOT / "bench/aws/up.sh", aws_dir / "up.sh")
-    shutil.copy2(ROOT / "bench/aws/down.sh", aws_dir / "down.sh")
-    (aws_dir / "config.sh").write_text(mock_config())
-    (aws_dir / "mock-key").write_text("fixture")
-    write_executable(bin_dir / "curl", "#!/usr/bin/env bash\nprintf '203.0.113.1\\n'\n")
-    write_executable(
-        bin_dir / "aws",
-        r'''#!/usr/bin/env bash
+''', {}),
+    (r'''#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >> "$MOCK_LOG"
 case "$*" in
@@ -456,16 +415,32 @@ case "$*" in
     *run-instances*) exit 8 ;;
     *) : ;;
 esac
-''',
-    )
+''', {"TOPO": "split"}),
+], ids=["test_up_does_not_modify_reused_security_group",
+        "test_up_rejects_reused_security_group_with_partial_benchmark_range"])
+def test_up_never_modifies_a_reused_security_group(
+    tmp_path: Path, mock_aws, extra_env,
+) -> None:
+    """up.sh neither modifies nor deletes a pre-existing security group nor
+    runs instances — against a wholly reused group and against one carrying
+    a partial benchmark range (the second row, TOPO=split)."""
+    aws_dir = tmp_path / "bench" / "aws"
+    bin_dir = tmp_path / "bin"
+    aws_dir.mkdir(parents=True)
+    bin_dir.mkdir()
+    shutil.copy2(ROOT / "bench/aws/up.sh", aws_dir / "up.sh")
+    shutil.copy2(ROOT / "bench/aws/down.sh", aws_dir / "down.sh")
+    (aws_dir / "config.sh").write_text(mock_config())
+    (aws_dir / "mock-key").write_text("fixture")
+    write_executable(bin_dir / "curl", "#!/usr/bin/env bash\nprintf '203.0.113.1\\n'\n")
+    write_executable(bin_dir / "aws", mock_aws)
     state = aws_dir / "mock-state"
     log = tmp_path / "calls.log"
     env = os.environ | {
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
         "STATE_FILE": str(state),
         "MOCK_LOG": str(log),
-        "TOPO": "split",
-    }
+    } | extra_env
 
     result = run(aws_dir / "up.sh", env=env)
 

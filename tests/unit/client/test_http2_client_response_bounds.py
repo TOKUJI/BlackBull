@@ -264,7 +264,13 @@ class TestTheHeaderAggregate:
         await _feed_headers(c, 1, [], end_stream=True)
         assert (await _resolved(future)).status
 
-    async def test_headers_accumulating_past_the_cap_are_refused(self, monkeypatch):
+    @pytest.mark.parametrize(
+        'expect_rst', [False, True],
+        ids=['TestTheHeaderAggregate.test_headers_accumulating_past_the_cap_are_refused',
+             'TestTheHeaderAggregate.test_the_refusal_resets_the_stream'])
+    async def test_headers_past_the_cap_are_refused(self, monkeypatch, expect_rst):
+        """Past-cap header accumulation is refused; the refusal resets the
+        stream (the second row pins the RST_STREAM on top of the refusal)."""
         monkeypatch.setenv('BB_CLIENT_HEAD_MAX_TOTAL', '4096')
         c = _client()
         future = _pending(c)
@@ -272,6 +278,8 @@ class TestTheHeaderAggregate:
             await _feed_headers(c, 1, self._section(10))
         with pytest.raises(ResponseTooLarge):
             await _resolved(future)
+        if expect_rst:
+            assert _frames_of(c, FrameTypes.RST_STREAM)
 
     async def test_one_legal_section_is_not_refused(self, monkeypatch):
         """The cap is on the aggregate; a single section inside it must pass."""
@@ -280,16 +288,6 @@ class TestTheHeaderAggregate:
         future = _pending(c)
         await _feed_headers(c, 1, self._section(10), end_stream=True)
         assert (await _resolved(future)).status
-
-    async def test_the_refusal_resets_the_stream(self, monkeypatch):
-        monkeypatch.setenv('BB_CLIENT_HEAD_MAX_TOTAL', '4096')
-        c = _client()
-        future = _pending(c)
-        for _ in range(20):
-            await _feed_headers(c, 1, self._section(10))
-        with pytest.raises(ResponseTooLarge):
-            await _resolved(future)
-        assert _frames_of(c, FrameTypes.RST_STREAM)
 
 
 class TestTheFieldSectionBoundIsTheDecoders:

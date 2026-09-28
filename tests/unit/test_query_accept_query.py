@@ -34,15 +34,21 @@ def _app():
     return app
 
 
-class TestAcceptQueryHeader:
-    def test_header_on_successful_query_response(self):
-        with TestClient(_app()) as client:
-            r = client.request('QUERY', '/search', content=b'select 1',
-                               headers={'content-type': 'application/sql'})
-            assert r.status_code == 200
+@pytest.mark.parametrize('full', [True, False],
+                         ids=['TestAcceptQueryHeader.test_header_on_successful_query_response',
+                              'TestContentTypeEnforcement.test_supported_media_type_passes'])
+def test_supported_media_type_query_succeeds(full):
+    """An accepted media type yields 200; full rows also pin body and header."""
+    with TestClient(_app()) as client:
+        r = client.request('QUERY', '/search', content=b'select 1',
+                           headers={'content-type': 'application/sql'})
+        assert r.status_code == 200
+        if full:
             assert r.content == b'select 1'
             assert r.headers.get('accept-query') == 'application/sql, text/plain'
 
+
+class TestAcceptQueryHeader:
     def test_header_is_structured_field_list(self):
         """RFC 9651 SF list: comma-space separated tokens, no parameters."""
         with TestClient(_app()) as client:
@@ -71,12 +77,6 @@ class TestContentTypeEnforcement:
                                headers={'content-type': 'application/json'})
             assert r.status_code == 415
             assert r.headers.get('accept-query') == 'application/sql, text/plain'
-
-    def test_supported_media_type_passes(self):
-        with TestClient(_app()) as client:
-            r = client.request('QUERY', '/search', content=b'select 1',
-                               headers={'content-type': 'application/sql'})
-            assert r.status_code == 200
 
     def test_media_type_parameters_are_ignored(self):
         """A charset parameter must not defeat the media-type match."""

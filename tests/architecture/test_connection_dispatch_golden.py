@@ -132,17 +132,14 @@ async def test_http1_cleartext_selects_http1() -> None:
     assert calls == ['http1']
 
 
-async def test_http2_cleartext_preface_selects_http2() -> None:
+@pytest.mark.parametrize('alpn', [None, 'h2'],
+                         ids=['test_http2_cleartext_preface_selects_http2',
+                              'test_http2_alpn_selects_http2'])
+async def test_http2_preface_or_alpn_selects_http2(alpn) -> None:
+    """HTTP/2 is claimed both by the cleartext preface (no ALPN) and by ALPN 'h2'."""
     reg, calls = ProtocolRegistry(), []
     _spy_serves(reg, calls)
-    await _actor(_BufReader(_HTTP2_PREFACE), _Writer(), registry=reg).run()
-    assert calls == ['http2']
-
-
-async def test_http2_alpn_selects_http2() -> None:
-    reg, calls = ProtocolRegistry(), []
-    _spy_serves(reg, calls)
-    await _actor(_BufReader(_HTTP2_PREFACE), _Writer(), registry=reg, alpn='h2').run()
+    await _actor(_BufReader(_HTTP2_PREFACE), _Writer(), registry=reg, alpn=alpn).run()
     assert calls == ['http2']
 
 

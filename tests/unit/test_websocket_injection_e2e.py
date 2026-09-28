@@ -91,20 +91,16 @@ def test_path_param_is_coerced_to_its_annotation():
 # Rejection reaches the client as a close code
 # ---------------------------------------------------------------------------
 
-def test_missing_required_query_param_is_refused_with_1008():
+@pytest.mark.parametrize('path', ['/strict', '/seats/front-row'],
+                         ids=['test_missing_required_query_param_is_refused_with_1008',
+                              'test_uncoercible_path_param_is_refused_with_1008'])
+def test_bad_params_refused_with_1008(path):
+    """A missing required query param and an uncoercible path param both
+    reach the client as close code 1008."""
     app = _make_app()
     with TestClient(app) as client:
         with pytest.raises(WebSocketDisconnect) as excinfo:
-            with client.websocket_connect('/strict'):
-                pass
-    assert excinfo.value.code == 1008
-
-
-def test_uncoercible_path_param_is_refused_with_1008():
-    app = _make_app()
-    with TestClient(app) as client:
-        with pytest.raises(WebSocketDisconnect) as excinfo:
-            with client.websocket_connect('/seats/front-row'):
+            with client.websocket_connect(path):
                 pass
     assert excinfo.value.code == 1008
 

@@ -258,9 +258,13 @@ async def test_chain_built_with_call_next_name(router):
 
 
 @pytest.mark.asyncio
-async def test_chain_built_with_inner_name(router):
-    path = 'test_inner'
-
+@pytest.mark.parametrize('path', ['test_inner', 'test_fn_path'],
+                         ids=['test_chain_built_with_inner_name',
+                              'test_functions_path_unchanged'])
+async def test_functions_chain_built_with_inner_name(router, path):
+    """A middleware chain whose positional parameter is named ``inner``
+    still wires call-through — and the functions= path registers and
+    resolves unchanged."""
     async def mw(scope, receive, send, inner):
         res = await inner(scope, receive, send)
         return res + '_mw'
@@ -370,22 +374,6 @@ def test_middlewares_handler_returned_unchanged(router):
         return 'ok'
 
     assert callable(handler)
-
-
-@pytest.mark.asyncio
-async def test_functions_path_unchanged(router):
-    path = 'test_fn_path'
-
-    async def mw(scope, receive, send, inner):
-        res = await inner(scope, receive, send)
-        return res + '_mw'
-
-    async def handler(scope, receive, send):
-        return 'ok'
-
-    router.route(methods=[HTTPMethod.GET], path=path, functions=[mw, handler])
-    fn = router[(path, HTTPMethod.GET, Scheme.http)]
-    assert await fn({}, None, None) == 'ok_mw'
 
 
 # ---------------------------------------------------------------------------
@@ -889,34 +877,23 @@ class TestSimplifiedHandlerReturnValues:
         send.assert_called_once_with(resp)
 
     @pytest.mark.asyncio
-    async def test_returns_bytes(self):
+    @pytest.mark.parametrize('value, expected_type', [
+        (b'hello', Response),
+        ('hello', Response),
+        ({'key': 'value'}, JSONResponse),
+    ], ids=['TestSimplifiedHandlerReturnValues.test_returns_bytes',
+            'TestSimplifiedHandlerReturnValues.test_returns_str',
+            'TestSimplifiedHandlerReturnValues.test_returns_dict'])
+    async def test_non_response_returns_are_wrapped(self, value, expected_type):
+        """Bytes and str returns are wrapped in a Response and dicts in a
+        JSONResponse; each is sent once."""
         send = AsyncMock()
-        async def fn(): return b'hello'
+        async def fn(): return value
         wrapper = _adapt_handler(fn, '/')
         await wrapper({}, None, send)
         send.assert_called_once()
         arg = send.call_args[0][0]
-        assert isinstance(arg, Response)
-
-    @pytest.mark.asyncio
-    async def test_returns_str(self):
-        send = AsyncMock()
-        async def fn(): return 'hello'
-        wrapper = _adapt_handler(fn, '/')
-        await wrapper({}, None, send)
-        send.assert_called_once()
-        arg = send.call_args[0][0]
-        assert isinstance(arg, Response)
-
-    @pytest.mark.asyncio
-    async def test_returns_dict(self):
-        send = AsyncMock()
-        async def fn(): return {'key': 'value'}
-        wrapper = _adapt_handler(fn, '/')
-        await wrapper({}, None, send)
-        send.assert_called_once()
-        arg = send.call_args[0][0]
-        assert isinstance(arg, JSONResponse)
+        assert isinstance(arg, expected_type)
 
     @pytest.mark.asyncio
     async def test_returns_none_no_send(self):
@@ -1591,12 +1568,18 @@ class TestCustomMethods:
         result = router[('/pot', 'BREW', Scheme.http)]
         assert result is brew_fn
 
-    def test_wrong_custom_method_raises_method_not_applicable(self, router):
+    @pytest.mark.parametrize(
+        'method', ['FROBNICATE', 'WHEN'],
+        ids=['TestCustomMethods.test_wrong_custom_method_raises_method_not_applicable',
+             'TestCustomMethods.test_custom_method_allow_header_populated'])
+    def test_wrong_custom_method_lists_allowed(self, router, method):
+        """An unregistered method raises MethodNotApplicable whose
+        allowed_methods lists the registered custom method (the Allow header source)."""
         @router.route(path='/pot', methods='BREW')
         def fn(scope, receive, send): pass
 
         with pytest.raises(MethodNotApplicable) as exc_info:
-            router[('/pot', 'FROBNICATE', Scheme.http)]
+            router[('/pot', method, Scheme.http)]
         assert 'BREW' in exc_info.value.allowed_methods
 
     def test_case_sensitivity_custom_method(self, router):
@@ -1612,14 +1595,6 @@ class TestCustomMethods:
 
         assert router[('/pot', HTTPMethod.GET, Scheme.http)] is fn
         assert router[('/pot', 'BREW', Scheme.http)] is fn
-
-    def test_custom_method_allow_header_populated(self, router):
-        @router.route(path='/pot', methods='BREW')
-        def fn(scope, receive, send): pass
-
-        with pytest.raises(MethodNotApplicable) as exc_info:
-            router[('/pot', 'WHEN', Scheme.http)]
-        assert 'BREW' in exc_info.value.allowed_methods
 
 
 class TestGetRoutes:

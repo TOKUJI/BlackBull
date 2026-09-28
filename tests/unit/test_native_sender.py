@@ -85,11 +85,19 @@ class TestWireEquivalence:
 # ---------------------------------------------------------------------------
 
 class TestNativeResponsePath:
-    async def test_complete_single_send(self):
+    @pytest.mark.parametrize('parts', [
+        (NativeResponse(status=200,
+                        header=[(b'content-type', b'text/plain')],
+                        body=b'Hi'),),
+        (NativeResponse(status=200,
+                        header=[(b'content-type', b'text/plain')]),
+         NativeResponse(body=b'Hi')),
+    ], ids=['TestNativeResponsePath.test_complete_single_send',
+            'TestNativeResponsePath.test_header_then_body'])
+    async def test_header_and_body_emit_the_same_wire(self, parts):
         s, w = _sender()
-        await s(NativeResponse(status=200,
-                               header=[(b'content-type', b'text/plain')],
-                               body=b'Hi'))
+        for part in parts:
+            await s(part)
         # sender auto-emits Date (RFC 9110 §6.6.1), so assert structure,
         # not exact bytes.
         assert w.data.startswith(b'HTTP/1.1 200 OK\r\n')
@@ -104,17 +112,6 @@ class TestNativeResponsePath:
                                header=[(b'content-type', b'text/plain')]))
         assert w.data == b''          # buffered, nothing on the wire
         assert s._buffered_status is not None
-
-    async def test_header_then_body(self):
-        s, w = _sender()
-        await s(NativeResponse(status=200,
-                               header=[(b'content-type', b'text/plain')]))
-        await s(NativeResponse(body=b'Hi'))
-        assert w.data.startswith(b'HTTP/1.1 200 OK\r\n')
-        assert b'content-type: text/plain\r\n' in w.data
-        assert b'content-length: 2\r\n' in w.data
-        assert w.data.endswith(b'\r\n\r\nHi')
-        assert s._completed is True
 
     async def test_streaming_chunks(self):
         s, w = _sender()
@@ -135,16 +132,24 @@ class TestNativeResponsePath:
         assert b'x-t: v' in w.data
         assert w.data.endswith(b'0\r\nx-t: v\r\n\r\n')
 
-    async def test_expects_trailers_matches_dict_path(self):
-        # Full-form ASGI start(trailers=True) → chunked body → trailers.  The
-        # native form preserves the start flag (expects_trailers) so the
-        # terminal chunk is withheld until the trailers event — byte-identical
-        # to the dict path (lossless compat).
+    @pytest.mark.parametrize('more_body, terminal', [
+        (True, False),
+        (False, True),
+    ], ids=['TestNativeResponsePath.test_expects_trailers_matches_dict_path',
+            'TestNativeResponsePath.test_terminal_body_then_trailers_matches_dict_path'])
+    async def test_trailers_match_dict_path(self, more_body, terminal):
+        """Full-form ASGI start(trailers=True) → chunked body → trailers: the
+        native form preserves the start flag (expects_trailers) so the
+        terminal chunk is withheld until the trailers event — byte-identical
+        to the dict path (lossless compat) whether or not the body is
+        terminal.  The start declaration assigns completion to the trailers
+        event, so the terminal body cannot select fixed Content-Length
+        framing."""
         s1, w1 = _sender()
         await s1({'type': ASGIEvent.HTTP_RESPONSE_START, 'status': 200,
                   'headers': [(b'content-type', b'text/plain')], 'trailers': True})
         await s1({'type': ASGIEvent.HTTP_RESPONSE_BODY, 'body': b'Hi',
-                  'more_body': True})
+                  'more_body': more_body})
         await s1({'type': ASGIEvent.HTTP_RESPONSE_TRAILERS,
                   'headers': [(b'x-t', b'v')]})
 
@@ -152,33 +157,14 @@ class TestNativeResponsePath:
         await s2(NativeResponse(status=200,
                                 header=[(b'content-type', b'text/plain')],
                                 expects_trailers=True))
-        await s2(NativeResponse(body=b'Hi', more_body=True))
+        await s2(NativeResponse(body=b'Hi', more_body=more_body))
         await s2(NativeResponse(trailers=[(b'x-t', b'v')]))
         assert w2.data == w1.data
-        assert b'transfer-encoding: chunked' in w2.data
-        assert w2.data.endswith(b'2\r\nHi\r\n0\r\nx-t: v\r\n\r\n')
-        assert s2._completed is True
-
-    async def test_terminal_body_then_trailers_matches_dict_path(self):
-        # The start declaration assigns completion to the trailers event, so
-        # the terminal body cannot select fixed Content-Length framing.
-        s1, w1 = _sender()
-        await s1({'type': ASGIEvent.HTTP_RESPONSE_START, 'status': 200,
-                  'headers': [(b'content-type', b'text/plain')], 'trailers': True})
-        await s1({'type': ASGIEvent.HTTP_RESPONSE_BODY, 'body': b'Hi',
-                  'more_body': False})
-        await s1({'type': ASGIEvent.HTTP_RESPONSE_TRAILERS,
-                  'headers': [(b'x-t', b'v')]})
-
-        s2, w2 = _sender()
-        await s2(NativeResponse(status=200,
-                                header=[(b'content-type', b'text/plain')],
-                                expects_trailers=True))
-        await s2(NativeResponse(body=b'Hi'))
-        await s2(NativeResponse(trailers=[(b'x-t', b'v')]))
-        assert w2.data == w1.data
-        assert b'transfer-encoding: chunked\r\n' in w2.data
-        assert b'content-length:' not in w2.data
+        if terminal:
+            assert b'transfer-encoding: chunked\r\n' in w2.data
+            assert b'content-length:' not in w2.data
+        else:
+            assert b'transfer-encoding: chunked' in w2.data
         assert w2.data.endswith(b'2\r\nHi\r\n0\r\nx-t: v\r\n\r\n')
         assert s2._completed is True
 

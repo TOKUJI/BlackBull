@@ -113,6 +113,26 @@ class TestCookies:
 # body() — single-drain cache; json()/text() build on it
 # ---------------------------------------------------------------------------
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize('method', ['body', 'stream'],
+                         ids=['TestBody.test_mid_body_disconnect_raises',
+                              'TestStream.test_stream_mid_body_disconnect_raises'])
+async def test_mid_body_disconnect_raises(method):
+    """A disconnect mid-body raises ClientDisconnected whether the body is
+    consumed whole (body()) or chunk by chunk (stream())."""
+    receive, _ = make_receive([
+        {'type': 'http.request', 'body': b'partial', 'more_body': True},
+        {'type': 'http.disconnect'},
+    ])
+    req = _conn({'headers': []}, receive)
+    with pytest.raises(ClientDisconnected):
+        if method == 'body':
+            await req.body()
+        else:
+            async for _ in req.stream():
+                pass
+
+
 class TestBody:
     @pytest.mark.asyncio
     async def test_body_returns_full_payload(self):
@@ -145,16 +165,6 @@ class TestBody:
         ])
         req = _conn({'headers': []}, receive)
         assert await req.body() == b'chunk1chunk2'
-
-    @pytest.mark.asyncio
-    async def test_mid_body_disconnect_raises(self):
-        receive, _ = make_receive([
-            {'type': 'http.request', 'body': b'partial', 'more_body': True},
-            {'type': 'http.disconnect'},
-        ])
-        req = _conn({'headers': []}, receive)
-        with pytest.raises(ClientDisconnected):
-            await req.body()
 
 
 class TestStream:
@@ -201,17 +211,6 @@ class TestStream:
             pass
         with pytest.raises(RuntimeError):
             await req.body()
-
-    @pytest.mark.asyncio
-    async def test_stream_mid_body_disconnect_raises(self):
-        receive, _ = make_receive([
-            {'type': 'http.request', 'body': b'partial', 'more_body': True},
-            {'type': 'http.disconnect'},
-        ])
-        req = _conn({'headers': []}, receive)
-        with pytest.raises(ClientDisconnected):
-            async for _ in req.stream():
-                pass
 
 
 class TestJson:

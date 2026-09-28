@@ -291,32 +291,25 @@ class TestSubscriptionOptions:
             publish=MQTTPublish(topic='t', payload=b'y', qos=0), sender=pub))
         assert [p for p in sub.packets() if isinstance(p, MQTTPublish)]
 
-    async def test_retain_as_published_preserves_retain_flag(self):
+    @pytest.mark.parametrize('options, expected_retain', [
+        ([{'retain_as_published': True}], True),
+        (None, False),  # no RAP
+    ], ids=['TestSubscriptionOptions.test_retain_as_published_preserves_retain_flag',
+            'TestSubscriptionOptions.test_without_rap_retain_flag_cleared_on_forward'])
+    async def test_rap_controls_forwarded_retain_flag(self, options, expected_retain):
+        """With retain_as_published the forwarded PUBLISH keeps its retain
+        flag; without the option the flag is cleared on forward."""
         broker = BrokerActor()
         sub, pub = RecordingConn(), RecordingConn()
         await _attach(broker, sub, client_id='sub')
-        await _subscribe(broker, sub, 1, [('t', 0)],
-                         options=[{'retain_as_published': True}])
+        await _subscribe(broker, sub, 1, [('t', 0)], options=options)
         sub.outbox.clear()
         await _attach(broker, pub, client_id='pub')
         await broker._handle(ClientPublish(
             publish=MQTTPublish(topic='t', payload=b'z', qos=0, retain=True),
             sender=pub))
         delivered = [p for p in sub.packets() if isinstance(p, MQTTPublish)][0]
-        assert delivered.retain is True
-
-    async def test_without_rap_retain_flag_cleared_on_forward(self):
-        broker = BrokerActor()
-        sub, pub = RecordingConn(), RecordingConn()
-        await _attach(broker, sub, client_id='sub')
-        await _subscribe(broker, sub, 1, [('t', 0)])  # no RAP
-        sub.outbox.clear()
-        await _attach(broker, pub, client_id='pub')
-        await broker._handle(ClientPublish(
-            publish=MQTTPublish(topic='t', payload=b'z', qos=0, retain=True),
-            sender=pub))
-        delivered = [p for p in sub.packets() if isinstance(p, MQTTPublish)][0]
-        assert delivered.retain is False
+        assert delivered.retain is expected_retain
 
     async def test_shared_subscription_granted(self):
         """Spec change: §4.8.2 shared subscriptions are now

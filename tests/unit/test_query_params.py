@@ -58,22 +58,21 @@ class TestQueryParamResolution:
         assert captured['ratio'] == 0.5
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize('raw', ['1', 'true', 'yes', 'on', 'True', 'YES'])
-    async def test_bool_true_forms(self, raw):
+    @pytest.mark.parametrize('raw, expected', [
+        pytest.param(raw, True, id=f'{raw}-TestQueryParamResolution.test_bool_true_forms')
+        for raw in ['1', 'true', 'yes', 'on', 'True', 'YES']
+    ] + [
+        pytest.param(raw, False, id=f'{raw}-TestQueryParamResolution.test_bool_false_forms')
+        for raw in ['0', 'false', 'no', 'off', 'False', 'NO']
+    ])
+    async def test_bool_forms(self, raw, expected):
+        """'1'/'true'/'yes'/'on' in any case coerce to True; '0'/'false'/
+        'no'/'off' in any case coerce to False."""
         captured = {}
         async def fn(active: bool): captured['active'] = active
         wrapper = _adapt_handler(fn, '/search')
         await wrapper(_scope(f'active={raw}'.encode()), None, AsyncMock())
-        assert captured['active'] is True
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize('raw', ['0', 'false', 'no', 'off', 'False', 'NO'])
-    async def test_bool_false_forms(self, raw):
-        captured = {}
-        async def fn(active: bool): captured['active'] = active
-        wrapper = _adapt_handler(fn, '/search')
-        await wrapper(_scope(f'active={raw}'.encode()), None, AsyncMock())
-        assert captured['active'] is False
+        assert captured['active'] is expected
 
     @pytest.mark.asyncio
     async def test_default_used_when_absent(self):
@@ -164,19 +163,14 @@ class TestQueryParam400s:
         assert 'q' in exc_info.value.detail
 
     @pytest.mark.asyncio
-    async def test_int_coercion_failure_raises_400(self):
+    @pytest.mark.parametrize('query', [b'page=abc', b'page='],
+                             ids=['TestQueryParam400s.test_int_coercion_failure_raises_400',
+                                  'TestQueryParam400s.test_blank_int_value_raises_400'])
+    async def test_unusable_int_value_raises_400(self, query):
         async def fn(page: int): pass
         wrapper = _adapt_handler(fn, '/search')
         with pytest.raises(HTTPException) as exc_info:
-            await wrapper(_scope(b'page=abc'), None, AsyncMock())
-        assert exc_info.value.status == HTTPStatus.BAD_REQUEST
-
-    @pytest.mark.asyncio
-    async def test_blank_int_value_raises_400(self):
-        async def fn(page: int): pass
-        wrapper = _adapt_handler(fn, '/search')
-        with pytest.raises(HTTPException) as exc_info:
-            await wrapper(_scope(b'page='), None, AsyncMock())
+            await wrapper(_scope(query), None, AsyncMock())
         assert exc_info.value.status == HTTPStatus.BAD_REQUEST
 
     @pytest.mark.asyncio

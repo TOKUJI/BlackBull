@@ -543,43 +543,6 @@ class TestBrotliCompression:
         body_event = next(e for e in events if e.get('type') == 'http.response.body')
         assert _brotli.decompress(body_event['body']) == body
 
-    async def test_br_content_encoding_header(self):
-        async def handler(_scope, _receive, send):
-            await send({'type': 'http.response.start', 'status': 200, 'headers': []})
-            await send({'type': 'http.response.body', 'body': b'x' * 200, 'more_body': False})
-
-        scope = Connection.from_scope({'type': 'http', 'headers': Headers([(b'accept-encoding', b'br')])})
-        events = []
-
-        async def capture_send(event):
-            _collect(events, event)
-
-        await compress(scope, AsyncMock(return_value={'type': 'http.disconnect'}),
-                       capture_send, call_next=handler)
-
-        start = next(e for e in events if e.get('type') == 'http.response.start')
-        header_dict = {k: v for k, v in start.get('headers', [])}
-        assert header_dict.get(b'content-encoding') == b'br'
-
-    async def test_br_preferred_over_gzip(self):
-        """When client accepts both br and gzip, br must be chosen."""
-        async def handler(_scope, _receive, send):
-            await send({'type': 'http.response.start', 'status': 200, 'headers': []})
-            await send({'type': 'http.response.body', 'body': b'x' * 200, 'more_body': False})
-
-        scope = Connection.from_scope({'type': 'http', 'headers': Headers([(b'accept-encoding', b'gzip, br')])})
-        events = []
-
-        async def capture_send(event):
-            _collect(events, event)
-
-        await compress(scope, AsyncMock(return_value={'type': 'http.disconnect'}),
-                       capture_send, call_next=handler)
-
-        start = next(e for e in events if e.get('type') == 'http.response.start')
-        header_dict = {k: v for k, v in start.get('headers', [])}
-        assert header_dict.get(b'content-encoding') == b'br'
-
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(not _HAVE_ZSTD, reason='zstandard not installed')
@@ -606,20 +569,35 @@ class TestZstdCompression:
         dctx = _zstd.ZstdDecompressor()
         assert dctx.decompress(body_event['body']) == body
 
-    async def test_zstd_content_encoding_header(self):
-        async def handler(_scope, _receive, send):
-            await send({'type': 'http.response.start', 'status': 200, 'headers': []})
-            await send({'type': 'http.response.body', 'body': b'x' * 200, 'more_body': False})
 
-        scope = Connection.from_scope({'type': 'http', 'headers': Headers([(b'accept-encoding', b'zstd')])})
-        events = []
+@pytest.mark.asyncio
+@pytest.mark.parametrize('accept_encoding, expected', [
+    pytest.param(b'br', b'br',
+                 marks=pytest.mark.skipif(not _HAVE_BROTLI, reason='brotli not installed')),
+    pytest.param(b'gzip, br', b'br',
+                 marks=pytest.mark.skipif(not _HAVE_BROTLI, reason='brotli not installed')),
+    pytest.param(b'zstd', b'zstd',
+                 marks=pytest.mark.skipif(not _HAVE_ZSTD, reason='zstandard not installed')),
+], ids=['TestBrotliCompression.test_br_content_encoding_header',
+        'TestBrotliCompression.test_br_preferred_over_gzip',
+        'TestZstdCompression.test_zstd_content_encoding_header'])
+async def test_content_encoding_header(accept_encoding, expected):
+    """compress() sets content-encoding to the codec it chose: 'br' whenever
+    the client accepts it — even alongside gzip — and 'zstd' when that is
+    what the client accepts (each row skips unless its codec is installed)."""
+    async def handler(_scope, _receive, send):
+        await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+        await send({'type': 'http.response.body', 'body': b'x' * 200, 'more_body': False})
 
-        async def capture_send(event):
-            _collect(events, event)
+    scope = Connection.from_scope({'type': 'http', 'headers': Headers([(b'accept-encoding', accept_encoding)])})
+    events = []
 
-        await compress(scope, AsyncMock(return_value={'type': 'http.disconnect'}),
-                       capture_send, call_next=handler)
+    async def capture_send(event):
+        _collect(events, event)
 
-        start = next(e for e in events if e.get('type') == 'http.response.start')
-        header_dict = {k: v for k, v in start.get('headers', [])}
-        assert header_dict.get(b'content-encoding') == b'zstd'
+    await compress(scope, AsyncMock(return_value={'type': 'http.disconnect'}),
+                   capture_send, call_next=handler)
+
+    start = next(e for e in events if e.get('type') == 'http.response.start')
+    header_dict = {k: v for k, v in start.get('headers', [])}
+    assert header_dict.get(b'content-encoding') == expected

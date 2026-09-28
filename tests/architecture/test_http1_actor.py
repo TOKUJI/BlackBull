@@ -300,17 +300,25 @@ class TestScopePopulation:
     """HTTP1Actor must fill client, server, and scheme from peername/sockname/ssl."""
 
     @pytest.mark.asyncio
-    async def test_client_is_set_from_peername(self):
+    @pytest.mark.parametrize(
+        'key, make_kwargs, expected',
+        [('client', {'peername': ('192.168.1.10', 54321)}, ['192.168.1.10', 54321]),
+         ('scheme', {'ssl': False}, 'http'),
+         ('scheme', {'ssl': True}, 'https')],
+        ids=['TestScopePopulation.test_client_is_set_from_peername',
+             'TestScopePopulation.test_scheme_is_http_for_plain_connection',
+             'TestScopePopulation.test_scheme_is_https_for_tls_connection'])
+    async def test_scope_client_and_scheme_population(self, key, make_kwargs, expected):
         raw = _http_request()
         captured = {}
 
         async def capture_app(scope, receive, send):
             captured.update(scope.as_scope() if hasattr(scope, 'as_scope') else scope)
 
-        actor, _writer = _make_actor(raw, capture_app, peername=('192.168.1.10', 54321))
+        actor, _writer = _make_actor(raw, capture_app, **make_kwargs)
         await actor.run()
 
-        assert captured['client'] == ['192.168.1.10', 54321]
+        assert captured[key] == expected
 
     @pytest.mark.asyncio
     async def test_server_falls_back_to_sockname_when_no_host_header(self):
@@ -341,32 +349,6 @@ class TestScopePopulation:
         await actor.run()
 
         assert captured['server'] == ['example.com', 8080]
-
-    @pytest.mark.asyncio
-    async def test_scheme_is_http_for_plain_connection(self):
-        raw = _http_request()
-        captured = {}
-
-        async def capture_app(scope, receive, send):
-            captured.update(scope.as_scope() if hasattr(scope, 'as_scope') else scope)
-
-        actor, _writer = _make_actor(raw, capture_app, ssl=False)
-        await actor.run()
-
-        assert captured['scheme'] == 'http'
-
-    @pytest.mark.asyncio
-    async def test_scheme_is_https_for_tls_connection(self):
-        raw = _http_request()
-        captured = {}
-
-        async def capture_app(scope, receive, send):
-            captured.update(scope.as_scope() if hasattr(scope, 'as_scope') else scope)
-
-        actor, _writer = _make_actor(raw, capture_app, ssl=True)
-        await actor.run()
-
-        assert captured['scheme'] == 'https'
 
     @pytest.mark.asyncio
     async def test_scheme_is_wss_for_tls_websocket(self):

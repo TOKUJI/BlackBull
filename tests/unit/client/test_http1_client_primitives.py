@@ -166,13 +166,6 @@ class TestSendRaw:
         await c.send_raw(b'after\r\n')
         assert c.wire_buffer == b'after\r\n'
 
-    @pytest.mark.asyncio
-    async def test_send_raw_without_connect_raises(self):
-        c = HTTP1Client('h', 1)
-        # No __aenter__ called → _writer is None.
-        with pytest.raises(AssertionError):
-            await c.send_raw(b'x')
-
 
 # ---------------------------------------------------------------------------
 # send_request_line
@@ -346,8 +339,14 @@ class TestReadResponse:
         assert resp.status == 204
         assert resp.body == b''
 
-    @pytest.mark.asyncio
-    async def test_read_response_without_connect_raises(self):
-        c = HTTP1Client('h', 1)
-        with pytest.raises(AssertionError):
-            await c.read_response()
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('call', [lambda c: c.send_raw(b'x'), lambda c: c.read_response()],
+                         ids=['TestSendRaw.test_send_raw_without_connect_raises',
+                              'TestReadResponse.test_read_response_without_connect_raises'])
+async def test_primitives_without_connect_raise(call):
+    """Both primitives raise AssertionError when called before connect."""
+    c = HTTP1Client('h', 1)
+    # No __aenter__ called → _writer is None.
+    with pytest.raises(AssertionError):
+        await call(c)

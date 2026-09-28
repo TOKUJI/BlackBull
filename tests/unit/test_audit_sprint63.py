@@ -301,13 +301,6 @@ class TestSpecialRequestForms:
                              b'Host: example.com\r\n\r\n')
         assert scope._asterisk_form is True
 
-    def test_asterisk_form_non_options_rejected(self):
-        # COMP-ASTERISK-WITH-GET — '*' is only valid for OPTIONS (§3.2.4).
-        from blackbull.server.http1_actor import BadRequestError
-        actor = _make_actor()
-        with pytest.raises(BadRequestError):
-            actor._parse(b'GET * HTTP/1.1\r\nHost: example.com\r\n\r\n')
-
     def test_connect_method_not_implemented(self):
         # COMP-METHOD-CONNECT — tunneling is not implemented → 501 path.
         from blackbull.server.http1_actor import NotImplementedFramingError
@@ -322,29 +315,20 @@ class TestSpecialRequestForms:
 # ---------------------------------------------------------------------------
 
 class TestProtocolValidation:
-    def test_userinfo_in_host_rejected(self):
-        # COMP-HOST-WITH-USERINFO — RFC 3986 §3.2 deprecates userinfo in
-        # authority; its presence in Host is an SSRF/smuggling vector.
-        from blackbull.server.http1_actor import BadRequestError
-        actor = _make_actor()
-        with pytest.raises(BadRequestError):
-            actor._parse(b'GET / HTTP/1.1\r\nHost: user@example.com\r\n\r\n')
-
-    def test_non_ascii_request_target_rejected(self):
-        # MAL-NON-ASCII-URL — raw non-ASCII bytes in the request-target.
-        from blackbull.server.http1_actor import BadRequestError
-        actor = _make_actor()
-        with pytest.raises(BadRequestError):
-            actor._parse(b'GET /\xc3\xa9 HTTP/1.1\r\nHost: example.com\r\n\r\n')
-
-    def test_te_chunked_not_final_rejected_400(self):
+    @pytest.mark.parametrize('raw', [
         # SMUG-TE-NOT-FINAL-CHUNKED — RFC 9112 §6.1: chunked present but not
         # final ⇒ body length undeterminable ⇒ MUST 400 (not 501).
+        b'POST /echo HTTP/1.1\r\nHost: x\r\n'
+        b'Transfer-Encoding: chunked, gzip\r\n\r\n',
+        b'POST /echo HTTP/1.1\r\nHost: x\r\n'
+        b'Transfer-Encoding: chunked, chunked\r\n\r\n',
+    ], ids=['TestProtocolValidation.test_te_chunked_not_final_rejected_400',
+            'TestProtocolValidation.test_te_duplicate_chunked_rejected_400'])
+    def test_te_chunked_irregularity_rejected_400(self, raw):
         from blackbull.server.http1_actor import BadRequestError
         actor = _make_actor()
         with pytest.raises(BadRequestError):
-            actor._parse(b'POST /echo HTTP/1.1\r\nHost: x\r\n'
-                         b'Transfer-Encoding: chunked, gzip\r\n\r\n')
+            actor._parse(raw)
 
     def test_te_unknown_coding_still_501(self):
         # gzip (chunked final absent) stays 501 Not Implemented.
@@ -354,27 +338,11 @@ class TestProtocolValidation:
             actor._parse(b'POST /echo HTTP/1.1\r\nHost: x\r\n'
                          b'Transfer-Encoding: gzip\r\n\r\n')
 
-    def test_te_duplicate_chunked_rejected_400(self):
-        from blackbull.server.http1_actor import BadRequestError
-        actor = _make_actor()
-        with pytest.raises(BadRequestError):
-            actor._parse(b'POST /echo HTTP/1.1\r\nHost: x\r\n'
-                         b'Transfer-Encoding: chunked, chunked\r\n\r\n')
-
     def test_plain_chunked_still_accepted(self):
         actor = _make_actor()
         scope = actor._parse(b'POST /echo HTTP/1.1\r\nHost: x\r\n'
                              b'Transfer-Encoding: chunked\r\n\r\n')
         assert scope.type == 'http'
-
-    def test_duplicate_content_type_rejected(self):
-        # COMP-DUPLICATE-CT — Content-Type is a singleton field.
-        from blackbull.server.http1_actor import BadRequestError
-        actor = _make_actor()
-        with pytest.raises(BadRequestError):
-            actor._parse(b'GET / HTTP/1.1\r\nHost: x\r\n'
-                         b'Content-Type: text/plain\r\n'
-                         b'Content-Type: text/html\r\n\r\n')
 
 
 # ---------------------------------------------------------------------------
@@ -537,22 +505,17 @@ class TestChunkedTrailerSection:
         assert await _drain_body(_chunked_recipient(wire)) == b'hello'
 
     @pytest.mark.asyncio
-    async def test_bare_lf_trailer_terminator_raises_400(self):
+    @pytest.mark.parametrize('wire', [
         # SMUG-CHUNK-LF-TRAILER — bare LF terminating the trailer section
         # (after the last-chunk ``0\r\n``).  Pre-fix the parser waited for
         # a CRLF that never came and the request timed out.
-        wire = b'5\r\nhello\r\n0\r\n\n'
-        recipient = _chunked_recipient(wire)
-        with pytest.raises(HTTPException) as exc_info:
-            await _drain_body(recipient)
-        assert exc_info.value.status == HTTPStatus.BAD_REQUEST
-        assert recipient.framing_broken is True
-
-    @pytest.mark.asyncio
-    async def test_bare_lf_trailer_line_raises_400(self):
+        b'5\r\nhello\r\n0\r\n\n',
         # A trailer *field line* terminated by bare LF is the same
         # framing violation as a bare-LF chunk-size line.
-        wire = b'5\r\nhello\r\n0\r\nfoo: bar\n\r\n'
+        b'5\r\nhello\r\n0\r\nfoo: bar\n\r\n',
+    ], ids=['TestChunkedTrailerSection.test_bare_lf_trailer_terminator_raises_400',
+            'TestChunkedTrailerSection.test_bare_lf_trailer_line_raises_400'])
+    async def test_bare_lf_trailer_raises_400(self, wire):
         recipient = _chunked_recipient(wire)
         with pytest.raises(HTTPException) as exc_info:
             await _drain_body(recipient)
@@ -584,31 +547,23 @@ class TestChunkedTrailerSection:
 # ---------------------------------------------------------------------------
 
 class TestMissingHostAndVersion:
-    def test_http11_without_host_rejected(self):
-        # RFC9112-7.1-MISSING-HOST — RFC 9112 §3.2 mandates Host on 1.1.
-        from blackbull.server.http1_actor import BadRequestError
-        actor = _make_actor()
-        with pytest.raises(BadRequestError):
-            actor._parse(b'GET / HTTP/1.1\r\n\r\n')
-
     def test_http10_without_host_still_accepted(self):
         # COMP-HTTP10-NO-HOST — HTTP/1.0 predates Host; must stay 200.
         actor = _make_actor()
         scope = actor._parse(b'GET / HTTP/1.0\r\n\r\n')
         assert scope.http_version == '1.0'
 
-    def test_unsupported_major_version_rejected_505(self):
+    @pytest.mark.parametrize('raw', [
         # RFC9112-2.3-INVALID-VERSION — HTTP/9.9 → 505, not a happy 200.
+        b'GET / HTTP/9.9\r\nHost: x\r\n\r\n',
+        b'GET / HTTP/0.9\r\nHost: x\r\n\r\n',
+    ], ids=['TestMissingHostAndVersion.test_unsupported_major_version_rejected_505',
+            'TestMissingHostAndVersion.test_http09_rejected_505'])
+    def test_unsupported_version_rejected_505(self, raw):
         from blackbull.server.http1_actor import UnsupportedVersionError
         actor = _make_actor()
         with pytest.raises(UnsupportedVersionError):
-            actor._parse(b'GET / HTTP/9.9\r\nHost: x\r\n\r\n')
-
-    def test_http09_rejected_505(self):
-        from blackbull.server.http1_actor import UnsupportedVersionError
-        actor = _make_actor()
-        with pytest.raises(UnsupportedVersionError):
-            actor._parse(b'GET / HTTP/0.9\r\nHost: x\r\n\r\n')
+            actor._parse(raw)
 
     def test_http12_accepted_as_http1x(self):
         # COMP-HTTP12-VERSION — a higher 1.x minor is 1.x-compatible and
@@ -616,14 +571,6 @@ class TestMissingHostAndVersion:
         actor = _make_actor()
         scope = actor._parse(b'GET / HTTP/1.2\r\nHost: x\r\n\r\n')
         assert scope.http_version == '1.2'
-
-    def test_malformed_version_still_400(self):
-        # Grammar violations (not a valid HTTP-version token at all) stay
-        # on the 400 path, distinct from a well-formed unsupported version.
-        from blackbull.server.http1_actor import BadRequestError
-        actor = _make_actor()
-        with pytest.raises(BadRequestError):
-            actor._parse(b'GET / HTTP/1.1.1\r\nHost: x\r\n\r\n')
 
 
 class TestContentLengthStrict:
@@ -683,3 +630,39 @@ class TestUnderscoreFramingHeaderNames:
         scope = actor._parse(b'GET / HTTP/1.1\r\nHost: x\r\n'
                              b'x_request_id: abc\r\n\r\n')
         assert scope.headers.get(b'x_request_id') == b'abc'
+
+
+@pytest.mark.parametrize('raw', [
+    # COMP-ASTERISK-WITH-GET — '*' is only valid for OPTIONS (§3.2.4).
+    b'GET * HTTP/1.1\r\nHost: example.com\r\n\r\n',
+    # COMP-HOST-WITH-USERINFO — RFC 3986 §3.2 deprecates userinfo in
+    # authority; its presence in Host is an SSRF/smuggling vector.
+    b'GET / HTTP/1.1\r\nHost: user@example.com\r\n\r\n',
+    # MAL-NON-ASCII-URL — raw non-ASCII bytes in the request-target.
+    b'GET /\xc3\xa9 HTTP/1.1\r\nHost: example.com\r\n\r\n',
+    # COMP-DUPLICATE-CT — Content-Type is a singleton field.
+    b'GET / HTTP/1.1\r\nHost: x\r\n'
+    b'Content-Type: text/plain\r\n'
+    b'Content-Type: text/html\r\n\r\n',
+    # RFC9112-7.1-MISSING-HOST — RFC 9112 §3.2 mandates Host on 1.1.
+    b'GET / HTTP/1.1\r\n\r\n',
+    # Grammar violations (not a valid HTTP-version token at all) stay
+    # on the 400 path, distinct from a well-formed unsupported version.
+    b'GET / HTTP/1.1.1\r\nHost: x\r\n\r\n',
+], ids=[
+    'TestSpecialRequestForms.test_asterisk_form_non_options_rejected',
+    'TestProtocolValidation.test_userinfo_in_host_rejected',
+    'TestProtocolValidation.test_non_ascii_request_target_rejected',
+    'TestProtocolValidation.test_duplicate_content_type_rejected',
+    'TestMissingHostAndVersion.test_http11_without_host_rejected',
+    'TestMissingHostAndVersion.test_malformed_version_still_400',
+])
+def test_malformed_request_head_rejected_400(raw):
+    """Each raw request head is refused with BadRequestError (400): an
+    asterisk-form outside OPTIONS, userinfo in Host, a non-ASCII target, a
+    duplicate Content-Type, HTTP/1.1 without Host, and a version token that
+    is not HTTP-version grammar at all."""
+    from blackbull.server.http1_actor import BadRequestError
+    actor = _make_actor()
+    with pytest.raises(BadRequestError):
+        actor._parse(raw)

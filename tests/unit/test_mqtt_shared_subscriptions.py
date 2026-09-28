@@ -283,7 +283,20 @@ class TestSharedNoLocal:
 # ===========================================================================
 
 class TestRetainedInteraction:
-    async def test_shared_subscription_never_receives_retained(self):
+    @pytest.mark.parametrize('filter_, options, resubscribe, expected', [
+        ('$share/g/t', None, False, 0),
+        ('t', [{'retain_handling': 1}], False, 1),
+        ('t', [{'retain_handling': 1}], True, 0),
+        ('t', None, True, 1),  # RH defaults to 0 — retained re-delivered
+    ], ids=['TestRetainedInteraction.test_shared_subscription_never_receives_retained',
+            'TestRetainedInteraction.test_rh1_delivers_retained_on_new_subscription',
+            'TestRetainedInteraction.test_rh1_skips_retained_on_existing_subscription',
+            'TestRetainedInteraction.test_rh0_redelivers_retained_on_resubscribe'])
+    async def test_retained_delivery_by_subscribe_shape(self, filter_, options,
+                                                       resubscribe, expected):
+        """Retained messages reach a subscription only where the spec says:
+        never through a shared filter; RH=1 delivers to a new subscription
+        but skips an existing one; RH=0 re-delivers on re-SUBSCRIBE."""
         broker = BrokerActor()
         pub = RecordingConn()
         await _attach(broker, pub, client_id='pub')
@@ -291,49 +304,15 @@ class TestRetainedInteraction:
 
         conn = RecordingConn()
         await _attach(broker, conn, client_id='c1')
-        await _subscribe(broker, conn, 1, [('$share/g/t', 0)])
-        assert conn.publishes() == []
-
-    async def test_rh1_delivers_retained_on_new_subscription(self):
-        broker = BrokerActor()
-        pub = RecordingConn()
-        await _attach(broker, pub, client_id='pub')
-        await _publish(broker, pub, payload=b'r', retain=True)
-
-        conn = RecordingConn()
-        await _attach(broker, conn, client_id='c1')
-        await _subscribe(broker, conn, 1, [('t', 0)],
-                         options=[{'retain_handling': 1}])
-        assert len(conn.publishes()) == 1
-
-    async def test_rh1_skips_retained_on_existing_subscription(self):
-        broker = BrokerActor()
-        pub = RecordingConn()
-        await _attach(broker, pub, client_id='pub')
-        await _publish(broker, pub, payload=b'r', retain=True)
-
-        conn = RecordingConn()
-        await _attach(broker, conn, client_id='c1')
-        await _subscribe(broker, conn, 1, [('t', 0)],
-                         options=[{'retain_handling': 1}])
-        conn.outbox.clear()
-        # Re-SUBSCRIBE to the same filter: subscription already exists.
-        await _subscribe(broker, conn, 2, [('t', 0)],
-                         options=[{'retain_handling': 1}])
-        assert conn.publishes() == []
-
-    async def test_rh0_redelivers_retained_on_resubscribe(self):
-        broker = BrokerActor()
-        pub = RecordingConn()
-        await _attach(broker, pub, client_id='pub')
-        await _publish(broker, pub, payload=b'r', retain=True)
-
-        conn = RecordingConn()
-        await _attach(broker, conn, client_id='c1')
-        await _subscribe(broker, conn, 1, [('t', 0)])
-        conn.outbox.clear()
-        await _subscribe(broker, conn, 2, [('t', 0)])   # RH defaults to 0
-        assert len(conn.publishes()) == 1
+        await _subscribe(broker, conn, 1, [(filter_, 0)], options=options)
+        if resubscribe:
+            conn.outbox.clear()
+            # Re-SUBSCRIBE to the same filter: subscription already exists.
+            await _subscribe(broker, conn, 2, [(filter_, 0)], options=options)
+        if expected == 0:
+            assert conn.publishes() == []
+        else:
+            assert len(conn.publishes()) == expected
 
 
 # ===========================================================================

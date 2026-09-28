@@ -68,18 +68,15 @@ def _header(events, name: bytes) -> bytes | None:
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_no_origin_passes_through():
+@pytest.mark.parametrize('origin', [None, 'https://evil.com'],
+                         ids=['test_no_origin_passes_through',
+                              'test_disallowed_origin_passes_through'])
+async def test_absent_or_disallowed_origin_passes_through(origin):
+    """A request with no Origin header, or one from a disallowed origin,
+    passes through untouched: the handler runs and no
+    access-control-allow-origin header is set."""
     mw = CORS(allow_origins=['https://example.com'])
-    scope = _make_scope(origin=None)
-    sent, called = await _call(mw, scope)
-    assert called == [True]
-    assert _header(sent, b'access-control-allow-origin') is None
-
-
-@pytest.mark.asyncio
-async def test_disallowed_origin_passes_through():
-    mw = CORS(allow_origins=['https://example.com'])
-    scope = _make_scope(origin='https://evil.com')
+    scope = _make_scope(origin=origin)
     sent, called = await _call(mw, scope)
     assert called == [True]
     assert _header(sent, b'access-control-allow-origin') is None

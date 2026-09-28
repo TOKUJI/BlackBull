@@ -96,15 +96,21 @@ async def _drain(*tasks):
 
 # --------------------------------------------------------------------------
 
-async def test_connect_round_trips_connack():
+@pytest.mark.parametrize('connect_kwargs, reason_code', [
+    ({'client_id': 'c1', 'clean_start': True, 'keep_alive': 60}, 0),
+    ({'client_id': 'c1', 'clean_start': True, 'keep_alive': 60, 'proto_level': 4}, 0x84),
+], ids=['test_connect_round_trips_connack', 'test_unsupported_version_rejected'])
+async def test_connect_yields_expected_connack(connect_kwargs, reason_code):
+    """A supported CONNECT round-trips CONNACK reason 0; an unsupported
+    protocol level is refused with CONNACK reason 0x84."""
     async with _running_broker() as broker:
         reader = _FakeReader()
         writer, task = await _serve(broker, reader, _ctx())
-        reader.feed_packet(MQTTConnect(client_id='c1', clean_start=True, keep_alive=60))
+        reader.feed_packet(MQTTConnect(**connect_kwargs))
         await asyncio.sleep(0.1)
         pkts = writer.pop_packets()
         await _drain(task)
-    assert any(isinstance(p, MQTTConnack) and p.reason_code == 0 for p in pkts)
+    assert any(isinstance(p, MQTTConnack) and p.reason_code == reason_code for p in pkts)
 
 
 async def test_pingreq_answered_locally():
@@ -265,15 +271,3 @@ async def test_on_message_tap_exception_is_isolated():
         await _drain(task)
     # Broker still acked despite the tap raising (isolation).
     assert any(isinstance(p, MQTTPuback) and p.packet_id == 5 for p in pkts)
-
-
-async def test_unsupported_version_rejected():
-    async with _running_broker() as broker:
-        reader = _FakeReader()
-        writer, task = await _serve(broker, reader, _ctx())
-        reader.feed_packet(MQTTConnect(client_id='c1', clean_start=True,
-                                       keep_alive=60, proto_level=4))
-        await asyncio.sleep(0.1)
-        pkts = writer.pop_packets()
-        await _drain(task)
-    assert any(isinstance(p, MQTTConnack) and p.reason_code == 0x84 for p in pkts)

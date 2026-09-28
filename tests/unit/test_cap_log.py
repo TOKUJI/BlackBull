@@ -202,29 +202,26 @@ def test_counter_flush_idempotent(cap_log_caplog):
 # CapHitCounter.bind() — contextvar binding
 # ----------------------------------------------------------------------
 
-def test_bind_makes_counter_ambient(cap_log_caplog):
+@pytest.mark.parametrize('after_exit, expected', [
+    (False, 1),
+    (True, 2),
+], ids=['test_bind_makes_counter_ambient', 'test_bind_unbinds_on_exit'])
+def test_bind_scopes_the_ambient_counter(cap_log_caplog, after_exit, expected):
+    """While bind() lasts, hits with no explicit counter= kwarg share the
+    bound counter — the first call emits, the rest are suppressed.  After
+    bind() exits, a hit without a counter logs every time."""
     counter = CapHitCounter()
     with counter.bind():
         # No explicit counter= kwarg — picks up from contextvar.
         log_cap_hit('ws_max_frame_payload', 4_000_000, 1_048_576)
+        if not after_exit:
+            log_cap_hit('ws_max_frame_payload', 4_000_000, 1_048_576)
+    if after_exit:
+        cap_log_caplog.clear()
+        log_cap_hit('ws_max_frame_payload', 4_000_000, 1_048_576)
         log_cap_hit('ws_max_frame_payload', 4_000_000, 1_048_576)
     records = [r for r in cap_log_caplog.records if r.name == 'blackbull.caps']
-    # First call emits; second is suppressed because the same counter
-    # is active for both.
-    assert len(records) == 1
-
-
-def test_bind_unbinds_on_exit(cap_log_caplog):
-    counter = CapHitCounter()
-    with counter.bind():
-        log_cap_hit('ws_max_frame_payload', 4_000_000, 1_048_576)
-    cap_log_caplog.clear()
-
-    # After bind() exits, a hit without a counter logs every time.
-    log_cap_hit('ws_max_frame_payload', 4_000_000, 1_048_576)
-    log_cap_hit('ws_max_frame_payload', 4_000_000, 1_048_576)
-    records = [r for r in cap_log_caplog.records if r.name == 'blackbull.caps']
-    assert len(records) == 2
+    assert len(records) == expected
 
 
 def test_explicit_counter_overrides_ambient(cap_log_caplog):

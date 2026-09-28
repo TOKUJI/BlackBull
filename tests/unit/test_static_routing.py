@@ -82,15 +82,13 @@ class TestBarePrefixWithIndex:
     too or these regress.
     """
 
-    def test_prefix_with_trailing_slash_serves_index(self, site):
+    @pytest.mark.parametrize(
+        'path', ['/assets/', '/assets'],
+        ids=['TestBarePrefixWithIndex.test_prefix_with_trailing_slash_serves_index',
+             'TestBarePrefixWithIndex.test_prefix_without_trailing_slash_serves_index'])
+    def test_bare_prefix_serves_index(self, site, path):
         with TestClient(_app(site, index='index.html')) as client:
-            r = client.get('/assets/')
-        assert r.status_code == 200
-        assert r.content == b'<h1>root index</h1>'
-
-    def test_prefix_without_trailing_slash_serves_index(self, site):
-        with TestClient(_app(site, index='index.html')) as client:
-            r = client.get('/assets')
+            r = client.get(path)
         assert r.status_code == 200
         assert r.content == b'<h1>root index</h1>'
 

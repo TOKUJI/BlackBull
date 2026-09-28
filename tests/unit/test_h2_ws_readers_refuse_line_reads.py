@@ -52,43 +52,28 @@ async def _refuses(call):
         await asyncio.wait_for(call, CALL_TIMEOUT_S)
 
 
+@pytest.mark.parametrize('call', [lambda r: r.readuntil(b'\r\n', 5),
+                                  lambda r: r.readuntil(b'\r\n', limit=5),
+                                  lambda r: r.read_head(1024),
+                                  lambda r: r.readuntil(b'\r\n'),
+                                  lambda r: r.read_head(0)],
+                         ids=['test_readuntil_with_a_positional_limit_is_refused',
+                              'test_readuntil_with_a_keyword_limit_is_refused',
+                              'test_bounded_read_head_is_refused',
+                              'test_unbounded_readuntil_is_refused',
+                              'test_unbounded_read_head_is_refused'])
 @pytest.mark.parametrize('make_reader', READERS)
-async def test_readuntil_with_a_positional_limit_is_refused(make_reader):
+async def test_line_reads_are_refused(make_reader, call):
+    """Every bare line-read call shape is refused with NotImplementedError."""
     reader = await make_reader()
-    await _refuses(reader.readuntil(b'\r\n', 5))
+    await _refuses(call(reader))
 
 
+@pytest.mark.parametrize('call', [lambda r: r.readuntil(b'\r\n', 64), lambda r: r.read_head(1024)],
+                         ids=['test_bounded_readuntil_through_an_empty_prefix_is_refused',
+                              'test_bounded_read_head_through_an_empty_prefix_is_refused'])
 @pytest.mark.parametrize('make_reader', READERS)
-async def test_readuntil_with_a_keyword_limit_is_refused(make_reader):
-    reader = await make_reader()
-    await _refuses(reader.readuntil(b'\r\n', limit=5))
-
-
-@pytest.mark.parametrize('make_reader', READERS)
-async def test_bounded_read_head_is_refused(make_reader):
-    reader = await make_reader()
-    await _refuses(reader.read_head(1024))
-
-
-@pytest.mark.parametrize('make_reader', READERS)
-async def test_unbounded_readuntil_is_refused(make_reader):
-    reader = await make_reader()
-    await _refuses(reader.readuntil(b'\r\n'))
-
-
-@pytest.mark.parametrize('make_reader', READERS)
-async def test_unbounded_read_head_is_refused(make_reader):
-    reader = await make_reader()
-    await _refuses(reader.read_head(0))
-
-
-@pytest.mark.parametrize('make_reader', READERS)
-async def test_bounded_readuntil_through_an_empty_prefix_is_refused(make_reader):
+async def test_line_reads_through_an_empty_prefix_are_refused(make_reader, call):
+    """Line reads through PrefixReader(b'') are refused like bare ones."""
     reader = PrefixReader(b'', await make_reader())
-    await _refuses(reader.readuntil(b'\r\n', 64))
-
-
-@pytest.mark.parametrize('make_reader', READERS)
-async def test_bounded_read_head_through_an_empty_prefix_is_refused(make_reader):
-    reader = PrefixReader(b'', await make_reader())
-    await _refuses(reader.read_head(1024))
+    await _refuses(call(reader))

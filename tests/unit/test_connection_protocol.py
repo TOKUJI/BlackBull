@@ -122,7 +122,12 @@ class TestReaderWakes:
             coro.close()
             pytest.fail('read suspended even though bytes were resident')
 
-    async def test_eof_unblocks_a_parked_reader(self, wired):
+    @pytest.mark.parametrize('eof, exc',
+                             [(True, None), (False, ConnectionResetError('peer gone'))],
+                             ids=['TestReaderWakes.test_eof_unblocks_a_parked_reader',
+                                  'TestReaderWakes.test_connection_lost_unblocks_with_the_error'])
+    async def test_parked_reader_is_unblocked(self, wired, eof, exc):
+        """EOF wakes a parked read with b''; connection_lost wakes it by raising the error."""
         proto, _ = wired
 
         async def consumer():
@@ -130,20 +135,13 @@ class TestReaderWakes:
 
         task = asyncio.create_task(consumer())
         await asyncio.sleep(0)
-        proto.eof_received()
-        assert await asyncio.wait_for(task, timeout=1) == b''
-
-    async def test_connection_lost_unblocks_with_the_error(self, wired):
-        proto, _ = wired
-
-        async def consumer():
-            return await proto.reader.read(10)
-
-        task = asyncio.create_task(consumer())
-        await asyncio.sleep(0)
-        proto.connection_lost(ConnectionResetError('peer gone'))
-        with pytest.raises(ConnectionResetError):
-            await asyncio.wait_for(task, timeout=1)
+        if eof:
+            proto.eof_received()
+            assert await asyncio.wait_for(task, timeout=1) == b''
+        else:
+            proto.connection_lost(exc)
+            with pytest.raises(ConnectionResetError):
+                await asyncio.wait_for(task, timeout=1)
 
     async def test_readexactly_spanning_two_arrivals(self, wired):
         proto, _ = wired

@@ -82,15 +82,14 @@ class TestEveryHighByteIsRejected:
     hand-picked sample; the sweep is what makes the claim total.
     """
 
+    @pytest.mark.parametrize(
+        'prefix', [b'', b'example.com'],
+        ids=['TestEveryHighByteIsRejected.test_a_bare_high_byte',
+             'TestEveryHighByteIsRejected.test_a_high_byte_inside_an_otherwise_valid_host'])
     @pytest.mark.parametrize('high', range(0x80, 0x100))
-    def test_a_bare_high_byte(self, high):
+    def test_a_high_byte_is_rejected(self, high, prefix):
         with pytest.raises(BadRequestError):
-            _validate_host(_headers(bytes([high])))
-
-    @pytest.mark.parametrize('high', range(0x80, 0x100))
-    def test_a_high_byte_inside_an_otherwise_valid_host(self, high):
-        with pytest.raises(BadRequestError):
-            _validate_host(_headers(b'example.com' + bytes([high])))
+            _validate_host(_headers(prefix + bytes([high])))
 
     @pytest.mark.parametrize('value', [
         b'ex\xffample.com',    # non-ASCII

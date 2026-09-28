@@ -235,21 +235,19 @@ class TestCacheability:
         await _run(mw, _scope(headers=[(b'cache-control', b'no-store')]), cn)
         assert counter['n'] == 2
 
-    async def test_authorization_request_bypasses_cache_by_default(self):
-        mw = Cache()
+    @pytest.mark.parametrize(
+        'cache_authenticated, expected', [(False, 2), (True, 1)],
+        ids=['TestCacheability.test_authorization_request_bypasses_cache_by_default',
+             'TestCacheability.test_cache_authenticated_true_caches_authorized'])
+    async def test_authorization_cacheability_follows_cache_authenticated(
+            self, cache_authenticated, expected):
+        """Authorized requests bypass the cache unless Cache(cache_authenticated=True) opts in."""
+        mw = Cache(cache_authenticated=cache_authenticated)
         cn, counter = _make_handler()
         scope = _scope(headers=[(b'authorization', b'Bearer abc')])
         await _run(mw, scope, cn)
         await _run(mw, scope, cn)
-        assert counter['n'] == 2
-
-    async def test_cache_authenticated_true_caches_authorized(self):
-        mw = Cache(cache_authenticated=True)
-        cn, counter = _make_handler()
-        scope = _scope(headers=[(b'authorization', b'Bearer abc')])
-        await _run(mw, scope, cn)
-        await _run(mw, scope, cn)
-        assert counter['n'] == 1
+        assert counter['n'] == expected
 
 
 # ---------------------------------------------------------------------------
@@ -359,64 +357,45 @@ class TestExpiry:
 class TestExplicitFreshness:
     """The configured default must not widen a freshness the response stated."""
 
-    async def test_zero_max_age_is_stale_at_once(self):
+    @pytest.mark.parametrize('extra_headers', [
+        [(b'cache-control', b'max-age=0')],
+        [(b'cache-control', b'max-age=120, s-maxage=0')],
+        [(b'cache-control', b'max-age=-5')],
+        [(b'cache-control', b'public'), (b'cache-control', b'max-age=0')],
+        [(b'cache-control', b'max-age="0"')],
+    ], ids=['TestExplicitFreshness.test_zero_max_age_is_stale_at_once',
+            'TestExplicitFreshness.test_zero_s_maxage_wins_over_positive_max_age',
+            'TestExplicitFreshness.test_negative_freshness_is_stale_not_defaulted',
+            'TestExplicitFreshness.test_every_cache_control_field_is_read',
+            'TestStatedFreshnessSources.test_quoted_delta_seconds_are_read'])
+    async def test_stated_zero_freshness_is_stale_at_once(self, extra_headers):
+        """However freshness is stated — max-age=0, s-maxage=0 over a positive
+        max-age, a negative delta, a max-age in a later cache-control field,
+        or a quoted delta — the response is stale at once; the configured
+        default must not widen it."""
         mw = Cache(max_age=600)
-        cn, counter = _make_handler(
-            extra_headers=[(b'cache-control', b'max-age=0')])
+        cn, counter = _make_handler(extra_headers=extra_headers)
         with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
             await _run(mw, _scope(), cn)
         with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.5):
             await _run(mw, _scope(), cn)
         assert counter['n'] == 2
 
-    async def test_zero_s_maxage_wins_over_positive_max_age(self):
+    @pytest.mark.parametrize('extra_headers', [
+        None,
+        [(b'cache-control', b'max-age=abc')],
+    ], ids=['TestExplicitFreshness.test_absent_freshness_keeps_the_configured_default',
+            'TestExplicitFreshness.test_malformed_freshness_keeps_the_configured_default'])
+    async def test_absent_or_malformed_freshness_keeps_the_default(self, extra_headers):
+        """When the response states no usable freshness — none at all, or a
+        malformed delta — the configured default TTL applies unchanged."""
         mw = Cache(max_age=600)
-        cn, counter = _make_handler(
-            extra_headers=[(b'cache-control', b'max-age=120, s-maxage=0')])
-        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
-            await _run(mw, _scope(), cn)
-        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.5):
-            await _run(mw, _scope(), cn)
-        assert counter['n'] == 2
-
-    async def test_absent_freshness_keeps_the_configured_default(self):
-        mw = Cache(max_age=600)
-        cn, counter = _make_handler()
+        cn, counter = _make_handler(extra_headers=extra_headers)
         with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
             await _run(mw, _scope(), cn)
         with patch('blackbull.middleware.cache.time.monotonic', return_value=1_500.0):
             await _run(mw, _scope(), cn)
         assert counter['n'] == 1
-
-    async def test_malformed_freshness_keeps_the_configured_default(self):
-        mw = Cache(max_age=600)
-        cn, counter = _make_handler(
-            extra_headers=[(b'cache-control', b'max-age=abc')])
-        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
-            await _run(mw, _scope(), cn)
-        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_500.0):
-            await _run(mw, _scope(), cn)
-        assert counter['n'] == 1
-
-    async def test_negative_freshness_is_stale_not_defaulted(self):
-        mw = Cache(max_age=600)
-        cn, counter = _make_handler(
-            extra_headers=[(b'cache-control', b'max-age=-5')])
-        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
-            await _run(mw, _scope(), cn)
-        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.5):
-            await _run(mw, _scope(), cn)
-        assert counter['n'] == 2
-
-    async def test_every_cache_control_field_is_read(self):
-        mw = Cache(max_age=600)
-        cn, counter = _make_handler(extra_headers=[
-            (b'cache-control', b'public'), (b'cache-control', b'max-age=0')])
-        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
-            await _run(mw, _scope(), cn)
-        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.5):
-            await _run(mw, _scope(), cn)
-        assert counter['n'] == 2
 
 
 @pytest.mark.asyncio
@@ -472,16 +451,6 @@ class TestStatedFreshnessSources:
         assert _split_response(sent)[0] == 200
         await _run(mw, _scope(), cn)          # clamped short, still fresh
         assert counter['n'] == 1
-
-    async def test_quoted_delta_seconds_are_read(self):
-        mw = Cache(max_age=600)
-        cn, counter = _make_handler(
-            extra_headers=[(b'cache-control', b'max-age="0"')])
-        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
-            await _run(mw, _scope(), cn)
-        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.5):
-            await _run(mw, _scope(), cn)
-        assert counter['n'] == 2
 
     async def test_a_quoted_value_cannot_inject_a_directive(self):
         """``x="a,max-age=31536000,b"`` is one extension directive whose value
@@ -817,25 +786,21 @@ class TestRequestDirectives:
 
 @pytest.mark.asyncio
 class TestLRUEviction:
-    async def test_oldest_entry_evicted_when_cap_reached(self):
+    @pytest.mark.parametrize('paths, expected', [
+        (['/a', '/b', '/c', '/a'], 4),
+        # /c evicts the oldest (/a); re-requesting /a is a cache miss.
+        (['/a', '/b', '/a', '/c', '/a'], 3),
+        # /a is MRU when /c arrives, so /b is evicted and /a still hits.
+    ], ids=['TestLRUEviction.test_oldest_entry_evicted_when_cap_reached',
+            'TestLRUEviction.test_access_promotes_to_mru'])
+    async def test_lru_eviction_order(self, paths, expected):
+        """With max_entries=2 the oldest entry is evicted at the cap, and an
+        access promotes an entry to MRU so it survives the next eviction."""
         mw = Cache(max_entries=2)
         cn, counter = _make_handler()
-        await _run(mw, _scope(path='/a'), cn)
-        await _run(mw, _scope(path='/b'), cn)
-        await _run(mw, _scope(path='/c'), cn)  # /a should now be evicted
-        # Re-request /a → cache miss → handler runs again.
-        await _run(mw, _scope(path='/a'), cn)
-        assert counter['n'] == 4
-
-    async def test_access_promotes_to_mru(self):
-        mw = Cache(max_entries=2)
-        cn, counter = _make_handler()
-        await _run(mw, _scope(path='/a'), cn)
-        await _run(mw, _scope(path='/b'), cn)
-        await _run(mw, _scope(path='/a'), cn)  # /a now MRU
-        await _run(mw, _scope(path='/c'), cn)  # /b should be evicted, /a survives
-        await _run(mw, _scope(path='/a'), cn)  # still cached
-        assert counter['n'] == 3
+        for path in paths:
+            await _run(mw, _scope(path=path), cn)
+        assert counter['n'] == expected
 
 
 # ---------------------------------------------------------------------------

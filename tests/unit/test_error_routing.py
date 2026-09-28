@@ -78,17 +78,15 @@ class TestErrorRouterHTTPStatus:
 
 class TestErrorRouterException:
 
-    def test_registered_exception_class_is_found(self):
+    @pytest.mark.parametrize('key', [ValueError, ValueError('msg')], ids=[
+        'TestErrorRouterException.test_registered_exception_class_is_found',
+        'TestErrorRouterException.test_lookup_by_instance'])
+    def test_lookup_by_class_or_instance(self, key):
+        """A registered exception handler is found by class or by instance."""
         router = ErrorRouter()
         async def handler(scope, receive, send): pass
         router[ValueError] = handler
-        assert router[ValueError] is handler
-
-    def test_lookup_by_instance(self):
-        router = ErrorRouter()
-        async def handler(scope, receive, send): pass
-        router[ValueError] = handler
-        assert router[ValueError("msg")] is handler
+        assert router[key] is handler
 
     def test_mro_walk_finds_base_class_handler(self):
         """KeyError is a LookupError; handler for LookupError should be returned."""

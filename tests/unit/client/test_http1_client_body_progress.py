@@ -104,16 +104,14 @@ class TestSteadyDeliveryOutlivesTheDeadline:
 class TestOneLongGapIsStillRefused:
     """The control: a deadline that cannot fire would pass the tests above."""
 
+    @pytest.mark.parametrize(
+        'fetch', [lambda r: HTTP1ResponseRecipient().receive(r), _streamed],
+        ids=['TestOneLongGapIsStillRefused.test_receive_refuses_a_stalled_peer',
+             'TestOneLongGapIsStillRefused.test_stream_refuses_a_stalled_peer'])
     @_WIRES
-    async def test_receive_refuses_a_stalled_peer(self, wire):
+    async def test_receive_and_stream_refuse_a_stalled_peer(self, wire, fetch):
         with pytest.raises(TimeoutError):
-            await HTTP1ResponseRecipient().receive(
-                _Dribbler(wire(_BODY), stall_at=_MID_BODY))
-
-    @_WIRES
-    async def test_stream_refuses_a_stalled_peer(self, wire):
-        with pytest.raises(TimeoutError):
-            await _streamed(_Dribbler(wire(_BODY), stall_at=_MID_BODY))
+            await fetch(_Dribbler(wire(_BODY), stall_at=_MID_BODY))
 
 
 # ----------------------------------------------------------------------
