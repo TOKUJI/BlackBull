@@ -2361,15 +2361,20 @@ class WebSocketRecipient(BaseRecipient):
         """Cancel and await the background read-loop task, and disarm the
         idle watchdog.
 
-        A reader task that outlives its session keeps reading a dead transport
-        and warns at event-loop shutdown, so client sessions call this from
-        ``close()``.  Idempotent, and safe before the first ``__call__``.
+        Ownership (BLA-363): the read-loop task and event queue are released
+        here; the watchdog is timer handles (``disarm_watchdog``); control
+        sends — liveness probe, unresponsive end, buffered control frames —
+        are single suppressed writes that end on their own, so nothing joins
+        them.  A reader that outlives its session reads a dead transport and
+        warns at event-loop shutdown.  Idempotent, safe before the first
+        ``__call__``; called from the read loop itself it skips the join.
         """
         self._closed = True
         self.disarm_watchdog()
         task = self._reader_task
         self._reader_task = None
-        if task is not None and not task.done():
+        if (task is not None and task is not asyncio.current_task()
+                and not task.done()):
             task.cancel()
             try:
                 await task

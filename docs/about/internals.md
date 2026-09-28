@@ -209,6 +209,12 @@ so the two disagreed for the rest of the request.
   [WebSockets — Fragmented messages](../guide/websockets.md#fragmented-messages)).
 - Supervisor strategy: **isolate** — a protocol error closes
   this connection only.
+- On end (handler return, error, cancel, peer close, timeout) the
+  recipient's read-loop task is cancelled and joined before the
+  transport closes — a reader parked on a full queue never wakes on
+  EOF alone.  Ownership: read-loop task and queue → `recipient.shutdown`;
+  watchdog → `disarm_watchdog`; control sends are single writes that end
+  on their own.
 
 ### Non-HTTP protocol handlers (the Non-ASGI bridge)
 
