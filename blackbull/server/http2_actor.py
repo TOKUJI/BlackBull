@@ -1613,11 +1613,12 @@ class HTTP2Actor(Actor):
                                        head_mode=method_is(conn.method,
                                                            'HEAD'))
 
-        async def _ws_send_200(subprotocol=None):
+        async def _ws_send_200(subprotocol=None, app_headers=None):
             headers = []
             if subprotocol:
                 sp = subprotocol if isinstance(subprotocol, str) else subprotocol.decode()
                 headers = [(b'sec-websocket-protocol', sp.encode())]
+            headers.extend(app_headers or ())
             # Flushed now, not through http.response.start: HTTP2Sender
             # coalesces HEADERS with the first DATA, and an RFC 8441 accept has
             # no body, so the HEADERS would never leave and the handshake would

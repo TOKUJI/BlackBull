@@ -11,6 +11,7 @@ from ..asgi import (ASGIEvent, WebSocketAcceptEvent, WebSocketCloseEvent,
                     WebSocketSendEvent)
 from .conn_id import new_connection_id
 from .constants import WSCloseCode
+from ..headers import _validate_response_header_fields
 from .permessage_deflate import (
     DeflateParams, InboundDecompressor, OutboundCompressor,
 )
@@ -18,6 +19,34 @@ from .recipient import AbstractReader, RecipientFactory, _WS_READ_INLINE
 from .sender import AbstractWriter, SenderFactory
 
 logger = logging.getLogger(__name__)
+
+
+# The handshake owns these response fields; an application accept header with
+# one of these names would rewrite the protocol's own answer (BLA-378).
+_HANDSHAKE_OWNED = frozenset({
+    b'upgrade', b'connection', b'sec-websocket-accept',
+    b'sec-websocket-extensions', b'sec-websocket-protocol',
+})
+
+
+def _app_accept_headers(raw) -> list[tuple[bytes, bytes]] | None:
+    """Check the accept event's extra headers; order and multiplicity stay.
+
+    A name the handshake owns, or a field that would break the response
+    (BLA-342's grammar), raises rather than being dropped.
+    """
+    if not raw:
+        return None
+    out: list[tuple[bytes, bytes]] = []
+    for item in raw:
+        name, value = item
+        if name.lower() in _HANDSHAKE_OWNED:
+            raise ValueError(
+                f'{name!r} is owned by the WebSocket handshake and cannot '
+                f'be set from websocket.accept headers')
+        out.append((name, value))
+    _validate_response_header_fields(out)
+    return out
 
 
 class WebSocketActor(Actor):
@@ -140,7 +169,8 @@ class WebSocketActor(Actor):
 
 
     async def _send(self,
-                    event: WebSocketSendEvent | WebSocketCloseEvent | WebSocketAcceptEvent,
+                    event: (WebSocketSendEvent | WebSocketCloseEvent
+                            | WebSocketAcceptEvent | NativeWSMessage),
                     _status=None, _headers=None) -> None:
         # The accept message is the actor's cue to fire the deferred 101/200
         # and the ``websocket_connected`` event.  It arrives native from the
@@ -149,16 +179,21 @@ class WebSocketActor(Actor):
         if isinstance(event, NativeWSMessage):
             is_accept = event.kind == NativeWSMessage.ACCEPT
             offered = event.subprotocol
+            extra = event.headers if is_accept else None
         else:
             is_accept = (isinstance(event, dict)
                          and event.get('type') == ASGIEvent.WS_ACCEPT)
             offered = event.get('subprotocol') if is_accept else None
+            extra = event.get('headers') if is_accept else None
         if is_accept:
+            # Checked before the response goes out: a refused header must
+            # fail the accept, not arrive silently shortened.
+            app_headers = _app_accept_headers(extra)
             ws_bag = self._conn._ws or {}
             send_101 = ws_bag.pop('send_101', None)
             if send_101:
                 subprotocol = offered or ws_bag.pop('auto_subprotocol', None)
-                await send_101(subprotocol)
+                await send_101(subprotocol, app_headers)
             if not self._conn.connection_id:
                 # Normally set by the HTTP actor's upgrade path from the
                 # accept-time id; mint one only for direct test drives.
