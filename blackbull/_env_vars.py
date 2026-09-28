@@ -268,13 +268,13 @@ BB_H2_WS_MAX_STREAMS_PER_CONNECTION = 5
 # --- MQTT ----------------------------------------------------------------------
 
 BB_MQTT_MAX_PACKET_SIZE = 1024 * 1024
-"""Maximum size of one inbound control packet, advertised as `Maximum Packet Size` (§3.2.2.3.6).  Checked against the declared Remaining Length as soon as the fixed header is readable, so an over-size packet is refused **without buffering its payload** — MQTT 5 lets a peer declare 268,435,455 bytes (256 MiB) and then dribble them.  Over the cap the broker answers `DISCONNECT` with **0x95 (Packet Too Large)** and closes.  `0` disables."""
+"""Maximum inbound packet size including its fixed header, advertised as `Maximum Packet Size` (§3.2.2.3.6) and checked before waiting for the body. Exceeding it closes silently before CONNECT admission, otherwise with `DISCONNECT` **0x95 (Packet Too Large)**. `0` disables."""
 
 BB_MQTT_BROKER_INBOX_MAXSIZE = 1024
 """Positive bound on messages waiting in the worker's MQTT broker inbox. Readers await admission at capacity; the broker logs the cap hit. Independent of session QoS backlog. Invalid values, including zero, use the default."""
 
 BB_MQTT_BROKER_INBOX_MAX_BYTES = 16 * 1024 * 1024
-"""Positive wire-size budget for broker inbox contents, alongside the count cap. Compact ACK/lifecycle envelopes charge one byte and one slot. A single packet exceeding the budget is refused with `DISCONNECT 0x97`. Not a heap budget; active processing and each reader's admission candidate are outside the queue. Invalid values use the default."""
+"""Positive wire-size budget for broker inbox contents, alongside the count cap. Compact ACK/lifecycle envelopes charge one byte and one slot. A single packet exceeding the budget closes the connection: silently before CONNECT admission, otherwise with `DISCONNECT 0x97`. Not a heap budget; active processing and each reader's admission candidate are outside the queue. Invalid values use the default."""
 
 BB_MQTT_CONNECTION_INBOX_MAXSIZE = 1024
 """Positive bound on all packets waiting for each MQTT writer, including QoS 0 and ACKs. The producer yields to the writer at capacity, then logs and ends only that connection if it cannot admit the packet; it never waits for socket progress inside the broker. Invalid values, including zero, use the default."""
@@ -332,4 +332,3 @@ BB_PHASE_TRACE = '0'
 
 BB_DEADLINE_TICK_MS = '300'
 """Polling interval (milliseconds) for the per-process deadline scanner that enforces `BB_HEADER_TIMEOUT`, `BB_BODY_TIMEOUT`, `BB_WRITE_TIMEOUT`, and `BB_KEEP_ALIVE_TIMEOUT`.  One shared timer for the whole process instead of one per request, which is why enabling those timeouts costs nothing per request.  Smaller = tighter timeout granularity at a small CPU cost; larger = more slack but cheaper."""
-

@@ -25,6 +25,7 @@ from blackbull.mqtt.messages import (
     MQTTConnect,
     MQTTConnack,
     MQTTDecodeError,
+    IncompletePacket,
     MQTTDisconnect,
     MQTTPacketType,
     MQTTPuback,
@@ -34,9 +35,30 @@ from blackbull.mqtt.messages import (
     MQTTUnsuback,
     MQTTUnsubscribe,
     decode_packet,
+    decode_variable_byte_integer,
     encode_packet,
     encode_variable_byte_integer,
 )
+
+
+@pytest.mark.parametrize('length', [1, 2, 3])
+def test_variable_integer_continuations_remain_incomplete(length):
+    with pytest.raises(IncompletePacket):
+        decode_variable_byte_integer(b'\x80' * length)
+
+
+def test_fourth_variable_integer_continuation_is_malformed_without_a_fifth_byte():
+    with pytest.raises(MQTTDecodeError):
+        decode_variable_byte_integer(b'\x80' * 4)
+    assert decode_variable_byte_integer(b'\xff\xff\xff\x7f') == (268435455, 4)
+
+
+@pytest.mark.parametrize('cap', [0, 1048576])
+def test_framer_rejects_fourth_remaining_length_continuation_without_more_input(cap):
+    framer = PacketFramer(max_packet_size=cap)
+    framer.feed(b'\x30\x80\x80\x80\x80')
+    with pytest.raises(MQTTDecodeError):
+        list(framer)
 
 # §2.1.3 — PUBREL, SUBSCRIBE and UNSUBSCRIBE reserve these fixed-header flags.
 
@@ -282,17 +304,19 @@ def test_a_malformed_packet_never_reaches_the_framer():
                     + BYTES_AFTER_THE_LAST_FIELD + BODY_MUST_BE_ABSENT):
         framer = PacketFramer()
         framer.feed(wire)
-        assert list(framer) == [], wire.hex()
+        with pytest.raises(MQTTDecodeError):
+            list(framer)
 
 
-def test_the_packet_behind_a_malformed_one_still_decodes():
-    """Its deficit may not be taken from the next packet's octets."""
+def test_the_packet_behind_a_malformed_one_is_not_decoded():
+    """Malformed input terminates framing at the original boundary."""
     valid = packet(MQTTPacketType.PUBACK, b'\x00\x01')
     for _, wire in (SHORTER_THAN_THE_TYPE_REQUIRES + ZERO_PACKET_IDENTIFIER
                     + BYTES_AFTER_THE_LAST_FIELD + BODY_MUST_BE_ABSENT):
         framer = PacketFramer()
         framer.feed(wire + valid)
-        assert list(framer) == [MQTTPuback(packet_id=1)], wire.hex()
+        with pytest.raises(MQTTDecodeError):
+            next(iter(framer))
 
 
 def test_a_body_the_message_class_refuses_is_a_decode_error():

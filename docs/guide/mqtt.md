@@ -197,6 +197,9 @@ of those is bounded, and each bound is **advertised in CONNACK** where MQTT 5
 has a property for it. Local aggregate quotas can also be reached by legal
 traffic, for example when a subscriber's network slows down.
 
+DISCONNECT refusals below apply after CONNECT admission. Earlier packet-size
+or input-budget refusals close the connection silently.
+
 | Limit | Default | Advertised as | Over the limit |
 |---|---|---|---|
 | `BB_MQTT_MAX_PACKET_SIZE` | 1 MiB | `Maximum Packet Size` (§3.2.2.3.6) | `DISCONNECT` **0x95 Packet Too Large**, connection closed |
@@ -249,11 +252,12 @@ that barrier acknowledges routing work, not completion of socket writes.
 Normal broker and connection mailbox shutdowns emit DEBUG lifecycle logs under
 `blackbull.mqtt.broker` and `blackbull.mqtt.connection`.
 
-**The packet limit is judged from the header.** MQTT 5 lets a peer declare a
-Remaining Length of 268,435,455 bytes (256 MiB) and then deliver it slowly. The
-check runs as soon as the fixed header is readable, so the payload is never
-buffered — the broker refuses on what the peer *claimed*, not on what it
-managed to send.
+**The packet limit includes the fixed header** and is checked as soon as the
+header is complete; zero disables it. Packet decoding errors or oversized
+declarations end the connection without forwarding trailing packets. Malformed
+input closes silently before CONNECT admission; afterward it receives DISCONNECT
+(`0x81`). Keep Alive bounds receive idleness after CONNECT, not total
+packet-assembly time; zero disables that idle check.
 
 **The backlog exists because flow control is not a licence to forget.** When a
 client's `Receive Maximum` window is full, matching messages are held rather

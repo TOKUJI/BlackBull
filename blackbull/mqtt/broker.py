@@ -92,7 +92,9 @@ class ClientAuth(ActorMessage):
 
 @dataclass
 class ClientProtocolError(ActorMessage):
-    """A decoded packet that is not permitted in the client-to-server direction."""
+    """A terminal wire or client-direction error, ordered after admission."""
+
+    reason_code: int = ReasonCode.PROTOCOL_ERROR
 
 
 @dataclass
@@ -433,7 +435,7 @@ class BrokerActor(Actor):
         elif isinstance(msg, ClientAuth):
             await msg.sender.send(Send(packet=MQTTAuth(reason_code=ReasonCode.SUCCESS)))
         elif isinstance(msg, ClientProtocolError):
-            await self._disconnect(msg.sender, ReasonCode.PROTOCOL_ERROR)
+            await self._disconnect(msg.sender, msg.reason_code)
         else:  # pragma: no cover - connection actor sends only the above
             logger.debug('BrokerActor ignoring %s', type(msg).__name__)
 
