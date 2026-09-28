@@ -162,10 +162,18 @@ class WebSocketActor(Actor):
         except Exception as exc:
             await self._aggregator.on_error(self._conn, exc)
         finally:
-            await self._aggregator.on_websocket_disconnected(
-                self._conn, code=self._disconnect_code)
-            self._ws_receive.disarm_watchdog()
-            await self._writer.close()
+            # Release order (BLA-363): the disconnect event (once, with the
+            # code the peer saw), then the reader task — a full queue parks
+            # it in queue.put, where EOF never wakes it — then the transport.
+            # Each step releases the next even when it raises.
+            try:
+                await self._aggregator.on_websocket_disconnected(
+                    self._conn, code=self._disconnect_code)
+            finally:
+                try:
+                    await self._ws_receive.shutdown()
+                finally:
+                    await self._writer.close()
 
 
     async def _send(self,
