@@ -6414,6 +6414,12 @@ so the two disagreed for the rest of the request.</p>
   <a href="../../guide/websockets/#fragmented-messages">WebSockets — Fragmented messages</a>).</li>
 <li>Supervisor strategy: <strong>isolate</strong> — a protocol error closes
   this connection only.</li>
+<li>On end (handler return, error, cancel, peer close, timeout) the
+  recipient's read-loop task is cancelled and joined before the
+  transport closes — a reader parked on a full queue never wakes on
+  EOF alone.  Ownership: read-loop task and queue → <code>recipient.shutdown</code>;
+  watchdog → <code>disarm_watchdog</code>; control sends are single writes that end
+  on their own.</li>
 </ul>
 <h3 id="non-http-protocol-handlers-the-non-asgi-bridge">Non-HTTP protocol handlers (the Non-ASGI bridge)<a class="headerlink" href="#non-http-protocol-handlers-the-non-asgi-bridge" title="Permanent link">&para;</a></h3>
 <ul>
