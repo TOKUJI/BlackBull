@@ -6518,7 +6518,7 @@ ever meeting the enforcement path.</p>
 <tr>
 <td><code>BB_MQTT_MAX_PACKET_SIZE</code></td>
 <td><code>1048576</code> (1 MiB)</td>
-<td>Maximum size of one inbound control packet, advertised as <code>Maximum Packet Size</code> (§3.2.2.3.6).  Checked against the declared Remaining Length as soon as the fixed header is readable, so an over-size packet is refused <strong>without buffering its payload</strong> — MQTT 5 lets a peer declare 268,435,455 bytes (256 MiB) and then dribble them.  Over the cap the broker answers <code>DISCONNECT</code> with <strong>0x95 (Packet Too Large)</strong> and closes.  <code>0</code> disables.</td>
+<td>Maximum inbound packet size including its fixed header, advertised as <code>Maximum Packet Size</code> (§3.2.2.3.6) and checked before waiting for the body. Exceeding it closes silently before CONNECT admission, otherwise with <code>DISCONNECT</code> <strong>0x95 (Packet Too Large)</strong>. <code>0</code> disables.</td>
 </tr>
 <tr>
 <td><code>BB_MQTT_BROKER_INBOX_MAXSIZE</code></td>
@@ -6528,7 +6528,7 @@ ever meeting the enforcement path.</p>
 <tr>
 <td><code>BB_MQTT_BROKER_INBOX_MAX_BYTES</code></td>
 <td><code>16777216</code> (16 MiB)</td>
-<td>Positive wire-size budget for broker inbox contents, alongside the count cap. Compact ACK/lifecycle envelopes charge one byte and one slot. A single packet exceeding the budget is refused with <code>DISCONNECT 0x97</code>. Not a heap budget; active processing and each reader's admission candidate are outside the queue. Invalid values use the default.</td>
+<td>Positive wire-size budget for broker inbox contents, alongside the count cap. Compact ACK/lifecycle envelopes charge one byte and one slot. A single packet exceeding the budget closes the connection: silently before CONNECT admission, otherwise with <code>DISCONNECT 0x97</code>. Not a heap budget; active processing and each reader's admission candidate are outside the queue. Invalid values use the default.</td>
 </tr>
 <tr>
 <td><code>BB_MQTT_CONNECTION_INBOX_MAXSIZE</code></td>
