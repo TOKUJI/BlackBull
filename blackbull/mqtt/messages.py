@@ -326,23 +326,36 @@ def encode_variable_byte_integer(value: int) -> bytes:
     return bytes(out)
 
 
+def _read_vbi_at(data: bytes | bytearray, pos: int, end: int) -> tuple[int, int]:
+    """§1.5.5 — Decode a Variable Byte Integer in place; no buffer copies.
+
+    Returns ``(value, new_pos)``.  An integer still continuing when *end*
+    arrives is an incomplete read; one continuing on its fourth octet is
+    malformed.  Trailing bytes beyond the integer are the caller's.
+    """
+    multiplier = 1
+    value = 0
+    consumed = 0
+    while pos < end:
+        byte = data[pos]
+        pos += 1
+        value += (byte & 0x7F) * multiplier
+        consumed += 1
+        if (byte & 0x80) == 0:
+            return value, pos
+        if consumed == 4:
+            raise MQTTDecodeError('Variable Byte Integer too long')
+        multiplier *= 128
+    raise IncompletePacket('Variable Byte Integer continues past buffer')
+
+
 def decode_variable_byte_integer(data: bytes) -> tuple[int, int]:
     """§1.5.5 — Decode a Variable Byte Integer; return ``(value, consumed)``.
 
     Trailing bytes beyond the integer are ignored (the caller tracks them).
     """
-    multiplier = 1
-    value = 0
-    consumed = 0
-    for byte in data:
-        value += (byte & 0x7F) * multiplier
-        consumed += 1
-        if (byte & 0x80) == 0:
-            return value, consumed
-        if consumed == 4:
-            raise MQTTDecodeError('Variable Byte Integer too long')
-        multiplier *= 128
-    raise IncompletePacket('Variable Byte Integer continues past buffer')
+    value, pos = _read_vbi_at(data, 0, len(data))
+    return value, pos
 
 
 # ===========================================================================
@@ -507,28 +520,87 @@ def get_property_info(identifier: int) -> PropertyInfo | None:
 
 
 def _decode_vbi_at(data: bytes, pos: int, end: int) -> tuple[int, int]:
-    val, consumed = decode_variable_byte_integer(data[pos:end])
-    return val, pos + consumed
+    try:
+        return _read_vbi_at(data, pos, end)
+    except IncompletePacket as exc:
+        raise MQTTDecodeError(_CROSSING) from exc
 
 
-# Wire type → (value encoder, value decoder).  Module-level constant, so both
-# property codec paths are a single dict lookup instead of a 6-branch chain
-# (the original ``_encode_prop_value`` used bare ``if`` — not ``elif`` — so every
-# branch was evaluated even after a match).  Encoders take the raw value and
-# return the encoded bytes *without* the property-id prefix; decoders share a
-# uniform ``(data, pos, end) -> (value, new_pos)`` signature.  ``_PAIR`` (user
-# properties) is handled by guard clauses in both callers, not via this table.
+# §2.2.2 contract for the decoders below: consume only bytes inside the
+# declared Property Length.  A violation is MQTTDecodeError, never
+# IncompletePacket — the packet is already whole; nothing waits for more bytes.
+_CROSSING = 'property value crosses the declared Property Length'
+
+
+def _decode_u8_at(data: bytes, pos: int, end: int) -> tuple[int, int]:
+    if pos + 1 > end:
+        raise MQTTDecodeError(_CROSSING)
+    return data[pos], pos + 1
+
+
+def _decode_u16_at(data: bytes, pos: int, end: int) -> tuple[int, int]:
+    if pos + 2 > end:
+        raise MQTTDecodeError(_CROSSING)
+    return data[pos] << 8 | data[pos + 1], pos + 2
+
+
+def _decode_u32_at(data: bytes, pos: int, end: int) -> tuple[int, int]:
+    if pos + 4 > end:
+        raise MQTTDecodeError(_CROSSING)
+    return (data[pos] << 24 | data[pos + 1] << 16
+            | data[pos + 2] << 8 | data[pos + 3]), pos + 4
+
+
+def _decode_utf8_at(data: bytes, pos: int, end: int) -> tuple[str, int]:
+    if pos + 2 > end:
+        raise MQTTDecodeError(_CROSSING)
+    length = int.from_bytes(data[pos:pos + 2], 'big')
+    start = pos + 2
+    stop = start + length
+    if stop > end:
+        raise MQTTDecodeError(_CROSSING)
+    return data[start:stop].decode('utf-8'), stop
+
+
+def _decode_binary_at(data: bytes, pos: int, end: int) -> tuple[bytes, int]:
+    if pos + 2 > end:
+        raise MQTTDecodeError(_CROSSING)
+    length = int.from_bytes(data[pos:pos + 2], 'big')
+    start = pos + 2
+    stop = start + length
+    if stop > end:
+        raise MQTTDecodeError(_CROSSING)
+    return bytes(data[start:stop]), stop
+
+
+def _decode_pair_at(data: bytes, pos: int, end: int) -> tuple[tuple[str, str], int]:
+    pair_key, pos = _decode_utf8_at(data, pos, end)
+    pair_val, pos = _decode_utf8_at(data, pos, end)
+    return (pair_key, pair_val), pos
+
+
+# Wire type → (value encoder, value decoder); ``_PAIR`` is not an entry —
+# encode guards it, decode binds ``_decode_pair_at``.  Encoders return the
+# value bytes *without* the property-id prefix; decoders follow
+# ``(data, pos, end) -> (value, new_pos)``, staying inside the section.  This
+# table owns wire shape and bounds only; admissibility, multiplicity (User
+# Property is plural, the rest single) and value ranges are the message's
+# and the broker's.
 _WIRE_CODECS: dict[str, tuple[Callable[[Any], bytes],
                               Callable[[bytes, int, int], tuple[Any, int]]]] = {
-    _BYTE:   (lambda v: bytes([v & 0xFF]),
-              lambda d, p, e: (d[p], p + 1)),
-    _UINT16: (lambda v: int(v).to_bytes(2, 'big'),
-              lambda d, p, e: (int.from_bytes(d[p:p + 2], 'big'), p + 2)),
-    _UINT32: (lambda v: int(v).to_bytes(4, 'big'),
-              lambda d, p, e: (int.from_bytes(d[p:p + 4], 'big'), p + 4)),
+    _BYTE:   (lambda v: bytes([v & 0xFF]), _decode_u8_at),
+    _UINT16: (lambda v: int(v).to_bytes(2, 'big'), _decode_u16_at),
+    _UINT32: (lambda v: int(v).to_bytes(4, 'big'), _decode_u32_at),
     _VBI:    (lambda v: encode_variable_byte_integer(int(v)), _decode_vbi_at),
-    _UTF8:   (_encode_utf8, lambda d, p, e: _decode_utf8(d, p)),
-    _BINARY: (_encode_binary, lambda d, p, e: _decode_binary(d, p)),
+    _UTF8:   (_encode_utf8, _decode_utf8_at),
+    _BINARY: (_encode_binary, _decode_binary_at),
+}
+# Key and decoder are static per identifier: one lookup serves the decode
+# loop where separate key and wire-type hops would do three.
+_PROP_DECODE: dict[int, tuple[str, Callable[[bytes, int, int], tuple[Any, int]]]] = {
+    int(pid): (_PROP_ID_TO_KEY[pid],
+               _decode_pair_at if wt == _PAIR else _WIRE_CODECS[wt][1])
+    for pid, _ident, _key, wt in _PROPERTY_SPECS
 }
 
 
@@ -560,8 +632,7 @@ def decode_properties(data: bytes, offset: int = 0) -> tuple[dict[str, Any], int
 
     ``consumed`` counts the Property Length prefix plus the property bytes.
     """
-    length, len_consumed = decode_variable_byte_integer(data[offset:])
-    start = offset + len_consumed
+    length, start = _read_vbi_at(data, offset, len(data))
     end = start + length
     if end > len(data):
         raise IncompletePacket('Properties body truncated')
@@ -570,20 +641,15 @@ def decode_properties(data: bytes, offset: int = 0) -> tuple[dict[str, Any], int
     while pos < end:
         pid = data[pos]
         pos += 1
-        spec = _PROP_BY_ID.get(pid)
-        if spec is None:
+        entry = _PROP_DECODE.get(pid)
+        if entry is None:
             raise MQTTDecodeError(f'Unknown property identifier 0x{pid:02X}')
-        wire_type = spec.wire_type
-        runtime_key = _PROP_ID_TO_KEY[pid]
-        if wire_type == _PAIR:
-            pair_key, pos = _decode_utf8(data, pos)
-            pair_val, pos = _decode_utf8(data, pos)
-            props.setdefault(runtime_key, []).append((pair_key, pair_val))
-            continue
-        codec = _WIRE_CODECS.get(wire_type)
-        if codec is None:  # pragma: no cover - exhaustive above
-            raise MQTTDecodeError(f'Unhandled property wire type {wire_type!r}')
-        props[runtime_key], pos = codec[1](data, pos, end)
+        runtime_key, decoder = entry
+        value, pos = decoder(data, pos, end)
+        if decoder is _decode_pair_at:
+            props.setdefault(runtime_key, []).append(value)
+        else:
+            props[runtime_key] = value
     return props, end - offset
 
 
@@ -1319,8 +1385,7 @@ def decode_packet(data: bytes) -> MQTTMessage:
             raise MQTTDecodeError(
                 f'Reserved flag bits 0x{flags:X} invalid for {packet_type.name}')
 
-    remaining_length, rl_consumed = decode_variable_byte_integer(data[1:5])
-    header_len = 1 + rl_consumed
+    remaining_length, header_len = _read_vbi_at(data, 1, min(len(data), 5))
     total = header_len + remaining_length
     if total > len(data):
         raise IncompletePacket('Packet body truncated')
