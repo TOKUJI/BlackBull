@@ -127,3 +127,79 @@ class TestInvalidCompressedData:
         decompressor = InboundDecompressor(wbits=15, reset_per_message=False)
         with pytest.raises(Exception):
             decompressor.decompress(b'\xff' * 32)
+
+
+class TestNegotiationDeclinesInvalidOffers:
+    """RFC 7692 §7.1.1 — these offers a server MUST decline."""
+
+    def test_an_unknown_parameter_declines_the_offer(self):
+        assert negotiate(b'permessage-deflate; x-mystery=1') == (None, None)
+
+    def test_a_duplicate_parameter_declines_the_offer(self):
+        assert negotiate(
+            b'permessage-deflate; client_max_window_bits=10'
+            b'; client_max_window_bits=12') == (None, None)
+
+    def test_a_valueless_server_max_window_bits_declines_the_offer(self):
+        assert negotiate(b'permessage-deflate; server_max_window_bits') == (None, None)
+
+    def test_a_valued_no_context_takeover_declines_the_offer(self):
+        assert negotiate(b'permessage-deflate; server_no_context_takeover=1') == (None, None)
+
+    @pytest.mark.parametrize('value', [b'08', b'+8', b'8x', b'"8x"', b'""', b'7', b'16'])
+    def test_a_window_value_outside_bare_8_to_15_declines_the_offer(self, value):
+        assert negotiate(b'permessage-deflate; server_max_window_bits=' + value) == (None, None)
+
+    def test_an_invalid_offer_falls_through_to_the_next_valid_one(self):
+        params, response = negotiate(
+            b'permessage-deflate; x-mystery=1, '
+            b'permessage-deflate; client_no_context_takeover')
+        assert params == DeflateParams(client_no_context_takeover=True)
+        assert response == b'permessage-deflate; client_no_context_takeover'
+
+
+class TestNegotiationQuotedValues:
+    def test_a_quoted_window_value_is_unquoted(self):
+        params, _ = negotiate(b'permessage-deflate; server_max_window_bits="14"')
+        assert params is not None
+        assert params.server_max_window_bits == 14
+
+
+class TestNegotiationMatchesRuntimeSupport:
+    """Accept only configurations whose codecs the runtime serves (§7.1.1)."""
+
+    @staticmethod
+    def _pair_works(server_wbits, client_wbits):
+        try:
+            out = OutboundCompressor(server_wbits, reset_per_message=False)
+            inc = InboundDecompressor(client_wbits, reset_per_message=False)
+        except ValueError:
+            return False
+        return inc.decompress(out.compress(b'ping')) == b'ping'
+
+    @pytest.mark.parametrize('wbits', range(8, 16))
+    def test_an_accepted_window_is_one_the_runtime_serves(self, wbits):
+        params, _ = negotiate(
+            f'permessage-deflate; server_max_window_bits={wbits}'.encode())
+        if self._pair_works(wbits, 15):
+            assert params is not None
+            assert params.server_max_window_bits == wbits
+        else:
+            assert params is None
+
+    def test_an_unusable_window_is_declined_not_raised(self):
+        if self._pair_works(8, 15):
+            pytest.skip('this zlib serves window 8; the decline path is unreachable')
+        assert negotiate(b'permessage-deflate; server_max_window_bits=8') == (None, None)
+        params, _ = negotiate(
+            b'permessage-deflate; server_max_window_bits=8, '
+            b'permessage-deflate; client_max_window_bits=10')
+        assert params == DeflateParams(client_max_window_bits=10)
+
+
+class TestResponseCarriesOnlyOfferedConstraints:
+    def test_window_constraints_appear_only_when_the_offer_had_them(self):
+        _, response = negotiate(b'permessage-deflate; client_no_context_takeover')
+        assert response == b'permessage-deflate; client_no_context_takeover'
+        _, response = negotiate(b'permessage-deflate; client_max_window_bits=10')
+        assert response == b'permessage-deflate; client_max_window_bits=10'
