@@ -30,7 +30,7 @@ from .messages import (
     MQTTConnect, MQTTPublish, MQTTPuback, MQTTPubrec, MQTTPubrel, MQTTPubcomp,
     MQTTSubscribe, MQTTUnsubscribe, MQTTPingreq,
     MQTTDisconnect, MQTTAuth, MQTTMessage,
-    IncompletePacket, MQTTDecodeError, ReasonCode,
+    IncompletePacket, MQTTDecodeError, ReasonCode, _read_vbi_at,
     decode_packet, decode_variable_byte_integer, encode_packet,
 )
 from ..server.cap_log import log_cap_hit
@@ -94,11 +94,10 @@ class PacketFramer:
         if not buffer[0] >> 4:
             return
         try:
-            remaining_length, rl_consumed = decode_variable_byte_integer(
-                bytes(buffer[1:5]))
+            remaining_length, after = _read_vbi_at(buffer, 1, min(len(buffer), 5))
         except (IncompletePacket, MQTTDecodeError, ValueError):
             return
-        declared = 1 + rl_consumed + remaining_length
+        declared = after + remaining_length
         if declared > self._max_packet_size:
             log_cap_hit('mqtt_max_packet_size',
                         requested=declared,
