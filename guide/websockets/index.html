@@ -5923,7 +5923,7 @@ no sentinel event to test for, and no <code>try</code>/<code>except</code> aroun
 <tbody>
 <tr>
 <td><code>await ws.accept(subprotocol=None, headers=None)</code></td>
-<td>Completes the handshake.  Nothing may be sent before it.</td>
+<td>Completes the handshake.  Nothing may be sent before it.  <em>headers</em> are extra response fields, in order and with duplicates kept (<code>Set-Cookie</code> twice sends two).</td>
 </tr>
 <tr>
 <td><code>await ws.close(code=1000, reason=None)</code></td>
@@ -5959,6 +5959,12 @@ no sentinel event to test for, and no <code>try</code>/<code>except</code> aroun
 <code>ws.path_params</code>, <code>ws.query_string</code>, <code>ws.client</code>, <code>ws.subprotocols</code> — and
 the full <a href="../requests-and-responses/"><code>Connection</code></a> is <code>ws.connection</code>.  State
 is readable via <code>ws.accepted</code>, <code>ws.client_disconnected</code>, and <code>ws.close_code</code>.</p>
+<p>Accept headers land on the handshake response as given (the 101 over
+HTTP/1.1, the 200 over HTTP/2).  <code>Upgrade</code>, <code>Connection</code>,
+<code>Sec-WebSocket-Accept</code>, <code>Sec-WebSocket-Extensions</code> and
+<code>Sec-WebSocket-Protocol</code> belong to the handshake; passing one of those
+names, or a field that is not a valid one, raises rather than silently
+losing it.</p>
 <p>The parameter is matched by annotation first, so <code>ws: WebSocket</code> works under
 any name.  Un-annotated, the names <code>ws</code> and <code>websocket</code> are recognised.  You
 can take the <code>Connection</code> alongside it:</p>
