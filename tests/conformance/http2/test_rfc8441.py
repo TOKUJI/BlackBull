@@ -1028,3 +1028,88 @@ class TestActorBackpressureBranch:
         assert recipient.disconnected, (
             'the reset stream left a handler waiting on a body that will '
             'never continue')
+
+
+# ---------------------------------------------------------------------------
+# Application accept headers on the 200 (BLA-378)
+# ---------------------------------------------------------------------------
+
+class TestAcceptHeadersOnThe200:
+    def _headers_200(self, app, request_frame=None):
+        from hpack import Decoder
+
+        writes = []
+
+        handler, _, writer = _make_h2_actor(app)
+        writer.write = MagicMock(side_effect=lambda b: writes.append(b))
+        writer.drain = AsyncMock()
+        frames = [_client_settings(),
+                  request_frame or _make_extended_connect_frame(),
+                  None]
+        handler.receive = AsyncMock(side_effect=frames)
+        asyncio.run(handler.run())
+
+        decoder = Decoder()
+        all_bytes = b''.join(writes)
+        found = None
+        i = 0
+        while i + 9 <= len(all_bytes):
+            length = int.from_bytes(all_bytes[i:i + 3], 'big')
+            frame_type = all_bytes[i + 3]
+            payload = all_bytes[i + 9:i + 9 + length]
+            if frame_type == 0x01 and length > 0:
+                try:
+                    hdrs = decoder.decode(payload)
+                except Exception:
+                    hdrs = []
+                norm = [(k.decode() if isinstance(k, bytes) else k,
+                         v.decode() if isinstance(v, bytes) else v)
+                        for k, v in hdrs]
+                if (':status', '200') in norm:
+                    found = norm
+            i += 9 + length
+        return found
+
+    def test_accept_headers_reach_the_200_in_order(self):
+        async def app(conn, receive, send):
+            await receive()
+            await send({'type': 'websocket.accept', 'subprotocol': None,
+                        'headers': [[b'set-cookie', b'a=1'],
+                                    [b'x-mid', b'm'],
+                                    [b'set-cookie', b'b=2']]})
+            await receive()
+
+        found = self._headers_200(app)
+        assert found is not None
+        want = [('set-cookie', 'a=1'), ('x-mid', 'm'), ('set-cookie', 'b=2')]
+        assert [kv for kv in found if kv in want] == want
+
+    def test_a_native_accept_header_reaches_the_200(self):
+        from blackbull.native import NativeWSMessage
+
+        async def app(conn, receive, send):
+            await receive()
+            await send(NativeWSMessage.accept(None, [(b'x-review', b'ok')]))
+            await receive()
+
+        found = self._headers_200(app)
+        assert found is not None
+        assert ('x-review', 'ok') in found
+
+    def test_an_invalid_header_value_is_refused(self):
+        async def app(conn, receive, send):
+            await receive()
+            await send({'type': 'websocket.accept', 'subprotocol': None,
+                        'headers': [[b'x-review', b'ok\r\ninjected: 1']]})
+            await receive()
+
+        assert self._headers_200(app) is None
+
+    def test_a_reserved_protocol_header_is_refused(self):
+        async def app(conn, receive, send):
+            await receive()
+            await send({'type': 'websocket.accept', 'subprotocol': None,
+                        'headers': [[b'sec-websocket-accept', b'evil']]})
+            await receive()
+
+        assert self._headers_200(app) is None

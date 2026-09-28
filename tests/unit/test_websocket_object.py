@@ -648,6 +648,20 @@ async def test_accept_with_a_subprotocol_under_middleware_raises():
 
 
 @pytest.mark.asyncio
+async def test_accept_with_headers_under_middleware_raises():
+    """The 101 has gone; silently dropping the request would be worse."""
+    from blackbull.websocket import mark_handshake_accepted
+
+    conn = _conn()
+    mark_handshake_accepted(conn)
+    channel = _Channel()
+    ws = WebSocket(conn, channel.receive, channel.send)
+
+    with pytest.raises(RuntimeError, match='already completed by middleware'):
+        await ws.accept(headers=[(b'x-review', b'ok')])
+
+
+@pytest.mark.asyncio
 async def test_a_second_accept_under_middleware_is_still_an_error():
     """The no-op is a one-shot tolerance, not a licence to accept twice."""
     from blackbull.websocket import mark_handshake_accepted

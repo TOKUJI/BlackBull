@@ -1207,7 +1207,7 @@ class HTTP1Actor(Actor):
             offer = headers.get(b'sec-websocket-extensions', b'')
             deflate_params, deflate_response = _negotiate_deflate(offer or None)
 
-        async def _send_101(subprotocol=None):
+        async def _send_101(subprotocol=None, app_headers=None):
             hs_headers = Headers([
                 (b'upgrade', b'websocket'),
                 (b'connection', b'upgrade'),
@@ -1218,6 +1218,8 @@ class HTTP1Actor(Actor):
                 hs_headers.append(b'sec-websocket-protocol', sp)
             if deflate_response is not None:
                 hs_headers.append(b'sec-websocket-extensions', deflate_response)
+            if app_headers:
+                hs_headers.append(app_headers)
             await send(b'', HTTPStatus.SWITCHING_PROTOCOLS, hs_headers)
 
         conn._ws = {

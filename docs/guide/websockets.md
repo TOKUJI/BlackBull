@@ -32,7 +32,7 @@ no sentinel event to test for, and no `try`/`except` around it.
 
 | Call | Does |
 |---|---|
-| `await ws.accept(subprotocol=None, headers=None)` | Completes the handshake.  Nothing may be sent before it. |
+| `await ws.accept(subprotocol=None, headers=None)` | Completes the handshake.  Nothing may be sent before it.  *headers* are extra response fields, in order and with duplicates kept (`Set-Cookie` twice sends two). |
 | `await ws.close(code=1000, reason=None)` | Closes.  Called *before* `accept()`, it rejects the connection instead.  Idempotent, so `finally: await ws.close()` is safe. |
 | `await ws.send_text(str)` / `send_bytes(bytes)` | Sends one complete message. |
 | `await ws.send_json(obj, binary=False)` | Serialises and sends. |
@@ -45,6 +45,13 @@ Connection facts are on the object too — `ws.path`, `ws.headers`,
 `ws.path_params`, `ws.query_string`, `ws.client`, `ws.subprotocols` — and
 the full [`Connection`](requests-and-responses.md) is `ws.connection`.  State
 is readable via `ws.accepted`, `ws.client_disconnected`, and `ws.close_code`.
+
+Accept headers land on the handshake response as given (the 101 over
+HTTP/1.1, the 200 over HTTP/2).  `Upgrade`, `Connection`,
+`Sec-WebSocket-Accept`, `Sec-WebSocket-Extensions` and
+`Sec-WebSocket-Protocol` belong to the handshake; passing one of those
+names, or a field that is not a valid one, raises rather than silently
+losing it.
 
 The parameter is matched by annotation first, so `ws: WebSocket` works under
 any name.  Un-annotated, the names `ws` and `websocket` are recognised.  You
