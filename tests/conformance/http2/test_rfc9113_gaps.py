@@ -404,13 +404,17 @@ class TestG6MissingMandatoryPseudoHeaders:
     """RFC 9113 §8.3.1: All HTTP/2 requests MUST include exactly one valid
     value for :method, :scheme, and :path.  Omission → malformed."""
 
+    @pytest.mark.parametrize('fields', [
+        pytest.param([(b':path', b'/'), (b':scheme', b'https'),
+                      (b':authority', b'example.com')],
+                     id='missing-method'),
+        pytest.param([(b':method', b'GET'), (b':scheme', b'https'),
+                      (b':authority', b'example.com')],
+                     id='missing-path'),
+    ])
     @pytest.mark.asyncio
-    async def test_missing_method_is_malformed(self):
-        await _check_malformed([(b':path', b'/'), (b':scheme', b'https'), (b':authority', b'example.com')])
-
-    @pytest.mark.asyncio
-    async def test_missing_path_is_malformed(self):
-        await _check_malformed([(b':method', b'GET'), (b':scheme', b'https'), (b':authority', b'example.com')])
+    async def test_missing_method_is_malformed(self, fields):
+        await _check_malformed(fields)
 
     @pytest.mark.asyncio
     async def test_missing_scheme_is_malformed(self):
@@ -511,15 +515,16 @@ class TestG6MethodAndSchemeGrammar:
         assert app.await_count == 1
         assert not _sent_rst_streams(handler, 1)
 
-    @pytest.mark.parametrize('method', ILLEGAL_METHODS)
+    @pytest.mark.parametrize('overrides', [
+        pytest.param({'method': m}, id=f'method-not-token-{i}')
+        for i, m in enumerate(ILLEGAL_METHODS)
+    ] + [
+        pytest.param({'scheme': s}, id=f'scheme-not-uri-scheme-{i}')
+        for i, s in enumerate(ILLEGAL_SCHEMES)
+    ])
     @pytest.mark.asyncio
-    async def test_a_method_that_is_not_a_token_is_malformed(self, method):
-        await _check_malformed(self._fields(method=method))
-
-    @pytest.mark.parametrize('scheme', ILLEGAL_SCHEMES)
-    @pytest.mark.asyncio
-    async def test_a_scheme_that_is_not_a_uri_scheme_is_malformed(self, scheme):
-        await _check_malformed(self._fields(scheme=scheme))
+    async def test_a_method_that_is_not_a_token_is_malformed(self, overrides):
+        await _check_malformed(self._fields(**overrides))
 
     @pytest.mark.parametrize('method', LEGAL_METHODS)
     @pytest.mark.asyncio
@@ -753,36 +758,31 @@ class TestG13FieldCharacterValidation:
     its separators included — and a value is §5.5 field-content.
     Violations → malformed."""
 
+    @pytest.mark.parametrize('field,label', [
+        pytest.param((b'Content-Type', b'text/html'), 'uppercase field name',
+                     id='uppercase-name'),
+        pytest.param((b'x-test', b'value\r\ninjection'), 'CR in field value',
+                     id='cr-in-value'),
+        pytest.param((b'x-test', b'value\ninjection'), 'LF in field value',
+                     id='lf-in-value'),
+        pytest.param((b'x-test', b'value\x00injection'), 'NUL in field value',
+                     id='nul-in-value'),
+    ])
     @pytest.mark.asyncio
-    async def test_uppercase_field_name_is_malformed(self):
-        await self._check_malformed_field(
-            (b'Content-Type', b'text/html'),
-            'uppercase field name')
+    async def test_uppercase_field_name_is_malformed(self, field, label):
+        await self._check_malformed_field(field, label)
 
+    @pytest.mark.parametrize('field,label', [
+        pytest.param((b'x-colon:name', b'value'), 'colon in field name',
+                     id='colon-in-name'),
+        pytest.param((b'', b'v'), 'empty field name',
+                     id='empty-name'),
+    ])
     @pytest.mark.asyncio
-    async def test_field_value_with_cr_is_malformed(self):
-        await self._check_malformed_field(
-            (b'x-test', b'value\r\ninjection'),
-            'CR in field value')
-
-    @pytest.mark.asyncio
-    async def test_field_value_with_lf_is_malformed(self):
-        await self._check_malformed_field(
-            (b'x-test', b'value\ninjection'),
-            'LF in field value')
-
-    @pytest.mark.asyncio
-    async def test_field_value_with_nul_is_malformed(self):
-        await self._check_malformed_field(
-            (b'x-test', b'value\x00injection'),
-            'NUL in field value')
-
-    @pytest.mark.asyncio
-    async def test_field_name_with_colon_is_malformed(self):
-        """§8.2.1: Field names MUST NOT include colon (except pseudo-headers)."""
-        await self._check_malformed_field(
-            (b'x-colon:name', b'value'),
-            'colon in field name')
+    async def test_field_name_with_colon_is_malformed(self, field, label):
+        """§8.2.1: Field names MUST NOT include colon (except pseudo-headers);
+        RFC 9110 §5.6.2 — token = 1*tchar, so no octets is not a name."""
+        await self._check_malformed_field(field, label)
 
     @pytest.mark.parametrize('value', [b' value', b'value ', b'\tvalue',
                                        b'value\t'])
@@ -792,15 +792,20 @@ class TestG13FieldCharacterValidation:
         await self._check_malformed_field(
             (b'x-test', value), f'boundary whitespace in {value!r}')
 
+    @pytest.mark.parametrize('value', [
+        pytest.param(b'value with\tinner whitespace', id='inner-whitespace'),
+        pytest.param(b'value\x80\xff', id='obs-text'),
+    ])
     @pytest.mark.asyncio
-    async def test_field_value_with_inner_whitespace_still_reaches_the_app(self):
+    async def test_field_value_with_inner_whitespace_still_reaches_the_app(self, value):
         """The edge is what the MUST is about: SP and HTAB stay legal inside
-        a field value, so this one is not malformed."""
+        a field value, and obs-text (0x80-0xFF) is inside RFC 9110's
+        field-content — neither is malformed."""
         handler, app = _make_h2_actor()
         fields = [
             (b':method', b'GET'), (b':path', b'/'), (b':scheme', b'https'),
             (b':authority', b'example.com'),
-            (b'x-test', b'value with\tinner whitespace'),
+            (b'x-test', value),
         ]
         h = _make_headers_frame(1, end_stream=True, fields=fields)
         settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
@@ -828,29 +833,6 @@ class TestG13FieldCharacterValidation:
         name octet — HTTP/1.1's tchar table already refuses them."""
         await self._check_malformed_field(
             (name, b'v'), f'separator in {name!r}')
-
-    @pytest.mark.asyncio
-    async def test_an_empty_field_name_is_malformed(self):
-        """RFC 9110 §5.6.2 — ``token = 1*tchar``, so no octets is not a name."""
-        await self._check_malformed_field((b'', b'v'), 'empty field name')
-
-    @pytest.mark.asyncio
-    async def test_obs_text_in_a_field_value_still_reaches_the_app(self):
-        """obs-text (0x80-0xFF) is inside RFC 9110's field-content, so the
-        widened grammar must not swallow it."""
-        handler, app = _make_h2_actor()
-        fields = [
-            (b':method', b'GET'), (b':path', b'/'), (b':scheme', b'https'),
-            (b':authority', b'example.com'),
-            (b'x-test', b'value\x80\xff'),
-        ]
-        h = _make_headers_frame(1, end_stream=True, fields=fields)
-        settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
-        handler.receive = AsyncMock(side_effect=[settings, h, None])
-        await handler.run()
-
-        assert app.await_count == 1
-        assert not _sent_rst_streams(handler, 1)
 
     @pytest.mark.parametrize('bad_field', [
         (b'x-trailer', b' value'), (b'x-trailer', b'value '),
@@ -1005,29 +987,20 @@ class TestG15ClientPushPromise:
         assert 'client sent PUSH_PROMISE' in connection_error.call_args.args[1]
         assert app.await_count == 0
 
+    @pytest.mark.parametrize('head', [
+        pytest.param(_make_headers_frame(1, end_stream=False), id='open-stream'),
+        pytest.param(_make_headers_frame(1, end_stream=True), id='half-closed-stream'),
+    ])
     @pytest.mark.asyncio
-    async def test_a_push_promise_on_an_open_stream_goes_away(self):
-        """The open-stream case used to raise out of the responder lookup."""
+    async def test_a_push_promise_on_an_open_stream_goes_away(self, head):
+        """PUSH_PROMISE is a connection PROTOCOL_ERROR whatever the stream
+        state (the open-stream case used to raise out of the responder
+        lookup; half-closed(remote) used to answer RST_STREAM(STREAM_CLOSED))."""
         handler, app = _make_h2_actor()
         connection_error = self._observe_connection_error(handler)
         settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
         handler.receive = AsyncMock(side_effect=[
-            settings, _make_headers_frame(1, end_stream=False),
-            self._push_promise(), None])
-        await handler.run()
-
-        assert _sent_goaway_codes(handler) == [ErrorCodes.PROTOCOL_ERROR]
-        assert _sent_rst_streams(handler, 1) == []
-        assert 'client sent PUSH_PROMISE' in connection_error.call_args.args[1]
-
-    @pytest.mark.asyncio
-    async def test_a_push_promise_on_a_half_closed_stream_goes_away(self):
-        """Half-closed(remote) used to answer RST_STREAM(STREAM_CLOSED)."""
-        handler, app = _make_h2_actor()
-        connection_error = self._observe_connection_error(handler)
-        settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
-        handler.receive = AsyncMock(side_effect=[
-            settings, _make_headers_frame(1, end_stream=True),
+            settings, head,
             self._push_promise(), None])
         await handler.run()
 
