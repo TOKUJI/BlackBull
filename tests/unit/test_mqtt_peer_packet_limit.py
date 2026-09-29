@@ -7,11 +7,11 @@ refusal when that fits, else a bare Close — decided before anything is
 registered.  Every refusal reply honours the limit the same way.
 
 Then the data path (§3.1.2-25): an Application Message whose packet the
-limit excludes is discarded whole at the delivery decision — no Packet
-Identifier booked, no pending entry, nothing for §4.4 to resend — and the
-flow is then treated complete, including a queued PUBLISH or a PUBREL
-re-drive that no longer fits the current connection.  Probe-derived
-bounds keep the tests honest about actual encoded sizes.
+limit excludes is dropped whole at the delivery decision — no Packet
+Identifier booked, no pending entry, nothing to resend — and its flow is
+treated complete, including a queued PUBLISH or PUBREL re-drive that no
+longer fits the current connection.  Probe-derived bounds keep the tests
+honest about actual encoded sizes.
 """
 
 from __future__ import annotations
@@ -309,7 +309,7 @@ def _pubrels(conn):
 
 def _named_floor() -> int:
     """The smallest Maximum Packet Size a named client can declare and
-    still be accepted — its trimmed CONNACK (properties are zero-length)."""
+    still be accepted — its trimmed CONNACK size."""
     return _size(MQTTConnack(session_present=False,
                              reason_code=ReasonCode.SUCCESS, properties={}))
 
@@ -322,11 +322,8 @@ def _msg(payload=b'', qos=0, topic='a'):
 class TestApplicationMessageDiscard:
     """§3.1.2-25 — a message the peer's limit excludes never happens.
 
-    Dropped whole at the delivery decision: not on the wire, no Packet
-    Identifier booked, no pending entry, nothing §4.4 would resend.  The
-    decision is the *current* connection's declaration (§3.1.2.11.4 — the
-    Maximum Packet Size the Client is willing to accept is a CONNECT
-    property; §4.1's Session State list does not carry it), so queued
+    The decision is the *current* connection's declaration
+    (§3.1.2.11.4; §4.1's session-state list omits it), so queued
     messages are re-judged against whoever receives the re-drive.
     """
 
@@ -409,9 +406,8 @@ class TestApplicationMessageDiscard:
         assert session['pending_qos2_out'][1]['packet'].payload == b'ok'
 
     async def test_a_pubrel_redrive_the_peer_cannot_receive_completes_the_flow(self):
-        # The minimum limit a named client can declare and still get a CONNACK
-        # is the trimmed size (5); the PUBREL re-drive is 6 bytes, so §4.4's
-        # resend can be ruled out at the wire while the flow is past PUBREC.
+        # The floor (5) admits the client but rules out the 6-byte PUBREL
+        # re-drive; lower and the CONNECT is refused instead.
         broker = BrokerActor()
         conn, session = await _subscriber(broker, subs=(('a', 2),),
                                           session_expiry=30)

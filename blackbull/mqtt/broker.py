@@ -320,13 +320,11 @@ class BrokerActor(Actor):
                               if max_sessions is None else max_sessions)
         self._clients = {}          # client_id -> live connection Actor
         self._client_by_conn = {}   # id(conn) -> client_id
-        # §3.1.2.11.4 — the Maximum Packet Size each live connection declared
-        # in CONNECT.  Connection state, not session state: §4.1's Session
-        # State list does not carry it, so a reconnect declares its own limit
-        # (or none) and nothing is inherited.  Only declared limits are
-        # stored — a miss from ``.get`` *is* "no limit imposed".  Keyed by
-        # the connection actor itself so the delivery hot path pays one
-        # lookup, not ``id()`` plus one.
+        # §3.1.2.11.4 — the limit each live connection declared in CONNECT.
+        # Connection state, not session state (§4.1's list omits it): a
+        # reconnect re-declares or lifts it.  A missing entry *is* "no limit
+        # imposed"; keyed by the actor so the delivery path pays one lookup,
+        # not ``id()`` plus one.
         self._peer_max_packet_size: dict[Actor, int] = {}
         self._sessions = {}         # client_id -> session dict
         self._retained = {}         # topic -> MQTTPublish
@@ -506,12 +504,9 @@ class BrokerActor(Actor):
         """Whether *send* fits a peer that declared *peer_limit* (§3.1.2-24).
 
         §3.1.2-25 — a packet too large to send is discarded without sending
-        and the Application Message is then treated complete: callers ask
-        this before booking anything and walk away on ``False``.  Callers
-        reach it only when the peer declared a limit (absent is the
-        protocol's "no limit imposed"), and the length is
-        ``Send.wire_bytes()``'s own cache — a packet that goes out is still
-        encoded exactly once, the mailbox accounting with the same call.
+        and the Application Message is then treated complete, so callers
+        must ask before booking anything.  The length rides
+        ``Send.wire_bytes()``'s cache: a sent packet is encoded exactly once.
         """
         return len(send.wire_bytes()) <= peer_limit
 
@@ -726,9 +721,9 @@ class BrokerActor(Actor):
         PUBREC.  A QoS 2 exchange already past PUBREC re-drives its PUBREL.
 
         Each re-drive is re-judged against the *reconnecting* connection's
-        Maximum Packet Size (§3.1.2-24): a packet it cannot receive is
-        discarded and its flow treated complete (§3.1.2-25) — keeping it
-        unacknowledged would oblige §4.4 to resend what §3.1.2-24 forbids."""
+        Maximum Packet Size (§3.1.2-24): one it cannot receive is dropped,
+        its flow complete (§3.1.2-25) — keeping it unacknowledged would
+        oblige §4.4 to resend what §3.1.2-24 forbids."""
         peer_limit = self._peer_max_packet_size.get(conn)
         redrives = [
             (session['pending_qos1_out'], packet_id,
@@ -1025,9 +1020,8 @@ class BrokerActor(Actor):
         for share, members in share_groups.items():
             cursor = self._share_rotation.get(share, 0) % len(members)
             self._share_rotation[share] = cursor + 1
-            # §3.1.2.11.4 — where the message is too large for one member but
-            # another can receive it, it goes to one that can; only when none
-            # can is the copy discarded.
+            # §3.1.2.11.4 — the one copy goes to a member that can receive
+            # it; discarded only when none can.
             for conn, session, qos, opts in members[cursor:] + members[:cursor]:
                 rap = bool(opts.get('retain_as_published'))
                 if await self._deliver(conn, session, publish, qos,
@@ -1084,11 +1078,8 @@ class BrokerActor(Actor):
 
     async def _deliver(self, conn, session, publish, granted_qos, *,
                        retain=False) -> bool:
-        """One message to one client; False when §3.1.2-25 discarded it.
-
-        False is what the shared-subscription fan-out reads as "this member
-        cannot receive it" — the one copy then goes to a member that can.
-        """
+        """One message to one client; False when §3.1.2-25 discarded it
+        for this peer (the shared fan-out then tries another member)."""
         peer_limit = self._peer_max_packet_size.get(conn)
         qos = min(publish.qos, granted_qos)
         if qos == 0:
@@ -1104,9 +1095,8 @@ class BrokerActor(Actor):
 
         if self._in_flight(session) >= session.get('receive_maximum', 65535):
             # Judged before the queue holds it: §3.1.2-25's "never happened"
-            # includes never being queued.  The placeholder identifier exists
-            # only to satisfy §3.3.2-2's invariant — any id encodes the same
-            # two bytes, so the measured size is the one a send would use.
+            # includes never being queued.  The placeholder id satisfies
+            # §3.3.2-2; any id encodes the same two bytes.
             if peer_limit is not None and not self._fits_peer(
                     peer_limit, Send(packet=MQTTPublish(
                         topic=publish.topic, payload=publish.payload, qos=qos,
@@ -1150,9 +1140,8 @@ class BrokerActor(Actor):
             packet_id=packet_id, retain=retain, properties=dict(publish.properties))
         send = Send(packet=out)
         if peer_limit is not None and not self._fits_peer(peer_limit, send):
-            # §3.1.2-25 — dropped whole: the message never happened, so the
-            # identifier goes back to the space untouched and nothing is
-            # booked that §4.4 would later resend into the same refusal.
+            # §3.1.2-25 — dropped whole: the identifier goes back untouched,
+            # and nothing is booked that §4.4 would resend into this refusal.
             session['_next_pid'] = cursor
             return False
         if qos == 1:

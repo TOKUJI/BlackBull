@@ -113,21 +113,20 @@ optional), and only when neither fits is the connection refused with `0x95`
 — or closed outright when even that reply cannot fit — before creating a
 session.
 
-The same limit binds the data path. Where a packet is too large to send, the
+The same limit binds the data path. "Where a Packet is too large to send, the
 Server MUST discard it without sending it and then behave as if it had
-completed sending that Application Message [MQTT-3.1.2-25]: an oversized
-message is dropped at the delivery decision — no Packet Identifier booked, no
-pending entry, nothing for §4.4 to resend on the next reconnect. Queued
-re-delivery is re-judged against the *current* connection's declaration (every
-CONNECT declares its own limit, or none), and a re-drive that no longer fits is
-dropped the same way — including the PUBREL of a QoS 2 exchange already past
-PUBREC, whose flow is then treated complete. Retained replay and Will delivery
-are ordinary deliveries in this respect. For a Shared Subscription §3.1.2.11.4
-allows either reading — "where the message is too large to send to one or more
-of the Clients but other Clients can receive it, the Server can choose either
-discard the message without sending the message to any of the Clients, or to
-send the message to one of the Clients that can receive it" — and BlackBull
-sends it to a member that can receive it.
+completed sending that Application Message [MQTT-3.1.2-25]": dropped whole at
+the delivery decision and never retried. Queued messages are re-judged against
+the *current* connection's declaration (every CONNECT declares its own, or
+none); a re-drive that no longer fits completes its flow instead. Retained
+replay and Will delivery are ordinary deliveries here. For a Shared
+Subscription §3.1.2.11.4 allows either reading — "where the message is too
+large to send to one or more of the Clients but other Clients can receive it,
+the Server can choose either discard the message without sending the message
+to any of the Clients, or to send the message to one of the Clients that can
+receive it" — and BlackBull sends it to a member that can receive it. The
+takeover (0x8E) and duplicate-CONNECT (0x82) DISCONNECTs stay the CONNECT
+path's unlimit-checked exceptions.
 Broker-initiated protocol-error closure retires admission before processing the
 next command. Client DISCONNECT and transport failures use the FIFO `Detach`
 boundary: commands ordered before it were admitted while the connection was
