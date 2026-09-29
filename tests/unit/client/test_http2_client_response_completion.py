@@ -320,17 +320,15 @@ class TestTheDeclaredLengthIsHonoured:
                               .data(b'x')))
         assert res.body == b'x'
 
-    async def test_a_body_short_of_the_declared_length_is_refused(self):
+    @pytest.mark.parametrize('cl,data', [
+        pytest.param(b'10', b'x', id='body-short-of-declared'),
+        pytest.param(b'1', b'xy', id='body-past-declared'),
+    ])
+    async def test_a_body_short_of_the_declared_length_is_refused(self, cl, data):
         _refused(await _call(_Peer().settings()
                              .headers({PseudoHeaders.STATUS: '200'},
-                                      [(b'content-length', b'10')])
-                             .data(b'x')))
-
-    async def test_a_body_past_the_declared_length_is_refused(self):
-        _refused(await _call(_Peer().settings()
-                             .headers({PseudoHeaders.STATUS: '200'},
-                                      [(b'content-length', b'1')])
-                             .data(b'xy')))
+                                      [(b'content-length', cl)])
+                             .data(data)))
 
     async def test_two_declarations_that_agree_completes(self):
         res = _ok(await _call(_Peer().settings()

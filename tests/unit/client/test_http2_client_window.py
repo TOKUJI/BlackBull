@@ -14,6 +14,7 @@ from __future__ import annotations
 from blackbull.client.http2 import HTTP2Client
 from blackbull.server.sender import AbstractWriter
 from blackbull.protocol.frame_types import DEFAULT_INITIAL_WINDOW_SIZE
+import pytest
 
 
 class _NullWriter(AbstractWriter):
@@ -28,13 +29,18 @@ def _client() -> HTTP2Client:
 
 
 class TestClientWindowSeeding:
-    def test_sender_created_after_settings_is_seeded(self):
-        """A sender made after the SETTINGS exchange must start
-        at the peer's announced initial window, not the RFC default."""
+    @pytest.mark.parametrize('window,stream_id', [
+        pytest.param(123456, 1, id='sender-after-settings-seeded'),
+        pytest.param(1024, 3, id='shrunk-window-seeds-low'),
+    ])
+    def test_sender_created_after_settings_is_seeded(self, window, stream_id):
+        """A sender made after the SETTINGS exchange must start at the
+        peer's announced initial window, not the RFC default — including a
+        window below the default (e.g. 1024), or late senders overrun."""
         c = _client()
-        c._on_initial_window_size(123456)
-        sender = c._make_sender(1)
-        assert sender.stream_window_size == 123456
+        c._on_initial_window_size(window)
+        sender = c._make_sender(stream_id)
+        assert sender.stream_window_size == window
 
     def test_sender_created_before_settings_gets_delta(self):
         """Existing behaviour pin: pre-SETTINGS senders are delta-adjusted."""
@@ -49,11 +55,3 @@ class TestClientWindowSeeding:
         c = _client()
         sender = c._make_sender(1)
         assert sender.stream_window_size == DEFAULT_INITIAL_WINDOW_SIZE
-
-    def test_shrunk_window_seeds_new_sender_low(self):
-        """A peer may announce a window *below* the default (e.g. 1024);
-        late senders must honour that too, or they overrun."""
-        c = _client()
-        c._on_initial_window_size(1024)
-        sender = c._make_sender(3)
-        assert sender.stream_window_size == 1024

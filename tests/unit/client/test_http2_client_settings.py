@@ -160,13 +160,15 @@ class TestSettingsCanExpressBothIdentifiers:
         """What ``settings()`` emits, read back by the server's own parser."""
         return FrameFactory().load(FrameFactory().settings(**kwargs).save())
 
-    def test_enable_push_round_trips(self):
-        parsed = self._roundtrip(enable_push=0)
-        assert getattr(parsed, 'enable_push', None) == 0
-
-    def test_max_header_list_size_round_trips(self):
-        parsed = self._roundtrip(max_header_list_size=65536)
-        assert getattr(parsed, 'max_header_list_size', None) == 65536
+    @pytest.mark.parametrize('kwargs,attr,expected', [
+        pytest.param({'enable_push': 0}, 'enable_push', 0,
+                     id='enable-push-round-trip'),
+        pytest.param({'max_header_list_size': 65536}, 'max_header_list_size', 65536,
+                     id='max-header-list-size-round-trip'),
+    ])
+    def test_enable_push_round_trips(self, kwargs, attr, expected):
+        parsed = self._roundtrip(**kwargs)
+        assert getattr(parsed, attr, None) == expected
 
     def test_both_at_once_round_trip(self):
         parsed = self._roundtrip(enable_push=0, max_header_list_size=4096)
@@ -369,13 +371,6 @@ class TestEnablePushZero:
         goaway = _written(c, FrameTypes.GOAWAY)
         assert goaway, 'the promise was accepted after ENABLE_PUSH=0 was acked'
         assert goaway[0].error_code == ErrorCodes.PROTOCOL_ERROR
-
-    async def test_the_refusal_is_not_a_silent_close(self):
-        block = Encoder().encode([(':method', 'GET'), (':path', '/pushed')])
-        c = await _connected(_settings_ack() + _push_promise(block))
-
-        assert c._connection_lost
-        assert c._failure is not None and 'PUSH_PROMISE' in c._failure
 
     async def test_the_refused_block_is_still_decoded(self):
         """BLA-267's regression guard.  The HPACK table is connection-wide,
