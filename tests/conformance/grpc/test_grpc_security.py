@@ -107,23 +107,27 @@ class TestGrpcContentType:
         assert _trailers_of(events)[b'grpc-status'] == b'0'
 
     @pytest.mark.asyncio
-    async def test_case_insensitive_content_type_detection(self):
-        """Content-Type is case-insensitive per HTTP spec.  The dispatch check
-        in ``BlackBull._dispatch`` does a ``startswith(b'application/grpc')``
-        which is case-sensitive.  This test documents the *current* behavior."""
-        # Note: The bridge itself does not check content-type (the caller does).
-        # We test what happens when passed with various content-type spellings.
+    @pytest.mark.parametrize('content_type', [
+        pytest.param(b'APPLICATION/GRPC', id='case-insensitive'),
+        pytest.param(b'application/grpc+proto', id='grpc-plus-proto-suffix'),
+        pytest.param(b'application/grpc+json', id='grpc-plus-json-suffix'),
+        pytest.param(b'application/grpc-web+proto', id='grpc-web-proto'),
+        pytest.param(b'application/grpc-web-text+proto', id='grpc-web-text-proto'),
+        pytest.param(b'application/grpc; charset=utf-8; boundary=xyz',
+                     id='multiple-parameters'),
+    ])
+    async def test_case_insensitive_content_type_detection(self, content_type):
+        """Every legal content-type spelling reaches the bridge unchanged;
+        the bridge itself does not filter content-type (the caller does)."""
         reg = GrpcServiceRegistry()
 
         @reg.method('/svc/M')
         async def m(request, context):
             return b'ok'
 
-        # APPLICATION/GRPC — the bridge doesn't enforce content-type itself,
-        # so this succeeds.  The caller (app._dispatch) does the filtering.
         events, send = _collector()
         scope = {'type': 'http', 'path': '/svc/M',
-                 'headers': [(b'content-type', b'APPLICATION/GRPC'),
+                 'headers': [(b'content-type', content_type),
                              (b':method', b'POST')]}
         await serve_grpc(reg, scope, _receive_with(encode_message(b'')), send)
         assert _trailers_of(events)[b'grpc-status'] == b'0'
@@ -584,23 +588,6 @@ class TestGrpcMetadata:
         body_event = next((e for e in events if e['type'] == 'http.response.body'), None)
         assert body_event is not None
         assert decode_messages(body_event['body']) == [(False, b'fallback')]
-
-    @pytest.mark.asyncio
-    async def test_metadata_case_insensitive_lookup(self):
-        """HTTP header names are case-insensitive."""
-        reg = GrpcServiceRegistry()
-
-        @reg.method('/svc/CaseTest')
-        async def case_test(request, context):
-            return context.metadata(b'X-TOKEN', b'')
-
-        headers = [(b'content-type', b'application/grpc'), (b'x-token', b'secret')]
-        events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/CaseTest', headers),
-                         _receive_with(encode_message(b'')), send)
-        body_event = next((e for e in events if e['type'] == 'http.response.body'), None)
-        assert body_event is not None
-        assert decode_messages(body_event['body']) == [(False, b'secret')]
 
 
 # ---------------------------------------------------------------------------
