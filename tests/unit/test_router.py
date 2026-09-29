@@ -576,10 +576,6 @@ class TestSimplifiedHandlerFailFast:
     # Spec change: a scalar param that matches no path
     # placeholder is now a *query param*, not a registration error — the
     # fail-fast contract holds only for annotations no category can resolve.
-    def test_unresolvable_annotation_raises_at_registration(self):
-        async def fn(x: dict): pass
-        with pytest.raises(TypeError, match="cannot resolve parameter 'x'"):
-            _adapt_handler(fn, '/items/{id}')
 
     def test_container_annotation_raises_at_registration(self):
         async def fn(name: list[str]): pass

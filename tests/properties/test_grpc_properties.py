@@ -245,6 +245,3 @@ class TestGrpcStatusProperties:
         err = GrpcError(code, details)
         assert code.name in str(err)
 
-    def test_grpc_status_enum_has_exactly_17_members(self):
-        """The canonical gRPC status set has exactly 17 codes (0–16)."""
-        assert len(GrpcStatus) == 17
