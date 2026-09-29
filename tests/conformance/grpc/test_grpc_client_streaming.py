@@ -94,6 +94,23 @@ async def _bidi_handler(request_iter, context):
 
 
 # --------------------------------------------------------------------------
+
+async def _request_handler(request, context) -> bytes:
+    return b'x'
+
+
+async def _request_iter_handler(request_iter, context) -> bytes:
+    return b'x'
+
+
+async def _server_stream_handler(request, context):
+    yield b'x'
+
+
+async def _bidi_handler(request_iter, context):
+    yield b'x'
+
+
 # Registry — client-streaming detection
 # --------------------------------------------------------------------------
 
