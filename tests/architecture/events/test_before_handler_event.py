@@ -85,29 +85,6 @@ async def _run_request(app, raw: bytes) -> None:
 # 1. Fires on normal request
 # ---------------------------------------------------------------------------
 
-@pytest.mark.asyncio
-async def test_before_handler_fires():
-    """before_handler fires once for a normal HTTP GET."""
-    app = BlackBull()
-    captured: list[Event] = []
-    seen = asyncio.Event()
-
-    @app.on('before_handler')
-    async def observer(event: Event):
-        captured.append(event)
-        seen.set()
-
-    @app.route(path='/hello')
-    async def handler(scope, receive, send):
-        await send({'type': 'http.response.start', 'status': 200, 'headers': []})
-        await send({'type': 'http.response.body', 'body': b'ok', 'more_body': False})
-
-    await _run_request(app, _raw_request(path='/hello'))
-    await asyncio.wait_for(seen.wait(), timeout=2.0)
-    await asyncio.sleep(0.2)
-    assert len(captured) == 1
-    assert captured[0].name == 'before_handler'
-
 
 # ---------------------------------------------------------------------------
 # 2. Detail shape
@@ -147,58 +124,10 @@ async def test_before_handler_detail_shape():
 # 3. Ordering: request_received → before_handler → handler_body
 # ---------------------------------------------------------------------------
 
-@pytest.mark.asyncio
-async def test_before_handler_ordering():
-    """request_received fires before before_handler, before_handler before handler body."""
-    app = BlackBull()
-    order: list[str] = []
-
-    @app.intercept('request_received')
-    async def rr_interceptor(event: Event):
-        order.append('request_received')
-
-    @app.intercept('before_handler')
-    async def bh_interceptor(event: Event):
-        order.append('before_handler')
-
-    @app.route(path='/order')
-    async def handler(scope, receive, send):
-        order.append('handler_body')
-        await send({'type': 'http.response.start', 'status': 200, 'headers': []})
-        await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
-
-    await _run_request(app, _raw_request(path='/order'))
-    assert order == ['request_received', 'before_handler', 'handler_body'], (
-        f'Expected [request_received, before_handler, handler_body], got {order}'
-    )
-
 
 # ---------------------------------------------------------------------------
 # 4. Exactly-once per request
 # ---------------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_before_handler_exactly_once():
-    """A single request produces exactly one before_handler event."""
-    app = BlackBull()
-    count = 0
-    seen = asyncio.Event()
-
-    @app.on('before_handler')
-    async def observer(event: Event):
-        nonlocal count
-        count += 1
-        seen.set()
-
-    @app.route(path='/once')
-    async def handler(scope, receive, send):
-        await send({'type': 'http.response.start', 'status': 200, 'headers': []})
-        await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
-
-    await _run_request(app, _raw_request(path='/once'))
-    await asyncio.wait_for(seen.wait(), timeout=2.0)
-    await asyncio.sleep(0.2)
-    assert count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -269,8 +198,14 @@ async def test_before_handler_not_fired_for_websocket():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_before_handler_exactly_once_with_aggregator():
-    """Exactly one before_handler per request under the production actor path.
+@pytest.mark.parametrize('event_name,path,body', [
+    pytest.param('before_handler', '/hello', b'ok',
+                 id='before-handler-with-aggregator'),
+    pytest.param('request_received', '/once-agg', b'',
+                 id='request-received-with-aggregator'),
+])
+async def test_before_handler_exactly_once_with_aggregator(event_name, path, body):
+    """Exactly one event per request under the production actor path.
 
     Regression for the candidate-3 double fire: both the actor
     layer (EventAggregator.on_before_handler) and BlackBull._dispatch used
@@ -283,19 +218,19 @@ async def test_before_handler_exactly_once_with_aggregator():
     count = 0
     seen = asyncio.Event()
 
-    @app.on('before_handler')
+    @app.on(event_name)
     async def observer(event: Event):
         nonlocal count
         count += 1
         seen.set()
 
-    @app.route(path='/hello')
+    @app.route(path=path)
     async def handler(scope, receive, send):
         await send({'type': 'http.response.start', 'status': 200, 'headers': []})
-        await send({'type': 'http.response.body', 'body': b'ok', 'more_body': False})
+        await send({'type': 'http.response.body', 'body': body, 'more_body': False})
 
     writer = _FakeWriter()
-    raw = _raw_request(path='/hello')
+    raw = _raw_request(path=path)
     actor = HTTP1Actor(
         _FakeReader(b''), writer, app, EventAggregator(app._dispatcher),
         request=raw,

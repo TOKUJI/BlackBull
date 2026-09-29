@@ -95,39 +95,15 @@ def _get_state(base: str) -> dict:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_request_received_fires(live):
+@pytest.mark.parametrize('key', [
+    pytest.param('received', id='request-received-fires'),
+    pytest.param('before', id='before-handler-fires'),
+    pytest.param('after', id='after-handler-fires'),
+    pytest.param('completed', id='request-completed-fires'),
+])
+async def test_request_received_fires(live, key):
     base = _base(live)
     async with httpx.AsyncClient() as c:
         await c.get(f'{base}/trigger')
     state = _get_state(base)
-    assert state['received'] >= 1
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_before_handler_fires(live):
-    base = _base(live)
-    async with httpx.AsyncClient() as c:
-        await c.get(f'{base}/trigger')
-    state = _get_state(base)
-    assert state['before'] >= 1
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_after_handler_fires(live):
-    base = _base(live)
-    async with httpx.AsyncClient() as c:
-        await c.get(f'{base}/trigger')
-    state = _get_state(base)
-    assert state['after'] >= 1
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_request_completed_fires(live):
-    base = _base(live)
-    async with httpx.AsyncClient() as c:
-        await c.get(f'{base}/trigger')
-    state = _get_state(base)
-    assert state['completed'] >= 1
+    assert state[key] >= 1

@@ -90,29 +90,6 @@ async def _run_request(app, raw: bytes) -> None:
 # 1. Fires on normal HTTP request
 # ---------------------------------------------------------------------------
 
-@pytest.mark.asyncio
-async def test_request_received_fires():
-    """request_received fires once for a normal HTTP GET."""
-    app = BlackBull()
-    captured: list[Event] = []
-    seen = asyncio.Event()
-
-    @app.on('request_received')
-    async def observer(event: Event):
-        captured.append(event)
-        seen.set()
-
-    @app.route(path='/hello')
-    async def handler(scope, receive, send):
-        await send({'type': 'http.response.start', 'status': 200, 'headers': []})
-        await send({'type': 'http.response.body', 'body': b'ok', 'more_body': False})
-
-    await _run_request(app, _raw_request(path='/hello'))
-    await asyncio.wait_for(seen.wait(), timeout=2.0)
-    await asyncio.sleep(0.2)
-    assert len(captured) == 1
-    assert captured[0].name == 'request_received'
-
 
 # ---------------------------------------------------------------------------
 # 2. Detail shape
@@ -179,29 +156,6 @@ async def test_request_received_fires_before_handler():
 # ---------------------------------------------------------------------------
 # 4. Exactly-once per request
 # ---------------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_request_received_exactly_once():
-    """A single request produces exactly one request_received event."""
-    app = BlackBull()
-    count = 0
-    seen = asyncio.Event()
-
-    @app.on('request_received')
-    async def observer(event: Event):
-        nonlocal count
-        count += 1
-        seen.set()
-
-    @app.route(path='/once')
-    async def handler(scope, receive, send):
-        await send({'type': 'http.response.start', 'status': 200, 'headers': []})
-        await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
-
-    await _run_request(app, _raw_request(path='/once'))
-    await asyncio.wait_for(seen.wait(), timeout=2.0)
-    await asyncio.sleep(0.2)
-    assert count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -292,42 +246,3 @@ async def test_request_received_not_fired_for_websocket():
 # ---------------------------------------------------------------------------
 # 7. Exactly-once on the aggregator (production server) path
 # ---------------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_request_received_exactly_once_with_aggregator():
-    """Exactly one request_received per request under the production actor path.
-
-    Emission moved from the actor layer into BlackBull._dispatch;
-    this pins the no-double-fire property when an EventAggregator is wired
-    (the production server configuration).
-    """
-    from blackbull.event_aggregator import EventAggregator
-
-    app = BlackBull()
-    count = 0
-    seen = asyncio.Event()
-
-    @app.on('request_received')
-    async def observer(event: Event):
-        nonlocal count
-        count += 1
-        seen.set()
-
-    @app.route(path='/once-agg')
-    async def handler(scope, receive, send):
-        await send({'type': 'http.response.start', 'status': 200, 'headers': []})
-        await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
-
-    writer = _FakeWriter()
-    raw = _raw_request(path='/once-agg')
-    actor = HTTP1Actor(
-        _FakeReader(b''), writer, app, EventAggregator(app._dispatcher),
-        request=raw,
-        peername=('127.0.0.1', 54321),
-        sockname=('0.0.0.0', 8000),
-    )
-    await actor.run()
-
-    await asyncio.wait_for(seen.wait(), timeout=2.0)
-    await asyncio.sleep(0.2)
-    assert count == 1

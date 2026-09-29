@@ -122,13 +122,18 @@ async def _drive_ws_session_with_message(app, path: str, *, message: str) -> Non
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_websocket_connected_fires_after_accept():
-    """websocket_connected fires after the app sends websocket.accept."""
+@pytest.mark.parametrize('event_name', [
+    pytest.param('websocket_connected', id='ws-connected-fires'),
+    pytest.param('websocket_disconnected', id='ws-disconnected-fires'),
+])
+async def test_websocket_connected_fires_after_accept(event_name):
+    """websocket_connected fires after the app sends websocket.accept;
+    websocket_disconnected fires when the connection closes."""
     app = BlackBull()
     captured: list[Event] = []
     seen = asyncio.Event()
 
-    @app.on('websocket_connected')
+    @app.on(event_name)
     async def observer(event: Event):
         captured.append(event)
         seen.set()
@@ -144,7 +149,7 @@ async def test_websocket_connected_fires_after_accept():
     await asyncio.wait_for(seen.wait(), timeout=2.0)
     await asyncio.sleep(0.2)
     assert len(captured) == 1
-    assert captured[0].name == 'websocket_connected'
+    assert captured[0].name == event_name
 
 
 # ---------------------------------------------------------------------------
@@ -218,13 +223,18 @@ async def test_websocket_connected_subprotocol():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_websocket_connected_exactly_once():
-    """A single connection produces exactly one event — no duplicates."""
+@pytest.mark.parametrize('event_name', [
+    pytest.param('websocket_connected', id='ws-connected-exactly-once'),
+    pytest.param('websocket_disconnected', id='ws-disconnected-exactly-once'),
+])
+async def test_websocket_connected_exactly_once(event_name):
+    """A single connection (and its close) produces exactly one event —
+    no duplicates."""
     app = BlackBull()
     count = 0
     seen = asyncio.Event()
 
-    @app.on('websocket_connected')
+    @app.on(event_name)
     async def observer(event: Event):
         nonlocal count
         count += 1
@@ -288,12 +298,17 @@ async def test_connection_id_available_in_conn_during_message():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_websocket_connected_not_fired_for_http():
-    """An ordinary HTTP request must not fire websocket_connected."""
+@pytest.mark.parametrize('event_name', [
+    pytest.param('websocket_connected', id='ws-connected-not-fired-for-http'),
+    pytest.param('websocket_disconnected', id='ws-disconnected-not-fired-for-http'),
+])
+async def test_websocket_connected_not_fired_for_http(event_name):
+    """An ordinary HTTP request must not fire the websocket lifecycle
+    events."""
     app = BlackBull()
     fired: list[Event] = []
 
-    @app.on('websocket_connected')
+    @app.on(event_name)
     async def observer(event: Event):
         fired.append(event)
 

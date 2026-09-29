@@ -72,13 +72,18 @@ async def _run_request(app, raw: bytes) -> _FakeWriter:
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_after_handler_fires():
-    """after_handler fires once for a normal HTTP GET."""
+@pytest.mark.parametrize('event_name', [
+    pytest.param('after_handler', id='after-handler-fires'),
+    pytest.param('before_handler', id='before-handler-fires'),
+    pytest.param('request_received', id='request-received-fires'),
+])
+async def test_after_handler_fires(event_name):
+    """The lifecycle hook fires once for a normal HTTP GET."""
     app = BlackBull()
     captured: list[Event] = []
     seen = asyncio.Event()
 
-    @app.on('after_handler')
+    @app.on(event_name)
     async def observer(event: Event):
         captured.append(event)
         seen.set()
@@ -92,7 +97,7 @@ async def test_after_handler_fires():
     await asyncio.wait_for(seen.wait(), timeout=2.0)
     await asyncio.sleep(0.2)
     assert len(captured) == 1
-    assert captured[0].name == 'after_handler'
+    assert captured[0].name == event_name
 
 
 # ---------------------------------------------------------------------------
@@ -189,18 +194,27 @@ async def test_after_handler_fires_on_exception():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_after_handler_ordering():
-    """handler body runs before after_handler, which runs before request_completed."""
+@pytest.mark.parametrize('steps,expected', [
+    pytest.param([('after_handler', 'after_handler'),
+                  ('request_completed', 'request_completed')],
+                 ['handler_body', 'after_handler', 'request_completed'],
+                 id='after-handler-ordering'),
+    pytest.param([('request_received', 'request_received'),
+                  ('before_handler', 'before_handler')],
+                 ['request_received', 'before_handler', 'handler_body'],
+                 id='before-handler-ordering'),
+])
+async def test_after_handler_ordering(steps, expected):
+    """One hook's handlers run in registration order: the handler body
+    interleaves with after_handler/request_completed and with
+    request_received/before_handler per the lifecycle order."""
     app = BlackBull()
     order: list[str] = []
 
-    @app.intercept('after_handler')
-    async def after_interceptor(event: Event):
-        order.append('after_handler')
-
-    @app.intercept('request_completed')
-    async def completed_interceptor(event: Event):
-        order.append('request_completed')
+    for hook, label in steps:
+        @app.intercept(hook)
+        async def interceptor(event: Event, label=label):
+            order.append(label)
 
     @app.route(path='/order')
     async def handler(scope, receive, send):
@@ -209,8 +223,8 @@ async def test_after_handler_ordering():
         await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
 
     await _run_request(app, _raw_request(path='/order'))
-    assert order == ['handler_body', 'after_handler', 'request_completed'], (
-        f'Expected [handler_body, after_handler, request_completed], got {order}'
+    assert order == expected, (
+        f'Expected {expected}, got {order}'
     )
 
 
@@ -219,13 +233,18 @@ async def test_after_handler_ordering():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_after_handler_exactly_once():
-    """A single request produces exactly one after_handler event."""
+@pytest.mark.parametrize('event_name', [
+    pytest.param('after_handler', id='after-handler-exactly-once'),
+    pytest.param('before_handler', id='before-handler-exactly-once'),
+    pytest.param('request_received', id='request-received-exactly-once'),
+])
+async def test_after_handler_exactly_once(event_name):
+    """A single request produces exactly one event per hook."""
     app = BlackBull()
     count = 0
     seen = asyncio.Event()
 
-    @app.on('after_handler')
+    @app.on(event_name)
     async def observer(event: Event):
         nonlocal count
         count += 1
