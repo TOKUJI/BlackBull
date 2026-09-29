@@ -89,17 +89,17 @@ def _host_field(authority: bytes) -> bytes:
 @pytest.mark.integration
 class TestAuthorityIpLiteral:
     @pytest.mark.parametrize('build,authority,expected', [
-        pytest.param(_absolute_form, a, 400, id=f'bad-absolute-form-{i}')
-        for i, a in enumerate(_BAD_IP_LITERALS)
+        pytest.param(_absolute_form, a, 400, id=f'bad-absolute-form-{a.decode()}')
+        for a in _BAD_IP_LITERALS
     ] + [
-        pytest.param(_host_field, a, 400, id=f'bad-host-field-{i}')
-        for i, a in enumerate(_BAD_IP_LITERALS)
+        pytest.param(_host_field, a, 400, id=f'bad-host-field-{a.decode()}')
+        for a in _BAD_IP_LITERALS
     ] + [
-        pytest.param(_absolute_form, a, 200, id=f'good-absolute-form-{i}')
-        for i, a in enumerate(_GOOD_IP_LITERALS)
+        pytest.param(_absolute_form, a, 200, id=f'good-absolute-form-{a.decode()}')
+        for a in _GOOD_IP_LITERALS
     ] + [
-        pytest.param(_host_field, a, 200, id=f'good-host-field-{i}')
-        for i, a in enumerate(_GOOD_IP_LITERALS)
+        pytest.param(_host_field, a, 200, id=f'good-host-field-{a.decode()}')
+        for a in _GOOD_IP_LITERALS
     ])
     def test_bad_ip_literal_in_absolute_form_is_400(self, h1_app, build, authority, expected):
         """RFC 3986 §3.2.2 — bracket forms on both H1 authority paths: bad
