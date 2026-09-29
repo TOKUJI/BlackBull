@@ -35,38 +35,6 @@ class TestChunkedHappyPath:
         assert r.status == 200
         assert r.body == b'hello world'
 
-    def test_empty_chunked_body(self, h1_app):
-        """0\\r\\n\\r\\n is a valid (empty) chunked body."""
-        r = send_raw('127.0.0.1', h1_app.port,
-                     b'POST /echo HTTP/1.1\r\n'
-                     b'Host: localhost\r\n'
-                     b'Transfer-Encoding: chunked\r\n\r\n'
-                     b'0\r\n\r\n')
-        assert r.status == 200
-        assert r.body == b''
-
-    def test_chunk_size_uppercase_hex(self, h1_app):
-        """Chunk-size hex digits MAY be either case (§7.1.1)."""
-        r = send_raw('127.0.0.1', h1_app.port,
-                     b'POST /echo HTTP/1.1\r\n'
-                     b'Host: localhost\r\n'
-                     b'Transfer-Encoding: chunked\r\n\r\n'
-                     b'A\r\n0123456789\r\n'
-                     b'0\r\n\r\n')
-        assert r.status == 200
-        assert r.body == b'0123456789'
-
-    def test_chunk_ext_ignored(self, h1_app):
-        """``5;foo=bar\\r\\nhello\\r\\n0\\r\\n\\r\\n`` — chunk-ext must be ignored, not affect size."""
-        r = send_raw('127.0.0.1', h1_app.port,
-                     b'POST /echo HTTP/1.1\r\n'
-                     b'Host: localhost\r\n'
-                     b'Transfer-Encoding: chunked\r\n\r\n'
-                     b'5;foo=bar\r\nhello\r\n'
-                     b'0\r\n\r\n')
-        assert r.status == 200
-        assert r.body == b'hello'
-
     def test_last_chunk_with_extension(self, h1_app):
         r = send_raw('127.0.0.1', h1_app.port,
                      b'POST /echo HTTP/1.1\r\n'
@@ -79,18 +47,27 @@ class TestChunkedHappyPath:
 
 @pytest.mark.integration
 class TestChunkedTrailers:
-    def test_trailer_after_last_chunk_accepted(self, h1_app):
-        """Trailers MAY follow the 0\\r\\n line and end with CRLF CRLF."""
+    @pytest.mark.parametrize('headers,tail,expected_body', [
+        pytest.param(b'', b'0\r\n\r\n', b'',
+                     id='empty-chunked-body'),
+        pytest.param(b'', b'A\r\n0123456789\r\n0\r\n\r\n', b'0123456789',
+                     id='uppercase-hex-size'),
+        pytest.param(b'', b'5;foo=bar\r\nhello\r\n0\r\n\r\n', b'hello',
+                     id='chunk-ext-ignored'),
+        pytest.param(b'Trailer: X-Checksum\r\n',
+                     b'5\r\nhello\r\n0\r\nX-Checksum: abc123\r\n\r\n', b'hello',
+                     id='trailer-after-last-chunk'),
+    ])
+    def test_trailer_after_last_chunk_accepted(self, h1_app, headers, tail, expected_body):
+        """Valid chunked encodings are accepted: empty body, uppercase hex
+        size (§7.1.1), ignored chunk-ext, trailers after the 0 chunk."""
         r = send_raw('127.0.0.1', h1_app.port,
                      b'POST /echo HTTP/1.1\r\n'
                      b'Host: localhost\r\n'
                      b'Transfer-Encoding: chunked\r\n'
-                     b'Trailer: X-Checksum\r\n\r\n'
-                     b'5\r\nhello\r\n'
-                     b'0\r\n'
-                     b'X-Checksum: abc123\r\n\r\n')
+                     + headers + b'\r\n' + tail)
         assert r.status == 200
-        assert r.body == b'hello'
+        assert r.body == expected_body
 
 
 @pytest.mark.integration

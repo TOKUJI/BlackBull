@@ -77,33 +77,35 @@ _BAD_IP_LITERALS = [b'[::1', b'[]', b'[zz]', b'[::1]x', b'[1.2.3.4]',
 _GOOD_IP_LITERALS = [b'[::1]', b'[::1]:8100', b'[fe80::1%25eth0]']
 
 
+def _absolute_form(authority: bytes) -> bytes:
+    return (b'GET http://' + authority + b'/echo HTTP/1.1\r\n'
+            b'Host: localhost\r\n\r\n')
+
+
+def _host_field(authority: bytes) -> bytes:
+    return b'GET /echo HTTP/1.1\r\nHost: ' + authority + b'\r\n\r\n'
+
+
 @pytest.mark.integration
 class TestAuthorityIpLiteral:
-    @pytest.mark.parametrize('authority', _BAD_IP_LITERALS)
-    def test_bad_ip_literal_in_absolute_form_is_400(self, h1_app, authority):
-        r = send_raw('127.0.0.1', h1_app.port,
-                     b'GET http://' + authority + b'/echo HTTP/1.1\r\n'
-                     b'Host: localhost\r\n\r\n')
-        assert r.status == 400
-
-    @pytest.mark.parametrize('authority', _BAD_IP_LITERALS)
-    def test_bad_ip_literal_in_host_is_400(self, h1_app, authority):
-        r = send_raw('127.0.0.1', h1_app.port,
-                     b'GET /echo HTTP/1.1\r\nHost: ' + authority + b'\r\n\r\n')
-        assert r.status == 400
-
-    @pytest.mark.parametrize('authority', _GOOD_IP_LITERALS)
-    def test_ip_literal_in_absolute_form_still_accepted(self, h1_app, authority):
-        r = send_raw('127.0.0.1', h1_app.port,
-                     b'GET http://' + authority + b'/echo HTTP/1.1\r\n'
-                     b'Host: localhost\r\n\r\n')
-        assert r.status == 200
-
-    @pytest.mark.parametrize('authority', _GOOD_IP_LITERALS)
-    def test_ip_literal_in_host_still_accepted(self, h1_app, authority):
-        r = send_raw('127.0.0.1', h1_app.port,
-                     b'GET /echo HTTP/1.1\r\nHost: ' + authority + b'\r\n\r\n')
-        assert r.status == 200
+    @pytest.mark.parametrize('build,authority,expected', [
+        pytest.param(_absolute_form, a, 400, id=f'bad-absolute-form-{i}')
+        for i, a in enumerate(_BAD_IP_LITERALS)
+    ] + [
+        pytest.param(_host_field, a, 400, id=f'bad-host-field-{i}')
+        for i, a in enumerate(_BAD_IP_LITERALS)
+    ] + [
+        pytest.param(_absolute_form, a, 200, id=f'good-absolute-form-{i}')
+        for i, a in enumerate(_GOOD_IP_LITERALS)
+    ] + [
+        pytest.param(_host_field, a, 200, id=f'good-host-field-{i}')
+        for i, a in enumerate(_GOOD_IP_LITERALS)
+    ])
+    def test_bad_ip_literal_in_absolute_form_is_400(self, h1_app, build, authority, expected):
+        """RFC 3986 §3.2.2 — bracket forms on both H1 authority paths: bad
+        literals are rejected, good literals stay accepted."""
+        r = send_raw('127.0.0.1', h1_app.port, build(authority))
+        assert r.status == expected
 
 
 @pytest.mark.integration

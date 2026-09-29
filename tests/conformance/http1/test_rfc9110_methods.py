@@ -45,9 +45,14 @@ class TestMethodCase:
         assert r.status != 200, (
             f'lowercase ``get`` must NOT dispatch to GET handler; got {r.status}')
 
-    def test_mixed_case_method_not_dispatched(self, h1_app):
-        r = send_raw('127.0.0.1', h1_app.port,
-                     b'Get / HTTP/1.1\r\nHost: localhost\r\n\r\n')
+    @pytest.mark.parametrize('req', [
+        pytest.param(b'Get / HTTP/1.1\r\nHost: localhost\r\n\r\n',
+                     id='mixed-case-method'),
+        pytest.param(b'PURGE / HTTP/1.1\r\nHost: localhost\r\n\r\n',
+                     id='extension-method'),
+    ])
+    def test_mixed_case_method_not_dispatched(self, h1_app, req):
+        r = send_raw('127.0.0.1', h1_app.port, req)
         assert r.status != 200
 
     def test_unknown_method_yields_405(self, h1_app):
@@ -63,11 +68,6 @@ class TestMethodCase:
 class TestUnknownExtensionMethod:
     """RFC 9110 §9.1 — method-tokens are extensible; a server MAY refuse
     methods it doesn't recognise with 501 Not Implemented."""
-
-    def test_extension_method_does_not_dispatch_get(self, h1_app):
-        r = send_raw('127.0.0.1', h1_app.port,
-                     b'PURGE / HTTP/1.1\r\nHost: localhost\r\n\r\n')
-        assert r.status != 200
 
 
 @pytest.mark.integration
