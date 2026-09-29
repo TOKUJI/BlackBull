@@ -33,19 +33,27 @@ class TestContentLengthValidation:
                      b'hello')
         assert r.status != 200
 
-    def test_content_length_with_minus_rejected(self, h1_app):
-        r = send_raw('127.0.0.1', h1_app.port,
-                     b'POST /echo HTTP/1.1\r\n'
-                     b'Host: localhost\r\n'
-                     b'Content-Length: -5\r\n\r\n'
-                     b'hello')
-        assert r.status != 200
-
-    def test_content_length_hex_rejected(self, h1_app):
-        r = send_raw('127.0.0.1', h1_app.port,
-                     b'POST /echo HTTP/1.1\r\n'
-                     b'Host: localhost\r\n'
-                     b'Content-Length: 0xff\r\n\r\n')
+    @pytest.mark.parametrize('req', [
+        pytest.param(
+            b'POST /echo HTTP/1.1\r\n'
+            b'Host: localhost\r\n'
+            b'Content-Length: -5\r\n\r\n'
+            b'hello',
+            id='minus-value'),
+        pytest.param(
+            b'POST /echo HTTP/1.1\r\n'
+            b'Host: localhost\r\n'
+            b'Content-Length: 0xff\r\n\r\n'
+            b'hello',
+            id='hex-value'),
+        pytest.param(
+            b'POST /echo HTTP/1.1\r\n'
+            b'Host: localhost\r\n'
+            b'Content-Length:\r\n\r\n',
+            id='empty-value'),
+    ])
+    def test_content_length_with_minus_rejected(self, h1_app, req):
+        r = send_raw('127.0.0.1', h1_app.port, req)
         assert r.status != 200
 
     def test_content_length_with_trailing_garbage_rejected(self, h1_app):
@@ -56,13 +64,6 @@ class TestContentLengthValidation:
                      b'Host: localhost\r\n'
                      b'Content-Length: 5x\r\n\r\n'
                      b'hello')
-        assert r.status != 200
-
-    def test_empty_content_length_rejected(self, h1_app):
-        r = send_raw('127.0.0.1', h1_app.port,
-                     b'POST /echo HTTP/1.1\r\n'
-                     b'Host: localhost\r\n'
-                     b'Content-Length:\r\n\r\n')
         assert r.status != 200
 
 

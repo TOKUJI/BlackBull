@@ -353,40 +353,30 @@ class TestSmugglingRejected:
     check directly."""
 
     @pytest.mark.asyncio
-    async def test_duplicate_content_length_rejected(self, slow_app):
-        scenario = Scenario(steps=(
-            SendRawBytes(
-                data=b'POST /echo HTTP/1.1\r\n'
+    @pytest.mark.parametrize('data', [
+        pytest.param(b'POST /echo HTTP/1.1\r\n'
                      b'Host: localhost\r\n'
                      b'Content-Length: 5\r\n'
                      b'Content-Length: 10\r\n'
                      b'\r\n'
                      b'hello',
-            ),
-            ReadResponse(timeout=2.0),
-        ))
-        result = await _run(scenario, slow_app.port)
-        assert _server_closed(result), (
-            f'duplicate Content-Length must be rejected; result={result!r}'
-        )
-
-    @pytest.mark.asyncio
-    async def test_conflicting_cl_te_rejected(self, slow_app):
-        # RFC 9112 §6.3 — when both Transfer-Encoding and Content-Length
-        # are present, the server MUST close the connection (or reject)
-        # to defend against request smuggling.
-        scenario = Scenario(steps=(
-            SendRawBytes(
-                data=b'POST /echo HTTP/1.1\r\n'
+                     id='duplicate-content-length'),
+        pytest.param(b'POST /echo HTTP/1.1\r\n'
                      b'Host: localhost\r\n'
                      b'Content-Length: 5\r\n'
                      b'Transfer-Encoding: chunked\r\n'
                      b'\r\n'
                      b'0\r\n\r\n',
-            ),
+                     id='conflicting-cl-te'),
+    ])
+    async def test_conflicting_cl_te_rejected(self, slow_app, data):
+        """Conflicting framing declarations must be rejected — even under
+        slow-loris conditions — as the CL.CL / CL+TE smuggling defence."""
+        scenario = Scenario(steps=(
+            SendRawBytes(data=data),
             ReadResponse(timeout=2.0),
         ))
         result = await _run(scenario, slow_app.port)
         assert _server_closed(result), (
-            f'CL+TE conflict must be rejected; result={result!r}'
+            f'conflicting framing must be rejected; result={result!r}'
         )

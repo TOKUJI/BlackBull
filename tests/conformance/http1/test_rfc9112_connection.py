@@ -164,24 +164,29 @@ class TestAsteriskFormKeepAlive:
         assert rest.status == 200, f'GET after OPTIONS * failed: {rest!r}'
         assert rest.body.startswith(b'ok')
 
-    def test_asterisk_with_body_drains_before_next_request(self, h1_app):
+    @pytest.mark.parametrize('framing,body,hint', [
+        pytest.param(b'Content-Length: 4\r\n\r\n', b'body',
+                     'body was not drained — the next request was parsed out of '
+                     'the leftover bytes',
+                     id='content-length-drain'),
+        pytest.param(b'Transfer-Encoding: chunked\r\n\r\n', b'4\r\nbody\r\n0\r\n\r\n',
+                     'chunked body was not drained through the terminal chunk',
+                     id='chunked-drain'),
+    ])
+    def test_asterisk_with_body_drains_before_next_request(self, h1_app, framing, body, hint):
         """RFC 9110 §9.3.7 permits content on OPTIONS, so the server-wide
-        answer must still consume it.
+        answer must still consume it — for either framing.
 
-        Undrained, the body bytes become the start of the next request line:
-        ``body`` + ``GET / HTTP/1.1`` parses as the method ``bodyGET``, which
-        no route allows, and the client's next request is destroyed by the
-        framing of the previous one (405 instead of 200).  Behind a
-        connection-pooling reverse proxy that desync is the request-smuggling
-        shape, so the 200 below is the security-relevant assertion, not just a
-        keep-alive nicety.
+        Undrained, the body bytes become the start of the next request line;
+        behind a connection-pooling reverse proxy that desync is the
+        request-smuggling shape, so the 200 below is the security-relevant
+        assertion, not just a keep-alive nicety.
         """
         s = open_socket('127.0.0.1', h1_app.port, timeout=5)
         try:
             s.sendall(
                 b'OPTIONS * HTTP/1.1\r\nHost: localhost\r\n'
-                b'Content-Length: 4\r\n\r\n'
-                b'body'
+                + framing + body +
                 b'GET / HTTP/1.1\r\nHost: localhost\r\n'
                 b'Connection: close\r\n\r\n'
             )
@@ -194,39 +199,7 @@ class TestAsteriskFormKeepAlive:
         first = parse_response(buf[:second])
         rest = parse_response(buf[second:], closed=True)
         assert first.status == 204
-        assert rest.status == 200, (
-            f'body was not drained — the next request was parsed out of the '
-            f'leftover bytes; got {rest.status}')
-        assert rest.body.startswith(b'ok')
-
-    def test_asterisk_with_chunked_body_then_pipelined_get(self, h1_app):
-        """The drain must follow chunked framing through the terminal chunk.
-
-        A length-oblivious drain would stop early and leave ``0\\r\\n\\r\\n``
-        (or the chunk-size lines) in the reader — the same desync as the
-        Content-Length case, reached through the other framing.
-        """
-        s = open_socket('127.0.0.1', h1_app.port, timeout=5)
-        try:
-            s.sendall(
-                b'OPTIONS * HTTP/1.1\r\nHost: localhost\r\n'
-                b'Transfer-Encoding: chunked\r\n\r\n'
-                b'4\r\nbody\r\n0\r\n\r\n'
-                b'GET / HTTP/1.1\r\nHost: localhost\r\n'
-                b'Connection: close\r\n\r\n'
-            )
-            buf = read_until_eof(s)
-        finally:
-            s.close()
-
-        second = buf.find(b'HTTP/1.1 ', 8)
-        assert second > 0, f'no second response; got {buf!r}'
-        first = parse_response(buf[:second])
-        rest = parse_response(buf[second:], closed=True)
-        assert first.status == 204
-        assert rest.status == 200, (
-            f'chunked body was not drained through the terminal chunk; '
-            f'got {rest.status}')
+        assert rest.status == 200, f'{hint}; got {rest.status}'
         assert rest.body.startswith(b'ok')
 
     def test_asterisk_with_large_body_within_bound_drains(self, h1_app):
@@ -325,38 +298,27 @@ class TestAsteriskFormKeepAlive:
         assert b'HTTP/1.1 ' not in tail, (
             f'pipelined request was answered past the drain bound; got {tail!r}')
 
-    def test_asterisk_then_bare_crlf_closes(self, h1_app):
-        # A bare CRLF where the next request-line belongs terminates the
-        # connection — one response, then close.
+    @pytest.mark.parametrize('req', [
+        pytest.param(b'OPTIONS * HTTP/1.1\r\nHost: localhost\r\n\r\n'
+                     b'\r\n',
+                     id='bare-crlf-closes'),
+        pytest.param(b'OPTIONS * HTTP/1.1\r\nHost: localhost\r\n'
+                     b'Connection: close\r\n\r\n',
+                     id='connection-close'),
+    ])
+    def test_asterisk_then_bare_crlf_closes(self, h1_app, req):
+        """A bare CRLF where the next request-line belongs, or Connection:
+        close on the OPTIONS * itself, ends the connection after the
+        server-wide answer — one response, then close."""
         s = open_socket('127.0.0.1', h1_app.port, timeout=5)
         try:
-            s.sendall(
-                b'OPTIONS * HTTP/1.1\r\nHost: localhost\r\n\r\n'
-                b'\r\n'
-            )
+            s.sendall(req)
             buf = read_until_eof(s)
         finally:
             s.close()
 
         assert buf.count(b'HTTP/1.1 ') == 1, (
             f'expected exactly one response before close; got {buf!r}')
-        assert parse_response(buf, closed=True).status == 204
-
-    def test_asterisk_with_connection_close(self, h1_app):
-        # §9.1 — Connection: close on the OPTIONS * itself ends the connection
-        # after the server-wide answer.
-        s = open_socket('127.0.0.1', h1_app.port, timeout=5)
-        try:
-            s.sendall(
-                b'OPTIONS * HTTP/1.1\r\nHost: localhost\r\n'
-                b'Connection: close\r\n\r\n'
-            )
-            buf = read_until_eof(s)
-        finally:
-            s.close()
-
-        assert buf.count(b'HTTP/1.1 ') == 1, (
-            f'expected exactly one response; got {buf!r}')
         assert parse_response(buf, closed=True).status == 204
 
 

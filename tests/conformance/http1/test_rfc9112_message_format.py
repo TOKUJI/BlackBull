@@ -40,16 +40,21 @@ class TestRequestLine:
                      b'GET HTTP/1.1\r\nHost: localhost\r\n\r\n')
         assert r.status != 200
 
-    def test_bare_lf_in_request_line_rejected(self, h1_app):
+    @pytest.mark.parametrize('req', [
+        pytest.param(b'GET / HTTP/1.1\nHost: localhost\n\n',
+                     id='bare-lf-request-line'),
+        pytest.param(b'GET / HTTP/1.1\nHost: localhost\n\n'
+                     b'GET /admin HTTP/1.1\r\nHost: localhost\r\n\r\n',
+                     id='lf-cr-lf-desync'),
+    ])
+    def test_bare_lf_in_request_line_rejected(self, h1_app, req):
         """§2.2: a recipient MUST NOT interpret a bare LF as a CRLF.
 
         Accepting LF-only line terminators is a request-smuggling vector
         (the LF.CR.LF de-sync class).
         """
-        r = send_raw('127.0.0.1', h1_app.port,
-                     b'GET / HTTP/1.1\nHost: localhost\n\n')
-        assert r.status != 200, (
-            f'bare LF without CR MUST be rejected; got {r.status}')
+        r = send_raw('127.0.0.1', h1_app.port, req)
+        assert r.status != 200
 
     def test_lf_terminated_http_version_rejected(self, h1_app):
         """§2.3/§4: a version token ending in LF (``HTTP/1.1\\n``) is not
