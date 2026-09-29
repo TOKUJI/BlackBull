@@ -204,17 +204,21 @@ class TestExtendedConnectHandshake:
         await handler.run()
         return writer
 
-    async def test_scope_type_is_websocket(self):
+    @pytest.mark.parametrize('attr,expected', [
+        pytest.param('type', 'websocket', id='scope-type-websocket'),
+        pytest.param('http_version', '2', id='scope-http-version-2'),
+    ])
+    async def test_scope_type_is_websocket(self, attr, expected):
         captured = {}
 
         async def app(conn, receive, send):
-            captured['type'] = conn.type
-            await receive()          # websocket.connect
+            captured[attr] = getattr(conn, attr)
+            await receive()
             await send({'type': 'websocket.accept'})
-            await receive()          # websocket.disconnect (from EOF)
+            await receive()
 
         await self._run_with_app(app)
-        assert captured['type'] == 'websocket'
+        assert captured[attr] == expected
 
     async def test_split_headers_use_the_same_websocket_lifecycle(self):
         captured = {}
@@ -237,18 +241,6 @@ class TestExtendedConnectHandshake:
         assert captured['first_event'] == {'type': 'websocket.connect'}
         assert captured['last_event']['type'] == 'websocket.disconnect'
 
-    async def test_scope_http_version_is_2(self):
-        captured = {}
-
-        async def app(conn, receive, send):
-            captured['http_version'] = conn.http_version
-            await receive()
-            await send({'type': 'websocket.accept'})
-            await receive()
-
-        await self._run_with_app(app)
-        assert captured['http_version'] == '2'
-
     async def test_scope_path(self):
         captured = {}
 
@@ -266,8 +258,15 @@ class TestExtendedConnectHandshake:
         await handler.run()
         assert captured['path'] == '/chat-room'
 
-    @pytest.mark.parametrize('scheme', ['https', 'HTTPS'])
-    async def test_scope_scheme_wss_for_https(self, scheme):
+    @pytest.mark.parametrize('scheme,expected', [
+        pytest.param('https', 'wss', id='https-to-wss'),
+        pytest.param('HTTPS', 'wss', id='HTTPS-to-wss'),
+        pytest.param('http', 'ws', id='http-to-ws'),
+        pytest.param('HTTP', 'ws', id='HTTP-to-ws'),
+    ])
+    async def test_scope_scheme_wss_for_https(self, scheme, expected):
+        """RFC8441 scope scheme mapping: https → wss, http → ws,
+        case-insensitively."""
         captured = {}
 
         async def app(conn, receive, send):
@@ -282,25 +281,7 @@ class TestExtendedConnectHandshake:
                   None]
         handler.receive = AsyncMock(side_effect=frames)
         await handler.run()
-        assert captured['scheme'] == 'wss'
-
-    @pytest.mark.parametrize('scheme', ['http', 'HTTP'])
-    async def test_scope_scheme_ws_for_http(self, scheme):
-        captured = {}
-
-        async def app(conn, receive, send):
-            captured['scheme'] = conn.scheme
-            await receive()
-            await send({'type': 'websocket.accept'})
-            await receive()
-
-        handler, _, _ = _make_h2_actor(app)
-        frames = [_client_settings(),
-                  _make_extended_connect_frame(scheme=scheme),
-                  None]
-        handler.receive = AsyncMock(side_effect=frames)
-        await handler.run()
-        assert captured['scheme'] == 'ws'
+        assert captured['scheme'] == expected
 
     async def test_scope_subprotocols_parsed(self):
         captured = {}
@@ -560,46 +541,32 @@ class TestDataExchange:
 class TestNegativeCases:
     """CONNECT without :protocol or with wrong :protocol must not trigger RFC 8441."""
 
-    async def test_connect_without_protocol_not_websocket(self):
-        """Plain CONNECT (no :protocol) must not produce a websocket scope."""
+    @pytest.mark.parametrize('make_frame,reply_status,label', [
+        pytest.param(_make_normal_connect_frame, 200, 'CONNECT without :protocol',
+                     id='no-protocol'),
+        pytest.param(_make_connect_wrong_protocol_frame, 400, 'CONNECT with :protocol=ftp',
+                     id='wrong-protocol'),
+    ])
+    async def test_connect_without_protocol_not_websocket(self, make_frame, reply_status, label):
+        """Extended CONNECT without or with a wrong :protocol must not
+        produce a websocket scope."""
         scopes = []
 
         async def app(conn, receive, send):
             scopes.append(conn.type)
-            # Regular HTTP CONNECT — just reply
-            await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+            await send({'type': 'http.response.start', 'status': reply_status, 'headers': []})
             await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
 
         handler, _, _ = _make_h2_actor(app)
         handler.receive = AsyncMock(side_effect=[
             _client_settings(),
-            _make_normal_connect_frame(),
+            make_frame(),
             None,
         ])
         await handler.run()
 
         assert all(t != 'websocket' for t in scopes), (
-            f'CONNECT without :protocol must not produce websocket scope; got {scopes}')
-
-    async def test_connect_wrong_protocol_not_websocket(self):
-        """CONNECT + :protocol=ftp must not produce a websocket scope."""
-        scopes = []
-
-        async def app(conn, receive, send):
-            scopes.append(conn.type)
-            await send({'type': 'http.response.start', 'status': 400, 'headers': []})
-            await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
-
-        handler, _, _ = _make_h2_actor(app)
-        handler.receive = AsyncMock(side_effect=[
-            _client_settings(),
-            _make_connect_wrong_protocol_frame(),
-            None,
-        ])
-        await handler.run()
-
-        assert all(t != 'websocket' for t in scopes), (
-            f'CONNECT with :protocol=ftp must not produce websocket scope; got {scopes}')
+            f'{label} must not produce websocket scope; got {scopes}')
 
     async def test_multiple_ws_streams_multiplexed(self):
         """Two concurrent WebSocket streams on the same connection must each
