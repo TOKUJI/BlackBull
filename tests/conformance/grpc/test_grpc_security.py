@@ -228,15 +228,6 @@ class TestGrpcMessageEncoding:
         assert _pct_encode_message('αβ') == b'%CE%B1%CE%B2'  # Greek alpha, beta
         assert _pct_encode_message('日本語') == b'%E6%97%A5%E6%9C%AC%E8%AA%9E'
 
-    def test_empty_string_produces_empty_bytes(self):
-        """Empty details → empty grpc-message (or omitted)."""
-        assert _pct_encode_message('') == b''
-
-
-    def test_delete_character_encoded(self):
-        """DEL (0x7F) is NOT in the 0x20–0x7E range and must be encoded."""
-        assert _pct_encode_message('del\x7fhere') == b'del%7Fhere'
-
 
 # ---------------------------------------------------------------------------
 # §4 — Security: header injection via grpc-message
@@ -257,23 +248,25 @@ class TestGrpcMessageInjection:
         assert b'\x0d' not in _pct_encode_message('a\rb')
         assert b'%0D' in _pct_encode_message('a\rb')
 
-    def test_crlf_sequence_is_encoded(self):
-        """CRLF (0x0D 0x0A) must not appear literally."""
-        encoded = _pct_encode_message('header\r\ninjection')
-        assert b'\r\n' not in encoded
-        assert b'%0D%0A' in encoded
+    @pytest.mark.parametrize('raw,forbidden,encoded_form', [
+        pytest.param('header\r\ninjection', b'\r\n', b'%0D%0A', id='crlf-sequence'),
+        pytest.param('null\x00here', b'\x00', b'%00', id='null-byte'),
+    ])
+    def test_crlf_sequence_is_encoded(self, raw, forbidden, encoded_form):
+        """Control bytes must not appear literally in grpc-message."""
+        encoded = _pct_encode_message(raw)
+        assert forbidden not in encoded
+        assert encoded_form in encoded
 
-    def test_null_byte_is_encoded(self):
-        """Null byte injection must be prevented."""
-        encoded = _pct_encode_message('null\x00here')
-        assert b'\x00' not in encoded
-        assert b'%00' in encoded
-
-    def test_colon_is_not_encoded(self):
-        """':' (0x3A) is printable ASCII — passes through.  This is acceptable
-        because gRPC trailers are HTTP/2 HEADERS, not HTTP/1.1 headers, and
-        HTTP/2 does not use ':' as a header/value separator in the same way."""
-        assert _pct_encode_message('key:value') == b'key:value'
+    @pytest.mark.parametrize('raw,expected', [
+        pytest.param('', b'', id='empty-string'),
+        pytest.param('del\x7fhere', b'del%7Fhere', id='delete-character'),
+        pytest.param('key:value', b'key:value', id='colon-passthrough'),
+    ])
+    def test_colon_is_not_encoded(self, raw, expected):
+        """grpc-message encoding table: empty details, DEL (0x7F) encoded,
+        ':' (0x3A) printable ASCII passes through."""
+        assert _pct_encode_message(raw) == expected
 
     @pytest.mark.asyncio
     async def test_injection_attempt_via_details_does_not_corrupt_trailers(self):

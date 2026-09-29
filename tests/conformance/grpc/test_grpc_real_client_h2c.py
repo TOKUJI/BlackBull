@@ -395,18 +395,18 @@ class TestRealClientErrorStatus:
         assert exc.code() == grpc.StatusCode.INTERNAL, exc
 
     @pytest.mark.asyncio
-    async def test_grpc_error_status_and_message(self, grpc_server_port):
-        ok, exc = await _unary(grpc_server_port, '/err.Err/Denied')
+    @pytest.mark.parametrize('path,code,details', [
+        pytest.param('/err.Err/Denied', grpc.StatusCode.PERMISSION_DENIED,
+                     'access denied', id='grpc-error-status-and-message'),
+        pytest.param('/err.Err/Abort', grpc.StatusCode.NOT_FOUND,
+                     'item not found', id='context-abort-status'),
+    ])
+    async def test_grpc_error_status_and_message(self, grpc_server_port, path, code, details):
+        """Error sources surface status code and details to the client."""
+        ok, exc = await _unary(grpc_server_port, path)
         assert not ok
-        assert exc.code() == grpc.StatusCode.PERMISSION_DENIED, exc
-        assert exc.details() == 'access denied'
-
-    @pytest.mark.asyncio
-    async def test_context_abort_status(self, grpc_server_port):
-        ok, exc = await _unary(grpc_server_port, '/err.Err/Abort')
-        assert not ok
-        assert exc.code() == grpc.StatusCode.NOT_FOUND, exc
-        assert exc.details() == 'item not found'
+        assert exc.code() == code, exc
+        assert exc.details() == details
 
     @pytest.mark.asyncio
     async def test_unknown_method_is_unimplemented(self, grpc_server_port):
@@ -427,8 +427,15 @@ class TestRealClientServerStreaming:
         assert msgs == [f'msg{i}'.encode() for i in range(5)]
 
     @pytest.mark.asyncio
-    async def test_empty_stream(self, grpc_server_port):
-        msgs, err = await _server_stream(grpc_server_port, '/echo.Echo/Stream', b'0')
+    @pytest.mark.parametrize('run', [
+        pytest.param(lambda p: _server_stream(p, '/echo.Echo/Stream', b'0'),
+                     id='server-streaming-empty'),
+        pytest.param(lambda p: _bidi(p, '/echo.Echo/Chat', []),
+                     id='bidi-empty'),
+    ])
+    async def test_empty_stream(self, grpc_server_port, run):
+        """An empty request stream completes successfully."""
+        msgs, err = await run(grpc_server_port)
         assert err is None, f'unexpected stream error: {err}'
         assert msgs == []
 
@@ -470,31 +477,27 @@ class TestRealClientClientStreaming:
         assert value == b''
 
     @pytest.mark.asyncio
-    async def test_request_stream_within_window(self, grpc_server_port):
-        # 40 × 1 KiB (~40 KiB) — under both the 65535-byte initial window and the
-        # 64-deep recipient queue, so the request direction never back-pressures.
-        # Client-streaming's supported envelope, kept clear of the
-        # enqueue-time-crediting boundary (mirrors the bidi within-window gate).
-        payloads = [b'x' * 1024] * 40
-        ok, value = await _client_stream(
-            grpc_server_port, '/echo.Echo/CountBytes', payloads)
-        assert ok, f'unexpected error: {value}'
-        assert value == str(40 * 1024).encode()
-
-    @pytest.mark.asyncio
-    async def test_large_request_stream_over_window(self, grpc_server_port):
-        # 200 × 1 KiB (~200 KiB) crosses the initial 65535-byte window on the
-        # request direction.  Gate for consume-based inbound flow control
-        #: the server credits WINDOW_UPDATE as the
-        # handler consumes, so a slow drain closes the window and
+    @pytest.mark.parametrize('count', [
+        # 40 × 1 KiB (~40 KiB) stays under both the 65535-byte initial window
+        # and the 64-deep recipient queue, so the request direction never
+        # back-pressures — client-streaming's supported envelope, kept clear of
+        # the enqueue-time-crediting boundary (mirrors the bidi gate).
+        pytest.param(40, id='within-window'),
+        # 200 × 1 KiB (~200 KiB) crosses the initial window on the request
+        # direction — gate for consume-based inbound flow control: the server
+        # credits WINDOW_UPDATE as the handler consumes, so a slow drain
         # back-pressures grpcio instead of overflowing the recipient queue
         # into RST_STREAM(ENHANCE_YOUR_CALM) — the pre-fix failure mode under
         # CPU load.
-        payloads = [b'x' * 1024] * 200
+        pytest.param(200, id='over-window'),
+    ])
+    async def test_large_request_stream_over_window(self, grpc_server_port, count):
+        """Request streams respect the flow-control window on both sides."""
+        payloads = [b'x' * 1024] * count
         ok, value = await _client_stream(
             grpc_server_port, '/echo.Echo/CountBytes', payloads)
         assert ok, f'unexpected error: {value}'
-        assert value == str(200 * 1024).encode()
+        assert value == str(count * 1024).encode()
 
 
 # ---------------------------------------------------------------------------
@@ -510,32 +513,23 @@ class TestRealClientBidiStreaming:
         assert msgs == [b'a', b'bb', b'ccc']
 
     @pytest.mark.asyncio
-    async def test_empty_stream(self, grpc_server_port):
-        msgs, err = await _bidi(grpc_server_port, '/echo.Echo/Chat', [])
-        assert err is None, f'unexpected bidi error: {err}'
-        assert msgs == []
-
-    @pytest.mark.asyncio
-    async def test_both_directions_within_window(self, grpc_server_port):
-        # 20 × 1 KiB (~20 KiB) each way — comfortably under both the 65535-byte
-        # initial window and the 64-deep recipient queue, so neither direction
-        # back-pressures.  Bidi's supported envelope: concurrent read/write on
-        # one stream, kept clear of the enqueue-time-crediting boundary.
-        payloads = [bytes([i % 256]) * 1024 for i in range(20)]
-        msgs, err = await _bidi(grpc_server_port, '/echo.Echo/Chat', payloads)
-        assert err is None, f'unexpected bidi error: {err}'
-        assert msgs == payloads
-
-    @pytest.mark.asyncio
-    async def test_large_both_directions_over_window(self, grpc_server_port):
-        # 200 × 1 KiB echoed back — BOTH directions cross the initial
-        # 65535-byte window concurrently.  Gate for consume-based inbound
-        # flow control: when the handler stalls
-        # reading (blocked on yield under response back-pressure) it stops
-        # crediting, the request-direction window closes, and grpcio
-        # back-pressures — pre-fix this overflowed the 64-deep recipient
-        # queue into RST_STREAM(ENHANCE_YOUR_CALM).
-        payloads = [bytes([i % 256]) * 1024 for i in range(200)]
+    @pytest.mark.parametrize('count', [
+        # 20 × 1 KiB (~20 KiB) each way — under both the 65535-byte initial
+        # window and the 64-deep recipient queue, so neither direction
+        # back-pressures: bidi's supported envelope (concurrent read/write on
+        # one stream), kept clear of the enqueue-time-crediting boundary.
+        pytest.param(20, id='within-window'),
+        # 200 × 1 KiB echoed back — BOTH directions cross the initial window
+        # concurrently.  Gate for consume-based inbound flow control: when the
+        # handler stalls reading (blocked on yield under response
+        # back-pressure) it stops crediting, the request-direction window
+        # closes, and grpcio back-pressures — pre-fix this overflowed the
+        # 64-deep recipient queue into RST_STREAM(ENHANCE_YOUR_CALM).
+        pytest.param(200, id='over-window'),
+    ])
+    async def test_large_both_directions_over_window(self, grpc_server_port, count):
+        """Bidi streams respect the flow-control window in both directions."""
+        payloads = [bytes([i % 256]) * 1024 for i in range(count)]
         msgs, err = await _bidi(grpc_server_port, '/echo.Echo/Chat', payloads)
         assert err is None, f'unexpected bidi error: {err}'
         assert msgs == payloads

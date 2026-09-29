@@ -240,19 +240,6 @@ class TestGrpcH2Errors:
     """gRPC error responses over real HTTP/2."""
 
     @pytest.mark.asyncio
-    async def test_unimplemented_method(self, grpc_h2_port):
-        """Unregistered method → UNIMPLEMENTED (12) in trailers-only."""
-        async with HTTP2Client('127.0.0.1', grpc_h2_port) as c:
-            res = await c.request(
-                'POST', '/No.Such/Method',
-                headers=[('content-type', 'application/grpc')],
-                body=_grpc_request_body(b''))
-
-        assert res.status == 200
-        assert res.body == b''  # trailers-only: no DATA frame
-        assert res.trailers.get(b'grpc-status') == str(int(GrpcStatus.UNIMPLEMENTED)).encode()
-
-    @pytest.mark.asyncio
     async def test_handler_grpc_error(self, grpc_h2_port):
         """``GrpcError`` → correct grpc-status in trailers-only."""
         async with HTTP2Client('127.0.0.1', grpc_h2_port) as c:
@@ -267,31 +254,25 @@ class TestGrpcH2Errors:
         assert b'item not found' in res.trailers.get(b'grpc-message', b'')
 
     @pytest.mark.asyncio
-    async def test_handler_exception_becomes_internal(self, grpc_h2_port):
-        """Unhandled exception → INTERNAL (13) in trailers-only."""
+    @pytest.mark.parametrize('path,expected', [
+        pytest.param('/No.Such/Method', GrpcStatus.UNIMPLEMENTED,
+                     id='unimplemented-method'),
+        pytest.param('/err.Err/Explode', GrpcStatus.INTERNAL,
+                     id='handler-exception-internal'),
+        pytest.param('/err.Err/Abort', GrpcStatus.PERMISSION_DENIED,
+                     id='context-abort'),
+    ])
+    async def test_context_abort(self, grpc_h2_port, path, expected):
+        """Every handler outcome surfaces as its gRPC status in trailers-only."""
         async with HTTP2Client('127.0.0.1', grpc_h2_port) as c:
             res = await c.request(
-                'POST', '/err.Err/Explode',
+                'POST', path,
                 headers=[('content-type', 'application/grpc')],
                 body=_grpc_request_body(b''))
 
         assert res.status == 200
-        assert res.body == b''
-        assert res.trailers.get(b'grpc-status') == str(int(GrpcStatus.INTERNAL)).encode()
-
-    @pytest.mark.asyncio
-    async def test_context_abort(self, grpc_h2_port):
-        """``context.abort()`` → PERMISSION_DENIED in trailers-only."""
-        async with HTTP2Client('127.0.0.1', grpc_h2_port) as c:
-            res = await c.request(
-                'POST', '/err.Err/Abort',
-                headers=[('content-type', 'application/grpc')],
-                body=_grpc_request_body(b''))
-
-        assert res.status == 200
-        assert res.body == b''
-        assert res.trailers.get(b'grpc-status') == \
-            str(int(GrpcStatus.PERMISSION_DENIED)).encode()
+        assert res.body == b''  # trailers-only: no DATA frame
+        assert res.trailers.get(b'grpc-status') == str(int(expected)).encode()
 
     @pytest.mark.asyncio
     async def test_compressed_message_rejected(self, grpc_h2_port):
@@ -529,26 +510,21 @@ class TestGrpcH2ResponseShape:
     """Verify the correct H2 frame sequence for gRPC responses."""
 
     @pytest.mark.asyncio
-    async def test_success_response_has_content_type(self, grpc_h2_port):
-        """Success response must carry ``Content-Type: application/grpc``."""
+    @pytest.mark.parametrize('extract,key,expected', [
+        pytest.param(lambda r: r.headers, b'content-type', b'application/grpc',
+                     id='success-content-type'),
+        pytest.param(lambda r: r.trailers, b'grpc-status', b'0',
+                     id='success-grpc-status-zero'),
+    ])
+    async def test_success_response_has_content_type(self, grpc_h2_port, extract, key, expected):
+        """Success responses carry the required gRPC envelope fields."""
         async with HTTP2Client('127.0.0.1', grpc_h2_port) as c:
             res = await c.request(
                 'POST', '/echo.Echo/Echo',
                 headers=[('content-type', 'application/grpc')],
                 body=_grpc_request_body(b'test'))
 
-        assert res.headers.get(b'content-type') == b'application/grpc'
-
-    @pytest.mark.asyncio
-    async def test_success_response_has_grpc_status_zero(self, grpc_h2_port):
-        """Success response trailers must include ``grpc-status: 0``."""
-        async with HTTP2Client('127.0.0.1', grpc_h2_port) as c:
-            res = await c.request(
-                'POST', '/echo.Echo/Echo',
-                headers=[('content-type', 'application/grpc')],
-                body=_grpc_request_body(b'test'))
-
-        assert res.trailers.get(b'grpc-status') == b'0'
+        assert extract(res).get(key) == expected
 
     @pytest.mark.asyncio
     async def test_error_response_has_empty_body(self, grpc_h2_port):
