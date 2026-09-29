@@ -465,9 +465,6 @@ class TestPseudoHeaderInjection:
         assert body_ev is not None
         assert decode_messages(body_ev['body']) == [(False, meta_value)]
 
-        # The handler was still routed to /svc/Real — :path header didn't
-        # override scope['path'].  This is correct.
-
     @pytest.mark.asyncio
     @pytest.mark.parametrize('lookup_key,sent_key,sent_value', [
         pytest.param(b':method', b':method', b'GET', id='pseudo-header-method'),
