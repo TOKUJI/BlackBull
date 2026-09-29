@@ -5793,8 +5793,16 @@ CONNACK honours the peer's Maximum Packet Size: the full reply, then one
 trimmed of the broker's advertised limits (an assigned identifier is not
 optional), and only when neither fits is the connection refused with <code>0x95</code>
 — or closed outright when even that reply cannot fit — before creating a
-session.
-Broker-initiated protocol-error closure retires admission before processing the
+session.</p>
+<p>The limit also applies to outgoing PUBLISH and PUBREL packets. A packet
+that exceeds it is discarded, and its delivery is treated as complete
+[MQTT-3.1.2-25]. It is never queued or retried. The limit belongs to the
+connection: queued messages are rechecked against the reconnecting client's
+limit. Retained and Will messages follow the same rule. For a Shared
+Subscription, the message goes to a member that can receive it and is
+dropped only if no member can. The takeover (<code>0x8E</code>) and duplicate-CONNECT
+(<code>0x82</code>) DISCONNECTs are not size-checked.</p>
+<p>Broker-initiated protocol-error closure retires admission before processing the
 next command. Client DISCONNECT and transport failures use the FIFO <code>Detach</code>
 boundary: commands ordered before it were admitted while the connection was
 active; commands after it cannot mutate broker state. Will and session-expiry
