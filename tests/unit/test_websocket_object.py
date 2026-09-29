@@ -484,12 +484,21 @@ def test_bare_parameter_names_get_the_object(name):
     assert _kinds(plan) == (_ParamKind.WS,)
 
 
-def test_annotation_wins_over_name():
-    """``ws: Connection`` means the Connection, however the parameter is spelt."""
-    async def handler(ws: Connection):
-        pass
+@pytest.mark.parametrize('which,expected', [
+    pytest.param('conn', (_ParamKind.CONN,), id='annotation-wins-over-name'),
+    pytest.param('ws', (_ParamKind.WS,), id='explicit-annotation-any-name'),
+])
+def test_annotation_wins_over_name(which, expected):
+    """``ws: Connection`` means the Connection, however the parameter is spelt;
+    annotation beats naming convention."""
+    if which == 'conn':
+        async def handler(ws: Connection):
+            pass
+    else:
+        async def handler(sock: WebSocket):
+            pass
 
-    assert _kinds(_websocket_param_plan(handler)) == (_ParamKind.CONN,)
+    assert _kinds(_websocket_param_plan(handler)) == expected
 
 
 def test_object_and_connection_together():
@@ -511,14 +520,6 @@ def test_unresolvable_parameter_fails_at_registration_not_at_connect_time():
         @app.route(path='/bad', scheme=Scheme.websocket)
         async def bad(socket):   # noqa: F841 — deliberately unrecognised
             pass
-
-
-def test_an_explicit_annotation_works_under_any_parameter_name():
-    """The counterpart to the rule above: annotation beats naming convention."""
-    async def handler(sock: WebSocket):
-        pass
-
-    assert _kinds(_websocket_param_plan(handler)) == (_ParamKind.WS,)
 
 
 def test_http_route_is_unaffected_by_the_websocket_branch():

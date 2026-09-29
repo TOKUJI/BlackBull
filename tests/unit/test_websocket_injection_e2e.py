@@ -66,45 +66,31 @@ def _clear_teardowns():
 # Injection
 # ---------------------------------------------------------------------------
 
-def test_path_and_query_params_reach_the_handler():
+@pytest.mark.parametrize('url,expected', [
+    pytest.param('/rooms/lobby?since=7', 'room=lobby since=7', id='path-and-query'),
+    pytest.param('/rooms/lobby', 'room=lobby since=0', id='query-default'),
+    pytest.param('/seats/12', 'seat=12 type=int', id='path-coerced'),
+])
+def test_path_and_query_params_reach_the_handler(url, expected):
     app = _make_app()
     with TestClient(app) as client:
-        with client.websocket_connect('/rooms/lobby?since=7') as ws:
-            assert ws.receive_text() == 'room=lobby since=7'
-
-
-def test_query_param_default_applies_when_absent():
-    app = _make_app()
-    with TestClient(app) as client:
-        with client.websocket_connect('/rooms/lobby') as ws:
-            assert ws.receive_text() == 'room=lobby since=0'
-
-
-def test_path_param_is_coerced_to_its_annotation():
-    app = _make_app()
-    with TestClient(app) as client:
-        with client.websocket_connect('/seats/12') as ws:
-            assert ws.receive_text() == 'seat=12 type=int'
+        with client.websocket_connect(url) as ws:
+            assert ws.receive_text() == expected
 
 
 # ---------------------------------------------------------------------------
 # Rejection reaches the client as a close code
 # ---------------------------------------------------------------------------
 
-def test_missing_required_query_param_is_refused_with_1008():
+@pytest.mark.parametrize('url', [
+    pytest.param('/strict', id='missing-required-query'),
+    pytest.param('/seats/front-row', id='uncoercible-path-param'),
+])
+def test_missing_required_query_param_is_refused_with_1008(url):
     app = _make_app()
     with TestClient(app) as client:
         with pytest.raises(WebSocketDisconnect) as excinfo:
-            with client.websocket_connect('/strict'):
-                pass
-    assert excinfo.value.code == 1008
-
-
-def test_uncoercible_path_param_is_refused_with_1008():
-    app = _make_app()
-    with TestClient(app) as client:
-        with pytest.raises(WebSocketDisconnect) as excinfo:
-            with client.websocket_connect('/seats/front-row'):
+            with client.websocket_connect(url):
                 pass
     assert excinfo.value.code == 1008
 

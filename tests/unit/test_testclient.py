@@ -295,14 +295,23 @@ def test_app_without_lifespan_still_works() -> None:
     assert response.text == 'no-lifespan'
 
 
-def test_lifespan_startup_failure_surfaces() -> None:
+@pytest.mark.parametrize('phase,match', [
+    pytest.param('startup', 'startup failed', id='startup-failure'),
+    pytest.param('shutdown', 'intentional shutdown failure', id='shutdown-failure'),
+])
+def test_lifespan_startup_failure_surfaces(phase, match) -> None:
     app = BlackBull()
 
-    @app.on_startup
-    async def _boom() -> None:
-        raise RuntimeError('intentional startup failure')
+    if phase == 'startup':
+        @app.on_startup
+        async def _boom() -> None:
+            raise RuntimeError('intentional startup failure')
+    else:
+        @app.on_shutdown
+        async def _boom() -> None:
+            raise RuntimeError('intentional shutdown failure')
 
-    with pytest.raises(RuntimeError, match='startup failed'):
+    with pytest.raises(RuntimeError, match=match):
         with TestClient(app):
             pass
 
@@ -323,15 +332,3 @@ def test_a_failing_shutdown_does_not_replace_the_block_s_own_error(caplog) -> No
                or 'Lifespan shutdown failed' in record.getMessage()
                for record in caplog.records), (
         'the suppressed shutdown failure was not reported anywhere')
-
-
-def test_lifespan_shutdown_failure_surfaces() -> None:
-    app = BlackBull()
-
-    @app.on_shutdown
-    async def _boom() -> None:
-        raise RuntimeError('intentional shutdown failure')
-
-    with pytest.raises(RuntimeError, match='intentional shutdown failure'):
-        with TestClient(app):
-            pass
