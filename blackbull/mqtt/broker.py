@@ -163,6 +163,11 @@ class Send(ActorMessage):
     packet: Any = field(default=None, compare=False, repr=False)
     _encoded: bytes | None = field(default=None, init=False, compare=False, repr=False)
 
+    def wire_bytes(self) -> bytes:
+        if self._encoded is None:
+            self._encoded = encode_packet(self.packet)
+        return self._encoded
+
 
 @dataclass
 class Close(ActorMessage):
@@ -460,6 +465,20 @@ class BrokerActor(Actor):
         await conn.send(Send(packet=MQTTDisconnect(reason_code=reason_code)))
         await conn.send(Close(reason_code=reason_code))
 
+    async def _refuse(self, conn, reason_code, *, limit: int | None = None) -> None:
+        # [MQTT-3.14.0-1] — DISCONNECT only ever follows CONNACK.
+        reject = Send(packet=MQTTConnack(
+            session_present=False, reason_code=reason_code))
+        if limit is None or len(reject.wire_bytes()) <= limit:
+            await conn.send(reject)
+        await conn.send(Close(reason_code=reason_code))
+
+    async def _over_limit(self, conn, ack: Send, limit: int | None) -> bool:
+        if limit is not None and len(ack.wire_bytes()) > limit:
+            await self._refuse(conn, ReasonCode.PACKET_TOO_LARGE, limit=limit)
+            return True
+        return False
+
     @staticmethod
     def _alloc_pid(session) -> int:
         """§2.2.1 — allocate a non-zero Packet Identifier not currently in use.
@@ -523,10 +542,7 @@ class BrokerActor(Actor):
             return
         self._seen_connections.add(conn)
         if connect.proto_level != ProtocolLevel.V5_0:
-            await conn.send(Send(packet=MQTTConnack(
-                session_present=False,
-                reason_code=ReasonCode.UNSUPPORTED_PROTOCOL_VERSION)))
-            await conn.send(Close(reason_code=ReasonCode.UNSUPPORTED_PROTOCOL_VERSION))
+            await self._refuse(conn, ReasonCode.UNSUPPORTED_PROTOCOL_VERSION)
             return
 
         client_id = connect.client_id
@@ -534,6 +550,7 @@ class BrokerActor(Actor):
         self._sweep_expired()
 
         connack_props = self._connack_properties()
+        limit = connect.properties.get('maximum_packet_size')
         ack: Send | None = None
         if not client_id:
             client_id = self._allocate_client_id()
@@ -541,20 +558,8 @@ class BrokerActor(Actor):
             ack = Send(packet=MQTTConnack(
                 session_present=False, reason_code=ReasonCode.SUCCESS,
                 properties=connack_props))
-            limit = connect.properties.get('maximum_packet_size')
-            if limit is not None:
-                ack._encoded = encode_packet(ack.packet)
-                if len(ack._encoded) > limit:
-                    # [MQTT-3.14.0-1] — DISCONNECT only ever follows CONNACK.
-                    reject = Send(packet=MQTTConnack(
-                        session_present=False,
-                        reason_code=ReasonCode.PACKET_TOO_LARGE))
-                    reject._encoded = encode_packet(reject.packet)
-                    if len(reject._encoded) <= limit:
-                        await conn.send(reject)
-                    await conn.send(Close(
-                        reason_code=ReasonCode.PACKET_TOO_LARGE))
-                    return
+            if await self._over_limit(conn, ack, limit):
+                return
 
         # The *total* column.  Checked before any registration below, so a
         # refusal leaves no half-attached client behind — and only for a
@@ -569,10 +574,7 @@ class BrokerActor(Actor):
                         limit=self._max_sessions,
                         scope_path=client_id,
                         protocol='mqtt')
-            await conn.send(Send(packet=MQTTConnack(
-                session_present=False,
-                reason_code=ReasonCode.QUOTA_EXCEEDED)))
-            await conn.send(Close(reason_code=ReasonCode.QUOTA_EXCEEDED))
+            await self._refuse(conn, ReasonCode.QUOTA_EXCEEDED)
             return
 
         # §3.1.4-3 — a second CONNECT for a Client Identifier that is already
