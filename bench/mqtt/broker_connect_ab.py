@@ -174,7 +174,8 @@ def ci95(samples: list[float]) -> float:
 
 async def probe_limits(mods) -> tuple[int, int]:
     """Derive the limit scenarios' bounds from measured CONNACK sizes:
-    refuse one byte below the smallest success CONNACK, accept at 1024."""
+    refuse one byte below the smallest success CONNACK among the assigning
+    arms, so every limit-honouring arm refuses; accept at 1024."""
     from blackbull.mqtt.messages import (
         MQTTConnack, MQTTConnect, ReasonCode, encode_packet)
     sizes = {}
