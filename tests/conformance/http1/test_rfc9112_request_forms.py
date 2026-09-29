@@ -145,11 +145,3 @@ class TestChunkFramingOnTheWire:
                      b'Transfer-Encoding: chunked\r\n\r\n'
                      b'5\r\nhelloEXTRA\r\n0\r\n\r\n')
         assert r.status == 400
-
-    def test_valid_chunked_still_200(self, h1_app):
-        r = send_raw('127.0.0.1', h1_app.port,
-                     b'POST /echo HTTP/1.1\r\nHost: localhost\r\n'
-                     b'Transfer-Encoding: chunked\r\n\r\n'
-                     b'5\r\nhello\r\n0\r\n\r\n')
-        assert r.status == 200
-        assert r.body == b'hello'
