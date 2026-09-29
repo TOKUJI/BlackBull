@@ -555,36 +555,27 @@ def test_reuseport_still_makes_per_worker_sockets_on_a_free_port(tmp_path: Path,
 
 
 @pytest.mark.timeout(_HARD_TIMEOUT)
-def test_a_creator_held_listener_still_serves_without_reuseport(tmp_path: Path, child_env):
+@pytest.mark.parametrize('workers,reuseport,msg', [
+    pytest.param(2, 0, 'the shared adopted socket is not served',
+                 id='creator-held-no-reuseport'),
+    pytest.param(1, 1, 'the single worker does not serve the adopted socket',
+                 id='one-worker-adopted'),
+])
+def test_a_creator_held_listener_still_serves_without_reuseport(
+        tmp_path: Path, child_env, workers, reuseport, msg):
     """``BB_SOCKET_REUSEPORT=0`` shares the held socket instead of re-binding
-    it — the way out the refusal names."""
+    it — the way out the refusal names; ``workers=1`` adopts the fd as-is,
+    with no re-bind to attempt."""
     creator = _tcp_listener()
     port = creator.getsockname()[1]
     adopted = os.dup(creator.fileno())
-    server = Server(tmp_path, workers=2, reuseport=0, inherited_fd=adopted, child_env=child_env)
+    server = Server(tmp_path, workers=workers, reuseport=reuseport,
+                    inherited_fd=adopted, child_env=child_env)
     os.close(adopted)
     try:
         outcome = _settle(server, port)
         assert outcome.served, (
-            f'the shared adopted socket is not served: {outcome}\n'
-            f'{_diagnostics(server, port)}')
-    finally:
-        server.stop()
-        creator.close()
-
-
-@pytest.mark.timeout(_HARD_TIMEOUT)
-def test_one_worker_with_a_creator_held_listener_still_serves(tmp_path: Path, child_env):
-    """``workers=1`` adopts the fd as-is, with no re-bind to attempt."""
-    creator = _tcp_listener()
-    port = creator.getsockname()[1]
-    adopted = os.dup(creator.fileno())
-    server = Server(tmp_path, workers=1, reuseport=1, inherited_fd=adopted, child_env=child_env)
-    os.close(adopted)
-    try:
-        outcome = _settle(server, port)
-        assert outcome.served, (
-            f'the single worker does not serve the adopted socket: {outcome}\n'
+            f'{msg}: {outcome}\n'
             f'{_diagnostics(server, port)}')
     finally:
         server.stop()
