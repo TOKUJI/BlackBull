@@ -320,12 +320,7 @@ def _msg(payload=b'', qos=0, topic='a'):
 
 
 class TestApplicationMessageDiscard:
-    """§3.1.2-25 — a message the peer's limit excludes never happens.
-
-    The decision is the *current* connection's declaration
-    (§3.1.2.11.4; §4.1's session-state list omits it), so queued
-    messages are re-judged against whoever receives the re-drive.
-    """
+    """A message over the peer's limit is discarded and its flow completed."""
 
     async def test_an_oversized_qos0_message_never_reaches_the_wire(self):
         broker = BrokerActor()
@@ -442,12 +437,7 @@ class TestApplicationMessageDiscard:
         assert _pubs(conn) == []
 
     async def test_a_shared_subscription_skips_a_member_that_cannot_receive(self):
-        """§3.1.2.11.4 — "In the case of a Shared Subscription where the
-        message is too large to send to one or more of the Clients but other
-        Clients can receive it, the Server can choose either discard the
-        message without sending the message to any of the Clients, or to send
-        the message to one of the Clients that can receive it."  BlackBull
-        sends it to one that can receive it."""
+        """Delivers to a member that can receive it."""
         broker = BrokerActor()
         small, _ = await _subscriber(
             broker, 'probe-connect', limit=_size(_msg(payload=b'ok', qos=0)),
