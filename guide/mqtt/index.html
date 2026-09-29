@@ -5786,7 +5786,14 @@ Server-only packet types received from the client also end admission instead
 of being skipped; a non-CONNECT first command cannot establish a connection.
 Reconnecting requires a <strong>new</strong> network connection, which can resume an existing
 session. Session takeover invalidates the old actor, so its delayed commands
-cannot publish or alter the replacement session, even while its writer flushes.
+cannot publish or alter the replacement session, even while its writer
+flushes. A zero-length Client Identifier never takes part in that: the
+broker assigns an unused identifier and reports it in CONNACK. Every
+CONNACK honours the peer's Maximum Packet Size: the full reply, then one
+trimmed of the broker's advertised limits (an assigned identifier is not
+optional), and only when neither fits is the connection refused with <code>0x95</code>
+— or closed outright when even that reply cannot fit — before creating a
+session.
 Broker-initiated protocol-error closure retires admission before processing the
 next command. Client DISCONNECT and transport failures use the FIFO <code>Detach</code>
 boundary: commands ordered before it were admitted while the connection was
@@ -5850,6 +5857,10 @@ conformance matrix:</p>
 <tr>
 <td>Session takeover</td>
 <td>a second CONNECT for a live Client Identifier disconnects the prior connection with <code>0x8E</code> (§3.1.4)</td>
+</tr>
+<tr>
+<td>Client Identifier</td>
+<td>a zero-length Client Identifier is assigned an identifier no live or offline session holds, returned in CONNACK as <code>Assigned Client Identifier</code> (§3.2.2.3.7)</td>
 </tr>
 <tr>
 <td>Properties</td>
