@@ -271,16 +271,16 @@ def test_cookie_header_value_contains_name_and_value():
     assert b'session_id=xyz' in v
 
 
-def test_cookie_header_httponly_by_default():
-    assert b'HttpOnly' in cookie_header('sid', 'abc')[1]
+@pytest.mark.parametrize('needle', [
+    pytest.param(b'HttpOnly', id='httponly-by-default'),
+    pytest.param(b'Path=/', id='path-attribute'),
+])
+def test_cookie_header_httponly_by_default(needle):
+    assert needle in cookie_header('sid', 'abc')[1]
 
 
 def test_cookie_header_no_httponly():
     assert b'HttpOnly' not in cookie_header('sid', 'abc', http_only=False)[1]
-
-
-def test_cookie_header_path():
-    assert b'Path=/' in cookie_header('sid', 'abc')[1]
 
 
 # ---------------------------------------------------------------------------
