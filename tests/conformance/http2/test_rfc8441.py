@@ -213,9 +213,9 @@ class TestExtendedConnectHandshake:
 
         async def app(conn, receive, send):
             captured[attr] = getattr(conn, attr)
-            await receive()
+            await receive()          # websocket.connect
             await send({'type': 'websocket.accept'})
-            await receive()
+            await receive()          # websocket.disconnect (from EOF)
 
         await self._run_with_app(app)
         assert captured[attr] == expected

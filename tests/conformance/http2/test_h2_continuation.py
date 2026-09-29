@@ -55,7 +55,8 @@ def _make_h2_frame(type_byte: FrameTypes, flags: FrameFlags | int,
 # ---------------------------------------------------------------------------
 
 class TestHeadersFrameFlags:
-    """HEADERS frame must correctly expose the END_HEADERS flag."""
+    """END_STREAM is an independent HEADERS flag (the END_HEADERS
+    exposure cases live in TestContinuationFrameParsing)."""
 
     def test_end_stream_flag_independent_of_end_headers(self):
         """END_STREAM (0x01) and END_HEADERS (0x04) are independent bits."""
@@ -121,7 +122,7 @@ class TestContinuationFrameParsing:
                      'stream_id', 3, id='continuation-carries-stream-id'),
     ])
     def test_intermediate_continuation_frame_has_end_headers_zero(self, frame_type, flags, stream_id, attr, expected):
-        """CONTINUATION/HEADERS frame fields are encoded correctly."""
+        """CONTINUATION/HEADERS frame fields are decoded correctly."""
         factory = FrameFactory()
         raw = _make_h2_frame(frame_type, flags, stream_id, b'')
         frame = factory.load(raw)
