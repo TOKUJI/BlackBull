@@ -79,6 +79,3 @@ def test_custom_response_header(client):
     r = client.get('/custom-header')
     assert r.status_code == 200
     assert r.headers.get('x-request-id') == 'abc123'
-
-
-
