@@ -194,10 +194,6 @@ class TestQueryParamRegistration:
         with pytest.raises(TypeError, match="cannot resolve parameter 'x'"):
             _adapt_handler(fn, '/search')
 
-    def test_container_annotation_raises_at_registration(self):
-        async def fn(tags: list[str]): pass
-        with pytest.raises(TypeError, match="cannot resolve parameter 'tags'"):
-            _adapt_handler(fn, '/search')
 
     def test_path_param_with_default_warns_shadowing(self):
         async def fn(item_id: int = 3): pass

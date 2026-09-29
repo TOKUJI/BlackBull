@@ -33,8 +33,6 @@ class TestCodec:
         buf = encode_message(b'one') + encode_message(b'two') + encode_message(b'')
         assert decode_messages(buf) == [(False, b'one'), (False, b'two'), (False, b'')]
 
-    def test_empty_buffer_yields_no_messages(self):
-        assert decode_messages(b'') == []
 
     def test_compressed_flag_reported(self):
         assert decode_messages(encode_message(b'x', compressed=True)) == [(True, b'x')]

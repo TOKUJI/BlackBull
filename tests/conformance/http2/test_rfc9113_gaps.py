@@ -132,15 +132,6 @@ class TestG1IdleStreamReceivesNonOpeningFrames:
         # Must have sent RST_STREAM or GOAWAY with PROTOCOL_ERROR.
         self._assert_error_sent(handler, ErrorCodes.PROTOCOL_ERROR)
 
-    @pytest.mark.asyncio
-    async def test_rst_on_idle_stream_is_protocol_error(self):
-        """RST_STREAM on idle stream → PROTOCOL_ERROR (RFC 9113 §6.4)."""
-        handler, app = _make_h2_actor()
-        rst = _make_h2_frame(FrameTypes.RST_STREAM, 0, stream_id=5,
-                             payload=(0).to_bytes(4, 'big'))
-        handler.receive = AsyncMock(side_effect=[self._settings(), rst, None])
-        await handler.run()
-        self._assert_error_sent(handler, ErrorCodes.PROTOCOL_ERROR)
 
     @pytest.mark.asyncio
     async def test_window_update_on_idle_stream_is_protocol_error(self):

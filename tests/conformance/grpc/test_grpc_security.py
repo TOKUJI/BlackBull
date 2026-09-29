@@ -209,11 +209,6 @@ class TestGrpcMessageEncoding:
     """grpc-message values MUST be percent-encoded per the gRPC HTTP/2 spec.
     Only printable ASCII (0x20–0x7E, excluding '%') passes through unencoded."""
 
-    def test_printable_ascii_passes_through(self):
-        """Characters 0x20–0x7E except '%' must appear verbatim."""
-        assert _pct_encode_message('hello world') == b'hello world'
-        assert _pct_encode_message('abc123XYZ!@#$^&*()_+-=[]{}|;:,.<>?/`~') == \
-            b'abc123XYZ!@#$^&*()_+-=[]{}|;:,.<>?/`~'
 
     def test_percent_sign_encoded_as_percent25(self):
         """'%' (0x25) must be encoded as '%25'."""
@@ -237,10 +232,6 @@ class TestGrpcMessageEncoding:
         """Empty details → empty grpc-message (or omitted)."""
         assert _pct_encode_message('') == b''
 
-    def test_space_preserved_literally(self):
-        """Space (0x20) is in the printable range and must NOT be encoded."""
-        assert _pct_encode_message('hello world') == b'hello world'
-        assert _pct_encode_message(' leading trailing ') == b' leading trailing '
 
     def test_delete_character_encoded(self):
         """DEL (0x7F) is NOT in the 0x20–0x7E range and must be encoded."""

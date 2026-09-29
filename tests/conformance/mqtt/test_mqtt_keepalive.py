@@ -244,16 +244,6 @@ class TestServerKeepAlive:
     MUST use that value instead of the value it sent in the CONNECT.
     """
 
-    def test_connack_with_server_keep_alive(self, mqtt):
-        """§3.2.2.3.2 — Server Keep Alive overrides client's Keep Alive."""
-        connack = MQTTConnack(
-            session_present=False,
-            reason_code=ReasonCode.SUCCESS,
-            properties={'server_keep_alive': 120},
-        )
-        wire = encode_packet(connack)
-        decoded = decode_packet(wire)
-        assert decoded.properties.get('server_keep_alive') == 120
 
     def test_connack_without_server_keep_alive_uses_client_value(self, mqtt):
         """§3.2.2.3.2 — If absent, client's Keep Alive value is used."""

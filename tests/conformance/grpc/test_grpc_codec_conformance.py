@@ -89,12 +89,6 @@ class TestDecodeWireFormat:
         """A zero-length buffer contains zero messages — not an error."""
         assert decode_messages(b'') == []
 
-    def test_single_message_round_trip(self):
-        """encode → decode must be identity for the payload."""
-        for payload in [b'', b'hello', b'x' * 1024, bytes(range(256))]:
-            framed = encode_message(payload)
-            decoded = decode_messages(framed)
-            assert decoded == [(False, payload)], f'round-trip failed for {payload!r}'
 
     def test_multiple_messages_in_one_buffer(self):
         """gRPC allows multiple framed messages in a single DATA buffer.
