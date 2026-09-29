@@ -531,23 +531,12 @@ class BrokerActor(Actor):
 
         client_id = connect.client_id
 
-        # Collect what has already expired before deciding anything about
-        # this CONNECT: whether the session resumes, whether the table is
-        # full, and which identifiers are free must all be answered against
-        # live state only.
         self._sweep_expired()
 
         connack_props = self._connack_properties()
         ack: Send | None = None
         if not client_id:
-            # §3.2.2.3.7 [MQTT-3.2.2-16] — the client must see what it was
-            # assigned, in a CONNACK the peer can receive: nothing larger
-            # than its Maximum Packet Size may be sent (§3.1.2.11.3), so
-            # the reply is measured before anything is registered and the
-            # CONNECT refused if it cannot fit — no nameless or unusable
-            # session may outlive the refusal.  A fresh allocation never
-            # resumes a session, so ``session_present`` is False in every
-            # outcome below and the encoded bytes stay valid until sent.
+            # §3.2.2.3.7 [MQTT-3.2.2-16] — the client must see its assigned id.
             client_id = self._allocate_client_id()
             connack_props['assigned_client_identifier'] = client_id
             ack = Send(packet=MQTTConnack(
@@ -557,11 +546,7 @@ class BrokerActor(Actor):
             if limit is not None:
                 ack._encoded = encode_packet(ack.packet)
                 if len(ack._encoded) > limit:
-                    # [MQTT-3.14.0-1] — DISCONNECT only ever follows a
-                    # CONNACK, so the refusal is a CONNACK with an error
-                    # code (§3.2.2.3).  When even that cannot fit the
-                    # declared limit, close without one rather than send
-                    # what the peer cannot receive.
+                    # [MQTT-3.14.0-1] — DISCONNECT only ever follows CONNACK.
                     reject = Send(packet=MQTTConnack(
                         session_present=False,
                         reason_code=ReasonCode.PACKET_TOO_LARGE))
@@ -973,13 +958,7 @@ class BrokerActor(Actor):
                                 retain=(rap and publish.retain))
 
     def _allocate_client_id(self) -> str:
-        """§3.2.2.3.7 [MQTT-3.2.2-16] — a Client Identifier no session holds.
-
-        Live and offline sessions both reserve their names, so an
-        identifier that merely looks allocated — ``auto-1`` and friends —
-        is skipped, never taken over.  The counter only orders candidates;
-        the tables decide.
-        """
+        """§3.2.2.3.7 [MQTT-3.2.2-16] — an identifier no session holds."""
         while True:
             self._auto_seq += 1
             candidate = f'auto-{self._auto_seq}'

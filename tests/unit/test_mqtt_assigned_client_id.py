@@ -1,12 +1,4 @@
-"""§3.2.2.3.7 [MQTT-3.2.2-16] — zero-length Client Identifier.
-
-A server that accepts a zero-byte Client Identifier assigns one the client
-can see (Assigned Client Identifier in the success CONNACK) and later
-reconnect with.  Assignment is not a takeover: an identifier handed out
-this way must not collide with — and must never retire — a live or offline
-session that already holds that name, including names that merely look
-like the server's own.
-"""
+"""§3.2.2.3.7 [MQTT-3.2.2-16] — zero-length Client Identifier assignment."""
 
 from __future__ import annotations
 
@@ -58,8 +50,6 @@ def _assigned(connack):
 
 
 def _success_size(connack):
-    """The wire size of the CONNACK this broker would send for these
-    properties — the number the peer's Maximum Packet Size is compared to."""
     return len(encode_packet(MQTTConnack(
         session_present=False, reason_code=ReasonCode.SUCCESS,
         properties=dict(connack.properties or {}))))
@@ -94,7 +84,7 @@ class TestAssignedIdentifier:
         broker, first = BrokerActor(), RecordingConn()
         await _attach(broker, first, client_id='auto-1', clean_start=False,
                       properties={'session_expiry_interval': 3600})
-        await _detach(broker, first)          # connection gone; session stays
+        await _detach(broker, first)
         fresh = RecordingConn()
         await _attach(broker, fresh)
         assigned = _assigned(fresh.packets()[0])
@@ -109,7 +99,6 @@ class TestAssignedIdentifier:
         assert first and second and first != second
 
     async def test_two_queued_empty_id_connects_both_get_identifiers(self):
-        """Both CONNECTs sit in the inbox before either is processed."""
         broker = BrokerActor()
         a, b = RecordingConn(), RecordingConn()
         await broker.send(Attach(connect=_connect(), sender=a))
@@ -140,7 +129,7 @@ class TestAssignedIdentifier:
         await _attach(broker, conn,
                       properties={'session_expiry_interval': 3600})
         assigned = _assigned(conn.packets()[0])
-        await _detach(broker, conn)          # connection drops; session stays
+        await _detach(broker, conn)
         again = RecordingConn()
         await _attach(broker, again, client_id=assigned, clean_start=False)
         assert again.packets()[0].session_present is True
@@ -160,7 +149,7 @@ class TestAssignedIdentifier:
         await _attach(broker, conn,
                       properties={'session_expiry_interval': 3600})
         assigned = _assigned(conn.packets()[0])
-        await _detach(broker, conn)          # session survives with its state
+        await _detach(broker, conn)
         again = RecordingConn()
         await _attach(broker, again, client_id=assigned, clean_start=True)
         assert again.packets()[0].session_present is False
@@ -205,14 +194,17 @@ class TestQuotaAndPeerLimits:
         broker, conn = BrokerActor(), RecordingConn()
         await _attach(broker, conn, will_topic='w',
                       properties={'maximum_packet_size': size - 1})
-        # §3.14 [MQTT-3.14.0-1] — DISCONNECT only ever follows a CONNACK,
-        # so the refusal is a CONNACK carrying an error code.
+        # §3.14 [MQTT-3.14.0-1] — DISCONNECT only ever follows a CONNACK.
         ack = conn.packets()[0]
         assert isinstance(ack, MQTTConnack)
         assert ack.reason_code == ReasonCode.PACKET_TOO_LARGE
         assert not any(isinstance(p, MQTTDisconnect) for p in conn.packets())
         assert any(isinstance(m, Close) for m in conn.outbox)
-        await _detach(broker, conn)          # teardown must find nothing
+        assert broker._sessions == {}
+        assert broker._clients == {}
+        assert broker._client_by_conn == {}
+        assert broker._wills == {}
+        await _detach(broker, conn)
         assert broker._sessions == {}
         assert broker._clients == {}
         assert broker._client_by_conn == {}
@@ -239,8 +231,6 @@ class TestQuotaAndPeerLimits:
         conn = RecordingConn()
         await _attach(broker, conn,
                       properties={'maximum_packet_size': size - 1})
-        # The success CONNACK can never reach this peer, so the packet
-        # limit answers the CONNECT before the quota has a say.
         ack = conn.packets()[0]
         assert isinstance(ack, MQTTConnack)
         assert ack.reason_code == ReasonCode.PACKET_TOO_LARGE
