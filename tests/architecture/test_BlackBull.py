@@ -276,33 +276,24 @@ def _make_lifespan_receive(*event_types):
 
 
 @pytest.mark.asyncio
-async def test_on_startup_hook_called_at_lifespan_startup():
+@pytest.mark.parametrize('phase,expected', [
+    pytest.param('startup', ['startup'], id='on-startup-hook'),
+    pytest.param('shutdown', ['shutdown'], id='on-shutdown-hook'),
+])
+async def test_on_startup_hook_called_at_lifespan_startup(phase, expected):
     app_ = BlackBull()
     called = []
 
-    @app_.on_startup
+    register = app_.on_startup if phase == 'startup' else app_.on_shutdown
+
+    @register
     async def hook():
-        called.append('startup')
+        called.append(phase)
 
     async def noop_send(_): pass
     receive = _make_lifespan_receive('lifespan.startup', 'lifespan.shutdown')
     await app_({'type': 'lifespan'}, receive, noop_send)
-    assert called == ['startup']
-
-
-@pytest.mark.asyncio
-async def test_on_shutdown_hook_called_at_lifespan_shutdown():
-    app_ = BlackBull()
-    called = []
-
-    @app_.on_shutdown
-    async def hook():
-        called.append('shutdown')
-
-    async def noop_send2(_): pass
-    receive = _make_lifespan_receive('lifespan.startup', 'lifespan.shutdown')
-    await app_({'type': 'lifespan'}, receive, noop_send2)
-    assert called == ['shutdown']
+    assert called == expected
 
 
 @pytest.mark.asyncio

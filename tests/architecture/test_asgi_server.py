@@ -99,20 +99,18 @@ class TestASGIServerInit:
 class TestMakeSSLContext:
     """make_ssl_context() must silently defer (not raise) when called with incomplete state."""
 
-    def test_defers_when_only_certfile_set(self, cert_path, manage_cert_and_key):
-        """Bug 1 regression: setting certfile alone must not crash."""
+    @pytest.mark.parametrize('attr,path_fixture', [
+        pytest.param('_certfile', 'cert_path', id='only-certfile-set'),
+        pytest.param('_keyfile', 'key_path', id='only-keyfile-set'),
+    ])
+    def test_defers_when_only_certfile_set(self, attr, path_fixture, request, manage_cert_and_key):
+        """Bug 1 regression: setting certfile or keyfile alone must not crash."""
+        path = request.getfixturevalue(path_fixture)
         server = ASGIServer(_noop_app)
-        # Directly set certfile without keyfile – should not raise
-        server._certfile = cert_path
+        # Directly set one half without the other – should not raise
+        setattr(server, attr, path)
         server.make_ssl_context()           # must return None silently
         assert server.ssl_context is None   # not yet ready
-
-    def test_defers_when_only_keyfile_set(self, key_path, manage_cert_and_key):
-        """Bug 1 regression: setting keyfile alone must not crash."""
-        server = ASGIServer(_noop_app)
-        server._keyfile = key_path
-        server.make_ssl_context()
-        assert server.ssl_context is None
 
     def test_builds_context_when_both_set(self, cert_path, key_path, manage_cert_and_key):
         """Once both files are present make_ssl_context() must produce a context."""
