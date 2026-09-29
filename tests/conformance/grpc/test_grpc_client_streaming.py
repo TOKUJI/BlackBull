@@ -77,8 +77,6 @@ def _trailers(events) -> dict:
     return dict(events[-1]['headers'])
 
 
-# --------------------------------------------------------------------------
-
 async def _request_handler(request, context) -> bytes:
     return b'x'
 
@@ -95,6 +93,7 @@ async def _bidi_handler(request_iter, context):
     yield b'x'
 
 
+# --------------------------------------------------------------------------
 # Registry — client-streaming detection
 # --------------------------------------------------------------------------
 
