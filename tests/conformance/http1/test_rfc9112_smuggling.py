@@ -22,11 +22,6 @@ from .conftest import send_raw
 
 
 @pytest.mark.integration
-class TestCLCL:
-    """Two Content-Length headers; safe receiver MUST reject."""
-
-
-@pytest.mark.integration
 class TestCLTE:
     """Content-Length + Transfer-Encoding present — RFC 9112 §6.1.
 

@@ -65,12 +65,6 @@ class TestMethodCase:
 
 
 @pytest.mark.integration
-class TestUnknownExtensionMethod:
-    """RFC 9110 §9.1 — method-tokens are extensible; a server MAY refuse
-    methods it doesn't recognise with 501 Not Implemented."""
-
-
-@pytest.mark.integration
 class TestPostWithoutBody:
     """A POST with Content-Length: 0 is legal."""
 
