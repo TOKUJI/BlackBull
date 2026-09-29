@@ -101,9 +101,13 @@ class TestParse:
     def test_asgi_version_is_set(self):
         assert _get_scope(_http_request()).get('asgi', {}).get('version') == '3.0'
 
-    def test_server_host_and_port_are_parsed(self):
-        scope = _get_scope(_http_request(headers={'Host': 'localhost:9000'}))
-        assert scope['server'] == ['localhost', 9000]
+    @pytest.mark.parametrize('host,expected', [
+        pytest.param('localhost:9000', ['localhost', 9000], id='host-and-port'),
+        pytest.param('[2001:db8::1]', ['2001:db8::1', 80], id='ipv6-bracketed-no-port'),
+    ])
+    def test_server_host_and_port_are_parsed(self, host, expected):
+        scope = _get_scope(_http_request(headers={'Host': host}))
+        assert scope['server'] == expected
 
     def test_ipv6_bracketed_host_and_port_are_parsed(self):
         """RFC 3986 §3.2.2 — ``[::1]:8100`` must not crash Host parsing.
@@ -114,10 +118,6 @@ class TestParse:
         """
         scope = _get_scope(_http_request(headers={'Host': '[::1]:8100'}))
         assert scope['server'] == ['::1', 8100]
-
-    def test_ipv6_bracketed_host_without_port(self):
-        scope = _get_scope(_http_request(headers={'Host': '[2001:db8::1]'}))
-        assert scope['server'] == ['2001:db8::1', 80]
 
     def test_websocket_upgrade_sets_type_websocket(self):
         scope = _get_scope(_ws_request_dispatch())
@@ -182,12 +182,18 @@ class TestParse:
     # behaviour so future refactors cannot silently drift.
     # ------------------------------------------------------------------
 
-    def test_path_strips_fragment(self):
-        """RFC 7230 §5.3 — fragment must not appear in request-target;
-        it is silently stripped."""
-        scope = _get_scope(_http_request(path='/api#frag'))
-        assert scope['path'] == '/api'
-        assert scope['query_string'] == b''
+    @pytest.mark.parametrize('path,expected_path,expected_qs', [
+        pytest.param('/api#frag', '/api', b'', id='strips-fragment'),
+        pytest.param('/api?x=1?y=2', '/api', b'x=1?y=2', id='multiple-question-marks'),
+        pytest.param('?onlyq', '', b'onlyq', id='only-query-string'),
+    ])
+    def test_path_strips_fragment(self, path, expected_path, expected_qs):
+        """RFC 7230 §5.3 — the fragment is silently stripped; per RFC 3986
+        the first ? terminates the path and later ? characters stay in the
+        query; a bare ?query request-target has an empty path."""
+        scope = _get_scope(_http_request(path=path))
+        assert scope['path'] == expected_path
+        assert scope['query_string'] == expected_qs
 
     def test_path_keeps_semicolon_params(self):
         """';' is an RFC 3986 path sub-delimiter, not a params
@@ -211,19 +217,6 @@ class TestParse:
         scope = _get_scope(_http_request(path='/cart;sid=abc?x=1#frag'))
         assert scope['path'] == '/cart;sid=abc'
         assert scope['query_string'] == b'x=1'
-
-    def test_multiple_question_marks_kept_in_query(self):
-        """Per RFC 3986 the first ? terminates the path; subsequent
-        ? characters are part of the query."""
-        scope = _get_scope(_http_request(path='/api?x=1?y=2'))
-        assert scope['path'] == '/api'
-        assert scope['query_string'] == b'x=1?y=2'
-
-    def test_only_query_string(self):
-        """Edge case: request-target is just ?query (no leading path)."""
-        scope = _get_scope(_http_request(path='?onlyq'))
-        assert scope['path'] == ''
-        assert scope['query_string'] == b'onlyq'
 
     def test_trailing_question_mark_yields_empty_query(self):
         scope = _get_scope(_http_request(path='/empty?'))
@@ -419,10 +412,14 @@ class TestParseHeadersNoneContract:
         assert _real_parse_headers(frame) is None
         assert frame.malformed
 
-    def test_empty_authority_returns_none(self):
+    @pytest.mark.parametrize('extra', [
+        pytest.param((b':authority', b''), id='empty-authority'),
+        pytest.param((b'host', b'ex\xffample.com'), id='non-ascii-host'),
+    ])
+    def test_empty_authority_returns_none(self, extra):
         frame = self._headers_frame([
             (b':method', b'GET'), (b':path', b'/'), (b':scheme', b'https'),
-            (b':authority', b''),
+            extra,
         ])
         assert _real_parse_headers(frame) is None
         assert frame.malformed
@@ -436,14 +433,6 @@ class TestParseHeadersNoneContract:
         frame = self._headers_frame([
             (b':method', b'GET'), (b':path', b'/'), (b':scheme', b'https'),
             (b':authority', '\u4f8b\u3048.jp'),
-        ])
-        assert _real_parse_headers(frame) is None
-        assert frame.malformed
-
-    def test_non_ascii_host_returns_none(self):
-        frame = self._headers_frame([
-            (b':method', b'GET'), (b':path', b'/'), (b':scheme', b'https'),
-            (b'host', b'ex\xffample.com'),
         ])
         assert _real_parse_headers(frame) is None
         assert frame.malformed
@@ -464,45 +453,44 @@ class TestParseHeadersNoneContract:
         assert 'UTF-8' in (frame.malformed_reason or '')
         assert _real_parse_headers(frame) is None
 
-    @pytest.mark.parametrize('value', [
-        b'example.com', b'example.com:8443', b'[::1]:8100',
-        b'exam\x01ple.com', b'exam\x7fple.com', b'exam ple.com',
-        b'user@example.com', '\u4f8b\u3048.jp'.encode('utf-8'),
+    @pytest.mark.parametrize('which,value', [
+        pytest.param('authority', b'example.com', id='authority-verdict-example'),
+        pytest.param('authority', b'example.com:8443', id='authority-verdict-port'),
+        pytest.param('authority', b'[::1]:8100', id='authority-verdict-ipv6'),
+        pytest.param('authority', b'exam\x01ple.com', id='authority-verdict-ctl-x01'),
+        pytest.param('authority', b'exam\x7fple.com', id='authority-verdict-ctl-x7f'),
+        pytest.param('authority', b'exam ple.com', id='authority-verdict-space'),
+        pytest.param('authority', b'user@example.com', id='authority-verdict-userinfo'),
+        pytest.param('authority', '\u4f8b\u3048.jp'.encode('utf-8'), id='authority-verdict-non-ascii'),
+        pytest.param('path', b'/', id='path-verdict-root'),
+        pytest.param('path', b'/a/b?x=1', id='path-verdict-query'),
+        pytest.param('path', b'/%E4%BE%8B', id='path-verdict-pct-encoded'),
+        pytest.param('path', b'/a~b!$&()*+,;=:@', id='path-verdict-sub-delims'),
+        pytest.param('path', b'/a\x01b', id='path-verdict-ctl-x01'),
+        pytest.param('path', b'/a\x7fb', id='path-verdict-ctl-x7f'),
+        pytest.param('path', b'/a b', id='path-verdict-space'),
+        pytest.param('path', '/a\u00e9b'.encode('utf-8'), id='path-verdict-non-ascii'),
     ])
-    def test_authority_verdict_matches_http1(self, value):
-        """The same authority value is accepted or refused identically on both
+    def test_authority_verdict_matches_http1(self, which, value):
+        """The same octets are accepted or refused identically on both
         transports — one grammar, two header models."""
-        frame = self._headers_frame([
-            (b':method', b'GET'), (b':path', b'/'), (b':scheme', b'https'),
-            (b':authority', value),
-        ])
-        from blackbull.server.http1_actor import BadRequestError
-        actor = object.__new__(_HTTP1Actor)
-        actor._ssl = False
-        try:
-            actor._parse(b'GET / HTTP/1.1\r\nHost: ' + value + b'\r\n\r\n')
-        except BadRequestError:
-            http1_ok = False
+        if which == 'authority':
+            frame = self._headers_frame([
+                (b':method', b'GET'), (b':path', b'/'), (b':scheme', b'https'),
+                (b':authority', value),
+            ])
+            h1_request = b'GET / HTTP/1.1\r\nHost: ' + value + b'\r\n\r\n'
         else:
-            http1_ok = True
-        assert (_real_parse_headers(frame) is not None) is http1_ok
-
-    @pytest.mark.parametrize('value', [
-        b'/', b'/a/b?x=1', b'/%E4%BE%8B', b'/a~b!$&()*+,;=:@',
-        b'/a\x01b', b'/a\x7fb', b'/a b', '/a\u00e9b'.encode('utf-8'),
-    ])
-    def test_path_verdict_matches_http1(self, value):
-        """The same path octets are accepted or refused identically on both
-        transports."""
-        frame = self._headers_frame([
-            (b':method', b'GET'), (b':scheme', b'https'),
-            (b':authority', b'example.com'), (b':path', value),
-        ])
+            frame = self._headers_frame([
+                (b':method', b'GET'), (b':scheme', b'https'),
+                (b':authority', b'example.com'), (b':path', value),
+            ])
+            h1_request = b'GET ' + value + b' HTTP/1.1\r\nHost: h\r\n\r\n'
         from blackbull.server.http1_actor import BadRequestError
         actor = object.__new__(_HTTP1Actor)
         actor._ssl = False
         try:
-            actor._parse(b'GET ' + value + b' HTTP/1.1\r\nHost: h\r\n\r\n')
+            actor._parse(h1_request)
         except BadRequestError:
             http1_ok = False
         else:
@@ -679,17 +667,15 @@ class TestHTTP11DuplicateHeaders:
         keys = [k for k, _ in scope['headers']]
         assert b'accept' in keys
 
-    def test_two_set_cookie_both_in_headers(self):
-        raw = self._raw_with_duplicate('Set-Cookie', ['a=1', 'b=2'])
+    @pytest.mark.parametrize('name,values,key', [
+        pytest.param('Set-Cookie', ['a=1', 'b=2'], b'set-cookie', id='two-set-cookie'),
+        pytest.param('Accept', ['text/html', 'application/json'], b'accept', id='duplicate-accept'),
+    ])
+    def test_two_set_cookie_both_in_headers(self, name, values, key):
+        raw = self._raw_with_duplicate(name, values)
         scope = _get_scope(raw)
-        cookie_values = [v for k, v in scope['headers'] if k == b'set-cookie']
-        assert len(cookie_values) == 2
-
-    def test_duplicate_accept_both_preserved(self):
-        raw = self._raw_with_duplicate('Accept', ['text/html', 'application/json'])
-        scope = _get_scope(raw)
-        accept_values = [v for k, v in scope['headers'] if k == b'accept']
-        assert len(accept_values) == 2
+        preserved = [v for k, v in scope['headers'] if k == key]
+        assert len(preserved) == 2
 
     def test_first_value_not_overwritten(self):
         raw = self._raw_with_duplicate('X-Custom', ['first', 'second'])
@@ -781,19 +767,17 @@ class TestPseudoHeaderGrammarBeyondFieldOctets:
         return _h2_frame([(b':method', method), (b':path', b'/'),
                           (b':scheme', scheme), (b':authority', b'example.com')])
 
-    @pytest.mark.parametrize('method', ILLEGAL_METHODS)
-    def test_a_non_token_method_is_malformed(self, method):
-        frame = self._request(method=method)
+    @pytest.mark.parametrize(
+        'which,value',
+        [('method', m) for m in ILLEGAL_METHODS]
+        + [('scheme', s) for s in ILLEGAL_SCHEMES],
+        ids=[*[f'non-token-method-{m.hex()}' for m in ILLEGAL_METHODS],
+             *[f'non-scheme-scheme-{s.hex()}' for s in ILLEGAL_SCHEMES]])
+    def test_a_non_token_method_is_malformed(self, which, value):
+        frame = self._request(**{which: value})
         assert _real_parse_headers(frame) is None
         assert frame.malformed
-        assert ':method' in (frame.malformed_reason or '')
-
-    @pytest.mark.parametrize('scheme', ILLEGAL_SCHEMES)
-    def test_a_non_scheme_scheme_is_malformed(self, scheme):
-        frame = self._request(scheme=scheme)
-        assert _real_parse_headers(frame) is None
-        assert frame.malformed
-        assert ':scheme' in (frame.malformed_reason or '')
+        assert f':{which}' in (frame.malformed_reason or '')
 
     @pytest.mark.parametrize('method', LEGAL_METHODS)
     def test_a_token_method_is_accepted(self, method):

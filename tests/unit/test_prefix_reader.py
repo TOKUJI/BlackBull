@@ -58,23 +58,14 @@ async def test_read_drains_prefix_then_underlying():
     assert await pr.read(10) == b''
 
 
-async def test_readexactly_within_prefix():
-    pr = PrefixReader(b'HELLO', _Under(b'WORLD'))
-    assert await pr.readexactly(3) == b'HEL'
-    assert await pr.readexactly(2) == b'LO'
-
-
-async def test_readexactly_spans_boundary():
-    pr = PrefixReader(b'AB', _Under(b'CDEF'))
-    assert await pr.readexactly(4) == b'ABCD'   # 2 from prefix + 2 native
-    assert await pr.readexactly(2) == b'EF'
-
-
-async def test_readuntil_sep_in_prefix():
-    pr = PrefixReader(b'one\r\ntwo', _Under(b'three\r\n'))
-    assert await pr.readuntil(b'\r\n') == b'one\r\n'
-    # leftover prefix 'two' + underlying serve the next line
-    assert await pr.readuntil(b'\r\n') == b'twothree\r\n'
+@pytest.mark.parametrize('prefix,under,n1,r1,n2,r2', [
+    pytest.param(b'HELLO', b'WORLD', 3, b'HEL', 2, b'LO', id='within-prefix'),
+    pytest.param(b'AB', b'CDEF', 4, b'ABCD', 2, b'EF', id='spans-boundary'),
+])
+async def test_readexactly_within_prefix(prefix, under, n1, r1, n2, r2):
+    pr = PrefixReader(prefix, _Under(under))
+    assert await pr.readexactly(n1) == r1
+    assert await pr.readexactly(n2) == r2
 
 
 async def test_readuntil_sep_in_underlying():
@@ -83,13 +74,18 @@ async def test_readuntil_sep_in_underlying():
     assert await pr.read(4) == b'rest'
 
 
-async def test_readuntil_sep_straddles_boundary():
-    # Prefix ends with the first separator byte; the second is the first
-    # underlying byte — the separator straddles the seam.
-    pr = PrefixReader(b'GET / HTTP/1.1\r', _Under(b'\nHost: x\r\n'))
-    assert await pr.readuntil(b'\r\n') == b'GET / HTTP/1.1\r\n'
+@pytest.mark.parametrize('prefix,under,r1,r2', [
+    pytest.param(b'one\r\ntwo', b'three\r\n', b'one\r\n', b'twothree\r\n',
+                 id='sep-in-prefix'),
+    pytest.param(b'GET / HTTP/1.1\r', b'\nHost: x\r\n',
+                 b'GET / HTTP/1.1\r\n', b'Host: x\r\n',
+                 id='sep-straddles-boundary'),
+])
+async def test_readuntil_sep_straddles_boundary(prefix, under, r1, r2):
+    pr = PrefixReader(prefix, _Under(under))
+    assert await pr.readuntil(b'\r\n') == r1
     # the over-read underlying bytes were pushed back, not lost
-    assert await pr.readuntil(b'\r\n') == b'Host: x\r\n'
+    assert await pr.readuntil(b'\r\n') == r2
 
 
 async def test_limited_readuntil_handles_separator_at_boundary():
