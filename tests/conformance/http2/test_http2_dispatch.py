@@ -888,19 +888,16 @@ class TestHTTP2StreamStateMachine:
         stream = Stream(stream_id=1, parent=None)
         assert stream.state == StreamState.IDLE
 
-    async def test_headers_received_opens_stream(self):
+    @pytest.mark.parametrize('end_stream,expected', [
+        pytest.param(False, 'OPEN', id='headers-opens-stream'),
+        pytest.param(True, 'HALF_CLOSED_REMOTE', id='end-stream-half-closes'),
+    ])
+    async def test_headers_received_opens_stream(self, end_stream, expected):
         StreamState = self._import_state()
         from blackbull.protocol.stream import Stream
         stream = Stream(stream_id=1, parent=None)
-        stream.on_headers_received(end_stream=False)
-        assert stream.state == StreamState.OPEN
-
-    async def test_headers_with_end_stream_half_closes(self):
-        StreamState = self._import_state()
-        from blackbull.protocol.stream import Stream
-        stream = Stream(stream_id=1, parent=None)
-        stream.on_headers_received(end_stream=True)
-        assert stream.state == StreamState.HALF_CLOSED_REMOTE
+        stream.on_headers_received(end_stream=end_stream)
+        assert stream.state == getattr(StreamState, expected)
 
     async def test_data_end_stream_half_closes_remote(self):
         """RFC 9113 §5.1 — the peer's END_STREAM closes only *their* half.
@@ -1047,47 +1044,46 @@ class TestHTTP2PriorityScope:
                    + priority_field.encode())
         return _make_h2_frame(FrameTypes.PRIORITY_UPDATE, 0, 0, payload)
 
-    async def test_parse_priority_field_default(self):
+    @pytest.mark.parametrize('field,expected', [
+        pytest.param('', {'urgency': 3, 'incremental': False}, id='default'),
+        pytest.param('u=5', {'urgency': 5, 'incremental': False}, id='urgency'),
+        pytest.param('u=2, i', {'urgency': 2, 'incremental': True},
+                     id='urgency-and-incremental'),
+        pytest.param('x=5, u=1', {'urgency': 1, 'incremental': False},
+                     id='unknown-members-ignored'),
+    ])
+    async def test_parse_priority_field_default(self, field, expected):
+        """RFC 9218 priority field parsing: defaults, urgency, incremental,
+        unknown members ignored."""
         from blackbull.protocol.frame_types import parse_priority_field
-        assert parse_priority_field('') == {'urgency': 3, 'incremental': False}
+        assert parse_priority_field(field) == expected
 
-    async def test_parse_priority_field_urgency(self):
-        from blackbull.protocol.frame_types import parse_priority_field
-        assert parse_priority_field('u=5') == {'urgency': 5, 'incremental': False}
-
-    async def test_parse_priority_field_urgency_and_incremental(self):
-        from blackbull.protocol.frame_types import parse_priority_field
-        assert parse_priority_field('u=2, i') == {'urgency': 2, 'incremental': True}
-
-    async def test_parse_priority_field_explicit_incremental_boolean(self):
+    @pytest.mark.parametrize('checks', [
         # RFC 9651 valueless `i` and explicit `i=?1` / `i=?0` are all valid.
-        from blackbull.protocol.frame_types import parse_priority_field
-        assert parse_priority_field('i=?1') == {'urgency': 3, 'incremental': True}
-        assert parse_priority_field('u=2, i=?0') == {'urgency': 2, 'incremental': False}
-
-    async def test_parse_priority_field_out_of_range_urgency_ignored(self):
+        pytest.param([('i=?1', {'urgency': 3, 'incremental': True}),
+                      ('u=2, i=?0', {'urgency': 2, 'incremental': False})],
+                     id='explicit-incremental-boolean'),
         # RFC 9218 §4 — out-of-range values MUST be ignored (not clamped):
         # the default urgency 3 applies.
-        from blackbull.protocol.frame_types import parse_priority_field
-        assert parse_priority_field('u=9') == {'urgency': 3, 'incremental': False}
-        assert parse_priority_field('u=-1') == {'urgency': 3, 'incremental': False}
-
-    async def test_parse_priority_field_mistyped_members_ignored(self):
+        pytest.param([('u=9', {'urgency': 3, 'incremental': False}),
+                      ('u=-1', {'urgency': 3, 'incremental': False})],
+                     id='out-of-range-urgency'),
         # RFC 9218 §4 — values of unexpected types MUST be ignored.
-        from blackbull.protocol.frame_types import parse_priority_field
-        assert parse_priority_field('u=abc, i=1') == {'urgency': 3, 'incremental': False}
-        assert parse_priority_field('u=?1') == {'urgency': 3, 'incremental': False}
-
-    async def test_parse_priority_field_unknown_members_ignored(self):
-        from blackbull.protocol.frame_types import parse_priority_field
-        assert parse_priority_field('x=5, u=1') == {'urgency': 1, 'incremental': False}
-
-    async def test_parse_priority_field_malformed_falls_back_to_defaults(self):
+        pytest.param([('u=abc, i=1', {'urgency': 3, 'incremental': False}),
+                      ('u=?1', {'urgency': 3, 'incremental': False})],
+                     id='mistyped-members'),
         # A Priority field that fails strict RFC 9651 parsing is ignored
         # entirely (RFC 9218 §5) — defaults apply.
+        pytest.param([('???', {'urgency': 3, 'incremental': False}),
+                      ('u=2, ???', {'urgency': 3, 'incremental': False})],
+                     id='malformed-fallback'),
+    ])
+    async def test_parse_priority_field_out_of_range_urgency_ignored(self, checks):
+        """parse_priority_field tolerance: explicit boolean, out-of-range,
+        mistyped and malformed members."""
         from blackbull.protocol.frame_types import parse_priority_field
-        assert parse_priority_field('???') == {'urgency': 3, 'incremental': False}
-        assert parse_priority_field('u=2, ???') == {'urgency': 3, 'incremental': False}
+        for field, expected in checks:
+            assert parse_priority_field(field) == expected
 
     async def test_scope_has_default_priority_extension(self):
         h_frame = _make_headers_frame(stream_id=1, end_stream=True)

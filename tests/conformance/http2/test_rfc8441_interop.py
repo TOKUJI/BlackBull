@@ -117,21 +117,16 @@ class TestRFC8441Handshake:
     SETTINGS advertisement is verified at the frame level in
     ``test_rfc8441.py``; this section covers end-to-end interop."""
 
-    async def test_extended_connect_returns_200(self, rfc8441_server_port):
+    @pytest.mark.parametrize('path', [
+        pytest.param('/ws', id='default-path'),
+        pytest.param('/ws-chat', id='custom-path'),
+    ])
+    async def test_extended_connect_returns_200(self, rfc8441_server_port, path):
         async with WebSocketH2Client(
             '127.0.0.1', rfc8441_server_port.port,
             ssl=_ssl_context_for_h2(),
         ) as c:
-            ws = await c.connect(path='/ws')
-            assert c.connect_status == 200
-            await ws.close()
-
-    async def test_extended_connect_custom_path(self, rfc8441_server_port):
-        async with WebSocketH2Client(
-            '127.0.0.1', rfc8441_server_port.port,
-            ssl=_ssl_context_for_h2(),
-        ) as c:
-            ws = await c.connect(path='/ws-chat')
+            ws = await c.connect(path=path)
             assert c.connect_status == 200
             await ws.close()
 
@@ -188,39 +183,25 @@ class TestRFC8441DataExchange:
                 assert echoed == msg
             await ws.close()
 
+    @pytest.mark.parametrize('size', [
+        # 8 KiB fits a single H2 DATA frame (RFC 9113 §4.2 default
+        # max_frame_size 16,384) and the §6.9.2 default 65,535-byte initial
+        # window — BINARY echo without client-side splitting or WINDOW_UPDATE.
+        pytest.param(8192, id='within-frame-limits'),
+        # 64 KiB exceeds both defaults — exercises outgoing DATA splitting
+        # via HTTP2Sender and receive-side WINDOW_UPDATE emission together.
+        pytest.param(65536, id='exceeds-h2-limits'),
+    ])
     async def test_medium_binary_frame_within_max_frame_size(
-        self, rfc8441_server_port,
+        self, rfc8441_server_port, size,
     ):
-        """An 8 KiB binary frame fits inside a single H2 DATA frame (RFC
-        9113 §4.2 default ``max_frame_size`` is 16,384) and inside the
-        RFC §6.9.2 default 65,535-byte initial window — exercises
-        BINARY echo at a non-trivial payload size without needing
-        client-side DATA-frame splitting or ``WINDOW_UPDATE``."""
+        """Binary WebSocket frames over H2 within and beyond frame limits."""
         async with WebSocketH2Client(
             '127.0.0.1', rfc8441_server_port.port,
             ssl=_ssl_context_for_h2(),
         ) as c:
             ws = await c.connect(path='/ws')
-            payload = os.urandom(8192)
-            await ws.send_bytes(payload)
-            opcode, echoed = await ws.receive(timeout=5.0)
-            assert opcode == WSOpcode.BINARY
-            assert echoed == payload
-            await ws.close()
-
-    async def test_large_binary_frame_exceeds_h2_limits(
-        self, rfc8441_server_port,
-    ):
-        """A 64 KiB payload exceeds both the H2 ``max_frame_size``
-        default (16,384) and the RFC initial window (65,535).  Exercises
-        outgoing DATA splitting via ``HTTP2Sender`` and receive-side
-        ``WINDOW_UPDATE`` emission together."""
-        async with WebSocketH2Client(
-            '127.0.0.1', rfc8441_server_port.port,
-            ssl=_ssl_context_for_h2(),
-        ) as c:
-            ws = await c.connect(path='/ws')
-            payload = os.urandom(65536)
+            payload = os.urandom(size)
             await ws.send_bytes(payload)
             opcode, echoed = await ws.receive(timeout=5.0)
             assert opcode == WSOpcode.BINARY
