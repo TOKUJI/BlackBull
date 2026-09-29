@@ -96,43 +96,34 @@ def _ctx(conn_id: str = 'test-conn'):
 class TestCleanStart:
     """§3.1.2.3 — Clean Start flag controls session lifecycle."""
 
-    def test_clean_start_true_discards_existing_session(self, mqtt):
-        """§3.1.2.3 — Clean Start = 1: server discards any prior session."""
+    @pytest.mark.parametrize('client_id,clean_start,expected', [
+        pytest.param('cs-false', False, False, id='clean-start-false-resumes'),
+        pytest.param('cs-true', True, True, id='clean-start-true-discards'),
+    ])
+    def test_clean_start_false_resumes_session(self, mqtt, client_id, clean_start, expected):
+        """§3.1.2.3 — Clean Start = 0 resumes an existing session if
+        available; Clean Start = 1 discards any prior session."""
         connect = MQTTConnect(
-            client_id='cs-true',
-            clean_start=True,
+            client_id=client_id,
+            clean_start=clean_start,
             keep_alive=60,
         )
         wire = encode_packet(connect)
         decoded = decode_packet(wire)
-        assert decoded.clean_start is True
+        assert decoded.clean_start is expected
 
-    def test_clean_start_false_resumes_session(self, mqtt):
-        """§3.1.2.3 — Clean Start = 0: resume existing session if available."""
-        connect = MQTTConnect(
-            client_id='cs-false',
-            clean_start=False,
-            keep_alive=60,
-        )
-        wire = encode_packet(connect)
-        decoded = decode_packet(wire)
-        assert decoded.clean_start is False
-
-    def test_connack_session_present_true_when_session_exists(self, mqtt):
-        """§3.2.2.3 — Session Present = True when a prior session was found."""
+    @pytest.mark.parametrize('present', [
+        pytest.param(True, id='session-present-true'),
+        pytest.param(False, id='session-present-false'),
+    ])
+    def test_connack_session_present_true_when_session_exists(self, mqtt, present):
+        """§3.2.2.3 — Session Present = True when a prior session was found;
+        False for Clean Start or no prior session."""
         connack = MQTTConnack(
-            session_present=True,
+            session_present=present,
             reason_code=ReasonCode.SUCCESS,
         )
-        assert connack.session_present is True
-
-    def test_connack_session_present_false_when_clean_start(self, mqtt):
-        """§3.2.2.3 — Session Present = False for Clean Start or no prior session."""
-        connack = MQTTConnack(
-            session_present=False,
-            reason_code=ReasonCode.SUCCESS,
-        )
-        assert connack.session_present is False
+        assert connack.session_present is present
 
 
 # ============================================================================
