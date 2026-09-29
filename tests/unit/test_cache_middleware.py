@@ -200,18 +200,14 @@ class TestCacheability:
         await _run(mw, _scope(), cn)
         assert counter['n'] == 2
 
-    async def test_cache_control_no_store_skips_storage(self):
+    @pytest.mark.parametrize('cc', [
+        pytest.param(b'no-store', id='no-store-skips'),
+        pytest.param(b'private, max-age=60', id='private-skips'),
+    ])
+    async def test_cache_control_no_store_skips_storage(self, cc):
         mw = Cache()
         cn, counter = _make_handler(
-            extra_headers=[(b'cache-control', b'no-store')])
-        await _run(mw, _scope(), cn)
-        await _run(mw, _scope(), cn)
-        assert counter['n'] == 2
-
-    async def test_cache_control_private_skips_storage(self):
-        mw = Cache()
-        cn, counter = _make_handler(
-            extra_headers=[(b'cache-control', b'private, max-age=60')])
+            extra_headers=[(b'cache-control', cc)])
         await _run(mw, _scope(), cn)
         await _run(mw, _scope(), cn)
         assert counter['n'] == 2
@@ -359,25 +355,26 @@ class TestExpiry:
 class TestExplicitFreshness:
     """The configured default must not widen a freshness the response stated."""
 
-    async def test_zero_max_age_is_stale_at_once(self):
+    @pytest.mark.parametrize('cc,t2,n', [
+        pytest.param(b'max-age=0', 1_000.5, 2, id='zero-max-age'),
+        pytest.param(b'max-age=120, s-maxage=0', 1_000.5, 2, id='zero-s-maxage-wins'),
+        pytest.param(b'max-age=abc', 1_500.0, 1, id='malformed-keeps-default'),
+        pytest.param(b'max-age=-5', 1_000.5, 2, id='negative-is-stale'),
+        pytest.param(b'max-age="0"', 1_000.5, 2, id='quoted-delta-read'),
+    ])
+    async def test_zero_max_age_is_stale_at_once(self, cc, t2, n):
+        """Freshness directive value semantics: zero is stale at once,
+        s-maxage=0 wins over a positive max-age, a malformed value keeps the
+        configured default, a negative value is stale rather than defaulted,
+        and quoted delta-seconds are read."""
         mw = Cache(max_age=600)
         cn, counter = _make_handler(
-            extra_headers=[(b'cache-control', b'max-age=0')])
+            extra_headers=[(b'cache-control', cc)])
         with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
             await _run(mw, _scope(), cn)
-        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.5):
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=t2):
             await _run(mw, _scope(), cn)
-        assert counter['n'] == 2
-
-    async def test_zero_s_maxage_wins_over_positive_max_age(self):
-        mw = Cache(max_age=600)
-        cn, counter = _make_handler(
-            extra_headers=[(b'cache-control', b'max-age=120, s-maxage=0')])
-        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
-            await _run(mw, _scope(), cn)
-        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.5):
-            await _run(mw, _scope(), cn)
-        assert counter['n'] == 2
+        assert counter['n'] == n
 
     async def test_absent_freshness_keeps_the_configured_default(self):
         mw = Cache(max_age=600)
@@ -387,26 +384,6 @@ class TestExplicitFreshness:
         with patch('blackbull.middleware.cache.time.monotonic', return_value=1_500.0):
             await _run(mw, _scope(), cn)
         assert counter['n'] == 1
-
-    async def test_malformed_freshness_keeps_the_configured_default(self):
-        mw = Cache(max_age=600)
-        cn, counter = _make_handler(
-            extra_headers=[(b'cache-control', b'max-age=abc')])
-        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
-            await _run(mw, _scope(), cn)
-        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_500.0):
-            await _run(mw, _scope(), cn)
-        assert counter['n'] == 1
-
-    async def test_negative_freshness_is_stale_not_defaulted(self):
-        mw = Cache(max_age=600)
-        cn, counter = _make_handler(
-            extra_headers=[(b'cache-control', b'max-age=-5')])
-        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
-            await _run(mw, _scope(), cn)
-        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.5):
-            await _run(mw, _scope(), cn)
-        assert counter['n'] == 2
 
     async def test_every_cache_control_field_is_read(self):
         mw = Cache(max_age=600)
@@ -473,28 +450,6 @@ class TestStatedFreshnessSources:
         await _run(mw, _scope(), cn)          # clamped short, still fresh
         assert counter['n'] == 1
 
-    async def test_quoted_delta_seconds_are_read(self):
-        mw = Cache(max_age=600)
-        cn, counter = _make_handler(
-            extra_headers=[(b'cache-control', b'max-age="0"')])
-        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
-            await _run(mw, _scope(), cn)
-        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.5):
-            await _run(mw, _scope(), cn)
-        assert counter['n'] == 2
-
-    async def test_a_quoted_value_cannot_inject_a_directive(self):
-        """``x="a,max-age=31536000,b"`` is one extension directive whose value
-        mentions max-age — not a stated lifetime."""
-        mw = Cache(max_age=300)
-        cn, counter = _make_handler(extra_headers=[
-            (b'cache-control', b'x="a,max-age=31536000,b"')])
-        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
-            await _run(mw, _scope(), cn)
-        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_400.0):
-            await _run(mw, _scope(), cn)
-        assert counter['n'] == 2
-
     async def test_repeated_expires_takes_the_earliest(self):
         far = b'Fri, 31 Dec 9999 23:59:59 GMT'
         past = b'Thu, 01 Jan 1970 00:00:00 GMT'
@@ -531,40 +486,34 @@ class TestStatedFreshnessSources:
         ages = [v for n, v in _split_response(sent)[1] if n.lower() == b'age']
         assert ages == [b'0'], ages
 
-    async def test_a_field_we_cannot_parse_is_not_stored(self):
-        """An unterminated quote makes the field unreadable, so the response is
-        not stored rather than read through the broken text."""
-        mw = Cache(max_age=300)
-        cn, counter = _make_handler(extra_headers=[
-            (b'cache-control', b'x="a,max-age=31536000')])
-        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
-            await _run(mw, _scope(), cn)
-        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_400.0):
-            await _run(mw, _scope(), cn)
-        assert counter['n'] == 2
-
-    async def test_a_misplaced_quote_is_not_stored(self):
-        """``"no-cache"`` is balanced, so a reader that only counts quotes
-        would store the response — the cache must not."""
-        mw = Cache(max_age=600)
+    @pytest.mark.parametrize('max_age,cc,t2', [
+        pytest.param(300, b'x="a,max-age=31536000,b"', 1_400.0,
+                     id='quoted-value-cannot-inject'),
+        pytest.param(300, b'x="a,max-age=31536000', 1_400.0,
+                     id='unparseable-field-not-stored'),
+        pytest.param(600, b'"no-cache"', 1_000.5,
+                     id='misplaced-quote-not-stored'),
+        pytest.param(600, b'max-age="31536000\\"x"', 1_700.0,
+                     id='quoted-non-number-no-lifetime'),
+        pytest.param(600, b'x", max-age=0', 1_000.5,
+                     id='stray-quote-hides-nothing'),
+        pytest.param(600, b'max-age="0"x', 1_000.5,
+                     id='value-not-ending-at-comma'),
+        pytest.param(300, b'max-age="31536000\\"', 1_400.0,
+                     id='escaped-closing-quote-unreadable'),
+    ])
+    async def test_a_quoted_value_that_is_no_number_states_no_lifetime(self, max_age, cc, t2):
+        """Malformed Cache-Control quoted values are not stored and cannot
+        inject directives: an unterminated, stray, or escaped quote leaves the
+        field unreadable (the response is not stored), a quoted value that is
+        no number states no lifetime (the configured default stands), and a
+        value that does not end at a comma is not stored either."""
+        mw = Cache(max_age=max_age)
         cn, counter = _make_handler(
-            extra_headers=[(b'cache-control', b'"no-cache"')])
+            extra_headers=[(b'cache-control', cc)])
         with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
             await _run(mw, _scope(), cn)
-        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.5):
-            await _run(mw, _scope(), cn)
-        assert counter['n'] == 2
-
-    async def test_a_quoted_value_that_is_no_number_states_no_lifetime(self):
-        """``max-age="31536000\\"x"`` de-escapes to a string that is not a
-        number, so its leading digits are not the lifetime; the default stands
-        and expires at 600 s, not after a year."""
-        mw = Cache(max_age=600)
-        cn, counter = _make_handler(
-            extra_headers=[(b'cache-control', b'max-age="31536000\\"x"')])
-        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
-            await _run(mw, _scope(), cn)
-        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_700.0):
+        with patch('blackbull.middleware.cache.time.monotonic', return_value=t2):
             await _run(mw, _scope(), cn)
         assert counter['n'] == 2
 
@@ -580,13 +529,6 @@ class TestStatedFreshnessSources:
 @pytest.mark.asyncio
 class TestRequestDirectives:
     """The request's own Cache-Control binds what a hit may reuse."""
-
-    async def test_request_no_cache_runs_the_handler(self):
-        mw = Cache()
-        cn, counter = _make_handler()
-        await _run(mw, _scope(), cn)
-        await _run(mw, _scope(headers=[(b'cache-control', b'no-cache')]), cn)
-        assert counter['n'] == 2
 
     async def test_request_no_cache_is_not_answered_304_by_the_cache(self):
         """A conditional request with ``no-cache`` is the origin's to answer:
@@ -618,27 +560,17 @@ class TestRequestDirectives:
             await _run(mw, _scope(headers=[(b'cache-control', b'max-age=5')]), cn)
         assert counter['n'] == 2
 
-    async def test_a_second_cache_control_field_still_binds(self):
+    @pytest.mark.parametrize('req_headers', [
+        pytest.param([(b'cache-control', b'max-age=600'),
+                      (b'cache-control', b'no-cache')], id='second-field-binds'),
+        pytest.param([(b'cache-control', b'public'),
+                      (b'cache-control', b'no-store')], id='second-field-no-store'),
+    ])
+    async def test_a_second_cache_control_field_still_binds(self, req_headers):
         mw = Cache()
         cn, counter = _make_handler()
         await _run(mw, _scope(), cn)
-        await _run(mw, _scope(headers=[(b'cache-control', b'max-age=600'),
-                                       (b'cache-control', b'no-cache')]), cn)
-        assert counter['n'] == 2
-
-    async def test_a_second_field_no_store_bypasses(self):
-        mw = Cache()
-        cn, counter = _make_handler()
-        await _run(mw, _scope(), cn)
-        await _run(mw, _scope(headers=[(b'cache-control', b'public'),
-                                       (b'cache-control', b'no-store')]), cn)
-        assert counter['n'] == 2
-
-    async def test_pragma_no_cache_validates_when_cache_control_is_absent(self):
-        mw = Cache()
-        cn, counter = _make_handler()
-        await _run(mw, _scope(), cn)
-        await _run(mw, _scope(headers=[(b'pragma', b'no-cache')]), cn)
+        await _run(mw, _scope(headers=req_headers), cn)
         assert counter['n'] == 2
 
     @pytest.mark.parametrize('cache_control', [b'max-age=600', b''])
@@ -650,13 +582,17 @@ class TestRequestDirectives:
                                        (b'pragma', b'no-cache')]), cn)
         assert counter['n'] == 1
 
-    async def test_a_quoted_request_max_age_is_read(self):
+    @pytest.mark.parametrize('req_cc', [
+        pytest.param(b'max-age="0"', id='quoted-request-max-age'),
+        pytest.param(b'max-age=0', id='request-max-age-zero'),
+    ])
+    async def test_a_quoted_request_max_age_is_read(self, req_cc):
         mw = Cache()
         cn, counter = _make_handler()
         with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
             await _run(mw, _scope(), cn)
         with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.5):
-            await _run(mw, _scope(headers=[(b'cache-control', b'max-age="0"')]), cn)
+            await _run(mw, _scope(headers=[(b'cache-control', req_cc)]), cn)
         assert counter['n'] == 2
 
     async def test_pragma_no_cache_as_a_list_or_second_field(self):
@@ -669,24 +605,23 @@ class TestRequestDirectives:
                                        (b'pragma', b'no-cache')]), cn)
         assert counter['n'] == 3
 
-    async def test_qualified_request_no_cache_still_validates(self):
+    @pytest.mark.parametrize('req_headers', [
+        pytest.param([(b'cache-control', b'no-cache')], id='request-no-cache'),
+        pytest.param([(b'pragma', b'no-cache')], id='pragma-no-cache'),
+        pytest.param([(b'cache-control', b'no-cache="set-cookie"')], id='qualified-no-cache'),
+        pytest.param([(b'cache-control', b'no-store"')], id='no-store-stray-quote'),
+        pytest.param([(b'cache-control', b'no-cache"x"')], id='quote-in-name'),
+        pytest.param([(b'cache-control', b'max-age="0"x')], id='value-not-at-comma'),
+        pytest.param([(b'cache-control', b'"no-cache"')], id='misplaced-quote'),
+    ])
+    async def test_qualified_request_no_cache_still_validates(self, req_headers):
+        """Request cache-control directives drive validate/bypass; a request
+        field that cannot be read (stray quote, quote in the name, a value
+        not ending at a comma) validates rather than reusing."""
         mw = Cache()
         cn, counter = _make_handler()
         await _run(mw, _scope(), cn)
-        await _run(mw, _scope(headers=[
-            (b'cache-control', b'no-cache="set-cookie"')]), cn)
-        assert counter['n'] == 2
-
-    async def test_a_stray_quote_does_not_hide_a_later_directive(self):
-        """The field cannot be read, so the response is not stored — and the
-        ``max-age=0`` behind the stray quote is never read past."""
-        mw = Cache(max_age=600)
-        cn, counter = _make_handler(
-            extra_headers=[(b'cache-control', b'x", max-age=0')])
-        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
-            await _run(mw, _scope(), cn)
-        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.5):
-            await _run(mw, _scope(), cn)
+        await _run(mw, _scope(headers=req_headers), cn)
         assert counter['n'] == 2
 
     async def test_a_trailing_stray_quote_leaves_the_field_unreadable(self):
@@ -719,13 +654,6 @@ class TestRequestDirectives:
             (b'cache-control', b'x="a,no-store,b"')]), cn)
         assert counter['n'] == 2, 'the mentioned no-store must not bypass'
 
-    async def test_no_store_with_a_stray_quote_still_bypasses(self):
-        mw = Cache()
-        cn, counter = _make_handler()
-        await _run(mw, _scope(), cn)
-        await _run(mw, _scope(headers=[(b'cache-control', b'no-store"')]), cn)
-        assert counter['n'] == 2
-
     async def test_a_quote_inside_a_name_is_not_stored(self):
         """A quote where the grammar has none makes the field unreadable, so a
         ``no-cache`` written that way is not read through."""
@@ -734,39 +662,6 @@ class TestRequestDirectives:
             extra_headers=[(b'cache-control', b'no-cache"x"')])
         await _run(mw, _scope(), cn)
         await _run(mw, _scope(), cn)
-        assert counter['n'] == 2
-
-    async def test_a_quote_inside_a_request_name_validates(self):
-        mw = Cache()
-        cn, counter = _make_handler()
-        await _run(mw, _scope(), cn)
-        await _run(mw, _scope(headers=[(b'cache-control', b'no-cache"x"')]), cn)
-        assert counter['n'] == 2
-
-    async def test_a_value_that_does_not_end_at_a_comma_is_not_stored(self):
-        """``max-age="0"x`` states nothing a reader can trust, so it is not
-        read as "unstated" and given the default either."""
-        mw = Cache(max_age=600)
-        cn, counter = _make_handler(
-            extra_headers=[(b'cache-control', b'max-age="0"x')])
-        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
-            await _run(mw, _scope(), cn)
-        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.5):
-            await _run(mw, _scope(), cn)
-        assert counter['n'] == 2
-
-    async def test_a_request_value_that_does_not_end_at_a_comma_validates(self):
-        mw = Cache()
-        cn, counter = _make_handler()
-        await _run(mw, _scope(), cn)
-        await _run(mw, _scope(headers=[(b'cache-control', b'max-age="0"x')]), cn)
-        assert counter['n'] == 2
-
-    async def test_a_misplaced_quote_in_a_request_validates(self):
-        mw = Cache()
-        cn, counter = _make_handler()
-        await _run(mw, _scope(), cn)
-        await _run(mw, _scope(headers=[(b'cache-control', b'"no-cache"')]), cn)
         assert counter['n'] == 2
 
     async def test_an_unreadable_request_field_is_not_stored(self):
@@ -789,27 +684,6 @@ class TestRequestDirectives:
         with patch('blackbull.middleware.cache.time.monotonic', return_value=1_400.0):
             await _run(mw, _scope(), cn)
         assert counter['n'] == 1
-
-    async def test_an_escaped_closing_quote_leaves_the_field_unreadable(self):
-        """The quote that would close the value is escaped, so the string is
-        still open: not a one-year lifetime."""
-        mw = Cache(max_age=300)
-        cn, counter = _make_handler(extra_headers=[
-            (b'cache-control', b'max-age="31536000\\"')])
-        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
-            await _run(mw, _scope(), cn)
-        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_400.0):
-            await _run(mw, _scope(), cn)
-        assert counter['n'] == 2
-
-    async def test_request_max_age_zero_always_validates(self):
-        mw = Cache()
-        cn, counter = _make_handler()
-        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.0):
-            await _run(mw, _scope(), cn)
-        with patch('blackbull.middleware.cache.time.monotonic', return_value=1_000.5):
-            await _run(mw, _scope(headers=[(b'cache-control', b'max-age=0')]), cn)
-        assert counter['n'] == 2
 
 
 # ---------------------------------------------------------------------------
@@ -882,26 +756,20 @@ class TestNonHTTPRequests:
 class TestOriginKeying:
     """The key is per origin: two hosts never share one copy."""
 
-    async def test_hosts_do_not_share_an_entry(self):
+    @pytest.mark.parametrize('h1,h2,n', [
+        pytest.param(b'a.example', b'b.example', 2, id='hosts-do-not-share'),
+        pytest.param(b'Example.com', b'example.com:080', 1, id='case-and-default-port'),
+        pytest.param(b'[v1.example]', b'v1.example', 2, id='ip-literal-distinct'),
+    ])
+    async def test_hosts_do_not_share_an_entry(self, h1, h2, n):
+        """Cache entry origin identity: two hosts never share one copy;
+        case and the default port collapse to one origin; an IP literal is
+        not the same name."""
         mw = Cache(max_age=600)
         cn, counter = _make_handler()
-        await _run(mw, _scope(headers=[(b'host', b'a.example')]), cn)
-        await _run(mw, _scope(headers=[(b'host', b'b.example')]), cn)
-        assert counter['n'] == 2
-
-    async def test_case_and_default_port_are_one_origin(self):
-        mw = Cache(max_age=600)
-        cn, counter = _make_handler()
-        await _run(mw, _scope(headers=[(b'host', b'Example.com')]), cn)
-        await _run(mw, _scope(headers=[(b'host', b'example.com:080')]), cn)
-        assert counter['n'] == 1
-
-    async def test_an_ip_literal_is_not_the_same_name(self):
-        mw = Cache(max_age=600)
-        cn, counter = _make_handler()
-        await _run(mw, _scope(headers=[(b'host', b'[v1.example]')]), cn)
-        await _run(mw, _scope(headers=[(b'host', b'v1.example')]), cn)
-        assert counter['n'] == 2
+        await _run(mw, _scope(headers=[(b'host', h1)]), cn)
+        await _run(mw, _scope(headers=[(b'host', h2)]), cn)
+        assert counter['n'] == n
 
     async def test_two_host_fields_bypass_the_cache(self):
         mw = Cache(max_age=600)
@@ -1042,12 +910,14 @@ class TestHeaderHelpers:
         names = _names(b'public, max-age=300, must-revalidate')
         assert names == [b'public', b'max-age', b'must-revalidate']
 
-    def test_response_max_age_parses_max_age(self):
-        assert _stated_max_age([(b'cache-control', b'max-age=120')]) == 120
-
-    def test_response_max_age_prefers_s_maxage(self):
-        assert _stated_max_age(
-            [(b'cache-control', b'max-age=10, s-maxage=99')]) == 99
+    @pytest.mark.parametrize('headers,expected', [
+        pytest.param([(b'cache-control', b'max-age=120')], 120,
+                     id='parses-max-age'),
+        pytest.param([(b'cache-control', b'max-age=10, s-maxage=99')], 99,
+                     id='prefers-s-maxage'),
+    ])
+    def test_response_max_age_prefers_s_maxage(self, headers, expected):
+        assert _stated_max_age(headers) == expected
 
     def test_response_max_age_missing_returns_none(self):
         assert _stated_max_age([(b'cache-control', b'public')]) is None
@@ -1119,19 +989,18 @@ class TestHeaderHelpers:
         assert _response_etag([(b'ETag', b'"abc"')]) == b'"abc"'
         assert _response_etag([]) is None
 
-    def test_etag_matches_exact(self):
-        assert _etag_matches(b'"abc"', b'"abc"')
-
-    def test_etag_matches_star(self):
-        assert _etag_matches(b'*', b'anything')
+    @pytest.mark.parametrize('candidate,etag', [
+        pytest.param(b'"abc"', b'"abc"', id='exact'),
+        pytest.param(b'*', b'anything', id='star'),
+        pytest.param(b'"x", "y", "z"', b'"y"', id='multiple-candidates'),
+    ])
+    def test_etag_matches_exact(self, candidate, etag):
+        assert _etag_matches(candidate, etag)
 
     def test_etag_matches_weak_vs_strong(self):
         """Weak comparison: W/"abc" matches "abc" (and itself)."""
         assert _etag_matches(b'W/"abc"', b'"abc"')
         assert _etag_matches(b'"abc"', b'W/"abc"')
-
-    def test_etag_matches_multiple_candidates(self):
-        assert _etag_matches(b'"x", "y", "z"', b'"y"')
 
     def test_etag_no_match(self):
         assert not _etag_matches(b'"abc"', b'"def"')
