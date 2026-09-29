@@ -81,11 +81,15 @@ def static_dir(tmp_path: pathlib.Path) -> pathlib.Path:
 class TestStaticFilesBasic:
     """StaticFiles must serve files from a configured directory."""
 
-    async def test_existing_file_returns_200(self, static_dir):
+    @pytest.mark.parametrize('path,expected', [
+        pytest.param('/hello.txt', 200, id='existing-file'),
+        pytest.param('/missing.html', 404, id='missing-file'),
+    ])
+    async def test_existing_file_returns_200(self, static_dir, path, expected):
         from blackbull.middleware.static import StaticFiles
         app = StaticFiles(directory=str(static_dir))
-        start, _ = await _collect(app, _scope(path='/hello.txt'))
-        assert start['status'] == 200, f'Expected 200; got {start["status"]}'
+        start, _ = await _collect(app, _scope(path=path))
+        assert start['status'] == expected, f'Expected {expected}; got {start["status"]}'
 
     async def test_existing_file_body_matches_content(self, static_dir):
         from blackbull.middleware.static import StaticFiles
@@ -95,12 +99,6 @@ class TestStaticFilesBasic:
             f'Expected file content; got {body!r}'
         )
 
-    async def test_missing_file_returns_404(self, static_dir):
-        from blackbull.middleware.static import StaticFiles
-        app = StaticFiles(directory=str(static_dir))
-        start, _ = await _collect(app, _scope(path='/missing.html'))
-        assert start['status'] == 404, f'Expected 404; got {start["status"]}'
-
     async def test_subdirectory_file_served(self, static_dir):
         from blackbull.middleware.static import StaticFiles
         app = StaticFiles(directory=str(static_dir))
@@ -108,24 +106,19 @@ class TestStaticFilesBasic:
         assert start['status'] == 200, f'Expected 200; got {start["status"]}'
         assert b'sub' in body, f'Expected sub-page content; got {body!r}'
 
-    async def test_content_type_css(self, static_dir):
-        """CSS files must carry Content-Type: text/css."""
+    @pytest.mark.parametrize('path,ctype', [
+        pytest.param('/style.css', 'text/css', id='css'),
+        pytest.param('/sub/page.html', 'text/html', id='html'),
+    ])
+    async def test_content_type_css(self, static_dir, path, ctype):
+        """CSS files must carry Content-Type: text/css; HTML files must
+        carry Content-Type: text/html."""
         from blackbull.middleware.static import StaticFiles
         app = StaticFiles(directory=str(static_dir))
-        start, _ = await _collect(app, _scope(path='/style.css'))
+        start, _ = await _collect(app, _scope(path=path))
         headers = {k.lower(): v.lower() for k, v in start.get('headers', [])}
-        assert b'text/css' in headers.get(b'content-type', b''), (
-            f'Expected text/css; got {headers.get(b"content-type")!r}'
-        )
-
-    async def test_content_type_html(self, static_dir):
-        """HTML files must carry Content-Type: text/html."""
-        from blackbull.middleware.static import StaticFiles
-        app = StaticFiles(directory=str(static_dir))
-        start, _ = await _collect(app, _scope(path='/sub/page.html'))
-        headers = {k.lower(): v.lower() for k, v in start.get('headers', [])}
-        assert b'text/html' in headers.get(b'content-type', b''), (
-            f'Expected text/html; got {headers.get(b"content-type")!r}'
+        assert ctype.encode() in headers.get(b'content-type', b''), (
+            f'Expected {ctype}; got {headers.get(b"content-type")!r}'
         )
 
     @pytest.mark.parametrize('filename,expected_ct', [
@@ -176,22 +169,18 @@ class TestStaticFilesBasic:
 class TestStaticFilesPathSecurity:
     """StaticFiles must reject paths that escape the configured directory."""
 
-    async def test_path_traversal_dot_dot_rejected(self, static_dir):
-        """/../etc/passwd must be rejected with 400 or 404."""
+    @pytest.mark.parametrize('path,label', [
+        pytest.param('/../etc/passwd', 'Path traversal', id='plain-dot-dot'),
+        pytest.param('/%2F..%2Fetc%2Fpasswd', 'Encoded path traversal',
+                     id='encoded-dot-dot'),
+    ])
+    async def test_path_traversal_dot_dot_rejected(self, static_dir, path, label):
+        """URL-encoded ../ (%2F%2E%2E) must also be rejected with 400 or 404."""
         from blackbull.middleware.static import StaticFiles
         app = StaticFiles(directory=str(static_dir))
-        start, _ = await _collect(app, _scope(path='/../etc/passwd'))
+        start, _ = await _collect(app, _scope(path=path))
         assert start['status'] in (400, 403, 404), (
-            f'Path traversal must be rejected; got {start["status"]}'
-        )
-
-    async def test_encoded_path_traversal_rejected(self, static_dir):
-        """URL-encoded ../ (%2F%2E%2E) must also be rejected."""
-        from blackbull.middleware.static import StaticFiles
-        app = StaticFiles(directory=str(static_dir))
-        start, _ = await _collect(app, _scope(path='/%2F..%2Fetc%2Fpasswd'))
-        assert start['status'] in (400, 403, 404), (
-            f'Encoded path traversal must be rejected; got {start["status"]}'
+            f'{label} must be rejected; got {start["status"]}'
         )
 
     async def test_directory_listing_not_served(self, static_dir):
@@ -219,15 +208,6 @@ class TestStaticFilesRangeRequests:
     """
 
     FILE = b'Hello, static world!'   # 20 bytes
-
-    async def test_range_request_returns_206(self, static_dir):
-        """Range: bytes=0-3 must return 206 Partial Content."""
-        from blackbull.middleware.static import StaticFiles
-        app = StaticFiles(directory=str(static_dir))
-        start, _ = await _collect(
-            app, _scope(path='/hello.txt', headers={'Range': 'bytes=0-3'})
-        )
-        assert start['status'] == 206, f'Expected 206; got {start["status"]}'
 
     async def test_range_body_is_correct_slice(self, static_dir):
         """Range: bytes=0-3 body must be the first 4 bytes of the file."""
@@ -285,16 +265,22 @@ class TestStaticFilesRangeRequests:
             f'Expected last 5 bytes {self.FILE[-5:]!r}; got {body!r}'
         )
 
-    async def test_out_of_range_returns_416(self, static_dir):
-        """A Range that exceeds the file size must return 416 Range Not Satisfiable."""
+    @pytest.mark.parametrize('rng,expected', [
+        pytest.param('bytes=0-3', 206, id='in-range-206'),
+        pytest.param('bytes=100-200', 416, id='out-of-range-416'),
+    ])
+    async def test_out_of_range_returns_416(self, static_dir, rng, expected):
         from blackbull.middleware.static import StaticFiles
         app = StaticFiles(directory=str(static_dir))
         start, _ = await _collect(
-            app, _scope(path='/hello.txt', headers={'Range': 'bytes=100-200'})
+            app, _scope(path='/hello.txt', headers={'Range': rng})
         )
-        assert start['status'] == 416, (
-            f'Out-of-range request must return 416; got {start["status"]}'
-        )
+        if expected == 206:
+            assert start['status'] == 206, f'Expected 206; got {start["status"]}'
+        else:
+            assert start['status'] == 416, (
+                f'Out-of-range request must return 416; got {start["status"]}'
+            )
 
     async def test_no_range_returns_full_file(self, static_dir):
         """Without a Range header the full file must be served with status 200."""
@@ -313,26 +299,18 @@ class TestStaticFilesRangeRequests:
 class TestStaticFilesEnv:
     """BLACKBULL_ENV controls whether static files are served."""
 
-    async def test_production_returns_404(self, static_dir, monkeypatch):
-        monkeypatch.setenv('BLACKBULL_ENV', 'production')
+    @pytest.mark.parametrize('env,expected,label', [
+        pytest.param('production', 404, '404 in production', id='production'),
+        pytest.param('development', 200, '200 in development', id='development'),
+        pytest.param('test', 200, '200 in test env', id='test-env'),
+    ])
+    async def test_production_returns_404(self, static_dir, monkeypatch,
+                                          env, expected, label):
+        monkeypatch.setenv('BLACKBULL_ENV', env)
         from blackbull.middleware.static import StaticFiles
         app = StaticFiles(directory=str(static_dir))
         start, _ = await _collect(app, _scope(path='/hello.txt'))
-        assert start['status'] == 404, f'Expected 404 in production; got {start["status"]}'
-
-    async def test_development_serves_file(self, static_dir, monkeypatch):
-        monkeypatch.setenv('BLACKBULL_ENV', 'development')
-        from blackbull.middleware.static import StaticFiles
-        app = StaticFiles(directory=str(static_dir))
-        start, _ = await _collect(app, _scope(path='/hello.txt'))
-        assert start['status'] == 200, f'Expected 200 in development; got {start["status"]}'
-
-    async def test_test_env_serves_file(self, static_dir, monkeypatch):
-        monkeypatch.setenv('BLACKBULL_ENV', 'test')
-        from blackbull.middleware.static import StaticFiles
-        app = StaticFiles(directory=str(static_dir))
-        start, _ = await _collect(app, _scope(path='/hello.txt'))
-        assert start['status'] == 200, f'Expected 200 in test env; got {start["status"]}'
+        assert start['status'] == expected, f'Expected {label}; got {start["status"]}'
 
 
 # ---------------------------------------------------------------------------
@@ -717,16 +695,6 @@ class TestStaticFilesConditional:
         assert start['status'] == 304
         assert body == b''
 
-    async def test_if_none_match_mismatch_serves_200(self, static_dir):
-        from blackbull.middleware.static import StaticFiles
-        app = StaticFiles(directory=str(static_dir))
-        start, body = await _collect(
-            app, _scope(path='/hello.txt',
-                        headers={'If-None-Match': '"stale-tag"'})
-        )
-        assert start['status'] == 200
-        assert body == self.FILE
-
     async def test_if_modified_since_returns_304(self, static_dir):
         from email.utils import formatdate
         from blackbull.middleware.static import StaticFiles
@@ -741,23 +709,18 @@ class TestStaticFilesConditional:
         assert start2['status'] == 304
         assert body2 == b''
 
-    async def test_if_modified_since_old_date_serves_200(self, static_dir):
+    @pytest.mark.parametrize('headers', [
+        pytest.param({'If-None-Match': '"stale-tag"'}, id='if-none-match-mismatch'),
+        pytest.param({'If-Modified-Since': 'Thu, 01 Jan 1970 00:00:00 GMT'},
+                     id='if-modified-since-old-date'),
+        pytest.param({'If-Modified-Since': 'not-a-date'},
+                     id='malformed-if-modified-since'),
+    ])
+    async def test_if_modified_since_old_date_serves_200(self, static_dir, headers):
         from blackbull.middleware.static import StaticFiles
         app = StaticFiles(directory=str(static_dir))
         start, body = await _collect(
-            app, _scope(path='/hello.txt',
-                        headers={'If-Modified-Since':
-                                 'Thu, 01 Jan 1970 00:00:00 GMT'})
-        )
-        assert start['status'] == 200
-        assert body == self.FILE
-
-    async def test_malformed_if_modified_since_serves_200(self, static_dir):
-        from blackbull.middleware.static import StaticFiles
-        app = StaticFiles(directory=str(static_dir))
-        start, body = await _collect(
-            app, _scope(path='/hello.txt',
-                        headers={'If-Modified-Since': 'not-a-date'})
+            app, _scope(path='/hello.txt', headers=headers)
         )
         assert start['status'] == 200
         assert body == self.FILE

@@ -54,12 +54,23 @@ def test_stream_has_no_dict():
     assert hasattr(Stream, '__slots__')
 
 
-def test_http1_sender_has_no_dict():
-    s = HTTP1Sender(_FakeWriter())
-    assert not hasattr(s, '__dict__'), (
-        '__dict__ resurfaced on HTTP1Sender; check BaseSender and '
-        'HTTP1Sender __slots__ declarations.'
-    )
+@pytest.mark.parametrize('which', [
+    pytest.param('http1', id='http1-sender-no-dict'),
+    pytest.param('websocket', id='websocket-sender-no-dict'),
+])
+def test_http1_sender_has_no_dict(which):
+    if which == 'http1':
+        s = HTTP1Sender(_FakeWriter())
+        assert not hasattr(s, '__dict__'), (
+            '__dict__ resurfaced on HTTP1Sender; check BaseSender and '
+            'HTTP1Sender __slots__ declarations.'
+        )
+    else:
+        s = WebSocketSender(_FakeWriter())
+        assert not hasattr(s, '__dict__'), (
+            '__dict__ resurfaced on WebSocketSender; check BaseSender and '
+            'WebSocketSender __slots__ declarations.'
+        )
 
 
 def test_http2_sender_has_no_dict():
@@ -68,14 +79,6 @@ def test_http2_sender_has_no_dict():
     assert not hasattr(s, '__dict__'), (
         '__dict__ resurfaced on HTTP2Sender; check BaseSender and '
         'HTTP2Sender __slots__ declarations.'
-    )
-
-
-def test_websocket_sender_has_no_dict():
-    s = WebSocketSender(_FakeWriter())
-    assert not hasattr(s, '__dict__'), (
-        '__dict__ resurfaced on WebSocketSender; check BaseSender and '
-        'WebSocketSender __slots__ declarations.'
     )
 
 
