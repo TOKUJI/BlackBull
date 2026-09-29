@@ -492,7 +492,8 @@ class TestRealClientClientStreaming:
         pytest.param(200, id='over-window'),
     ])
     async def test_large_request_stream_over_window(self, grpc_server_port, count):
-        """Request streams respect the flow-control window on both sides."""
+        """Client-streaming request payloads respect the request-direction
+        flow-control window."""
         payloads = [b'x' * 1024] * count
         ok, value = await _client_stream(
             grpc_server_port, '/echo.Echo/CountBytes', payloads)
