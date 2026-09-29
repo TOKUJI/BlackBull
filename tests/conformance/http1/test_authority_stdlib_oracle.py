@@ -187,18 +187,17 @@ class TestThePortMatchesTheStdlibUrlParser:
         assert _parse_host_header(value, 80)[1] == 80
         assert urlsplit('http://' + value.decode('ascii') + '/x').port is None
 
-    def test_an_out_of_range_port_is_accepted(self):
+    @pytest.mark.parametrize('value,expected', [
         # §3.2.2 puts no ceiling on the digits, and the peer a request names is
         # decided before this is read; only the dialler may refuse it.
-        assert _parse_host_header(b'example.com:99999', 80)[1] == 99999
-        with pytest.raises(ValueError):
-            urlsplit('http://example.com:99999/x').port
-
-    def test_a_non_numeric_port_falls_back_to_the_default(self):
+        pytest.param(b'example.com:99999', 99999, id='out-of-range-port'),
         # The host side of this shape is pinned in the class below.
-        assert _parse_host_header(b'example.com:abc', 80)[1] == 80
+        pytest.param(b'example.com:abc', 80, id='non-numeric-fallback'),
+    ])
+    def test_an_out_of_range_port_is_accepted(self, value, expected):
+        assert _parse_host_header(value, 80)[1] == expected
         with pytest.raises(ValueError):
-            urlsplit('http://example.com:abc/x').port
+            urlsplit('http://' + value.decode('ascii') + '/x').port
 
 
 class TestTheHostMatchesTheStdlibUrlParser:
@@ -253,15 +252,16 @@ class TestAnInvalidRegNameIsRejected:
         b':', b':80', b'example.com:80x',
     ]
 
+    @pytest.mark.parametrize('build', [
+        pytest.param(
+            lambda a: b'GET /x HTTP/1.1\r\nHost: ' + a + b'\r\n\r\n',
+            id='host-field'),
+        pytest.param(
+            lambda a: (b'GET http://' + a + b'/x HTTP/1.1\r\n'
+                       b'Host: localhost\r\n\r\n'),
+            id='absolute-form'),
+    ])
     @pytest.mark.parametrize('authority', _INVALID, ids=repr)
-    def test_the_host_field_rejects_it(self, authority):
+    def test_the_absolute_form_authority_rejects_it(self, build, authority):
         with pytest.raises(BadRequestError):
-            _ACTOR._parse(
-                b'GET /x HTTP/1.1\r\nHost: ' + authority + b'\r\n\r\n')
-
-    @pytest.mark.parametrize('authority', _INVALID, ids=repr)
-    def test_the_absolute_form_authority_rejects_it(self, authority):
-        with pytest.raises(BadRequestError):
-            _ACTOR._parse(
-                b'GET http://' + authority + b'/x HTTP/1.1\r\n'
-                b'Host: localhost\r\n\r\n')
+            _ACTOR._parse(build(authority))

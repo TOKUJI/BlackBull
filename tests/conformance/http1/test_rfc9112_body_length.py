@@ -24,23 +24,6 @@ from .conftest import send_raw
 class TestContentLengthValidation:
     """§6.2 — Content-Length value must be a non-negative integer."""
 
-    def test_well_formed_content_length(self, h1_app):
-        r = send_raw('127.0.0.1', h1_app.port,
-                     b'POST /echo HTTP/1.1\r\n'
-                     b'Host: localhost\r\n'
-                     b'Content-Length: 5\r\n\r\n'
-                     b'hello')
-        assert r.status == 200
-        assert r.body == b'hello'
-
-    def test_zero_content_length_no_body(self, h1_app):
-        r = send_raw('127.0.0.1', h1_app.port,
-                     b'POST /echo HTTP/1.1\r\n'
-                     b'Host: localhost\r\n'
-                     b'Content-Length: 0\r\n\r\n')
-        assert r.status == 200
-        assert r.body == b''
-
     def test_content_length_with_leading_plus_rejected(self, h1_app):
         """``Content-Length: +5`` is not a DIGIT-only value (§6.3)."""
         r = send_raw('127.0.0.1', h1_app.port,

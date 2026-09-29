@@ -176,15 +176,6 @@ async def test_unary_success():
 
 
 @pytest.mark.asyncio
-async def test_unimplemented_method():
-    reg = GrpcServiceRegistry()
-    events, send = _collector()
-    await serve_grpc(reg, _grpc_scope('/nope.Svc/Missing'),
-                     _receive_with(encode_message(b'')), send)
-    assert _trailers_of(events)[b'grpc-status'] == str(int(GrpcStatus.UNIMPLEMENTED)).encode()
-
-
-@pytest.mark.asyncio
 async def test_handler_raises_grpc_error():
     reg = GrpcServiceRegistry()
 
@@ -203,20 +194,27 @@ async def test_handler_raises_grpc_error():
     assert tr[b'grpc-message'] == b'no such user%0A'
 
 
+async def _abort_handler(request, context):
+    context.abort(GrpcStatus.PERMISSION_DENIED, 'denied')
+    return b''  # unreachable
+
+
 @pytest.mark.asyncio
-async def test_context_abort():
+@pytest.mark.parametrize('path,handler,expected', [
+    pytest.param('/nope.Svc/Missing', None, GrpcStatus.UNIMPLEMENTED,
+                 id='unimplemented-method'),
+    pytest.param('/x/Abort', _abort_handler, GrpcStatus.PERMISSION_DENIED,
+                 id='context-abort'),
+])
+async def test_context_abort(path, handler, expected):
+    """Unregistered methods and context.abort() surface their gRPC status."""
     reg = GrpcServiceRegistry()
-
-    @reg.method('/x/Abort')
-    async def abort(request, context):
-        context.abort(GrpcStatus.PERMISSION_DENIED, 'denied')
-        return b''  # unreachable
-
+    if handler is not None:
+        reg.add_method(path, handler)
     events, send = _collector()
-    await serve_grpc(reg, _grpc_scope('/x/Abort'),
+    await serve_grpc(reg, _grpc_scope(path),
                      _receive_with(encode_message(b'')), send)
-    assert _trailers_of(events)[b'grpc-status'] == \
-        str(int(GrpcStatus.PERMISSION_DENIED)).encode()
+    assert _trailers_of(events)[b'grpc-status'] == str(int(expected)).encode()
 
 
 @pytest.mark.asyncio

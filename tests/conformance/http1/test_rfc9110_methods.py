@@ -70,18 +70,6 @@ class TestUnknownExtensionMethod:
     methods it doesn't recognise with 501 Not Implemented."""
 
 
-@pytest.mark.integration
-class TestPostWithoutBody:
-    """A POST with Content-Length: 0 is legal."""
-
-    def test_post_zero_length_to_echo(self, h1_app):
-        r = send_raw('127.0.0.1', h1_app.port,
-                     b'POST /echo HTTP/1.1\r\n'
-                     b'Host: localhost\r\n'
-                     b'Content-Length: 0\r\n\r\n')
-        assert r.status == 200
-        assert r.body == b''
-
 
 @pytest.mark.integration
 class TestGetWithBody:

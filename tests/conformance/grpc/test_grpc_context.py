@@ -77,13 +77,14 @@ def _trailers(events) -> dict:
 # --------------------------------------------------------------------------
 
 class TestPeer:
-    def test_ipv4_peer(self):
-        ctx = GrpcContext(_grpc_scope('/svc/M', client=('127.0.0.1', 55123)))
-        assert ctx.peer() == 'ipv4:127.0.0.1:55123'
-
-    def test_ipv6_peer(self):
-        ctx = GrpcContext(_grpc_scope('/svc/M', client=('::1', 9000)))
-        assert ctx.peer() == 'ipv6:[::1]:9000'
+    @pytest.mark.parametrize('client,expected', [
+        pytest.param(('127.0.0.1', 55123), 'ipv4:127.0.0.1:55123', id='ipv4-literal'),
+        pytest.param(('::1', 9000), 'ipv6:[::1]:9000', id='ipv6-literal'),
+    ])
+    def test_ipv4_peer(self, client, expected):
+        """ctx.peer() formats IPv4/IPv6 literals per the gRPC spec."""
+        ctx = GrpcContext(_grpc_scope('/svc/M', client=client))
+        assert ctx.peer() == expected
 
     def test_missing_client_is_empty(self):
         assert GrpcContext(_grpc_scope('/svc/M')).peer() == ''

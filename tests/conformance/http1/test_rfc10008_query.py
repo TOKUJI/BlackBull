@@ -21,24 +21,6 @@ from .conftest import send_raw
 class TestQueryDispatch:
     """QUERY requests route and carry a request body (RFC 10008 §2)."""
 
-    def test_query_with_body_echoes(self, h1_app):
-        r = send_raw('127.0.0.1', h1_app.port,
-                     b'QUERY /query HTTP/1.1\r\n'
-                     b'Host: localhost\r\n'
-                     b'Content-Type: text/plain\r\n'
-                     b'Content-Length: 8\r\n\r\n'
-                     b'select *')
-        assert r.status == 200
-        assert r.body == b'select *'
-
-    def test_query_with_empty_body(self, h1_app):
-        r = send_raw('127.0.0.1', h1_app.port,
-                     b'QUERY /query HTTP/1.1\r\n'
-                     b'Host: localhost\r\n'
-                     b'Content-Length: 0\r\n\r\n')
-        assert r.status == 200
-        assert r.body == b''
-
     def test_lowercase_query_does_not_dispatch(self, h1_app):
         """RFC 9110 §9.1 — methods are case-sensitive tokens."""
         r = send_raw('127.0.0.1', h1_app.port,
@@ -46,6 +28,55 @@ class TestQueryDispatch:
                      b'Host: localhost\r\n'
                      b'Content-Length: 0\r\n\r\n')
         assert r.status != 200
+
+
+@pytest.mark.parametrize('host,req,expected_body', [
+    pytest.param(
+        'localhost',
+        b'POST /echo HTTP/1.1\r\nHost: x\r\n'
+        b'Content-Length: 5\r\n\r\nhello', b'hello',
+        id='canonical-content-length'),
+    pytest.param(
+        '127.0.0.1',
+        b'QUERY /query HTTP/1.1\r\n'
+        b'Host: localhost\r\n'
+        b'Content-Type: text/plain\r\n'
+        b'Content-Length: 8\r\n\r\n'
+        b'select *', b'select *',
+        id='query-with-body', marks=pytest.mark.integration),
+    pytest.param(
+        '127.0.0.1',
+        b'QUERY /query HTTP/1.1\r\n'
+        b'Host: localhost\r\n'
+        b'Content-Length: 0\r\n\r\n', b'',
+        id='query-empty-body', marks=pytest.mark.integration),
+    pytest.param(
+        '127.0.0.1',
+        b'POST /echo HTTP/1.1\r\n'
+        b'Host: localhost\r\n'
+        b'Content-Length: 0\r\n\r\n', b'',
+        id='post-zero-length', marks=pytest.mark.integration),
+    pytest.param(
+        '127.0.0.1',
+        b'POST /echo HTTP/1.1\r\n'
+        b'Host: localhost\r\n'
+        b'Content-Length: 5\r\n\r\n'
+        b'hello', b'hello',
+        id='well-formed-content-length', marks=pytest.mark.integration),
+    pytest.param(
+        '127.0.0.1',
+        b'POST /echo HTTP/1.1\r\n'
+        b'Host: localhost\r\n'
+        b'Content-Length: 0\r\n\r\n', b'',
+        id='zero-content-length', marks=pytest.mark.integration),
+])
+def test_query_with_body_echoes(h1_app, host, req, expected_body):
+    """Well-formed request bodies are accepted and echoed (RFC 10008 §2,
+    RFC 9112 §6).  Module-level with per-case integration marks so the one
+    unmarked case keeps running in the default suite."""
+    r = send_raw(host, h1_app.port, req)
+    assert r.status == 200
+    assert r.body == expected_body
 
 
 @pytest.mark.integration
