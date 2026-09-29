@@ -146,11 +146,6 @@ class TestChunkSizeGrammar:
 
 class TestChunkedFramingStrict:
     @pytest.mark.asyncio
-    async def test_valid_chunked_body_still_round_trips(self):
-        wire = b'5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n'
-        assert await _drain_body(_chunked_recipient(wire)) == b'hello world'
-
-    @pytest.mark.asyncio
     async def test_chunk_data_spill_raises_400(self):
         # SMUG-CHUNK-SPILL — data exceeds the declared chunk-size.
         wire = b'5\r\nhelloEXTRA\r\n0\r\n\r\n'
@@ -160,34 +155,15 @@ class TestChunkedFramingStrict:
         assert exc_info.value.status == HTTPStatus.BAD_REQUEST
 
     @pytest.mark.asyncio
-    async def test_bare_cr_chunk_terminator_raises_400(self):
-        # SMUG-CHUNK-BARE-CR-TERM — chunk-data terminated by CR alone.
-        wire = b'5\r\nhello\r0\r\n\r\n'
-        with pytest.raises(HTTPException) as exc_info:
-            await _drain_body(_chunked_recipient(wire))
-        assert exc_info.value.status == HTTPStatus.BAD_REQUEST
-
-    @pytest.mark.asyncio
-    async def test_bare_lf_chunk_terminator_raises_400(self):
-        # SMUG-CHUNK-LF-TERM — chunk-data terminated by LF alone.
-        wire = b'5\r\nhello\n0\r\n\r\n'
-        with pytest.raises(HTTPException) as exc_info:
-            await _drain_body(_chunked_recipient(wire))
-        assert exc_info.value.status == HTTPStatus.BAD_REQUEST
-
-    @pytest.mark.asyncio
-    async def test_bare_lf_size_line_raises_400(self):
-        # A chunk-size line terminated by a bare LF must not be accepted
-        # (and, pre-fix, could hang the parser waiting for CRLF).
-        wire = b'5\nhello\r\n0\r\n\r\n'
-        with pytest.raises(HTTPException) as exc_info:
-            await _drain_body(_chunked_recipient(wire))
-        assert exc_info.value.status == HTTPStatus.BAD_REQUEST
-
-    @pytest.mark.asyncio
-    async def test_missing_crlf_between_chunks_raises_400(self):
-        # SMUG-CHUNK-MISSING-TRAILING-CRLF — next chunk glued to the data.
-        wire = b'5\r\nhello0\r\n\r\n'
+    @pytest.mark.parametrize('wire', [
+        pytest.param(b'5\r\nhello\r0\r\n\r\n', id='bare-cr-chunk-terminator'),
+        pytest.param(b'5\r\nhello\n0\r\n\r\n', id='bare-lf-chunk-terminator'),
+        pytest.param(b'5\nhello\r\n0\r\n\r\n', id='bare-lf-size-line'),
+        pytest.param(b'5\r\nhello0\r\n\r\n', id='missing-crlf-between-chunks'),
+    ])
+    async def test_bare_lf_size_line_raises_400(self, wire):
+        # Malformed chunked framing is a request smuggling vector: reject
+        # with 400 rather than resynchronise.
         with pytest.raises(HTTPException) as exc_info:
             await _drain_body(_chunked_recipient(wire))
         assert exc_info.value.status == HTTPStatus.BAD_REQUEST
@@ -444,11 +420,16 @@ class TestXForwardedPrefixTrust:
 
 class TestChunkLineLengthBound:
     @pytest.mark.asyncio
-    async def test_oversized_chunk_ext_line_raises_400(self):
+    @pytest.mark.parametrize('wire', [
+        pytest.param(b'5;ext=' + b'a' * 65536 + b'\r\nhello\r\n0\r\n\r\n',
+                     id='oversized-chunk-ext-line'),
+        pytest.param(b'5\r\nhello\r\n0\r\nx-pad: ' + b'a' * 65536 + b'\r\n\r\n',
+                     id='oversized-trailer-line'),
+    ])
+    async def test_oversized_chunk_ext_line_raises_400(self, wire):
         # MAL-CHUNK-EXT-64K / CVE-2023-39326 class — a 64 KiB chunk
-        # extension must be rejected with 400, not crash `readuntil` into
-        # a LimitOverrunError-backed 500.
-        wire = b'5;ext=' + b'a' * 65536 + b'\r\nhello\r\n0\r\n\r\n'
+        # extension or trailer line must be rejected with 400, not crash
+        # `readuntil` into a LimitOverrunError-backed 500.
         recipient = _chunked_recipient(wire)
         with pytest.raises(HTTPException) as exc_info:
             await _drain_body(recipient)
@@ -514,15 +495,6 @@ class TestChunkLineLengthBound:
         ]
         assert len(records) == 1
 
-    @pytest.mark.asyncio
-    async def test_oversized_trailer_line_raises_400(self):
-        wire = b'5\r\nhello\r\n0\r\nx-pad: ' + b'a' * 65536 + b'\r\n\r\n'
-        recipient = _chunked_recipient(wire)
-        with pytest.raises(HTTPException) as exc_info:
-            await _drain_body(recipient)
-        assert exc_info.value.status == HTTPStatus.BAD_REQUEST
-        assert recipient.framing_broken is True
-
 
 # ---------------------------------------------------------------------------
 # Trailer-section strictness (SMUG-CHUNK-LF-TRAILER,
@@ -531,28 +503,26 @@ class TestChunkLineLengthBound:
 
 class TestChunkedTrailerSection:
     @pytest.mark.asyncio
-    async def test_benign_trailer_still_accepted(self):
-        wire = (b'5\r\nhello\r\n0\r\n'
-                b'x-checksum: abc123\r\n\r\n')
-        assert await _drain_body(_chunked_recipient(wire)) == b'hello'
+    @pytest.mark.parametrize('wire,expected', [
+        pytest.param(b'5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n', b'hello world',
+                     id='valid-chunked-round-trip'),
+        pytest.param(b'5\r\nhello\r\n0\r\n'
+                     b'x-checksum: abc123\r\n\r\n', b'hello',
+                     id='benign-trailer-accepted'),
+    ])
+    async def test_benign_trailer_still_accepted(self, wire, expected):
+        assert await _drain_body(_chunked_recipient(wire)) == expected
 
     @pytest.mark.asyncio
-    async def test_bare_lf_trailer_terminator_raises_400(self):
-        # SMUG-CHUNK-LF-TRAILER — bare LF terminating the trailer section
-        # (after the last-chunk ``0\r\n``).  Pre-fix the parser waited for
-        # a CRLF that never came and the request timed out.
-        wire = b'5\r\nhello\r\n0\r\n\n'
-        recipient = _chunked_recipient(wire)
-        with pytest.raises(HTTPException) as exc_info:
-            await _drain_body(recipient)
-        assert exc_info.value.status == HTTPStatus.BAD_REQUEST
-        assert recipient.framing_broken is True
-
-    @pytest.mark.asyncio
-    async def test_bare_lf_trailer_line_raises_400(self):
-        # A trailer *field line* terminated by bare LF is the same
-        # framing violation as a bare-LF chunk-size line.
-        wire = b'5\r\nhello\r\n0\r\nfoo: bar\n\r\n'
+    @pytest.mark.parametrize('wire', [
+        pytest.param(b'5\r\nhello\r\n0\r\n\n', id='bare-lf-trailer-terminator'),
+        pytest.param(b'5\r\nhello\r\n0\r\nfoo: bar\n\r\n', id='bare-lf-trailer-line'),
+    ])
+    async def test_bare_lf_trailer_terminator_raises_400(self, wire):
+        # SMUG-CHUNK-LF-TRAILER — a bare LF terminating the trailer
+        # section or a trailer field line is the same framing violation as
+        # a bare-LF chunk-size line.  Pre-fix the parser waited for a CRLF
+        # that never came and the request timed out.
         recipient = _chunked_recipient(wire)
         with pytest.raises(HTTPException) as exc_info:
             await _drain_body(recipient)
@@ -597,18 +567,17 @@ class TestMissingHostAndVersion:
         scope = actor._parse(b'GET / HTTP/1.0\r\n\r\n')
         assert scope.http_version == '1.0'
 
-    def test_unsupported_major_version_rejected_505(self):
-        # RFC9112-2.3-INVALID-VERSION — HTTP/9.9 → 505, not a happy 200.
+    @pytest.mark.parametrize('raw', [
+        pytest.param(b'GET / HTTP/9.9\r\nHost: x\r\n\r\n', id='unsupported-major-version'),
+        pytest.param(b'GET / HTTP/0.9\r\nHost: x\r\n\r\n', id='http09-rejected'),
+    ])
+    def test_unsupported_major_version_rejected_505(self, raw):
+        # RFC9112-2.3-INVALID-VERSION — HTTP/9.9 and HTTP/0.9 → 505, not a
+        # happy 200.
         from blackbull.server.http1_actor import UnsupportedVersionError
         actor = _make_actor()
         with pytest.raises(UnsupportedVersionError):
-            actor._parse(b'GET / HTTP/9.9\r\nHost: x\r\n\r\n')
-
-    def test_http09_rejected_505(self):
-        from blackbull.server.http1_actor import UnsupportedVersionError
-        actor = _make_actor()
-        with pytest.raises(UnsupportedVersionError):
-            actor._parse(b'GET / HTTP/0.9\r\nHost: x\r\n\r\n')
+            actor._parse(raw)
 
     def test_http12_accepted_as_http1x(self):
         # COMP-HTTP12-VERSION — a higher 1.x minor is 1.x-compatible and
