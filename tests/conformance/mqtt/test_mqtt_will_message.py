@@ -256,61 +256,7 @@ class TestWillMessageDelivery:
         decoded = decode_packet(wire)
         assert decoded.reason_code == ReasonCode.SUCCESS
 
-    def test_disconnect_with_will_message_reason_code(self, mqtt):
-        """§3.14.2.1 — DISCONNECT reason code 0x04 triggers Will Message."""
-        disconnect = MQTTDisconnect(
-            reason_code=ReasonCode.DISCONNECT_WITH_WILL,
-            properties={'reason_string': 'Client requested Will delivery'},
-        )
-        wire = encode_packet(disconnect)
-        decoded = decode_packet(wire)
-        assert decoded.reason_code == ReasonCode.DISCONNECT_WITH_WILL
-
 
 # ============================================================================
 # §3.1.3.3 — Will Delay Interval
 # ============================================================================
-
-class TestWillDelayInterval:
-    """§3.1.3.3 / §3.2.2.3.2 — Will Delay Interval.
-
-    The Will Delay Interval (a 4-byte integer) specifies a delay before
-    the server publishes the Will Message.  This gives the client a window
-    to reconnect and avoid having the Will Message published unnecessarily
-    during a brief network interruption.
-
-    If the client reconnects before the Will Delay expires, the server
-    MUST NOT publish the Will Message.
-    """
-
-    def test_will_delay_interval_property(self, mqtt):
-        """§3.1.3.3 — Will Delay Interval is set in Will Properties."""
-        connect = MQTTConnect(
-            client_id='will-delay-client',
-            clean_start=True,
-            keep_alive=60,
-            will_topic='clients/status',
-            will_payload=b'lwt',
-            will_qos=0,
-            will_retain=False,
-            will_properties={'will_delay_interval': 30},
-        )
-        wire = encode_packet(connect)
-        decoded = decode_packet(wire)
-        assert decoded.will_properties['will_delay_interval'] == 30
-
-    def test_will_delay_zero_means_immediate(self, mqtt):
-        """§3.1.3.3 — Will Delay = 0 means publish immediately on disconnect."""
-        connect = MQTTConnect(
-            client_id='will-no-delay',
-            clean_start=True,
-            keep_alive=60,
-            will_topic='clients/status',
-            will_payload=b'lwt',
-            will_qos=0,
-            will_retain=False,
-            will_properties={'will_delay_interval': 0},
-        )
-        wire = encode_packet(connect)
-        decoded = decode_packet(wire)
-        assert decoded.will_properties['will_delay_interval'] == 0

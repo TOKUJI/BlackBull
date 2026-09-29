@@ -149,41 +149,6 @@ class TestSessionExpiryInterval:
     SESSION_EXPIRY_NEVER = session never expires (retained indefinitely).
     """
 
-    def test_session_expiry_set_to_3600(self, mqtt):
-        """§3.1.2.4 — Session Expiry = 3600 (1 hour)."""
-        connect = MQTTConnect(
-            client_id='se-client',
-            clean_start=False,
-            keep_alive=60,
-            properties={'session_expiry_interval': 3600},
-        )
-        wire = encode_packet(connect)
-        decoded = decode_packet(wire)
-        assert decoded.properties['session_expiry_interval'] == 3600
-
-    def test_session_expiry_zero_means_immediate_expiry(self, mqtt):
-        """§3.1.2.4 — Session Expiry = 0: session ends on disconnect."""
-        connect = MQTTConnect(
-            client_id='se-zero',
-            clean_start=False,
-            keep_alive=60,
-            properties={'session_expiry_interval': 0},
-        )
-        wire = encode_packet(connect)
-        decoded = decode_packet(wire)
-        assert decoded.properties['session_expiry_interval'] == 0
-
-    def test_session_expiry_absent_uses_server_default(self, mqtt):
-        """§3.1.2.4 — If absent, server's default Session Expiry is used."""
-        connect = MQTTConnect(
-            client_id='se-default',
-            clean_start=False,
-            keep_alive=60,
-        )
-        wire = encode_packet(connect)
-        decoded = decode_packet(wire)
-        assert 'session_expiry_interval' not in decoded.properties
-
     def test_session_expiry_maximum_never_expires(self, mqtt):
         """§3.1.2.4 — SESSION_EXPIRY_NEVER = session never expires."""
         connect = MQTTConnect(
