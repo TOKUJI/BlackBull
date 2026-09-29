@@ -106,10 +106,12 @@ Reconnecting requires a **new** network connection, which can resume an existing
 session. Session takeover invalidates the old actor, so its delayed commands
 cannot publish or alter the replacement session, even while its writer
 flushes. A zero-length Client Identifier never takes part in that: the
-broker assigns an unused identifier and reports it in CONNACK. If that
-CONNACK cannot fit the peer's Maximum Packet Size, the connection is
-refused with `0x95` — or closed outright when even that reply cannot
-fit — without creating a session.
+broker assigns an unused identifier and reports it in CONNACK. Every
+CONNACK honours the peer's Maximum Packet Size: the full reply, then one
+trimmed of the broker's advertised limits (an assigned identifier is not
+optional), and only when neither fits is the connection refused with `0x95`
+— or closed outright when even that reply cannot fit — before creating a
+session.
 Broker-initiated protocol-error closure retires admission before processing the
 next command. Client DISCONNECT and transport failures use the FIFO `Detach`
 boundary: commands ordered before it were admitted while the connection was

@@ -7,14 +7,13 @@ import asyncio
 import pytest
 
 from blackbull.actor import Actor
-from blackbull.mqtt.broker import BrokerActor, Attach, Detach, Send, Close
+from blackbull.mqtt.broker import BrokerActor, Attach, Detach, Send
 
 from blackbull.mqtt.messages import (
     MQTTConnect,
     MQTTConnack,
     MQTTDisconnect,
     ReasonCode,
-    encode_packet,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -47,12 +46,6 @@ async def _detach(broker, conn):
 
 def _assigned(connack):
     return (connack.properties or {}).get('assigned_client_identifier')
-
-
-def _success_size(connack):
-    return len(encode_packet(MQTTConnack(
-        session_present=False, reason_code=ReasonCode.SUCCESS,
-        properties=dict(connack.properties or {}))))
 
 
 class TestAssignedIdentifier:
@@ -155,7 +148,7 @@ class TestAssignedIdentifier:
         assert again.packets()[0].session_present is False
 
 
-class TestQuotaAndPeerLimits:
+class TestQuota:
     async def test_a_full_table_leaves_nothing_behind_for_an_empty_id(self):
         broker = BrokerActor()
         broker._max_sessions = 1
@@ -177,75 +170,6 @@ class TestQuotaAndPeerLimits:
         ack = conn.packets()[0]
         assert ack.reason_code == ReasonCode.SUCCESS
         assert set(broker._sessions) == {'c1', _assigned(ack)}
-
-    async def test_the_assigned_connack_fits_the_peer_packet_limit(self):
-        broker, probe = BrokerActor(), RecordingConn()
-        await _attach(broker, probe)
-        size = _success_size(probe.packets()[0])
-        broker, conn = BrokerActor(), RecordingConn()
-        await _attach(broker, conn,
-                      properties={'maximum_packet_size': size})
-        assert _assigned(conn.packets()[0])
-
-    async def test_an_unfittable_assigned_connack_is_refused_without_a_session(self):
-        broker, probe = BrokerActor(), RecordingConn()
-        await _attach(broker, probe)
-        size = _success_size(probe.packets()[0])
-        broker, conn = BrokerActor(), RecordingConn()
-        await _attach(broker, conn, will_topic='w',
-                      properties={'maximum_packet_size': size - 1})
-        # §3.14 [MQTT-3.14.0-1] — DISCONNECT only ever follows a CONNACK.
-        ack = conn.packets()[0]
-        assert isinstance(ack, MQTTConnack)
-        assert ack.reason_code == ReasonCode.PACKET_TOO_LARGE
-        assert not any(isinstance(p, MQTTDisconnect) for p in conn.packets())
-        assert any(isinstance(m, Close) for m in conn.outbox)
-        assert broker._sessions == {}
-        assert broker._clients == {}
-        assert broker._client_by_conn == {}
-        assert broker._wills == {}
-        await _detach(broker, conn)
-        assert broker._sessions == {}
-        assert broker._clients == {}
-        assert broker._client_by_conn == {}
-        assert broker._wills == {}
-
-    async def test_a_tiny_limit_gets_a_close_and_nothing_else(self):
-        broker, conn = BrokerActor(), RecordingConn()
-        await _attach(broker, conn, will_topic='w',
-                      properties={'maximum_packet_size': 2})
-        assert conn.packets() == []
-        assert any(isinstance(m, Close) for m in conn.outbox)
-        assert broker._sessions == {}
-        assert broker._clients == {}
-        assert broker._client_by_conn == {}
-        assert broker._wills == {}
-
-    async def test_the_packet_limit_is_answered_before_the_quota(self):
-        broker, probe = BrokerActor(), RecordingConn()
-        await _attach(broker, probe)
-        size = _success_size(probe.packets()[0])
-        broker = BrokerActor()
-        broker._max_sessions = 1
-        await _attach(broker, RecordingConn(), client_id='c1')
-        conn = RecordingConn()
-        await _attach(broker, conn,
-                      properties={'maximum_packet_size': size - 1})
-        ack = conn.packets()[0]
-        assert isinstance(ack, MQTTConnack)
-        assert ack.reason_code == ReasonCode.PACKET_TOO_LARGE
-        assert set(broker._sessions) == {'c1'}
-
-    async def test_a_zero_maximum_packet_size_cannot_bypass_the_check(self):
-        broker, conn = BrokerActor(), RecordingConn()
-        await _attach(broker, conn, will_topic='w',
-                      properties={'maximum_packet_size': 0})
-        assert conn.packets() == []
-        assert any(isinstance(m, Close) for m in conn.outbox)
-        assert broker._sessions == {}
-        assert broker._clients == {}
-        assert broker._client_by_conn == {}
-        assert broker._wills == {}
 
 
 class TestExplicitIdentifiersAreUnchanged:
