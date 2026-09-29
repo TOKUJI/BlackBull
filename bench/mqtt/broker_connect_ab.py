@@ -1,38 +1,25 @@
 """ABBA A/B of the MQTT broker's per-CONNECT handling cost — BLA-357.
 
-Arms are full copies of ``blackbull/mqtt/broker.py`` — ``base`` is e4f3985,
-``pr`` is 129bd7f, ``fast`` is the working tree — loaded as siblings of
-the package, so the arms differ only in that module (the revisions
-differ in no other ``blackbull/`` file).
-``null`` is a second load of ``base``: an A/A pair measured in the same
-session, so every delta gets the run's own noise floor beside it.
+Arms are full copies of ``blackbull/mqtt/broker.py`` loaded as siblings of
+the package, so the arms differ only in that module: ``base`` is e4f3985,
+``pr`` is 129bd7f, ``fast`` is the working tree, and ``null`` is a second
+load of ``base`` — an A/A pair measured in the same session, so every
+delta gets the run's own noise floor beside it.
 
 One operation is one ``BrokerActor._on_attach(conn, connect)`` on a fresh
-fake connection whose ``send()`` stores the message and touches it the
-way production does: once through ``blackbull.mqtt.connection._output_size``
-(mailbox enqueue accounting) and once through ``Send.wire_bytes()`` (the
-write path's cache read).  CONNECT packets are built outside the timed
-region.  The
-broker is built once per arm and scenario at its baseline — 0 or 1000
-live sessions squatting ``auto-`` names — by default ``auto-1..auto-1000``
-(the counter-era attack; only a sequential allocator can be forced to
-walk it — pass ``random`` for names drawn in the current allocator's
-format) — and
-each operation restores the slots an attach touches (session-table
-entries; the base arm's counter), so the timed work is the changed code,
-not fixture churn (a seeded entry an attach overwrites is replaced, not
-dropped).
+fake connection whose ``send()`` touches messages as production does, and
+it restores the slots an attach touches; the broker starts at 0 or 1000
+live sessions squatting ``auto-1..auto-1000`` (the walk a sequential
+allocator pays; pass ``random`` for names in the current allocator's
+format).
 
     UV_CACHE_DIR=/tmp/uv-cache uv run --no-sync python bench/mqtt/broker_connect_ab.py [rounds] [ops]
 
 Deltas are round-paired: each round measures every arm once in a rotated
-order and reports pr-base, fast-pr and fast-base per round (positive
-means the later arm is slower), so drift common to a round cancels.  The
-95% CI is the t-interval over those paired differences.  Per-round arm
-values and paired deltas print with every scenario, so each reported
-number recomputes from the output alone.  Verdict rule: a comparison is
-a regression only when the whole CI sits above the A/A pair's own CI
-spread (the noise floor).
+order (positive delta: the later arm is slower), so drift common to a
+round cancels; the 95% CI is the t-interval over the paired differences.
+Verdict rule: a comparison is a regression only when the whole CI sits
+above the A/A pair's own CI spread (the noise floor).
 """
 from __future__ import annotations
 
@@ -48,7 +35,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 WORK = REPO.parent / '.bench-bla357'
-sys.path.insert(0, str(REPO))          # run as a script, import as the package
+sys.path.insert(0, str(REPO))
 ARMS = ('base', 'pr', 'fast', 'null')
 BASE_REV = 'e4f3985'
 PR_REV = '129bd7f'
@@ -71,16 +58,15 @@ from blackbull.mqtt.broker import Send  # noqa: E402
 
 
 def load(name: str, path: Path):
-    # Import the package first: the arms resolve `.messages` and `..actor`
-    # through `blackbull.mqtt.__path__`, which only exists once it is in.
+    # Arms resolve `.messages`/`..actor` via `blackbull.mqtt.__path__`.
     import blackbull.mqtt  # noqa: F401
     import blackbull.mqtt.broker as shared
     spec = importlib.util.spec_from_file_location(f'blackbull.mqtt.{name}', path)
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
-    # The diff does not touch Send/Close: alias them to the checkout's
-    # classes so the shared _output_size accounts for the arms' messages.
+    # Alias the unchanged Send/Close so the shared _output_size accounts
+    # for the arms' messages.
     module.Send = shared.Send
     module.Close = shared.Close
     return module
@@ -102,14 +88,15 @@ class FakeConn:
         self.sent = []
 
     async def send(self, msg) -> None:
-        _output_size(msg)               # the Mailbox charges this at enqueue
+        # Touch the encode cache exactly as production: Mailbox accounting
+        # at enqueue, then the write path's cache read.
+        _output_size(msg)
         if isinstance(msg, Send):
-            msg.wire_bytes()            # the write path reads the cache again
+            msg.wire_bytes()
         self.sent.append(msg)
 
 
 def seed_names(mode: str) -> tuple[str, ...]:
-    # Deterministic for pairing across arms and rounds.
     if mode == 'random':
         rng = random.Random(0xB1A357)
         names = tuple(f'auto-{rng.getrandbits(48):012x}'
@@ -155,9 +142,8 @@ async def one_op(broker, connect, seed_keys, seed_template) -> None:
     await broker._on_attach(conn, connect)
     client_id = broker._client_by_conn.pop(id(conn), None)
     if client_id is not None:
-        # The base arm can register a squatted auto-N over its seed entry;
-        # restore that entry rather than dropping it, or a long run would
-        # erode the 1k baseline only for the arms that collide with it.
+        # Replace a colliding seed entry, not drop it: only the colliding
+        # arms would erode the 1k baseline.
         if client_id in seed_keys:
             broker._sessions[client_id] = seed_template
         else:
@@ -187,12 +173,8 @@ def ci95(samples: list[float]) -> float:
 
 
 async def probe_limits(mods) -> tuple[int, int]:
-    """Mechanically set the per-limit scenario bounds: the refuse limit is
-    one byte below the smallest success CONNACK among the assigning arms,
-    so every arm that honours the limit refuses; the accept limit clears
-    the largest, and the bare refusal must still fit.  The base CONNACK
-    differs by design: it carries no assigned Client Identifier; base and
-    null must agree (A/A)."""
+    """Derive the limit scenarios' bounds from measured CONNACK sizes:
+    refuse one byte below the smallest success CONNACK, accept at 1024."""
     from blackbull.mqtt.messages import (
         MQTTConnack, MQTTConnect, ReasonCode, encode_packet)
     sizes = {}
@@ -244,7 +226,7 @@ async def main(rounds: int, ops: int, seed_mode: str = 'counter') -> None:
         brokers = {arm: broker_for(mods[arm], scenario) for arm in ARMS}
         seeds = {arm: (seed_keys_for(scenario), mods[arm]._new_broker_session())
                  for arm in ARMS}
-        for _ in range(3):               # warm each arm before measuring
+        for _ in range(3):
             for arm in ARMS:
                 await time_arm(brokers[arm], connect, *seeds[arm], 200)
         seen = {arm: [] for arm in ARMS}
