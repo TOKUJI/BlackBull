@@ -16,6 +16,7 @@ import asyncio
 import logging
 from collections import deque
 from dataclasses import dataclass, field, replace
+from random import getrandbits
 from typing import Any
 from weakref import WeakSet
 
@@ -317,7 +318,6 @@ class BrokerActor(Actor):
         self._sessions = {}         # client_id -> session dict
         self._retained = {}         # topic -> MQTTPublish
         self._wills = {}            # client_id -> MQTTPublish (Will template)
-        self._auto_seq = 0          # for server-assigned client ids
         # §4.8.2 — round-robin cursor per share group.  Membership itself is
         # derived from session subscriptions at routing time (correctness
         # first: no registry to keep in sync across SUBSCRIBE / UNSUBSCRIBE /
@@ -536,7 +536,6 @@ class BrokerActor(Actor):
         connack_props = self._connack_properties()
         ack: Send | None = None
         if not client_id:
-            # §3.2.2.3.7 [MQTT-3.2.2-16] — the client must see its assigned id.
             client_id = self._allocate_client_id()
             connack_props['assigned_client_identifier'] = client_id
             ack = Send(packet=MQTTConnack(
@@ -958,10 +957,13 @@ class BrokerActor(Actor):
                                 retain=(rap and publish.retain))
 
     def _allocate_client_id(self) -> str:
-        """§3.2.2.3.7 [MQTT-3.2.2-16] — an identifier no session holds."""
+        """§3.2.2.3.7 [MQTT-3.2.2-16] — an identifier no session holds.
+
+        Random rather than sequential: held names cannot make the search
+        walk, and squats cannot be aimed at the next candidates.
+        """
         while True:
-            self._auto_seq += 1
-            candidate = f'auto-{self._auto_seq}'
+            candidate = f'auto-{getrandbits(48):012x}'
             if (candidate not in self._sessions
                     and candidate not in self._clients):
                 return candidate
