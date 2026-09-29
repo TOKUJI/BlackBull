@@ -64,11 +64,6 @@ class TestMethodCase:
         assert r.status in (404, 405, 501)
 
 
-@pytest.mark.integration
-class TestUnknownExtensionMethod:
-    """RFC 9110 §9.1 — method-tokens are extensible; a server MAY refuse
-    methods it doesn't recognise with 501 Not Implemented."""
-
 
 
 @pytest.mark.integration

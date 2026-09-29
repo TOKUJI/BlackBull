@@ -43,8 +43,7 @@ class TestContentLengthValidation:
         pytest.param(
             b'POST /echo HTTP/1.1\r\n'
             b'Host: localhost\r\n'
-            b'Content-Length: 0xff\r\n\r\n'
-            b'hello',
+            b'Content-Length: 0xff\r\n\r\n',
             id='hex-value'),
         pytest.param(
             b'POST /echo HTTP/1.1\r\n'

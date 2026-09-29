@@ -144,30 +144,26 @@ class TestFieldSyntax:
                      b'\r\n')
         assert r.status != 200
 
-    def test_tab_in_field_value_accepted(self, h1_app):
-        """§5: field-value MAY contain HTAB (0x09)."""
-        r = send_raw('127.0.0.1', h1_app.port,
-                     b'GET / HTTP/1.1\r\n'
+    @pytest.mark.parametrize('req', [
+        pytest.param(b'GET / HTTP/1.1\r\n'
                      b'Host: localhost\r\n'
                      b'X-Has-Tab: a\tb\r\n'
-                     b'\r\n')
-        assert r.status == 200
-
-    def test_leading_optional_whitespace_in_value_stripped(self, h1_app):
-        """OWS surrounding field-value is not part of the value."""
-        r = send_raw('127.0.0.1', h1_app.port,
-                     b'GET / HTTP/1.1\r\n'
+                     b'\r\n',
+                     id='tab-in-field-value'),
+        pytest.param(b'GET / HTTP/1.1\r\n'
                      b'Host:    localhost   \r\n'   # OWS on both sides
-                     b'\r\n')
-        assert r.status == 200
-
-    def test_empty_field_value_accepted(self, h1_app):
-        """§5: field-value MAY be empty (e.g. ``Header:\r\n``)."""
-        r = send_raw('127.0.0.1', h1_app.port,
-                     b'GET / HTTP/1.1\r\n'
+                     b'\r\n',
+                     id='ows-stripped'),
+        pytest.param(b'GET / HTTP/1.1\r\n'
                      b'Host: localhost\r\n'
                      b'X-Empty:\r\n'
-                     b'\r\n')
+                     b'\r\n',
+                     id='empty-field-value'),
+    ])
+    def test_tab_in_field_value_accepted(self, h1_app, req):
+        """Field-value acceptance rules (§5): HTAB allowed, OWS stripped,
+        empty value allowed."""
+        r = send_raw('127.0.0.1', h1_app.port, req)
         assert r.status == 200
 
     def test_nul_in_field_value_rejected(self, h1_app):
