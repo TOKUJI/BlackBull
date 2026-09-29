@@ -224,7 +224,7 @@ async def test_after_handler_ordering(steps, expected):
 
     await _run_request(app, _raw_request(path='/order'))
     assert order == expected, (
-        f'Expected {expected}, got {order}'
+        f'Expected [{", ".join(expected)}], got {order}'
     )
 
 
