@@ -320,6 +320,14 @@ class BrokerActor(Actor):
                               if max_sessions is None else max_sessions)
         self._clients = {}          # client_id -> live connection Actor
         self._client_by_conn = {}   # id(conn) -> client_id
+        # §3.1.2.11.4 — the Maximum Packet Size each live connection declared
+        # in CONNECT.  Connection state, not session state: §4.1's Session
+        # State list does not carry it, so a reconnect declares its own limit
+        # (or none) and nothing is inherited.  Only declared limits are
+        # stored — a miss from ``.get`` *is* "no limit imposed".  Keyed by
+        # the connection actor itself so the delivery hot path pays one
+        # lookup, not ``id()`` plus one.
+        self._peer_max_packet_size: dict[Actor, int] = {}
         self._sessions = {}         # client_id -> session dict
         self._retained = {}         # topic -> MQTTPublish
         self._wills = {}            # client_id -> MQTTPublish (Will template)
@@ -494,6 +502,19 @@ class BrokerActor(Actor):
         await self._refuse(conn, ReasonCode.PACKET_TOO_LARGE, limit=limit)
         return None
 
+    def _fits_peer(self, peer_limit: int, send: Send) -> bool:
+        """Whether *send* fits a peer that declared *peer_limit* (§3.1.2-24).
+
+        §3.1.2-25 — a packet too large to send is discarded without sending
+        and the Application Message is then treated complete: callers ask
+        this before booking anything and walk away on ``False``.  Callers
+        reach it only when the peer declared a limit (absent is the
+        protocol's "no limit imposed"), and the length is
+        ``Send.wire_bytes()``'s own cache — a packet that goes out is still
+        encoded exactly once, the mailbox accounting with the same call.
+        """
+        return len(send.wire_bytes()) <= peer_limit
+
     @staticmethod
     def _alloc_pid(session) -> int:
         """§2.2.1 — allocate a non-zero Packet Identifier not currently in use.
@@ -617,6 +638,7 @@ class BrokerActor(Actor):
         existing_conn = self._clients.get(client_id)
         if existing_conn is not None and existing_conn is not conn:
             self._client_by_conn.pop(id(existing_conn), None)
+            self._peer_max_packet_size.pop(existing_conn, None)
             await existing_conn.send(Send(packet=MQTTDisconnect(
                 reason_code=ReasonCode.SESSION_TAKEN_OVER)))
             await existing_conn.send(Close(
@@ -624,6 +646,8 @@ class BrokerActor(Actor):
 
         self._clients[client_id] = conn
         self._client_by_conn[id(conn)] = client_id
+        if limit is not None:
+            self._peer_max_packet_size[conn] = limit
 
         if connect.will_topic is not None:
             self._wills[client_id] = MQTTPublish(
@@ -699,16 +723,32 @@ class BrokerActor(Actor):
         """§4.4 — retransmit unacknowledged outbound messages on a
         session-present reconnect.  Replayed PUBLISH frames carry DUP=1
         (§3.3.1.1): QoS 1 PUBLISH awaiting PUBACK and QoS 2 PUBLISH awaiting
-        PUBREC.  A QoS 2 exchange already past PUBREC re-drives its PUBREL."""
-        for pending in list(session['pending_qos1_out'].values()):
-            await conn.send(Send(packet=replace(pending, dup=True)))
-        for packet_id, entry in list(session['pending_qos2_out'].items()):
+        PUBREC.  A QoS 2 exchange already past PUBREC re-drives its PUBREL.
+
+        Each re-drive is re-judged against the *reconnecting* connection's
+        Maximum Packet Size (§3.1.2-24): a packet it cannot receive is
+        discarded and its flow treated complete (§3.1.2-25) — keeping it
+        unacknowledged would oblige §4.4 to resend what §3.1.2-24 forbids."""
+        peer_limit = self._peer_max_packet_size.get(conn)
+        redrives = [
+            (session['pending_qos1_out'], packet_id,
+             Send(packet=replace(pending, dup=True)))
+            for packet_id, pending in session['pending_qos1_out'].items()]
+        for packet_id, entry in session['pending_qos2_out'].items():
             publish = entry.get('packet')
             if entry.get('state') == _QOS2_OUT_PUBLISH_SENT and publish is not None:
-                await conn.send(Send(packet=replace(publish, dup=True)))
+                redrives.append((session['pending_qos2_out'], packet_id,
+                                 Send(packet=replace(publish, dup=True))))
             else:  # PUBREL_SENT — the PUBLISH is acknowledged; re-drive PUBREL
-                await conn.send(Send(packet=MQTTPubrel(
-                    packet_id=packet_id, reason_code=ReasonCode.SUCCESS)))
+                redrives.append((session['pending_qos2_out'], packet_id,
+                                 Send(packet=MQTTPubrel(
+                                     packet_id=packet_id,
+                                     reason_code=ReasonCode.SUCCESS))))
+        for bucket, packet_id, send in redrives:
+            if peer_limit is None or self._fits_peer(peer_limit, send):
+                await conn.send(send)
+            else:
+                bucket.pop(packet_id, None)
 
     async def _on_subscribe(self, conn, subscribe) -> None:
         session = self._session_for(conn)
@@ -985,10 +1025,14 @@ class BrokerActor(Actor):
         for share, members in share_groups.items():
             cursor = self._share_rotation.get(share, 0) % len(members)
             self._share_rotation[share] = cursor + 1
-            conn, session, qos, opts = members[cursor]
-            rap = bool(opts.get('retain_as_published'))
-            await self._deliver(conn, session, publish, qos,
-                                retain=(rap and publish.retain))
+            # §3.1.2.11.4 — where the message is too large for one member but
+            # another can receive it, it goes to one that can; only when none
+            # can is the copy discarded.
+            for conn, session, qos, opts in members[cursor:] + members[:cursor]:
+                rap = bool(opts.get('retain_as_published'))
+                if await self._deliver(conn, session, publish, qos,
+                                       retain=(rap and publish.retain)):
+                    break
 
     def _allocate_client_id(self) -> str:
         """§3.2.2.3.7 [MQTT-3.2.2-16] — an identifier no session holds.
@@ -1038,20 +1082,41 @@ class BrokerActor(Actor):
         return len(session.get('pending_qos1_out') or {}) \
             + len(session.get('pending_qos2_out') or {})
 
-    async def _deliver(self, conn, session, publish, granted_qos, *, retain=False) -> None:
+    async def _deliver(self, conn, session, publish, granted_qos, *,
+                       retain=False) -> bool:
+        """One message to one client; False when §3.1.2-25 discarded it.
+
+        False is what the shared-subscription fan-out reads as "this member
+        cannot receive it" — the one copy then goes to a member that can.
+        """
+        peer_limit = self._peer_max_packet_size.get(conn)
         qos = min(publish.qos, granted_qos)
         if qos == 0:
             # Receive Maximum governs QoS>0 acknowledgements, not writer
             # capacity. QoS 0 uses the connection's separate mailbox budget.
-            await conn.send(Send(packet=MQTTPublish(
+            send = Send(packet=MQTTPublish(
                 topic=publish.topic, payload=publish.payload, qos=0,
-                retain=retain, properties=dict(publish.properties))))
-            return
+                retain=retain, properties=dict(publish.properties)))
+            if peer_limit is not None and not self._fits_peer(peer_limit, send):
+                return False
+            await conn.send(send)
+            return True
 
         if self._in_flight(session) >= session.get('receive_maximum', 65535):
+            # Judged before the queue holds it: §3.1.2-25's "never happened"
+            # includes never being queued.  The placeholder identifier exists
+            # only to satisfy §3.3.2-2's invariant — any id encodes the same
+            # two bytes, so the measured size is the one a send would use.
+            if peer_limit is not None and not self._fits_peer(
+                    peer_limit, Send(packet=MQTTPublish(
+                        topic=publish.topic, payload=publish.payload, qos=qos,
+                        packet_id=1, retain=retain,
+                        properties=dict(publish.properties)))):
+                return False
             self._enqueue_outbound(session, publish, qos, retain)
-            return
-        await self._send_qos(conn, session, publish, qos, retain)
+            return True
+        return await self._send_qos(conn, session, publish, qos, retain,
+                                    peer_limit)
 
     def _enqueue_outbound(self, session, publish, qos, retain) -> None:
         """Hold a message the client's window has no room for.
@@ -1076,17 +1141,27 @@ class BrokerActor(Actor):
         # 65535-wide space for a message that may wait indefinitely.
         queue.append(_Held(publish=publish, qos=qos, retain=retain))
 
-    async def _send_qos(self, conn, session, publish, qos, retain) -> None:
+    async def _send_qos(self, conn, session, publish, qos, retain,
+                        peer_limit) -> bool:
+        cursor = session.get('_next_pid', 0) if peer_limit is not None else 0
         packet_id = self._alloc_pid(session)
         out = MQTTPublish(
             topic=publish.topic, payload=publish.payload, qos=qos,
             packet_id=packet_id, retain=retain, properties=dict(publish.properties))
+        send = Send(packet=out)
+        if peer_limit is not None and not self._fits_peer(peer_limit, send):
+            # §3.1.2-25 — dropped whole: the message never happened, so the
+            # identifier goes back to the space untouched and nothing is
+            # booked that §4.4 would later resend into the same refusal.
+            session['_next_pid'] = cursor
+            return False
         if qos == 1:
             session['pending_qos1_out'][packet_id] = out
         else:
             session['pending_qos2_out'][packet_id] = {
                 'state': _QOS2_OUT_PUBLISH_SENT, 'packet': out}
-        await conn.send(Send(packet=out))
+        await conn.send(send)
+        return True
 
     async def _drain_outbound(self, conn) -> None:
         """Release held messages as acknowledgements free the window.
@@ -1100,9 +1175,11 @@ class BrokerActor(Actor):
             return
         queue = session.get('outbound_queue')
         limit = session.get('receive_maximum', 65535)
+        peer_limit = self._peer_max_packet_size.get(conn)
         while queue and self._in_flight(session) < limit:
             held = queue.popleft()
-            await self._send_qos(conn, session, held.publish, held.qos, held.retain)
+            await self._send_qos(conn, session, held.publish, held.qos,
+                                 held.retain, peer_limit)
 
     async def _on_pubrel(self, conn, packet_id) -> None:
         await conn.send(Send(packet=MQTTPubcomp(
@@ -1129,6 +1206,7 @@ class BrokerActor(Actor):
     async def _on_detach(self, conn, graceful, session_expiry_interval=None) -> None:
         if conn is not None:
             self._seen_connections.add(conn)
+        self._peer_max_packet_size.pop(conn, None)
         client_id = self._client_by_conn.pop(id(conn), None)
         if client_id is None:
             return
