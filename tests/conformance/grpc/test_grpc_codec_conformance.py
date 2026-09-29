@@ -90,13 +90,15 @@ class TestDecodeWireFormat:
         assert decode_messages(b'') == []
 
 
-    def test_multiple_messages_in_one_buffer(self):
-        """gRPC allows multiple framed messages in a single DATA buffer.
-        All must be decoded in order."""
-        buf = encode_message(b'one') + encode_message(b'two') + encode_message(b'three')
-        assert decode_messages(buf) == [
-            (False, b'one'), (False, b'two'), (False, b'three'),
-        ]
+    @pytest.mark.parametrize('payloads', [
+        pytest.param([b'one', b'two', b'three'], id='multiple-messages'),
+        pytest.param([b'one', b'', b'two'], id='zero-length-in-middle'),
+    ])
+    def test_multiple_messages_in_one_buffer(self, payloads):
+        """A DATA buffer may carry several messages — including zero-length
+        ones — decoded in order."""
+        buf = b''.join(encode_message(p) for p in payloads)
+        assert decode_messages(buf) == [(False, p) for p in payloads]
 
     def test_messages_are_not_required_to_align_to_frame_boundaries(self):
         """The spec says frames may be fragmented arbitrarily across DATA
@@ -114,13 +116,6 @@ class TestDecodeWireFormat:
         """The compressed flag (bool) MUST be reported faithfully per-message."""
         buf = encode_message(b'a', compressed=True) + encode_message(b'b', compressed=False)
         assert decode_messages(buf) == [(True, b'a'), (False, b'b')]
-
-    def test_zero_length_message_in_middle(self):
-        """A zero-length message between two non-empty messages is valid."""
-        buf = encode_message(b'one') + encode_message(b'') + encode_message(b'two')
-        assert decode_messages(buf) == [
-            (False, b'one'), (False, b''), (False, b'two'),
-        ]
 
 
 # ---------------------------------------------------------------------------
