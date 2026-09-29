@@ -438,18 +438,12 @@ class _AcceptGate:
         self._listening = listening
         return list(listening)
 
-    def admit(self) -> _Admission:
-        return _Admission(self)
-
     def connect(self, conn, factory, ssl_context) -> None:
         """Hand one accepted socket to the loop, counted until it closes."""
         admission = _Admission(self)
         try:
             protocol = factory()
-            try:
-                protocol.admission = admission
-            except AttributeError:
-                pass    # a protocol that cannot carry it releases on failure only
+            protocol.admission = admission
         except BaseException:
             conn.close()
             admission.release()

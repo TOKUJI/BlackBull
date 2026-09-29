@@ -17,7 +17,7 @@ import pytest
 
 from blackbull import BlackBull
 from blackbull.server import server as server_mod
-from blackbull.server.server import Server, _AcceptGate
+from blackbull.server.server import Server, _AcceptGate, _Admission
 
 
 class _Quiet(asyncio.Protocol):
@@ -53,7 +53,7 @@ async def _settle(gate: _AcceptGate) -> None:
 
 def test_an_admission_releases_once():
     gate = _AcceptGate()
-    admission = gate.admit()
+    admission = _Admission(gate)
     assert gate._descriptors_held == 1
     admission.release()
     admission.release()
@@ -75,10 +75,10 @@ async def test_the_admission_pause_logs_one_max_connections_cap_hit(caplog):
     gate._limit = 2
 
     with caplog.at_level(logging.WARNING, logger='blackbull.caps'):
-        first = gate.admit()
-        gate.admit()
+        first = _Admission(gate)
+        _Admission(gate)
         first.release()
-        gate.admit()
+        _Admission(gate)
 
     records = [record for record in caplog.records
                if record.name == 'blackbull.caps'
@@ -98,7 +98,7 @@ async def test_accepting_pauses_at_the_limit_and_resumes_below_it(listener):
     port = listener.getsockname()[1]
     clients = []
     try:
-        held = [gate.admit() for _ in range(limit - 1)]
+        held = [_Admission(gate) for _ in range(limit - 1)]
         clients.append(socket.create_connection(('127.0.0.1', port)))
         await asyncio.sleep(0.2)
         assert gate._descriptors_held == limit, 'the arrival up to the limit'
@@ -336,7 +336,7 @@ async def test_one_accept_tick_stops_at_the_limit(listener):
     accepting = []
     try:
         gate._limit = limit            # so the admissions below count against it
-        held = [gate.admit() for _ in range(limit - 2)]
+        held = [_Admission(gate) for _ in range(limit - 2)]
         accepting = gate.arm([((_Quiet, None), listener)], 1, 16)
         await asyncio.sleep(0.2)
         assert gate._descriptors_held == limit
@@ -401,7 +401,7 @@ async def _backed_off_then_paused(two_listeners, monkeypatch):
     gate = _AcceptGate()
     limit = 1 + server_mod._REFUSAL_RESERVE
     gate._limit = limit
-    held = [gate.admit() for _ in range(limit - 1)]
+    held = [_Admission(gate) for _ in range(limit - 1)]
     flaky = _FlakySocket(real_a, [OSError(errno.EMFILE, 'Too many open files')])
     asyncio.get_running_loop().set_exception_handler(lambda *_: None)
     accepting = gate.arm([((_Idle, None), flaky), ((_Idle, None), real_b)], 1, 16)
@@ -612,24 +612,30 @@ class _Slotted(asyncio.Protocol):
     """A protocol that cannot carry an admission."""
 
     __slots__ = ()
-    made = 0
 
-    def connection_made(self, transport):
-        _Slotted.made += 1
-        transport.close()
+
+class _ReadOnlyAdmission(asyncio.Protocol):
+    @property
+    def admission(self):
+        return None
 
 
 @pytest.mark.asyncio
 @pytest.mark.timeout(30)
-async def test_a_protocol_that_cannot_carry_an_admission_is_still_served(listener):
+@pytest.mark.parametrize('factory', [_Slotted, _ReadOnlyAdmission],
+                         ids=['slots', 'read_only_property'])
+async def test_a_protocol_that_cannot_carry_an_admission_fails_at_accept(
+        listener, factory):
+    """Served without its admission, the connection would hold a count that
+    nothing releases, and enough of them would pause accepting for good."""
     gate = _AcceptGate()
-    _Slotted.made = 0
     client = socket.create_connection(listener.getsockname())
     conn, _ = listener.accept()
     try:
-        gate.connect(conn, _Slotted, None)
-        await _settle(gate)
-        await asyncio.sleep(0.05)
-        assert _Slotted.made == 1
+        with pytest.raises(AttributeError):
+            gate.connect(conn, factory, None)
+        assert gate._descriptors_held == 0
+        assert conn.fileno() == -1
+        assert not gate._connecting
     finally:
         client.close()
