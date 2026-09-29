@@ -64,22 +64,21 @@ async def test_readuntil_with_a_keyword_limit_is_refused(make_reader):
     await _refuses(reader.readuntil(b'\r\n', limit=5))
 
 
-@pytest.mark.parametrize('make_reader', READERS)
-async def test_bounded_read_head_is_refused(make_reader):
+@pytest.mark.parametrize('make_reader,n', [
+    pytest.param(_ws_reader, 1024, id='bounded-read-head-HTTP2WSReader'),
+    pytest.param(_queue_reader, 1024, id='bounded-read-head-_H2QueueReader'),
+    pytest.param(_ws_reader, 0, id='unbounded-read-head-HTTP2WSReader'),
+    pytest.param(_queue_reader, 0, id='unbounded-read-head-_H2QueueReader'),
+])
+async def test_bounded_read_head_is_refused(make_reader, n):
     reader = await make_reader()
-    await _refuses(reader.read_head(1024))
+    await _refuses(reader.read_head(n))
 
 
 @pytest.mark.parametrize('make_reader', READERS)
 async def test_unbounded_readuntil_is_refused(make_reader):
     reader = await make_reader()
     await _refuses(reader.readuntil(b'\r\n'))
-
-
-@pytest.mark.parametrize('make_reader', READERS)
-async def test_unbounded_read_head_is_refused(make_reader):
-    reader = await make_reader()
-    await _refuses(reader.read_head(0))
 
 
 @pytest.mark.parametrize('make_reader', READERS)

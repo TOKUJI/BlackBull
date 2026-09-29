@@ -18,7 +18,7 @@ import asyncio
 import pytest
 
 from blackbull import BlackBull
-from blackbull.event import Event
+from blackbull.event import Event, EventDispatcher
 from blackbull.testing import native
 
 pytestmark = pytest.mark.asyncio
@@ -112,31 +112,58 @@ class TestQuiescenceNotASnapshot:
     still outstanding at shutdown.
     """
 
-    async def test_an_observer_that_emits_is_drained_too(self):
-        seen: list = []
-        app = BlackBull()
+    @pytest.mark.parametrize('driver', [
+        pytest.param('dispatcher-aclose', id='aclose-drains-chained-observer'),
+        pytest.param('app-drain-events', id='drain-events-drains-chained-observer'),
+    ])
+    async def test_an_observer_that_emits_is_drained_too(self, driver):
+        """Both generations must have run before the drain returns —
+        through ``dispatcher.aclose`` and through ``app.drain_events``."""
+        if driver == 'dispatcher-aclose':
+            ran: list[str] = []
+            dispatcher = EventDispatcher(shutdown_timeout=5.0)
 
-        @app.route(path='/')
-        async def _root(conn):
-            return 'ok'
+            async def second(event):
+                await asyncio.sleep(0.05)
+                ran.append('second')
 
-        @app.on('request_completed')
-        async def _first(event):
-            await asyncio.sleep(0.05)
-            seen.append('first')
-            # Through the dispatcher: there is no `app.emit`, and an
-            # AttributeError here would be swallowed by observer isolation
-            # and read as "the drain worked".
-            await app._dispatcher.emit(Event('second_hop', {}))
+            async def first(event):
+                await asyncio.sleep(0.05)
+                ran.append('first')
+                await dispatcher.emit(Event('chained', {}))
 
-        @app.on('second_hop')
-        async def _second(event):
-            await asyncio.sleep(0.05)
-            seen.append('second')
+            dispatcher.on('start', first)
+            dispatcher.on('chained', second)
 
-        await native.get(app, '/')
-        drained = await app.drain_events(timeout=5.0)
+            await dispatcher.emit(Event('start', {}))
+            await dispatcher.aclose()
 
-        assert drained is True
-        assert seen == ['first', 'second'], (
-            f'the drain returned before the chained observer ran: {seen}')
+            assert ran == ['first', 'second'], ran
+        else:
+            seen: list = []
+            app = BlackBull()
+
+            @app.route(path='/')
+            async def _root(conn):
+                return 'ok'
+
+            @app.on('request_completed')
+            async def _first(event):
+                await asyncio.sleep(0.05)
+                seen.append('first')
+                # Through the dispatcher: there is no `app.emit`, and an
+                # AttributeError here would be swallowed by observer isolation
+                # and read as "the drain worked".
+                await app._dispatcher.emit(Event('second_hop', {}))
+
+            @app.on('second_hop')
+            async def _second(event):
+                await asyncio.sleep(0.05)
+                seen.append('second')
+
+            await native.get(app, '/')
+            drained = await app.drain_events(timeout=5.0)
+
+            assert drained is True
+            assert seen == ['first', 'second'], (
+                f'the drain returned before the chained observer ran: {seen}')

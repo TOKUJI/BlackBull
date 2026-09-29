@@ -52,22 +52,17 @@ class TestCodec:
 # ---------------------------------------------------------------------------
 
 class TestRegistry:
-    def test_add_and_lookup(self):
+    @pytest.mark.parametrize('added', [
+        pytest.param('/pkg.Svc/M', id='add-and-lookup'),
+        pytest.param('pkg.Svc/M', id='leading-slash-normalised'),
+    ])
+    def test_add_and_lookup(self, added):
         reg = GrpcServiceRegistry()
 
         async def h(request, context):
             return b''
 
-        reg.add_method('/pkg.Svc/M', h)
-        assert reg.lookup('/pkg.Svc/M') is h
-
-    def test_lookup_normalises_leading_slash(self):
-        reg = GrpcServiceRegistry()
-
-        async def h(request, context):
-            return b''
-
-        reg.add_method('pkg.Svc/M', h)            # no leading slash
+        reg.add_method(added, h)
         assert reg.lookup('/pkg.Svc/M') is h
 
     def test_decorator(self):
