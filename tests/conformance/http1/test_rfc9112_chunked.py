@@ -24,16 +24,21 @@ from .conftest import send_raw
 
 @pytest.mark.integration
 class TestChunkedHappyPath:
-    def test_basic_chunked_body_round_trips(self, h1_app):
+    @pytest.mark.parametrize('chunk_tail,expected_body', [
+        pytest.param(b'5\r\nhello\r\n'
+                     b'6\r\n world\r\n'
+                     b'0\r\n\r\n', b'hello world', id='basic-round-trip'),
+        pytest.param(b'0;name=value\r\n\r\n', b'', id='last-chunk-extension'),
+        pytest.param(b'5\r\nhello\r\n0\r\n\r\n', b'hello', id='valid-chunked-200'),
+    ])
+    def test_basic_chunked_body_round_trips(self, h1_app, chunk_tail, expected_body):
+        """Well-formed chunked bodies are accepted and echoed."""
         r = send_raw('127.0.0.1', h1_app.port,
                      b'POST /echo HTTP/1.1\r\n'
                      b'Host: localhost\r\n'
-                     b'Transfer-Encoding: chunked\r\n\r\n'
-                     b'5\r\nhello\r\n'
-                     b'6\r\n world\r\n'
-                     b'0\r\n\r\n')
+                     b'Transfer-Encoding: chunked\r\n\r\n' + chunk_tail)
         assert r.status == 200
-        assert r.body == b'hello world'
+        assert r.body == expected_body
 
     def test_empty_chunked_body(self, h1_app):
         """0\\r\\n\\r\\n is a valid (empty) chunked body."""
@@ -66,15 +71,6 @@ class TestChunkedHappyPath:
                      b'0\r\n\r\n')
         assert r.status == 200
         assert r.body == b'hello'
-
-    def test_last_chunk_with_extension(self, h1_app):
-        r = send_raw('127.0.0.1', h1_app.port,
-                     b'POST /echo HTTP/1.1\r\n'
-                     b'Host: localhost\r\n'
-                     b'Transfer-Encoding: chunked\r\n\r\n'
-                     b'0;name=value\r\n\r\n')
-        assert r.status == 200
-        assert r.body == b''
 
 
 @pytest.mark.integration

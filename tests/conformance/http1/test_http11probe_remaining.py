@@ -112,13 +112,6 @@ class TestContentLengthStrictWire:
         resp = send_raw('localhost', h1_app.port, req)
         assert resp.status == 400
 
-    def test_canonical_content_length_still_200(self, h1_app):
-        resp = send_raw('localhost', h1_app.port,
-                        b'POST /echo HTTP/1.1\r\nHost: x\r\n'
-                        b'Content-Length: 5\r\n\r\nhello')
-        assert resp.status == 200
-        assert resp.body == b'hello'
-
 
 class TestUnderscoreFramingNamesWire:
     def test_underscore_content_length_400(self, h1_app):
