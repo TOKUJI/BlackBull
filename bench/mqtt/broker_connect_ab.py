@@ -53,8 +53,8 @@ ARMS = ('base', 'pr', 'fast', 'null')
 BASE_REV = 'e4f3985'
 PR_REV = '129bd7f'
 SCENARIOS = (
-    'empty-id', 'named-id', 'empty-id-limit-ok', 'empty-id-limit-refuse',
-    'empty-id-1k-sessions', 'named-id-1k-sessions',
+    'empty-id', 'named-id', 'empty-id-limit-ok', 'named-id-limit-ok',
+    'empty-id-limit-refuse', 'empty-id-1k-sessions', 'named-id-1k-sessions',
 )
 NAMED_ID = 'bench-client'
 SEED_SESSIONS = 1000
@@ -142,9 +142,9 @@ def connect_for(scenario: str, refuse_limit: int, ok_limit: int):
     from blackbull.mqtt.messages import MQTTConnect
     named = scenario.startswith('named-id')
     props = {}
-    if scenario == 'empty-id-limit-ok':
+    if scenario.endswith('limit-ok'):
         props['maximum_packet_size'] = ok_limit
-    elif scenario == 'empty-id-limit-refuse':
+    elif scenario.endswith('limit-refuse'):
         props['maximum_packet_size'] = refuse_limit
     return MQTTConnect(client_id=NAMED_ID if named else '', clean_start=True,
                        keep_alive=60, properties=props)
