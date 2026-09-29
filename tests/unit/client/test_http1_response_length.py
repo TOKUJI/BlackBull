@@ -79,15 +79,6 @@ async def _within(coro, seconds: float = 1.0):
 
 class TestInterimResponses:
     @pytest.mark.asyncio
-    async def test_early_hints_are_skipped_and_the_final_response_returned(self):
-        """The MUST is *parse past it*; the MAY is *ignore it*."""
-        wire = (b'HTTP/1.1 103 Early Hints\r\n'
-                b'link: </s.css>; rel=preload; as=style\r\n\r\n'
-                b'HTTP/1.1 200 OK\r\ncontent-length: 5\r\n\r\nHELLO')
-        res = await _within(HTTP1ResponseRecipient().receive(_Canned(wire)))
-        assert (res.status, res.body) == (200, b'HELLO')
-
-    @pytest.mark.asyncio
     async def test_several_interims_in_a_row_are_all_skipped(self):
         wire = (b'HTTP/1.1 100 Continue\r\n\r\n'
                 b'HTTP/1.1 103 Early Hints\r\nlink: </a>\r\n\r\n'
@@ -97,12 +88,19 @@ class TestInterimResponses:
         assert (res.status, res.body) == (200, b'hi')
 
     @pytest.mark.asyncio
-    async def test_an_interim_declaring_a_body_consumes_none_of_it(self):
-        """§6.3 item 1 covers 1xx too, so a ``content-length`` on an interim
-        is a desync offer: five octets of the real response, taken as a body
-        nobody asked for."""
-        wire = (b'HTTP/1.1 100 Continue\r\ncontent-length: 5\r\n\r\n'
-                b'HTTP/1.1 200 OK\r\ncontent-length: 5\r\n\r\nHELLO')
+    @pytest.mark.parametrize('wire', [
+        pytest.param(b'HTTP/1.1 103 Early Hints\r\n'
+                     b'link: </s.css>; rel=preload; as=style\r\n\r\n'
+                     b'HTTP/1.1 200 OK\r\ncontent-length: 5\r\n\r\nHELLO',
+                     id='early-hints-skipped'),
+        pytest.param(b'HTTP/1.1 100 Continue\r\ncontent-length: 5\r\n\r\n'
+                     b'HTTP/1.1 200 OK\r\ncontent-length: 5\r\n\r\nHELLO',
+                     id='interim-body-consumes-none'),
+    ])
+    async def test_an_interim_declaring_a_body_consumes_none_of_it(self, wire):
+        """Interim responses are skipped without disturbing the final
+        response — the MUST is *parse past it*; a content-length on an
+        interim is a desync offer (§6.3 item 1 covers 1xx too)."""
         res = await _within(HTTP1ResponseRecipient().receive(_Canned(wire)))
         assert (res.status, res.body) == (200, b'HELLO')
 
@@ -155,12 +153,17 @@ class TestInterimResponses:
                 if getattr(r, 'cap', None) == 'client_max_interim_responses']
 
     @pytest.mark.asyncio
-    async def test_streaming_also_reaches_the_final_response(self):
-        wire = (b'HTTP/1.1 103 Early Hints\r\nlink: </a>\r\n\r\n'
-                b'HTTP/1.1 200 OK\r\ncontent-length: 5\r\n\r\nHELLO')
+    @pytest.mark.parametrize('wire,expected', [
+        pytest.param(b'HTTP/1.1 103 Early Hints\r\nlink: </a>\r\n\r\n'
+                     b'HTTP/1.1 200 OK\r\ncontent-length: 5\r\n\r\nHELLO',
+                     b'HELLO', id='streaming-reaches-final'),
+        pytest.param(b'HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\n\r\nhello world',
+                     b'hello world', id='streaming-lengthless-body'),
+    ])
+    async def test_streaming_also_reaches_the_final_response(self, wire, expected):
         chunks = [c async for c in
                   HTTP1ResponseRecipient().stream(_Canned(wire))]
-        assert b''.join(chunks) == b'HELLO'
+        assert b''.join(chunks) == expected
 
 
 # ----------------------------------------------------------------------
@@ -323,12 +326,6 @@ class TestCloseDelimitedBody:
         wire = b'HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\n\r\nhello world'
         res = await _within(HTTP1ResponseRecipient().receive(_Canned(wire)))
         assert (res.status, res.body) == (200, b'hello world')
-
-    @pytest.mark.asyncio
-    async def test_streaming_a_lengthless_body_yields_it(self):
-        wire = b'HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\n\r\nhello world'
-        chunks = [c async for c in HTTP1ResponseRecipient().stream(_Canned(wire))]
-        assert b''.join(chunks) == b'hello world'
 
     @pytest.mark.asyncio
     async def test_a_close_delimited_body_is_bounded_by_the_total(self, monkeypatch):
