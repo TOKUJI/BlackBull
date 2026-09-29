@@ -70,10 +70,6 @@ class TestUnknownExtensionMethod:
         assert r.status != 200
 
 
-@pytest.mark.integration
-class TestPostWithoutBody:
-    """A POST with Content-Length: 0 is legal."""
-
 
 @pytest.mark.integration
 class TestGetWithBody:
