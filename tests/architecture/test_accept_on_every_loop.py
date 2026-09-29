@@ -407,3 +407,116 @@ def test_an_accepted_connection_is_non_blocking(loop):
             listener.close()
             await asyncio.sleep(0.05)
     _run(loop, main)
+
+
+# ---------------------------------------------------------------------------
+# A TLS handshake is bounded like a request head
+# ---------------------------------------------------------------------------
+
+HEADER_TIMEOUT = 1.0
+
+
+@pytest.mark.timeout(60)
+@pytest.mark.parametrize('loop', LOOPS)
+@pytest.mark.parametrize('path', ['gate', 'loop_fallback'])
+def test_silent_tls_connects_release_accepting_within_the_header_timeout(
+        loop, path, monkeypatch):
+    """A client that never sends a ClientHello holds its admission only as
+    long as ``BB_HEADER_TIMEOUT`` would let a cleartext client withhold its
+    head; until then a burst of them can pause every listener."""
+    import time
+
+    from blackbull.env import reset_settings_cache
+
+    if path == 'loop_fallback' and loop == 'uvloop':
+        pytest.skip('uvloop add_reader cannot be refused from a test')
+    monkeypatch.setenv('BB_HEADER_TIMEOUT', str(HEADER_TIMEOUT))
+    reset_settings_cache()
+
+    async def main():
+        if path == 'loop_fallback':
+            def refuse(*_args):
+                raise NotImplementedError('no readers on this loop')
+            asyncio.get_running_loop().add_reader = refuse
+        server = Server(_app(), max_connections=4, listeners=[
+            Listener(Tcp(0, host='127.0.0.1')),
+            Listener(Tcp(0, host='127.0.0.1'),
+                     tls=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER))])
+        server.open_socket()
+        plain, tls = [socks[0].getsockname()[1]
+                      for _l, socks in server.bound_listeners]
+        runner = asyncio.create_task(server.run())
+        silent = []
+        try:
+            await _until(lambda: getattr(server, '_running_servers', None))
+            for _ in range(20):
+                silent.append(socket.create_connection(('127.0.0.1', tls)))
+            started = time.monotonic()
+            if path == 'gate':
+                await _until(lambda: server._accept_gate._paused)
+                await _served(plain, timeout=HEADER_TIMEOUT + 4)
+            for sock in silent:
+                sock.setblocking(False)
+            while True:
+                closed = 0
+                for sock in silent:
+                    try:
+                        closed += sock.recv(1) == b''
+                    except BlockingIOError:
+                        pass
+                    except ConnectionResetError:
+                        closed += 1
+                if closed == len(silent):
+                    break
+                assert time.monotonic() - started < HEADER_TIMEOUT + 4, (
+                    f'{len(silent) - closed} silent handshakes still open')
+                await asyncio.sleep(0.05)
+        finally:
+            for sock in silent:
+                sock.close()
+            await asyncio.wait_for(server.stop(drain_timeout=1.0), 5)
+            await asyncio.wait({runner}, timeout=5)
+            server.close_socket()
+
+    try:
+        _run(loop, main)
+    finally:
+        reset_settings_cache()
+
+
+# ---------------------------------------------------------------------------
+# One record per refusal
+# ---------------------------------------------------------------------------
+
+@pytest.mark.timeout(30)
+def test_a_refusal_at_the_cap_logs_one_warning(caplog):
+    import logging
+
+    async def main():
+        server = Server(_app(), max_connections=1)
+        server.open_socket(0)
+        runner = asyncio.create_task(server.run())
+        holder = None
+        try:
+            await _until(lambda: getattr(server, '_running_servers', None))
+            holder = socket.create_connection(('127.0.0.1', server.port))
+            await _until(lambda: server._active_connections == 1)
+            with caplog.at_level(logging.WARNING, logger='blackbull'):
+                reader, writer = await asyncio.open_connection(
+                    '127.0.0.1', server.port)
+                writer.write(REQUEST)
+                line = await asyncio.wait_for(reader.readline(), 5)
+                writer.close()
+            assert line.startswith(b'HTTP/1.1 503'), line
+        finally:
+            if holder is not None:
+                holder.close()
+            await asyncio.wait_for(server.stop(drain_timeout=1.0), 5)
+            await asyncio.wait({runner}, timeout=5)
+            server.close_socket()
+
+    asyncio.run(main())
+    warnings = [r for r in caplog.records if r.levelno >= logging.WARNING
+                and r.name.startswith('blackbull')]
+    assert [(r.name, getattr(r, 'cap', None)) for r in warnings] == [
+        ('blackbull.caps', 'max_connections')]

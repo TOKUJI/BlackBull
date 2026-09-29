@@ -148,8 +148,8 @@ async def test_a_cleartext_connect_cancelled_after_connection_made_releases_once
 @pytest.mark.timeout(30)
 async def test_a_failed_tls_handshake_releases_without_connection_lost(
         listener, monkeypatch):
-    monkeypatch.setattr(server_mod, '_SSL_HANDSHAKE_TIMEOUT', 0.2)
     gate = _AcceptGate()
+    gate._handshake_timeout = 0.2
     _Quiet.made = _Quiet.lost = 0
     client = socket.create_connection(listener.getsockname())
     conn, _ = listener.accept()

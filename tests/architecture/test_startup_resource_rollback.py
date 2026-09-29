@@ -191,7 +191,7 @@ async def test_later_tls_group_failure_closes_earlier_group(monkeypatch):
     )
     monkeypatch.setattr(
         "blackbull.env.get_settings",
-        lambda: SimpleNamespace(socket_backlog=16),
+        lambda: SimpleNamespace(socket_backlog=16, header_timeout=10.0),
     )
 
     with pytest.raises(RuntimeError) as raised:

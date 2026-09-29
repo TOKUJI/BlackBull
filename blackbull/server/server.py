@@ -276,7 +276,6 @@ _REFUSAL_RESERVE = FD_RESERVE // 4
 _ACCEPTS_PER_TICK = FD_RESERVE // 8
 assert _REFUSAL_RESERVE + _ACCEPTS_PER_TICK <= FD_RESERVE
 
-_SSL_HANDSHAKE_TIMEOUT = 60.0
 _ACCEPT_RETRY_DELAY = asyncio.constants.ACCEPT_RETRY_DELAY
 _ACCEPT_RESOURCE_ERRNOS = frozenset(
     {errno.EMFILE, errno.ENFILE, errno.ENOBUFS, errno.ENOMEM})
@@ -397,10 +396,11 @@ class _AcceptGate:
         self._descriptors_held = 0
         self._paused = False
         self._connecting: set[asyncio.Task] = set()
+        self._handshake_timeout: float | None = None
         self._cap_hits = CapHitCounter(flush_interval=0)
 
-    def arm(self, entries, max_connections: int,
-            backlog: int) -> list[_Listening] | None:
+    def arm(self, entries, max_connections: int, backlog: int,
+            handshake_timeout: float | None = None) -> list[_Listening] | None:
         """Start accepting on each ``((factory, ssl_context), sock)``.
 
         ``None`` when some listener could not be armed; none is left
@@ -408,6 +408,7 @@ class _AcceptGate:
         """
         self.close()
         self._loop = asyncio.get_running_loop()
+        self._handshake_timeout = handshake_timeout
         self._limit = (max_connections + _REFUSAL_RESERVE
                        if max_connections else 0)
         self._paused = bool(self._limit) and self._descriptors_held >= self._limit
@@ -473,7 +474,7 @@ class _AcceptGate:
         try:
             await loop.connect_accepted_socket(
                 lambda: protocol, conn, ssl=ssl_context,
-                ssl_handshake_timeout=(_SSL_HANDSHAKE_TIMEOUT
+                ssl_handshake_timeout=(self._handshake_timeout
                                        if ssl_context is not None else None))
         except BaseException as exc:
             # A transport closes the socket it was given; this one never got one.
@@ -644,6 +645,12 @@ class LifespanManager:
         return False
 
 
+def _tls_handshake_timeout(settings) -> float | None:
+    """A TLS handshake is the request head's prelude, so the same bound;
+    ``None`` leaves the loop's own when that bound is disabled."""
+    return settings.header_timeout or None
+
+
 @asynccontextmanager
 async def SocketManager(socket_cb_pairs, ssl_context, cleanup_budget=None):
     """Async context manager that creates asyncio servers from already-bound sockets.
@@ -674,7 +681,8 @@ async def SocketManager(socket_cb_pairs, ssl_context, cleanup_budget=None):
     """
     import socket as _socket  # noqa: PLC0415
     from ..env import get_settings as _get_settings  # noqa: PLC0415
-    backlog = _get_settings().socket_backlog
+    settings = _get_settings()
+    backlog = settings.socket_backlog
     # Some Windows builds do not define AF_UNIX at all.
     _af_unix = getattr(_socket, 'AF_UNIX', None)
     loop = asyncio.get_running_loop()
@@ -686,7 +694,7 @@ async def SocketManager(socket_cb_pairs, ssl_context, cleanup_budget=None):
             kwargs = {'sock': sock, 'ssl': ssl_context, 'backlog': backlog,
                       'start_serving': False}
             if ssl_context is not None:
-                kwargs['ssl_handshake_timeout'] = _SSL_HANDSHAKE_TIMEOUT
+                kwargs['ssl_handshake_timeout'] = _tls_handshake_timeout(settings)
             if _af_unix is not None and sock.family == _af_unix:
                 srv = await loop.create_unix_server(factory, **kwargs)
             else:
@@ -1029,10 +1037,6 @@ class Server:
         aggregator = self._cached_aggregator
 
         if self._max_connections and self._active_connections >= self._max_connections:
-            logger.warning(
-                'Connection limit reached (%d/%d) — 503 to %s',
-                self._active_connections, self._max_connections, peername,
-            )
             # This fires before ConnectionActor binds a CapHitCounter, so the
             # contextvar is unset and the record is emitted unconditionally —
             # safe, because nobody gets a connection past the cap to flood it.
@@ -1356,8 +1360,10 @@ class Server:
             if af_unix is not None and sock.family == af_unix:
                 _warn_if_unix_queue_full(sock)
         from ..env import get_settings as _get_settings  # noqa: PLC0415
+        settings = _get_settings()
         accepting = self._accept_gate.arm(
-            listening, self._max_connections, _get_settings().socket_backlog)
+            listening, self._max_connections, settings.socket_backlog,
+            _tls_handshake_timeout(settings))
         if accepting is not None:
             self._running_servers = accepting
             return
