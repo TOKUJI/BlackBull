@@ -31,7 +31,7 @@ from .messages import (
     MQTTSubscribe, MQTTUnsubscribe, MQTTPingreq,
     MQTTDisconnect, MQTTAuth, MQTTMessage,
     IncompletePacket, MQTTDecodeError, ReasonCode, _read_vbi_at,
-    decode_packet, decode_variable_byte_integer, encode_packet,
+    decode_packet, decode_variable_byte_integer,
 )
 from ..server.cap_log import log_cap_hit
 from .mailbox import Mailbox, MailboxClosed, MailboxTooLarge
@@ -45,9 +45,7 @@ _IDLE_SLEEP = 0.005
 
 def _output_size(msg: ActorMessage) -> int:
     if isinstance(msg, Send):
-        if msg._encoded is None:
-            msg._encoded = encode_packet(msg.packet)
-        return len(msg._encoded)
+        return len(msg.wire_bytes())
     return 1
 
 
@@ -230,9 +228,8 @@ class MQTT5Actor(Actor):
     async def _handle(self, msg: ActorMessage) -> None:
         if isinstance(msg, Send):
             try:
-                _output_size(msg)
                 async with asyncio.timeout(self._write_timeout or None):
-                    await self._writer.write(msg._encoded)
+                    await self._writer.write(msg.wire_bytes())
             except Exception:
                 logger.debug('MQTT write failed', exc_info=True)
                 self.graceful = False
