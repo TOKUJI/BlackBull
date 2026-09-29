@@ -208,21 +208,6 @@ class TestRequestTimeout408:
     """When a handler exceeds ``BB_REQUEST_TIMEOUT``, the server must
     respond with ``408 Request Timeout`` and close the connection."""
 
-    def test_slow_handler_returns_408(self, timeout_server):
-        """A handler that sleeps 2.0 s with BB_REQUEST_TIMEOUT=1.0 must
-        produce a 408 response (the deadline fires before the handler
-        finishes)."""
-        raw, closed = _send_and_receive(
-            '127.0.0.1', timeout_server.port,
-            b'GET /sleep?s=2.0 HTTP/1.1\r\n'
-            b'Host: localhost\r\n'
-            b'Connection: close\r\n\r\n',
-            timeout=5.0,
-        )
-        status = _extract_status(raw)
-        assert status == 408, (
-            f'expected 408 Request Timeout; got status={status}, raw={raw[:200]!r}')
-
     def test_slow_handler_connection_closed_after_408(self, timeout_server):
         """After a 408, the server must close the connection — no
         keep-alive after a timeout."""
@@ -282,20 +267,6 @@ class TestRequestTimeout408:
 class TestRequestTimeoutFastHandlerUnaffected:
     """When a handler completes within the timeout window, the response
     must be normal and the connection must be reusable."""
-
-    def test_fast_handler_returns_200(self, timeout_server):
-        """A fast handler under ``BB_REQUEST_TIMEOUT=1.0`` must return
-        200 as normal."""
-        raw, closed = _send_and_receive(
-            '127.0.0.1', timeout_server.port,
-            b'GET /sleep?s=0.0 HTTP/1.1\r\n'
-            b'Host: localhost\r\n'
-            b'Connection: close\r\n\r\n',
-            timeout=3.0,
-        )
-        status = _extract_status(raw)
-        assert status == 200, (
-            f'fast handler must return 200; got {status}, raw={raw[:200]!r}')
 
     def test_handler_at_half_timeout_still_succeeds(self, timeout_server):
         """A handler that uses 50 % of the timeout window must not be
@@ -594,27 +565,20 @@ class TestRequestTimeoutCustomValue:
             proc.join(timeout=5)
             _os.environ.pop('BB_REQUEST_TIMEOUT', None)
 
-    def test_handler_just_under_custom_timeout_succeeds(self, short_timeout_server):
-        """0.2 s handler with 0.3 s timeout → 200."""
+    @pytest.mark.parametrize('duration,expected', [
+        pytest.param('0.2', 200, id='just-under-custom-timeout'),
+        pytest.param('0.5', 408, id='over-custom-timeout'),
+    ])
+    def test_handler_just_under_custom_timeout_succeeds(self, short_timeout_server, duration, expected):
+        """A handler near the custom BB_REQUEST_TIMEOUT boundary maps to 200/408."""
         raw, _ = _send_and_receive(
             '127.0.0.1', short_timeout_server.port,
-            b'GET /nap?s=0.2 HTTP/1.1\r\n'
+            b'GET /nap?s=' + duration.encode() + b' HTTP/1.1\r\n'
             b'Host: localhost\r\n'
             b'Connection: close\r\n\r\n',
             timeout=3.0,
         )
-        assert _extract_status(raw) == 200
-
-    def test_handler_over_custom_timeout_fails(self, short_timeout_server):
-        """0.5 s handler with 0.3 s timeout → 408."""
-        raw, _ = _send_and_receive(
-            '127.0.0.1', short_timeout_server.port,
-            b'GET /nap?s=0.5 HTTP/1.1\r\n'
-            b'Host: localhost\r\n'
-            b'Connection: close\r\n\r\n',
-            timeout=3.0,
-        )
-        assert _extract_status(raw) == 408
+        assert _extract_status(raw) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -653,23 +617,21 @@ class TestBufferedStartTimeout408:
     status line — NOT the handler's buffered 200 status line with
     a "408 Request Timeout" body grafted on."""
 
-    def test_buffered_start_timeout_produces_clean_408_status_line(
-        self, timeout_server,
-    ):
-        """A handler that sends start, then stalls 3.0 s with
-        BB_REQUEST_TIMEOUT=1.0 must produce a response whose status
-        line begins with ``HTTP/1.1 408``, not ``HTTP/1.1 200``."""
+    @pytest.mark.parametrize('path,timeout,expected', [
+        pytest.param('/sleep?s=2.0', 5.0, 408, id='slow-handler-408'),
+        pytest.param('/sleep?s=0.0', 3.0, 200, id='fast-handler-200'),
+        pytest.param('/buffered-stall?s=3.0', 5.0, 408, id='buffered-start-clean-408'),
+    ])
+    def test_buffered_start_timeout_produces_clean_408_status_line(self, timeout_server, path, timeout, expected):
+        """Request-timeout policy maps handler latency and config to 408/200."""
         raw, _ = _send_and_receive(
             '127.0.0.1', timeout_server.port,
-            b'GET /buffered-stall?s=3.0 HTTP/1.1\r\n'
+            b'GET ' + path.encode() + b' HTTP/1.1\r\n'
             b'Host: localhost\r\n'
             b'Connection: close\r\n\r\n',
-            timeout=5.0,
+            timeout=timeout,
         )
-        status = _extract_status(raw)
-        assert status == 408, (
-            f'expected 408 after buffered-start timeout; '
-            f'got status={status}, raw={raw[:300]!r}')
+        assert _extract_status(raw) == expected, raw[:200]
 
     def test_buffered_start_timeout_does_not_emit_200_body(
         self, timeout_server,

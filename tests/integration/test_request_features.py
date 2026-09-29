@@ -49,7 +49,6 @@ def test_multi_value_header_getlist(client):
     assert len(r.json()['values']) >= 1
 
 
-
 @pytest.mark.integration
 def test_query_string(client):
     r = client.get('/query', params={'q': 'hello', 'page': '2'})

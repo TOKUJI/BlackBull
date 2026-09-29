@@ -77,31 +77,54 @@ def _trailers(events) -> dict:
     return dict(events[-1]['headers'])
 
 
+async def _request_handler(request, context) -> bytes:
+    return b'x'
+
+
+async def _request_iter_handler(request_iter, context) -> bytes:
+    return b'x'
+
+
+async def _server_stream_handler(request, context):
+    yield b'x'
+
+
+async def _bidi_handler(request_iter, context):
+    yield b'x'
+
+
 # --------------------------------------------------------------------------
+
+async def _request_handler(request, context) -> bytes:
+    return b'x'
+
+
+async def _request_iter_handler(request_iter, context) -> bytes:
+    return b'x'
+
+
+async def _server_stream_handler(request, context):
+    yield b'x'
+
+
+async def _bidi_handler(request_iter, context):
+    yield b'x'
+
+
 # Registry — client-streaming detection
 # --------------------------------------------------------------------------
 
 class TestClientStreamingDetection:
-    def test_request_iter_param_is_client_streaming(self):
+    @pytest.mark.parametrize('handler,client_streaming', [
+        pytest.param(_request_iter_handler, True, id='request-iter-param'),
+        pytest.param(_request_handler, False, id='plain-request-param'),
+    ])
+    def test_request_iter_param_is_client_streaming(self, handler, client_streaming):
+        """Streaming classification derives from the first parameter name."""
         reg = GrpcServiceRegistry()
-
-        @reg.method('/svc/Collect')
-        async def c(request_iter, context) -> bytes:
-            return b'x'
-
+        reg.add_method('/svc/Collect', handler)
         m = reg.lookup_method('/svc/Collect')
-        assert m.client_streaming is True
-        assert m.streaming is False
-
-    def test_plain_request_param_is_request_unary(self):
-        reg = GrpcServiceRegistry()
-
-        @reg.method('/svc/Unary')
-        async def u(request, context) -> bytes:
-            return b'x'
-
-        m = reg.lookup_method('/svc/Unary')
-        assert m.client_streaming is False
+        assert m.client_streaming is client_streaming
         assert m.streaming is False
 
     def test_explicit_client_streaming_override(self):
@@ -113,26 +136,17 @@ class TestClientStreamingDetection:
         reg.add_method('/svc/Forced', hidden, client_streaming=True)
         assert reg.lookup_method('/svc/Forced').client_streaming is True
 
-    def test_bidi_is_both_axes(self):
+    @pytest.mark.parametrize('handler,client_streaming', [
+        pytest.param(_bidi_handler, True, id='bidi-both-axes'),
+        pytest.param(_server_stream_handler, False, id='server-streaming-request-unary'),
+    ])
+    def test_bidi_is_both_axes(self, handler, client_streaming):
+        """An async-generator handler is response-streaming on both shapes;
+        request-streaming still derives from the first parameter name."""
         reg = GrpcServiceRegistry()
-
-        @reg.method('/svc/Chat')
-        async def chat(request_iter, context):
-            yield b'x'
-
+        reg.add_method('/svc/Chat', handler)
         m = reg.lookup_method('/svc/Chat')
-        assert m.client_streaming is True
-        assert m.streaming is True
-
-    def test_server_streaming_stays_request_unary(self):
-        reg = GrpcServiceRegistry()
-
-        @reg.method('/svc/Down')
-        async def down(request, context):
-            yield b'x'
-
-        m = reg.lookup_method('/svc/Down')
-        assert m.client_streaming is False
+        assert m.client_streaming is client_streaming
         assert m.streaming is True
 
 

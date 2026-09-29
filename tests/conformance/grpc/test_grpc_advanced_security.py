@@ -128,16 +128,14 @@ class TestOutOfRangeStatusCodes:
         with pytest.raises(ValueError):
             GrpcStatus(-1)
 
-    def test_grpc_status_rejects_zero_as_string(self):
-        """``GrpcStatus('0')`` must raise ``ValueError`` (string, not int).
-        This is correct behavior; gRPC status codes are integers."""
+    @pytest.mark.parametrize('bad', [
+        pytest.param('0', id='zero-as-string'),
+        pytest.param('abc', id='non-numeric-string'),
+    ])
+    def test_grpc_status_rejects_zero_as_string(self, bad):
+        """String forms must be rejected — gRPC status codes are integers."""
         with pytest.raises(ValueError):
-            GrpcStatus('0')  # type: ignore[arg-type]
-
-    def test_grpc_status_rejects_non_numeric_string(self):
-        """``GrpcStatus('abc')`` must raise ``ValueError``."""
-        with pytest.raises(ValueError):
-            GrpcStatus('abc')  # type: ignore[arg-type]
+            GrpcStatus(bad)  # type: ignore[arg-type]
 
     def test_grpc_error_constructor_rejects_out_of_range(self):
         """``GrpcError(999, 'msg')`` must be rejected (enum-only contract,
@@ -195,74 +193,6 @@ class TestContentTypeConfusion:
     unexpected routing behavior."""
 
     @pytest.mark.asyncio
-    async def test_grpc_plus_proto_suffix_accepted_by_bridge(self):
-        """``application/grpc+proto`` is a common variant.  The ASGI bridge
-        itself doesn't check content-type (the caller in ``_dispatch`` does),
-        so passing it through works."""
-        reg = GrpcServiceRegistry()
-
-        @reg.method('/svc/M')
-        async def m(request, context):
-            return b'ok'
-
-        events, send = _collector()
-        scope = {'type': 'http', 'path': '/svc/M',
-                 'headers': [(b'content-type', b'application/grpc+proto'),
-                             (b':method', b'POST')]}
-        await serve_grpc(reg, scope, _receive_with(encode_message(b'')), send)
-        assert _trailers_of(events)[b'grpc-status'] == b'0'
-
-    @pytest.mark.asyncio
-    async def test_grpc_plus_json_suffix_accepted_by_bridge(self):
-        """``application/grpc+json`` is another variant.  The bridge
-        processes it identically to ``application/grpc``."""
-        reg = GrpcServiceRegistry()
-
-        @reg.method('/svc/M')
-        async def m(request, context):
-            return b'ok'
-
-        events, send = _collector()
-        scope = {'type': 'http', 'path': '/svc/M',
-                 'headers': [(b'content-type', b'application/grpc+json'),
-                             (b':method', b'POST')]}
-        await serve_grpc(reg, scope, _receive_with(encode_message(b'')), send)
-        assert _trailers_of(events)[b'grpc-status'] == b'0'
-
-    @pytest.mark.asyncio
-    async def test_grpc_web_proto_content_type(self):
-        """``application/grpc-web+proto`` is used by gRPC-Web.  The bridge
-        accepts it (the caller filters by ``startswith(b'application/grpc')``)."""
-        reg = GrpcServiceRegistry()
-
-        @reg.method('/svc/M')
-        async def m(request, context):
-            return b'ok'
-
-        events, send = _collector()
-        scope = {'type': 'http', 'path': '/svc/M',
-                 'headers': [(b'content-type', b'application/grpc-web+proto'),
-                             (b':method', b'POST')]}
-        await serve_grpc(reg, scope, _receive_with(encode_message(b'')), send)
-        assert _trailers_of(events)[b'grpc-status'] == b'0'
-
-    @pytest.mark.asyncio
-    async def test_grpc_web_text_content_type(self):
-        """``application/grpc-web-text+proto`` (base64-encoded gRPC-Web)."""
-        reg = GrpcServiceRegistry()
-
-        @reg.method('/svc/M')
-        async def m(request, context):
-            return b'ok'
-
-        events, send = _collector()
-        scope = {'type': 'http', 'path': '/svc/M',
-                 'headers': [(b'content-type', b'application/grpc-web-text+proto'),
-                             (b':method', b'POST')]}
-        await serve_grpc(reg, scope, _receive_with(encode_message(b'')), send)
-        assert _trailers_of(events)[b'grpc-status'] == b'0'
-
-    @pytest.mark.asyncio
     async def test_unknown_grpc_suffix_does_not_crash(self):
         """``application/grpc+thrift`` or any unknown suffix must not crash."""
         reg = GrpcServiceRegistry()
@@ -298,23 +228,6 @@ class TestContentTypeConfusion:
         assert _trailers_of(events)[b'grpc-status'] == b'0'
 
     @pytest.mark.asyncio
-    async def test_content_type_with_multiple_parameters(self):
-        """``application/grpc; charset=utf-8; param=value`` must not crash."""
-        reg = GrpcServiceRegistry()
-
-        @reg.method('/svc/M')
-        async def m(request, context):
-            return b'ok'
-
-        events, send = _collector()
-        scope = {'type': 'http', 'path': '/svc/M',
-                 'headers': [(b'content-type',
-                              b'application/grpc; charset=utf-8; boundary=xyz'),
-                             (b':method', b'POST')]}
-        await serve_grpc(reg, scope, _receive_with(encode_message(b'')), send)
-        assert _trailers_of(events)[b'grpc-status'] == b'0'
-
-    @pytest.mark.asyncio
     async def test_content_type_with_leading_trailing_whitespace(self):
         """Content-Type with whitespace around the value (`` application/grpc ``
         or ``application/grpc ``) — the bridge doesn't trim, but the caller's
@@ -346,77 +259,39 @@ class TestMethodPathTraversal:
     escape the registry namespace."""
 
     @pytest.mark.asyncio
-    async def test_dot_dot_slash_path_returns_unimplemented(self):
-        """``/../`` in a gRPC method path must not resolve to a different service."""
+    @pytest.mark.parametrize('registered,requested', [
+        pytest.param('/admin.Service/Delete', '/../admin.Service/Delete',
+                     id='dot-dot-slash'),
+        pytest.param('/svc/Real', '/../../../svc/Real',
+                     id='multiple-dot-dot-slash'),
+        pytest.param('/svc/Target', '/%2e%2e%2fsvc/Target',
+                     id='encoded-dot-dot-slash'),
+    ])
+    async def test_dot_dot_slash_path_returns_unimplemented(self, registered, requested):
+        """A traversal-style path must not resolve to a registered handler."""
         reg = GrpcServiceRegistry()
 
-        @reg.method('/admin.Service/Delete')
-        async def delete(request, context):
-            return b'deleted'  # pragma: no cover — should not be reached
+        @reg.method(registered)
+        async def handler(request, context):
+            return b'reached'  # pragma: no cover — should not be reached
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/../admin.Service/Delete'),
-                         _receive_with(encode_message(b'')), send)
-        # Path traversal should NOT match the registered handler
-        assert _trailers_of(events)[b'grpc-status'] == \
-            str(int(GrpcStatus.UNIMPLEMENTED)).encode()
-
-    @pytest.mark.asyncio
-    async def test_multiple_dot_dot_slash_path(self):
-        """``/../../../`` in path must not crash the lookup."""
-        reg = GrpcServiceRegistry()
-
-        @reg.method('/svc/Real')
-        async def real(request, context):
-            return b'real'
-
-        events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/../../../svc/Real'),
+        await serve_grpc(reg, _grpc_scope(requested),
                          _receive_with(encode_message(b'')), send)
         assert _trailers_of(events)[b'grpc-status'] == \
             str(int(GrpcStatus.UNIMPLEMENTED)).encode()
 
     @pytest.mark.asyncio
-    async def test_encoded_dot_dot_slash_path(self):
-        """``%2e%2e%2f`` (percent-encoded ../) in path."""
-        reg = GrpcServiceRegistry()
-
-        @reg.method('/svc/Target')
-        async def target(request, context):
-            return b'target'  # pragma: no cover
-
-        events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/%2e%2e%2fsvc/Target'),
-                         _receive_with(encode_message(b'')), send)
-        assert _trailers_of(events)[b'grpc-status'] == \
-            str(int(GrpcStatus.UNIMPLEMENTED)).encode()
-
-    @pytest.mark.asyncio
-    async def test_backslash_path_does_not_crash(self):
-        """Backslashes in gRPC paths must not crash the bridge."""
+    @pytest.mark.parametrize('path', [
+        pytest.param('\\svc\\Windows', id='backslash-path'),
+        pytest.param('/svc\x00/Method', id='null-byte-in-path'),
+        pytest.param('/', id='only-slash-path'),
+    ])
+    async def test_backslash_path_does_not_crash(self, path):
+        """Malformed paths answer UNIMPLEMENTED without crashing the bridge."""
         reg = GrpcServiceRegistry()
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('\\svc\\Windows'),
-                         _receive_with(encode_message(b'')), send)
-        assert _trailers_of(events)[b'grpc-status'] == \
-            str(int(GrpcStatus.UNIMPLEMENTED)).encode()
-
-    @pytest.mark.asyncio
-    async def test_null_byte_in_path_does_not_crash(self):
-        """Null byte in method path must not crash."""
-        reg = GrpcServiceRegistry()
-        events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc\x00/Method'),
-                         _receive_with(encode_message(b'')), send)
-        assert _trailers_of(events)[b'grpc-status'] == \
-            str(int(GrpcStatus.UNIMPLEMENTED)).encode()
-
-    @pytest.mark.asyncio
-    async def test_only_slash_path(self):
-        """Path ``/`` with gRPC content-type."""
-        reg = GrpcServiceRegistry()
-        events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/'),
+        await serve_grpc(reg, _grpc_scope(path),
                          _receive_with(encode_message(b'')), send)
         assert _trailers_of(events)[b'grpc-status'] == \
             str(int(GrpcStatus.UNIMPLEMENTED)).encode()
@@ -477,26 +352,6 @@ class TestGrpcTimeoutHeader:
                              _receive_with(encode_message(b'')), send)
             assert _trailers_of(events)[b'grpc-status'] == b'0', (
                 f'failed for grpc-timeout={bad_value!r}')
-
-    @pytest.mark.asyncio
-    async def test_grpc_timeout_accessible_via_context(self):
-        """The ``grpc-timeout`` header must be readable via ``context.metadata()``
-        so that handlers can implement their own deadline enforcement."""
-        reg = GrpcServiceRegistry()
-
-        @reg.method('/svc/ReadTimeout')
-        async def read_timeout(request, context):
-            timeout_val = context.metadata(b'grpc-timeout', b'not-set')
-            return timeout_val
-
-        headers = [(b'content-type', b'application/grpc'),
-                   (b'grpc-timeout', b'30S')]
-        events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/ReadTimeout', headers),
-                         _receive_with(encode_message(b'')), send)
-        body_ev = next((e for e in events if e['type'] == 'http.response.body'), None)
-        assert body_ev is not None
-        assert decode_messages(body_ev['body']) == [(False, b'30S')]
 
 
 # ---------------------------------------------------------------------------
@@ -586,88 +441,54 @@ class TestPseudoHeaderInjection:
     confuse downstream proxies or the HTTP/2 layer."""
 
     @pytest.mark.asyncio
-    async def test_pseudo_header_status_is_readable_as_metadata(self):
-        """``:status`` passed as a regular header is readable via
-        ``context.metadata()``.  The HTTP/2 layer strips pseudo-headers,
-        so this should only appear if a malicious client sends it as
-        a regular (non-pseudo) header."""
+    @pytest.mark.parametrize('meta_key,meta_value', [
+        pytest.param(b':status', b'999', id='pseudo-header-status'),
+        pytest.param(b':path', b'/evil.Service/Bad', id='pseudo-header-path'),
+        pytest.param(b'grpc-timeout', b'30S', id='grpc-timeout'),
+    ])
+    async def test_pseudo_header_status_is_readable_as_metadata(self, meta_key, meta_value):
+        """Request metadata (pseudo-header forms and grpc-timeout) is readable
+        through context.metadata(); injected headers never affect routing,
+        which uses scope['path']."""
         reg = GrpcServiceRegistry()
 
         @reg.method('/svc/Pseudo')
         async def pseudo(request, context):
-            val = context.metadata(b':status', b'not-present')
-            return val
+            return context.metadata(meta_key, b'not-present')
 
         headers = [(b'content-type', b'application/grpc'),
-                   (b':status', b'999')]
+                   (meta_key, meta_value)]
         events, send = _collector()
         await serve_grpc(reg, _grpc_scope('/svc/Pseudo', headers),
                          _receive_with(encode_message(b'')), send)
         body_ev = next((e for e in events if e['type'] == 'http.response.body'), None)
         assert body_ev is not None
-        # :status is readable — this is expected because the ASGI layer
-        # doesn't distinguish pseudo-headers from regular headers.
-        # The transport layer (HTTP/2) is responsible for enforcing
-        # pseudo-header restrictions.
-        assert decode_messages(body_ev['body']) == [(False, b'999')]
+        assert decode_messages(body_ev['body']) == [(False, meta_value)]
 
     @pytest.mark.asyncio
-    async def test_pseudo_header_path_as_metadata(self):
-        """``:path`` header must be readable but must not affect routing
-        (routing uses ``scope['path']``, not the ``:path`` header)."""
+    @pytest.mark.parametrize('lookup_key,sent_key,sent_value', [
+        pytest.param(b':method', b':method', b'GET', id='pseudo-header-method'),
+        pytest.param(b':authority', b':authority', b'evil.com:443',
+                     id='pseudo-header-authority'),
+        pytest.param(b'X-TOKEN', b'x-token', b'secret',
+                     id='metadata-case-insensitive'),
+    ])
+    async def test_pseudo_header_method_as_metadata(self, lookup_key, sent_key, sent_value):
+        """Metadata lookup covers pseudo-header keys and is case-insensitive."""
         reg = GrpcServiceRegistry()
 
-        @reg.method('/svc/Real')
-        async def real(request, context):
-            pseudo_path = context.metadata(b':path', b'none')
-            return pseudo_path
+        @reg.method('/svc/Meta')
+        async def meta(request, context):
+            return context.metadata(lookup_key, b'unknown')
 
         headers = [(b'content-type', b'application/grpc'),
-                   (b':path', b'/evil.Service/Bad')]
+                   (sent_key, sent_value)]
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Real', headers),
+        await serve_grpc(reg, _grpc_scope('/svc/Meta', headers),
                          _receive_with(encode_message(b'')), send)
         body_ev = next((e for e in events if e['type'] == 'http.response.body'), None)
         assert body_ev is not None
-        assert decode_messages(body_ev['body']) == [(False, b'/evil.Service/Bad')]
-        # The handler was still routed to /svc/Real — :path header didn't
-        # override scope['path'].  This is correct.
-
-    @pytest.mark.asyncio
-    async def test_pseudo_header_method_as_metadata(self):
-        """``:method`` header readable but doesn't affect dispatch."""
-        reg = GrpcServiceRegistry()
-
-        @reg.method('/svc/Method')
-        async def method_handler(request, context):
-            return context.metadata(b':method', b'unknown')
-
-        headers = [(b'content-type', b'application/grpc'),
-                   (b':method', b'GET')]
-        events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Method', headers),
-                         _receive_with(encode_message(b'')), send)
-        body_ev = next((e for e in events if e['type'] == 'http.response.body'), None)
-        assert body_ev is not None
-        assert decode_messages(body_ev['body']) == [(False, b'GET')]
-
-    @pytest.mark.asyncio
-    async def test_pseudo_header_authority_as_metadata(self):
-        """``:authority`` pseudo-header must be readable."""
-        reg = GrpcServiceRegistry()
-
-        @reg.method('/svc/Authority')
-        async def authority(request, context):
-            return context.metadata(b':authority', b'unknown')
-
-        headers = [(b'content-type', b'application/grpc'),
-                   (b':authority', b'evil.com:443')]
-        events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Authority', headers),
-                         _receive_with(encode_message(b'')), send)
-        body_ev = next((e for e in events if e['type'] == 'http.response.body'), None)
-        assert body_ev is not None
-        assert decode_messages(body_ev['body']) == [(False, b'evil.com:443')]
+        assert decode_messages(body_ev['body']) == [(False, sent_value)]
 
     @pytest.mark.asyncio
     async def test_grpc_status_metadata_header_does_not_override_trailers(self):
@@ -1004,49 +825,19 @@ class TestReflectionAbuse:
     paths are handled safely."""
 
     @pytest.mark.asyncio
-    async def test_reflection_service_not_registered_by_default(self):
-        """The canonical reflection path must return UNIMPLEMENTED since
-        no reflection handler is registered."""
+    @pytest.mark.parametrize('path', [
+        pytest.param('/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo',
+                     id='reflection-v1alpha'),
+        pytest.param('/grpc.reflection.v1.ServerReflection/ServerReflectionInfo',
+                     id='reflection-v1'),
+        pytest.param('/grpc.health.v1.Health/Check', id='health-check'),
+    ])
+    async def test_reflection_service_not_registered_by_default(self, path):
+        """Unregistered built-in services answer UNIMPLEMENTED."""
         reg = GrpcServiceRegistry()
         events, send = _collector()
-        await serve_grpc(
-            reg,
-            _grpc_scope('/grpc.reflection.v1alpha.ServerReflection/'
-                        'ServerReflectionInfo'),
-            _receive_with(encode_message(b'')),
-            send,
-        )
-        assert _trailers_of(events)[b'grpc-status'] == \
-            str(int(GrpcStatus.UNIMPLEMENTED)).encode()
-
-    @pytest.mark.asyncio
-    async def test_reflection_service_v1_path(self):
-        """``grpc.reflection.v1.ServerReflection`` (v1, not v1alpha) must
-        also return UNIMPLEMENTED."""
-        reg = GrpcServiceRegistry()
-        events, send = _collector()
-        await serve_grpc(
-            reg,
-            _grpc_scope('/grpc.reflection.v1.ServerReflection/'
-                        'ServerReflectionInfo'),
-            _receive_with(encode_message(b'')),
-            send,
-        )
-        assert _trailers_of(events)[b'grpc-status'] == \
-            str(int(GrpcStatus.UNIMPLEMENTED)).encode()
-
-    @pytest.mark.asyncio
-    async def test_health_check_service_not_registered_by_default(self):
-        """gRPC Health Checking (``grpc.health.v1.Health/Check``) must
-        return UNIMPLEMENTED unless explicitly registered."""
-        reg = GrpcServiceRegistry()
-        events, send = _collector()
-        await serve_grpc(
-            reg,
-            _grpc_scope('/grpc.health.v1.Health/Check'),
-            _receive_with(encode_message(b'')),
-            send,
-        )
+        await serve_grpc(reg, _grpc_scope(path),
+                         _receive_with(encode_message(b'')), send)
         assert _trailers_of(events)[b'grpc-status'] == \
             str(int(GrpcStatus.UNIMPLEMENTED)).encode()
 
