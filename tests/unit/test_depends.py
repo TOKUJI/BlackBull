@@ -54,23 +54,24 @@ class TestDependsConstruction:
 
 
 class TestDependsRegistrationConflicts:
-    def test_path_param_with_depends_default_raises(self):
+    @pytest.mark.parametrize('case', [
+        pytest.param('item_id', id='path-param'),
+        pytest.param('scope', id='scope-name'),
+        pytest.param('body', id='body-name'),
+    ])
+    def test_path_param_with_depends_default_raises(self, case):
         async def provider(): return 1
-        async def fn(item_id=Depends(provider)): pass
-        with pytest.raises(TypeError, match="item_id"):
-            _adapt_handler(fn, '/items/{item_id}')
-
-    def test_scope_name_with_depends_default_raises(self):
-        async def provider(): return 1
-        async def fn(scope=Depends(provider)): pass
-        with pytest.raises(TypeError, match="scope"):
-            _adapt_handler(fn, '/')
-
-    def test_body_name_with_depends_default_raises(self):
-        async def provider(): return 1
-        async def fn(body=Depends(provider)): pass
-        with pytest.raises(TypeError, match="body"):
-            _adapt_handler(fn, '/')
+        async def with_item_id(item_id=Depends(provider)): pass
+        async def with_scope(scope=Depends(provider)): pass
+        async def with_body(body=Depends(provider)): pass
+        handlers = {
+            'item_id': (with_item_id, '/items/{item_id}'),
+            'scope': (with_scope, '/'),
+            'body': (with_body, '/'),
+        }
+        fn, route = handlers[case]
+        with pytest.raises(TypeError, match=case):
+            _adapt_handler(fn, route)
 
 
 class TestDependsInjection:

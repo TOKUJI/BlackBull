@@ -419,17 +419,23 @@ class TestBlackBullErrorDispatch:
             response = client.get('/nonexistent')
         assert response.status_code == 404
 
-    def test_404_calls_custom_on_error_handler(self):
+    @pytest.mark.parametrize('status,path,body,code,text', [
+        pytest.param(HTTPStatus.NOT_FOUND, '/nonexistent', b'custom not found',
+                     404, 'custom not found', id='404-custom-handler'),
+        pytest.param(HTTPStatus.METHOD_NOT_ALLOWED, '/post-only', b'custom 405',
+                     405, 'custom 405', id='405-custom-handler'),
+    ])
+    def test_404_calls_custom_on_error_handler(self, status, path, body, code, text):
         app = self._make_app()
 
-        @app.on_error(HTTPStatus.NOT_FOUND)
-        async def custom_404(scope, receive, send):
-            await send(b'custom not found', HTTPStatus.NOT_FOUND)
+        @app.on_error(status)
+        async def custom(scope, receive, send):
+            await send(body, status)
 
         with TestClient(app) as client:
-            response = client.get('/nonexistent')
-        assert response.status_code == 404
-        assert response.text == 'custom not found'
+            response = client.get(path)
+        assert response.status_code == code
+        assert response.text == text
 
     def test_405_returns_method_not_allowed(self):
         """GET to a POST-only route must yield 405, not 404."""
@@ -445,18 +451,6 @@ class TestBlackBullErrorDispatch:
         assert response.status_code == 405
         assert 'allow' in response.headers
         assert 'POST' in response.headers['allow'].upper()
-
-    def test_405_calls_custom_on_error_handler(self):
-        app = self._make_app()
-
-        @app.on_error(HTTPStatus.METHOD_NOT_ALLOWED)
-        async def custom_405(scope, receive, send):
-            await send(b'custom 405', HTTPStatus.METHOD_NOT_ALLOWED)
-
-        with TestClient(app) as client:
-            response = client.get('/post-only')
-        assert response.status_code == 405
-        assert response.text == 'custom 405'
 
     def test_exception_in_handler_calls_error_router(self):
         app = self._make_app()
