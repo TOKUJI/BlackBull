@@ -44,22 +44,15 @@ def _close_all(socks):
 class TestBindSocket:
     """Unit tests for the internal _bind_socket helper."""
 
-    def test_ipv4_bind_returns_socket(self):
-        """_bind_socket(AF_INET, '0.0.0.0', 0) must return a bound socket."""
-        sock = _bind_socket(socket.AF_INET, '0.0.0.0', 0)
+    @pytest.mark.parametrize('family,host', [
+        pytest.param(socket.AF_INET, '0.0.0.0', id='ipv4-bind'),
+        pytest.param(socket.AF_INET6, '::', id='ipv6-bind'),
+    ])
+    def test_ipv4_bind_returns_socket(self, family, host):
+        sock = _bind_socket(family, host, 0)
         try:
             assert sock is not None, "_bind_socket must return a socket object"
-            assert sock.family == socket.AF_INET
-        finally:
-            if sock:
-                sock.close()
-
-    def test_ipv6_bind_returns_socket(self):
-        """_bind_socket(AF_INET6, '::', 0) must return a bound socket."""
-        sock = _bind_socket(socket.AF_INET6, '::', 0)
-        try:
-            assert sock is not None, "_bind_socket must return a socket object"
-            assert sock.family == socket.AF_INET6
+            assert sock.family == family
         finally:
             if sock:
                 sock.close()
@@ -70,19 +63,6 @@ class TestBindSocket:
         try:
             _, port = sock.getsockname()
             assert port > 0
-        finally:
-            if sock:
-                sock.close()
-
-    def test_ipv6_socket_has_ipv6_only_set(self):
-        """IPv6 sockets must have IPV6_V6ONLY=1 to avoid conflicts with IPv4."""
-        sock = _bind_socket(socket.AF_INET6, '::', 0)
-        try:
-            v6only = sock.getsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY)
-            assert v6only == 1, (
-                "IPV6_V6ONLY must be 1 on the IPv6 socket so it does not "
-                "also handle IPv4-mapped addresses."
-            )
         finally:
             if sock:
                 sock.close()
@@ -123,22 +103,16 @@ class TestBindSocket:
 class TestCreateSocket:
     """Tests for the legacy create_socket helper."""
 
-    def test_ipv4_host_creates_af_inet_socket(self):
-        """create_socket(('0.0.0.0', 0)) must produce an AF_INET socket."""
-        sock = create_socket(('0.0.0.0', 0))
+    @pytest.mark.parametrize('host,family', [
+        pytest.param('0.0.0.0', socket.AF_INET, id='ipv4-host'),
+        pytest.param('::', socket.AF_INET6, id='ipv6-host'),
+        pytest.param('::1', socket.AF_INET6, id='ipv6-loopback'),
+    ])
+    def test_ipv4_host_creates_af_inet_socket(self, host, family):
+        sock = create_socket((host, 0))
         try:
             assert sock is not None
-            assert sock.family == socket.AF_INET
-        finally:
-            if sock:
-                sock.close()
-
-    def test_ipv6_host_creates_af_inet6_socket(self):
-        """create_socket(('::', 0)) must produce an AF_INET6 socket."""
-        sock = create_socket(('::', 0))
-        try:
-            assert sock is not None
-            assert sock.family == socket.AF_INET6
+            assert sock.family == family
         finally:
             if sock:
                 sock.close()
@@ -148,16 +122,6 @@ class TestCreateSocket:
         sock = create_socket(('127.0.0.1', 0))
         try:
             assert sock.family == socket.AF_INET
-        finally:
-            if sock:
-                sock.close()
-
-    def test_ipv6_loopback_creates_af_inet6(self):
-        """'::1' is an IPv6 address; must create AF_INET6 socket."""
-        sock = create_socket(('::1', 0))
-        try:
-            assert sock is not None
-            assert sock.family == socket.AF_INET6
         finally:
             if sock:
                 sock.close()
@@ -225,20 +189,37 @@ class TestCreateDualStackSockets:
         finally:
             _close_all(socks)
 
-    def test_ipv6_socket_has_ipv6_only_set(self):
-        """The IPv6 socket must have IPV6_V6ONLY=1 so it doesn't shadow IPv4."""
-        socks = create_dual_stack_sockets(0)
-        try:
-            for s in socks:
-                if s.family == socket.AF_INET6:
-                    v6only = s.getsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY)
-                    assert v6only == 1, (
-                        "IPV6_V6ONLY must be 1 on the IPv6 socket. "
-                        "Without it, the IPv6 socket would also accept "
-                        "IPv4-mapped addresses, conflicting with the IPv4 socket."
-                    )
-        finally:
-            _close_all(socks)
+    @pytest.mark.parametrize('case', [
+        pytest.param('bind', id='bind-ipv6-v6only'),
+        pytest.param('dual-stack', id='dual-stack-ipv6-v6only'),
+    ])
+    def test_ipv6_socket_has_ipv6_only_set(self, case):
+        if case == 'bind':
+            """IPv6 sockets must have IPV6_V6ONLY=1 to avoid conflicts with IPv4."""
+            sock = _bind_socket(socket.AF_INET6, '::', 0)
+            try:
+                v6only = sock.getsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY)
+                assert v6only == 1, (
+                    "IPV6_V6ONLY must be 1 on the IPv6 socket so it does not "
+                    "also handle IPv4-mapped addresses."
+                )
+            finally:
+                if sock:
+                    sock.close()
+        else:
+            """The IPv6 socket must have IPV6_V6ONLY=1 so it doesn't shadow IPv4."""
+            socks = create_dual_stack_sockets(0)
+            try:
+                for s in socks:
+                    if s.family == socket.AF_INET6:
+                        v6only = s.getsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY)
+                        assert v6only == 1, (
+                            "IPV6_V6ONLY must be 1 on the IPv6 socket. "
+                            "Without it, the IPv6 socket would also accept "
+                            "IPv4-mapped addresses, conflicting with the IPv4 socket."
+                        )
+            finally:
+                _close_all(socks)
 
     def test_sockets_are_listening(self):
         """All returned sockets must be in the listen state."""
@@ -391,16 +372,14 @@ class TestAdoptListeningFd:
         adopted = adopt_listening_fd(listening_sock.fileno())
         adopted.detach()
 
-    def test_rejects_listen_pid_mismatch(self, monkeypatch, listening_sock):
-        """LISTEN_PID pointing at a different PID must raise RuntimeError."""
-        monkeypatch.setenv('LISTEN_PID', '1')  # PID 1 (init) is never ours
-        monkeypatch.delenv('LISTEN_FDS', raising=False)
-        with pytest.raises(RuntimeError, match='LISTEN_PID'):
-            adopt_listening_fd(listening_sock.fileno())
-
-    def test_rejects_non_integer_listen_pid(self, monkeypatch, listening_sock):
-        """LISTEN_PID that is not an integer must raise RuntimeError."""
-        monkeypatch.setenv('LISTEN_PID', 'bogus')
+    @pytest.mark.parametrize('pid', [
+        pytest.param('1', id='pid-mismatch'),
+        pytest.param('bogus', id='non-integer-pid'),
+    ])
+    def test_rejects_listen_pid_mismatch(self, monkeypatch, listening_sock, pid):
+        """LISTEN_PID pointing at a different PID — or not an integer —
+        must raise RuntimeError."""
+        monkeypatch.setenv('LISTEN_PID', pid)
         monkeypatch.delenv('LISTEN_FDS', raising=False)
         with pytest.raises(RuntimeError, match='LISTEN_PID'):
             adopt_listening_fd(listening_sock.fileno())

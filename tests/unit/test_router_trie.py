@@ -28,20 +28,37 @@ def test_trie_exact_path_hit():
     assert params == {}
 
 
-def test_trie_exact_path_miss():
+@pytest.mark.parametrize('case', [
+    pytest.param('exact-miss', id='exact-path-miss'),
+    pytest.param('converter-reject', id='int-converter-rejects'),
+    pytest.param('scheme-mismatch', id='scheme-mismatch'),
+])
+def test_trie_exact_path_miss(case):
     trie = _RouteTrie()
-    trie.insert('/ping', (HTTPMethod.GET,), Scheme.http, _handler)
-    h, params, allowed = trie.lookup('/pong', HTTPMethod.GET, Scheme.http)
+    if case == 'exact-miss':
+        trie.insert('/ping', (HTTPMethod.GET,), Scheme.http, _handler)
+        h, params, allowed = trie.lookup('/pong', HTTPMethod.GET, Scheme.http)
+    elif case == 'converter-reject':
+        trie.insert('/items/{n:int}', (HTTPMethod.GET,), Scheme.http, _handler)
+        h, params, allowed = trie.lookup('/items/abc', HTTPMethod.GET, Scheme.http)
+    else:
+        trie.insert('/ws', (HTTPMethod.GET,), Scheme.websocket, _handler)
+        h, params, allowed = trie.lookup('/ws', HTTPMethod.GET, Scheme.http)
     assert h is None
-    assert allowed == set()
+    assert allowed == set()  # conversion failed → path not matched
 
 
-def test_trie_param_path_hit():
+@pytest.mark.parametrize('route,url,expected_params', [
+    pytest.param('/users/{id}', '/users/42', {'id': '42'}, id='param-path-hit'),
+    pytest.param('/files/{rest:path}', '/files/a/b/c.txt', {'rest': 'a/b/c.txt'},
+                 id='path-converter-slashes'),
+])
+def test_trie_param_path_hit(route, url, expected_params):
     trie = _RouteTrie()
-    trie.insert('/users/{id}', (HTTPMethod.GET,), Scheme.http, _handler)
-    h, params, allowed = trie.lookup('/users/42', HTTPMethod.GET, Scheme.http)
+    trie.insert(route, (HTTPMethod.GET,), Scheme.http, _handler)
+    h, params, _ = trie.lookup(url, HTTPMethod.GET, Scheme.http)
     assert h is _handler
-    assert params == {'id': '42'}
+    assert params == expected_params
 
 
 def test_trie_int_converter_accepts_digits():
@@ -51,22 +68,6 @@ def test_trie_int_converter_accepts_digits():
     assert h is _handler
     assert params == {'n': 7}
     assert isinstance(params['n'], int)
-
-
-def test_trie_int_converter_rejects_non_int():
-    trie = _RouteTrie()
-    trie.insert('/items/{n:int}', (HTTPMethod.GET,), Scheme.http, _handler)
-    h, params, allowed = trie.lookup('/items/abc', HTTPMethod.GET, Scheme.http)
-    assert h is None
-    assert allowed == set()  # conversion failed → path not matched
-
-
-def test_trie_path_converter_matches_slashes():
-    trie = _RouteTrie()
-    trie.insert('/files/{rest:path}', (HTTPMethod.GET,), Scheme.http, _handler)
-    h, params, _ = trie.lookup('/files/a/b/c.txt', HTTPMethod.GET, Scheme.http)
-    assert h is _handler
-    assert params == {'rest': 'a/b/c.txt'}
 
 
 def test_trie_static_child_wins_over_param():
@@ -95,14 +96,6 @@ def test_trie_method_not_allowed_returns_allowed_set():
     assert HTTPMethod.GET in allowed
 
 
-def test_trie_scheme_mismatch_no_match():
-    trie = _RouteTrie()
-    trie.insert('/ws', (HTTPMethod.GET,), Scheme.websocket, _handler)
-    h, params, allowed = trie.lookup('/ws', HTTPMethod.GET, Scheme.http)
-    assert h is None
-    assert allowed == set()
-
-
 def test_trie_multiple_params():
     trie = _RouteTrie()
     trie.insert('/a/{x}/{y:int}', (HTTPMethod.GET,), Scheme.http, _handler)
@@ -115,30 +108,33 @@ def test_trie_multiple_params():
 # Backtracking pins — behaviours the lookup fast path must keep
 # ---------------------------------------------------------------------------
 
-def test_trie_backtracks_to_param_when_static_dead_ends_deeper():
-    """A static branch that dead-ends below must fall back to a param branch
-    taken at an earlier level."""
-    static_h, param_h = object(), object()
-    trie = _RouteTrie()
-    trie.insert('/x/static/other', (HTTPMethod.GET,), Scheme.http, static_h)
-    trie.insert('/x/{a}/target', (HTTPMethod.GET,), Scheme.http, param_h)
+@pytest.mark.parametrize('case', [
+    pytest.param('static-dead-end', id='static-dead-ends-deeper'),
+    pytest.param('method-mismatch', id='method-mismatch-static-branch'),
+])
+def test_trie_backtracks_to_param_when_static_dead_ends_deeper(case):
+    if case == 'static-dead-end':
+        # A static branch that dead-ends below must fall back to a param
+        # branch taken at an earlier level.
+        static_h, param_h = object(), object()
+        trie = _RouteTrie()
+        trie.insert('/x/static/other', (HTTPMethod.GET,), Scheme.http, static_h)
+        trie.insert('/x/{a}/target', (HTTPMethod.GET,), Scheme.http, param_h)
 
-    h, params, _ = trie.lookup('/x/static/target', HTTPMethod.GET, Scheme.http)
-    assert h is param_h
-    assert params == {'a': 'static'}
+        h, params, _ = trie.lookup('/x/static/target', HTTPMethod.GET, Scheme.http)
+        assert h is param_h
+        assert params == {'a': 'static'}
+    else:
+        # Static-first priority is per-entry-match, not per-path: a method miss
+        # on the static entry still lets a param sibling serve the request.
+        get_h, post_h = object(), object()
+        trie = _RouteTrie()
+        trie.insert('/x/fixed', (HTTPMethod.GET,), Scheme.http, get_h)
+        trie.insert('/x/{a}', (HTTPMethod.POST,), Scheme.http, post_h)
 
-
-def test_trie_backtracks_on_method_mismatch_in_static_branch():
-    """Static-first priority is per-entry-match, not per-path: a method miss
-    on the static entry still lets a param sibling serve the request."""
-    get_h, post_h = object(), object()
-    trie = _RouteTrie()
-    trie.insert('/x/fixed', (HTTPMethod.GET,), Scheme.http, get_h)
-    trie.insert('/x/{a}', (HTTPMethod.POST,), Scheme.http, post_h)
-
-    h, params, _ = trie.lookup('/x/fixed', HTTPMethod.POST, Scheme.http)
-    assert h is post_h
-    assert params == {'a': 'fixed'}
+        h, params, _ = trie.lookup('/x/fixed', HTTPMethod.POST, Scheme.http)
+        assert h is post_h
+        assert params == {'a': 'fixed'}
 
 
 def test_trie_405_aggregates_allowed_methods_across_branches():
@@ -151,26 +147,29 @@ def test_trie_405_aggregates_allowed_methods_across_branches():
     assert HTTPMethod.GET in allowed and HTTPMethod.POST in allowed
 
 
-def test_trie_backtracks_to_wildcard_when_param_dead_ends():
-    param_h, wild_h = object(), object()
-    trie = _RouteTrie()
-    trie.insert('/f/{a}/b', (HTTPMethod.GET,), Scheme.http, param_h)
-    trie.insert('/f/{rest:path}', (HTTPMethod.GET,), Scheme.http, wild_h)
+@pytest.mark.parametrize('case', [
+    pytest.param('param-dead-end', id='param-dead-ends'),
+    pytest.param('converter-reject', id='converter-rejection'),
+])
+def test_trie_backtracks_to_wildcard_when_param_dead_ends(case):
+    if case == 'param-dead-end':
+        param_h, wild_h = object(), object()
+        trie = _RouteTrie()
+        trie.insert('/f/{a}/b', (HTTPMethod.GET,), Scheme.http, param_h)
+        trie.insert('/f/{rest:path}', (HTTPMethod.GET,), Scheme.http, wild_h)
 
-    h, params, _ = trie.lookup('/f/q/z', HTTPMethod.GET, Scheme.http)
-    assert h is wild_h
-    assert params == {'rest': 'q/z'}
+        h, params, _ = trie.lookup('/f/q/z', HTTPMethod.GET, Scheme.http)
+        assert h is wild_h
+        assert params == {'rest': 'q/z'}
+    else:
+        int_h, wild_h = object(), object()
+        trie = _RouteTrie()
+        trie.insert('/i/{n:int}', (HTTPMethod.GET,), Scheme.http, int_h)
+        trie.insert('/i/{rest:path}', (HTTPMethod.GET,), Scheme.http, wild_h)
 
-
-def test_trie_converter_rejection_falls_back_to_wildcard_sibling():
-    int_h, wild_h = object(), object()
-    trie = _RouteTrie()
-    trie.insert('/i/{n:int}', (HTTPMethod.GET,), Scheme.http, int_h)
-    trie.insert('/i/{rest:path}', (HTTPMethod.GET,), Scheme.http, wild_h)
-
-    h, params, _ = trie.lookup('/i/abc', HTTPMethod.GET, Scheme.http)
-    assert h is wild_h
-    assert params == {'rest': 'abc'}
+        h, params, _ = trie.lookup('/i/abc', HTTPMethod.GET, Scheme.http)
+        assert h is wild_h
+        assert params == {'rest': 'abc'}
 
 
 def test_trie_slash_normalization_matches_static_route():
