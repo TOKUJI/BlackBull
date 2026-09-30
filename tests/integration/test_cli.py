@@ -62,8 +62,6 @@ def _wait_until(predicate, deadline: float, poll: float = 0.1):
 @pytest.mark.timeout(45)
 def test_cli_serves_blackbull_app(tmp_path: Path, child_env):
     """``blackbull module:app`` resolves a BlackBull instance and serves it."""
-    blackbull = shutil.which('blackbull')
-    assert blackbull, "'blackbull' console script is not on PATH — run 'pip install -e .'"
 
     port = _free_port()
     script = tmp_path / 'cli_app.py'
@@ -80,7 +78,9 @@ def test_cli_serves_blackbull_app(tmp_path: Path, child_env):
             return b'cli-v1'
     ''').lstrip())
 
-    env = child_env({'BB_ACCESS_LOG': '0', 'PYTHONUNBUFFERED': '1'})
+    env = child_env({'BB_ACCESS_LOG': '0', 'PYTHONUNBUFFERED': '1'}, cwd=str(tmp_path))
+    blackbull = shutil.which('blackbull', path=env['PATH'])
+    assert blackbull, 'the harness must provide the blackbull executable'
 
     log_path = tmp_path / 'subprocess.log'
     log_fh = open(log_path, 'w', buffering=1)
@@ -122,8 +122,6 @@ def test_cli_serves_over_unix_domain_socket(tmp_path: Path, child_env):
     a TCP port.  Verify the CLI parses the spec, ASGIServer binds AF_UNIX,
     and a client can complete a request through the socket file.
     """
-    blackbull = shutil.which('blackbull')
-    assert blackbull, "'blackbull' console script is not on PATH"
 
     sock_path = tmp_path / 'bb.sock'
     script = tmp_path / 'uds_app.py'
@@ -138,7 +136,9 @@ def test_cli_serves_over_unix_domain_socket(tmp_path: Path, child_env):
             return b'uds-v1'
     ''').lstrip())
 
-    env = child_env({'BB_ACCESS_LOG': '0', 'PYTHONUNBUFFERED': '1'})
+    env = child_env({'BB_ACCESS_LOG': '0', 'PYTHONUNBUFFERED': '1'}, cwd=str(tmp_path))
+    blackbull = shutil.which('blackbull', path=env['PATH'])
+    assert blackbull, 'the harness must provide the blackbull executable'
 
     log_path = tmp_path / 'subprocess.log'
     log_fh = open(log_path, 'w', buffering=1)
@@ -205,8 +205,6 @@ def test_cli_serves_raw_asgi_callable(tmp_path: Path, child_env):
     pointing the CLI at ``bench.peers.asgi_app:app`` (a raw ASGI app)
     just like every other peer server.
     """
-    blackbull = shutil.which('blackbull')
-    assert blackbull, "'blackbull' console script is not on PATH"
 
     port = _free_port()
     script = tmp_path / 'raw_asgi_app.py'
@@ -228,7 +226,9 @@ def test_cli_serves_raw_asgi_callable(tmp_path: Path, child_env):
                 await send({'type': 'http.response.body', 'body': b''})
     ''').lstrip())
 
-    env = child_env({'BB_ACCESS_LOG': '0', 'PYTHONUNBUFFERED': '1'})
+    env = child_env({'BB_ACCESS_LOG': '0', 'PYTHONUNBUFFERED': '1'}, cwd=str(tmp_path))
+    blackbull = shutil.which('blackbull', path=env['PATH'])
+    assert blackbull, 'the harness must provide the blackbull executable'
     # BlackBull is a native-Connection framework — its server hands
     # the app a typed ``Connection`` by default. A *raw* ASGI callable (no
     # BlackBull instance) reads ``scope['type']``/``scope['path']``, so it must
@@ -325,7 +325,7 @@ def _spawn_server(tmp_path: Path, body: str, port: int, child_env,
         _SHUTDOWN_APP.format(body=body, hold=_SLOW_SECONDS).lstrip())
 
     env = child_env({'BB_ACCESS_LOG': '0', 'PYTHONUNBUFFERED': '1',
-                     'PYTHONPATH': str(tmp_path)})
+                     'PYTHONPATH': str(tmp_path)}, cwd=str(tmp_path))
     env.update(extra_env or {})
 
     proc = subprocess.Popen(
