@@ -16,7 +16,7 @@ from http import HTTPStatus
 from unittest.mock import AsyncMock
 
 import pytest
-from hypothesis import given, strategies as st
+from hypothesis import example, given, strategies as st
 
 from blackbull.protocol.field_grammar import (
     FIELD_VALUE_ALLOWED_OCTETS, TCHAR_SET)
@@ -326,6 +326,7 @@ class TestFlowControlInvariants:
         consumed=st.integers(min_value=0, max_value=131070),
         credited=st.integers(min_value=0, max_value=0x7FFFFFFF),
     )
+    @example(initial=65535, consumed=0, credited=0x7FFFFFFF)
     @pytest.mark.xfail(strict=True, reason='BLA-514: no FLOW_CONTROL_ERROR path')
     def test_window_never_exceeds_max(self, initial, consumed, credited):
         """RFC 9113 §6.9.1 — the flow-control window must never exceed
