@@ -111,12 +111,6 @@ async def _cancel_tasks(tasks, budget: _AsyncCleanupBudget) -> Exception | None:
     return combine_cleanup_errors(*errors)
 
 
-async def _settle(cancelled, budget: _AsyncCleanupBudget) -> None:
-    """Wait, inside the budget, for cancelled tasks to finish unwinding."""
-    if cancelled:
-        await asyncio.wait(cancelled, timeout=budget.remaining())
-
-
 async def _wait_for_event_ignoring_cancellation(event: asyncio.Event) -> None:
     """Wait for a cleanup boundary even when the caller is cancelled again."""
     waiter = asyncio.create_task(event.wait())
@@ -314,7 +308,6 @@ class _Listening:
         self._tls = ssl_context
         self._reading = False
         self._stopped = False
-        self._closed = False
         self._retry: asyncio.TimerHandle | None = None
 
     def is_serving(self) -> bool:
@@ -339,9 +332,6 @@ class _Listening:
         self.stop_reading()
 
     def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
         # The reader goes first: left on a closed descriptor, it fires on
         # whatever socket reuses the number next.
         try:
@@ -470,10 +460,13 @@ class _AcceptGate:
     def _never_started(self, task, conn, admission: _Admission,
                        started: list) -> None:
         if task.cancelled() and not started:
-            if conn.fileno() != -1:
-                conn.close()
-            admission.release()
-            self._connecting.discard(task)
+            self._abandon(task, conn, admission)
+
+    def _abandon(self, task, conn, admission: _Admission) -> None:
+        self._connecting.discard(task)
+        # A transport closes the socket it was given; this one never got one.
+        conn.close()
+        admission.release()
 
     async def _connected(self, loop, conn, protocol, ssl_context,
                          admission: _Admission, started: list | None = None) -> None:
@@ -485,14 +478,8 @@ class _AcceptGate:
                 lambda: protocol, conn, ssl=ssl_context,
                 ssl_handshake_timeout=(self._handshake_timeout
                                        if ssl_context is not None else None))
-        except BaseException as exc:
-            self._connecting.discard(task)
-            # A transport closes the socket it was given; this one never got one.
-            if conn.fileno() != -1:
-                conn.close()
-            admission.release()
-            if not isinstance(exc, Exception):
-                raise
+        except Exception as exc:
+            self._abandon(task, conn, admission)
             # Swallowed, as the loop's own accept does: a raise here would
             # surface as "Task exception was never retrieved".
             if loop.get_debug():
@@ -502,6 +489,9 @@ class _AcceptGate:
                     'exception': exc,
                 })
             return
+        except BaseException:
+            self._abandon(task, conn, admission)
+            raise
         # The transport exists: stop() now drains this task, it no longer
         # cancels it.
         self._connecting.discard(task)
@@ -1308,17 +1298,12 @@ class Server:
 
             _validate_unique_socket_fds(self.bound_listeners)
 
-            groups: dict[object, list] = defaultdict(list)
+            listening = []
             for listener, socks in self.bound_listeners:
                 binding = (None if listener.speaks == HTTP else
                            self._protocol_registry.raw_bindings.get(listener.speaks))
                 factory = self.connection_protocol_factory(binding)
-                for sock in socks:
-                    groups[listener.tls].append((sock, factory))
-
-            listening = [((factory, context), sock)
-                         for context, pairs in groups.items()
-                         for sock, factory in pairs]
+                listening += [((factory, listener.tls), sock) for sock in socks]
             for _spec, sock in listening:
                 if sock.type != socket.SOCK_STREAM:
                     raise ValueError(f'A Stream Socket was expected, got {sock!r}')
@@ -1363,10 +1348,11 @@ class Server:
             raise
         finally:
             try:
-                await _settle(self._accept_gate.close(), budget)
+                accept_error = await _cancel_tasks(self._accept_gate.close(), budget)
             finally:
                 socket_error = self._close_socket()
-            cleanup_error = combine_cleanup_errors(cleanup_error, socket_error)
+            cleanup_error = combine_cleanup_errors(
+                cleanup_error, accept_error, socket_error)
             if cleanup_error is not None:
                 if primary is None:
                     raise cleanup_error
@@ -1433,7 +1419,7 @@ class Server:
             try:
                 # A connection still in its TLS handshake has no request to
                 # finish; the drain is for the ones being served.
-                await _settle(connecting, budget)
+                errors.append(await _cancel_tasks(connecting, budget))
                 await self._drain(drain_timeout)
             except (asyncio.CancelledError, Exception) as exc:
                 errors.append(exc)
