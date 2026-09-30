@@ -68,20 +68,21 @@ def test_import_app_resolves_attribute(tmp_path, monkeypatch):
     assert _import_app('sample_cli_app:app') == 'i-am-the-app'
 
 
-def test_import_app_rejects_missing_colon():
-    with pytest.raises(ValueError, match="module:attribute"):
-        _import_app('not_a_path')
+@pytest.mark.parametrize('spec,exc,match', [
+    pytest.param('not_a_path', ValueError, 'module:attribute',
+                 id='missing-colon'),
+    pytest.param('definitely_not_a_real_module_xyz:app', ImportError,
+                 'could not import', id='unknown-module'),
+])
+def test_import_app_rejects_missing_colon(spec, exc, match):
+    with pytest.raises(exc, match=match):
+        _import_app(spec)
 
 
 @pytest.mark.parametrize('spec', [':app', 'mod:', ':'])
 def test_import_app_rejects_empty_sides(spec):
     with pytest.raises(ValueError, match='non-empty'):
         _import_app(spec)
-
-
-def test_import_app_unknown_module():
-    with pytest.raises(ImportError, match='could not import'):
-        _import_app('definitely_not_a_real_module_xyz:app')
 
 
 def test_import_app_missing_attribute(tmp_path, monkeypatch):
@@ -163,12 +164,18 @@ def test_main_bad_bind_returns_1(capsys):
     assert 'blackbull:' in err and 'expected host:port' in err
 
 
-def test_main_bad_app_returns_1(capsys):
+@pytest.mark.parametrize('argv,err_frag', [
+    pytest.param(['not_a_real_module_zzz:app', '--bind', '127.0.0.1:1'],
+                 'could not import', id='bad-app'),
+    pytest.param(['myapp:app', '--config', '/no/such/file.toml'],
+                 'blackbull:', id='bad-config-path'),
+])
+def test_main_bad_app_returns_1(capsys, argv, err_frag):
     from blackbull.cli import main
-    rc = main(['not_a_real_module_zzz:app', '--bind', '127.0.0.1:1'])
+    rc = main(argv)
     assert rc == 1
     err = capsys.readouterr().err
-    assert 'could not import' in err
+    assert err_frag in err
 
 
 def test_main_warns_on_specific_host(capsys, monkeypatch):
@@ -201,26 +208,33 @@ def test_main_warns_on_specific_host(capsys, monkeypatch):
 # _load_config
 # ---------------------------------------------------------------------------
 
-def test_load_config_maps_server_workers(tmp_path):
+@pytest.mark.parametrize('content,key,value', [
+    pytest.param('[server]\nworkers = 4\n', 'BB_WORKERS', '4',
+                 id='server-workers'),
+    pytest.param('[limits]\nmax_connections = 100\n', 'BB_MAX_CONNECTIONS', '100',
+                 id='limits-max-connections'),
+])
+def test_load_config_maps_server_workers(tmp_path, content, key, value):
     cfg_file = tmp_path / 'bb.toml'
-    cfg_file.write_text('[server]\nworkers = 4\n')
+    cfg_file.write_text(content)
     result = _load_config(str(cfg_file))
-    assert result['BB_WORKERS'] == '4'
+    assert result[key] == value
 
 
-def test_load_config_maps_limits_max_connections(tmp_path):
+@pytest.mark.parametrize('content,expected', [
+    pytest.param('[logging]\naccess_log = false\nasync_logging = true\n',
+                 {'BB_ACCESS_LOG': '0', 'BB_ASYNC_LOGGING': '1'},
+                 id='logging-booleans'),
+    pytest.param('[tls]\ncert = "cert.pem"\nkey = "key.pem"\n',
+                 {'_certfile': 'cert.pem', '_keyfile': 'key.pem'},
+                 id='tls-cert-and-key'),
+])
+def test_load_config_maps_logging_booleans(tmp_path, content, expected):
     cfg_file = tmp_path / 'bb.toml'
-    cfg_file.write_text('[limits]\nmax_connections = 100\n')
+    cfg_file.write_text(content)
     result = _load_config(str(cfg_file))
-    assert result['BB_MAX_CONNECTIONS'] == '100'
-
-
-def test_load_config_maps_logging_booleans(tmp_path):
-    cfg_file = tmp_path / 'bb.toml'
-    cfg_file.write_text('[logging]\naccess_log = false\nasync_logging = true\n')
-    result = _load_config(str(cfg_file))
-    assert result['BB_ACCESS_LOG'] == '0'
-    assert result['BB_ASYNC_LOGGING'] == '1'
+    for key, value in expected.items():
+        assert result[key] == value
 
 
 def test_load_config_maps_logging_sink_knobs(tmp_path):
@@ -234,14 +248,6 @@ def test_load_config_maps_logging_sink_knobs(tmp_path):
     assert result['BB_LOG_BATCH_SIZE'] == '128'
     assert result['BB_LOG_BATCH_TIMEOUT_MS'] == '5'
     assert result['BB_LOG_FILE'] == '/var/log/bb.log'
-
-
-def test_load_config_tls_cert_and_key(tmp_path):
-    cfg_file = tmp_path / 'bb.toml'
-    cfg_file.write_text('[tls]\ncert = "cert.pem"\nkey = "key.pem"\n')
-    result = _load_config(str(cfg_file))
-    assert result['_certfile'] == 'cert.pem'
-    assert result['_keyfile'] == 'key.pem'
 
 
 def test_load_config_ignores_unknown_sections(tmp_path):
@@ -350,14 +356,6 @@ def test_main_config_tls_fallback(tmp_path, monkeypatch):
     assert rc == 0
     assert called['certfile'] == 'my.crt'
     assert called['keyfile'] == 'my.key'
-
-
-def test_main_bad_config_path_returns_1(capsys):
-    from blackbull.cli import main
-    rc = main(['myapp:app', '--config', '/no/such/file.toml'])
-    assert rc == 1
-    err = capsys.readouterr().err
-    assert 'blackbull:' in err
 
 
 def test_main_invalid_toml_returns_1(tmp_path, capsys):
