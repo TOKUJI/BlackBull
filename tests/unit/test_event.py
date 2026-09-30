@@ -178,6 +178,12 @@ async def test_pending_tasks_are_removed_when_completed():
 
     d.on('test', quick)
     await d.emit(Event('test'))
+    # The detached observer task completes and its done callback removes it
+    # from the dispatcher's pending set.
+    await asyncio.sleep(0.01)
+    assert d._pending_tasks == set(), (
+        'completed observer tasks must be removed from the pending set'
+    )
     await asyncio.wait_for(d.aclose(), timeout=1.0)
 
 

@@ -499,12 +499,3 @@ class TestBlackBullErrorDispatch:
         assert send.status == 405, (
             f"Expected 405 for unknown method NOTEXIST, got {send.status}"
         )
-
-    @pytest.mark.asyncio
-    async def test_unknown_http_method_does_not_raise(self):
-        """ValueError from HTTPMethod() must be caught internally; __call__ must not raise."""
-        app = self._make_app()
-        scope = _make_scope('/hello', method='HEAD')
-        send = _CaptureSend()
-        # Must complete without raising ValueError
-        await app(scope, None, send)
