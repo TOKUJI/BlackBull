@@ -516,11 +516,11 @@ class TestG6MethodAndSchemeGrammar:
         assert not _sent_rst_streams(handler, 1)
 
     @pytest.mark.parametrize('overrides', [
-        pytest.param({'method': m}, id=f'method-not-token-{i}')
-        for i, m in enumerate(ILLEGAL_METHODS)
+        pytest.param({'method': m}, id=f'method-not-token-{m.hex()}')
+        for m in ILLEGAL_METHODS
     ] + [
-        pytest.param({'scheme': s}, id=f'scheme-not-uri-scheme-{i}')
-        for i, s in enumerate(ILLEGAL_SCHEMES)
+        pytest.param({'scheme': s}, id=f'scheme-not-uri-scheme-{s.hex()}')
+        for s in ILLEGAL_SCHEMES
     ])
     @pytest.mark.asyncio
     async def test_a_method_that_is_not_a_token_is_malformed(self, overrides):
