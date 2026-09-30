@@ -445,9 +445,24 @@ class TestHTTP11KeepAlive:
         reader = MagicMock(spec=AbstractReader)
         reader.readuntil = AsyncMock(side_effect=IncompleteReadError(b'Host: localh'))
 
-        actor = HTTP1Actor(reader, _FakeWriter(), _noop_app, None,
+        writer = _FakeWriter()
+        actor = HTTP1Actor(reader, writer, _noop_app, None,
                            request=first_line + b'\r\n')
-        await actor.run()  # must return normally
+        await actor.run()  # must return normally — the EOF is absorbed
+
+        # RFC 9112 §2.2: octets that do not match the HTTP-message grammar
+        # (a head truncated by EOF never completes it) are answered 400 and
+        # the connection is closed.  "Silently" is the actor's half of the
+        # contract: the EOF never surfaces as an exception, and the close is
+        # announced (Connection: close, RFC 9112 §9.6) rather than a reset.
+        wire = bytes(writer.written)
+        assert wire.startswith(b'HTTP/1.1 400 Bad Request'), (
+            f'a truncated head must be answered 400 (RFC 9112 §2.2); got {wire[:24]!r}'
+        )
+        assert b'connection: close' in wire.lower(), (
+            'the connection close must be announced, not a bare reset'
+        )
+        assert wire.count(b'HTTP/1.1 ') == 1, 'exactly one response before the close'
 
     async def test_incomplete_read_after_first_request_app_called_once(self):
         req = _http_request(method='GET', path='/one',

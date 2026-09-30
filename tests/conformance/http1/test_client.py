@@ -360,6 +360,40 @@ class TestHTTP1RequestSenderWire:
 # TestWebSocketClient — round-trips against a real ASGIServer (WebSocket)
 # ---------------------------------------------------------------------------
 
+class _RecordingWriter:
+    """Session-writer spy: records every frame WebSocketSession writes."""
+
+    def __init__(self, inner):
+        self._inner = inner
+        self.frames: list[bytes] = []
+
+    async def write(self, data: bytes) -> None:
+        self.frames.append(bytes(data))
+        await self._inner.write(data)
+
+    async def close(self) -> None:
+        await self._inner.close()
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+class _EventSpyRecipient:
+    """Recipient spy: records the events the close() drain loop consumes."""
+
+    def __init__(self, inner):
+        self._inner = inner
+        self.seen: list[dict] = []
+
+    async def __call__(self):
+        event = await self._inner()
+        self.seen.append(event)
+        return event
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
 class TestWebSocketClient:
     @pytest.mark.asyncio
     async def test_handshake_completes(self, server_port):
@@ -390,10 +424,23 @@ class TestWebSocketClient:
 
     @pytest.mark.asyncio
     async def test_close_handshake(self, server_port):
+        # RFC 6455 §7.1.2: ws.close() completes the closing handshake —
+        # exactly one CLOSE frame on the wire and the peer's Close reply
+        # drained within the bound.
         async with WebSocketClient('127.0.0.1', server_port) as c:
             ws = await c.connect('/ws')
-            await ws.close()
-        # No exception raised — close() drained gracefully.
+            writer = _RecordingWriter(ws._writer)
+            events = _EventSpyRecipient(ws._recipient)
+            ws._writer = writer
+            ws._recipient = events
+            await asyncio.wait_for(ws.close(), 5)
+        close_frames = [f for f in writer.frames if f and (f[0] & 0x0F) == 0x8]
+        assert len(close_frames) == 1, (
+            f'ws.close() must write exactly one CLOSE frame; wrote {len(close_frames)}'
+        )
+        assert any(e.get('type') == 'websocket.disconnect' for e in events.seen), (
+            "the peer's Close reply must be drained within the bound"
+        )
 
     @pytest.mark.asyncio
     async def test_close_drains_peer_close_and_stops_reader(self, server_port):
@@ -410,10 +457,18 @@ class TestWebSocketClient:
 
     @pytest.mark.asyncio
     async def test_close_is_idempotent(self, server_port):
+        # The second close() is an idempotent no-op: the writer records
+        # nothing new after the first CLOSE frame.
         async with WebSocketClient('127.0.0.1', server_port) as c:
             ws = await c.connect('/ws')
+            writer = _RecordingWriter(ws._writer)
+            ws._writer = writer
             await asyncio.wait_for(ws.close(), 5)
+            writes_after_first_close = len(writer.frames)
             await asyncio.wait_for(ws.close(), 5)  # returns immediately
+        assert len(writer.frames) == writes_after_first_close, (
+            'the second close() must write nothing'
+        )
 
     @pytest.mark.asyncio
     async def test_subprotocol_negotiation(self, server_port):
