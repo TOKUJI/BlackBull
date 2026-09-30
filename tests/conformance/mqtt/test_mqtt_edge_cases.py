@@ -16,6 +16,11 @@ import asyncio
 
 import pytest
 
+from tests.conformance.mqtt._harness import (
+    _FakeMQTTReader, _FakeMQTTWriter, _ctx,
+    run_until_idle, wait_idle, cancel_all,
+)
+
 from blackbull.mqtt.messages import (
     ReasonCode,
     MQTTConnect, MQTTConnack, MQTTDisconnect,
@@ -323,50 +328,34 @@ class TestSessionStateDetails:
     async def test_session_stores_subscription_options(self, mqtt):
         """§3.1.2.11 — Session preserves Subscription Options (No Local,
         Retain As Published, Retain Handling) across reconnects."""
-        from tests.conformance.mqtt.test_mqtt_keepalive import (
-            _FakeMQTTReader, _FakeMQTTWriter, _ctx)
 
         # Connection 1: a SUBSCRIBE carrying §3.8.3.1 options; the session
         # must outlive the connection (Session Expiry Interval > 0).
-        reader = _FakeMQTTReader()
-        writer = _FakeMQTTWriter()
-        reader.feed_packet(MQTTConnect(
-            client_id='opts-client', clean_start=True, keep_alive=60,
-            properties={'session_expiry_interval': 3600},
-        ))
-        reader.feed_packet(MQTTSubscribe(
-            packet_id=1,
-            subscriptions=[('chat/room1', 1), ('alerts/#', 2)],
-            subscription_options=[
-                {'no_local': True, 'retain_as_published': True,
-                 'retain_handling': 1},
-                {'no_local': False},
-            ],
-        ))
-        actor = mqtt.serve(reader, writer, _ctx())
-        task = asyncio.create_task(actor.run())
-        await asyncio.sleep(0.1)
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+        await run_until_idle(
+            mqtt,
+            MQTTConnect(
+                client_id='opts-client', clean_start=True, keep_alive=60,
+                properties={'session_expiry_interval': 3600},
+            ),
+            MQTTSubscribe(
+                packet_id=1,
+                subscriptions=[('chat/room1', 1), ('alerts/#', 2)],
+                subscription_options=[
+                    {'no_local': True, 'retain_as_published': True,
+                     'retain_handling': 1},
+                    {'no_local': False},
+                ],
+            ),
+        )
 
         # Connection 2: Clean Start = 0 reconnect — the session survives.
-        reader = _FakeMQTTReader()
-        writer = _FakeMQTTWriter()
-        reader.feed_packet(MQTTConnect(
-            client_id='opts-client', clean_start=False, keep_alive=60,
-            properties={'session_expiry_interval': 3600},
-        ))
-        actor = mqtt.serve(reader, writer, _ctx())
-        task = asyncio.create_task(actor.run())
-        await asyncio.sleep(0.1)
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+        await run_until_idle(
+            mqtt,
+            MQTTConnect(
+                client_id='opts-client', clean_start=False, keep_alive=60,
+                properties={'session_expiry_interval': 3600},
+            ),
+        )
 
         # §3.1.2.11 — the session holds (filter, qos, options) triples, and
         # the Subscription Options came through the broker intact.
@@ -384,8 +373,6 @@ class TestSessionStateDetails:
     @pytest.mark.asyncio
     async def test_session_stores_pending_qos1_messages(self, mqtt):
         """§3.1.2.11 — Session stores QoS 1 messages pending acknowledgment."""
-        from tests.conformance.mqtt.test_mqtt_keepalive import (
-            _FakeMQTTReader, _FakeMQTTWriter, _ctx)
 
         sub_r, sub_w = _FakeMQTTReader(), _FakeMQTTWriter()
         sub_r.feed_packet(MQTTConnect(
@@ -397,7 +384,7 @@ class TestSessionStateDetails:
         ))
         sub = mqtt.serve(sub_r, sub_w, _ctx())
         sub_task = asyncio.create_task(sub.run())
-        await asyncio.sleep(0.1)
+        await wait_idle(sub_r, sub_w)
 
         # A QoS 1 delivery books pending_qos1_out until its PUBACK arrives.
         pub_r, pub_w = _FakeMQTTReader(), _FakeMQTTWriter()
@@ -409,7 +396,7 @@ class TestSessionStateDetails:
         ))
         pub = mqtt.serve(pub_r, pub_w, _ctx())
         pub_task = asyncio.create_task(pub.run())
-        await asyncio.sleep(0.1)
+        await wait_idle(pub_r, pub_w)
 
         pending = mqtt.sessions['qos1-client']['pending_qos1_out']
         assert len(pending) == 1, (
@@ -422,23 +409,16 @@ class TestSessionStateDetails:
 
         # PUBACK acknowledges it — the entry is dropped.
         sub_r.feed_packet(MQTTPuback(packet_id=packet_id))
-        await asyncio.sleep(0.1)
+        await wait_idle(sub_r, sub_w)
         assert mqtt.sessions['qos1-client']['pending_qos1_out'] == {}, (
             'PUBACK must clear the pending_qos1_out entry'
         )
 
-        for task in (sub_task, pub_task):
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+        await cancel_all(sub_task, pub_task)
 
     @pytest.mark.asyncio
     async def test_session_stores_pending_qos2_states(self, mqtt):
         """§3.1.2.11 — Session stores QoS 2 messages in various states."""
-        from tests.conformance.mqtt.test_mqtt_keepalive import (
-            _FakeMQTTReader, _FakeMQTTWriter, _ctx)
 
         reader = _FakeMQTTReader()
         writer = _FakeMQTTWriter()
@@ -451,7 +431,7 @@ class TestSessionStateDetails:
         ))
         actor = mqtt.serve(reader, writer, _ctx())
         task = asyncio.create_task(actor.run())
-        await asyncio.sleep(0.1)
+        await wait_idle(reader, writer)
 
         # Receive side, §4.3.3: PUBREC sent, awaiting PUBREL.  (The send side —
         # PUBLISH_SENT / PUBREL_SENT — is driven end to end by
@@ -464,16 +444,12 @@ class TestSessionStateDetails:
         # PUBREL completes the receive side (answered with PUBCOMP) and
         # clears the state.
         reader.feed_packet(MQTTPubrel(packet_id=200))
-        await asyncio.sleep(0.1)
+        await wait_idle(reader, writer)
         assert 200 not in mqtt.sessions['qos2-client']['pending_qos2_in'], (
             'PUBREL must clear the pending_qos2_in state'
         )
 
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+        await cancel_all(task)
 
 
 # ============================================================================

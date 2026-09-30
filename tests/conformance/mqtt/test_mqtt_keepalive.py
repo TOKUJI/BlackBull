@@ -32,63 +32,10 @@ from blackbull.mqtt.messages import (
     MQTTPingreq, MQTTPingresp,
     encode_packet, decode_packet,
 )
-from blackbull.server.protocol_registry import ProtocolContext
-from blackbull.server.sender import AbstractWriter
-from blackbull.server.recipient import AbstractReader
-
-
-# ---------------------------------------------------------------------------
-# In-process fakes
-# ---------------------------------------------------------------------------
-
-class _FakeMQTTReader(AbstractReader):
-    def __init__(self, data: bytes = b''):
-        self._buf = bytearray(data)
-
-    async def read(self, n: int) -> bytes:
-        if not self._buf:
-            # Simulate read timeout (real MQTT actor would use a deadline)
-            await asyncio.sleep(0.01)
-            return b''
-        chunk = bytes(self._buf[:n])
-        del self._buf[:n]
-        return chunk
-
-    def feed(self, data: bytes) -> None:
-        self._buf.extend(data)
-
-    def feed_packet(self, packet) -> None:
-        self._buf.extend(encode_packet(packet))
-
-
-class _FakeMQTTWriter(AbstractWriter):
-    def __init__(self):
-        self.written = bytearray()
-
-    async def write(self, data: bytes) -> None:
-        self.written.extend(data)
-
-    def pop_packets(self) -> list:
-        packets = []
-        offset = 0
-        buf = bytes(self.written)
-        while offset < len(buf):
-            packet, consumed = decode_packet(buf[offset:])
-            packets.append(packet)
-            offset += consumed
-        self.written = self.written[offset:]
-        return packets
-
-
-def _ctx():
-    return ProtocolContext(
-        peername=('127.0.0.1', 54321),
-        sockname=('0.0.0.0', 1883),
-        ssl=False,
-        aggregator=None,
-        connection_id='test-conn',
-        protocol='mqtt',
-    )
+from tests.conformance.mqtt._harness import (
+    _FakeMQTTReader, _FakeMQTTWriter, _ctx,
+    run_until_idle, cancel_all,
+)
 
 
 # ============================================================================
@@ -164,26 +111,12 @@ class TestKeepAliveTimeout:
     @pytest.mark.asyncio
     async def test_pingreq_triggers_pingresp(self, mqtt):
         """§3.12 → §3.13 — Server MUST respond to PINGREQ with PINGRESP."""
-        reader = _FakeMQTTReader()
-        writer = _FakeMQTTWriter()
-        ctx = _ctx()
-
-        actor = mqtt.serve(reader, writer, ctx)
         # Connect then send PINGREQ
-        reader.feed_packet(MQTTConnect(
-            client_id='ping-client',
-            clean_start=True,
-            keep_alive=30,
-        ))
-        reader.feed_packet(MQTTPingreq())
-
-        task = asyncio.create_task(actor.run())
-        await asyncio.sleep(0.1)
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+        _, writer = await run_until_idle(
+            mqtt,
+            MQTTConnect(client_id='ping-client', clean_start=True, keep_alive=30),
+            MQTTPingreq(),
+        )
 
         packets = writer.pop_packets()
         pingresps = [p for p in packets if isinstance(p, MQTTPingresp)]
@@ -198,8 +131,6 @@ class TestKeepAliveTimeout:
         """
         from blackbull.mqtt.messages import MQTTPublish
 
-        reader = _FakeMQTTReader()
-        writer = _FakeMQTTWriter()
         ctx = _ctx()
 
         # A Will topic makes the abnormal detach observable on the wire:
@@ -212,52 +143,55 @@ class TestKeepAliveTimeout:
             packet_id=1, subscriptions=[('ka/will/#', 0)],
         ))
 
-        # keep_alive=2: the 1.5x deadline is 3.0s after each connection's last
-        # control packet.  B stays silent; A gets one PUBLISH mid-window (at
-        # ~1.4s), which moves its deadline to ~4.4s.
+        # keep_alive=1: the 1.5x deadline is 1.5s after each connection's last
+        # control packet.  Both start together; A gets one PUBLISH mid-window
+        # (at ~0.75s), which moves its deadline to ~2.25s.  The remaining
+        # margins are the two sides of the mid-window point (0.75s each); the
+        # deadlines themselves are observed by polling, not by fixed sleeps.
         a_r, a_w = _FakeMQTTReader(), _FakeMQTTWriter()
         a_r.feed_packet(MQTTConnect(
-            client_id='ka-active', clean_start=True, keep_alive=2,
+            client_id='ka-active', clean_start=True, keep_alive=1,
             will_topic='ka/will/active', will_payload=b'gone',
         ))
         b_r, b_w = _FakeMQTTReader(), _FakeMQTTWriter()
         b_r.feed_packet(MQTTConnect(
-            client_id='ka-silent', clean_start=True, keep_alive=2,
+            client_id='ka-silent', clean_start=True, keep_alive=1,
             will_topic='ka/will/silent', will_payload=b'gone',
         ))
         tasks = [asyncio.create_task(mqtt.serve(r, w, ctx).run())
                  for r, w in ((obs_r, obs_w), (a_r, a_w), (b_r, b_w))]
-        await asyncio.sleep(1.4)
+        await asyncio.sleep(0.75)
         # The activity is a PUBLISH — any Control Packet counts, not just
         # PINGREQ (§3.1.2.10).
         a_r.feed_packet(MQTTPublish(
             topic='status/heartbeat', payload=b'alive', qos=0,
         ))
 
-        def wills_seen():
-            return {p.topic for p in obs_w.pop_packets()
-                    if isinstance(p, MQTTPublish)}
+        # Collect the Will deliveries as they arrive, with their arrival
+        # times — the order and the gap between them ARE the assertion, so
+        # no fixed sleep has to land between the two deadlines.
+        seen: dict = {}
 
-        await asyncio.sleep(2.2)   # t≈3.6: B's deadline (3.0) has passed ...
-        seen = wills_seen()
-        assert 'ka/will/silent' in seen, (
-            'a control-less window must time out and fire the Will'
+        async def collect_wills():
+            while not ({'ka/will/silent', 'ka/will/active'} <= seen.keys()):
+                now = asyncio.get_running_loop().time()
+                for packet in obs_w.pop_packets():
+                    if isinstance(packet, MQTTPublish):
+                        seen.setdefault(packet.topic, now)
+                await asyncio.sleep(0.02)
+
+        await asyncio.wait_for(collect_wills(), 5)
+
+        assert seen['ka/will/silent'] < seen['ka/will/active'], (
+            'a control-less window must time out and fire the Will first'
         )
-        assert 'ka/will/active' not in seen, (
-            'the mid-window PUBLISH must reset the timer (deadline -> ~4.4s)'
-        )
-        await asyncio.sleep(1.6)   # t≈5.2: A's reset deadline (4.4) has passed
-        assert 'ka/will/active' in wills_seen(), (
-            'the reset postpones the deadline — the timer still runs'
+        assert seen['ka/will/active'] - seen['ka/will/silent'] >= 0.4, (
+            'the mid-window PUBLISH must reset the timer (its deadline moves '
+            'past the un-reset one); the Will gap shrank to '
+            f'{seen["ka/will/active"] - seen["ka/will/silent"]:.2f}s'
         )
 
-        for task in tasks:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-
+        await cancel_all(*tasks)
 
 # ============================================================================
 # §3.1.2.10 — Server Keep Alive override (CONNACK property)
