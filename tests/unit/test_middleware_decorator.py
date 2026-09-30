@@ -121,18 +121,34 @@ async def test_decorated_inner_send_receives_native_for_json_response():
 
 @pytest.mark.asyncio
 async def test_undecorated_call_next_is_not_wrapped():
+    """Power-user contract: run through the product middleware chain, an
+    undecorated middleware is handed the chain's plain next link.  The
+    @as_middleware decorator swaps in a send-normalising wrapper instead —
+    the contrast is the point."""
+    from blackbull import BlackBull
+    from blackbull.testing import TestClient
+
     captured = []
 
     async def raw_mw(conn, receive, send, call_next):
         captured.append(call_next)
         await call_next(conn, receive, send)
 
-    async def handler(scope, receive, send):
-        pass
+    app = BlackBull()
+    app.use(raw_mw)
 
-    await raw_mw({}, None, None, call_next=handler)
+    @app.route(path='/')
+    async def handler():
+        return 'ok'
 
-    assert captured[0] is handler   # exact same object, no wrapper
+    with TestClient(app) as client:
+        assert client.get('/').status_code == 200
+
+    # The call_next the middleware received is the chain's next link — the
+    # app's dispatch — with no normalising wrapper in between.
+    assert captured, 'the middleware must have run'
+    assert captured[0].__self__ is app
+    assert captured[0].__func__ is BlackBull._dispatch
 
 
 # ---------------------------------------------------------------------------
