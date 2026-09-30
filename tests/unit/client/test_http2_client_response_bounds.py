@@ -331,7 +331,6 @@ class TestTheHeaderAggregate:
             await _resolved(future)
         assert _frames_of(c, FrameTypes.RST_STREAM)
 
-
 class TestTheFieldSectionBoundIsTheDecoders:
     """One field section is bounded by hpack, not by us — recorded so the
     dependency default is on the register as load-bearing rather than

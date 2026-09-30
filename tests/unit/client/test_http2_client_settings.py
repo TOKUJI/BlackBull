@@ -160,13 +160,15 @@ class TestSettingsCanExpressBothIdentifiers:
         """What ``settings()`` emits, read back by the server's own parser."""
         return FrameFactory().load(FrameFactory().settings(**kwargs).save())
 
-    def test_enable_push_round_trips(self):
-        parsed = self._roundtrip(enable_push=0)
-        assert getattr(parsed, 'enable_push', None) == 0
-
-    def test_max_header_list_size_round_trips(self):
-        parsed = self._roundtrip(max_header_list_size=65536)
-        assert getattr(parsed, 'max_header_list_size', None) == 65536
+    @pytest.mark.parametrize('kwargs,attr,expected', [
+        pytest.param({'enable_push': 0}, 'enable_push', 0,
+                     id='enable-push-round-trip'),
+        pytest.param({'max_header_list_size': 65536}, 'max_header_list_size', 65536,
+                     id='max-header-list-size-round-trip'),
+    ])
+    def test_enable_push_round_trips(self, kwargs, attr, expected):
+        parsed = self._roundtrip(**kwargs)
+        assert getattr(parsed, attr, None) == expected
 
     def test_both_at_once_round_trip(self):
         parsed = self._roundtrip(enable_push=0, max_header_list_size=4096)

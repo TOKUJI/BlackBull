@@ -114,11 +114,16 @@ async def test_malformed_headers_reset_only_its_stream_before_raw_routing():
 
 
 @pytest.mark.asyncio
-async def test_priority_headers_short_priority_field_is_connection_error():
+@pytest.mark.parametrize('frame', [
+    pytest.param(_wire(FrameTypes.HEADERS, b'1234', stream_id=1, flags=0x24),
+                 id='priority-field-short'),
+    pytest.param(_wire(FrameTypes.SETTINGS, b'123456', stream_id=0, flags=1),
+                 id='nonempty-settings-ack'),
+])
+async def test_priority_headers_short_priority_field_is_connection_error(frame):
     client, writer = _client()
     with pytest.raises(_ConnectionFailed):
-        await client._load(_wire(FrameTypes.HEADERS, b'1234', stream_id=1,
-                                 flags=0x24))
+        await client._load(frame)
     assert _written_error(writer) == (
         FrameTypes.GOAWAY, 0, 0, int(ErrorCodes.FRAME_SIZE_ERROR))
 
@@ -268,16 +273,6 @@ async def test_non_ack_settings_multiple_of_six_is_applied_and_acknowledged():
     assert writer.frames[-1][3:4] == FrameTypes.SETTINGS.value
     assert writer.frames[-1][4] == 1
     assert len(writer.frames[-1]) == 9
-
-
-@pytest.mark.asyncio
-async def test_nonempty_settings_ack_is_connection_frame_size_error():
-    client, writer = _client()
-    with pytest.raises(_ConnectionFailed):
-        await client._load(_wire(FrameTypes.SETTINGS, b'123456',
-                                 stream_id=0, flags=1))
-    assert _written_error(writer) == (
-        FrameTypes.GOAWAY, 0, 0, int(ErrorCodes.FRAME_SIZE_ERROR))
 
 
 @pytest.mark.asyncio
