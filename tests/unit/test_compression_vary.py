@@ -141,10 +141,15 @@ class TestVaryOnCompressibleButUncompressedPaths:
         assert _has_vary_accept_encoding(res['headers'])
 
     @pytest.mark.asyncio
-    async def test_uncompressible_content_type_does_not_vary(self):
-        # An already-compressed Content-Type must NOT gain a spurious Vary (2a).
+    @pytest.mark.parametrize('ctype,accept', [
+        pytest.param(b'image/png', b'gzip', id='uncompressible-type'),
+        pytest.param(b'video/mp4', b'', id='no-codec-path'),
+    ])
+    async def test_uncompressible_content_type_does_not_vary(self, ctype, accept):
+        # An already-compressed Content-Type must NOT gain a spurious Vary (2a);
+        # branch 1 with an uncompressible type and no codec → no Vary either.
         mw = Compression()
-        res = await _run(mw, _BODY, [(b'content-type', b'image/png')], accept=b'gzip')
+        res = await _run(mw, _BODY, [(b'content-type', ctype)], accept=accept)
         assert not _has_vary_accept_encoding(res['headers'])
 
     @pytest.mark.asyncio
@@ -158,13 +163,6 @@ class TestVaryOnCompressibleButUncompressedPaths:
         ], accept=b'gzip')
         assert not _has_vary_accept_encoding(res['headers'])
 
-    @pytest.mark.asyncio
-    async def test_no_codec_path_leaves_uncompressible_alone(self):
-        # Branch 1 + uncompressible type → no compression, no Vary.
-        mw = Compression()
-        res = await _run(mw, _BODY, [(b'content-type', b'video/mp4')], accept=b'')
-        assert not _has_vary_accept_encoding(res['headers'])
-
 
 class TestMergeVaryHelper:
     def test_appends_when_absent(self):
@@ -172,20 +170,18 @@ class TestMergeVaryHelper:
         _merge_vary(hdrs)
         assert (b'vary', b'Accept-Encoding') in hdrs
 
-    def test_folds_into_existing(self):
-        hdrs = [(b'vary', b'Accept-Language')]
+    @pytest.mark.parametrize('hdrs_in,hdrs_out', [
+        pytest.param([(b'vary', b'Accept-Language')],
+                     [(b'vary', b'Accept-Language, Accept-Encoding')], id='folds-into-existing'),
+        pytest.param([(b'vary', b'Accept-Encoding')],
+                     [(b'vary', b'Accept-Encoding')], id='no-dup'),
+        pytest.param([(b'vary', b'*')],
+                     [(b'vary', b'*')], id='star-untouched'),
+    ])
+    def test_folds_into_existing(self, hdrs_in, hdrs_out):
+        hdrs = list(hdrs_in)
         _merge_vary(hdrs)
-        assert hdrs == [(b'vary', b'Accept-Language, Accept-Encoding')]
-
-    def test_no_dup(self):
-        hdrs = [(b'vary', b'Accept-Encoding')]
-        _merge_vary(hdrs)
-        assert hdrs == [(b'vary', b'Accept-Encoding')]
-
-    def test_star_untouched(self):
-        hdrs = [(b'vary', b'*')]
-        _merge_vary(hdrs)
-        assert hdrs == [(b'vary', b'*')]
+        assert hdrs == hdrs_out
 
 
 class TestNoCodecPathForwardsBodiesUntouched:
