@@ -38,6 +38,21 @@ class DeflateParams:
     client_max_window_bits:     int = 15
 
 
+def negotiate_offer(headers) -> tuple[DeflateParams | None, bytes | None]:
+    """Apply the settings gate and negotiate the RFC 7692 offer in *headers*.
+
+    The one way both handshakes (HTTP/1.1 and the RFC 8441 path) decide on
+    permessage-deflate.  Returns what `negotiate` returns: ``(params,
+    response_value)``, both ``None`` when nothing was offered, the offer was
+    declined, or ``ws_permessage_deflate`` is off.
+    """
+    from ..env import get_settings  # noqa: PLC0415
+    if not get_settings().ws_permessage_deflate:
+        return None, None
+    offer = headers.get(b'sec-websocket-extensions', b'')
+    return negotiate(offer or None)
+
+
 def negotiate(offer_header: bytes | None) -> tuple[DeflateParams | None, bytes | None]:
     """Decide whether to accept permessage-deflate based on the client's offer.
 

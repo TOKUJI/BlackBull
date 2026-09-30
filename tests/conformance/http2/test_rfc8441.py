@@ -129,6 +129,39 @@ def _make_ws_data_frame(ws_frame_bytes: bytes, stream_id: int = 1,
     return _make_raw_frame(FrameTypes.DATA, flags, stream_id, ws_frame_bytes)
 
 
+def _response_headers(writes) -> list[tuple[str, str]]:
+    """Every (name, value) pair from the HEADERS frames written to the wire.
+
+    Strict on purpose: a decode failure must fail the test, never hide the
+    headers the test is about to assert on.
+    """
+    from hpack import Decoder
+    all_bytes = b''.join(writes)
+    out: list[tuple[str, str]] = []
+    decoder = Decoder()
+    i = 0
+    while i + 9 <= len(all_bytes):
+        length = int.from_bytes(all_bytes[i:i+3], 'big')
+        if all_bytes[i+3] == 0x01 and length > 0:  # HEADERS
+            for k, v in decoder.decode(all_bytes[i+9:i+9+length]):
+                out.append((k.decode() if isinstance(k, bytes) else k,
+                            v.decode() if isinstance(v, bytes) else v))
+        i += 9 + length
+    return out
+
+
+def _echoed_ws_frame(writes) -> bytes:
+    """The payload of the first DATA frame sent back to the client."""
+    all_bytes = b''.join(writes)
+    i = 0
+    while i + 9 <= len(all_bytes):
+        length = int.from_bytes(all_bytes[i:i+3], 'big')
+        if all_bytes[i+3] == 0x00 and length > 0 and all_bytes[i+4] & 0x01 == 0:
+            return all_bytes[i+9:i+9+length]
+        i += 9 + length
+    raise AssertionError('no DATA frame echoed')
+
+
 def _make_h2_actor(app=None):
     if app is None:
         app = AsyncMock()
@@ -322,28 +355,8 @@ class TestExtendedConnectHandshake:
         handler.receive = AsyncMock(side_effect=frames)
         await handler.run()
 
-        # Find the HEADERS frame written to the wire
-        all_bytes = b''.join(writes)
-        # Scan for a HEADERS frame (type=0x01) containing :status 200
-        found_200 = False
-        decoder = Decoder()
-        i = 0
-        while i + 9 <= len(all_bytes):
-            length = int.from_bytes(all_bytes[i:i+3], 'big')
-            frame_type = all_bytes[i+3]
-            payload = all_bytes[i+9:i+9+length]
-            if frame_type == 0x01 and length > 0:  # HEADERS
-                try:
-                    hdrs = decoder.decode(payload)
-                    for k, v in hdrs:
-                        k = k.decode() if isinstance(k, bytes) else k
-                        v = v.decode() if isinstance(v, bytes) else v
-                        if k == ':status' and v == '200':
-                            found_200 = True
-                except Exception:
-                    pass
-            i += 9 + length
-        assert found_200, 'Expected :status 200 HEADERS frame on websocket.accept'
+        assert (':status', '200') in _response_headers(writes), \
+            'Expected :status 200 HEADERS frame on websocket.accept'
 
     async def test_subprotocol_included_in_200_headers(self):
         """websocket.accept(subprotocol='chat') must include sec-websocket-protocol
@@ -366,26 +379,8 @@ class TestExtendedConnectHandshake:
         handler.receive = AsyncMock(side_effect=frames)
         await handler.run()
 
-        all_bytes = b''.join(writes)
-        found_subprotocol = False
-        decoder = Decoder()
-        i = 0
-        while i + 9 <= len(all_bytes):
-            length = int.from_bytes(all_bytes[i:i+3], 'big')
-            frame_type = all_bytes[i+3]
-            payload = all_bytes[i+9:i+9+length]
-            if frame_type == 0x01 and length > 0:
-                try:
-                    hdrs = decoder.decode(payload)
-                    for k, v in hdrs:
-                        k = k.decode() if isinstance(k, bytes) else k
-                        v = v.decode() if isinstance(v, bytes) else v
-                        if k == 'sec-websocket-protocol' and v == 'chat':
-                            found_subprotocol = True
-                except Exception:
-                    pass
-            i += 9 + length
-        assert found_subprotocol, (
+        assert (':status', '200') in _response_headers(writes)
+        assert ('sec-websocket-protocol', 'chat') in _response_headers(writes), (
             'Expected sec-websocket-protocol: chat in 200 response headers')
 
 
@@ -397,43 +392,19 @@ class TestExtendedConnectHandshake:
 class TestPermessageDeflateNegotiation:
     """RFC 7692 negotiation over the RFC 8441 handshake (BLA-362)."""
 
-    @staticmethod
-    def _response_headers(writes) -> list[tuple[str, str]]:
-        from hpack import Decoder
-        all_bytes = b''.join(writes)
-        out = []
-        decoder = Decoder()
-        i = 0
-        while i + 9 <= len(all_bytes):
-            length = int.from_bytes(all_bytes[i:i+3], 'big')
-            if all_bytes[i+3] == 0x01 and length > 0:
-                try:
-                    for k, v in decoder.decode(all_bytes[i+9:i+9+length]):
-                        out.append((k.decode() if isinstance(k, bytes) else k,
-                                    v.decode() if isinstance(v, bytes) else v))
-                except Exception:
-                    pass
-            i += 9 + length
-        return out
-
-    @staticmethod
-    def _echoed_ws_frame(writes) -> bytes:
-        all_bytes = b''.join(writes)
-        i = 0
-        while i + 9 <= len(all_bytes):
-            length = int.from_bytes(all_bytes[i:i+3], 'big')
-            if all_bytes[i+3] == 0x00 and length > 0 and all_bytes[i+4] & 0x01 == 0:
-                return all_bytes[i+9:i+9+length]
-            i += 9 + length
-        raise AssertionError('no DATA frame echoed')
-
-    async def test_an_accepted_offer_is_echoed_and_compressed_round_trip_works(self):
-        """An offered permessage-deflate the runtime serves is answered in
-        the 200 and the round trip carries RFC 7692 frames."""
+    @pytest.mark.parametrize('extensions, expect_extension, compressed', [
+        ('permessage-deflate', True, True),
+        ('permessage-deflate; server_max_window_bits=8', False, False),
+        ('', False, False),
+    ])
+    async def test_the_200_answers_the_offer_and_the_round_trip_works(
+            self, extensions, expect_extension, compressed):
+        """The 200 answers the offer exactly as H1's 101 would — an
+        accepted offer echoes the extension line and the round trip
+        carries RFC 7692 frames; a declined or absent offer answers
+        plain and the plain round trip keeps working."""
         from blackbull.server.permessage_deflate import (
             InboundDecompressor, OutboundCompressor, negotiate)
-        params, _ = negotiate(b'permessage-deflate')
-        assert params is not None, 'this runtime must serve the bare offer'
         received = {}
 
         async def app(conn, receive, send):
@@ -444,100 +415,48 @@ class TestPermessageDeflateNegotiation:
             await send({'type': 'websocket.send', 'text': event['text']})
             await receive()
 
-        compressed = OutboundCompressor(
-            wbits=params.client_max_window_bits,
-            reset_per_message=params.client_no_context_takeover,
-        ).compress(b'hello')
-        ws_bytes = encode_frame(compressed, opcode=WSOpcode.TEXT,
-                                mask=True, rsv1=True)
+        params = None
+        if compressed:
+            params, _ = negotiate(b'permessage-deflate')
+            assert params is not None, 'this runtime must serve the bare offer'
+            payload = OutboundCompressor(
+                wbits=params.client_max_window_bits,
+                reset_per_message=params.client_no_context_takeover,
+            ).compress(b'hello')
+            ws_bytes = encode_frame(payload, opcode=WSOpcode.TEXT,
+                                    mask=True, rsv1=True)
+        else:
+            ws_bytes = encode_frame(b'hello', opcode=WSOpcode.TEXT, mask=True)
+
         handler, _, writer = _make_h2_actor(app)
         writes = []
         writer.write = MagicMock(side_effect=lambda b: writes.append(b))
         writer.drain = AsyncMock()
         handler.receive = AsyncMock(side_effect=[
             _client_settings(),
-            _make_extended_connect_frame(extensions='permessage-deflate'),
+            _make_extended_connect_frame(extensions=extensions),
             _make_ws_data_frame(ws_bytes, stream_id=1),
             None,
         ])
         await handler.run()
 
-        headers = self._response_headers(writes)
+        headers = _response_headers(writes)
+        assert (':status', '200') in headers, headers
         assert any(k == 'sec-websocket-extensions'
                    and v.startswith('permessage-deflate')
-                   for k, v in headers), headers
+                   for k, v in headers) == expect_extension, headers
         assert received.get('text') == 'hello'
-        echoed = self._echoed_ws_frame(writes)
-        assert echoed[0] & 0x40, 'server echo must be RFC 7692 compressed'
-        out = InboundDecompressor(
-            wbits=params.server_max_window_bits,
-            reset_per_message=params.server_no_context_takeover,
-        ).decompress(echoed[2:])
-        assert out == b'hello'
-
-    async def test_an_unservable_offer_declines_to_plain(self):
-        """An offer the runtime cannot serve earns no extension in the
-        200 and the plain round trip keeps working."""
-        received = {}
-
-        async def app(conn, receive, send):
-            await receive()
-            await send({'type': 'websocket.accept'})
-            event = await receive()
-            received.update(event)
-            await send({'type': 'websocket.send', 'text': event['text']})
-            await receive()
-
-        ws_bytes = encode_frame(b'hello', opcode=WSOpcode.TEXT, mask=True)
-        handler, _, writer = _make_h2_actor(app)
-        writes = []
-        writer.write = MagicMock(side_effect=lambda b: writes.append(b))
-        writer.drain = AsyncMock()
-        handler.receive = AsyncMock(side_effect=[
-            _client_settings(),
-            _make_extended_connect_frame(
-                extensions='permessage-deflate; server_max_window_bits=8'),
-            _make_ws_data_frame(ws_bytes, stream_id=1),
-            None,
-        ])
-        await handler.run()
-
-        headers = self._response_headers(writes)
-        assert not any(k == 'sec-websocket-extensions' for k, v in headers), headers
-        assert received.get('text') == 'hello'
-        echoed = self._echoed_ws_frame(writes)
-        assert not echoed[0] & 0x40, 'declined offer must echo plain frames'
-        assert echoed[2:] == b'hello'
-
-    async def test_no_offer_keeps_the_handshake_plain(self):
-        """No offer: no extension header and an untouched round trip."""
-        received = {}
-
-        async def app(conn, receive, send):
-            await receive()
-            await send({'type': 'websocket.accept'})
-            event = await receive()
-            received.update(event)
-            await send({'type': 'websocket.send', 'text': event['text']})
-            await receive()
-
-        ws_bytes = encode_frame(b'hello', opcode=WSOpcode.TEXT, mask=True)
-        handler, _, writer = _make_h2_actor(app)
-        writes = []
-        writer.write = MagicMock(side_effect=lambda b: writes.append(b))
-        writer.drain = AsyncMock()
-        handler.receive = AsyncMock(side_effect=[
-            _client_settings(),
-            _make_extended_connect_frame(),
-            _make_ws_data_frame(ws_bytes, stream_id=1),
-            None,
-        ])
-        await handler.run()
-
-        headers = self._response_headers(writes)
-        assert not any(k == 'sec-websocket-extensions' for k, v in headers), headers
-        assert received.get('text') == 'hello'
-        assert self._echoed_ws_frame(writes)[2:] == b'hello'
+        echoed = _echoed_ws_frame(writes)
+        if compressed:
+            assert echoed[0] & 0x40, 'server echo must be RFC 7692 compressed'
+            out = InboundDecompressor(
+                wbits=params.server_max_window_bits,
+                reset_per_message=params.server_no_context_takeover,
+            ).decompress(echoed[2:])
+            assert out == b'hello'
+        else:
+            assert not echoed[0] & 0x40, 'a declined offer must echo plain'
+            assert echoed[2:] == b'hello'
 
 
 @pytest.mark.asyncio
@@ -1166,26 +1085,8 @@ class TestAcceptHeadersOnThe200:
         handler.receive = AsyncMock(side_effect=frames)
         asyncio.run(handler.run())
 
-        decoder = Decoder()
-        all_bytes = b''.join(writes)
-        found = None
-        i = 0
-        while i + 9 <= len(all_bytes):
-            length = int.from_bytes(all_bytes[i:i + 3], 'big')
-            frame_type = all_bytes[i + 3]
-            payload = all_bytes[i + 9:i + 9 + length]
-            if frame_type == 0x01 and length > 0:
-                try:
-                    hdrs = decoder.decode(payload)
-                except Exception:
-                    hdrs = []
-                norm = [(k.decode() if isinstance(k, bytes) else k,
-                         v.decode() if isinstance(v, bytes) else v)
-                        for k, v in hdrs]
-                if (':status', '200') in norm:
-                    found = norm
-            i += 9 + length
-        return found
+        norm = _response_headers(writes)
+        return norm if (':status', '200') in norm else None
 
     def test_accept_headers_reach_the_200_in_order(self):
         async def app(conn, receive, send):

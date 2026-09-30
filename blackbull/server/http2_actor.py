@@ -1616,13 +1616,8 @@ class HTTP2Actor(Actor):
         # RFC 7692 permessage-deflate negotiation, shared with the HTTP/1.1
         # handshake: the offer decides, the answer rides the 200, and the
         # parameters reach WebSocketActor through ``conn._ws``.
-        from ..env import get_settings as _get_settings  # noqa: PLC0415
-        from .permessage_deflate import negotiate as _negotiate_deflate  # noqa: PLC0415
-        deflate_params = None
-        deflate_response = None
-        if _get_settings().ws_permessage_deflate:
-            offer = conn.headers.get(b'sec-websocket-extensions', b'')
-            deflate_params, deflate_response = _negotiate_deflate(offer or None)
+        from .permessage_deflate import negotiate_offer as _negotiate_deflate  # noqa: PLC0415
+        deflate_params, deflate_response = _negotiate_deflate(conn.headers)
 
         async def _ws_send_200(subprotocol=None, app_headers=None):
             headers = []
