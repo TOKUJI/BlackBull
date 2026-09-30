@@ -20,6 +20,8 @@ from .sender import AbstractWriter, SenderFactory
 
 logger = logging.getLogger(__name__)
 
+_DISCONNECT_HOOK_TIMEOUT = 5.0
+
 
 # The handshake owns these response fields; an application accept header with
 # one of these names would rewrite the protocol's own answer (BLA-378).
@@ -162,13 +164,12 @@ class WebSocketActor(Actor):
         except Exception as exc:
             await self._aggregator.on_error(self._conn, exc)
         finally:
-            # Release order (BLA-363): the disconnect event (once, with the
-            # code the peer saw), then the reader task — a full queue parks
-            # it in queue.put, where EOF never wakes it — then the transport.
-            # Each step releases the next even when it raises.
+            # Cancel the reader before closing: a full queue can leave it
+            # blocked in queue.put(), which EOF cannot wake.
             try:
                 await self._aggregator.on_websocket_disconnected(
-                    self._conn, code=self._disconnect_code)
+                    self._conn, code=self._disconnect_code,
+                    timeout=_DISCONNECT_HOOK_TIMEOUT)
             finally:
                 try:
                     await self._ws_receive.shutdown()

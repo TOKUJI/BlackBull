@@ -167,3 +167,68 @@ async def test_on_handler_exception_does_not_propagate():
     # Must not raise
     await app._dispatcher.emit(Event('custom_event'))
     await asyncio.wait_for(app._dispatcher.aclose(), timeout=1.0)
+@pytest.mark.asyncio
+async def test_the_dispatch_budget_does_not_starve_later_handlers():
+    from blackbull.event import EventDispatcher
+    dispatcher = EventDispatcher()
+    reached = []
+    async def hang(event):
+        await asyncio.Event().wait()
+    async def second(event):
+        reached.append(event.name)
+    dispatcher.on('e', hang, blocking=True)
+    dispatcher.on('e', second, blocking=True)
+    dispatcher.on('e', second, blocking=True)
+    await asyncio.wait_for(
+        dispatcher.emit(Event('e', {}), timeout=0.05), 1.0)
+    assert reached == ['e', 'e']
+
+
+@pytest.mark.asyncio
+async def test_the_budget_names_the_handlers_it_stops(caplog):
+    import logging
+    from blackbull.event import EventDispatcher
+    dispatcher = EventDispatcher()
+    async def hang(event):
+        await asyncio.Event().wait()
+    dispatcher.on('e', hang, blocking=True)
+    with caplog.at_level(logging.WARNING, logger='blackbull.event'):
+        await asyncio.wait_for(
+            dispatcher.emit(Event('e', {}), timeout=0.05), 1.0)
+    assert any('hang' in r.message for r in caplog.records), caplog.text
+
+
+@pytest.mark.asyncio
+async def test_detached_observers_are_scheduled_even_after_the_budget_spends():
+    from blackbull.event import EventDispatcher
+    dispatcher = EventDispatcher()
+    seen = []
+    async def hang(event):
+        await asyncio.Event().wait()
+    async def detached(event):
+        seen.append(event.name)
+    dispatcher.on('e', hang, blocking=True)
+    dispatcher.on('e', detached)
+    await asyncio.wait_for(
+        dispatcher.emit(Event('e', {}), timeout=0.05), 1.0)
+    await dispatcher.drain(timeout=1.0)
+    assert seen == ['e']
+
+
+@pytest.mark.asyncio
+async def test_an_interceptor_exception_still_propagates_under_the_budget():
+    from blackbull.event import EventDispatcher
+    dispatcher = EventDispatcher()
+    async def boom(event):
+        raise ValueError('nope')
+    async def second(event):
+        raise AssertionError('must be aborted by the first interceptor')
+    dispatcher.intercept('e', boom)
+    dispatcher.intercept('e', second)
+    try:
+        await asyncio.wait_for(
+            dispatcher.emit(Event('e', {}), timeout=0.5), 1.0)
+    except ValueError as exc:
+        assert str(exc) == 'nope'
+    else:
+        raise AssertionError('the interceptor exception must propagate')
