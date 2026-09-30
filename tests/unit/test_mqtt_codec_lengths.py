@@ -331,3 +331,12 @@ def test_two_legal_packets_decode_one_at_a_time():
     framer = PacketFramer()
     framer.feed(first + second)
     assert [type(m).__name__ for m in framer] == ['MQTTPuback', 'MQTTPingreq']
+
+
+def test_non_minimal_variable_byte_integer_encodings_are_accepted():
+    """§1.5.5 requires the minimum number of bytes; this runtime does not
+    enforce it (BLA-352 residual).  A value whose encoding carries a
+    redundant continuation octet decodes successfully — this pins what
+    the code does today, so the tolerance cannot change silently."""
+    assert decode_variable_byte_integer(b'\x80\x00') == (0, 2)     # 0 in 2 octets
+    assert decode_variable_byte_integer(b'\xac\x82\x00') == (300, 3)  # 300 in 3
