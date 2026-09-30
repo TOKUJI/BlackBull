@@ -343,30 +343,21 @@ class TestScopePopulation:
         assert captured['server'] == ['example.com', 8080]
 
     @pytest.mark.asyncio
-    async def test_scheme_is_http_for_plain_connection(self):
+    @pytest.mark.parametrize('ssl,expected', [
+        pytest.param(False, 'http', id='plain-connection'),
+        pytest.param(True, 'https', id='tls-connection'),
+    ])
+    async def test_scheme_is_http_for_plain_connection(self, ssl, expected):
         raw = _http_request()
         captured = {}
 
         async def capture_app(scope, receive, send):
             captured.update(scope.as_scope() if hasattr(scope, 'as_scope') else scope)
 
-        actor, _writer = _make_actor(raw, capture_app, ssl=False)
+        actor, _writer = _make_actor(raw, capture_app, ssl=ssl)
         await actor.run()
 
-        assert captured['scheme'] == 'http'
-
-    @pytest.mark.asyncio
-    async def test_scheme_is_https_for_tls_connection(self):
-        raw = _http_request()
-        captured = {}
-
-        async def capture_app(scope, receive, send):
-            captured.update(scope.as_scope() if hasattr(scope, 'as_scope') else scope)
-
-        actor, _writer = _make_actor(raw, capture_app, ssl=True)
-        await actor.run()
-
-        assert captured['scheme'] == 'https'
+        assert captured['scheme'] == expected
 
     @pytest.mark.asyncio
     async def test_scheme_is_wss_for_tls_websocket(self):
@@ -442,17 +433,17 @@ class TestFillConnectionInfo:
         base.update(over)
         return Connection(**base)
 
-    def test_peername_sets_client(self):
-        actor = self._make_actor(peername=('10.0.0.1', 9999))
+    @pytest.mark.parametrize('actor_over,field,expected', [
+        pytest.param({'peername': ('10.0.0.1', 9999)}, 'client', ('10.0.0.1', 9999),
+                     id='peername-sets-client'),
+        pytest.param({'sockname': ('0.0.0.0', 7777)}, 'server', ('0.0.0.0', 7777),
+                     id='sockname-sets-server'),
+    ])
+    def test_peername_sets_client(self, actor_over, field, expected):
+        actor = self._make_actor(**actor_over)
         conn = self._conn(server=None)
         actor._fill_connection_info(conn)
-        assert conn.client == ('10.0.0.1', 9999)
-
-    def test_sockname_sets_server_when_no_host(self):
-        actor = self._make_actor(sockname=('0.0.0.0', 7777))
-        conn = self._conn(server=None)
-        actor._fill_connection_info(conn)
-        assert conn.server == ('0.0.0.0', 7777)
+        assert getattr(conn, field) == expected
 
     def test_host_header_not_overwritten_by_sockname(self):
         actor = self._make_actor(sockname=('0.0.0.0', 7777))
@@ -460,17 +451,15 @@ class TestFillConnectionInfo:
         actor._fill_connection_info(conn)
         assert conn.server == ('myhost', 80)
 
-    def test_ssl_true_sets_https(self):
-        actor = self._make_actor(ssl=True)
+    @pytest.mark.parametrize('ssl,expected', [
+        pytest.param(True, 'https', id='ssl-true-sets-https'),
+        pytest.param(False, 'http', id='ssl-false-leaves-scheme'),
+    ])
+    def test_ssl_true_sets_https(self, ssl, expected):
+        actor = self._make_actor(ssl=ssl)
         conn = self._conn(scheme='http', server=None)
         actor._fill_connection_info(conn)
-        assert conn.scheme == 'https'
-
-    def test_ssl_false_leaves_scheme(self):
-        actor = self._make_actor(ssl=False)
-        conn = self._conn(scheme='http', server=None)
-        actor._fill_connection_info(conn)
-        assert conn.scheme == 'http'
+        assert conn.scheme == expected
 
     def test_ssl_true_websocket_sets_wss(self):
         actor = self._make_actor(ssl=True)

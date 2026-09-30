@@ -125,18 +125,15 @@ def _actor(reader, writer, *, registry=None, bound=None, alpn=None, aggregator=N
 # Protocol selection (must be preserved across the refactor)
 # ---------------------------------------------------------------------------
 
-async def test_http1_cleartext_selects_http1() -> None:
+@pytest.mark.parametrize('reader_input,expected', [
+    pytest.param(_HTTP1_REQUEST, ['http1'], id='http1-cleartext'),
+    pytest.param(_HTTP2_PREFACE, ['http2'], id='http2-cleartext-preface'),
+])
+async def test_http1_cleartext_selects_http1(reader_input, expected) -> None:
     reg, calls = ProtocolRegistry(), []
     _spy_serves(reg, calls)
-    await _actor(_BufReader(_HTTP1_REQUEST), _Writer(), registry=reg).run()
-    assert calls == ['http1']
-
-
-async def test_http2_cleartext_preface_selects_http2() -> None:
-    reg, calls = ProtocolRegistry(), []
-    _spy_serves(reg, calls)
-    await _actor(_BufReader(_HTTP2_PREFACE), _Writer(), registry=reg).run()
-    assert calls == ['http2']
+    await _actor(_BufReader(reader_input), _Writer(), registry=reg).run()
+    assert calls == expected
 
 
 async def test_http2_alpn_selects_http2() -> None:

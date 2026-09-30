@@ -189,9 +189,9 @@ def _with_extra_line(line: str) -> list[str]:
     return _second_passes(ast.parse('\n'.join(body)))
 
 
-def test_the_walker_sees_the_decode_when_it_is_put_back():
-    assert _with_extra_line('value.decode("ascii")') != []
-
-
-def test_the_walker_sees_a_second_pattern_when_it_is_added():
-    assert _with_extra_line('_ASCII_RE.search(value)') != []
+@pytest.mark.parametrize('line', [
+    pytest.param('value.decode("ascii")', id='decode-put-back'),
+    pytest.param('_ASCII_RE.search(value)', id='second-pattern-added'),
+])
+def test_the_walker_sees_the_decode_when_it_is_put_back(line):
+    assert _with_extra_line(line) != []
