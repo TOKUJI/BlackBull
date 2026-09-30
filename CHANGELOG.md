@@ -15,9 +15,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   refusal stays its own: `501` for a coding the server does not implement,
   `400` for a length no reading can determine, `ProtocolError` for a
   request the client would have to rewrite.  At the server a malformed or
-  absurd list (`gzip;bad`, a field of commas) and `chunked` not the final
-  coding behind a parameter now answer `400`, where the broken split had
-  graded them `501`.
+  absurd list (`gzip;bad`, a field of commas) answers `400`, and a
+  parametered `chunked` now counts as `chunked` — so `chunked; ext=1,
+  gzip` is a non-final `chunked` and `chunked; ext=1, chunked` a doubled
+  one, both `400` — where the broken split graded each of these `501`.
 - **A lifespan task that dies after its startup ack is reported at once**,
   not only at shutdown.  Serving continues; the shutdown failure still
   surfaces exactly as before.

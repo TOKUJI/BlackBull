@@ -326,7 +326,10 @@ def _validate_message_framing(headers: 'Headers') -> int:
         elif codings[-1] != b'chunked' or codings.count(b'chunked') > 1:
             # chunked present but not the sole final coding (``chunked, gzip``,
             # ``chunked, chunked``) ⇒ the message length is undeterminable, and
-            # a server MUST NOT process it (SMUG-TE-NOT-FINAL-CHUNKED).
+            # a server MUST NOT process it (SMUG-TE-NOT-FINAL-CHUNKED).  A
+            # parametered ``chunked`` counts as ``chunked`` — the split keeps
+            # the parameter — so ``chunked; ext=1, chunked`` lands here as a
+            # doubled chunked and ``chunked; ext=1, gzip`` as a non-final one.
             raise BadRequestError(
                 f'Transfer-Encoding with chunked not the sole final coding: '
                 f'{codings!r}')

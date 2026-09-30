@@ -25,6 +25,13 @@ class TestDecomposition:
             [(b'transfer-encoding', b'chunked; ext=1')]) == [
                 (b'chunked', ((b'ext', b'1'),))]
 
+    def test_parameter_names_and_values_stay_as_written(self):
+        # Only the coding token is lowered; a parameter is kept verbatim —
+        # quotes, case and all.
+        assert split_transfer_codings(
+            [(b'transfer-encoding', b'GZip;P="a,B"')]) == [
+                (b'gzip', ((b'P', b'"a,B"'),))]
+
     def test_a_quoted_parameter_value_keeps_its_commas_and_quotes(self):
         # The comma inside the quoted string is not a member separator; the
         # value is kept as written, nothing decoded.
@@ -69,3 +76,12 @@ class TestRefusals:
             [(b'transfer-encoding', b',' * 15)])) == 16
         with pytest.raises(ValueError):
             split_transfer_codings([(b'transfer-encoding', b',' * 16)])
+
+    def test_the_bound_counts_empty_members_across_fields(self):
+        # The reading is of the whole field section: 8 + 9 empty members are
+        # 17, over the bound whatever fields carried them.
+        with pytest.raises(ValueError):
+            split_transfer_codings([
+                (b'transfer-encoding', b',' * 7),
+                (b'transfer-encoding', b',' * 8),
+            ])
