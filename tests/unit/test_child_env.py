@@ -51,3 +51,14 @@ def test_the_probe_uses_the_spawn_cwd(tmp_path, child_env):
         env=env, cwd=clean, capture_output=True, text=True, timeout=30)
     resolved = pathlib.Path((probe.stdout or '').strip()).resolve()
     assert resolved.is_relative_to(REPO_ROOT)
+
+
+def test_a_path_override_cannot_discard_the_shim(child_env):
+    """The pins survive a caller overriding PATH or the tree root."""
+    env = child_env({'PATH': '/usr/bin:/bin',
+                     'BB_TEST_TREE_ROOT': '/somewhere/else'})
+    found = shutil.which('blackbull', path=env['PATH'])
+    assert found, 'the shim must survive a PATH override'
+    assert str(pathlib.Path(found).parent) not in ('/usr/bin', '/bin'), (
+        f'{found} came from the overridden PATH')
+    assert env['BB_TEST_TREE_ROOT'] == str(REPO_ROOT)

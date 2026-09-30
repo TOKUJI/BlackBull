@@ -120,12 +120,13 @@ def child_env(tmp_path_factory):
     """Environment for a test's child process (BLA-448).
 
     Every child of the test must import and run blackbull from the tree
-    under test.  ``make`` pins ``PYTHONPATH`` ahead of the caller's
-    entries, provides the ``blackbull`` executable itself (a harness shim
-    over this tree, never an installed script), and probes the import the
-    child will see from the child's own cwd — failing if the claim would
-    not hold.  ``BB_TEST_TREE_ROOT`` lets a child assert the same in its
-    own process.
+    under test.  ``make`` applies ``extra``, then pins ``PYTHONPATH``
+    ahead of the caller's entries, provides the ``blackbull`` executable
+    itself (a harness shim over this tree, never an installed script —
+    its directory leads the child's ``sys.path``, where an extensionless
+    file cannot shadow the package), and probes the import the child will
+    see from the child's own cwd — failing if the claim would not hold.
+    ``BB_TEST_TREE_ROOT`` lets a child assert the same in its own process.
     """
 
     bin_dir = tmp_path_factory.mktemp('bla-448-bin')
@@ -134,6 +135,8 @@ def child_env(tmp_path_factory):
         env = os.environ.copy()
         want = (extra or {}).get('PYTHONPATH', '').split(os.pathsep)
         have = env.get('PYTHONPATH', '').split(os.pathsep)
+        env.update({k: v for k, v in (extra or {}).items()
+                    if k != 'PYTHONPATH'})
         env['PYTHONPATH'] = os.pathsep.join(
             [str(REPO_ROOT)] + [p for p in want + have if p])
         env['BB_TEST_TREE_ROOT'] = str(REPO_ROOT)
@@ -155,8 +158,6 @@ def child_env(tmp_path_factory):
         resolved = pathlib.Path(found)
         assert resolved.resolve().is_relative_to(REPO_ROOT), (
             f'child would import blackbull from {resolved}, not this checkout')
-        env.update({k: v for k, v in (extra or {}).items()
-                    if k != 'PYTHONPATH'})
         return env
 
     return make
