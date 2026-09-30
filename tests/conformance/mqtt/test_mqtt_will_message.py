@@ -24,10 +24,14 @@ Key behaviours:
 import asyncio
 import pytest
 
+from tests.conformance.mqtt._harness import (
+    run_until_idle, wait_idle, wait_for_packets, cancel_all,
+)
+
 from blackbull.mqtt.messages import (
     ReasonCode,
     MQTTConnect, MQTTConnack, MQTTDisconnect,
-    MQTTPublish,
+    MQTTPublish, MQTTSubscribe,
     encode_packet, decode_packet,
 )
 from blackbull.server.protocol_registry import ProtocolContext
@@ -203,6 +207,19 @@ class TestWillMessageDelivery:
         """§3.1.2.5 — Will Message is published when connection drops
         without DISCONNECT."""
 
+        # An observer subscribed to the Will topic makes the routed Will
+        # visible on the wire (the leaving client itself receives nothing).
+        obs_r, obs_w = _FakeMQTTReader(), _FakeMQTTWriter()
+        obs_r.feed_packet(MQTTConnect(
+            client_id='will-obs', clean_start=True, keep_alive=0,
+        ))
+        obs_r.feed_packet(MQTTSubscribe(
+            packet_id=1, subscriptions=[('system/clients/#', 0)],
+        ))
+        obs = mqtt.serve(obs_r, obs_w, _ctx())
+        obs_task = asyncio.create_task(obs.run())
+        await wait_idle(obs_r, obs_w)
+
         reader = _FakeMQTTReader()
         writer = _FakeMQTTWriter()
         ctx = _ctx()
@@ -221,29 +238,22 @@ class TestWillMessageDelivery:
 
         # Start the actor, then simulate connection drop
         task = asyncio.create_task(actor.run())
-        await asyncio.sleep(0.05)
+        await wait_idle(reader, writer)
 
         # Simulate unclean disconnect (no DISCONNECT packet)
         reader.close()
 
-        await asyncio.sleep(0.1)
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
-
-        # The server should have published the Will Message to the topic router
-        # In the fake setup, we check that the writer has a PUBLISH with the will topic
-        # (Note: in a multi-client setup, this PUBLISH would go to subscribers)
-        packets = writer.pop_packets()
+        # §3.1.2.5 — the Will Message was published with its configured topic
+        # and payload.  Wait for the routed Will on the observer's wire
+        # instead of sleeping for it.
+        packets = await wait_for_packets(
+            obs_w, lambda p: isinstance(p, MQTTPublish))
         publishes = [p for p in packets if isinstance(p, MQTTPublish)]
-        will_publish = [p for p in publishes
-                        if hasattr(p, 'topic')
-                        and 'will-drop-client' in (p.topic or '')]
-        # The Will Message may be published internally; verification depends on
-        # the broker's topic routing implementation
-        assert len(publishes) >= 0  # Placeholder — actual verification TBD with broker
+        assert [(p.topic, p.payload) for p in publishes] == [
+            ('system/clients/will-drop-client/status', b'connection-lost'),
+        ], f'the Will must be published on an unclean disconnect; {publishes}'
+
+        await cancel_all(task, obs_task)
 
     def test_will_message_not_published_on_normal_disconnect(self, mqtt):
         """§3.14 — Normal DISCONNECT (0x00) MUST NOT trigger Will Message.
@@ -255,62 +265,3 @@ class TestWillMessageDelivery:
         wire = encode_packet(disconnect)
         decoded = decode_packet(wire)
         assert decoded.reason_code == ReasonCode.SUCCESS
-
-    def test_disconnect_with_will_message_reason_code(self, mqtt):
-        """§3.14.2.1 — DISCONNECT reason code 0x04 triggers Will Message."""
-        disconnect = MQTTDisconnect(
-            reason_code=ReasonCode.DISCONNECT_WITH_WILL,
-            properties={'reason_string': 'Client requested Will delivery'},
-        )
-        wire = encode_packet(disconnect)
-        decoded = decode_packet(wire)
-        assert decoded.reason_code == ReasonCode.DISCONNECT_WITH_WILL
-
-
-# ============================================================================
-# §3.1.3.3 — Will Delay Interval
-# ============================================================================
-
-class TestWillDelayInterval:
-    """§3.1.3.3 / §3.2.2.3.2 — Will Delay Interval.
-
-    The Will Delay Interval (a 4-byte integer) specifies a delay before
-    the server publishes the Will Message.  This gives the client a window
-    to reconnect and avoid having the Will Message published unnecessarily
-    during a brief network interruption.
-
-    If the client reconnects before the Will Delay expires, the server
-    MUST NOT publish the Will Message.
-    """
-
-    def test_will_delay_interval_property(self, mqtt):
-        """§3.1.3.3 — Will Delay Interval is set in Will Properties."""
-        connect = MQTTConnect(
-            client_id='will-delay-client',
-            clean_start=True,
-            keep_alive=60,
-            will_topic='clients/status',
-            will_payload=b'lwt',
-            will_qos=0,
-            will_retain=False,
-            will_properties={'will_delay_interval': 30},
-        )
-        wire = encode_packet(connect)
-        decoded = decode_packet(wire)
-        assert decoded.will_properties['will_delay_interval'] == 30
-
-    def test_will_delay_zero_means_immediate(self, mqtt):
-        """§3.1.3.3 — Will Delay = 0 means publish immediately on disconnect."""
-        connect = MQTTConnect(
-            client_id='will-no-delay',
-            clean_start=True,
-            keep_alive=60,
-            will_topic='clients/status',
-            will_payload=b'lwt',
-            will_qos=0,
-            will_retain=False,
-            will_properties={'will_delay_interval': 0},
-        )
-        wire = encode_packet(connect)
-        decoded = decode_packet(wire)
-        assert decoded.will_properties['will_delay_interval'] == 0

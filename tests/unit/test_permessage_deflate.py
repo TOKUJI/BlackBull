@@ -60,15 +60,9 @@ class TestNegotiateDeclines:
         assert negotiate(None) == (None, None)
         assert negotiate(b'') == (None, None)
 
-    def test_other_extension_only_declines(self):
-        assert negotiate(b'x-other-extension') == (None, None)
-
     def test_window_bits_out_of_range_skips_offer(self):
         assert negotiate(b'permessage-deflate; server_max_window_bits=7') == (None, None)
         assert negotiate(b'permessage-deflate; client_max_window_bits=16') == (None, None)
-
-    def test_malformed_window_bits_value_skips_offer(self):
-        assert negotiate(b'permessage-deflate; server_max_window_bits=oops') == (None, None)
 
 
 class TestRoundTripCompression:
@@ -132,19 +126,21 @@ class TestInvalidCompressedData:
 class TestNegotiationDeclinesInvalidOffers:
     """RFC 7692 §7.1.1 — these offers a server MUST decline."""
 
-    def test_an_unknown_parameter_declines_the_offer(self):
-        assert negotiate(b'permessage-deflate; x-mystery=1') == (None, None)
-
-    def test_a_duplicate_parameter_declines_the_offer(self):
-        assert negotiate(
-            b'permessage-deflate; client_max_window_bits=10'
-            b'; client_max_window_bits=12') == (None, None)
-
-    def test_a_valueless_server_max_window_bits_declines_the_offer(self):
-        assert negotiate(b'permessage-deflate; server_max_window_bits') == (None, None)
-
-    def test_a_valued_no_context_takeover_declines_the_offer(self):
-        assert negotiate(b'permessage-deflate; server_no_context_takeover=1') == (None, None)
+    @pytest.mark.parametrize('offer', [
+        pytest.param(b'permessage-deflate; x-mystery=1', id='unknown-parameter'),
+        pytest.param(b'permessage-deflate; client_max_window_bits=10'
+                     b'; client_max_window_bits=12', id='duplicate-parameter'),
+        pytest.param(b'permessage-deflate; server_max_window_bits',
+                     id='valueless-server-max-window-bits'),
+        pytest.param(b'permessage-deflate; server_no_context_takeover=1',
+                     id='valued-no-context-takeover'),
+        pytest.param(b'x-other-extension', id='other-extension-only'),
+        pytest.param(b'permessage-deflate; server_max_window_bits=oops',
+                     id='malformed-window-bits-value'),
+    ])
+    def test_a_duplicate_parameter_declines_the_offer(self, offer):
+        """RFC 7692 §7.1.1 — these offers a server MUST decline."""
+        assert negotiate(offer) == (None, None)
 
     @pytest.mark.parametrize('value', [b'08', b'+8', b'8x', b'"8x"', b'""', b'7', b'16'])
     def test_a_window_value_outside_bare_8_to_15_declines_the_offer(self, value):

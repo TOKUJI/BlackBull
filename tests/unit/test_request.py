@@ -37,19 +37,15 @@ async def test_read_json_array():
 
 
 @pytest.mark.asyncio
-async def test_read_json_empty_body_returns_none():
-    assert await read_json(_receive_from(b'')) is None
-
-
-@pytest.mark.asyncio
-async def test_read_json_invalid_returns_none():
-    assert await read_json(_receive_from(b'{not json')) is None
-
-
-@pytest.mark.asyncio
-async def test_read_json_invalid_utf8_returns_none():
-    # Lone continuation byte — not decodable as UTF-8, must not raise.
-    assert await read_json(_receive_from(b'\xff\xfe')) is None
+@pytest.mark.parametrize('body', [
+    pytest.param(b'', id='empty-body'),
+    pytest.param(b'{not json', id='invalid-json'),
+    pytest.param(b'\xff\xfe', id='invalid-utf8'),
+])
+async def test_read_json_invalid_utf8_returns_none(body):
+    # An empty or unparseable body — including a lone continuation byte,
+    # not decodable as UTF-8 — must not raise.
+    assert await read_json(_receive_from(body)) is None
 
 
 @pytest.mark.asyncio
@@ -92,13 +88,6 @@ async def test_read_text_honours_encoding_argument():
 # read_body
 # ---------------------------------------------------------------------------
 
-@pytest.mark.asyncio
-async def test_read_body_single_chunk():
-    async def receive():
-        return {'body': b'hello', 'more_body': False}
-
-    assert await read_body(receive) == b'hello'
-
 
 @pytest.mark.asyncio
 async def test_read_body_multiple_chunks():
@@ -115,11 +104,15 @@ async def test_read_body_multiple_chunks():
 
 
 @pytest.mark.asyncio
-async def test_read_body_empty():
+@pytest.mark.parametrize('chunk,expected', [
+    pytest.param(b'', b'', id='empty'),
+    pytest.param(b'hello', b'hello', id='single-chunk'),
+])
+async def test_read_body_empty(chunk, expected):
     async def receive():
-        return {'body': b'', 'more_body': False}
+        return {'body': chunk, 'more_body': False}
 
-    assert await read_body(receive) == b''
+    assert await read_body(receive) == expected
 
 
 @pytest.mark.asyncio
@@ -243,20 +236,19 @@ def test_parse_cookies_empty_header():
     assert parse_cookies(scope) == {}
 
 
-def test_parse_cookies_single():
-    scope = {'headers': Headers([(b'cookie', b'session_id=abc123')])}
-    assert parse_cookies(scope) == {'session_id': 'abc123'}
+@pytest.mark.parametrize('cookie,expected', [
+    pytest.param(b'session_id=abc123', {'session_id': 'abc123'}, id='single'),
+    pytest.param(b'  key = value ', {'key': 'value'}, id='strips-whitespace'),
+])
+def test_parse_cookies_single(cookie, expected):
+    scope = {'headers': Headers([(b'cookie', cookie)])}
+    assert parse_cookies(scope) == expected
 
 
 def test_parse_cookies_multiple():
     scope = {'headers': Headers([(b'cookie', b'a=1; b=2; c=3')])}
     result = parse_cookies(scope)
     assert result == {'a': '1', 'b': '2', 'c': '3'}
-
-
-def test_parse_cookies_strips_whitespace():
-    scope = {'headers': Headers([(b'cookie', b'  key = value ')])}
-    assert parse_cookies(scope) == {'key': 'value'}
 
 
 def test_parse_cookies_no_cookie_header():

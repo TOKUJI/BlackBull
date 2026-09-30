@@ -262,60 +262,26 @@ def _report(found: set[str], allowed: dict[str, str], what: str) -> str:
 # Tests
 # ---------------------------------------------------------------------------
 
-def test_to_asgi_only_at_enumerated_boundaries(scanned):
-    """``NativeResponse.to_asgi()`` runs only where BlackBull meets ASGI."""
-    found = {s for sc in scanned for s in sc.to_asgi}
-    problem = _report(found, _TO_ASGI_ALLOWED, 'native → ASGI expansion')
-    assert not problem, problem
 
-
-def test_the_asgi_send_boundary_is_wrapped_only_at_enumerated_edges(scanned):
-    """Only a real ASGI edge may convert its ``send``.
-
-    The expansion lives in one helper now; this is what keeps the *edges*
-    enumerated, which is the property the two former call sites carried.
-    """
-    found = {s for sc in scanned for s in sc.boundary_wrappers}
-    problem = _report(found, _BOUNDARY_WRAPPER_ALLOWED, 'ASGI send-boundary wrap')
-    assert not problem, problem
-
-
-def test_response_dicts_only_at_enumerated_boundaries(scanned):
-    """Framework producers emit ``NativeResponse``, not response-event dicts."""
-    found = {s for sc in scanned for s in sc.response_dicts}
-    problem = _report(found, _RESPONSE_DICT_ALLOWED, 'ASGI response-event dict')
-    assert not problem, problem
-
-
-def test_request_dicts_only_at_enumerated_boundaries(scanned):
-    """The body crosses the framework as bytes; the dict is the encoding.
-
-    The receive-side mirror of the response rule.  A producer here charges
-    every body reader for the ASGI encoding — including ``conn.body()`` /
-    ``conn.stream()``, which never look at it.
-    """
-    found = {s for sc in scanned for s in sc.request_dicts}
-    problem = _report(found, _REQUEST_DICT_ALLOWED, 'ASGI request-event dict')
-    assert not problem, problem
-
-
-def test_ws_dicts_only_at_enumerated_boundaries(scanned):
-    """The WebSocket channel is native too, in both directions.
-
-    The send half is done: the ``WebSocket`` object emits ``NativeWSMessage``
-    and the sender has a native arm mirroring HTTP's.  The receive half is the
-    remaining work, and the *residual* entries below are exactly its extent.
-    """
-    found = {s for sc in scanned for s in sc.ws_dicts}
-    problem = _report(found, _WS_DICT_ALLOWED, 'ASGI websocket-event dict')
-    assert not problem, problem
-
-
-def test_connection_to_scope_only_at_enumerated_boundaries(scanned):
-    """``Connection`` becomes a scope dict only on a lane that asked for one."""
-    found = {s for sc in scanned for s in sc.to_asgi_scope}
-    problem = _report(found, _TO_ASGI_SCOPE_ALLOWED,
-                      'Connection → ASGI scope conversion')
+@pytest.mark.parametrize('attr,allowed,label', [
+    pytest.param('to_asgi', _TO_ASGI_ALLOWED, 'native → ASGI expansion',
+                 id='to-asgi-boundaries'),
+    pytest.param('boundary_wrappers', _BOUNDARY_WRAPPER_ALLOWED, 'ASGI send-boundary wrap',
+                 id='asgi-send-boundary'),
+    pytest.param('response_dicts', _RESPONSE_DICT_ALLOWED, 'ASGI response-event dict',
+                 id='response-dicts'),
+    pytest.param('request_dicts', _REQUEST_DICT_ALLOWED, 'ASGI request-event dict',
+                 id='request-dicts'),
+    pytest.param('ws_dicts', _WS_DICT_ALLOWED, 'ASGI websocket-event dict',
+                 id='ws-dicts'),
+    pytest.param('to_asgi_scope', _TO_ASGI_SCOPE_ALLOWED, 'Connection → ASGI scope conversion',
+                 id='to-asgi-scope'),
+])
+def test_request_dicts_only_at_enumerated_boundaries(scanned, attr, allowed, label):
+    """Native/ASGI conversions happen only at the enumerated boundaries:
+    each rule is found − allowed over its scanner attribute."""
+    found = {s for sc in scanned for s in getattr(sc, attr)}
+    problem = _report(found, allowed, label)
     assert not problem, problem
 
 

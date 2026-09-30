@@ -68,15 +68,6 @@ class TestBuildExtensions:
         p = default_extensions['http.response.priority']
         assert p == {'urgency': 3, 'incremental': False}
 
-    def test_priority_passthrough_for_explicit_hint(self):
-        ext = _build_h2_extensions(
-            stream_id=5,
-            priority={'urgency': 0, 'incremental': True},
-            peer_initial_window=65535,
-            connection_window=65535)
-        assert ext['http.response.priority'] == {
-            'urgency': 0, 'incremental': True}
-
     def test_http2_stream_includes_stream_id(self, default_extensions):
         assert default_extensions['http.response.http2_stream']['stream_id'] == 1
 
@@ -132,14 +123,19 @@ class TestLegacyAliasIsGone:
     extensions dict is shared by reference, while the top-level alias was a
     dispatch-time snapshot that silently went stale."""
 
-    def test_the_priority_hint_is_carried_by_the_extension(self):
+    @pytest.mark.parametrize('stream_id,priority', [
+        pytest.param(7, {'urgency': 5, 'incremental': False},
+                     id='priority-hint-carried'),
+        pytest.param(5, {'urgency': 0, 'incremental': True},
+                     id='explicit-hint-passthrough'),
+    ])
+    def test_the_priority_hint_is_carried_by_the_extension(self, stream_id, priority):
         ext = _build_h2_extensions(
-            stream_id=7,
-            priority={'urgency': 5, 'incremental': False},
+            stream_id=stream_id,
+            priority=priority,
             peer_initial_window=65535,
             connection_window=65535)
-        assert ext['http.response.priority'] == {
-            'urgency': 5, 'incremental': False}
+        assert ext['http.response.priority'] == priority
 
     def test_the_extensions_builder_never_emits_the_legacy_key(self):
         """The alias was written at the app boundary, not here — but a

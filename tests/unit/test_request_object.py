@@ -222,14 +222,12 @@ class TestJson:
         assert await req.json() == {'k': [1, 2]}
 
     @pytest.mark.asyncio
-    async def test_invalid_json_returns_none(self):
-        receive, _ = single_body_receive(b'{not json')
-        req = _conn({'headers': []}, receive)
-        assert await req.json() is None
-
-    @pytest.mark.asyncio
-    async def test_empty_body_returns_none(self):
-        receive, _ = single_body_receive(b'')
+    @pytest.mark.parametrize('body', [
+        pytest.param(b'{not json', id='invalid-json'),
+        pytest.param(b'', id='empty-body'),
+    ])
+    async def test_invalid_json_returns_none(self, body):
+        receive, _ = single_body_receive(body)
         req = _conn({'headers': []}, receive)
         assert await req.json() is None
 

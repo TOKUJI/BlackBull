@@ -132,8 +132,12 @@ def _goaway_codes(sent) -> list[int]:
 class TestPingFlood:
     """CVE-2019-9512 — one ACK write per PING."""
 
-    async def test_over_the_budget_closes_the_connection(self):
-        _, sent = await _drive([_settings()] + [_ping()] * (_LIMIT + 2))
+    @pytest.mark.parametrize('frames', [
+        pytest.param([_settings()] + [_ping()] * (_LIMIT + 2), id='ping-flood'),
+        pytest.param([_settings()] * (_LIMIT + 3), id='settings-flood'),
+    ])
+    async def test_over_the_budget_closes_the_connection(self, frames):
+        _, sent = await _drive(frames)
         assert ErrorCodes.ENHANCE_YOUR_CALM in _goaway_codes(sent)
 
     async def test_within_the_budget_every_ping_is_answered(self):
@@ -150,10 +154,6 @@ class TestPingFlood:
 
 class TestSettingsFlood:
     """CVE-2019-9515 — one ACK write per SETTINGS."""
-
-    async def test_over_the_budget_closes_the_connection(self):
-        _, sent = await _drive([_settings()] * (_LIMIT + 3))
-        assert ErrorCodes.ENHANCE_YOUR_CALM in _goaway_codes(sent)
 
     async def test_the_budgets_are_per_type(self):
         """A peer spending its PING allowance keeps its SETTINGS allowance.

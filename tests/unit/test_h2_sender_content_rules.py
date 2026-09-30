@@ -220,3 +220,17 @@ async def test_a_head_response_is_quiet_about_the_chunks_it_suppresses(caplog):
     await asyncio.sleep(0)
     assert _wire(writer) == [(1, 1)]
     assert caplog.records == []
+
+
+@pytest.mark.asyncio
+async def test_a_plain_asgi_dict_still_reaches_the_wire():
+    """A plain ASGI app speaks dicts, and hosting one is a public feature.
+    The senders convert at the entry, so this pins that the conversion is
+    the one doing the work — not a shape that quietly stopped arriving."""
+    sender, writer = _sender()
+    await sender({'type': 'http.response.start', 'status': 200,
+                  'headers': [(b'content-length', b'2')]})
+    await sender({'type': 'http.response.body', 'body': b'ok'})
+    await asyncio.sleep(0)
+
+    assert _decoded(writer), 'a plain ASGI dict never reached the wire'

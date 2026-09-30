@@ -1511,3 +1511,74 @@ class TestRapidReset:
                    and c.args[0].FrameType() == FrameTypes.GOAWAY]
         assert goaways == [], (
             f'no GOAWAY expected below the rate cap; got {goaways}')
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('native', [False, True])
+@pytest.mark.parametrize('disable_push', [False, True])
+async def test_push_path_and_headers_reach_wire_and_handler(native, disable_push, caplog):
+    from hpack import Decoder
+
+    calls = []
+    written = bytearray()
+
+    async def app(conn, receive, send):
+        calls.append(conn)
+        path = conn['path'] if isinstance(conn, dict) else conn.path
+        if path == '/':
+            if disable_push:
+                settings = _make_h2_frame(
+                    FrameTypes.SETTINGS, SettingFrameFlags.INIT, 0,
+                    (0x2).to_bytes(2, 'big') + (0).to_bytes(4, 'big'))
+                await SettingsResponder(handler.factory.load(settings)).respond(handler)
+            if native:
+                from blackbull.native import NativeResponse
+
+                event = NativeResponse(push='/style.css?v=1', header=[(b'accept', b'text/css')])
+            else:
+                event = {'type': 'http.response.push', 'path': '/style.css?v=1',
+                         'headers': [(b'accept', b'text/css')]}
+            await send(event)
+        await send(b'ok')
+
+    writer = MagicMock()
+    writer.write.side_effect = written.extend
+    writer.drain = AsyncMock()
+    handler = HTTP2Actor(None, AsyncioWriter(writer), app, aggregator=None)
+    handler.receive = AsyncMock(side_effect=[
+        _make_headers_frame(stream_id=1, end_stream=True), None])
+    await handler.run()
+
+    decoder = Decoder()
+    promises = []
+    offset = 0
+    while offset < len(written):
+        length = int.from_bytes(written[offset:offset + 3], 'big')
+        kind = written[offset + 3:offset + 4]
+        payload = bytes(written[offset + 9:offset + 9 + length])
+        if kind == FrameTypes.PUSH_PROMISE.value:
+            assert int.from_bytes(written[offset + 5:offset + 9], 'big') == 1
+            assert int.from_bytes(payload[:4], 'big') == 2
+            promises.append(dict(decoder.decode(payload[4:])))
+        elif kind == FrameTypes.HEADERS.value:
+            decoder.decode(payload)
+        offset += 9 + length
+    if disable_push:
+        assert promises == []
+        assert len(calls) == 1
+        assert handler._next_push_stream_id == 2
+        assert 'SETTINGS_ENABLE_PUSH=0' in caplog.text
+    else:
+        assert promises == [{':method': 'GET', ':path': '/style.css?v=1',
+                             ':scheme': 'https', ':authority': 'example.com',
+                             'accept': 'text/css'}]
+        assert len(calls) == 2
+        pushed = calls[1]
+        if isinstance(pushed, dict):
+            assert pushed['path'] == '/style.css'
+            assert pushed['query_string'] == b'v=1'
+            assert (b'accept', b'text/css') in pushed['headers']
+        else:
+            assert pushed.path == '/style.css'
+            assert pushed.query_string == b'v=1'
+            assert pushed.headers.get(b'accept') == b'text/css'

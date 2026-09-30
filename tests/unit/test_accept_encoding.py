@@ -207,3 +207,119 @@ async def test_an_interim_head_reaches_the_wire_before_the_final_one():
     payload = b''.join(e.get('body', b'') for e in events
                        if e['type'] == 'http.response.body')
     assert gzip.decompress(payload) == BODY, 'the final response lost compression'
+
+
+@pytest.mark.asyncio
+async def test_a_middleware_emitting_asgi_dicts_still_gets_compressed():
+    """Third-party ASGI middleware predates the native seam and hands
+    ``http.response.start`` dicts down.  The contract says the middleware's
+    inner send wrapper sees only the native representation, so this pins
+    whether a dict reaching the middleware band is normalised before the
+    next layer — and therefore whether the dict branch there is a live
+    compat surface or a shape that can no longer occur."""
+    middleware = Compression(min_size=1)
+    middleware._available = {'gzip': gzip.compress}
+    conn = Connection(method='GET', path='/body.txt', raw_path=b'/body.txt',
+                      headers=Headers([(b'Accept-Encoding', b'gzip')]),
+                      type='http')
+    events = []
+
+    async def send(event):
+        if isinstance(event, NativeResponse):
+            events.extend(event.to_asgi())
+        else:
+            events.append(event)
+
+    async def asgi_middleware(conn, receive, send, call_next):
+        """A third-party shape: emits plain ASGI dicts, not NativeResponse."""
+        async def dict_send(event):
+            await send(event)
+        await call_next(conn, receive, dict_send)
+
+    async def handler(conn, receive, send):
+        await send(NativeResponse(status=200,
+                                  header=[(b'content-type', b'text/plain')],
+                                  body=BODY))
+
+    await asgi_middleware(conn, _receive, send,
+                          lambda c, r, s: middleware(c, r, s, handler))
+
+    starts = [e for e in events if e['type'] == 'http.response.start']
+    assert starts, events
+    payload = b''.join(e.get('body', b'') for e in events
+                       if e['type'] == 'http.response.body')
+    assert gzip.decompress(payload) == BODY
+    assert b'accept-encoding' in dict(starts[0]['headers']).get(
+        b'vary', b'').lower(), starts
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('order', ['third>comp', 'comp>third',
+                                   'third>cors', 'cors>third'],
+                         ids=lambda o: o.replace('>', '_over_'))
+@pytest.mark.parametrize('encoding', [b'gzip', b'unsupported'])
+async def test_a_dict_emitting_middleware_composes_in_any_order(order, encoding):
+    """A third-party ASGI middleware works in the dict domain and hands plain
+    ``http.response.start`` dicts down.  Whichever side of CORS or
+    Compression it sits on, the response must survive: the layer that sees
+    the dict already consumed it, so no later one is asked to."""
+    from blackbull.middleware.cors import CORS
+
+    comp = Compression(min_size=1)
+    comp._available = {'gzip': gzip.compress}
+    cors = CORS(allow_origins=['https://example.com'], allow_credentials=True)
+    conn = Connection(method='GET', path='/', raw_path=b'/',
+                      headers=Headers([(b'accept-encoding', encoding),
+                                       (b'origin', b'https://example.com')]),
+                      type='http')
+    events = []
+
+    async def send(event):
+        if isinstance(event, NativeResponse):
+            events.extend(event.to_asgi())
+        else:
+            events.append(event)
+
+    async def handler(conn, receive, send):
+        await send(NativeResponse(status=200,
+                                  header=[(b'content-type', b'text/plain')],
+                                  body=BODY))
+
+    async def third(conn, receive, send, call_next):
+        async def dict_send(event):
+            for item in (event.to_asgi()
+                         if isinstance(event, NativeResponse) else [event]):
+                await send(item)
+        await call_next(conn, receive, dict_send)
+
+    if order == 'third>comp':
+        await third(conn, _receive, send,
+                    lambda a, b, e: comp(a, b, e, handler))
+    elif order == 'comp>third':
+        await comp(conn, _receive, send,
+                   lambda a, b, e: third(a, b, e, handler))
+    elif order == 'third>cors':
+        await third(conn, _receive, send,
+                    lambda a, b, e: cors(a, b, e, handler))
+    else:
+        await cors(conn, _receive, send,
+                   lambda a, b, e: third(a, b, e, handler))
+
+    starts = [e for e in events if e.get('type') == 'http.response.start']
+    assert [s['status'] for s in starts] == [200], events
+    headers = dict(starts[0]['headers'])
+    payload = b''.join(e.get('body', b'') for e in events
+                       if e.get('type') == 'http.response.body')
+    if 'comp' in order:
+        assert b'accept-encoding' in headers[b'vary'].lower()
+        if encoding == b'gzip':
+            assert headers[b'content-encoding'] == b'gzip'
+            assert gzip.decompress(payload) == BODY
+        else:
+            assert b'content-encoding' not in headers
+            assert payload == BODY
+    else:
+        assert headers[b'access-control-allow-origin'] == b'https://example.com'
+        assert headers[b'access-control-allow-credentials'] == b'true'
+        assert b'origin' in headers[b'vary'].lower()
+        assert payload == BODY

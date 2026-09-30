@@ -208,10 +208,25 @@ async def test_warm_request_from_warmup_hook():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_warm_tls_completes_handshakes():
+async def test_warm_tls_attempts_n_handshakes_without_raising(monkeypatch):
+    """warm_tls drives exactly n handshake attempts through the TLS path,
+    none raising.  (Per-attempt completion is unobservable until warmup.py
+    exposes a success count — PRODUCT DEPENDENCY: BLA-518.)"""
     ctx = _server_ssl_context()
-    # Should complete N in-memory handshakes with no socket and no error.
+    attempts = {'n': 0, 'failures': 0}
+    real = warmup_mod._handshake_once
+
+    def counting(server_ctx, client_ctx):
+        attempts['n'] += 1
+        try:
+            real(server_ctx, client_ctx)
+        except Exception:
+            attempts['failures'] += 1
+            raise
+
+    monkeypatch.setattr(warmup_mod, '_handshake_once', counting)
     await warm_tls(ctx, n=8)
+    assert attempts == {'n': 8, 'failures': 0}
 
 
 @pytest.mark.asyncio

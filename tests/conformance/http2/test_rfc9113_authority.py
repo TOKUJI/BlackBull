@@ -21,6 +21,7 @@ from hpack import Encoder
 
 from blackbull.connection import Connection
 from blackbull.headers import Headers
+from blackbull.native import NativeResponse
 from blackbull.server.http2_actor import HTTP2Actor
 from blackbull.server.parser import parse_headers
 from blackbull.server.sender import AsyncioWriter
@@ -127,17 +128,13 @@ class TestAuthorityPresence:
         _assert_malformed(handler)
         assert app.await_count == 0
 
+    @pytest.mark.parametrize('extra', [
+        pytest.param([(b':authority', b'example.com')], id='authority-only'),
+        pytest.param([(b'host', b'example.com')], id='host-only'),
+    ])
     @pytest.mark.asyncio
-    async def test_authority_only_is_accepted(self):
-        handler, app = await _run_with_headers(
-            _PSEUDO_TRIO + [(b':authority', b'example.com')])
-        assert 1 not in _rst_streams(handler)
-        assert app.await_count == 1
-
-    @pytest.mark.asyncio
-    async def test_host_only_is_accepted(self):
-        handler, app = await _run_with_headers(
-            _PSEUDO_TRIO + [(b'host', b'example.com')])
+    async def test_authority_only_is_accepted(self, extra):
+        handler, app = await _run_with_headers(_PSEUDO_TRIO + extra)
         assert 1 not in _rst_streams(handler)
         assert app.await_count == 1
 
@@ -242,19 +239,14 @@ _GOOD_IP_LITERALS = [b'[::1]', b'[::1]:8100', b'[fe80::1%25eth0]']
 
 
 class TestAuthorityIpLiteral:
+    @pytest.mark.parametrize('key', [
+        pytest.param(b':authority', id='authority-position'),
+        pytest.param(b'host', id='host-fallback'),
+    ])
     @pytest.mark.parametrize('authority', _BAD_IP_LITERALS)
     @pytest.mark.asyncio
-    async def test_bad_ip_literal_in_authority_is_malformed(self, authority):
-        handler, app = await _run_with_headers(
-            _PSEUDO_TRIO + [(b':authority', authority)])
-        _assert_malformed(handler)
-        assert app.await_count == 0
-
-    @pytest.mark.parametrize('authority', _BAD_IP_LITERALS)
-    @pytest.mark.asyncio
-    async def test_bad_ip_literal_in_host_fallback_is_malformed(self, authority):
-        handler, app = await _run_with_headers(
-            _PSEUDO_TRIO + [(b'host', authority)])
+    async def test_bad_ip_literal_in_authority_is_malformed(self, key, authority):
+        handler, app = await _run_with_headers(_PSEUDO_TRIO + [(key, authority)])
         _assert_malformed(handler)
         assert app.await_count == 0
 
@@ -387,7 +379,7 @@ class TestPushPromiseAuthority:
             headers=Headers([(b'host', b'example.com:8443')]))
         async with asyncio.TaskGroup() as tg:
             handler._task_group = tg
-            await handler._handle_push({'path': '/style.css'}, 1)
+            await handler._handle_push(NativeResponse(push='/style.css'), 1)
         handler._task_group = None
         pp = None
         for call in handler.send_frame.call_args_list:

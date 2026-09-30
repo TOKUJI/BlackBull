@@ -166,8 +166,8 @@ BODY_MUST_BE_ABSENT = [
 ]
 
 
-@pytest.mark.parametrize('label,wire', SHORTER_THAN_THE_TYPE_REQUIRES,
-                         ids=[case[0] for case in SHORTER_THAN_THE_TYPE_REQUIRES])
+@pytest.mark.parametrize('label,wire', SHORTER_THAN_THE_TYPE_REQUIRES + BYTES_AFTER_THE_LAST_FIELD,
+                         ids=[case[0] for case in SHORTER_THAN_THE_TYPE_REQUIRES + BYTES_AFTER_THE_LAST_FIELD])
 def test_a_body_shorter_than_the_type_requires_is_malformed(label, wire):
     with pytest.raises(MQTTDecodeError):
         decode_packet(wire)
@@ -177,13 +177,6 @@ def test_a_body_shorter_than_the_type_requires_is_malformed(label, wire):
                          ids=[case[0] for case in ZERO_PACKET_IDENTIFIER])
 def test_a_zero_packet_identifier_is_malformed(label, wire):
     """§2.2.1 — a Packet Identifier of 0 is not allowed."""
-    with pytest.raises(MQTTDecodeError):
-        decode_packet(wire)
-
-
-@pytest.mark.parametrize('label,wire', BYTES_AFTER_THE_LAST_FIELD,
-                         ids=[case[0] for case in BYTES_AFTER_THE_LAST_FIELD])
-def test_bytes_after_the_last_field_are_malformed(label, wire):
     with pytest.raises(MQTTDecodeError):
         decode_packet(wire)
 

@@ -419,17 +419,23 @@ class TestBlackBullErrorDispatch:
             response = client.get('/nonexistent')
         assert response.status_code == 404
 
-    def test_404_calls_custom_on_error_handler(self):
+    @pytest.mark.parametrize('status,path,body', [
+        pytest.param(HTTPStatus.NOT_FOUND, '/nonexistent', b'custom not found',
+                     id='404-custom-handler'),
+        pytest.param(HTTPStatus.METHOD_NOT_ALLOWED, '/post-only', b'custom 405',
+                     id='405-custom-handler'),
+    ])
+    def test_404_calls_custom_on_error_handler(self, status, path, body):
         app = self._make_app()
 
-        @app.on_error(HTTPStatus.NOT_FOUND)
-        async def custom_404(scope, receive, send):
-            await send(b'custom not found', HTTPStatus.NOT_FOUND)
+        @app.on_error(status)
+        async def custom(scope, receive, send):
+            await send(body, status)
 
         with TestClient(app) as client:
-            response = client.get('/nonexistent')
-        assert response.status_code == 404
-        assert response.text == 'custom not found'
+            response = client.get(path)
+        assert response.status_code == status
+        assert response.content == body
 
     def test_405_returns_method_not_allowed(self):
         """GET to a POST-only route must yield 405, not 404."""
@@ -445,18 +451,6 @@ class TestBlackBullErrorDispatch:
         assert response.status_code == 405
         assert 'allow' in response.headers
         assert 'POST' in response.headers['allow'].upper()
-
-    def test_405_calls_custom_on_error_handler(self):
-        app = self._make_app()
-
-        @app.on_error(HTTPStatus.METHOD_NOT_ALLOWED)
-        async def custom_405(scope, receive, send):
-            await send(b'custom 405', HTTPStatus.METHOD_NOT_ALLOWED)
-
-        with TestClient(app) as client:
-            response = client.get('/post-only')
-        assert response.status_code == 405
-        assert response.text == 'custom 405'
 
     def test_exception_in_handler_calls_error_router(self):
         app = self._make_app()
@@ -505,12 +499,3 @@ class TestBlackBullErrorDispatch:
         assert send.status == 405, (
             f"Expected 405 for unknown method NOTEXIST, got {send.status}"
         )
-
-    @pytest.mark.asyncio
-    async def test_unknown_http_method_does_not_raise(self):
-        """ValueError from HTTPMethod() must be caught internally; __call__ must not raise."""
-        app = self._make_app()
-        scope = _make_scope('/hello', method='HEAD')
-        send = _CaptureSend()
-        # Must complete without raising ValueError
-        await app(scope, None, send)

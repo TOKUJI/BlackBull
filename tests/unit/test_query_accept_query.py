@@ -58,11 +58,16 @@ class TestContentTypeEnforcement:
             r = client.request('QUERY', '/search', content=b'select 1')
             assert r.status_code == 400
 
-    def test_unsupported_media_type_is_415(self):
+    @pytest.mark.parametrize('content,ct,expected', [
+        pytest.param(b'{}', 'application/json', 415, id='unsupported-media-type'),
+        pytest.param(b'select 1', 'application/sql', 200, id='supported-media-type'),
+        pytest.param(b'select 1', 'Application/SQL', 200, id='case-insensitive'),
+    ])
+    def test_unsupported_media_type_is_415(self, content, ct, expected):
         with TestClient(_app()) as client:
-            r = client.request('QUERY', '/search', content=b'{}',
-                               headers={'content-type': 'application/json'})
-            assert r.status_code == 415
+            r = client.request('QUERY', '/search', content=content,
+                               headers={'content-type': ct})
+            assert r.status_code == expected
 
     def test_415_carries_accept_query_header(self):
         """A 415 MUST advertise Accept-Query so the client can correct."""
@@ -72,23 +77,11 @@ class TestContentTypeEnforcement:
             assert r.status_code == 415
             assert r.headers.get('accept-query') == 'application/sql, text/plain'
 
-    def test_supported_media_type_passes(self):
-        with TestClient(_app()) as client:
-            r = client.request('QUERY', '/search', content=b'select 1',
-                               headers={'content-type': 'application/sql'})
-            assert r.status_code == 200
-
     def test_media_type_parameters_are_ignored(self):
         """A charset parameter must not defeat the media-type match."""
         with TestClient(_app()) as client:
             r = client.request('QUERY', '/search', content=b'select 1',
                                headers={'content-type': 'application/sql; charset=utf-8'})
-            assert r.status_code == 200
-
-    def test_media_type_match_is_case_insensitive(self):
-        with TestClient(_app()) as client:
-            r = client.request('QUERY', '/search', content=b'select 1',
-                               headers={'content-type': 'Application/SQL'})
             assert r.status_code == 200
 
 

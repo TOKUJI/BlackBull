@@ -88,75 +88,6 @@ def _ctx():
 
 
 # ============================================================================
-# §4.9 / §3.2.2.3.1 — Flow Control: Receive Maximum
-# ============================================================================
-
-class TestFlowControlReceiveMaximum:
-    """§4.9 — Flow Control using Receive Maximum.
-
-    §3.2.2.3.1: Receive Maximum is a 2-byte integer (1–65535) that limits
-    the number of QoS 1 and QoS 2 PUBLISH messages the client is willing to
-    process concurrently.  A value of 0 is invalid (treated as "no limit").
-
-    The server MUST NOT send more than Receive Maximum unacknowledged
-    QoS 1/2 PUBLISH messages to the client at any time.
-
-    Note: MQTT 5.0 §4.9 states that flow control is per-client, not
-    per-topic. The server tracks the count of sent-but-unacknowledged
-    QoS 1/2 messages and pauses when the limit is reached.
-    """
-
-    def test_receive_maximum_property_in_connect(self, mqtt):
-        """§3.2.2.3.1 — Client advertises Receive Maximum in CONNECT."""
-        connect = MQTTConnect(
-            client_id='rm-client',
-            clean_start=True,
-            keep_alive=60,
-            properties={'receive_maximum': 50},
-        )
-        wire = encode_packet(connect)
-        decoded = decode_packet(wire)
-        assert decoded.properties['receive_maximum'] == 50
-
-    def test_receive_maximum_property_in_connack(self, mqtt):
-        """§3.2.2.3.1 — Server advertises Receive Maximum in CONNACK."""
-        connack = MQTTConnack(
-            session_present=False,
-            reason_code=ReasonCode.SUCCESS,
-            properties={'receive_maximum': 65535},
-        )
-        wire = encode_packet(connack)
-        decoded = decode_packet(wire)
-        assert decoded.properties['receive_maximum'] == 65535
-
-    def test_receive_maximum_default_value(self, mqtt):
-        """§3.2.2.3.1 — If Receive Maximum is absent, the default is 65,535."""
-        connect = MQTTConnect(
-            client_id='rm-default',
-            clean_start=True,
-            keep_alive=60,
-        )
-        wire = encode_packet(connect)
-        decoded = decode_packet(wire)
-        assert 'receive_maximum' not in decoded.properties
-        # Server must assume 65535 if absent
-
-    def test_receive_maximum_zero_treated_as_no_limit(self, mqtt):
-        """§3.2.2.3.1 — Receive Maximum = 0 means no explicit limit."""
-        # The spec says 0 is invalid for CONNECT but the server MUST
-        # treat 0 from the client as an unspecified limit
-        connect = MQTTConnect(
-            client_id='rm-zero',
-            clean_start=True,
-            keep_alive=60,
-            properties={'receive_maximum': 0},
-        )
-        wire = encode_packet(connect)
-        decoded = decode_packet(wire)
-        assert decoded.properties['receive_maximum'] == 0
-
-
-# ============================================================================
 # §4.6 — Message Ordering
 # ============================================================================
 
@@ -212,11 +143,10 @@ class TestMessageOrdering:
         packets = writer.pop_packets()
         publishes = [p for p in packets if isinstance(p, MQTTPublish)
                      and p.topic == 'order/topic']
-        payloads = [p.payload for p in publishes]
-        # Verify ordering: msg-0, msg-1, msg-2, msg-3, msg-4
-        for i, payload in enumerate(payloads):
-            assert payload == f'msg-{i}'.encode(), \
-                f"Expected msg-{i} at position {i}, got {payload}"
+        # The whole sequence, in order — an empty or truncated delivery must
+        # fail here rather than pass silently.
+        assert [p.payload for p in publishes] == \
+            [b'msg-0', b'msg-1', b'msg-2', b'msg-3', b'msg-4']
 
 
 # ============================================================================
@@ -242,62 +172,26 @@ class TestTopicAlias:
         and use only the Topic Alias.
     """
 
-    def test_topic_alias_maximum_in_connect(self, mqtt):
-        """§3.1.2.3 — Client advertises Topic Alias Maximum."""
-        connect = MQTTConnect(
-            client_id='ta-client',
-            clean_start=True,
-            keep_alive=60,
-            properties={'topic_alias_maximum': 16},
-        )
-        wire = encode_packet(connect)
-        decoded = decode_packet(wire)
-        assert decoded.properties['topic_alias_maximum'] == 16
-
-    def test_topic_alias_maximum_in_connack(self, mqtt):
-        """§3.2.2.3.6 — Server advertises Topic Alias Maximum."""
-        connack = MQTTConnack(
-            session_present=False,
-            reason_code=ReasonCode.SUCCESS,
-            properties={'topic_alias_maximum': 8},
-        )
-        wire = encode_packet(connack)
-        decoded = decode_packet(wire)
-        assert decoded.properties['topic_alias_maximum'] == 8
-
-    def test_publish_with_topic_alias_property(self, mqtt):
-        """§3.3.2.4 — PUBLISH can include Topic Alias property.
-
-        The first PUBLISH with a given alias MUST also include the Topic Name.
-        Subsequent PUBLISH with the same alias MAY omit the Topic Name.
-        """
-        # First publish: topic + alias (establishes mapping)
+    @pytest.mark.parametrize('topic,payload,packet_id,expected_topic', [
+        pytest.param('sensors/temperature', b'22.5', 1, 'sensors/temperature',
+                     id='alias-with-topic'),
+        pytest.param('', b'22.6', 2, '', id='alias-only-no-topic'),
+    ])
+    def test_publish_with_topic_alias_property(self, mqtt, topic, payload, packet_id, expected_topic):
+        """§3.3.2.4 — PUBLISH Topic Alias forms: the first PUBLISH with a
+        given alias MUST also include the Topic Name; subsequent PUBLISH
+        with the same alias MAY omit it (empty Topic Name)."""
         publish = MQTTPublish(
-            topic='sensors/temperature',
-            payload=b'22.5',
+            topic=topic,
+            payload=payload,
             qos=1,
-            packet_id=1,
+            packet_id=packet_id,
             properties={'topic_alias': 1},
         )
         wire = encode_packet(publish)
         decoded = decode_packet(wire)
         assert decoded.properties['topic_alias'] == 1
-        assert decoded.topic == 'sensors/temperature'
-
-    def test_publish_with_topic_alias_only(self, mqtt):
-        """§3.3.2.4 — PUBLISH with Topic Alias but no Topic Name
-        (uses previously established alias mapping)."""
-        publish = MQTTPublish(
-            topic='',  # empty Topic Name when using alias
-            payload=b'22.6',
-            qos=1,
-            packet_id=2,
-            properties={'topic_alias': 1},
-        )
-        wire = encode_packet(publish)
-        decoded = decode_packet(wire)
-        assert decoded.properties['topic_alias'] == 1
-        assert decoded.topic == ''  # Topic Name omitted
+        assert decoded.topic == expected_topic
 
     def test_topic_alias_zero_is_prohibited(self, mqtt):
         """§3.3.2.4 — Topic Alias value 0 is prohibited in PUBLISH."""
@@ -358,21 +252,37 @@ class TestRequestResponsePattern:
         decoded = decode_packet(wire)
         assert decoded.properties['correlation_data'] == b'req-001'
 
-    def test_request_response_information_property(self, mqtt):
-        """§3.1.2.11 — Client can request Response Information in CONNECT.
-
-        If Request Response Information = 1, the server MAY return
-        Response Information in CONNACK (e.g., the response topic prefix).
-        """
+    @pytest.mark.parametrize('client_id,clean_start,props,key,value', [
+        pytest.param('mps-client', True, {'maximum_packet_size': 262144},
+                     'maximum_packet_size', 262144, id='maximum-packet-size-connect'),
+        pytest.param('rri-client', True, {'request_response_information': 1},
+                     'request_response_information', 1, id='request-response-information'),
+        pytest.param('rpi-on', True, {'request_problem_information': 1},
+                     'request_problem_information', 1, id='problem-info-enabled'),
+        pytest.param('rpi-off', True, {'request_problem_information': 0},
+                     'request_problem_information', 0, id='problem-info-disabled'),
+        pytest.param('rm-client', True, {'receive_maximum': 50},
+                     'receive_maximum', 50, id='receive-maximum-connect'),
+        pytest.param('rm-zero', True, {'receive_maximum': 0},
+                     'receive_maximum', 0, id='receive-maximum-zero'),
+        pytest.param('ta-client', True, {'topic_alias_maximum': 16},
+                     'topic_alias_maximum', 16, id='topic-alias-maximum-connect'),
+        pytest.param('se-client', False, {'session_expiry_interval': 3600},
+                     'session_expiry_interval', 3600, id='session-expiry-3600'),
+        pytest.param('se-zero', False, {'session_expiry_interval': 0},
+                     'session_expiry_interval', 0, id='session-expiry-zero'),
+    ])
+    def test_request_response_information_property(self, mqtt, client_id, clean_start, props, key, value):
+        """CONNECT properties round-trip through encode/decode."""
         connect = MQTTConnect(
-            client_id='rri-client',
-            clean_start=True,
+            client_id=client_id,
+            clean_start=clean_start,
             keep_alive=60,
-            properties={'request_response_information': 1},
+            properties=props,
         )
         wire = encode_packet(connect)
         decoded = decode_packet(wire)
-        assert decoded.properties['request_response_information'] == 1
+        assert decoded.properties[key] == value
 
 
 # ============================================================================
@@ -430,17 +340,6 @@ class TestNoLocalOption:
     Client ID).
     """
 
-    def test_subscribe_with_no_local(self, mqtt):
-        """§3.8.2.1 — No Local = 1 prevents self-delivery."""
-        sub = MQTTSubscribe(
-            packet_id=1,
-            subscriptions=[('chat/room1', 1)],
-            subscription_options=[{'no_local': True}],
-        )
-        wire = encode_packet(sub)
-        decoded = decode_packet(wire)
-        assert decoded.subscription_options[0]['no_local'] is True
-
     def test_subscribe_without_no_local(self, mqtt):
         """§3.8.2.1 — No Local = 0 (default): messages are delivered normally."""
         sub = MQTTSubscribe(
@@ -479,19 +378,6 @@ class TestPayloadFormatIndicator:
         wire = encode_packet(publish)
         decoded = decode_packet(wire)
         assert decoded.properties['payload_format_indicator'] == 1
-
-    def test_publish_with_payload_format_indicator_unspecified(self, mqtt):
-        """§3.3.2.3.2 — Payload Format Indicator = 0 (unspecified bytes)."""
-        publish = MQTTPublish(
-            topic='data/binary',
-            payload=b'\x00\x01\x02\x03',
-            qos=1,
-            packet_id=1,
-            properties={'payload_format_indicator': 0},
-        )
-        wire = encode_packet(publish)
-        decoded = decode_packet(wire)
-        assert decoded.properties['payload_format_indicator'] == 0
 
     def test_utf8_payload_must_be_valid_utf8(self, mqtt):
         """§1.5.4 — If Payload Format Indicator = 1, the payload MUST be
@@ -572,16 +458,30 @@ class TestSubscriptionIdentifier:
         decoded = decode_packet(wire)
         assert decoded.properties['subscription_identifier'] == 42
 
-    def test_publish_with_subscription_identifier(self, mqtt):
-        """§3.3.2.3.4 — PUBLISH forwarded to subscriber includes
-        Subscription Identifier(s) from matching subscriptions."""
+    @pytest.mark.parametrize('topic,payload,packet_id,props,key,value', [
+        pytest.param('events/temporary', b'expires soon', 1,
+                     {'message_expiry_interval': 60}, 'message_expiry_interval', 60,
+                     id='message-expiry-60'),
+        pytest.param('events/permanent', b'never expires', 1,
+                     {'message_expiry_interval': 0}, 'message_expiry_interval', 0,
+                     id='message-expiry-zero-no-expiry'),
+        pytest.param('data/binary', b'\x00\x01\x02\x03', 1,
+                     {'payload_format_indicator': 0}, 'payload_format_indicator', 0,
+                     id='payload-format-unspecified'),
+        pytest.param('sensors/room1/temperature', b'23.5', 10,
+                     {'subscription_identifier': 42}, 'subscription_identifier', 42,
+                     id='subscription-identifier'),
+    ])
+    def test_publish_with_subscription_identifier(self, mqtt, topic, payload, packet_id, props, key, value):
+        """PUBLISH properties round-trip: Message Expiry Interval, Payload
+        Format Indicator (0 = unspecified bytes), Subscription Identifier."""
         publish = MQTTPublish(
-            topic='sensors/room1/temperature',
-            payload=b'23.5',
+            topic=topic,
+            payload=payload,
             qos=1,
-            packet_id=10,
-            properties={'subscription_identifier': 42},
+            packet_id=packet_id,
+            properties=props,
         )
         wire = encode_packet(publish)
         decoded = decode_packet(wire)
-        assert decoded.properties['subscription_identifier'] == 42
+        assert decoded.properties[key] == value

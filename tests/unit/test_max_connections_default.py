@@ -69,15 +69,14 @@ class TestDerivation:
 
 
 class TestExplicitValues:
-    def test_zero_still_means_uncapped(self, monkeypatch):
-        monkeypatch.setenv('BB_MAX_CONNECTIONS', '0')
+    @pytest.mark.parametrize('value,expected', [
+        pytest.param('0', 0, id='zero-means-uncapped'),
+        pytest.param('512', 512, id='explicit-number-wins'),
+    ])
+    def test_zero_still_means_uncapped(self, monkeypatch, value, expected):
+        monkeypatch.setenv('BB_MAX_CONNECTIONS', value)
         reset_settings_cache()
-        assert get_settings().max_connections == 0
-
-    def test_an_explicit_number_wins(self, monkeypatch):
-        monkeypatch.setenv('BB_MAX_CONNECTIONS', '512')
-        reset_settings_cache()
-        assert get_settings().max_connections == 512
+        assert get_settings().max_connections == expected
 
     def test_an_explicit_number_is_not_clamped_to_the_fd_budget(self, monkeypatch):
         """An operator who names a number means it.

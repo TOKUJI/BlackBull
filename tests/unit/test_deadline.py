@@ -22,14 +22,6 @@ from blackbull.server.deadline import ConnectionDeadline, _Scanner
 
 
 @pytest.mark.asyncio
-async def test_guard_returns_normally_when_under_deadline():
-    dl = ConnectionDeadline()
-    with dl.guard(0.5):
-        await asyncio.sleep(0.01)
-    assert not dl.fired
-
-
-@pytest.mark.asyncio
 async def test_guard_raises_timeout_when_deadline_fires():
     dl = ConnectionDeadline()
     with pytest.raises(TimeoutError):
@@ -39,11 +31,16 @@ async def test_guard_raises_timeout_when_deadline_fires():
 
 
 @pytest.mark.asyncio
-async def test_guard_zero_disables_deadline():
+@pytest.mark.parametrize('deadline', [
+    pytest.param(0.5, id='under-deadline-returns'),
+    pytest.param(0.0, id='zero-disables'),
+])
+async def test_guard_zero_disables_deadline(deadline):
+    """Under the deadline the guard returns normally; 0 must NOT arm a timer
+    — the call should pass through.  Use a quick sleep so the test stays
+    fast even if the contract regresses."""
     dl = ConnectionDeadline()
-    # 0 must NOT arm a timer — the call should pass through.  Use a
-    # quick sleep so the test stays fast even if the contract regresses.
-    with dl.guard(0.0):
+    with dl.guard(deadline):
         await asyncio.sleep(0.01)
     assert not dl.fired
 
