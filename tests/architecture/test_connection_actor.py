@@ -133,7 +133,7 @@ def fake_http1_reader():
 
 def _http2_exchange() -> bytes:
     """A complete HTTP/2 request script: preface + SETTINGS + HEADERS."""
-    from tests.conformance.http2.test_rfc9113_gaps import (
+    from tests.conformance.http2._harness import (
         _make_h2_frame, _make_headers_frame)
     from blackbull.protocol.frame_types import FrameTypes
     return (_HTTP2_PREFACE
