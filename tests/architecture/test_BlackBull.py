@@ -284,7 +284,7 @@ async def test_on_startup_hook_called_at_lifespan_startup(phase, expected):
     app_ = BlackBull()
     called = []
 
-    register = app_.on_startup if phase == 'startup' else app_.on_shutdown
+    register = getattr(app_, f'on_{phase}')
 
     @register
     async def hook():
