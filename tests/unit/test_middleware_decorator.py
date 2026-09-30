@@ -124,18 +124,26 @@ async def test_undecorated_call_next_is_not_wrapped():
     """Power-user contract: run through the product middleware chain, an
     undecorated middleware is handed the chain's plain next link.  The
     @as_middleware decorator swaps in a send-normalising wrapper instead —
-    the contrast is the point."""
+    the contrast is the point, so both middlewares run and their next links
+    are probed, not named."""
     from blackbull import BlackBull
     from blackbull.testing import TestClient
 
     captured = []
+    wrapped = []
 
     async def raw_mw(conn, receive, send, call_next):
         captured.append(call_next)
         await call_next(conn, receive, send)
 
+    @as_middleware
+    async def decorated_mw(conn, receive, send, call_next):
+        wrapped.append(call_next)
+        await call_next(conn, receive, send)
+
     app = BlackBull()
     app.use(raw_mw)
+    app.use(decorated_mw)
 
     @app.route(path='/')
     async def handler():
@@ -144,11 +152,32 @@ async def test_undecorated_call_next_is_not_wrapped():
     with TestClient(app) as client:
         assert client.get('/').status_code == 200
 
-    # The call_next the middleware received is the chain's next link — the
-    # app's dispatch — with no normalising wrapper in between.
-    assert captured, 'the middleware must have run'
-    assert captured[0].__self__ is app
-    assert captured[0].__func__ is BlackBull._dispatch
+    async def _receive():
+        return {'type': 'http.disconnect'}
+
+    async def _send(event):
+        pass
+
+    async def probe(link):
+        """Hand the link a sentinel instead of a connection.
+
+        @as_middleware's normalising wrapper ignores that argument (it
+        re-sends the connection it captured) and completes; the chain's own
+        link dispatches on the argument it is given, so a sentinel cannot
+        stand in for a connection and the call fails.  The exception type is
+        not the contract — completing vs. not is.
+        """
+        try:
+            await link(object(), _receive, _send)
+        except Exception:  # noqa: BLE001 — any failure proves the arg was used
+            return False
+        return True
+
+    assert captured and wrapped, 'both middlewares must have run'
+    assert not await probe(captured[0]), (
+        'the undecorated middleware received the normalising wrapper')
+    assert await probe(wrapped[0]), (
+        'the decorated middleware must receive the normalising wrapper')
 
 
 # ---------------------------------------------------------------------------
