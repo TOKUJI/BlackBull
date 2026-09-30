@@ -116,12 +116,12 @@ class TestMessageDefaults:
         assert d.reason_code is None  # optional in MQTT 5.0
         assert d.properties == {}
 
-    def test_pingreq_defaults(self):
-        p = MQTTPingreq()
-        assert p is not None
-
-    def test_pingresp_defaults(self):
-        p = MQTTPingresp()
+    @pytest.mark.parametrize('cls', [
+        pytest.param(MQTTPingreq, id='pingreq-defaults'),
+        pytest.param(MQTTPingresp, id='pingresp-defaults'),
+    ])
+    def test_pingreq_defaults(self, cls):
+        p = cls()
         assert p is not None
 
 

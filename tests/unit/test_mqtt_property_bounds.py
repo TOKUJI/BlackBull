@@ -38,8 +38,13 @@ class TestPropertyValuesStayInsideTheSection:
         with pytest.raises(MQTTDecodeError):
             decode_properties(data)
 
-    def test_a_uint16_cut_by_the_end_is_malformed(self):
-        data = _section(bytes([0x22, 0x00]), declared=2) + b'\xff\xff'  # receive-max
+    @pytest.mark.parametrize('data', [
+        pytest.param(_section(bytes([0x22, 0x00]), declared=2) + b'\xff\xff',
+                     id='uint16-cut-by-end'),
+        pytest.param(_section(bytes([0x08, 0x00]), declared=2) + b'\x00\x05topic',
+                     id='utf8-length-prefix-cut-by-end'),
+    ])
+    def test_a_uint16_cut_by_the_end_is_malformed(self, data):
         with pytest.raises(MQTTDecodeError):
             decode_properties(data)
 
@@ -54,28 +59,20 @@ class TestPropertyValuesStayInsideTheSection:
             decode_properties(data)
         assert not isinstance(excinfo.value, IncompletePacket)
 
-    def test_a_utf8_length_prefix_cut_by_the_end_is_malformed(self):
-        data = _section(bytes([0x08, 0x00]), declared=2) + b'\x00\x05topic'
-        with pytest.raises(MQTTDecodeError):
-            decode_properties(data)
-
     def test_a_utf8_body_past_the_end_is_malformed(self):
         data = _section(bytes([0x08, 0x00, 0x05]) + b'to', declared=3) + b'pic'
         with pytest.raises(MQTTDecodeError):
             decode_properties(data)
 
-    def test_a_binary_body_past_the_end_is_malformed(self):
-        data = _section(bytes([0x09, 0x00, 0x04, 0x01]), declared=3) + b'\x02\x03\x04'
-        with pytest.raises(MQTTDecodeError):
-            decode_properties(data)
-
-    def test_a_user_property_key_past_the_end_is_malformed(self):
-        data = _section(bytes([0x26, 0x00, 0x02, 0x61]), declared=3) + b'b'
-        with pytest.raises(MQTTDecodeError):
-            decode_properties(data)
-
-    def test_a_user_property_value_past_the_end_is_malformed(self):
-        data = _section(bytes([0x26, 0x00, 0x61, 0x00]), declared=3) + b'b'
+    @pytest.mark.parametrize('data', [
+        pytest.param(_section(bytes([0x09, 0x00, 0x04, 0x01]), declared=3) + b'\x02\x03\x04',
+                     id='binary-body-past-end'),
+        pytest.param(_section(bytes([0x26, 0x00, 0x02, 0x61]), declared=3) + b'b',
+                     id='user-property-key-past-end'),
+        pytest.param(_section(bytes([0x26, 0x00, 0x61, 0x00]), declared=3) + b'b',
+                     id='user-property-value-past-end'),
+    ])
+    def test_a_binary_body_past_the_end_is_malformed(self, data):
         with pytest.raises(MQTTDecodeError):
             decode_properties(data)
 
