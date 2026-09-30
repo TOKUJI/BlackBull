@@ -8214,15 +8214,9 @@ reader owns it.  Returns True if any frame was serviced.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Cancel and await the background read-loop task, and disarm the
-idle watchdog.</p>
-<p>Ownership (BLA-363): the read-loop task and event queue are released
-here; the watchdog is timer handles (<code>disarm_watchdog</code>); control
-sends — liveness probe, unresponsive end, buffered control frames —
-are single suppressed writes that end on their own, so nothing joins
-them.  A reader that outlives its session reads a dead transport and
-warns at event-loop shutdown.  Idempotent, safe before the first
-<code>__call__</code>; called from the read loop itself it skips the join.</p>
+        <p>Disarm the watchdog and cancel the read loop, waiting up to 5 seconds.</p>
+<p>Safe to call repeatedly or before reading starts; never joins itself.
+The caller closes the transport even if the reader does not stop.</p>
 
 
     </div>

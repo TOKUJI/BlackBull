@@ -6258,8 +6258,8 @@ too, and is meant for <strong>resource cleanup</strong>.</p>
 </tr>
 </tbody>
 </table>
-<p>Pair it with <code>blocking=True</code> so cleanup completes before the scope
-is gone:</p>
+<p>Pair it with <code>blocking=True</code> — blocking observers delay dispatch,
+but cancellation can interrupt cleanup:</p>
 <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">on</span><span class="p">(</span><span class="s1">'scope_completed'</span><span class="p">,</span> <span class="n">blocking</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">cleanup</span><span class="p">(</span><span class="n">event</span><span class="p">:</span> <span class="n">Event</span><span class="p">):</span>
     <span class="n">conn</span> <span class="o">=</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">'conn'</span><span class="p">]</span>
@@ -6328,6 +6328,11 @@ connection.</p>
 </code></pre></div>
 <p>Both are <strong>observation only</strong> — the connection lifecycle is
 driven by the ASGI handler, not by interceptors.</p>
+<p>The server waits up to 5 seconds for each <code>websocket_disconnected</code>
+listener before continuing connection cleanup.  On timeout, it requests
+cancellation and logs a warning naming the listener, and the next
+listener is still served.  Detached observers are not awaited before
+the transport closes.</p>
 <h2 id="exception-handling">Exception handling<a class="headerlink" href="#exception-handling" title="Permanent link">&para;</a></h2>
 <p>Restated:</p>
 <ul>

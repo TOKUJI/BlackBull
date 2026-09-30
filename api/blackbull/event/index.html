@@ -5939,7 +5939,7 @@ is waited for too.</p>
 
 
 <h4 id="blackbull.event.EventDispatcher.emit" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">emit</span><span class="p">(</span><span class="n">event</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">emit</span><span class="p">(</span><span class="n">event</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
@@ -5956,9 +5956,7 @@ is waited for too.</p>
 <li><strong>Interceptors</strong> — awaited in registration order; their exceptions
    propagate (and abort the remaining interceptors).</li>
 <li><strong>Blocking observers</strong> — awaited in registration order; their
-   exceptions are caught and logged (isolated).  <code>emit</code> does not
-   return until they finish, so cleanup registered here is guaranteed
-   to complete within the event's lifetime.</li>
+   exceptions are caught and logged.</li>
 <li><strong>Detached observers</strong> — scheduled as independent tasks (isolated),
    tracked so they can be drained at shutdown via <a class="autorefs autorefs-internal" title="aclose()
 
@@ -5966,6 +5964,10 @@ is waited for too.</p>
       async
   " href="#blackbull.event.EventDispatcher.aclose"><code>aclose</code></a>.</li>
 </ol>
+<p><code>timeout</code> limits the wait for each interceptor and blocking
+observer.  On expiry, cancellation is requested, a warning
+identifies the handler, and dispatch continues without waiting for
+it to stop.  <code>None</code> disables this limit.</p>
 
 
     </div>
@@ -6024,10 +6026,9 @@ registered, so a caller may ask on every event.</p>
         <p>Register an observation handler for <code>event_name</code>.</p>
 <p>With <code>blocking=False</code> (the default) the handler is scheduled as an
 independent task when the event fires — it never delays the emitter.
-With <code>blocking=True</code> the handler is awaited in registration order
-before <code>emit</code> returns, so a side effect (e.g. resource cleanup) is
-guaranteed to finish within the event's lifetime; its exceptions are
-still isolated (logged, never propagated).</p>
+With <code>blocking=True</code> the handler is awaited in registration order,
+subject to <code>emit()</code>'s timeout and cancellation; its exceptions are
+logged.</p>
 
 
     </div>
