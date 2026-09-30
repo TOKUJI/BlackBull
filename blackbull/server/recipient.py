@@ -54,8 +54,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# A cancelled read loop stops at once; one that suppresses cancellation
-# is left reading a dead transport rather than stalling the close.
 _READ_LOOP_JOIN_TIMEOUT = 5.0
 
 # Defaults behind BB_STREAM_QUEUE_DEPTH / BB_WS_QUEUE_DEPTH (see
@@ -2362,17 +2360,10 @@ class WebSocketRecipient(BaseRecipient):
             self._watchdog.disarm()
 
     async def shutdown(self) -> None:
-        """Cancel and await the background read-loop task, and disarm the
-        idle watchdog.
+        """Disarm the watchdog and cancel the read loop, waiting up to 5 seconds.
 
-        Ownership (BLA-363): the read-loop task and event queue are released
-        here; the watchdog is timer handles (``disarm_watchdog``); control
-        sends — liveness probe, unresponsive end, buffered control frames —
-        are single suppressed writes that end on their own, so nothing joins
-        them.  The join is bounded: ``read()`` may suppress cancellation, and
-        such a reader is left reading a dead transport (it warns at event-loop
-        shutdown) instead of stalling the close.  Idempotent, safe before the
-        first ``__call__``; called from the read loop itself it skips the join.
+        Safe to call repeatedly or before reading starts; never joins itself.
+        The caller closes the transport even if the reader does not stop.
         """
         self._closed = True
         self.disarm_watchdog()
@@ -2381,6 +2372,7 @@ class WebSocketRecipient(BaseRecipient):
         if (task is not None and task is not asyncio.current_task()
                 and not task.done()):
             task.cancel()
+            # wait_for would also wait for cancellation to finish.
             done, _pending = await asyncio.wait(
                 {task}, timeout=_READ_LOOP_JOIN_TIMEOUT)
             if not done:

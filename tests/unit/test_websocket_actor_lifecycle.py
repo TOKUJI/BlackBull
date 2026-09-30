@@ -276,24 +276,58 @@ class _StubbornReader(_ScriptedReader):
 
 
 class TestTheReleaseIsBounded:
-    """No step of the release may wait forever on app- or reader-side code."""
+
+    async def test_a_later_listener_still_receives_past_a_hanging_one(
+            self, monkeypatch):
+        from blackbull.server import websocket_actor
+        monkeypatch.setattr(websocket_actor,
+                            '_DISCONNECT_HOOK_TIMEOUT', 0.05)
+        reached = []
+
+        from blackbull.event import EventDispatcher
+        from blackbull.event_aggregator import EventAggregator
+
+        async def hang(event):
+            await asyncio.Event().wait()
+
+        async def observe(event):
+            reached.append(event.detail['code'])
+
+        async def app(conn, receive, send):
+            pass
+
+        dispatcher = EventDispatcher()
+        dispatcher.on('websocket_disconnected', hang, blocking=True)
+        dispatcher.on('websocket_disconnected', observe, blocking=True)
+
+        writer = _FakeWriter()
+        actor = WebSocketActor(
+            _ScriptedReader([]), writer, _ws_conn(), app,
+            EventAggregator(dispatcher))
+        await asyncio.wait_for(actor.run(), 1.0)
+        assert writer.closed
+        assert reached == [1006], 'the later listener must be served'
 
     async def test_a_hanging_disconnect_listener_does_not_stall_the_release(
             self, monkeypatch):
         from blackbull.server import websocket_actor
         monkeypatch.setattr(websocket_actor,
                             '_DISCONNECT_HOOK_TIMEOUT', 0.05)
+        from blackbull.event import EventDispatcher
+        from blackbull.event_aggregator import EventAggregator
 
-        async def hang(conn, code=None):
+        async def hang(event):
             await asyncio.Event().wait()
 
         async def app(conn, receive, send):
             pass
 
+        dispatcher = EventDispatcher()
+        dispatcher.on('websocket_disconnected', hang, blocking=True)
         writer = _FakeWriter()
         actor = WebSocketActor(
             _ScriptedReader([_client_frame(b'hi')]), writer, _ws_conn(), app,
-            _agg(on_disconnect=hang))
+            EventAggregator(dispatcher))
         await asyncio.wait_for(actor.run(), 1.0)
         assert writer.closed, 'the transport must close past a hanging listener'
 

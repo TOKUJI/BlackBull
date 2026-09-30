@@ -1,7 +1,7 @@
 """Tests for WebSocketActor (Phase 6 Step 5)."""
 import asyncio
 import pytest
-from unittest.mock import AsyncMock
+from unittest.mock import ANY, AsyncMock
 
 from blackbull.connection import Connection
 from blackbull.event_aggregator import EventAggregator
@@ -167,7 +167,7 @@ async def test_websocket_lifecycle_events(
     await actor.run()
 
     aggregator.on_websocket_connected.assert_called_once_with(conn, None)
-    aggregator.on_websocket_disconnected.assert_called_once_with(conn, code=1006)
+    aggregator.on_websocket_disconnected.assert_called_once_with(conn, code=1006, timeout=ANY)
 
 
 @pytest.mark.asyncio
@@ -212,7 +212,7 @@ async def test_websocket_protocol_error_isolated(
     # the close code and only updated it from a disconnect *event*, which a
     # protocol violation never produces (it emits the exception instead), so
     # the copy stayed at its default.  One record now, read from the recipient.
-    aggregator.on_websocket_disconnected.assert_called_once_with(conn, code=1002)
+    aggregator.on_websocket_disconnected.assert_called_once_with(conn, code=1002, timeout=ANY)
 
 
 @pytest.mark.asyncio

@@ -10,9 +10,7 @@ Implements the minimal Pub/Sub dispatcher used by ``BlackBull.on`` /
   and logged — they never reach the emitter or abort siblings.  This is the
   "observe but block" mode: use it when a side effect must *complete* within the
   event's lifetime (resource cleanup on ``scope_completed``) yet must not be
-  able to break the thing that emitted it.  When the emitter passes a
-  dispatch budget (``emit(..., timeout=...)``), that lifetime is the
-  budget: the handler is cancelled when it runs out.
+  able to break the thing that emitted it.
 - **Observation** (``on``): handlers are scheduled as independent
   ``asyncio.Task``s (fire-and-forget); exceptions are caught and logged and
   never reach the emitter or other observers.
@@ -85,10 +83,9 @@ class EventDispatcher:
 
         With ``blocking=False`` (the default) the handler is scheduled as an
         independent task when the event fires — it never delays the emitter.
-        With ``blocking=True`` the handler is awaited in registration order
-        before ``emit`` returns, so a side effect (e.g. resource cleanup) is
-        guaranteed to finish within the event's lifetime; its exceptions are
-        still isolated (logged, never propagated).
+        With ``blocking=True`` the handler is awaited in registration order,
+        subject to ``emit()``'s timeout and cancellation; its exceptions are
+        logged.
         """
         if blocking:
             self._blocking_observers[event_name].append(handler)
@@ -119,23 +116,14 @@ class EventDispatcher:
         1. **Interceptors** — awaited in registration order; their exceptions
            propagate (and abort the remaining interceptors).
         2. **Blocking observers** — awaited in registration order; their
-           exceptions are caught and logged (isolated).  ``emit`` does not
-           return until they finish, so cleanup registered here is guaranteed
-           to complete within the event's lifetime.
+           exceptions are caught and logged.
         3. **Detached observers** — scheduled as independent tasks (isolated),
            tracked so they can be drained at shutdown via [`aclose`][].
 
-        With *timeout* every interceptor and blocking observer gets that
-        budget for itself: one that exhausts it is cancelled — a warning
-        names it — and the *next* handler runs with a fresh budget, so one
-        bad listener cannot cost the others their delivery.  Each handler
-        is bounded with `asyncio.wait`, so even one that suppresses
-        cancellation cannot outlast its budget.  Detached observers are
-        scheduled regardless.  Error semantics are unchanged: (1) still
-        propagates, (2) stays isolated.  The dispatch as a whole then lasts
-        at most (handlers × *timeout*) — that is the price of not letting
-        one bad handler cancel the others.  Without *timeout* the
-        unbounded lifetime in (2) stands.
+        ``timeout`` limits the wait for each interceptor and blocking
+        observer.  On expiry, cancellation is requested, a warning
+        identifies the handler, and dispatch continues without waiting for
+        it to stop.  ``None`` disables this limit.
         """
         for h in self._interceptors.get(event.name, []):
             if timeout is None:
@@ -158,16 +146,10 @@ class EventDispatcher:
 
     async def _bounded_run(self, handler, event: Event, timeout: float,
                            *, name: str | None = None) -> bool:
-        """Run *handler* with *timeout* seconds of budget of its own.
-
-        Returns ``True`` when the handler finished and ``False`` when the
-        budget cancelled it (a warning names the handler).  ``asyncio.wait``
-        bounds the wait itself, so a handler that swallows `CancelledError`
-        is left behind rather than waited for.  `CancelledError` delivered
-        to *this* coroutine cancels the handler and propagates.
-        """
+        """Return False on timeout; otherwise return True or propagate the error."""
         who = name or getattr(handler, '__qualname__', repr(handler))
         task = asyncio.ensure_future(handler(event))
+        # wait_for would also wait for cancellation to finish.
         try:
             done, _pending = await asyncio.wait({task}, timeout=timeout)
         except asyncio.CancelledError:
@@ -179,7 +161,7 @@ class EventDispatcher:
                 'Event %r: handler %s cancelled after its %.1fs dispatch budget',
                 event.name, who, timeout)
             return False
-        task.result()  # an interceptor exception propagates as before
+        task.result()
         return True
 
     async def _safe_observe(self, handler: EventHandler, event: Event) -> None:

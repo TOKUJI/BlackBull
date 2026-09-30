@@ -178,7 +178,6 @@ async def test_on_handler_exception_does_not_propagate():
 
 @pytest.mark.asyncio
 async def test_the_dispatch_budget_does_not_starve_later_handlers():
-    """One hung handler must cost the later ones nothing (BLA-363)."""
     from blackbull.event import EventDispatcher
     dispatcher = EventDispatcher()
     reached = []
@@ -196,7 +195,6 @@ async def test_the_dispatch_budget_does_not_starve_later_handlers():
 
 @pytest.mark.asyncio
 async def test_the_budget_names_the_handlers_it_stops(caplog):
-    """The warning identifies the handler, not just the event (BLA-363)."""
     import logging
     from blackbull.event import EventDispatcher
     dispatcher = EventDispatcher()
@@ -219,7 +217,7 @@ async def test_detached_observers_are_scheduled_even_after_the_budget_spends():
     async def detached(event):
         seen.append(event.name)
     dispatcher.on('e', hang, blocking=True)
-    dispatcher.on('e', detached)          # detached
+    dispatcher.on('e', detached)
     await asyncio.wait_for(
         dispatcher.emit(Event('e', {}), timeout=0.05), 1.0)
     await dispatcher.drain(timeout=1.0)

@@ -20,9 +20,6 @@ from .sender import AbstractWriter, SenderFactory
 
 logger = logging.getLogger(__name__)
 
-# No release step may wait forever on app- or reader-side code (BLA-363).
-# The dispatch budget for the disconnect event: hanging handlers are
-# cancelled by name within it, later ones skipped, the transport closes.
 _DISCONNECT_HOOK_TIMEOUT = 5.0
 
 
@@ -167,29 +164,12 @@ class WebSocketActor(Actor):
         except Exception as exc:
             await self._aggregator.on_error(self._conn, exc)
         finally:
-            # Release order (BLA-363): the disconnect event (once, with the
-            # code the peer saw), then the reader task — a full queue parks
-            # it in queue.put, where EOF never wakes it — then the transport.
-            # Each step releases the next even when it raises, and no step
-            # waits forever: the listener is app code and may hang, so it is
-            # bounded and then left behind — the transport still closes.
+            # Cancel the reader before closing: a full queue can leave it
+            # blocked in queue.put(), which EOF cannot wake.
             try:
-                hook = asyncio.ensure_future(
-                    self._aggregator.on_websocket_disconnected(
-                        self._conn, code=self._disconnect_code))
-                try:
-                    done, _pending = await asyncio.wait(
-                        {hook}, timeout=_DISCONNECT_HOOK_TIMEOUT)
-                except asyncio.CancelledError:
-                    hook.cancel()
-                    raise
-                if not done:
-                    hook.cancel()  # uniform with the cancellation exit
-                    logger.warning(
-                        'on_websocket_disconnected exceeded %.1fs; releasing '
-                        'the connection anyway', _DISCONNECT_HOOK_TIMEOUT)
-                else:
-                    hook.result()  # a raising listener still propagates
+                await self._aggregator.on_websocket_disconnected(
+                    self._conn, code=self._disconnect_code,
+                    timeout=_DISCONNECT_HOOK_TIMEOUT)
             finally:
                 try:
                     await self._ws_receive.shutdown()
