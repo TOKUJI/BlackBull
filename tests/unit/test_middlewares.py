@@ -498,7 +498,6 @@ class TestBrotliCompression:
         body_event = next(e for e in events if e.get('type') == 'http.response.body')
         assert _brotli.decompress(body_event['body']) == body
 
-    @pytest.mark.asyncio
     @pytest.mark.parametrize('codec', [
         pytest.param(b'br', id='br-content-encoding'),
         pytest.param(b'zstd', id='zstd-content-encoding'),
