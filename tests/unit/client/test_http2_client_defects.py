@@ -1165,35 +1165,19 @@ class TestFrameSizeCheck:
         assert goaway, 'an over-sized frame was refused without a GOAWAY'
         assert goaway[0].error_code == ErrorCodes.FRAME_SIZE_ERROR
 
-    @pytest.mark.parametrize('scenario', [
-        pytest.param('oversize', id='frame-size-refusal-not-silent'),
-        pytest.param('push-promise', id='enable-push-refusal-not-silent'),
-    ])
-    async def test_the_refusal_is_not_a_silent_close(self, monkeypatch, scenario):
+    async def test_the_refusal_is_not_a_silent_close(self):
         """``None`` from ``_receive_frame`` means EOF to the receive loop, so
         a refusal spelled that way is indistinguishable from the peer hanging
         up — the caller cannot tell a rejection from a disconnect."""
-        if scenario == 'oversize':
-            c, _reader, _sent = self._oversize(self._LIMIT + 1)
+        c, _reader, _sent = self._oversize(self._LIMIT + 1)
 
-            await asyncio.wait_for(c._receive_loop(), timeout=1.0)
+        await asyncio.wait_for(c._receive_loop(), timeout=1.0)
 
-            assert c._connection_lost, 'the connection was left usable'
-            assert c._failure, (
-                'the refusal recorded no reason — a caller cannot tell it from '
-                'the peer simply going away')
-            assert str(self._LIMIT + 1) in c._failure
-        else:
-            from hpack import Encoder
-            from tests.unit.client.test_http2_client_settings import (
-                _connected, _push_promise, _settings_ack,
-            )
-            monkeypatch.setenv('BB_CLIENT_H2_ENABLE_PUSH', '0')
-            block = Encoder().encode([(':method', 'GET'), (':path', '/pushed')])
-            c = await _connected(_settings_ack() + _push_promise(block))
-
-            assert c._connection_lost
-            assert c._failure is not None and 'PUSH_PROMISE' in c._failure
+        assert c._connection_lost, 'the connection was left usable'
+        assert c._failure, (
+            'the refusal recorded no reason — a caller cannot tell it from '
+            'the peer simply going away')
+        assert str(self._LIMIT + 1) in c._failure
 
     async def test_the_payload_is_never_read(self):
         """The whole memory argument: refusing *before* the read is what keeps

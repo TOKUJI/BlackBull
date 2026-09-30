@@ -372,6 +372,13 @@ class TestEnablePushZero:
         assert goaway, 'the promise was accepted after ENABLE_PUSH=0 was acked'
         assert goaway[0].error_code == ErrorCodes.PROTOCOL_ERROR
 
+    async def test_the_refusal_is_not_a_silent_close(self):
+        block = Encoder().encode([(':method', 'GET'), (':path', '/pushed')])
+        c = await _connected(_settings_ack() + _push_promise(block))
+
+        assert c._connection_lost
+        assert c._failure is not None and 'PUSH_PROMISE' in c._failure
+
     async def test_the_refused_block_is_still_decoded(self):
         """BLA-267's regression guard.  The HPACK table is connection-wide,
         so a block refused *instead of* decoded leaves every later block on

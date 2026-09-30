@@ -11,10 +11,11 @@ parameter (2.11's shared seeding helper).
 """
 from __future__ import annotations
 
+import pytest
+
 from blackbull.client.http2 import HTTP2Client
 from blackbull.server.sender import AbstractWriter
 from blackbull.protocol.frame_types import DEFAULT_INITIAL_WINDOW_SIZE
-import pytest
 
 
 class _NullWriter(AbstractWriter):

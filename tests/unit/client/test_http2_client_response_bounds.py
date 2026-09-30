@@ -199,30 +199,17 @@ class TestTheBodyTotal:
             await _resolved(future)
         assert sum(len(p) for p in held.body_parts) <= 10000
 
-    @pytest.mark.parametrize('kind', [
-        pytest.param('body-total', id='body-total-refusal-resets'),
-        pytest.param('header-aggregate', id='header-aggregate-refusal-resets'),
-    ])
-    async def test_the_refusal_resets_the_stream(self, monkeypatch, kind):
-        if kind == 'body-total':
-            monkeypatch.setenv('BB_CLIENT_BODY_MAX_TOTAL', '10000')
-            c = _client()
-            future = _pending(c)
-            for _ in range(8):
-                await _feed_data(c, 1, b'x' * 4096)
-            with pytest.raises(ResponseTooLarge):
-                await _resolved(future)
-            resets = _frames_of(c, FrameTypes.RST_STREAM)
-            assert resets and resets[0].stream_id == 1
-            assert resets[0].error_code == ErrorCodes.CANCEL
-        else:
-            monkeypatch.setenv('BB_CLIENT_HEAD_MAX_TOTAL', '4096')
-            c = _client()
-            future = _pending(c)
-            await TestTheHeaderAggregate()._sections(c, 21)
-            with pytest.raises(ResponseTooLarge):
-                await _resolved(future)
-            assert _frames_of(c, FrameTypes.RST_STREAM)
+    async def test_the_refusal_resets_the_stream(self, monkeypatch):
+        monkeypatch.setenv('BB_CLIENT_BODY_MAX_TOTAL', '10000')
+        c = _client()
+        future = _pending(c)
+        for _ in range(8):
+            await _feed_data(c, 1, b'x' * 4096)
+        with pytest.raises(ResponseTooLarge):
+            await _resolved(future)
+        resets = _frames_of(c, FrameTypes.RST_STREAM)
+        assert resets and resets[0].stream_id == 1
+        assert resets[0].error_code == ErrorCodes.CANCEL
 
     async def test_the_refusing_frame_is_itself_credited(self, monkeypatch):
         """The frame that breaches the cap is dropped, not un-received.
@@ -335,6 +322,14 @@ class TestTheHeaderAggregate:
         await _feed_headers(c, 1, self._section(10), end_stream=True)
         assert (await _resolved(future)).status
 
+    async def test_the_refusal_resets_the_stream(self, monkeypatch):
+        monkeypatch.setenv('BB_CLIENT_HEAD_MAX_TOTAL', '4096')
+        c = _client()
+        future = _pending(c)
+        await self._sections(c, 21)
+        with pytest.raises(ResponseTooLarge):
+            await _resolved(future)
+        assert _frames_of(c, FrameTypes.RST_STREAM)
 
 class TestTheFieldSectionBoundIsTheDecoders:
     """One field section is bounded by hpack, not by us — recorded so the
