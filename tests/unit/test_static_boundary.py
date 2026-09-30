@@ -181,3 +181,51 @@ async def test_every_serve_path_consults_the_selection_boundary(env, headers):
     assert getattr(app, 'consulted', 0) == 1
     await _collect(app, _scope(path='/item', headers=headers))
     assert app.consulted == 2
+
+
+async def test_a_hardlinked_sibling_claims_its_encoding(env):
+    """Variant identity is the filename alone (BLA-334 residual): a hard
+    link of the original named ``item.gz`` is served as gzip although its
+    bytes are plain.  ``st_nlink`` would not make identity robust; the
+    tree's names must be honest."""
+    www, _outside = env
+    (www / 'item.gz').hardlink_to(www / 'item')
+    start, body = await _collect(
+        StaticFiles(directory=str(www)),
+        _scope(path='/item', headers={'accept-encoding': 'gzip'}))
+    assert start['status'] == 200
+    headers = dict(start['headers'])
+    assert headers.get(b'content-encoding') == b'gzip'
+    assert body == b'ORIGINAL'
+
+
+async def test_a_selected_variant_that_escapes_loses_the_whole_request(env):
+    """Today's answer (BLA-334 residual): when the variant selection lands
+    outside the root the request is refused with 400 even though the
+    original would serve.  Fallback to the next candidate is not
+    implemented; this pins what the code does today."""
+    www, outside = env
+    (www / 'item.gz').symlink_to(outside / 'sentinel')
+    app = StaticFiles(directory=str(www))
+    refused, _body = await _collect(
+        app, _scope(path='/item', headers={'accept-encoding': 'gzip'}))
+    assert refused['status'] == 400
+    plain, body = await _collect(app, _scope(path='/item'))
+    assert plain['status'] == 200
+    assert body == b'ORIGINAL'
+
+
+async def test_a_hardlink_to_an_outside_inode_serves_the_outside_bytes(env):
+    """The sharper consequence of filename identity: a hard link to an
+    outside inode passes the path-based boundary (the link lives inside
+    the root) and the sentinel's bytes are served under the variant's
+    claimed encoding.  Nothing here is measurable from the path."""
+    www, outside = env
+    (www / 'item.gz').hardlink_to(outside / 'sentinel')
+    start, body = await _collect(
+        StaticFiles(directory=str(www)),
+        _scope(path='/item', headers={'accept-encoding': 'gzip'}))
+    assert start['status'] == 200
+    headers = dict(start['headers'])
+    assert headers.get(b'content-encoding') == b'gzip'
+    assert body == SENTINEL
