@@ -12,12 +12,20 @@ Reference: MQTT Version 5.0, OASIS Standard
   §1.5.4     UTF-8 string encoding rules
 """
 
+import asyncio
+
 import pytest
+
+from tests.conformance.mqtt._harness import (
+    _FakeMQTTReader, _FakeMQTTWriter, _ctx,
+    run_until_idle, wait_idle, cancel_all,
+)
 
 from blackbull.mqtt.messages import (
     ReasonCode,
     MQTTConnect, MQTTConnack, MQTTDisconnect,
     MQTTPublish, MQTTSubscribe, MQTTSuback,
+    MQTTPuback, MQTTPubrel,
     encode_packet, decode_packet,
     MQTTReasonCode,
 )
@@ -260,71 +268,132 @@ class TestSessionStateDetails:
       - QoS 2 messages sent but PUBCOMP not yet received
     """
 
-    def test_session_stores_subscription_options(self, mqtt):
+    @pytest.mark.asyncio
+    async def test_session_stores_subscription_options(self, mqtt):
         """§3.1.2.11 — Session preserves Subscription Options (No Local,
         Retain As Published, Retain Handling) across reconnects."""
-        # The session dict stores the full subscription configuration
-        # Subscription entries carry an options dict, so the collection must be
-        # a list (a dict is unhashable and cannot live in a set).
-        mqtt.sessions['opts-client'] = {
-            'subscriptions': [
-                ('chat/room1', 1, {'no_local': True, 'retain_as_published': True,
-                                   'retain_handling': 1}),
-                ('alerts/#', 2, {'no_local': False}),
-            ],
-            'pending_qos2_in': {},
-            'pending_qos2_out': {},
-        }
-        session = mqtt.sessions.get('opts-client')
-        assert session is not None
-        assert len(session['subscriptions']) == 2
-        chat_sub = [s for s in session['subscriptions'] if s[0] == 'chat/room1'][0]
+
+        # Connection 1: a SUBSCRIBE carrying §3.8.3.1 options; the session
+        # must outlive the connection (Session Expiry Interval > 0).
+        await run_until_idle(
+            mqtt,
+            MQTTConnect(
+                client_id='opts-client', clean_start=True, keep_alive=60,
+                properties={'session_expiry_interval': 3600},
+            ),
+            MQTTSubscribe(
+                packet_id=1,
+                subscriptions=[('chat/room1', 1), ('alerts/#', 2)],
+                subscription_options=[
+                    {'no_local': True, 'retain_as_published': True,
+                     'retain_handling': 1},
+                    {'no_local': False},
+                ],
+            ),
+        )
+
+        # Connection 2: Clean Start = 0 reconnect — the session survives.
+        await run_until_idle(
+            mqtt,
+            MQTTConnect(
+                client_id='opts-client', clean_start=False, keep_alive=60,
+                properties={'session_expiry_interval': 3600},
+            ),
+        )
+
+        # §3.1.2.11 — the session holds (filter, qos, options) triples, and
+        # the Subscription Options came through the broker intact.
+        subs = mqtt.sessions['opts-client']['subscriptions']
+        assert len(subs) == 2
+        chat_sub = [s for s in subs if s[0] == 'chat/room1'][0]
+        alerts_sub = [s for s in subs if s[0] == 'alerts/#'][0]
+        assert chat_sub[1] == 1
         assert chat_sub[2]['no_local'] is True
+        assert chat_sub[2]['retain_as_published'] is True
+        assert chat_sub[2]['retain_handling'] == 1
+        assert alerts_sub[1] == 2
+        assert alerts_sub[2]['no_local'] is False
 
-    def test_session_stores_pending_qos1_messages(self, mqtt):
+    @pytest.mark.asyncio
+    async def test_session_stores_pending_qos1_messages(self, mqtt):
         """§3.1.2.11 — Session stores QoS 1 messages pending acknowledgment."""
-        mqtt.sessions['qos1-client'] = {
-            'subscriptions': {},
-            'pending_qos1_out': {
-                100: MQTTPublish(
-                    topic='test/qos1',
-                    payload=b'message-1',
-                    qos=1,
-                    packet_id=100,
-                ),
-                101: MQTTPublish(
-                    topic='test/qos1',
-                    payload=b'message-2',
-                    qos=1,
-                    packet_id=101,
-                ),
-            },
-            'pending_qos2_in': {},
-            'pending_qos2_out': {},
-        }
-        session = mqtt.sessions.get('qos1-client')
-        assert len(session['pending_qos1_out']) == 2
 
-    def test_session_stores_pending_qos2_states(self, mqtt):
+        sub_r, sub_w = _FakeMQTTReader(), _FakeMQTTWriter()
+        sub_r.feed_packet(MQTTConnect(
+            client_id='qos1-client', clean_start=True, keep_alive=60,
+            properties={'session_expiry_interval': 3600},
+        ))
+        sub_r.feed_packet(MQTTSubscribe(
+            packet_id=1, subscriptions=[('test/qos1', 1)],
+        ))
+        sub = mqtt.serve(sub_r, sub_w, _ctx())
+        sub_task = asyncio.create_task(sub.run())
+        await wait_idle(sub_r, sub_w)
+
+        # A QoS 1 delivery books pending_qos1_out until its PUBACK arrives.
+        pub_r, pub_w = _FakeMQTTReader(), _FakeMQTTWriter()
+        pub_r.feed_packet(MQTTConnect(
+            client_id='qos1-pub', clean_start=True, keep_alive=60,
+        ))
+        pub_r.feed_packet(MQTTPublish(
+            topic='test/qos1', payload=b'message-1', qos=1, packet_id=100,
+        ))
+        pub = mqtt.serve(pub_r, pub_w, _ctx())
+        pub_task = asyncio.create_task(pub.run())
+        await wait_idle(pub_r, pub_w)
+
+        pending = mqtt.sessions['qos1-client']['pending_qos1_out']
+        assert len(pending) == 1, (
+            'an unacked QoS 1 delivery must sit in pending_qos1_out'
+        )
+        (packet_id, stored), = pending.items()
+        assert isinstance(stored, MQTTPublish)
+        assert (stored.topic, stored.payload, stored.qos) == \
+            ('test/qos1', b'message-1', 1)
+
+        # PUBACK acknowledges it — the entry is dropped.
+        sub_r.feed_packet(MQTTPuback(packet_id=packet_id))
+        await wait_idle(sub_r, sub_w)
+        assert mqtt.sessions['qos1-client']['pending_qos1_out'] == {}, (
+            'PUBACK must clear the pending_qos1_out entry'
+        )
+
+        await cancel_all(sub_task, pub_task)
+
+    @pytest.mark.asyncio
+    async def test_session_stores_pending_qos2_states(self, mqtt):
         """§3.1.2.11 — Session stores QoS 2 messages in various states."""
-        mqtt.sessions['qos2-client'] = {
-            'subscriptions': {},
-            'pending_qos1_out': {},
-            'pending_qos2_in': {
-                200: 'PUBREC_SENT',   # PUBREC sent, waiting for PUBREL
-                201: 'PUBREC_SENT',
-            },
-            'pending_qos2_out': {
-                # Outbound entries keep the PUBLISH for §4.4 DUP replay while
-                # still awaiting PUBREC; a PUBREL-stage entry is state-only.
-                300: {'state': 'PUBLISH_SENT', 'packet': None},
-                301: {'state': 'PUBREL_SENT'},
-            },
-        }
-        session = mqtt.sessions.get('qos2-client')
-        assert session['pending_qos2_in'][200] == 'PUBREC_SENT'
-        assert session['pending_qos2_out'][300]['state'] == 'PUBLISH_SENT'
-        assert session['pending_qos2_out'][301]['state'] == 'PUBREL_SENT'
+
+        reader = _FakeMQTTReader()
+        writer = _FakeMQTTWriter()
+        reader.feed_packet(MQTTConnect(
+            client_id='qos2-client', clean_start=True, keep_alive=60,
+            properties={'session_expiry_interval': 3600},
+        ))
+        reader.feed_packet(MQTTPublish(
+            topic='test/qos2', payload=b'message-1', qos=2, packet_id=200,
+        ))
+        actor = mqtt.serve(reader, writer, _ctx())
+        task = asyncio.create_task(actor.run())
+        await wait_idle(reader, writer)
+
+        # Receive side, §4.3.3: PUBREC sent, awaiting PUBREL.  (The send side —
+        # PUBLISH_SENT / PUBREL_SENT — is driven end to end by
+        # tests/unit/test_mqtt_hardening.py::test_outbound_qos2_keeps_publish_for_replay.)
+        assert mqtt.sessions['qos2-client']['pending_qos2_in'].get(200) == \
+            'PUBREC_SENT', (
+            'an inbound QoS 2 PUBLISH must sit at PUBREC_SENT'
+        )
+
+        # PUBREL completes the receive side (answered with PUBCOMP) and
+        # clears the state.
+        reader.feed_packet(MQTTPubrel(packet_id=200))
+        await wait_idle(reader, writer)
+        assert 200 not in mqtt.sessions['qos2-client']['pending_qos2_in'], (
+            'PUBREL must clear the pending_qos2_in state'
+        )
+
+        await cancel_all(task)
 
 
 # ============================================================================

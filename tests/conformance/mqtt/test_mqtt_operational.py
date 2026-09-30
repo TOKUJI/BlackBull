@@ -143,11 +143,10 @@ class TestMessageOrdering:
         packets = writer.pop_packets()
         publishes = [p for p in packets if isinstance(p, MQTTPublish)
                      and p.topic == 'order/topic']
-        payloads = [p.payload for p in publishes]
-        # Verify ordering: msg-0, msg-1, msg-2, msg-3, msg-4
-        for i, payload in enumerate(payloads):
-            assert payload == f'msg-{i}'.encode(), \
-                f"Expected msg-{i} at position {i}, got {payload}"
+        # The whole sequence, in order — an empty or truncated delivery must
+        # fail here rather than pass silently.
+        assert [p.payload for p in publishes] == \
+            [b'msg-0', b'msg-1', b'msg-2', b'msg-3', b'msg-4']
 
 
 # ============================================================================
