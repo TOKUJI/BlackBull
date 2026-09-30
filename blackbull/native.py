@@ -176,14 +176,13 @@ class NativeWSMessage:
 
 
 class NativeResponse:
-    # Set per instance only when a request is promised; the common response
-    # pays nothing for a shape it never uses.
-    push = None
     """A response on the native send path: header and/or body and/or trailers.
 
     ``header`` is ``None`` when absent (never ``[]`` — presence is decided by
     ``is not None``).  ``body`` is ``None`` when absent; ``b''`` is a real
     empty body.  ``more_body`` marks a non-terminal body chunk (streaming).
+    ``push`` makes this a promised request instead: its path is ``push`` and
+    ``header`` contains request headers. It cannot carry response-only fields.
     ``more_trailers`` marks a non-terminal trailer event.
     ``expects_trailers`` preserves the ASGI ``http.response.start``
     ``trailers: True`` flag so the sender withholds the terminal chunk until
@@ -198,6 +197,7 @@ class NativeResponse:
         'file_path',
         'more_body',
         'more_trailers',
+        'push',
         'status',
         'trailers',
     )
@@ -210,7 +210,13 @@ class NativeResponse:
                  more_trailers: bool = False,
                  expects_trailers: bool = False,
                  file_path: str | None = None,
-                 push: list | None = None) -> None:
+                 push: str | None = None) -> None:
+        if push is not None and (
+                status != 200 or body is not None or more_body
+                or trailers is not None or more_trailers
+                or expects_trailers or file_path is not None):
+            raise ValueError('push cannot carry response status, body, trailers, or file')
+        self.push = push
         self.status = status
         # Write the slot directly rather than going through the ``header``
         # property.  The setter is a descriptor call plus an isinstance test,
@@ -231,8 +237,6 @@ class NativeResponse:
         # (``StaticFiles``) can stay native and still get zero-copy.
         # Mutually exclusive with ``body``: the bytes come from the file.
         self.file_path = file_path
-        if push is not None:
-            self.push = push
 
     # --- fast constructors for framework-owned producers -------------------
     #
@@ -266,6 +270,7 @@ class NativeResponse:
         self.more_trailers = False
         self.expects_trailers = False
         self.file_path = None
+        self.push = None
         return self
 
     @classmethod
@@ -289,6 +294,7 @@ class NativeResponse:
         self.more_trailers = False
         self.expects_trailers = True
         self.file_path = None
+        self.push = None
         return self
 
     # --- header: DX view, or None when absent -----------------------------
@@ -347,6 +353,9 @@ class NativeResponse:
         compression); the native H1 sender path never materialises these
         dicts.
         """
+        if self.push is not None:
+            return [{'type': 'http.response.push', 'path': self.push,
+                     'headers': list(self._header) if self._header is not None else []}]
         # Validate both sections before materialising the first event.  The
         # external-ASGI boundary sends the returned list in order, so finding
         # a bad trailer after returning the start/body would be too late.
@@ -385,10 +394,41 @@ class NativeResponse:
         return events
 
 
+def _native_from_asgi(event, *, copy_headers=True):
+    """Convert HTTP send events; leave other event types unchanged.
+
+    Middleware may mutate native headers, so its boundary copies them.
+    Senders pass ``copy_headers=False`` because they take their own snapshot
+    before buffering or writing, avoiding two consecutive copies.
+    """
+    kind = event.get('type')
+    if kind == 'http.response.start':
+        headers = event.get('headers') or []
+        return NativeResponse(
+            status=int(event.get('status', 200)),
+            header=list(headers) if copy_headers else headers,
+            expects_trailers=bool(event.get('trailers', False)))
+    if kind == 'http.response.body':
+        # None would skip the body arm and leave buffered headers unflushed.
+        return NativeResponse(body=event.get('body') or b'',
+                              more_body=bool(event.get('more_body', False)))
+    if kind == 'http.response.trailers':
+        headers = event.get('headers') or []
+        return NativeResponse(
+            trailers=list(headers) if copy_headers else headers,
+            more_trailers=bool(event.get('more_trailers', False)))
+    if kind == 'http.response.pathsend':
+        return NativeResponse(file_path=event['path'])
+    if kind == 'http.response.push':
+        return NativeResponse(push=event.get('path', '/'),
+                              header=list(event.get('headers') or []))
+    return event
+
+
 def asgi_send_boundary(inner_send):
     """Wrap *inner_send* so native send-channel objects arrive as ASGI dicts.
 
-    Both native message types own a ``to_asgi()``, and both cross the same two
+    Native message types own a ``to_asgi()``, and cross the same two
     edges: the external-host boundary (uvicorn / ``asgi=True``) and the
     scope-declared middleware's own send wrapper.  Consumers there subscript
     ``event['type']``, so a native object reaching them raises in *their* code,

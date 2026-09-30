@@ -599,6 +599,19 @@ is exactly why that path drains rather than refusing.
 
 ## Send-path invariant
 
+HTTP ASGI send events are normalized by `blackbull.native._native_from_asgi`,
+shared by the handler/middleware adapters and both protocol senders.
+`NativeResponse(push=...)` carries a promised request; the HTTP/2 push
+callback consumes it directly. Its header arm describes request headers,
+so response middleware and route-header injection pass push messages through.
+`asgi_send_boundary` expands native messages at external-host and
+scope-declared middleware boundaries.
+
+Middleware conversion copies header lists because middleware may mutate them.
+Direct sender conversion borrows response headers and trailers; each sender
+copies them before buffering or writing. This avoids consecutive copies while
+isolating buffered fields from later changes to the caller's list.
+
 Protocol senders never choose between joining and vectored I/O
 themselves.  They always call `BaseSender._write_many(parts)`,
 and the internal size gate (`_VECTORED_JOIN_THRESHOLD`, 32 KiB)

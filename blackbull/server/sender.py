@@ -45,7 +45,7 @@ from ..asgi import (
     WebSocketSendEvent,
 )
 from ..headers import Headers, HeaderList, _validate_response_header_fields
-from ..native import NativeResponse, NativeWSMessage
+from ..native import NativeResponse, NativeWSMessage, _native_from_asgi
 
 from ..logger import debug_gate  # noqa: E402
 logger = logging.getLogger(__name__)
@@ -438,34 +438,6 @@ _SenderBody = _SenderEvent | bytes | NativeResponse
 _WSSenderEvent = WebSocketSendEvent | WebSocketCloseEvent | WebSocketAcceptEvent
 
 
-def _native_from_asgi(event):
-    """One dict → [`NativeResponse`][blackbull.native.NativeResponse].
-
-    Every shape but a promised request and an unknown one is expressible
-    natively, so the senders keep a single code path and the ASGI spelling
-    exists only here.  The rest is handed back unchanged for the senders to
-    decide on.
-    """
-    kind = event.get('type')
-    if kind == ASGIEvent.HTTP_RESPONSE_START:
-        return NativeResponse(
-            status=int(event.get('status', HTTPStatus.OK)),
-            header=list(event.get('headers') or []),
-            expects_trailers=bool(event.get('trailers', False)))
-    if kind == ASGIEvent.HTTP_RESPONSE_BODY:
-        # A missing body is a spec violation; an empty one keeps the response
-        # completing where a skipped body would hang it.
-        return NativeResponse(body=event.get('body') or b'',
-                              more_body=bool(event.get('more_body', False)))
-    if kind == ASGIEvent.HTTP_RESPONSE_TRAILERS:
-        return NativeResponse(trailers=list(event.get('headers') or []),
-                              more_trailers=bool(event.get('more_trailers',
-                                                          False)))
-    if kind == ASGIEvent.HTTP_RESPONSE_PATHSEND:
-        return NativeResponse(file_path=event['path'])
-    return event
-
-
 class BaseSender(ABC):
     """Abstract base for ASGI-event → wire-format senders.
 
@@ -654,7 +626,11 @@ class HTTP1Sender(BaseSender):
             return
 
         if isinstance(body, dict):
-            body = _native_from_asgi(body)
+            body = _native_from_asgi(body, copy_headers=False)
+
+        if isinstance(body, NativeResponse) and body.push is not None:
+            logger.warning('HTTP1Sender: push sent on HTTP/1; dropped')
+            return
 
         begins_response = (isinstance(body, bytes)
                            or (isinstance(body, NativeResponse)
@@ -683,8 +659,6 @@ class HTTP1Sender(BaseSender):
                     self._completed = True
 
             case NativeResponse():
-                # One object may carry header, body, and/or trailers; each arm
-                # does what the correspondingly named dict arm below does.
                 if body._header is not None:
                     header_pairs = list(body._header)
                     _validate_response_header_fields(header_pairs)
@@ -718,9 +692,6 @@ class HTTP1Sender(BaseSender):
                     self._response_started = True
                     await self._handle_trailers(
                         body.trailers, body.more_trailers)
-                if body.push is not None:
-                    logger.warning(
-                        'HTTP1Sender: push sent on HTTP/1; dropped')
 
             case {'type': str() as event_type}:
                 logger.warning('HTTP1Sender: unknown event type %r', event_type)
@@ -1642,7 +1613,7 @@ class HTTP2Sender(BaseSender):
             return
 
         if isinstance(body, dict):
-            body = _native_from_asgi(body)
+            body = _native_from_asgi(body, copy_headers=False)
 
         if isinstance(body, bytes):
             # RFC 9113 §8.1, as in the dict branch below.
@@ -1695,6 +1666,12 @@ class HTTP2Sender(BaseSender):
                         'the response was complete)',
                         self._stream_id)
                 return
+            if body.push is not None:
+                if self._push_callback is not None:
+                    await self._push_callback(body, self._stream_id)
+                else:
+                    logger.warning('push sent but no push handler registered')
+                return
             if body._header is not None:
                 header_pairs = list(body._header)
                 _validate_response_header_fields(header_pairs)
@@ -1718,11 +1695,6 @@ class HTTP2Sender(BaseSender):
             if body.trailers is not None and not self._end_stream_sent:
                 await self._handle_trailers(
                     list(body.trailers), body.more_trailers)
-            if body.push is not None:
-                if self._push_callback is not None:
-                    await self._push_callback(body.push, self._stream_id)
-                else:
-                    logger.warning('push sent but no push handler registered')
 
         elif isinstance(body, dict):
             event_type = body.get('type', '')
@@ -1741,14 +1713,7 @@ class HTTP2Sender(BaseSender):
                         event_type, self._stream_id)
                 return
 
-            if event_type == ASGIEvent.HTTP_RESPONSE_PUSH:
-                if self._push_callback is not None:
-                    await self._push_callback(body, self._stream_id)
-                else:
-                    logger.warning('http.response.push received but no push handler registered')
-
-            else:
-                logger.info('HTTP2Sender: unhandled event type %r', event_type)
+            logger.info('HTTP2Sender: unhandled event type %r', event_type)
 
         else:
             raise TypeError(f'HTTP2Sender expected bytes, dict, or FrameBase, got {type(body)!r}')

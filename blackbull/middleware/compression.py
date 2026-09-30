@@ -302,7 +302,7 @@ class Compression:
             # H1 native path: the header arm is a NativeResponse — stamp Vary
             # directly on its header list (zero-copy; no expansion).  Absence
             # is ``is not None`` — never truthiness.
-            if isinstance(event, NativeResponse):
+            if isinstance(event, NativeResponse) and event.push is None:
                 if event._header is not None:
                     headers = Headers(event._header)
                     if _is_compressible_content_type(headers) and \
@@ -420,7 +420,7 @@ class Compression:
             # against v0.67.0 on m7a.8xlarge: static −3.4〜−6.3 %, json-comp
             # −1.2〜−3.2 %).  Trailer shapes and plain dict events keep the
             # ``_dict_event`` lane.
-            if isinstance(event, NativeResponse):
+            if isinstance(event, NativeResponse) and event.push is None:
                 # Pass-through: a forward-verbatim decision is already made,
                 # so later objects are relayed untouched (mirrors the
                 # ``_dict_event`` fast path).
@@ -490,7 +490,7 @@ class Compression:
                 await send(event)
                 return
 
-            # A plain dict — ``push``, or an event the native seam does not
+            # A push message or an event the native seam does not
             # model.  Uncompressible for the same reason; release a held
             # header first so the sender has its headers before the thing that
             # depends on them.

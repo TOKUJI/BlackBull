@@ -255,6 +255,7 @@ class _Capture:
             await self._send(event)
             return
         if (not isinstance(event, NativeResponse)
+                or event.push is not None
                 or event.file_path is not None
                 or event.expects_trailers
                 or event.trailers is not None):

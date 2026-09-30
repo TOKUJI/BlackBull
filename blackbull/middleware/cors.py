@@ -106,18 +106,12 @@ class CORS:
     def _injecting_send(send, cors_hdrs):
         """Wrap *send* so the response's header arm gains *cors_hdrs*.
 
-        On the H1 native path the event is a
-        [`NativeResponse`][blackbull.native.NativeResponse] whose header arm gets the
-        CORS headers appended (a zero-copy mutation visible to the sender);
-        on the H2 / ASGI path it is a ``http.response.start`` dict, appended
-        to a copy of the event's own list — the downstream handler's headers
-        are never mutated in place.
+        ASGI headers are copied at the native conversion boundary before
+        this wrapper mutates them.
         """
-
-        # Unannotated on purpose: rebuilt per request (see _wrap_send_native in
-        # app.py).  ``event`` is a NativeResponse or an ASGISendEvent.
+        # Unannotated: rebuilt per request.
         async def cors_send(event):
-            if isinstance(event, NativeResponse):
+            if isinstance(event, NativeResponse) and event.push is None:
                 # Header arm — presence is `is not None` (never truthiness);
                 # raw slot for the check, view for the guarded append.
                 if event._header is not None:

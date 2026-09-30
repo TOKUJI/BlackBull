@@ -190,25 +190,25 @@ saving one round-trip.
 
 ### Triggering a push
 
-The app signals a push by calling `send` with an
-`http.response.push` event before the final `http.response.body`:
+Send a `NativeResponse(push=...)` before completing the parent response. ASGI apps may
+also send the equivalent `http.response.push` dictionary:
 
 ```python
+from blackbull.native import NativeResponse
+
 @app.route(path='/')
 async def index(conn, receive, send):
-    # Push a stylesheet before sending the HTML.
-    await send({
-        'type': 'http.response.push',
-        'path': '/static/style.css',
-        'headers': [],
-    })
+    await send(NativeResponse(push='/static/style.css'))
     await send({'type': 'http.response.start', 'status': 200,
                 'headers': [(b'content-type', b'text/html')]})
     await send({'type': 'http.response.body',
                 'body': b'<html>...</html>'})
 ```
 
-`path` must be a plain string (percent-encoding decoded).
+For a push, `header` contains the promised request's headers:
+`NativeResponse(push='/static/style.css', header=[(b'accept', b'text/css')])`.
+A push cannot also carry response status, body, trailers, or a file.
+`push` (ASGI `path`) must be a plain string (percent-encoding decoded).
 Pseudo-headers (`:method`, `:scheme`, `:authority`) are filled in
 automatically — do not include them in `headers`.
 
@@ -233,8 +233,7 @@ it at request-dispatch time:
 
 ```python
 if 'http.response.push' in conn.extensions:
-    await send({'type': 'http.response.push',
-                'path': '/logo.png', 'headers': []})
+    await send(NativeResponse(push='/logo.png'))
 ```
 
 For HTTP/1.1 requests `conn.extensions` does not contain
@@ -242,7 +241,10 @@ For HTTP/1.1 requests `conn.extensions` does not contain
 working on both protocols.  If the peer changes `SETTINGS_ENABLE_PUSH` after
 the scope was built, the send path checks the current connection permission as
 well: a late push event is logged and dropped without sending a
-`PUSH_PROMISE` or creating a pushed request.
+`PUSH_PROMISE` or creating a pushed request. Pushes sent on HTTP/1.1, on
+streams without a push handler, or after response completion are also dropped.
+`NativeResponse` preserves its push path and headers across scope-declared middleware
+and external ASGI hosts as an `http.response.push` event.
 
 ### Caveats
 

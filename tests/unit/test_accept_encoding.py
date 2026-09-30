@@ -257,7 +257,8 @@ async def test_a_middleware_emitting_asgi_dicts_still_gets_compressed():
 @pytest.mark.parametrize('order', ['third>comp', 'comp>third',
                                    'third>cors', 'cors>third'],
                          ids=lambda o: o.replace('>', '_over_'))
-async def test_a_dict_emitting_middleware_composes_in_any_order(order):
+@pytest.mark.parametrize('encoding', [b'gzip', b'unsupported'])
+async def test_a_dict_emitting_middleware_composes_in_any_order(order, encoding):
     """A third-party ASGI middleware works in the dict domain and hands plain
     ``http.response.start`` dicts down.  Whichever side of CORS or
     Compression it sits on, the response must survive: the layer that sees
@@ -266,9 +267,10 @@ async def test_a_dict_emitting_middleware_composes_in_any_order(order):
 
     comp = Compression(min_size=1)
     comp._available = {'gzip': gzip.compress}
-    cors = CORS()
+    cors = CORS(allow_origins=['https://example.com'], allow_credentials=True)
     conn = Connection(method='GET', path='/', raw_path=b'/',
-                      headers=Headers([(b'Accept-Encoding', b'gzip')]),
+                      headers=Headers([(b'accept-encoding', encoding),
+                                       (b'origin', b'https://example.com')]),
                       type='http')
     events = []
 
@@ -305,9 +307,19 @@ async def test_a_dict_emitting_middleware_composes_in_any_order(order):
 
     starts = [e for e in events if e.get('type') == 'http.response.start']
     assert [s['status'] for s in starts] == [200], events
+    headers = dict(starts[0]['headers'])
     payload = b''.join(e.get('body', b'') for e in events
                        if e.get('type') == 'http.response.body')
     if 'comp' in order:
-        assert gzip.decompress(payload) == BODY
+        assert b'accept-encoding' in headers[b'vary'].lower()
+        if encoding == b'gzip':
+            assert headers[b'content-encoding'] == b'gzip'
+            assert gzip.decompress(payload) == BODY
+        else:
+            assert b'content-encoding' not in headers
+            assert payload == BODY
     else:
+        assert headers[b'access-control-allow-origin'] == b'https://example.com'
+        assert headers[b'access-control-allow-credentials'] == b'true'
+        assert b'origin' in headers[b'vary'].lower()
         assert payload == BODY
