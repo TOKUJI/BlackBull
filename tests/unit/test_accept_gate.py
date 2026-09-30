@@ -25,6 +25,9 @@ class _Quiet(asyncio.Protocol):
     made = 0
     lost = 0
 
+    async def serve(self):
+        pass
+
     def connection_made(self, transport):
         type(self).made += 1
 
@@ -378,6 +381,9 @@ class _Idle(asyncio.Protocol):
     """Holds its admission for the connection's life, like a served client."""
 
     admission = None
+
+    async def serve(self):
+        pass
 
 
 @pytest.fixture
@@ -735,9 +741,66 @@ async def test_a_serve_failure_in_the_accept_task_is_logged_once(
             gc.collect()
             await asyncio.sleep(0.05)
         assert caplog.text.count('connection task failed') == 1
-        assert unhandled == []
+        assert unhandled == [], [c.get('message') for c in unhandled]
+        # Reported once, and not left in the task for asyncio to report again
+        # at collection ("Task exception was never retrieved").
+        assert accept_task.done() and accept_task.exception() is None
         assert gate._descriptors_held == 0
     finally:
         _Serving.fail = False
         loop.set_exception_handler(None)
+        client.close()
+
+
+
+class _ParkedServe(asyncio.Protocol):
+    admission = None
+
+    def connection_made(self, transport):
+        self.transport = transport
+
+    def connection_lost(self, exc):
+        if self.admission is not None:
+            self.admission.release()
+
+    async def serve(self):
+        await asyncio.Event().wait()
+
+
+@pytest.mark.asyncio
+@pytest.mark.timeout(30)
+async def test_a_cancel_during_serve_leaves_the_socket_to_its_transport(
+        listener, monkeypatch):
+    """Without eager start, the cleanup for a connect cancelled before its
+    first step must not also run for a cancel that lands while serving: the
+    transport still owns the socket then."""
+    monkeypatch.setattr(server_mod, '_EAGER_TASKS', False)
+    gate = _AcceptGate()
+    protocols = []
+
+    def factory():
+        protocols.append(_ParkedServe())
+        return protocols[-1]
+
+    client = socket.create_connection(listener.getsockname())
+    conn, _ = listener.accept()
+    try:
+        gate.connect(conn, factory, None)
+        [task] = gate._connecting
+        for _ in range(100):
+            if task in gate._serving:
+                break
+            await asyncio.sleep(0.01)
+        assert task in gate._serving
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await asyncio.sleep(0.05)
+        transport = protocols[0].transport
+        assert not transport.is_closing()
+        assert conn.fileno() != -1, 'closed under a live transport'
+        assert gate._descriptors_held == 1
+        transport.close()
+        await asyncio.sleep(0.05)
+        assert gate._descriptors_held == 0
+    finally:
         client.close()

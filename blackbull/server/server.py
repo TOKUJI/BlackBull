@@ -452,27 +452,33 @@ class _AcceptGate:
             admission.release()
             raise
         loop = self._loop or asyncio.get_running_loop()
-        coro = self._connected(loop, conn, protocol, ssl_context, admission)
         if _EAGER_TASKS:
-            task = asyncio.Task(coro, loop=loop, eager_start=True)
+            task = asyncio.Task(
+                self._connected(loop, conn, protocol, ssl_context, admission),
+                loop=loop, eager_start=True)
         else:
-            task = loop.create_task(coro)
+            started: list = []
+            task = loop.create_task(self._connected(
+                loop, conn, protocol, ssl_context, admission, started))
             # Cancelled before its first step, the coroutine never runs its
             # own cleanup.
             task.add_done_callback(
-                lambda done: self._never_started(done, conn, admission))
+                lambda done: self._never_started(done, conn, admission, started))
         if not task.done():
             self._connecting.add(task)
 
-    def _never_started(self, task, conn, admission: _Admission) -> None:
-        if task.cancelled():
+    def _never_started(self, task, conn, admission: _Admission,
+                       started: list) -> None:
+        if task.cancelled() and not started:
             if conn.fileno() != -1:
                 conn.close()
             admission.release()
             self._connecting.discard(task)
 
     async def _connected(self, loop, conn, protocol, ssl_context,
-                         admission: _Admission) -> None:
+                         admission: _Admission, started: list | None = None) -> None:
+        if started is not None:
+            started.append(True)
         task = asyncio.current_task()
         try:
             await loop.connect_accepted_socket(
@@ -499,13 +505,10 @@ class _AcceptGate:
         # The transport exists: stop() now drains this task, it no longer
         # cancels it.
         self._connecting.discard(task)
-        serve = getattr(protocol, 'serve', None)
-        if serve is None:
-            return
         serving = self._serving
         serving.add(task)
         try:
-            await serve()
+            await protocol.serve()
         except Exception:
             logger.exception('connection task failed')
         finally:

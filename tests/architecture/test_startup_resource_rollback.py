@@ -639,6 +639,9 @@ async def test_run_waits_for_in_progress_stop_despite_repeated_cancellation(
             server._connection_tasks.add(task)
             task.add_done_callback(server._connection_tasks.discard)
 
+        async def serve(self):
+            pass
+
     monkeypatch.setattr(
         server, "connection_protocol_factory", lambda _binding: TrackingProtocol
     )

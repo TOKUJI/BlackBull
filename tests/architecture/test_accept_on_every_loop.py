@@ -391,6 +391,9 @@ def test_an_accepted_connection_is_non_blocking(loop):
             def connection_made(self, transport):
                 transports.append(transport)
 
+            async def serve(self):
+                pass
+
         listener = socket.socket()
         listener.bind(('127.0.0.1', 0))
         listener.listen()
