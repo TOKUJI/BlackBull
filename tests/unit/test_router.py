@@ -216,22 +216,46 @@ async def test_router_websocket(router):
     assert scope['_connection'].path_params['id_'] == id_
 
 
+async def _mw_with_call_next(conn, receive, send, call_next):
+    pass
+
+
+async def _mw_with_inner(scope, receive, send, inner):
+    pass
+
+
+async def _chain_mw_call_next(conn, receive, send, call_next):
+    res = await call_next(conn, receive, send)
+    return res + '_mw'
+
+
+async def _chain_mw_inner(scope, receive, send, inner):
+    res = await inner(scope, receive, send)
+    return res + '_mw'
+
+
+async def _asgi_call_next(conn, receive, send, call_next): pass
+
+
+async def _asgi_inner(scope, receive, send, inner): pass
+
+
+async def _simplified_task_id(task_id): pass
+
+
+async def _simplified_scope(scope): pass
+
+
 # ---------------------------------------------------------------------------
 # call_next / inner detection tests
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize('case', [
-    pytest.param('call_next', id='call-next-detected'),
-    pytest.param('inner', id='inner-detected'),
+@pytest.mark.parametrize('mw,expected', [
+    pytest.param(_mw_with_call_next, 'call_next', id='call-next-detected'),
+    pytest.param(_mw_with_inner, 'inner', id='inner-detected'),
 ])
-def test_call_next_detected_as_middleware_param(case):
-    if case == 'call_next':
-        async def mw(conn, receive, send, call_next):
-            pass
-    else:
-        async def mw(scope, receive, send, inner):
-            pass
-    assert _middleware_param(mw) == case
+def test_call_next_detected_as_middleware_param(mw, expected):
+    assert _middleware_param(mw) == expected
     assert has_middleware_param(mw) is True
 
 
@@ -243,22 +267,11 @@ def test_plain_handler_has_no_middleware_param():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('case', [
-    pytest.param('call_next', id='chain-call-next-name'),
-    pytest.param('inner', id='chain-inner-name'),
+@pytest.mark.parametrize('mw,path', [
+    pytest.param(_chain_mw_call_next, 'test_cn', id='chain-call-next-name'),
+    pytest.param(_chain_mw_inner, 'test_inner', id='chain-inner-name'),
 ])
-async def test_chain_built_with_call_next_name(router, case):
-    path = 'test_cn' if case == 'call_next' else 'test_inner'
-
-    if case == 'call_next':
-        async def mw(conn, receive, send, call_next):
-            res = await call_next(conn, receive, send)
-            return res + '_mw'
-    else:
-        async def mw(scope, receive, send, inner):
-            res = await inner(scope, receive, send)
-            return res + '_mw'
-
+async def test_chain_built_with_call_next_name(router, mw, path):
     async def handler(scope, receive, send):
         return 'ok'
 
@@ -536,30 +549,22 @@ class TestSimplifiedHandlerDetection:
         async def fn(scope, receive, send): pass
         assert _is_simplified_handler(fn) is False
 
-    @pytest.mark.parametrize('case', [
-        pytest.param('call_next', id='call-next-middleware'),
-        pytest.param('inner', id='inner-middleware'),
+    @pytest.mark.parametrize('fn', [
+        pytest.param(_asgi_call_next, id='call-next-middleware'),
+        pytest.param(_asgi_inner, id='inner-middleware'),
     ])
-    def test_middleware_not_simplified(self, case):
-        if case == 'call_next':
-            async def fn(conn, receive, send, call_next): pass
-        else:
-            async def fn(scope, receive, send, inner): pass
+    def test_middleware_not_simplified(self, fn):
         assert _is_simplified_handler(fn) is False
 
     def test_no_params_is_simplified(self):
         async def fn(): pass
         assert _is_simplified_handler(fn) is True
 
-    @pytest.mark.parametrize('case', [
-        pytest.param('task_id', id='path-param-only'),
-        pytest.param('scope', id='scope-only'),
+    @pytest.mark.parametrize('fn', [
+        pytest.param(_simplified_task_id, id='path-param-only'),
+        pytest.param(_simplified_scope, id='scope-only'),
     ])
-    def test_path_param_only_is_simplified(self, case):
-        if case == 'task_id':
-            async def fn(task_id): pass
-        else:
-            async def fn(scope): pass
+    def test_path_param_only_is_simplified(self, fn):
         assert _is_simplified_handler(fn) is True
 
     def test_body_only_is_simplified(self):
@@ -845,14 +850,9 @@ class TestSimplifiedHandlerRequestInjection:
             _adapt_handler(fn, '/')
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize('case', [
-        pytest.param('no-body-param', id='no-body-param-does-not-call-receive'),
-        pytest.param('no-request-param', id='no-request-param-never-constructs-request'),
-    ])
-    async def test_no_request_param_never_constructs_request(self, case):
+    async def test_no_request_param_never_constructs_request(self):
         """Zero-cost check at the observable level: a handler with no body
-        param and no Request param must not touch receive, and the raw scope
-        object is handed through untouched (no wrapper dict)."""
+        param and no Request param must not touch receive."""
         async def fn(task_id): pass
         called = []
 
@@ -1557,22 +1557,12 @@ class TestCustomMethods:
     """RFC 9110 §9.1 — any token is a valid HTTP method; non-IANA methods
     (BREW, PROPFIND, WHEN, …) must be registerable and dispatchable."""
 
-    @pytest.mark.parametrize('case', [
-        pytest.param('fn', id='register-single-str-method'),
-        pytest.param('brew_fn', id='custom-method-dispatches'),
-    ])
-    def test_register_single_str_method(self, router, case):
-        if case == 'fn':
-            @router.route(path='/pot', methods='BREW')
-            def fn(scope, receive, send): pass
-            registered = fn
-        else:
-            @router.route(path='/pot', methods='BREW')
-            def brew_fn(scope, receive, send): pass
-            registered = brew_fn
+    def test_register_single_str_method(self, router):
+        @router.route(path='/pot', methods='BREW')
+        def fn(scope, receive, send): pass
 
         result = router[('/pot', 'BREW', Scheme.http)]
-        assert result is registered
+        assert result is fn
 
     def test_register_list_of_str_methods(self, router):
         @router.route(path='/pot', methods=['BREW', 'PROPFIND'])
