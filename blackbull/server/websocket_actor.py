@@ -21,6 +21,8 @@ from .sender import AbstractWriter, SenderFactory
 logger = logging.getLogger(__name__)
 
 # No release step may wait forever on app- or reader-side code (BLA-363).
+# The dispatch budget for the disconnect event: hanging handlers are
+# cancelled by name within it, later ones skipped, the transport closes.
 _DISCONNECT_HOOK_TIMEOUT = 5.0
 
 

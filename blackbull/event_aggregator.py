@@ -203,9 +203,13 @@ class EventAggregator:
         )
 
     async def on_websocket_disconnected(
-        self, conn, code: int = 1006
+        self, conn, code: int = 1006, *, timeout: float | None = None
     ) -> None:
-        """Fire Level B ``websocket_disconnected`` (``conn`` is a Connection)."""
+        """Fire Level B ``websocket_disconnected`` (``conn`` is a Connection).
+
+        ``timeout`` is the dispatch budget handed to `EventDispatcher.emit`
+        (see it for the bounded-dispatch contract).
+        """
         client, connection_id, path = _ws_fields(conn)
         await self._dispatcher.emit(Event("websocket_disconnected", {
             'conn':         conn,
@@ -213,7 +217,7 @@ class EventAggregator:
             "client_ip":     client[0] if client else '',
             "path":          path,
             "code":          code,
-        }))
+        }), timeout=timeout)
 
     # ------------------------------------------------------------------
     # Connection lifecycle

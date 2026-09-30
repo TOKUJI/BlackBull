@@ -258,6 +258,7 @@ class TestActorEndReleasesTheReader:
         await actor._ws_receive.shutdown()        # second release must be a no-op
         assert _released(actor)
 
+
 class _StubbornReader(_ScriptedReader):
     """A reader that suppresses cancellation, as the channel contract allows."""
 
@@ -312,4 +313,3 @@ class TestTheReleaseIsBounded:
         await asyncio.wait_for(actor.run(), 1.0)
         assert writer.closed, 'the transport must close past a suppressing reader'
         reader.suppressing = False
-

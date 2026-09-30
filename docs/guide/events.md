@@ -390,10 +390,15 @@ async def on_disconnected(event):
 Both are **observation only** — the connection lifecycle is
 driven by the ASGI handler, not by interceptors.
 
-The `websocket_disconnected` listener runs before the transport
-closes, but it is bounded: a listener that hangs is left behind
-after the bound (a warning names it) and the close proceeds.  The
-transport must close even when app hooks misbehave.
+The `websocket_disconnected` listeners run before the transport
+closes, and the dispatch is bounded: every interceptor and blocking
+observer for the event gets 5 seconds of budget of its own (the
+constant `_DISCONNECT_HOOK_TIMEOUT` in `blackbull.server.websocket_actor`).
+One that exhausts it is cancelled — a warning names it — and the
+next listener runs with a fresh budget, so one bad listener cannot
+cost the others their delivery.  Detached observers are scheduled
+regardless.  The transport must close even when app hooks misbehave;
+the dispatch as a whole lasts at most (listeners × 5 s).
 
 ## Exception handling
 
