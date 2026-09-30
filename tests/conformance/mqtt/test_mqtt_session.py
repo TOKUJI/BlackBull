@@ -26,6 +26,10 @@ Key behaviours:
 import asyncio
 import pytest
 
+from tests.conformance.mqtt._harness import (
+    run_until_idle, wait_idle, cancel_all,
+)
+
 from blackbull.mqtt.messages import (
     SESSION_EXPIRY_NEVER,
     ReasonCode,
@@ -42,51 +46,6 @@ from blackbull.server.recipient import AbstractReader
 # ---------------------------------------------------------------------------
 # In-process fakes
 # ---------------------------------------------------------------------------
-
-class _FakeMQTTReader(AbstractReader):
-    def __init__(self, data: bytes = b''):
-        self._buf = bytearray(data)
-
-    async def read(self, n: int) -> bytes:
-        if not self._buf:
-            await asyncio.sleep(0.01)
-            return b''
-        chunk = bytes(self._buf[:n])
-        del self._buf[:n]
-        return chunk
-
-    def feed_packet(self, packet) -> None:
-        self._buf.extend(encode_packet(packet))
-
-
-class _FakeMQTTWriter(AbstractWriter):
-    def __init__(self):
-        self.written = bytearray()
-
-    async def write(self, data: bytes) -> None:
-        self.written.extend(data)
-
-    def pop_packets(self) -> list:
-        packets = []
-        offset = 0
-        buf = bytes(self.written)
-        while offset < len(buf):
-            packet, consumed = decode_packet(buf[offset:])
-            packets.append(packet)
-            offset += consumed
-        self.written = self.written[offset:]
-        return packets
-
-
-def _ctx(conn_id: str = 'test-conn'):
-    return ProtocolContext(
-        peername=('127.0.0.1', 54321),
-        sockname=('0.0.0.0', 1883),
-        ssl=False,
-        aggregator=None,
-        connection_id=conn_id,
-        protocol='mqtt',
-    )
 
 
 # ============================================================================
@@ -211,48 +170,30 @@ class TestSessionStatePreservation:
 
         # Connection 1: subscribe to both topics; the session must outlive the
         # connection (Session Expiry Interval > 0).
-        reader = _FakeMQTTReader()
-        writer = _FakeMQTTWriter()
-        ctx = _ctx()
-        actor = mqtt.serve(reader, writer, ctx)
-        reader.feed_packet(MQTTConnect(
-            client_id='persist-sub',
-            clean_start=True,
-            keep_alive=60,
-            properties={'session_expiry_interval': 3600},
-        ))
-        reader.feed_packet(MQTTSubscribe(
-            packet_id=1,
-            subscriptions=[('sensors/temperature', 1), ('alerts/#', 2)],
-        ))
-        task = asyncio.create_task(actor.run())
-        await asyncio.sleep(0.05)
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+        await run_until_idle(
+            mqtt,
+            MQTTConnect(
+                client_id='persist-sub',
+                clean_start=True,
+                keep_alive=60,
+                properties={'session_expiry_interval': 3600},
+            ),
+            MQTTSubscribe(
+                packet_id=1,
+                subscriptions=[('sensors/temperature', 1), ('alerts/#', 2)],
+            ),
+        )
 
-        reader = _FakeMQTTReader()
-        writer = _FakeMQTTWriter()
-        ctx = _ctx()
-
-        actor = mqtt.serve(reader, writer, ctx)
         # Reconnect with Clean Start = False
-        reader.feed_packet(MQTTConnect(
-            client_id='persist-sub',
-            clean_start=False,
-            keep_alive=60,
-            properties={'session_expiry_interval': 3600},
-        ))
-
-        task = asyncio.create_task(actor.run())
-        await asyncio.sleep(0.05)
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+        _, writer = await run_until_idle(
+            mqtt,
+            MQTTConnect(
+                client_id='persist-sub',
+                clean_start=False,
+                keep_alive=60,
+                properties={'session_expiry_interval': 3600},
+            ),
+        )
 
         packets = writer.pop_packets()
         connacks = [p for p in packets if isinstance(p, MQTTConnack)]
@@ -271,46 +212,26 @@ class TestSessionStatePreservation:
 
         # Connection 1: subscribe; the session outlives the connection so the
         # Clean Start = 1 discard has something to discard.
-        reader = _FakeMQTTReader()
-        writer = _FakeMQTTWriter()
-        ctx = _ctx()
-        actor = mqtt.serve(reader, writer, ctx)
-        reader.feed_packet(MQTTConnect(
-            client_id='cs-discard',
-            clean_start=True,
-            keep_alive=60,
-            properties={'session_expiry_interval': 3600},
-        ))
-        reader.feed_packet(MQTTSubscribe(
-            packet_id=1, subscriptions=[('old/topic', 1)],
-        ))
-        task = asyncio.create_task(actor.run())
-        await asyncio.sleep(0.05)
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+        await run_until_idle(
+            mqtt,
+            MQTTConnect(
+                client_id='cs-discard',
+                clean_start=True,
+                keep_alive=60,
+                properties={'session_expiry_interval': 3600},
+            ),
+            MQTTSubscribe(packet_id=1, subscriptions=[('old/topic', 1)]),
+        )
 
-        reader = _FakeMQTTReader()
-        writer = _FakeMQTTWriter()
-        ctx = _ctx()
-
-        actor = mqtt.serve(reader, writer, ctx)
-        reader.feed_packet(MQTTConnect(
-            client_id='cs-discard',
-            clean_start=True,
-            keep_alive=60,
-            properties={'session_expiry_interval': 3600},
-        ))
-
-        task = asyncio.create_task(actor.run())
-        await asyncio.sleep(0.05)
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+        _, writer = await run_until_idle(
+            mqtt,
+            MQTTConnect(
+                client_id='cs-discard',
+                clean_start=True,
+                keep_alive=60,
+                properties={'session_expiry_interval': 3600},
+            ),
+        )
 
         packets = writer.pop_packets()
         connacks = [p for p in packets if isinstance(p, MQTTConnack)]

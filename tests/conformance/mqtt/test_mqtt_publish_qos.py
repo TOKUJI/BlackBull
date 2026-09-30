@@ -18,6 +18,8 @@ Reference: MQTT Version 5.0, OASIS Standard
 import asyncio
 import pytest
 
+from tests.conformance.mqtt._harness import wait_idle, cancel_all
+
 from blackbull.mqtt.messages import (
     RESERVED_FLAGS_0010,
     ReasonCode,
@@ -409,16 +411,12 @@ class TestPublishQoS2:
 
         actor = mqtt.serve(reader, writer, ctx)
         task = asyncio.create_task(actor.run())
-        await asyncio.sleep(0.1)
+        await wait_idle(reader, writer)
         # Third leg (§4.5): PUBREL for the same packet — the handshake must
         # complete with PUBCOMP, not stop at PUBREC.
         reader.feed_packet(MQTTPubrel(packet_id=999))
-        await asyncio.sleep(0.1)
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+        await wait_idle(reader, writer)
+        await cancel_all(task)
 
         packets = writer.pop_packets()
         # Both acknowledgement legs, in order: PUBREC for the PUBLISH, then

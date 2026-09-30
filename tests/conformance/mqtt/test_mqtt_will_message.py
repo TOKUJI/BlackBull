@@ -24,6 +24,10 @@ Key behaviours:
 import asyncio
 import pytest
 
+from tests.conformance.mqtt._harness import (
+    run_until_idle, wait_idle, wait_for_packets, cancel_all,
+)
+
 from blackbull.mqtt.messages import (
     ReasonCode,
     MQTTConnect, MQTTConnack, MQTTDisconnect,
@@ -214,7 +218,7 @@ class TestWillMessageDelivery:
         ))
         obs = mqtt.serve(obs_r, obs_w, _ctx())
         obs_task = asyncio.create_task(obs.run())
-        await asyncio.sleep(0.05)
+        await wait_idle(obs_r, obs_w)
 
         reader = _FakeMQTTReader()
         writer = _FakeMQTTWriter()
@@ -234,26 +238,22 @@ class TestWillMessageDelivery:
 
         # Start the actor, then simulate connection drop
         task = asyncio.create_task(actor.run())
-        await asyncio.sleep(0.05)
+        await wait_idle(reader, writer)
 
         # Simulate unclean disconnect (no DISCONNECT packet)
         reader.close()
 
-        await asyncio.sleep(0.1)
-
         # §3.1.2.5 — the Will Message was published with its configured topic
-        # and payload.
-        publishes = [p for p in obs_w.pop_packets() if isinstance(p, MQTTPublish)]
+        # and payload.  Wait for the routed Will on the observer's wire
+        # instead of sleeping for it.
+        packets = await wait_for_packets(
+            obs_w, lambda p: isinstance(p, MQTTPublish))
+        publishes = [p for p in packets if isinstance(p, MQTTPublish)]
         assert [(p.topic, p.payload) for p in publishes] == [
             ('system/clients/will-drop-client/status', b'connection-lost'),
         ], f'the Will must be published on an unclean disconnect; {publishes}'
 
-        for t in (task, obs_task):
-            t.cancel()
-            try:
-                await t
-            except asyncio.CancelledError:
-                pass
+        await cancel_all(task, obs_task)
 
     def test_will_message_not_published_on_normal_disconnect(self, mqtt):
         """§3.14 — Normal DISCONNECT (0x00) MUST NOT trigger Will Message.
