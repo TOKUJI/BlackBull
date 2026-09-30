@@ -22,6 +22,22 @@ def _scope(query: bytes = b'') -> dict:
             'query_string': query}
 
 
+async def _qp_page_int(page: int):
+    pass
+
+
+async def _qp_active_bool(active: bool):
+    pass
+
+
+async def _qp_search_q(q: str):
+    return {'q': q}
+
+
+async def _qp_search_page(page: int):
+    return {'page': page}
+
+
 class TestQueryParamResolution:
     @pytest.mark.asyncio
     async def test_unannotated_param_resolves_as_str(self):
@@ -50,12 +66,13 @@ class TestQueryParamResolution:
         assert captured['ratio'] == 0.5
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        'raw,expected',
-        [(r, True) for r in ['1', 'true', 'yes', 'on', 'True', 'YES']]
-        + [(r, False) for r in ['0', 'false', 'no', 'off', 'False', 'NO']],
-        ids=[*[f'bool-true-{r}' for r in ['1', 'true', 'yes', 'on', 'True', 'YES']],
-             *[f'bool-false-{r}' for r in ['0', 'false', 'no', 'off', 'False', 'NO']]])
+    @pytest.mark.parametrize('raw,expected', [
+        pytest.param(r, True, id=f'bool-true-{r}')
+        for r in ['1', 'true', 'yes', 'on', 'True', 'YES']
+    ] + [
+        pytest.param(r, False, id=f'bool-false-{r}')
+        for r in ['0', 'false', 'no', 'off', 'False', 'NO']
+    ])
     async def test_bool_true_forms(self, raw, expected):
         captured = {}
         async def fn(active: bool): captured['active'] = active
@@ -142,16 +159,12 @@ class TestQueryParam400s:
         assert 'q' in exc_info.value.detail
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize('param,qs', [
-        pytest.param('page:int', b'page=abc', id='int-coercion-failure'),
-        pytest.param('page:int', b'page=', id='blank-int-value'),
-        pytest.param('active:bool', b'active=maybe', id='bool-bad-value'),
+    @pytest.mark.parametrize('fn,qs', [
+        pytest.param(_qp_page_int, b'page=abc', id='int-coercion-failure'),
+        pytest.param(_qp_page_int, b'page=', id='blank-int-value'),
+        pytest.param(_qp_active_bool, b'active=maybe', id='bool-bad-value'),
     ])
-    async def test_int_coercion_failure_raises_400(self, param, qs):
-        if param == 'page:int':
-            async def fn(page: int): pass
-        else:
-            async def fn(active: bool): pass
+    async def test_int_coercion_failure_raises_400(self, fn, qs):
         wrapper = _adapt_handler(fn, '/search')
         with pytest.raises(HTTPException) as exc_info:
             await wrapper(_scope(qs), None, AsyncMock())
@@ -221,21 +234,13 @@ class TestQueryParamsEndToEnd:
             assert r.status_code == 200
             assert r.json() == {'q': 'bull', 'page': 2, 'active': True}
 
-    @pytest.mark.parametrize('sig,url', [
-        pytest.param('q: str', '/search', id='missing-required'),
-        pytest.param('page: int', '/search?page=xyz', id='coercion-failure'),
+    @pytest.mark.parametrize('handler,url', [
+        pytest.param(_qp_search_q, '/search', id='missing-required'),
+        pytest.param(_qp_search_page, '/search?page=xyz', id='coercion-failure'),
     ])
-    def test_missing_required_is_400_not_500(self, sig, url):
+    def test_missing_required_is_400_not_500(self, handler, url):
         app = BlackBull()
-
-        if sig == 'q: str':
-            @app.route(path='/search')
-            async def search(q: str):
-                return {'q': q}
-        else:
-            @app.route(path='/search')
-            async def search(page: int):
-                return {'page': page}
+        app.route(path='/search')(handler)
 
         with TestClient(app) as client:
             r = client.get(url)
