@@ -28,24 +28,19 @@ def test_trie_exact_path_hit():
     assert params == {}
 
 
-@pytest.mark.parametrize('case', [
-    pytest.param('exact-miss', id='exact-path-miss'),
-    pytest.param('converter-reject', id='int-converter-rejects'),
-    pytest.param('scheme-mismatch', id='scheme-mismatch'),
+@pytest.mark.parametrize('route,insert_scheme,url,lookup_scheme', [
+    pytest.param('/ping', Scheme.http, '/pong', Scheme.http, id='exact-path-miss'),
+    # conversion failed → path not matched
+    pytest.param('/items/{n:int}', Scheme.http, '/items/abc', Scheme.http,
+                 id='int-converter-rejects'),
+    pytest.param('/ws', Scheme.websocket, '/ws', Scheme.http, id='scheme-mismatch'),
 ])
-def test_trie_exact_path_miss(case):
+def test_trie_exact_path_miss(route, insert_scheme, url, lookup_scheme):
     trie = _RouteTrie()
-    if case == 'exact-miss':
-        trie.insert('/ping', (HTTPMethod.GET,), Scheme.http, _handler)
-        h, params, allowed = trie.lookup('/pong', HTTPMethod.GET, Scheme.http)
-    elif case == 'converter-reject':
-        trie.insert('/items/{n:int}', (HTTPMethod.GET,), Scheme.http, _handler)
-        h, params, allowed = trie.lookup('/items/abc', HTTPMethod.GET, Scheme.http)
-    else:
-        trie.insert('/ws', (HTTPMethod.GET,), Scheme.websocket, _handler)
-        h, params, allowed = trie.lookup('/ws', HTTPMethod.GET, Scheme.http)
+    trie.insert(route, (HTTPMethod.GET,), insert_scheme, _handler)
+    h, params, allowed = trie.lookup(url, HTTPMethod.GET, lookup_scheme)
     assert h is None
-    assert allowed == set()  # conversion failed → path not matched
+    assert allowed == set()
 
 
 @pytest.mark.parametrize('route,url,expected_params', [
@@ -108,33 +103,30 @@ def test_trie_multiple_params():
 # Backtracking pins — behaviours the lookup fast path must keep
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize('case', [
-    pytest.param('static-dead-end', id='static-dead-ends-deeper'),
-    pytest.param('method-mismatch', id='method-mismatch-static-branch'),
-])
-def test_trie_backtracks_to_param_when_static_dead_ends_deeper(case):
-    if case == 'static-dead-end':
-        # A static branch that dead-ends below must fall back to a param
-        # branch taken at an earlier level.
-        static_h, param_h = object(), object()
-        trie = _RouteTrie()
-        trie.insert('/x/static/other', (HTTPMethod.GET,), Scheme.http, static_h)
-        trie.insert('/x/{a}/target', (HTTPMethod.GET,), Scheme.http, param_h)
+def test_trie_backtracks_to_param_when_static_dead_ends_deeper():
+    """A static branch that dead-ends below must fall back to a param branch
+    taken at an earlier level."""
+    static_h, param_h = object(), object()
+    trie = _RouteTrie()
+    trie.insert('/x/static/other', (HTTPMethod.GET,), Scheme.http, static_h)
+    trie.insert('/x/{a}/target', (HTTPMethod.GET,), Scheme.http, param_h)
 
-        h, params, _ = trie.lookup('/x/static/target', HTTPMethod.GET, Scheme.http)
-        assert h is param_h
-        assert params == {'a': 'static'}
-    else:
-        # Static-first priority is per-entry-match, not per-path: a method miss
-        # on the static entry still lets a param sibling serve the request.
-        get_h, post_h = object(), object()
-        trie = _RouteTrie()
-        trie.insert('/x/fixed', (HTTPMethod.GET,), Scheme.http, get_h)
-        trie.insert('/x/{a}', (HTTPMethod.POST,), Scheme.http, post_h)
+    h, params, _ = trie.lookup('/x/static/target', HTTPMethod.GET, Scheme.http)
+    assert h is param_h
+    assert params == {'a': 'static'}
 
-        h, params, _ = trie.lookup('/x/fixed', HTTPMethod.POST, Scheme.http)
-        assert h is post_h
-        assert params == {'a': 'fixed'}
+
+def test_trie_backtracks_on_method_mismatch_in_static_branch():
+    """Static-first priority is per-entry-match, not per-path: a method miss
+    on the static entry still lets a param sibling serve the request."""
+    get_h, post_h = object(), object()
+    trie = _RouteTrie()
+    trie.insert('/x/fixed', (HTTPMethod.GET,), Scheme.http, get_h)
+    trie.insert('/x/{a}', (HTTPMethod.POST,), Scheme.http, post_h)
+
+    h, params, _ = trie.lookup('/x/fixed', HTTPMethod.POST, Scheme.http)
+    assert h is post_h
+    assert params == {'a': 'fixed'}
 
 
 def test_trie_405_aggregates_allowed_methods_across_branches():
@@ -147,29 +139,21 @@ def test_trie_405_aggregates_allowed_methods_across_branches():
     assert HTTPMethod.GET in allowed and HTTPMethod.POST in allowed
 
 
-@pytest.mark.parametrize('case', [
-    pytest.param('param-dead-end', id='param-dead-ends'),
-    pytest.param('converter-reject', id='converter-rejection'),
+@pytest.mark.parametrize('first,wild,url,expected_params', [
+    pytest.param('/f/{a}/b', '/f/{rest:path}', '/f/q/z', {'rest': 'q/z'},
+                 id='param-dead-ends'),
+    pytest.param('/i/{n:int}', '/i/{rest:path}', '/i/abc', {'rest': 'abc'},
+                 id='converter-rejection'),
 ])
-def test_trie_backtracks_to_wildcard_when_param_dead_ends(case):
-    if case == 'param-dead-end':
-        param_h, wild_h = object(), object()
-        trie = _RouteTrie()
-        trie.insert('/f/{a}/b', (HTTPMethod.GET,), Scheme.http, param_h)
-        trie.insert('/f/{rest:path}', (HTTPMethod.GET,), Scheme.http, wild_h)
+def test_trie_backtracks_to_wildcard_when_param_dead_ends(first, wild, url, expected_params):
+    first_h, wild_h = object(), object()
+    trie = _RouteTrie()
+    trie.insert(first, (HTTPMethod.GET,), Scheme.http, first_h)
+    trie.insert(wild, (HTTPMethod.GET,), Scheme.http, wild_h)
 
-        h, params, _ = trie.lookup('/f/q/z', HTTPMethod.GET, Scheme.http)
-        assert h is wild_h
-        assert params == {'rest': 'q/z'}
-    else:
-        int_h, wild_h = object(), object()
-        trie = _RouteTrie()
-        trie.insert('/i/{n:int}', (HTTPMethod.GET,), Scheme.http, int_h)
-        trie.insert('/i/{rest:path}', (HTTPMethod.GET,), Scheme.http, wild_h)
-
-        h, params, _ = trie.lookup('/i/abc', HTTPMethod.GET, Scheme.http)
-        assert h is wild_h
-        assert params == {'rest': 'abc'}
+    h, params, _ = trie.lookup(url, HTTPMethod.GET, Scheme.http)
+    assert h is wild_h
+    assert params == expected_params
 
 
 def test_trie_slash_normalization_matches_static_route():

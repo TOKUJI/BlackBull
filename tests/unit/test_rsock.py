@@ -100,6 +100,21 @@ class TestBindSocket:
 # create_socket
 # ---------------------------------------------------------------------------
 
+    def test_ipv6_socket_has_ipv6_only_set(self):
+        """IPv6 sockets must have IPV6_V6ONLY=1 to avoid conflicts with IPv4."""
+        sock = _bind_socket(socket.AF_INET6, '::', 0)
+        try:
+            v6only = sock.getsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY)
+            assert v6only == 1, (
+                "IPV6_V6ONLY must be 1 on the IPv6 socket so it does not "
+                "also handle IPv4-mapped addresses."
+            )
+        finally:
+            if sock:
+                sock.close()
+
+
+
 class TestCreateSocket:
     """Tests for the legacy create_socket helper."""
 
@@ -189,37 +204,21 @@ class TestCreateDualStackSockets:
         finally:
             _close_all(socks)
 
-    @pytest.mark.parametrize('case', [
-        pytest.param('bind', id='bind-ipv6-v6only'),
-        pytest.param('dual-stack', id='dual-stack-ipv6-v6only'),
-    ])
-    def test_ipv6_socket_has_ipv6_only_set(self, case):
-        if case == 'bind':
-            """IPv6 sockets must have IPV6_V6ONLY=1 to avoid conflicts with IPv4."""
-            sock = _bind_socket(socket.AF_INET6, '::', 0)
-            try:
-                v6only = sock.getsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY)
-                assert v6only == 1, (
-                    "IPV6_V6ONLY must be 1 on the IPv6 socket so it does not "
-                    "also handle IPv4-mapped addresses."
-                )
-            finally:
-                if sock:
-                    sock.close()
-        else:
-            """The IPv6 socket must have IPV6_V6ONLY=1 so it doesn't shadow IPv4."""
-            socks = create_dual_stack_sockets(0)
-            try:
-                for s in socks:
-                    if s.family == socket.AF_INET6:
-                        v6only = s.getsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY)
-                        assert v6only == 1, (
-                            "IPV6_V6ONLY must be 1 on the IPv6 socket. "
-                            "Without it, the IPv6 socket would also accept "
-                            "IPv4-mapped addresses, conflicting with the IPv4 socket."
-                        )
-            finally:
-                _close_all(socks)
+    def test_ipv6_socket_has_ipv6_only_set(self):
+        """The IPv6 socket must have IPV6_V6ONLY=1 so it doesn't shadow IPv4."""
+        socks = create_dual_stack_sockets(0)
+        try:
+            for s in socks:
+                if s.family == socket.AF_INET6:
+                    v6only = s.getsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY)
+                    assert v6only == 1, (
+                        "IPV6_V6ONLY must be 1 on the IPv6 socket. "
+                        "Without it, the IPv6 socket would also accept "
+                        "IPv4-mapped addresses, conflicting with the IPv4 socket."
+                    )
+        finally:
+            _close_all(socks)
+
 
     def test_sockets_are_listening(self):
         """All returned sockets must be in the listen state."""
