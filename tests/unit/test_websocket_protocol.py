@@ -176,13 +176,13 @@ class TestEncodeFrame:
             assert int.from_bytes(frame[2:10], 'big') == length
             assert frame[10:] == payload
 
-    @pytest.mark.parametrize('payload,opcode,expected', [
-        pytest.param(b'\x00\x01', 0x2, 0x2, id='binary-opcode'),
-        pytest.param(b'\x03\xe8', 0x8, 0x8, id='close-frame-opcode'),
+    @pytest.mark.parametrize('payload,opcode', [
+        pytest.param(b'\x00\x01', 0x2, id='binary-opcode'),
+        pytest.param(b'\x03\xe8', 0x8, id='close-frame-opcode'),
     ])
-    def test_binary_opcode(self, payload, opcode, expected):
+    def test_binary_opcode(self, payload, opcode):
         frame = encode_frame(payload, opcode=opcode)
-        assert frame[0] & 0x0F == expected
+        assert frame[0] & 0x0F == opcode
 
 
 class TestEncodeFrameHeader:

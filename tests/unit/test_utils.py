@@ -1,6 +1,6 @@
-import pytest
 from http import HTTPStatus
 
+import pytest
 
 from blackbull.utils import Scheme, pop_safe, is_client_error, is_server_error
 
@@ -48,21 +48,18 @@ def test_pop_safe_missing_key_is_noop():
 # own .is_client_error / .is_server_error are 3.12-only and crash on 3.11)
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize('kind', [
-    pytest.param('client', id='client-error-4xx'),
-    pytest.param('server', id='server-error-5xx'),
+@pytest.mark.parametrize('statuses,is_client', [
+    pytest.param((HTTPStatus.BAD_REQUEST, HTTPStatus.NOT_FOUND,
+                  HTTPStatus.IM_A_TEAPOT, HTTPStatus.UNAVAILABLE_FOR_LEGAL_REASONS),
+                 True, id='client-error-4xx'),
+    pytest.param((HTTPStatus.INTERNAL_SERVER_ERROR, HTTPStatus.BAD_GATEWAY,
+                  HTTPStatus.SERVICE_UNAVAILABLE, HTTPStatus.HTTP_VERSION_NOT_SUPPORTED),
+                 False, id='server-error-5xx'),
 ])
-def test_is_client_error_true_for_4xx(kind):
-    if kind == 'client':
-        for s in (HTTPStatus.BAD_REQUEST, HTTPStatus.NOT_FOUND,
-                  HTTPStatus.IM_A_TEAPOT, HTTPStatus.UNAVAILABLE_FOR_LEGAL_REASONS):
-            assert is_client_error(s)
-            assert not is_server_error(s)
-    else:
-        for s in (HTTPStatus.INTERNAL_SERVER_ERROR, HTTPStatus.BAD_GATEWAY,
-                  HTTPStatus.SERVICE_UNAVAILABLE, HTTPStatus.HTTP_VERSION_NOT_SUPPORTED):
-            assert is_server_error(s)
-            assert not is_client_error(s)
+def test_is_client_error_true_for_4xx(statuses, is_client):
+    for s in statuses:
+        assert is_client_error(s) is is_client
+        assert is_server_error(s) is (not is_client)
 
 
 def test_non_error_statuses_are_neither():

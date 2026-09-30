@@ -295,21 +295,18 @@ def test_app_without_lifespan_still_works() -> None:
     assert response.text == 'no-lifespan'
 
 
-@pytest.mark.parametrize('phase,match', [
-    pytest.param('startup', 'startup failed', id='startup-failure'),
-    pytest.param('shutdown', 'intentional shutdown failure', id='shutdown-failure'),
+@pytest.mark.parametrize('phase,message,match', [
+    pytest.param('startup', 'intentional startup failure', 'startup failed',
+                 id='startup-failure'),
+    pytest.param('shutdown', 'intentional shutdown failure',
+                 'intentional shutdown failure', id='shutdown-failure'),
 ])
-def test_lifespan_startup_failure_surfaces(phase, match) -> None:
+def test_lifespan_startup_failure_surfaces(phase, message, match) -> None:
     app = BlackBull()
 
-    if phase == 'startup':
-        @app.on_startup
-        async def _boom() -> None:
-            raise RuntimeError('intentional startup failure')
-    else:
-        @app.on_shutdown
-        async def _boom() -> None:
-            raise RuntimeError('intentional shutdown failure')
+    @getattr(app, f'on_{phase}')
+    async def _boom() -> None:
+        raise RuntimeError(message)
 
     with pytest.raises(RuntimeError, match=match):
         with TestClient(app):

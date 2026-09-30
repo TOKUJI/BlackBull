@@ -484,20 +484,21 @@ def test_bare_parameter_names_get_the_object(name):
     assert _kinds(plan) == (_ParamKind.WS,)
 
 
-@pytest.mark.parametrize('which,expected', [
-    pytest.param('conn', (_ParamKind.CONN,), id='annotation-wins-over-name'),
-    pytest.param('ws', (_ParamKind.WS,), id='explicit-annotation-any-name'),
+async def _ws_param_conn(ws: Connection):
+    pass
+
+
+async def _ws_param_sock(sock: WebSocket):
+    pass
+
+
+@pytest.mark.parametrize('handler,expected', [
+    pytest.param(_ws_param_conn, (_ParamKind.CONN,), id='annotation-wins-over-name'),
+    pytest.param(_ws_param_sock, (_ParamKind.WS,), id='explicit-annotation-any-name'),
 ])
-def test_annotation_wins_over_name(which, expected):
+def test_annotation_wins_over_name(handler, expected):
     """``ws: Connection`` means the Connection, however the parameter is spelt;
     annotation beats naming convention."""
-    if which == 'conn':
-        async def handler(ws: Connection):
-            pass
-    else:
-        async def handler(sock: WebSocket):
-            pass
-
     assert _kinds(_websocket_param_plan(handler)) == expected
 
 
