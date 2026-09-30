@@ -21,6 +21,7 @@ from hpack import Encoder
 
 from blackbull.connection import Connection
 from blackbull.headers import Headers
+from blackbull.native import NativeResponse
 from blackbull.server.http2_actor import HTTP2Actor
 from blackbull.server.parser import parse_headers
 from blackbull.server.sender import AsyncioWriter
@@ -378,7 +379,7 @@ class TestPushPromiseAuthority:
             headers=Headers([(b'host', b'example.com:8443')]))
         async with asyncio.TaskGroup() as tg:
             handler._task_group = tg
-            await handler._handle_push({'path': '/style.css'}, 1)
+            await handler._handle_push(NativeResponse(push='/style.css'), 1)
         handler._task_group = None
         pp = None
         for call in handler.send_frame.call_args_list:

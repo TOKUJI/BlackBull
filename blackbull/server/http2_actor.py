@@ -40,8 +40,8 @@ from .access_log import (
     open_record as _open_record,
     start_record as _start_record,
 )
-from ..asgi import (ASGIEvent, ASGIReceiveCallable, ASGISendCallable,
-                    HTTPResponsePushEvent)
+from ..asgi import ASGIEvent, ASGIReceiveCallable, ASGISendCallable
+from ..native import NativeResponse
 from .http1_actor import RequestActor
 
 logger = logging.getLogger(__name__)
@@ -1661,9 +1661,9 @@ class HTTP2Actor(Actor):
         task.add_done_callback(
             self._make_done_cb(stream.stream_id, is_ws=True))
 
-    async def _handle_push(self, event: HTTPResponsePushEvent,
+    async def _handle_push(self, event: NativeResponse,
                            parent_stream_id: int) -> None:
-        """Handle an 'http.response.push' ASGI event.
+        """Handle a native promised request.
 
         RFC 9113 §8.4 / §8.4.1 (safe, cacheable, body-less, always ``GET``)
         and §6.6 for the PUSH_PROMISE frame.  The ``:path`` split uses the
@@ -1687,7 +1687,7 @@ class HTTP2Actor(Actor):
         from .parser import _split_h2_path  # noqa: PLC0415
 
         push_stream_id = self._allocate_push_stream_id()
-        path = event.get('path', '/')
+        path = event.push
 
         parent = parent_stream.conn
         # Plain attribute reads, never ``.get()`` on a scope: under
@@ -1714,7 +1714,7 @@ class HTTP2Actor(Actor):
         regular = [
             (k.decode() if isinstance(k, bytes) else k,
              v.decode() if isinstance(v, bytes) else v)
-            for k, v in event.get('headers', [])
+            for k, v in (event._header or [])
             if not (k.decode() if isinstance(k, bytes) else k).startswith(':')
         ]
 

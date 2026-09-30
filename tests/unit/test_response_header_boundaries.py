@@ -225,3 +225,28 @@ async def test_h1_legal_controls_reach_one_field_each():
 def test_external_asgi_conversion_validates_all_sections_before_return(native):
     with pytest.raises(ValueError, match='header value'):
         native.to_asgi()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('protocol', ['h1', 'h2'])
+@pytest.mark.parametrize('native', [False, True])
+async def test_buffered_start_owns_its_header_snapshot(protocol, native):
+    writer = _Writer()
+    factory = FrameFactory()
+    sender = (HTTP1Sender(writer) if protocol == 'h1'
+              else HTTP2Sender(writer, factory, 1))
+    headers = [(b'x-original', b'1')]
+    start = (NativeResponse(header=headers) if native else
+             {'type': 'http.response.start', 'status': 200, 'headers': headers})
+    await sender(start)
+    headers.append((b'x-late', b'2'))
+    await sender(NativeResponse(body=b'ok'))
+    if protocol == 'h1':
+        assert b'x-original: 1\r\n' in writer.data
+        assert b'x-late:' not in writer.data
+    else:
+        length = int.from_bytes(writer.data[:3], 'big')
+        pairs = factory.decoder.decode(bytes(writer.data[9:9 + length]), raw=True)
+        assert (b'x-original', b'1') in pairs
+        assert not any(k == b'x-late' for k, _ in pairs)
+    assert headers == [(b'x-original', b'1'), (b'x-late', b'2')]

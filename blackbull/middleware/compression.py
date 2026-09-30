@@ -18,7 +18,6 @@ import functools
 import gzip
 import threading
 from collections.abc import Callable
-from ..asgi import ASGIEvent
 from ..connection import Connection
 from ..headers import Headers
 from ..native import NativeResponse
@@ -303,7 +302,8 @@ class Compression:
             # H1 native path: the header arm is a NativeResponse — stamp Vary
             # directly on its header list (zero-copy; no expansion).  Absence
             # is ``is not None`` — never truthiness.
-            if isinstance(event, NativeResponse):
+            if (isinstance(event, NativeResponse)
+                    and (event._extension is None or event.push is None)):
                 if event._header is not None:
                     headers = Headers(event._header)
                     if _is_compressible_content_type(headers) and \
@@ -314,14 +314,6 @@ class Compression:
             # of every body event just to have the next line's `isinstance`
             # reject it — a per-chunk cost on a streamed response, for a
             # wrapper that only ever cares about the start event.
-            elif isinstance(event, dict) and \
-                    event.get('type') == ASGIEvent.HTTP_RESPONSE_START:
-                headers = Headers(event.get('headers', []))
-                if _is_compressible_content_type(headers) and \
-                        not headers.get(b'content-encoding'):
-                    hdrs = list(event.get('headers', []))
-                    _merge_vary(hdrs)
-                    event = {**event, 'headers': hdrs}
             await send(event)
         return vary_send
 
@@ -429,7 +421,8 @@ class Compression:
             # against v0.67.0 on m7a.8xlarge: static −3.4〜−6.3 %, json-comp
             # −1.2〜−3.2 %).  Trailer shapes and plain dict events keep the
             # ``_dict_event`` lane.
-            if isinstance(event, NativeResponse):
+            if (isinstance(event, NativeResponse)
+                    and (event._extension is None or event.push is None)):
                 # Pass-through: a forward-verbatim decision is already made,
                 # so later objects are relayed untouched (mirrors the
                 # ``_dict_event`` fast path).
@@ -499,7 +492,7 @@ class Compression:
                 await send(event)
                 return
 
-            # A plain dict — ``push``, or an event the native seam does not
+            # A push message or an event the native seam does not
             # model.  Uncompressible for the same reason; release a held
             # header first so the sender has its headers before the thing that
             # depends on them.
