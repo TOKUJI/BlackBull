@@ -390,6 +390,11 @@ async def on_disconnected(event):
 Both are **observation only** — the connection lifecycle is
 driven by the ASGI handler, not by interceptors.
 
+The `websocket_disconnected` listener runs before the transport
+closes, but it is bounded: a listener that hangs is left behind
+after the bound (a warning names it) and the close proceeds.  The
+transport must close even when app hooks misbehave.
+
 ## Exception handling
 
 Restated:

@@ -54,6 +54,10 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# A cancelled read loop stops at once; one that suppresses cancellation
+# is left reading a dead transport rather than stalling the close.
+_READ_LOOP_JOIN_TIMEOUT = 5.0
+
 # Defaults behind BB_STREAM_QUEUE_DEPTH / BB_WS_QUEUE_DEPTH (see
 # docs/reference/env-vars.md); ``WebSocketRecipient`` documents the two modes.
 _HTTP2_STREAM_QUEUE_DEPTH = 64
@@ -2365,9 +2369,10 @@ class WebSocketRecipient(BaseRecipient):
         here; the watchdog is timer handles (``disarm_watchdog``); control
         sends — liveness probe, unresponsive end, buffered control frames —
         are single suppressed writes that end on their own, so nothing joins
-        them.  A reader that outlives its session reads a dead transport and
-        warns at event-loop shutdown.  Idempotent, safe before the first
-        ``__call__``; called from the read loop itself it skips the join.
+        them.  The join is bounded: ``read()`` may suppress cancellation, and
+        such a reader is left reading a dead transport (it warns at event-loop
+        shutdown) instead of stalling the close.  Idempotent, safe before the
+        first ``__call__``; called from the read loop itself it skips the join.
         """
         self._closed = True
         self.disarm_watchdog()
@@ -2376,10 +2381,17 @@ class WebSocketRecipient(BaseRecipient):
         if (task is not None and task is not asyncio.current_task()
                 and not task.done()):
             task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass  # Expected: the task was cancelled intentionally.
+            done, _pending = await asyncio.wait(
+                {task}, timeout=_READ_LOOP_JOIN_TIMEOUT)
+            if not done:
+                logger.warning(
+                    'read-loop task did not stop within %.1fs; leaving it to '
+                    'read a dead transport', _READ_LOOP_JOIN_TIMEOUT)
+            else:
+                try:
+                    task.result()
+                except asyncio.CancelledError:
+                    pass  # Expected: the task was cancelled intentionally.
 
     def _mark_connect_sent(self) -> None:
         """Claim the handshake read and arm the connection's timers.

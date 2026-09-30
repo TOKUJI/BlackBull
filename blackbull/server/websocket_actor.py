@@ -20,6 +20,9 @@ from .sender import AbstractWriter, SenderFactory
 
 logger = logging.getLogger(__name__)
 
+# No release step may wait forever on app- or reader-side code (BLA-363).
+_DISCONNECT_HOOK_TIMEOUT = 5.0
+
 
 # The handshake owns these response fields; an application accept header with
 # one of these names would rewrite the protocol's own answer (BLA-378).
@@ -165,10 +168,25 @@ class WebSocketActor(Actor):
             # Release order (BLA-363): the disconnect event (once, with the
             # code the peer saw), then the reader task — a full queue parks
             # it in queue.put, where EOF never wakes it — then the transport.
-            # Each step releases the next even when it raises.
+            # Each step releases the next even when it raises, and no step
+            # waits forever: the listener is app code and may hang, so it is
+            # bounded and then left behind — the transport still closes.
             try:
-                await self._aggregator.on_websocket_disconnected(
-                    self._conn, code=self._disconnect_code)
+                hook = asyncio.ensure_future(
+                    self._aggregator.on_websocket_disconnected(
+                        self._conn, code=self._disconnect_code))
+                try:
+                    done, _pending = await asyncio.wait(
+                        {hook}, timeout=_DISCONNECT_HOOK_TIMEOUT)
+                except asyncio.CancelledError:
+                    hook.cancel()
+                    raise
+                if not done:
+                    logger.warning(
+                        'on_websocket_disconnected exceeded %.1fs; releasing '
+                        'the connection anyway', _DISCONNECT_HOOK_TIMEOUT)
+                else:
+                    hook.result()  # a raising listener still propagates
             finally:
                 try:
                     await self._ws_receive.shutdown()

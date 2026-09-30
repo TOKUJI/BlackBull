@@ -257,3 +257,59 @@ class TestActorEndReleasesTheReader:
         await actor.run()
         await actor._ws_receive.shutdown()        # second release must be a no-op
         assert _released(actor)
+
+class _StubbornReader(_ScriptedReader):
+    """A reader that suppresses cancellation, as the channel contract allows."""
+
+    def __init__(self, chunks):
+        super().__init__(chunks)
+        self.suppressing = True
+
+    async def read(self, n: int) -> bytes:
+        while self.suppressing:
+            try:
+                return await super().read(n)
+            except asyncio.CancelledError:
+                continue
+        return b''
+
+
+class TestTheReleaseIsBounded:
+    """No step of the release may wait forever on app- or reader-side code."""
+
+    async def test_a_hanging_disconnect_listener_does_not_stall_the_release(
+            self, monkeypatch):
+        from blackbull.server import websocket_actor
+        monkeypatch.setattr(websocket_actor,
+                            '_DISCONNECT_HOOK_TIMEOUT', 0.05)
+
+        async def hang(conn, code=None):
+            await asyncio.Event().wait()
+
+        async def app(conn, receive, send):
+            pass
+
+        writer = _FakeWriter()
+        actor = WebSocketActor(
+            _ScriptedReader([_client_frame(b'hi')]), writer, _ws_conn(), app,
+            _agg(on_disconnect=hang))
+        await asyncio.wait_for(actor.run(), 1.0)
+        assert writer.closed, 'the transport must close past a hanging listener'
+
+    async def test_a_reader_that_suppresses_cancellation_does_not_stall_shutdown(
+            self, monkeypatch):
+        from blackbull.server import recipient
+        monkeypatch.setattr(recipient, '_READ_LOOP_JOIN_TIMEOUT', 0.05)
+
+        async def app(conn, receive, send):
+            await receive()
+            await receive()
+
+        reader = _StubbornReader([_client_frame(b'hi')])
+        writer = _FakeWriter()
+        actor = WebSocketActor(reader, writer, _ws_conn(), app, _agg(),
+                               ws_queue_depth=1)
+        await asyncio.wait_for(actor.run(), 1.0)
+        assert writer.closed, 'the transport must close past a suppressing reader'
+        reader.suppressing = False
+
