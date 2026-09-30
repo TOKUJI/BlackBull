@@ -1613,11 +1613,24 @@ class HTTP2Actor(Actor):
                                        head_mode=method_is(conn.method,
                                                            'HEAD'))
 
+        # RFC 7692 permessage-deflate negotiation, shared with the HTTP/1.1
+        # handshake: the offer decides, the answer rides the 200, and the
+        # parameters reach WebSocketActor through ``conn._ws``.
+        from ..env import get_settings as _get_settings  # noqa: PLC0415
+        from .permessage_deflate import negotiate as _negotiate_deflate  # noqa: PLC0415
+        deflate_params = None
+        deflate_response = None
+        if _get_settings().ws_permessage_deflate:
+            offer = conn.headers.get(b'sec-websocket-extensions', b'')
+            deflate_params, deflate_response = _negotiate_deflate(offer or None)
+
         async def _ws_send_200(subprotocol=None, app_headers=None):
             headers = []
             if subprotocol:
                 sp = subprotocol if isinstance(subprotocol, str) else subprotocol.decode()
                 headers = [(b'sec-websocket-protocol', sp.encode())]
+            if deflate_response is not None:
+                headers.append((b'sec-websocket-extensions', deflate_response))
             headers.extend(app_headers or ())
             # Flushed now, not through http.response.start: HTTP2Sender
             # coalesces HEADERS with the first DATA, and an RFC 8441 accept has
@@ -1625,7 +1638,7 @@ class HTTP2Actor(Actor):
             # hang.  No END_STREAM — the stream stays open for WS DATA frames.
             await stream_send.send_response_headers(HTTPStatus(200), headers)
 
-        conn._ws = {'send_101': _ws_send_200}
+        conn._ws = {'send_101': _ws_send_200, 'deflate': deflate_params}
 
         ws_reader = HTTP2WSReader(
             credit_callback=self._make_consume_credit_callback(stream.stream_id))

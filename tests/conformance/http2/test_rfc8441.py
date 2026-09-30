@@ -50,6 +50,7 @@ def _make_extended_connect_frame(
     scheme: str = 'https',
     stream_id: int = 1,
     subprotocols: str = '',
+    extensions: str = '',
     end_stream: bool = False,
 ) -> bytes:
     """HEADERS frame for RFC 8441 Extended CONNECT."""
@@ -63,6 +64,8 @@ def _make_extended_connect_frame(
     ]
     if subprotocols:
         headers.append((b'sec-websocket-protocol', subprotocols.encode()))
+    if extensions:
+        headers.append((b'sec-websocket-extensions', extensions.encode()))
     block = encoder.encode(headers)
     flags = HeaderFrameFlags.END_HEADERS
     if end_stream:
@@ -389,6 +392,153 @@ class TestExtendedConnectHandshake:
 # ---------------------------------------------------------------------------
 # §5 — Data exchange: WebSocket frames in HTTP/2 DATA frames
 # ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestPermessageDeflateNegotiation:
+    """RFC 7692 negotiation over the RFC 8441 handshake (BLA-362)."""
+
+    @staticmethod
+    def _response_headers(writes) -> list[tuple[str, str]]:
+        from hpack import Decoder
+        all_bytes = b''.join(writes)
+        out = []
+        decoder = Decoder()
+        i = 0
+        while i + 9 <= len(all_bytes):
+            length = int.from_bytes(all_bytes[i:i+3], 'big')
+            if all_bytes[i+3] == 0x01 and length > 0:
+                try:
+                    for k, v in decoder.decode(all_bytes[i+9:i+9+length]):
+                        out.append((k.decode() if isinstance(k, bytes) else k,
+                                    v.decode() if isinstance(v, bytes) else v))
+                except Exception:
+                    pass
+            i += 9 + length
+        return out
+
+    @staticmethod
+    def _echoed_ws_frame(writes) -> bytes:
+        all_bytes = b''.join(writes)
+        i = 0
+        while i + 9 <= len(all_bytes):
+            length = int.from_bytes(all_bytes[i:i+3], 'big')
+            if all_bytes[i+3] == 0x00 and length > 0 and all_bytes[i+4] & 0x01 == 0:
+                return all_bytes[i+9:i+9+length]
+            i += 9 + length
+        raise AssertionError('no DATA frame echoed')
+
+    async def test_an_accepted_offer_is_echoed_and_compressed_round_trip_works(self):
+        """An offered permessage-deflate the runtime serves is answered in
+        the 200 and the round trip carries RFC 7692 frames."""
+        from blackbull.server.permessage_deflate import (
+            InboundDecompressor, OutboundCompressor, negotiate)
+        params, _ = negotiate(b'permessage-deflate')
+        assert params is not None, 'this runtime must serve the bare offer'
+        received = {}
+
+        async def app(conn, receive, send):
+            await receive()
+            await send({'type': 'websocket.accept'})
+            event = await receive()
+            received.update(event)
+            await send({'type': 'websocket.send', 'text': event['text']})
+            await receive()
+
+        compressed = OutboundCompressor(
+            wbits=params.client_max_window_bits,
+            reset_per_message=params.client_no_context_takeover,
+        ).compress(b'hello')
+        ws_bytes = encode_frame(compressed, opcode=WSOpcode.TEXT,
+                                mask=True, rsv1=True)
+        handler, _, writer = _make_h2_actor(app)
+        writes = []
+        writer.write = MagicMock(side_effect=lambda b: writes.append(b))
+        writer.drain = AsyncMock()
+        handler.receive = AsyncMock(side_effect=[
+            _client_settings(),
+            _make_extended_connect_frame(extensions='permessage-deflate'),
+            _make_ws_data_frame(ws_bytes, stream_id=1),
+            None,
+        ])
+        await handler.run()
+
+        headers = self._response_headers(writes)
+        assert any(k == 'sec-websocket-extensions'
+                   and v.startswith('permessage-deflate')
+                   for k, v in headers), headers
+        assert received.get('text') == 'hello'
+        echoed = self._echoed_ws_frame(writes)
+        assert echoed[0] & 0x40, 'server echo must be RFC 7692 compressed'
+        out = InboundDecompressor(
+            wbits=params.server_max_window_bits,
+            reset_per_message=params.server_no_context_takeover,
+        ).decompress(echoed[2:])
+        assert out == b'hello'
+
+    async def test_an_unservable_offer_declines_to_plain(self):
+        """An offer the runtime cannot serve earns no extension in the
+        200 and the plain round trip keeps working."""
+        received = {}
+
+        async def app(conn, receive, send):
+            await receive()
+            await send({'type': 'websocket.accept'})
+            event = await receive()
+            received.update(event)
+            await send({'type': 'websocket.send', 'text': event['text']})
+            await receive()
+
+        ws_bytes = encode_frame(b'hello', opcode=WSOpcode.TEXT, mask=True)
+        handler, _, writer = _make_h2_actor(app)
+        writes = []
+        writer.write = MagicMock(side_effect=lambda b: writes.append(b))
+        writer.drain = AsyncMock()
+        handler.receive = AsyncMock(side_effect=[
+            _client_settings(),
+            _make_extended_connect_frame(
+                extensions='permessage-deflate; server_max_window_bits=8'),
+            _make_ws_data_frame(ws_bytes, stream_id=1),
+            None,
+        ])
+        await handler.run()
+
+        headers = self._response_headers(writes)
+        assert not any(k == 'sec-websocket-extensions' for k, v in headers), headers
+        assert received.get('text') == 'hello'
+        echoed = self._echoed_ws_frame(writes)
+        assert not echoed[0] & 0x40, 'declined offer must echo plain frames'
+        assert echoed[2:] == b'hello'
+
+    async def test_no_offer_keeps_the_handshake_plain(self):
+        """No offer: no extension header and an untouched round trip."""
+        received = {}
+
+        async def app(conn, receive, send):
+            await receive()
+            await send({'type': 'websocket.accept'})
+            event = await receive()
+            received.update(event)
+            await send({'type': 'websocket.send', 'text': event['text']})
+            await receive()
+
+        ws_bytes = encode_frame(b'hello', opcode=WSOpcode.TEXT, mask=True)
+        handler, _, writer = _make_h2_actor(app)
+        writes = []
+        writer.write = MagicMock(side_effect=lambda b: writes.append(b))
+        writer.drain = AsyncMock()
+        handler.receive = AsyncMock(side_effect=[
+            _client_settings(),
+            _make_extended_connect_frame(),
+            _make_ws_data_frame(ws_bytes, stream_id=1),
+            None,
+        ])
+        await handler.run()
+
+        headers = self._response_headers(writes)
+        assert not any(k == 'sec-websocket-extensions' for k, v in headers), headers
+        assert received.get('text') == 'hello'
+        assert self._echoed_ws_frame(writes)[2:] == b'hello'
+
 
 @pytest.mark.asyncio
 class TestDataExchange:
