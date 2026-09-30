@@ -1303,16 +1303,19 @@ class HTTP2Actor(Actor):
         a later CONTINUATION frame.
         """
         if stream.conn is not None:
-            # RFC 9113 §8.1 — a second field section is trailers: it must end
-            # the request and reach no handler; a malformed one earns the
-            # head's verdict.
-            if not header_frame.end_stream or header_frame.malformed:
+            # A second field section is trailers: it must end the request,
+            # carry no pseudo-header field, and reach no handler; anything
+            # else earns the head's verdict.
+            if (not header_frame.end_stream or header_frame.malformed
+                    or header_frame.pseudo_headers):
+                reason = (header_frame.malformed_reason
+                          or ('pseudo-header in trailer section'
+                              if header_frame.pseudo_headers
+                              else 'section does not end the request'))
                 if _DEBUG:
                     logger.debug(
                         'Stream %d refused trailing field section — %s',
-                        stream.stream_id,
-                        header_frame.malformed_reason
-                        or 'section does not end the request')
+                        stream.stream_id, reason)
                 self._retire_stream(stream.stream_id, via_rst=True)
                 await self.send_frame(self.factory.rst_stream(
                     stream.stream_id, ErrorCodes.PROTOCOL_ERROR))

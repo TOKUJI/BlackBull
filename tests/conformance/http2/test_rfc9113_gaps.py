@@ -856,6 +856,7 @@ class TestG13FieldCharacterValidation:
         (b'x-trailer', b' value'), (b'x-trailer', b'value '),
         (b'x-trailer', b'value\x00'), (b'x-trailer', b'value\r'),
         (b'X-Trailer', b'value'),
+        (b':method', b'GET'), (b':status', b'200'),
     ])
     @pytest.mark.asyncio
     async def test_a_malformed_trailer_field_is_malformed(self, bad_field):
