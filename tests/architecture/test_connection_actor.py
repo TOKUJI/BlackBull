@@ -131,9 +131,19 @@ def fake_http1_reader():
     return _FakeReader(_HTTP1_REQUEST)
 
 
+def _http2_exchange() -> bytes:
+    """A complete HTTP/2 request script: preface + SETTINGS + HEADERS."""
+    from tests.conformance.http2.test_rfc9113_gaps import (
+        _make_h2_frame, _make_headers_frame)
+    from blackbull.protocol.frame_types import FrameTypes
+    return (_HTTP2_PREFACE
+            + _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
+            + _make_headers_frame(1, end_stream=True))
+
+
 @pytest.fixture
 def fake_http2_preface_reader():
-    return _FakeReader(_HTTP2_PREFACE)
+    return _FakeReader(_http2_exchange())
 
 
 @pytest.fixture
@@ -177,6 +187,10 @@ async def test_connection_dispatches_http2(
     await actor.run()
 
     aggregator.on_connection_accepted.assert_called_once()
+    # The dispatch reached the HTTP/2 actor and the request ran end to end —
+    # and nothing failed on the way there.
+    mock_app.assert_awaited_once()
+    aggregator.on_error.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -201,12 +215,16 @@ async def test_connection_dispatches_http2_fragmented_preface(
     causing the preface validation to fail with ValueError('Invalid HTTP/2 preface
     continuation').  readexactly(8) reads all 8 bytes and the dispatch succeeds.
     """
-    reader = _ByteByByteReader(_HTTP2_PREFACE)
+    reader = _ByteByByteReader(_http2_exchange())
     aggregator = _mock_aggregator()
     actor = ConnectionActor(reader, fake_writer, mock_app, aggregator)
     await actor.run()  # must not raise ValueError
 
     aggregator.on_connection_accepted.assert_called_once()
+    # A byte-by-byte preface still dispatches: the request runs end to end
+    # with no protocol error raised on the way.
+    mock_app.assert_awaited_once()
+    aggregator.on_error.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

@@ -275,11 +275,18 @@ class TestASGIServerRun:
             _, writer = await asyncio.open_connection('127.0.0.1', port)
             writer.close()
             await writer.wait_closed()
+            # The server keeps serving after the accept: run() is still live
+            # and has raised nothing inside the task.
+            assert not task.done(), (
+                'run() must keep serving after accepting a connection'
+                + ('' if task.exception() is None
+                   else f'; it failed with {task.exception()!r}')
+            )
         finally:
             task.cancel()
             try:
                 await task
-            except (asyncio.CancelledError, Exception):
+            except asyncio.CancelledError:
                 pass
 
     @pytest.mark.asyncio
