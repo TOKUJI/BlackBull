@@ -113,6 +113,11 @@ class TestQuiescenceNotASnapshot:
     """
 
     async def test_an_observer_that_emits_is_drained_too(self):
+        """Both generations must have run before the drain returns —
+        through ``app.drain_events``.  (The dispatcher-level seam,
+        ``dispatcher.aclose``, is test_event_aclose_quiescence.py::
+        test_an_observer_that_emits_is_drained_too — the two share no
+        scenario code, so they are not one table.)"""
         seen: list = []
         app = BlackBull()
 

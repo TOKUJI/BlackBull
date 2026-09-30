@@ -65,21 +65,16 @@ async def test_readuntil_with_a_keyword_limit_is_refused(make_reader):
 
 
 @pytest.mark.parametrize('make_reader', READERS)
-async def test_bounded_read_head_is_refused(make_reader):
+@pytest.mark.parametrize('n', [1024, 0], ids=['bounded', 'unbounded'])
+async def test_bounded_read_head_is_refused(make_reader, n):
     reader = await make_reader()
-    await _refuses(reader.read_head(1024))
+    await _refuses(reader.read_head(n))
 
 
 @pytest.mark.parametrize('make_reader', READERS)
 async def test_unbounded_readuntil_is_refused(make_reader):
     reader = await make_reader()
     await _refuses(reader.readuntil(b'\r\n'))
-
-
-@pytest.mark.parametrize('make_reader', READERS)
-async def test_unbounded_read_head_is_refused(make_reader):
-    reader = await make_reader()
-    await _refuses(reader.read_head(0))
 
 
 @pytest.mark.parametrize('make_reader', READERS)
