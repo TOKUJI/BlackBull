@@ -9,7 +9,6 @@ import pytest
 from blackbull import BlackBull
 from blackbull.event import Event
 from blackbull.utils import Scheme
-from blackbull.server.http1_actor import HTTP1Actor
 from blackbull.connection import Connection
 from blackbull.server.websocket_actor import WebSocketActor
 from blackbull.server.recipient import AbstractReader
@@ -118,12 +117,7 @@ async def _drive_ws_session_with_close(app, path: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 1. Fires on disconnect
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# 2. Detail shape
+# 1. Detail shape
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
@@ -159,7 +153,7 @@ async def test_websocket_disconnected_detail_shape():
 
 
 # ---------------------------------------------------------------------------
-# 3. connection_id matches websocket_connected
+# 2. connection_id matches websocket_connected
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
@@ -195,11 +189,3 @@ async def test_websocket_disconnected_connection_id_matches_connected():
     assert len(connected_ids[0]) > 0
 
 
-# ---------------------------------------------------------------------------
-# 4. Exactly-once
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# 5. Not fired for HTTP requests
-# ---------------------------------------------------------------------------
