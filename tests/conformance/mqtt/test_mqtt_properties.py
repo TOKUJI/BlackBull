@@ -105,9 +105,7 @@ class TestPropertyValueValidation:
                      id='maximum-packet-size-256kb'),
     ])
     def test_maximum_packet_size(self, client_id, props, key, value):
-        """Numeric MQTT properties validate their ranges: Receive Maximum
-        (§3.2.2.3.1, 1–65535), Topic Alias Maximum (§3.2.2.3.6, 0 allowed),
-        Maximum Packet Size (§3.2.2.3.4, 32-bit)."""
+        """Numeric CONNECT properties round-trip."""
         connect = MQTTConnect(
             client_id=client_id,
             clean_start=True,
