@@ -54,8 +54,8 @@ class TestTopicLevelSeparator:
 # §4.7.1.2 — Single-Level Wildcard '+'
 # ============================================================================
 
-class TestSingleLevelWildcard:
-    """§4.7.1.2 — '+' matches exactly one complete topic level."""
+class TestWildcardMatching:
+    """§4.7.1.2/§4.7.1.3 — '+' and '#' wildcard matching rules."""
 
     @pytest.mark.parametrize("filter_str,topic,should_match", [
         # §4.7.1.2 — '+' matches exactly one level
@@ -102,12 +102,10 @@ class TestSingleLevelWildcard:
 # §4.7.1.3 — Multi-Level Wildcard '#'
 # ============================================================================
 
-class TestMultiLevelWildcard:
-    """§4.7.1.3 — '#' matches any number of complete topic levels including zero.
-
-    '#' MUST be the last character in the Topic Filter.
-    It MUST be preceded by '/' or be the only character.
-    """
+class TestWholeFilterWildcards:
+    """A wildcard as the entire Topic Filter (§4.7.1.2/§4.7.1.3), and the
+    '#' placement grammar (§4.7.1.3: last character, preceded by '/' or
+    alone)."""
 
     @pytest.mark.parametrize('checks', [
         pytest.param([('foo', '#', True), ('foo/bar', '#', True), ('a/b/c/d/e', '#', True)],
