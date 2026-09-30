@@ -28,7 +28,7 @@ import pytest
 
 from blackbull.mqtt.messages import (
     ReasonCode,
-    MQTTConnect, MQTTConnack,
+    MQTTConnect, MQTTConnack, MQTTSubscribe,
     MQTTPingreq, MQTTPingresp,
     encode_packet, decode_packet,
 )
@@ -202,35 +202,61 @@ class TestKeepAliveTimeout:
         writer = _FakeMQTTWriter()
         ctx = _ctx()
 
-        # Connect with short keep-alive
-        reader.feed_packet(MQTTConnect(
-            client_id='active-client',
-            clean_start=True,
-            keep_alive=5,
+        # A Will topic makes the abnormal detach observable on the wire:
+        # §3.1.2.10 — a keep-alive timeout fires the Will and closes.
+        obs_r, obs_w = _FakeMQTTReader(), _FakeMQTTWriter()
+        obs_r.feed_packet(MQTTConnect(
+            client_id='ka-obs', clean_start=True, keep_alive=0,
         ))
-        # Send PUBLISH to show activity (not PINGREQ)
-        reader.feed_packet(MQTTPublish(
-            topic='status/heartbeat',
-            payload=b'alive',
-            qos=0,
+        obs_r.feed_packet(MQTTSubscribe(
+            packet_id=1, subscriptions=[('ka/will/#', 0)],
         ))
 
-        actor = mqtt.serve(reader, writer, ctx)
-        task = asyncio.create_task(actor.run())
-        await asyncio.sleep(0.1)
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+        # keep_alive=2: the 1.5x deadline is 3.0s after each connection's last
+        # control packet.  B stays silent; A gets one PUBLISH mid-window (at
+        # ~1.4s), which moves its deadline to ~4.4s.
+        a_r, a_w = _FakeMQTTReader(), _FakeMQTTWriter()
+        a_r.feed_packet(MQTTConnect(
+            client_id='ka-active', clean_start=True, keep_alive=2,
+            will_topic='ka/will/active', will_payload=b'gone',
+        ))
+        b_r, b_w = _FakeMQTTReader(), _FakeMQTTWriter()
+        b_r.feed_packet(MQTTConnect(
+            client_id='ka-silent', clean_start=True, keep_alive=2,
+            will_topic='ka/will/silent', will_payload=b'gone',
+        ))
+        tasks = [asyncio.create_task(mqtt.serve(r, w, ctx).run())
+                 for r, w in ((obs_r, obs_w), (a_r, a_w), (b_r, b_w))]
+        await asyncio.sleep(1.4)
+        # The activity is a PUBLISH — any Control Packet counts, not just
+        # PINGREQ (§3.1.2.10).
+        a_r.feed_packet(MQTTPublish(
+            topic='status/heartbeat', payload=b'alive', qos=0,
+        ))
 
-        # The server should NOT have disconnected (no error reason code sent),
-        # because the PUBLISH reset the keep-alive timer.
-        packets = writer.pop_packets()
-        disconnects = [p for p in packets if hasattr(p, 'reason_code')
-                       and p.__class__.__name__ == 'MQTTDisconnect']
-        # No forced disconnect should have occurred
-        assert len(disconnects) <= 1  # at most the normal one we explicitly send
+        def wills_seen():
+            return {p.topic for p in obs_w.pop_packets()
+                    if isinstance(p, MQTTPublish)}
+
+        await asyncio.sleep(2.2)   # t≈3.6: B's deadline (3.0) has passed ...
+        seen = wills_seen()
+        assert 'ka/will/silent' in seen, (
+            'a control-less window must time out and fire the Will'
+        )
+        assert 'ka/will/active' not in seen, (
+            'the mid-window PUBLISH must reset the timer (deadline -> ~4.4s)'
+        )
+        await asyncio.sleep(1.6)   # t≈5.2: A's reset deadline (4.4) has passed
+        assert 'ka/will/active' in wills_seen(), (
+            'the reset postpones the deadline — the timer still runs'
+        )
+
+        for task in tasks:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
 
 # ============================================================================
