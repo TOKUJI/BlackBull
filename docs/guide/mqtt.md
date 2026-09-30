@@ -171,9 +171,10 @@ Length).  Nothing else converts.
 
 Variable Byte Integers accept **non-minimal encodings**: a value whose
 encoding carries a redundant continuation octet (0 in two octets, 300 in
-three) decodes normally.  The MQTT spec requires the minimum number of
-bytes (§1.5.5) and a non-minimal encoding is a Malformed Packet (§2.2.1);
-this runtime does not enforce that.  The tolerance is pinned in
+three) decodes normally.  A non-minimal encoding violates [MQTT-1.5.5-1]
+("the minimum number of bytes necessary"); by the spec's definition such a
+packet is a Malformed Packet (Terminology; §4.13.1).  This runtime does
+not enforce that.  The tolerance is pinned in
 `tests/unit/test_mqtt_codec_lengths.py`.
 
 The broker is an actor model split across a
