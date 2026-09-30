@@ -23,6 +23,29 @@ from blackbull.event import Event, EventDispatcher
 pytestmark = pytest.mark.asyncio
 
 
+async def test_an_observer_that_emits_is_drained_too():
+    """Both generations must have run before ``aclose`` returns."""
+    ran: list[str] = []
+    dispatcher = EventDispatcher(shutdown_timeout=5.0)
+
+    async def second(event):
+        await asyncio.sleep(0.05)
+        ran.append('second')
+
+    async def first(event):
+        await asyncio.sleep(0.05)
+        ran.append('first')
+        await dispatcher.emit(Event('chained', {}))
+
+    dispatcher.on('start', first)
+    dispatcher.on('chained', second)
+
+    await dispatcher.emit(Event('start', {}))
+    await dispatcher.aclose()
+
+    assert ran == ['first', 'second'], ran
+
+
 async def test_a_single_observer_still_drains():
     """Control: the shape that always worked must keep working."""
     ran: list[str] = []
