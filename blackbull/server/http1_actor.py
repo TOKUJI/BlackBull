@@ -1199,13 +1199,8 @@ class HTTP1Actor(Actor):
         # RFC 7692 permessage-deflate negotiation.  Cached on the Connection so
         # WebSocketActor can pick it up after the handshake commits, and
         # echoed back as ``Sec-WebSocket-Extensions`` in the 101 response.
-        from ..env import get_settings as _get_settings  # noqa: PLC0415
-        from .permessage_deflate import negotiate as _negotiate_deflate  # noqa: PLC0415
-        deflate_params = None
-        deflate_response = None
-        if _get_settings().ws_permessage_deflate:
-            offer = headers.get(b'sec-websocket-extensions', b'')
-            deflate_params, deflate_response = _negotiate_deflate(offer or None)
+        from .permessage_deflate import negotiate_offer as _negotiate_deflate  # noqa: PLC0415
+        deflate_params, deflate_response = _negotiate_deflate(headers)
 
         async def _send_101(subprotocol=None, app_headers=None):
             hs_headers = Headers([
