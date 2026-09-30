@@ -419,13 +419,13 @@ class TestBlackBullErrorDispatch:
             response = client.get('/nonexistent')
         assert response.status_code == 404
 
-    @pytest.mark.parametrize('status,path,body,code,text', [
+    @pytest.mark.parametrize('status,path,body', [
         pytest.param(HTTPStatus.NOT_FOUND, '/nonexistent', b'custom not found',
-                     404, 'custom not found', id='404-custom-handler'),
+                     id='404-custom-handler'),
         pytest.param(HTTPStatus.METHOD_NOT_ALLOWED, '/post-only', b'custom 405',
-                     405, 'custom 405', id='405-custom-handler'),
+                     id='405-custom-handler'),
     ])
-    def test_404_calls_custom_on_error_handler(self, status, path, body, code, text):
+    def test_404_calls_custom_on_error_handler(self, status, path, body):
         app = self._make_app()
 
         @app.on_error(status)
@@ -434,8 +434,8 @@ class TestBlackBullErrorDispatch:
 
         with TestClient(app) as client:
             response = client.get(path)
-        assert response.status_code == code
-        assert response.text == text
+        assert response.status_code == status
+        assert response.content == body
 
     def test_405_returns_method_not_allowed(self):
         """GET to a POST-only route must yield 405, not 404."""
