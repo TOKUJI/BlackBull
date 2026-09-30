@@ -180,14 +180,18 @@ def test_a_padded_data_frame_is_refused_in_every_direction():
                           'data': _b64(_DATA_PAYLOAD)})
 
 
-def test_a_settings_payload_that_is_not_whole_entries_is_refused():
-    """The record holds entries; a partial one has no representation.
-
-    Nor can the executor re-encode it: the record's entries are what both
-    paths describe, so the octets go through ``SendRawBytes`` instead.
-    """
-    malformed = FrameFactory().create(FrameTypes.SETTINGS, 0, 0,
-                                      data=b'\x00\x03\x00')
+@pytest.mark.parametrize('ftype,data', [
+    pytest.param(FrameTypes.SETTINGS, b'\x00\x03\x00',
+                 id='settings-partial-entry'),
+    pytest.param(FrameTypes.GOAWAY, b'\x00\x00\x00\x03',
+                 id='short-goaway'),
+])
+def test_a_settings_payload_that_is_not_whole_entries_is_refused(ftype, data):
+    """The record holds entries; a partial one has no representation, and a
+    GOAWAY parsed from four octets keeps no octets to reproduce.  Nor can the
+    executor re-encode either: the record's entries are what both paths
+    describe, so the octets go through ``SendRawBytes`` instead."""
+    malformed = FrameFactory().create(ftype, 0, 0, data=data)
     with pytest.raises(TypeError):
         _frame_to_dict(malformed)
     with pytest.raises(TypeError):
@@ -259,17 +263,6 @@ def test_a_window_update_with_a_mismatched_length_is_refused():
         _frame_to_dict(mismatched)
     with pytest.raises(TypeError):
         serialize_frame(mismatched)
-
-
-def test_a_short_goaway_is_refused_rather_than_normalised():
-    """A GOAWAY parsed from four octets keeps no octets to reproduce."""
-    short = FrameFactory().create(FrameTypes.GOAWAY, 0, 0,
-                                  data=b'\x00\x00\x00\x03')
-
-    with pytest.raises(TypeError):
-        _frame_to_dict(short)
-    with pytest.raises(TypeError):
-        serialize_frame(short)
 
 
 def test_a_reserved_stream_bit_is_refused_by_both_directions():

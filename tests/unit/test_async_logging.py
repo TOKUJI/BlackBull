@@ -398,10 +398,15 @@ def test_sink_default_batches_even_when_unset(monkeypatch):
         handlers[0].close()
 
 
-def test_sink_syslog_ignores_batch_size(monkeypatch):
-    """UDP is one datagram per message — batching does not apply to syslog."""
+@pytest.mark.parametrize('extra', [
+    pytest.param(('BB_LOG_BATCH_SIZE', '64'), id='syslog-ignores-batch-size'),
+    pytest.param(('BB_LOG_FILE', '/tmp/should-not-be-used.log'), id='syslog-ignores-log-file'),
+])
+def test_sink_syslog_ignores_batch_size(monkeypatch, extra):
+    """UDP syslog is one datagram per message and has no file stream —
+    file-oriented configuration does not apply."""
     monkeypatch.setenv('BB_SYSLOG_ADDR', '127.0.0.1:5514')
-    monkeypatch.setenv('BB_LOG_BATCH_SIZE', '64')
+    monkeypatch.setenv(*extra)
     handlers = _build_sink_handlers()
     assert isinstance(handlers[0], logging.handlers.SysLogHandler)
     handlers[0].close()
@@ -452,15 +457,6 @@ def test_sink_bad_log_file_falls_back_to_stderr(monkeypatch):
         assert handlers[0]._stream is sys.stderr
     finally:
         handlers[0].close()
-
-
-def test_sink_syslog_ignores_log_file(monkeypatch):
-    """UDP syslog has no file stream — BB_LOG_FILE does not apply."""
-    monkeypatch.setenv('BB_SYSLOG_ADDR', '127.0.0.1:5514')
-    monkeypatch.setenv('BB_LOG_FILE', '/tmp/should-not-be-used.log')
-    handlers = _build_sink_handlers()
-    assert isinstance(handlers[0], logging.handlers.SysLogHandler)
-    handlers[0].close()
 
 
 def test_settings_carry_logging_sink_fields(monkeypatch):

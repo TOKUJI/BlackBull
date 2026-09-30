@@ -216,21 +216,46 @@ async def test_router_websocket(router):
     assert scope['_connection'].path_params['id_'] == id_
 
 
+async def _mw_with_call_next(conn, receive, send, call_next):
+    pass
+
+
+async def _mw_with_inner(scope, receive, send, inner):
+    pass
+
+
+async def _chain_mw_call_next(conn, receive, send, call_next):
+    res = await call_next(conn, receive, send)
+    return res + '_mw'
+
+
+async def _chain_mw_inner(scope, receive, send, inner):
+    res = await inner(scope, receive, send)
+    return res + '_mw'
+
+
+async def _asgi_call_next(conn, receive, send, call_next): pass
+
+
+async def _asgi_inner(scope, receive, send, inner): pass
+
+
+async def _simplified_task_id(task_id): pass
+
+
+async def _simplified_scope(scope): pass
+
+
 # ---------------------------------------------------------------------------
 # call_next / inner detection tests
 # ---------------------------------------------------------------------------
 
-def test_call_next_detected_as_middleware_param():
-    async def mw(conn, receive, send, call_next):
-        pass
-    assert _middleware_param(mw) == 'call_next'
-    assert has_middleware_param(mw) is True
-
-
-def test_inner_still_detected_as_middleware_param():
-    async def mw(scope, receive, send, inner):
-        pass
-    assert _middleware_param(mw) == 'inner'
+@pytest.mark.parametrize('mw,expected', [
+    pytest.param(_mw_with_call_next, 'call_next', id='call-next-detected'),
+    pytest.param(_mw_with_inner, 'inner', id='inner-detected'),
+])
+def test_call_next_detected_as_middleware_param(mw, expected):
+    assert _middleware_param(mw) == expected
     assert has_middleware_param(mw) is True
 
 
@@ -242,29 +267,11 @@ def test_plain_handler_has_no_middleware_param():
 
 
 @pytest.mark.asyncio
-async def test_chain_built_with_call_next_name(router):
-    path = 'test_cn'
-
-    async def mw(conn, receive, send, call_next):
-        res = await call_next(conn, receive, send)
-        return res + '_mw'
-
-    async def handler(scope, receive, send):
-        return 'ok'
-
-    router.route(methods=[HTTPMethod.GET], path=path, functions=[mw, handler])
-    fn = router[(path, HTTPMethod.GET, Scheme.http)]
-    assert await fn({}, None, None) == 'ok_mw'
-
-
-@pytest.mark.asyncio
-async def test_chain_built_with_inner_name(router):
-    path = 'test_inner'
-
-    async def mw(scope, receive, send, inner):
-        res = await inner(scope, receive, send)
-        return res + '_mw'
-
+@pytest.mark.parametrize('mw,path', [
+    pytest.param(_chain_mw_call_next, 'test_cn', id='chain-call-next-name'),
+    pytest.param(_chain_mw_inner, 'test_inner', id='chain-inner-name'),
+])
+async def test_chain_built_with_call_next_name(router, mw, path):
     async def handler(scope, receive, send):
         return 'ok'
 
@@ -542,28 +549,26 @@ class TestSimplifiedHandlerDetection:
         async def fn(scope, receive, send): pass
         assert _is_simplified_handler(fn) is False
 
-    def test_middleware_not_simplified(self):
-        async def fn(conn, receive, send, call_next): pass
-        assert _is_simplified_handler(fn) is False
-
-    def test_middleware_inner_not_simplified(self):
-        async def fn(scope, receive, send, inner): pass
+    @pytest.mark.parametrize('fn', [
+        pytest.param(_asgi_call_next, id='call-next-middleware'),
+        pytest.param(_asgi_inner, id='inner-middleware'),
+    ])
+    def test_middleware_not_simplified(self, fn):
         assert _is_simplified_handler(fn) is False
 
     def test_no_params_is_simplified(self):
         async def fn(): pass
         assert _is_simplified_handler(fn) is True
 
-    def test_path_param_only_is_simplified(self):
-        async def fn(task_id): pass
+    @pytest.mark.parametrize('fn', [
+        pytest.param(_simplified_task_id, id='path-param-only'),
+        pytest.param(_simplified_scope, id='scope-only'),
+    ])
+    def test_path_param_only_is_simplified(self, fn):
         assert _is_simplified_handler(fn) is True
 
     def test_body_only_is_simplified(self):
         async def fn(body: bytes): pass
-        assert _is_simplified_handler(fn) is True
-
-    def test_scope_only_is_simplified(self):
-        async def fn(scope): pass
         assert _is_simplified_handler(fn) is True
 
     def test_partial_asgi_is_simplified(self):
@@ -737,19 +742,6 @@ class TestSimplifiedHandlerBodyInjection:
         await wrapper({}, fake_receive, AsyncMock())
         assert captured['body'] == b'hello'
 
-    @pytest.mark.asyncio
-    async def test_no_body_param_does_not_call_receive(self):
-        async def fn(task_id): pass
-
-        called = []
-        async def should_not_be_called():
-            called.append(True)
-            return {'type': 'http.request', 'body': b'', 'more_body': False}
-
-        wrapper = _adapt_handler(fn, '/tasks/{task_id}')
-        await wrapper({'path_params': {'task_id': '1'}}, should_not_be_called, AsyncMock())
-        assert called == []
-
 
 class TestSimplifiedHandlerRequestInjection:
     """Injection matrix for the opt-in Request context object."""
@@ -859,9 +851,8 @@ class TestSimplifiedHandlerRequestInjection:
 
     @pytest.mark.asyncio
     async def test_no_request_param_never_constructs_request(self):
-        # Zero-cost check at the observable level: a handler without a
-        # Request param must not touch receive, and the raw scope object is
-        # handed through untouched (no wrapper dict).
+        """Zero-cost check at the observable level: a handler with no body
+        param and no Request param must not touch receive."""
         async def fn(task_id): pass
         called = []
 
@@ -1072,13 +1063,19 @@ class TestDataclassBodyDeserialization:
         return receive
 
     @pytest.mark.asyncio
-    async def test_simple_dataclass_body(self):
+    @pytest.mark.parametrize('payload,expected', [
+        pytest.param(b'{"name":"widget","qty":3}', _Item(name='widget', qty=3),
+                     id='simple-dataclass-body'),
+        pytest.param(b'{"name":"only-name"}', _Item(name='only-name', qty=1),
+                     id='missing-optional-field-default'),
+    ])
+    async def test_simple_dataclass_body(self, payload, expected):
         captured = {}
         async def fn(body: _Item):
             captured['body'] = body
         wrapper = _adapt_handler(fn, '/items')
-        await wrapper({}, self._receive_with(b'{"name":"widget","qty":3}'), AsyncMock())
-        assert captured['body'] == _Item(name='widget', qty=3)
+        await wrapper({}, self._receive_with(payload), AsyncMock())
+        assert captured['body'] == expected
 
     @pytest.mark.asyncio
     async def test_parameter_name_other_than_body(self):
@@ -1090,24 +1087,6 @@ class TestDataclassBodyDeserialization:
         wrapper = _adapt_handler(fn, '/items')
         await wrapper({}, self._receive_with(b'{"name":"x","qty":7}'), AsyncMock())
         assert captured['item'] == _Item(name='x', qty=7)
-
-    @pytest.mark.asyncio
-    async def test_missing_optional_field_uses_default(self):
-        captured = {}
-        async def fn(body: _Item):
-            captured['body'] = body
-        wrapper = _adapt_handler(fn, '/items')
-        await wrapper({}, self._receive_with(b'{"name":"only-name"}'), AsyncMock())
-        assert captured['body'] == _Item(name='only-name', qty=1)
-
-    @pytest.mark.asyncio
-    async def test_missing_required_field_raises(self):
-        """A body missing a required field is a client error → 400."""
-        async def fn(body: _Item): pass
-        wrapper = _adapt_handler(fn, '/items')
-        with pytest.raises(HTTPException) as exc_info:
-            await wrapper({}, self._receive_with(b'{"qty":3}'), AsyncMock())
-        assert exc_info.value.status == HTTPStatus.BAD_REQUEST
 
     @pytest.mark.asyncio
     async def test_unknown_field_raises(self):
@@ -1171,13 +1150,18 @@ class TestDataclassBodyDeserialization:
             _adapt_handler(fn, '/x')
 
     @pytest.mark.asyncio
-    async def test_invalid_json_raises(self):
-        """Malformed JSON in the body is a client error → 400,
-        not the raw JSONDecodeError that used to surface as a 500."""
+    @pytest.mark.parametrize('payload', [
+        pytest.param(b'{"qty":3}', id='missing-required-field'),
+        pytest.param(b'not json', id='invalid-json'),
+    ])
+    async def test_invalid_json_raises(self, payload):
+        """A body missing a required field, or malformed JSON in the body,
+        is a client error → 400, not the raw JSONDecodeError that used to
+        surface as a 500."""
         async def fn(body: _Item): pass
         wrapper = _adapt_handler(fn, '/items')
         with pytest.raises(HTTPException) as exc_info:
-            await wrapper({}, self._receive_with(b'not json'), AsyncMock())
+            await wrapper({}, self._receive_with(payload), AsyncMock())
         assert exc_info.value.status == HTTPStatus.BAD_REQUEST
 
     @pytest.mark.asyncio
@@ -1503,14 +1487,6 @@ class TestUrlPathFor:
 # ---------------------------------------------------------------------------
 
 class TestStartupValidation:
-    def test_valid_routes_pass(self):
-        router = Router()
-
-        @router.route(path='/items/{id:int}', methods=HTTPMethod.GET)
-        async def handler(id: int): return ''
-
-        router.validate()  # must not raise
-
     def test_router_frozen_after_validate(self):
         router = Router()
 
@@ -1529,15 +1505,19 @@ class TestStartupValidation:
         with pytest.raises(ConfigurationError, match="id"):
             router.validate()
 
-    def test_bare_param_with_annotation_passes(self):
+    @pytest.mark.parametrize('path', [
+        pytest.param('/items/{id:int}', id='valid-routes'),
+        pytest.param('/items/{id}', id='bare-param-with-annotation'),
+    ])
+    def test_bare_param_with_annotation_passes(self, path):
         # {id} (no explicit :converter) defaults to a 'str' router spec, but
         # _adapt_handler re-coerces the captured string to the handler's own
         # annotation at call time (docs/getting-started/first-app.md's
         # "str captured, int() applied" pattern) — not a converter/annotation
-        # mismatch, unlike the explicit {id:int} case above.
+        # mismatch, unlike the explicit {id:int} case.
         router = Router()
 
-        @router.route(path='/items/{id}', methods=HTTPMethod.GET)
+        @router.route(path=path, methods=HTTPMethod.GET)
         async def handler(id: int): return ''
 
         router.validate()  # must not raise
@@ -1591,19 +1571,16 @@ class TestCustomMethods:
         assert router[('/pot', 'BREW', Scheme.http)] is fn
         assert router[('/pot', 'PROPFIND', Scheme.http)] is fn
 
-    def test_custom_method_dispatches_correctly(self, router):
-        @router.route(path='/pot', methods='BREW')
-        def brew_fn(scope, receive, send): pass
-
-        result = router[('/pot', 'BREW', Scheme.http)]
-        assert result is brew_fn
-
-    def test_wrong_custom_method_raises_method_not_applicable(self, router):
+    @pytest.mark.parametrize('method', [
+        pytest.param('FROBNICATE', id='wrong-custom-method'),
+        pytest.param('WHEN', id='allow-header-populated'),
+    ])
+    def test_wrong_custom_method_raises_method_not_applicable(self, router, method):
         @router.route(path='/pot', methods='BREW')
         def fn(scope, receive, send): pass
 
         with pytest.raises(MethodNotApplicable) as exc_info:
-            router[('/pot', 'FROBNICATE', Scheme.http)]
+            router[('/pot', method, Scheme.http)]
         assert 'BREW' in exc_info.value.allowed_methods
 
     def test_case_sensitivity_custom_method(self, router):
@@ -1619,14 +1596,6 @@ class TestCustomMethods:
 
         assert router[('/pot', HTTPMethod.GET, Scheme.http)] is fn
         assert router[('/pot', 'BREW', Scheme.http)] is fn
-
-    def test_custom_method_allow_header_populated(self, router):
-        @router.route(path='/pot', methods='BREW')
-        def fn(scope, receive, send): pass
-
-        with pytest.raises(MethodNotApplicable) as exc_info:
-            router[('/pot', 'WHEN', Scheme.http)]
-        assert 'BREW' in exc_info.value.allowed_methods
 
 
 class TestGetRoutes:
@@ -1670,23 +1639,20 @@ class TestGetRoutes:
         routes = app.get_routes()
         assert routes[0].path == '/tasks/{task_id:int}'
 
-    def test_name_reported(self):
+    @pytest.mark.parametrize('kwargs,attr,expected', [
+        pytest.param({'path': '/named', 'name': 'my_route'}, 'name', 'my_route',
+                     id='name-reported'),
+        pytest.param({'path': '/pot', 'methods': 'BREW'}, 'method', 'BREW',
+                     id='custom-method-as-string'),
+    ])
+    def test_name_reported(self, kwargs, attr, expected):
         app = BlackBull()
 
-        @app.route(path='/named', name='my_route')
-        async def named():
+        @app.route(**kwargs)
+        async def reported():
             return 'ok'
 
-        assert app.get_routes()[0].name == 'my_route'
-
-    def test_custom_method_reported_as_string(self):
-        app = BlackBull()
-
-        @app.route(path='/pot', methods='BREW')
-        async def brew():
-            return 'ok'
-
-        assert app.get_routes()[0].method == 'BREW'
+        assert getattr(app.get_routes()[0], attr) == expected
 
     def test_registration_order_preserved(self):
         app = BlackBull()

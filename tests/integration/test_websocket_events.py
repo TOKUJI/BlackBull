@@ -86,12 +86,16 @@ def _get_ws_state(base: str) -> dict:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_websocket_connected_fires(live):
+@pytest.mark.parametrize('msg,key', [
+    pytest.param('hello', 'connected', id='ws-connected-fires'),
+    pytest.param('bye', 'disconnected', id='ws-disconnected-fires'),
+])
+async def test_websocket_connected_fires(live, msg, key):
     async with websockets.connect(f'{_base_ws(live)}/ws') as ws:
-        await ws.send('hello')
+        await ws.send(msg)
         await ws.recv()
     state = _get_ws_state(_base_http(live))
-    assert state['connected'] >= 1
+    assert state[key] >= 1
 
 
 @pytest.mark.integration
@@ -104,13 +108,3 @@ async def test_websocket_message_fires(live):
         await ws.recv()
     state = _get_ws_state(_base_http(live))
     assert state['messages'] >= 2
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_websocket_disconnected_fires(live):
-    async with websockets.connect(f'{_base_ws(live)}/ws') as ws:
-        await ws.send('bye')
-        await ws.recv()
-    state = _get_ws_state(_base_http(live))
-    assert state['disconnected'] >= 1
