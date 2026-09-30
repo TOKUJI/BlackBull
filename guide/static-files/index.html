@@ -5977,6 +5977,18 @@ revalidation of a large asset costs no disk I/O.  Pass
   re-runs every request (a swap between requests is refused on the next
   one) but not within one request — do not leave the served tree writable
   by untrusted users.</li>
+<li><strong>A selected variant that escapes loses the whole request</strong>: the
+  refusal is <code>400</code> even when the original or another variant would
+  have served — an outward-symlinked <code>file.gz</code> with <code>Accept-Encoding:
+  gzip</code> refuses although <code>file</code> itself is fine.  There is no fallback
+  to the next candidate.</li>
+<li><strong>A variant is its filename</strong>: a hard link of the original named
+  <code>file.gz</code> is served as <code>Content-Encoding: gzip</code> although its bytes
+  are plain.  Identity is never measured (<code>st_nlink</code> would not make it
+  robust) — keep the served tree's names honest.  Hard links are not
+  detected at all: a hard link inside the root serves whatever file it
+  links to, even outside the root — keep the served tree free of links
+  you did not create.</li>
 </ul>
 <h2 id="inspecting-registered-roots">Inspecting registered roots<a class="headerlink" href="#inspecting-registered-roots" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="n">app</span><span class="o">.</span><span class="n">static</span><span class="p">(</span><span class="s1">'/a'</span><span class="p">,</span> <span class="s1">'public/a'</span><span class="p">)</span>

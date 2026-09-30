@@ -4619,6 +4619,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#blackbull.server.permessage_deflate.negotiate_offer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        negotiate_offer
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5617,6 +5628,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#blackbull.server.permessage_deflate.negotiate_offer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        negotiate_offer
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5923,6 +5945,28 @@ compression).  Honour <code>server_no_context_takeover</code> and
 <code>Sec-WebSocket-Extensions</code> header (or <code>None</code> when absent).  The
 client may send multiple comma-separated offers; we pick the first one
 that names <code>permessage-deflate</code> and that we can satisfy.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.server.permessage_deflate.negotiate_offer" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">negotiate_offer</span><span class="p">(</span><span class="n">headers</span><span class="p">)</span></code>
+
+<a href="#blackbull.server.permessage_deflate.negotiate_offer" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Apply the settings gate and negotiate the RFC 7692 offer in <em>headers</em>.</p>
+<p>The one way both handshakes (HTTP/1.1 and the RFC 8441 path) decide on
+permessage-deflate.  Returns what <code>negotiate</code> returns: <code>(params,
+response_value)</code>, both <code>None</code> when nothing was offered, the offer was
+declined, or <code>ws_permessage_deflate</code> is off.</p>
 
 
     </div>
