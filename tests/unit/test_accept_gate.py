@@ -639,3 +639,105 @@ async def test_a_protocol_that_cannot_carry_an_admission_fails_at_accept(
         assert not gate._connecting
     finally:
         client.close()
+
+
+# ---------------------------------------------------------------------------
+# One task per connection: the accept task goes on to serve
+# ---------------------------------------------------------------------------
+
+class _Serving(asyncio.Protocol):
+    """Records the task its ``serve()`` runs in, and whether the gate still
+    counts that task as connecting."""
+
+    admission = None
+    seen: list = []
+    fail = False
+
+    def connection_made(self, transport):
+        self.transport = transport
+
+    def connection_lost(self, exc):
+        if self.admission is not None:
+            self.admission.release()
+
+    async def serve(self):
+        task = asyncio.current_task()
+        type(self).seen.append((task, task in self.gate._connecting,
+                                task in self.gate._serving))
+        await asyncio.sleep(0)
+        self.transport.close()
+        if type(self).fail:
+            raise RuntimeError('serve blew up')
+
+
+@pytest.mark.asyncio
+@pytest.mark.timeout(30)
+@pytest.mark.parametrize('eager', [True, False], ids=['eager', 'queued'])
+async def test_the_accept_task_serves_the_connection(listener, monkeypatch, eager):
+    if eager and not server_mod._EAGER_TASKS:
+        pytest.skip('eager task start is 3.12+')
+    monkeypatch.setattr(server_mod, '_EAGER_TASKS', eager)
+    gate = _AcceptGate()
+    _Serving.seen, _Serving.fail = [], False
+    client = socket.create_connection(listener.getsockname())
+    conn, _ = listener.accept()
+
+    def factory():
+        protocol = _Serving()
+        protocol.gate = gate
+        return protocol
+
+    try:
+        gate.connect(conn, factory, None)
+        [accept_task] = gate._connecting
+        await _settle(gate)
+        for _ in range(50):
+            if accept_task.done():
+                break
+            await asyncio.sleep(0.01)
+        # Served in the task that accepted, after it stopped counting as a
+        # connect that stop() cancels and started counting as one it drains.
+        assert _Serving.seen == [(accept_task, False, True)]
+        assert not gate._serving
+        await asyncio.sleep(0.05)
+        assert gate._descriptors_held == 0
+    finally:
+        client.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.timeout(30)
+async def test_a_serve_failure_in_the_accept_task_is_logged_once(
+        listener, caplog):
+    import gc
+
+    loop = asyncio.get_running_loop()
+    unhandled = []
+    loop.set_exception_handler(lambda _loop, context: unhandled.append(context))
+    gate = _AcceptGate()
+    _Serving.seen, _Serving.fail = [], True
+    client = socket.create_connection(listener.getsockname())
+    conn, _ = listener.accept()
+
+    def factory():
+        protocol = _Serving()
+        protocol.gate = gate
+        return protocol
+
+    try:
+        with caplog.at_level(logging.ERROR, logger='blackbull.server.server'):
+            gate.connect(conn, factory, None)
+            [accept_task] = gate._connecting
+            for _ in range(50):
+                if accept_task.done():
+                    break
+                await asyncio.sleep(0.01)
+            gc.collect()
+            await asyncio.sleep(0.05)
+        assert caplog.text.count('connection task failed') == 1
+        assert unhandled == []
+        assert gate._descriptors_held == 0
+    finally:
+        _Serving.fail = False
+        loop.set_exception_handler(None)
+        client.close()

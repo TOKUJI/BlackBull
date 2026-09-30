@@ -386,9 +386,11 @@ class _AcceptGate:
     Public loop API only, so the bound holds on every event loop.
     """
 
-    def __init__(self):
+    def __init__(self, serving: set | None = None):
         self._listening: list[_Listening] = []
         self._loop = None
+        #: Accept tasks that went on to serve: drained on stop, not cancelled.
+        self._serving: set = set() if serving is None else serving
         self._limit = 0
         #: Accepted descriptors, refusals and TLS handshakes included; the 503
         #: decision counts ``Server._active_connections``, the ones being
@@ -471,12 +473,14 @@ class _AcceptGate:
 
     async def _connected(self, loop, conn, protocol, ssl_context,
                          admission: _Admission) -> None:
+        task = asyncio.current_task()
         try:
             await loop.connect_accepted_socket(
                 lambda: protocol, conn, ssl=ssl_context,
                 ssl_handshake_timeout=(self._handshake_timeout
                                        if ssl_context is not None else None))
         except BaseException as exc:
+            self._connecting.discard(task)
             # A transport closes the socket it was given; this one never got one.
             if conn.fileno() != -1:
                 conn.close()
@@ -491,8 +495,21 @@ class _AcceptGate:
                                'connection',
                     'exception': exc,
                 })
+            return
+        # The transport exists: stop() now drains this task, it no longer
+        # cancels it.
+        self._connecting.discard(task)
+        serve = getattr(protocol, 'serve', None)
+        if serve is None:
+            return
+        serving = self._serving
+        serving.add(task)
+        try:
+            await serve()
+        except Exception:
+            logger.exception('connection task failed')
         finally:
-            self._connecting.discard(asyncio.current_task())
+            serving.discard(task)
 
     def _hold(self) -> None:
         self._descriptors_held += 1
@@ -761,7 +778,6 @@ class Server:
         self._stream_queue_depth = stream_queue_depth
         self._ws_queue_depth = ws_queue_depth
         self._active_connections = 0
-        self._accept_gate = _AcceptGate()
 
         # An app carries a registry only once a raw_handler is registered.
         from .protocol_registry import ProtocolRegistry as _PR  # noqa: PLC0415
@@ -770,6 +786,7 @@ class Server:
                                    or _PR())
         self.protocol_ports: dict[str, int] = {}
         self._connection_tasks: set = set()
+        self._accept_gate = _AcceptGate(serving=self._connection_tasks)
         self._stopping = False
         self._drain_timeout = None
         self._stopped_event = asyncio.Event()
@@ -901,6 +918,8 @@ class Server:
 
             def connection_made(self, transport):
                 super().connection_made(transport)
+                if self.admission is not None:
+                    return    # the accept task serves it
                 # Eager start runs the serve prologue inside this callback and
                 # parks at the same read it would have parked at anyway, one
                 # loop iteration earlier — a hop paid once per connection, so
@@ -912,11 +931,11 @@ class Server:
                     # ``loop=`` is load-bearing: without it ``eager_start``
                     # leaves ``_loop`` unset and crashes on 3.12+ (seen on
                     # 3.14: ``'NoneType' object has no attribute 'is_running'``).
-                    task = asyncio.Task(self._serve(),
+                    task = asyncio.Task(self.serve(),
                                         loop=asyncio.get_running_loop(),
                                         eager_start=True)
                 else:
-                    task = asyncio.create_task(self._serve())
+                    task = asyncio.create_task(self.serve())
                 # A protocol factory cannot await, so the task is detached; the
                 # done-callback is what keeps a failure from surfacing as
                 # asyncio's "Task exception was never retrieved" at GC time.
@@ -924,7 +943,7 @@ class Server:
                 server._connection_tasks.add(task)
                 task.add_done_callback(self._serve_done)
 
-            async def _serve(self):
+            async def serve(self):
                 try:
                     await server._serve_connection(
                         self.reader,

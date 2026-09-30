@@ -93,7 +93,10 @@ def test_stop_closes_connections_still_in_their_tls_handshake(loop):
             for _ in range(5):
                 silent.append(socket.create_connection(('127.0.0.1', server.port)))
             await asyncio.sleep(0.5)   # every connect accepted, none answered
-            await asyncio.wait_for(server.stop(drain_timeout=1.0), 5)
+            # Cancelled at once, not drained: a handshake has no request to finish.
+            started = asyncio.get_running_loop().time()
+            await asyncio.wait_for(server.stop(drain_timeout=5.0), 5)
+            assert asyncio.get_running_loop().time() - started < 1.0
             assert server._accept_gate._descriptors_held == 0
             await asyncio.wait_for(runner, 5)
 
@@ -520,3 +523,41 @@ def test_a_refusal_at_the_cap_logs_one_warning(caplog):
                 and r.name.startswith('blackbull')]
     assert [(r.name, getattr(r, 'cap', None)) for r in warnings] == [
         ('blackbull.caps', 'max_connections')]
+
+
+# ---------------------------------------------------------------------------
+# stop() drains a request being served; it only cancels connects
+# ---------------------------------------------------------------------------
+
+@pytest.mark.timeout(60)
+@pytest.mark.parametrize('loop', LOOPS)
+def test_stop_drains_a_request_the_gate_is_serving(loop):
+    async def main():
+        started = asyncio.Event()
+        app = BlackBull()
+
+        @app.route(path='/slow')
+        async def slow():
+            started.set()
+            await asyncio.sleep(0.5)
+            return 'done'
+
+        server = Server(app, max_connections=64)
+        server.open_socket(0)
+        runner = asyncio.create_task(server.run())
+        try:
+            await _until(lambda: getattr(server, '_running_servers', None))
+            reader, writer = await asyncio.open_connection('127.0.0.1', server.port)
+            writer.write(b'GET /slow HTTP/1.1\r\nhost: x\r\nconnection: close\r\n\r\n')
+            await asyncio.wait_for(started.wait(), 5)
+            stopping = asyncio.create_task(server.stop(drain_timeout=5.0))
+            body = await asyncio.wait_for(reader.read(), 5)
+            writer.close()
+            await asyncio.wait_for(stopping, 5)
+            assert body.startswith(b'HTTP/1.1 200'), body
+            assert body.endswith(b'done'), body
+        finally:
+            if not runner.done():
+                await asyncio.wait({runner}, timeout=5)
+            server.close_socket()
+    _run(loop, main)
