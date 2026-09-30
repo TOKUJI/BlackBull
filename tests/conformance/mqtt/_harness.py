@@ -69,11 +69,11 @@ async def wait_idle(reader: "_FakeMQTTReader", writer: "_FakeMQTTWriter",
     """Wait until the actor has drained every fed byte and gone quiet.
 
     Idle = the reader is out of bytes and the writer's byte count is unchanged
-    across two polls — no fixed sleep, so no timing margin to be wrong about.
+    across five polls — no fixed sleep, so no timing margin to be wrong about.
     """
     async def _poll():
         last_len, stable = -1, 0
-        while stable < 2:
+        while stable < 5:
             if not reader._buf and len(writer.written) == last_len:
                 stable += 1
             else:
@@ -112,3 +112,22 @@ async def run_until_idle(mqtt, *packets, timeout: float = 2.0):
     finally:
         await cancel_all(task)
     return reader, writer
+
+
+async def wait_for_packets(writer: "_FakeMQTTWriter", predicate=lambda p: True,
+                           *, count: int = 1, timeout: float = 2.0) -> list:
+    """Wait until *count* packets matching *predicate* reach the wire.
+
+    Returns every packet popped on the way (order preserved).  This is the
+    fixed-sleep stand-in for "wait until the broker's delivery happened" —
+    e.g. a Will routed to a subscribed observer after its client drops.
+    """
+    got: list = []
+
+    async def _poll():
+        while len([p for p in got if predicate(p)]) < count:
+            got.extend(writer.pop_packets())
+            await asyncio.sleep(0.01)
+
+    await asyncio.wait_for(_poll(), timeout)
+    return got
