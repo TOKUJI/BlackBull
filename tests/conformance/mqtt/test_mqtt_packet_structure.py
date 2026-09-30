@@ -392,41 +392,28 @@ class TestPacketRoundTrip:
         assert decoded.qos == 0
         assert decoded.packet_id is None  # §3.3.2-1: no Packet Identifier for QoS 0
 
-    # §3.3 — PUBLISH packet (QoS 1)
-    def test_publish_qos1_packet_round_trip(self):
-        """§3.3.2 — PUBLISH QoS 1: includes Packet Identifier."""
+    # §3.3 — PUBLISH packet (QoS 1/2)
+    @pytest.mark.parametrize('qos,topic,payload,packet_id', [
+        pytest.param(1, 'sensors/pressure', b'1013.25', 42, id='qos1-round-trip'),
+        pytest.param(2, 'alerts/critical', b'TEMPERATURE EXCEEDS LIMIT', 99,
+                     id='qos2-round-trip'),
+    ])
+    def test_publish_qos1_packet_round_trip(self, qos, topic, payload, packet_id):
+        """§3.3.2 — PUBLISH QoS 1/2: includes Packet Identifier."""
         from blackbull.mqtt.messages import (
             MQTTPublish, encode_packet, decode_packet,
         )
         original = MQTTPublish(
-            topic='sensors/pressure',
-            payload=b'1013.25',
-            qos=1,
-            packet_id=42,
+            topic=topic,
+            payload=payload,
+            qos=qos,
+            packet_id=packet_id,
         )
         wire = encode_packet(original)
         decoded = decode_packet(wire)
         assert isinstance(decoded, MQTTPublish)
-        assert decoded.qos == 1
-        assert decoded.packet_id == 42
-
-    # §3.3 — PUBLISH packet (QoS 2)
-    def test_publish_qos2_packet_round_trip(self):
-        """§3.3.2 — PUBLISH QoS 2: includes Packet Identifier."""
-        from blackbull.mqtt.messages import (
-            MQTTPublish, encode_packet, decode_packet,
-        )
-        original = MQTTPublish(
-            topic='alerts/critical',
-            payload=b'TEMPERATURE EXCEEDS LIMIT',
-            qos=2,
-            packet_id=99,
-        )
-        wire = encode_packet(original)
-        decoded = decode_packet(wire)
-        assert isinstance(decoded, MQTTPublish)
-        assert decoded.qos == 2
-        assert decoded.packet_id == 99
+        assert decoded.qos == qos
+        assert decoded.packet_id == packet_id
 
     # §3.4 — PUBACK packet
     def test_puback_packet_round_trip(self):

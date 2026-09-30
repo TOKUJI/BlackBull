@@ -220,50 +220,39 @@ class TestRetainedMessageDelivery:
         assert len(retained) >= 1, \
             "Expected retained message to be delivered on subscribe"
 
-    def test_retain_handling_0_send_retained(self, mqtt):
-        """§3.8.2.1 — Retain Handling = 0: send retained messages at
-        subscribe time (default behavior)."""
+    @pytest.mark.parametrize('value', [
+        pytest.param(0, id='retain-handling-0-send'),
+        pytest.param(1, id='retain-handling-1-if-new'),
+        pytest.param(2, id='retain-handling-2-do-not-send'),
+    ])
+    def test_retain_handling_0_send_retained(self, mqtt, value):
+        """§3.8.2.1 — Retain Handling 0/1/2 select the retained-message
+        behaviour at subscribe time (send, send only if the subscription is
+        new, do not send)."""
         sub = MQTTSubscribe(
             packet_id=1,
             subscriptions=[('status/+/info', 1)],
-            subscription_options=[{'retain_handling': 0}],
+            subscription_options=[{'retain_handling': value}],
         )
         wire = encode_packet(sub)
         decoded = decode_packet(wire)
-        assert decoded.subscription_options[0]['retain_handling'] == 0
+        assert decoded.subscription_options[0]['retain_handling'] == value
 
-    def test_retain_handling_1_send_only_if_new(self, mqtt):
-        """§3.8.2.1 — Retain Handling = 1: send retained messages only if
-        the subscription does not already exist."""
+    @pytest.mark.parametrize('topic,option,value', [
+        pytest.param('status/#', 'retain_as_published', True,
+                     id='retain-as-published'),
+        pytest.param('chat/room1', 'no_local', True,
+                     id='no-local'),
+    ])
+    def test_retain_as_published_flag(self, mqtt, topic, option, value):
+        """§3.8.2.1 — subscription option bits round-trip: Retain As
+        Published (bit 3) preserves the RETAIN flag when forwarding;
+        No Local (= 1) prevents self-delivery."""
         sub = MQTTSubscribe(
             packet_id=1,
-            subscriptions=[('status/+/info', 1)],
-            subscription_options=[{'retain_handling': 1}],
+            subscriptions=[(topic, 1)],
+            subscription_options=[{option: value}],
         )
         wire = encode_packet(sub)
         decoded = decode_packet(wire)
-        assert decoded.subscription_options[0]['retain_handling'] == 1
-
-    def test_retain_handling_2_do_not_send(self, mqtt):
-        """§3.8.2.1 — Retain Handling = 2: do NOT send retained messages
-        at subscribe time."""
-        sub = MQTTSubscribe(
-            packet_id=1,
-            subscriptions=[('status/+/info', 1)],
-            subscription_options=[{'retain_handling': 2}],
-        )
-        wire = encode_packet(sub)
-        decoded = decode_packet(wire)
-        assert decoded.subscription_options[0]['retain_handling'] == 2
-
-    def test_retain_as_published_flag(self, mqtt):
-        """§3.8.2.1 — Retain As Published (bit 3): if set, the server
-        preserves the RETAIN flag when forwarding retained messages."""
-        sub = MQTTSubscribe(
-            packet_id=1,
-            subscriptions=[('status/#', 1)],
-            subscription_options=[{'retain_as_published': True}],
-        )
-        wire = encode_packet(sub)
-        decoded = decode_packet(wire)
-        assert decoded.subscription_options[0]['retain_as_published'] is True
+        assert decoded.subscription_options[0][option] is value
