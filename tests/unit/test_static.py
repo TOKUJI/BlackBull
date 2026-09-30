@@ -175,7 +175,7 @@ class TestStaticFilesPathSecurity:
                      id='encoded-dot-dot'),
     ])
     async def test_path_traversal_dot_dot_rejected(self, static_dir, path, label):
-        """URL-encoded ../ (%2F%2E%2E) must also be rejected with 400 or 404."""
+        """Path traversal is rejected."""
         from blackbull.middleware.static import StaticFiles
         app = StaticFiles(directory=str(static_dir))
         start, _ = await _collect(app, _scope(path=path))
@@ -275,12 +275,7 @@ class TestStaticFilesRangeRequests:
         start, _ = await _collect(
             app, _scope(path='/hello.txt', headers={'Range': rng})
         )
-        if expected == 206:
-            assert start['status'] == 206, f'Expected 206; got {start["status"]}'
-        else:
-            assert start['status'] == 416, (
-                f'Out-of-range request must return 416; got {start["status"]}'
-            )
+        assert start['status'] == expected
 
     async def test_no_range_returns_full_file(self, static_dir):
         """Without a Range header the full file must be served with status 200."""
