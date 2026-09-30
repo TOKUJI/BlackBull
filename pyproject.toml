@@ -136,8 +136,16 @@ testing = [
     # module's import-time state cannot leak from one test file to another.
     "pytest-xdist",
     "pytest-cov",
-    "beartype",
-    "pytest-beartype",
+    # BLA-516: pytest-beartype 0.3.0 requires beartype>=0.23.0rc0, and
+    # beartype 0.23.0rc2 raises BeartypeCallHintPep484ForwardRefStrException
+    # when --beartype-packages decorates NamedTuples declared under
+    # `from __future__ import annotations` (their stringified field hints
+    # resolve against beartype's synthesized namedtuple_* modules).  Every
+    # test file importing blackbull then fails at collection.  Pin both until
+    # beartype 0.23 compatibility is verified; the runtime dependency above
+    # stays unpinned (the failure needs blanket decoration).
+    "beartype>=0.22,<0.23.0rc0",
+    "pytest-beartype>=0.2,<0.3",
     "httpx[http2]",
     "websockets",
     "hypothesis",
