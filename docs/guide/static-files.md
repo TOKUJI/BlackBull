@@ -257,7 +257,10 @@ revalidation of a large asset costs no disk I/O.  Pass
 - **A variant is its filename**: a hard link of the original named
   `file.gz` is served as `Content-Encoding: gzip` although its bytes
   are plain.  Identity is never measured (`st_nlink` would not make it
-  robust) — keep the served tree's names honest.
+  robust) — keep the served tree's names honest.  Hard links are not
+  detected at all: a hard link inside the root serves whatever file it
+  links to, even outside the root — keep the served tree free of links
+  you did not create.
 
 ## Inspecting registered roots
 
