@@ -57,7 +57,8 @@ def _inject_response_headers(raw_send, extra_headers):
     # ``event`` is a NativeResponse.  Nested defs in a per-request factory
     # stay unannotated — tests/architecture/test_per_request_closure_annotations.py.
     async def _send(event):
-        if isinstance(event, NativeResponse) and event.push is None:
+        if (isinstance(event, NativeResponse)
+                and (event._extension is None or event.push is None)):
             view = event.header
             if view is not None:
                 view.append(extra_headers)

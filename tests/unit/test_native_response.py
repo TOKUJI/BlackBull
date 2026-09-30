@@ -216,3 +216,52 @@ class TestSlots:
         r = NativeResponse()
         with pytest.raises(AttributeError):
             r.typo_field = 1
+
+
+@pytest.mark.parametrize('kind', ['file_path', 'push'])
+def test_optional_send_path_assignment_and_clearing(kind):
+    other = 'push' if kind == 'file_path' else 'file_path'
+    response = NativeResponse(**{kind: '/first'})
+    setattr(response, other, None)
+    assert getattr(response, kind) == '/first'
+    assert getattr(response, other) is None
+    setattr(response, kind, '/second')
+    event = response.to_asgi()[0]
+    assert event['path'] == '/second'
+    assert event['type'] == ('http.response.push' if kind == 'push'
+                             else 'http.response.pathsend')
+    setattr(response, kind, None)
+    assert response.push is None
+    assert response.file_path is None
+    assert response.to_asgi() == []
+
+
+@pytest.mark.parametrize('kind', ['file_path', 'push'])
+def test_conflicting_send_path_assignment_preserves_existing_message(kind):
+    other = 'push' if kind == 'file_path' else 'file_path'
+    response = NativeResponse(**{kind: '/first'})
+    before = response.to_asgi()
+    with pytest.raises(ValueError, match='push'):
+        setattr(response, other, '/second')
+    assert response.to_asgi() == before
+
+
+@pytest.mark.parametrize('subclass', [False, True])
+@pytest.mark.parametrize('factory', ['init', 'complete', 'with_trailers'])
+def test_optional_paths_absent_for_all_response_constructors(subclass, factory):
+    class CustomResponse(NativeResponse):
+        __slots__ = ()
+
+    cls = CustomResponse if subclass else NativeResponse
+    if factory == 'init':
+        response = cls(header=[], body=b'ok')
+    elif factory == 'complete':
+        response = cls.complete(200, [], b'ok')
+    else:
+        response = cls.with_trailers(200, [], b'ok', [(b'x-end', b'1')])
+    assert type(response) is cls
+    assert response.push is None
+    assert response.file_path is None
+    assert response.body == b'ok'
+    assert [event['type'] for event in response.to_asgi()][:2] == [
+        'http.response.start', 'http.response.body']

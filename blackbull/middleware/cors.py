@@ -111,7 +111,8 @@ class CORS:
         """
         # Unannotated: rebuilt per request.
         async def cors_send(event):
-            if isinstance(event, NativeResponse) and event.push is None:
+            if (isinstance(event, NativeResponse)
+                    and (event._extension is None or event.push is None)):
                 # Header arm — presence is `is not None` (never truthiness);
                 # raw slot for the check, view for the guarded append.
                 if event._header is not None:

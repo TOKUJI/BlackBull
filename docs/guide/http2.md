@@ -208,6 +208,8 @@ async def index(conn, receive, send):
 For a push, `header` contains the promised request's headers:
 `NativeResponse(push='/static/style.css', header=[(b'accept', b'text/css')])`.
 A push cannot also carry response status, body, trailers, or a file.
+Clear `push` or `file_path` with `None` before switching between them;
+assigning a conflicting path raises `ValueError` and preserves the message.
 `push` (ASGI `path`) must be a plain string (percent-encoding decoded).
 Pseudo-headers (`:method`, `:scheme`, `:authority`) are filled in
 automatically — do not include them in `headers`.

@@ -607,6 +607,11 @@ so response middleware and route-header injection pass push messages through.
 `asgi_send_boundary` expands native messages at external-host and
 scope-declared middleware boundaries.
 
+The mutually exclusive `file_path` and `push` properties share the existing
+optional send storage. Only a push allocates a tagged path object; ordinary
+responses gain no slot or allocation. Senders and response middleware check
+whether this storage is empty before resolving the public properties.
+
 Middleware conversion copies header lists because middleware may mutate them.
 Direct sender conversion borrows response headers and trailers; each sender
 copies them before buffering or writing. This avoids consecutive copies while

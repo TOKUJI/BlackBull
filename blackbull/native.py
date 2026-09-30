@@ -175,6 +175,13 @@ class NativeWSMessage:
         return [{'type': 'websocket.send', 'bytes': self.data}]
 
 
+class _PushPath:
+    __slots__ = ('path',)
+
+    def __init__(self, path: str) -> None:
+        self.path = path
+
+
 class NativeResponse:
     """A response on the native send path: header and/or body and/or trailers.
 
@@ -194,10 +201,9 @@ class NativeResponse:
         '_body',
         '_header',
         'expects_trailers',
-        'file_path',
+        '_extension',
         'more_body',
         'more_trailers',
-        'push',
         'status',
         'trailers',
     )
@@ -211,12 +217,6 @@ class NativeResponse:
                  expects_trailers: bool = False,
                  file_path: str | None = None,
                  push: str | None = None) -> None:
-        if push is not None and (
-                status != 200 or body is not None or more_body
-                or trailers is not None or more_trailers
-                or expects_trailers or file_path is not None):
-            raise ValueError('push cannot carry response status, body, trailers, or file')
-        self.push = push
         self.status = status
         # Write the slot directly rather than going through the ``header``
         # property.  The setter is a descriptor call plus an isinstance test,
@@ -236,7 +236,9 @@ class NativeResponse:
         # function without its dict shape, so a framework-owned producer
         # (``StaticFiles``) can stay native and still get zero-copy.
         # Mutually exclusive with ``body``: the bytes come from the file.
-        self.file_path = file_path
+        self._extension: str | _PushPath | None = file_path
+        if push is not None:
+            self.push = push
 
     # --- fast constructors for framework-owned producers -------------------
     #
@@ -269,8 +271,7 @@ class NativeResponse:
         self.trailers = None
         self.more_trailers = False
         self.expects_trailers = False
-        self.file_path = None
-        self.push = None
+        self._extension = None
         return self
 
     @classmethod
@@ -293,9 +294,41 @@ class NativeResponse:
         self.trailers = trailers
         self.more_trailers = False
         self.expects_trailers = True
-        self.file_path = None
-        self.push = None
+        self._extension = None
         return self
+
+    # File sends and pushes are exclusive; only a push allocates its payload.
+    @property
+    def file_path(self) -> str | None:
+        extension = self._extension
+        return None if isinstance(extension, _PushPath) else extension
+
+    @file_path.setter
+    def file_path(self, value: str | None) -> None:
+        if isinstance(self._extension, _PushPath):
+            if value is not None:
+                raise ValueError('push cannot carry a file')
+        else:
+            self._extension = value
+
+    @property
+    def push(self) -> str | None:
+        extension = self._extension
+        return extension.path if isinstance(extension, _PushPath) else None
+
+    @push.setter
+    def push(self, value: str | None) -> None:
+        if value is None:
+            if isinstance(self._extension, _PushPath):
+                self._extension = None
+            return
+        if (self.status != 200 or self._body is not None or self.more_body
+                or self.trailers is not None or self.more_trailers
+                or self.expects_trailers
+                or (self._extension is not None
+                    and not isinstance(self._extension, _PushPath))):
+            raise ValueError('push cannot carry response status, body, trailers, or file')
+        self._extension = _PushPath(value)
 
     # --- header: DX view, or None when absent -----------------------------
     @property
@@ -353,8 +386,9 @@ class NativeResponse:
         compression); the native H1 sender path never materialises these
         dicts.
         """
-        if self.push is not None:
-            return [{'type': 'http.response.push', 'path': self.push,
+        extension = self._extension
+        if isinstance(extension, _PushPath):
+            return [{'type': 'http.response.push', 'path': extension.path,
                      'headers': list(self._header) if self._header is not None else []}]
         # Validate both sections before materialising the first event.  The
         # external-ASGI boundary sends the returned list in order, so finding
@@ -376,9 +410,9 @@ class NativeResponse:
             if self.expects_trailers:
                 start['trailers'] = True
             events.append(start)
-        if self.file_path is not None:
+        if extension is not None:
             events.append({'type': 'http.response.pathsend',
-                           'path': self.file_path})
+                           'path': extension})
         if self._body is not None:
             events.append({'type': 'http.response.body',
                            'body': self._body,

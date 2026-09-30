@@ -628,7 +628,8 @@ class HTTP1Sender(BaseSender):
         if isinstance(body, dict):
             body = _native_from_asgi(body, copy_headers=False)
 
-        if isinstance(body, NativeResponse) and body.push is not None:
+        if (isinstance(body, NativeResponse) and body._extension is not None
+                and body.push is not None):
             logger.warning('HTTP1Sender: push sent on HTTP/1; dropped')
             return
 
@@ -681,7 +682,7 @@ class HTTP1Sender(BaseSender):
                                 elif hkl == b'content-encoding':
                                     self._log_record.resp_content_encoding = hv
                         self._log_record.mark('start_arm_out')
-                if body.file_path is not None:
+                if body._extension is not None:
                     if await self._pathsend(body.file_path):
                         self._completed = True
                     return
@@ -1666,7 +1667,7 @@ class HTTP2Sender(BaseSender):
                         'the response was complete)',
                         self._stream_id)
                 return
-            if body.push is not None:
+            if body._extension is not None and body.push is not None:
                 if self._push_callback is not None:
                     await self._push_callback(body, self._stream_id)
                 else:
