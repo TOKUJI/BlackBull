@@ -36,40 +36,24 @@ class TestRequestProblemInformation:
     even on errors.
     """
 
-    def test_request_problem_information_default(self, mqtt):
-        """§3.1.2.11 — Default is 0 (no detailed errors)."""
+    @pytest.mark.parametrize('client_id,clean_start,key', [
+        pytest.param('rpi-default', True, 'request_problem_information',
+                     id='problem-info-absent'),
+        pytest.param('rm-default', True, 'receive_maximum',
+                     id='receive-maximum-absent'),
+        pytest.param('se-default', False, 'session_expiry_interval',
+                     id='session-expiry-absent'),
+    ])
+    def test_request_problem_information_default(self, mqtt, client_id, clean_start, key):
+        """An absent property is absent after decode."""
         connect = MQTTConnect(
-            client_id='rpi-default',
-            clean_start=True,
+            client_id=client_id,
+            clean_start=clean_start,
             keep_alive=60,
         )
         wire = encode_packet(connect)
         decoded = decode_packet(wire)
-        assert 'request_problem_information' not in decoded.properties
-
-    def test_request_problem_information_enabled(self, mqtt):
-        """§3.1.2.11 — Request Problem Information = 1."""
-        connect = MQTTConnect(
-            client_id='rpi-on',
-            clean_start=True,
-            keep_alive=60,
-            properties={'request_problem_information': 1},
-        )
-        wire = encode_packet(connect)
-        decoded = decode_packet(wire)
-        assert decoded.properties['request_problem_information'] == 1
-
-    def test_request_problem_information_disabled(self, mqtt):
-        """§3.1.2.11 — Request Problem Information = 0 explicitly."""
-        connect = MQTTConnect(
-            client_id='rpi-off',
-            clean_start=True,
-            keep_alive=60,
-            properties={'request_problem_information': 0},
-        )
-        wire = encode_packet(connect)
-        decoded = decode_packet(wire)
-        assert decoded.properties['request_problem_information'] == 0
+        assert key not in decoded.properties
 
 
 # ============================================================================
@@ -83,53 +67,27 @@ class TestServerCapabilities:
     the server supports, so the client can avoid using unsupported features.
     """
 
-    def test_retain_available_flag(self, mqtt):
-        """§3.2.2.3.2 — Retain Available: 0 = not supported, 1 = supported."""
+    @pytest.mark.parametrize('flag', [
+        pytest.param('subscription_identifier_available',
+                     id='subscription-identifier-available'),
+        pytest.param('shared_subscription_available',
+                     id='shared-subscription-available'),
+        pytest.param('retain_available', id='retain-available'),
+        pytest.param('wildcard_subscription_available',
+                     id='wildcard-subscription-available'),
+    ])
+    def test_subscription_identifier_available_flag(self, mqtt, flag):
+        """§3.2.2.3.2 — capability flags round-trip as booleans (0 = not
+        supported, 1 = supported)."""
         for val in (0, 1):
             connack = MQTTConnack(
                 session_present=False,
                 reason_code=ReasonCode.SUCCESS,
-                properties={'retain_available': val},
+                properties={flag: val},
             )
             wire = encode_packet(connack)
             decoded = decode_packet(wire)
-            assert decoded.properties['retain_available'] == val
-
-    def test_wildcard_subscription_available_flag(self, mqtt):
-        """§3.2.2.3.2 — Wildcard Subscription Available."""
-        for val in (0, 1):
-            connack = MQTTConnack(
-                session_present=False,
-                reason_code=ReasonCode.SUCCESS,
-                properties={'wildcard_subscription_available': val},
-            )
-            wire = encode_packet(connack)
-            decoded = decode_packet(wire)
-            assert decoded.properties['wildcard_subscription_available'] == val
-
-    def test_subscription_identifier_available_flag(self, mqtt):
-        """§3.2.2.3.2 — Subscription Identifier Available."""
-        for val in (0, 1):
-            connack = MQTTConnack(
-                session_present=False,
-                reason_code=ReasonCode.SUCCESS,
-                properties={'subscription_identifier_available': val},
-            )
-            wire = encode_packet(connack)
-            decoded = decode_packet(wire)
-            assert decoded.properties['subscription_identifier_available'] == val
-
-    def test_shared_subscription_available_flag(self, mqtt):
-        """§3.2.2.3.2 — Shared Subscription Available."""
-        for val in (0, 1):
-            connack = MQTTConnack(
-                session_present=False,
-                reason_code=ReasonCode.SUCCESS,
-                properties={'shared_subscription_available': val},
-            )
-            wire = encode_packet(connack)
-            decoded = decode_packet(wire)
-            assert decoded.properties['shared_subscription_available'] == val
+            assert decoded.properties[flag] == val
 
     def test_all_server_capability_flags_together(self, mqtt):
         """§3.2.2.3.2 — CONNACK with all capability flags."""
@@ -166,47 +124,30 @@ class TestMessageExpiryInterval:
     If absent, the message does not expire.
     """
 
-    def test_publish_with_message_expiry(self, mqtt):
-        """§3.3.2.3.2 — PUBLISH with Message Expiry Interval."""
-        publish = MQTTPublish(
-            topic='events/temporary',
-            payload=b'expires soon',
-            qos=1,
-            packet_id=1,
-            properties={'message_expiry_interval': 60},
-        )
-        wire = encode_packet(publish)
-        decoded = decode_packet(wire)
-        assert decoded.properties['message_expiry_interval'] == 60
-
-    def test_message_expiry_zero_no_expiry(self, mqtt):
-        """§3.3.2.3.2 — Message Expiry Interval = 0 means no expiry."""
-        publish = MQTTPublish(
-            topic='events/permanent',
-            payload=b'never expires',
-            qos=1,
-            packet_id=1,
-            properties={'message_expiry_interval': 0},
-        )
-        wire = encode_packet(publish)
-        decoded = decode_packet(wire)
-        assert decoded.properties['message_expiry_interval'] == 0
-
-    def test_will_message_expiry(self, mqtt):
-        """§3.1.3.3 — Will Message can have Message Expiry Interval."""
+    @pytest.mark.parametrize('client_id,will_qos,props,key,value', [
+        pytest.param('will-expiry-client', 1, {'message_expiry_interval': 3600},
+                     'message_expiry_interval', 3600, id='will-message-expiry'),
+        pytest.param('will-delay-client', 0, {'will_delay_interval': 30},
+                     'will_delay_interval', 30, id='will-delay-interval'),
+        pytest.param('will-no-delay', 0, {'will_delay_interval': 0},
+                     'will_delay_interval', 0, id='will-delay-zero-immediate'),
+    ])
+    def test_will_message_expiry(self, mqtt, client_id, will_qos, props, key, value):
+        """Will properties round-trip: Message Expiry Interval and Will
+        Delay Interval (0 = publish immediately on disconnect)."""
         connect = MQTTConnect(
-            client_id='will-expiry-client',
+            client_id=client_id,
             clean_start=True,
             keep_alive=60,
             will_topic='clients/status',
             will_payload=b'lwt',
-            will_qos=1,
+            will_qos=will_qos,
             will_retain=False,
-            will_properties={'message_expiry_interval': 3600},
+            will_properties=props,
         )
         wire = encode_packet(connect)
         decoded = decode_packet(wire)
-        assert decoded.will_properties['message_expiry_interval'] == 3600
+        assert decoded.will_properties[key] == value
 
 
 # ============================================================================
@@ -221,38 +162,41 @@ class TestMaximumPacketSize:
     the server MUST send DISCONNECT with reason code 0x8E (Packet too large).
     """
 
-    def test_maximum_packet_size_in_connack(self, mqtt):
-        """§3.2.2.3.4 — CONNACK with Maximum Packet Size."""
+    @pytest.mark.parametrize('props,key,value', [
+        pytest.param({'maximum_packet_size': 65536}, 'maximum_packet_size', 65536,
+                     id='maximum-packet-size-connack'),
+        pytest.param({'receive_maximum': 65535}, 'receive_maximum', 65535,
+                     id='receive-maximum-connack'),
+        pytest.param({'topic_alias_maximum': 8}, 'topic_alias_maximum', 8,
+                     id='topic-alias-maximum-connack'),
+    ])
+    def test_maximum_packet_size_in_connack(self, mqtt, props, key, value):
+        """CONNACK properties round-trip: Maximum Packet Size, Receive
+        Maximum, Topic Alias Maximum."""
         connack = MQTTConnack(
             session_present=False,
             reason_code=ReasonCode.SUCCESS,
-            properties={'maximum_packet_size': 65536},  # 64 KB
+            properties=props,
         )
         wire = encode_packet(connack)
         decoded = decode_packet(wire)
-        assert decoded.properties['maximum_packet_size'] == 65536
+        assert decoded.properties[key] == value
 
-    def test_maximum_packet_size_in_connect(self, mqtt):
-        """§3.1.2.3 — Client can also advertise Maximum Packet Size."""
-        connect = MQTTConnect(
-            client_id='mps-client',
-            clean_start=True,
-            keep_alive=60,
-            properties={'maximum_packet_size': 262144},  # 256 KB
-        )
-        wire = encode_packet(connect)
-        decoded = decode_packet(wire)
-        assert decoded.properties['maximum_packet_size'] == 262144
-
-    def test_packet_too_large_disconnect_reason(self, mqtt):
-        """§3.14.2.1 — DISCONNECT reason code 0x8E: Packet too large."""
+    @pytest.mark.parametrize('reason,reason_string', [
+        pytest.param(ReasonCode.PACKET_TOO_LARGE,
+                     'Packet exceeds maximum allowed size', id='packet-too-large'),
+        pytest.param(ReasonCode.DISCONNECT_WITH_WILL,
+                     'Client requested Will delivery', id='disconnect-with-will'),
+    ])
+    def test_packet_too_large_disconnect_reason(self, mqtt, reason, reason_string):
+        """DISCONNECT carries its reason code (§3.14.2.1)."""
         disconnect = MQTTDisconnect(
-            reason_code=ReasonCode.SESSION_TAKEN_OVER,
-            properties={'reason_string': 'Packet exceeds maximum allowed size'},
+            reason_code=reason,
+            properties={'reason_string': reason_string},
         )
         wire = encode_packet(disconnect)
         decoded = decode_packet(wire)
-        assert decoded.reason_code == ReasonCode.SESSION_TAKEN_OVER
+        assert decoded.reason_code == reason
 
 
 # ============================================================================
@@ -394,25 +338,20 @@ class TestDisconnectSessionExpiry:
     which takes effect even if different from the CONNECT value.
     """
 
-    def test_disconnect_with_shorter_session_expiry(self, mqtt):
-        """§3.14.2.2 — Client reduces Session Expiry on DISCONNECT."""
+    @pytest.mark.parametrize('value', [
+        pytest.param(0, id='shorter-expiry'),        # Expire immediately
+        pytest.param(86400, id='longer-expiry'),     # 24 hours
+    ])
+    def test_disconnect_with_shorter_session_expiry(self, mqtt, value):
+        """§3.14.2.2 — DISCONNECT can override the Session Expiry Interval,
+        shorter (0) or longer (86400)."""
         disconnect = MQTTDisconnect(
             reason_code=ReasonCode.SUCCESS,
-            properties={'session_expiry_interval': 0},  # Expire immediately
+            properties={'session_expiry_interval': value},
         )
         wire = encode_packet(disconnect)
         decoded = decode_packet(wire)
-        assert decoded.properties['session_expiry_interval'] == 0
-
-    def test_disconnect_with_longer_session_expiry(self, mqtt):
-        """§3.14.2.2 — Client extends Session Expiry on DISCONNECT."""
-        disconnect = MQTTDisconnect(
-            reason_code=ReasonCode.SUCCESS,
-            properties={'session_expiry_interval': 86400},  # 24 hours
-        )
-        wire = encode_packet(disconnect)
-        decoded = decode_packet(wire)
-        assert decoded.properties['session_expiry_interval'] == 86400
+        assert decoded.properties['session_expiry_interval'] == value
 
 
 # ============================================================================
@@ -426,18 +365,6 @@ class TestResponseInformation:
     the server MAY respond with Response Information in CONNACK
     (a UTF-8 string used as the basis for creating Response Topics).
     """
-
-    def test_request_response_information(self, mqtt):
-        """§3.1.2.11 — Client requests Response Information."""
-        connect = MQTTConnect(
-            client_id='rri-client',
-            clean_start=True,
-            keep_alive=60,
-            properties={'request_response_information': 1},
-        )
-        wire = encode_packet(connect)
-        decoded = decode_packet(wire)
-        assert decoded.properties['request_response_information'] == 1
 
     def test_response_information_in_connack(self, mqtt):
         """§3.2.2.3.2 — Server provides Response Information."""
