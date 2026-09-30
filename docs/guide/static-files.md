@@ -249,6 +249,15 @@ revalidation of a large asset costs no disk I/O.  Pass
   re-runs every request (a swap between requests is refused on the next
   one) but not within one request — do not leave the served tree writable
   by untrusted users.
+- **A selected variant that escapes loses the whole request**: the
+  refusal is `400` even when the original or another variant would
+  have served — an outward-symlinked `file.gz` with `Accept-Encoding:
+  gzip` refuses although `file` itself is fine.  There is no fallback
+  to the next candidate.
+- **A variant is its filename**: a hard link of the original named
+  `file.gz` is served as `Content-Encoding: gzip` although its bytes
+  are plain.  Identity is never measured (`st_nlink` would not make it
+  robust) — keep the served tree's names honest.
 
 ## Inspecting registered roots
 
