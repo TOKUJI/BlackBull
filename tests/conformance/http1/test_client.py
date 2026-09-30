@@ -429,6 +429,11 @@ class TestWebSocketClient:
         # drained within the bound.
         async with WebSocketClient('127.0.0.1', server_port) as c:
             ws = await c.connect('/ws')
+            # The spies wrap the live attributes after connect(): this works
+            # only while close() reads ws._writer / ws._recipient at call
+            # time.  If a refactor captured them earlier, the spies would
+            # silently see nothing — hence the assertions below fail loudly
+            # rather than pass vacuously.
             writer = _RecordingWriter(ws._writer)
             events = _EventSpyRecipient(ws._recipient)
             ws._writer = writer
