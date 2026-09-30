@@ -159,7 +159,24 @@ conformance matrix:
 
 The wire codec lives in `blackbull.mqtt.messages` (the 15 control-packet
 dataclasses, `encode_packet` / `decode_packet`, the property system, reason
-codes, and `topic_matches_filter`). The broker is an actor model split across a
+codes, and `topic_matches_filter`).  `decode_packet` raises two classes:
+`IncompletePacket` means the buffer is short — the packet is not whole
+yet, and `PacketFramer` keeps the partial bytes buffered for the next
+`feed` — while `MQTTDecodeError` means the bytes are invalid.  Inside an
+already-whole packet the first is converted to the second at exactly two
+places: the property context (`_decode_vbi_at`, where "incomplete" can
+only mean a value crossing the declared Property Length) and
+`decode_packet`'s inner wrap (a body inconsistent with its Remaining
+Length).  Nothing else converts.
+
+Variable Byte Integers accept **non-minimal encodings**: a value whose
+encoding carries a redundant continuation octet (0 in two octets, 300 in
+three) decodes normally.  The MQTT spec requires the minimum number of
+bytes (§1.5.5) and a non-minimal encoding is a Malformed Packet (§2.2.1);
+this runtime does not enforce that.  The tolerance is pinned in
+`tests/unit/test_mqtt_codec_lengths.py`.
+
+The broker is an actor model split across a
 few small modules: `blackbull.mqtt.broker` holds the `BrokerActor`, which owns
 all routing state (subscriptions, sessions, retained messages) and, processing
 its inbox serially, needs no locks; `blackbull.mqtt.connection` holds the

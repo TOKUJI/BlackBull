@@ -331,7 +331,10 @@ def _read_vbi_at(data: bytes | bytearray, pos: int, end: int) -> tuple[int, int]
 
     Returns ``(value, new_pos)``.  An integer still continuing when *end*
     arrives is an incomplete read; one continuing on its fourth octet is
-    malformed.  Trailing bytes beyond the integer are the caller's.
+    malformed.  A *non-minimal* encoding — one carrying a redundant
+    continuation octet — decodes normally: §1.5.5's minimum-bytes rule is
+    not enforced here (pinned in test_mqtt_codec_lengths.py).  Trailing
+    bytes beyond the integer are the caller's.
     """
     multiplier = 1
     value = 0
