@@ -182,6 +182,7 @@ class WebSocketActor(Actor):
                     hook.cancel()
                     raise
                 if not done:
+                    hook.cancel()  # uniform with the cancellation exit
                     logger.warning(
                         'on_websocket_disconnected exceeded %.1fs; releasing '
                         'the connection anyway', _DISCONNECT_HOOK_TIMEOUT)
