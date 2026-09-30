@@ -392,6 +392,24 @@ class TestHTTP2ScopeFields:
         assert scope.get('root_path') == ''
 
 
+def _authority_request(value):
+    """A ``(H2 frame, HTTP/1 request)`` pair with ``:authority`` set to *value*."""
+    frame = _h2_frame([
+        (b':method', b'GET'), (b':path', b'/'), (b':scheme', b'https'),
+        (b':authority', value),
+    ])
+    return frame, b'GET / HTTP/1.1\r\nHost: ' + value + b'\r\n\r\n'
+
+
+def _path_request(value):
+    """A ``(H2 frame, HTTP/1 request)`` pair with ``:path`` set to *value*."""
+    frame = _h2_frame([
+        (b':method', b'GET'), (b':scheme', b'https'),
+        (b':authority', b'example.com'), (b':path', value),
+    ])
+    return frame, b'GET ' + value + b' HTTP/1.1\r\nHost: h\r\n\r\n'
+
+
 class TestParseHeadersNoneContract:
     """Alloc hygiene: ``parse_headers`` returns ``None`` on every path that marks
     the frame malformed, uniformly — including host-authority validation
@@ -453,39 +471,28 @@ class TestParseHeadersNoneContract:
         assert 'UTF-8' in (frame.malformed_reason or '')
         assert _real_parse_headers(frame) is None
 
-    @pytest.mark.parametrize('which,value', [
-        pytest.param('authority', b'example.com', id='authority-verdict-example'),
-        pytest.param('authority', b'example.com:8443', id='authority-verdict-port'),
-        pytest.param('authority', b'[::1]:8100', id='authority-verdict-ipv6'),
-        pytest.param('authority', b'exam\x01ple.com', id='authority-verdict-ctl-x01'),
-        pytest.param('authority', b'exam\x7fple.com', id='authority-verdict-ctl-x7f'),
-        pytest.param('authority', b'exam ple.com', id='authority-verdict-space'),
-        pytest.param('authority', b'user@example.com', id='authority-verdict-userinfo'),
-        pytest.param('authority', '\u4f8b\u3048.jp'.encode('utf-8'), id='authority-verdict-non-ascii'),
-        pytest.param('path', b'/', id='path-verdict-root'),
-        pytest.param('path', b'/a/b?x=1', id='path-verdict-query'),
-        pytest.param('path', b'/%E4%BE%8B', id='path-verdict-pct-encoded'),
-        pytest.param('path', b'/a~b!$&()*+,;=:@', id='path-verdict-sub-delims'),
-        pytest.param('path', b'/a\x01b', id='path-verdict-ctl-x01'),
-        pytest.param('path', b'/a\x7fb', id='path-verdict-ctl-x7f'),
-        pytest.param('path', b'/a b', id='path-verdict-space'),
-        pytest.param('path', '/a\u00e9b'.encode('utf-8'), id='path-verdict-non-ascii'),
+    @pytest.mark.parametrize('build,value', [
+        pytest.param(_authority_request, b'example.com', id='authority-verdict-example'),
+        pytest.param(_authority_request, b'example.com:8443', id='authority-verdict-port'),
+        pytest.param(_authority_request, b'[::1]:8100', id='authority-verdict-ipv6'),
+        pytest.param(_authority_request, b'exam\x01ple.com', id='authority-verdict-ctl-x01'),
+        pytest.param(_authority_request, b'exam\x7fple.com', id='authority-verdict-ctl-x7f'),
+        pytest.param(_authority_request, b'exam ple.com', id='authority-verdict-space'),
+        pytest.param(_authority_request, b'user@example.com', id='authority-verdict-userinfo'),
+        pytest.param(_authority_request, '\u4f8b\u3048.jp'.encode('utf-8'), id='authority-verdict-non-ascii'),
+        pytest.param(_path_request, b'/', id='path-verdict-root'),
+        pytest.param(_path_request, b'/a/b?x=1', id='path-verdict-query'),
+        pytest.param(_path_request, b'/%E4%BE%8B', id='path-verdict-pct-encoded'),
+        pytest.param(_path_request, b'/a~b!$&()*+,;=:@', id='path-verdict-sub-delims'),
+        pytest.param(_path_request, b'/a\x01b', id='path-verdict-ctl-x01'),
+        pytest.param(_path_request, b'/a\x7fb', id='path-verdict-ctl-x7f'),
+        pytest.param(_path_request, b'/a b', id='path-verdict-space'),
+        pytest.param(_path_request, '/a\u00e9b'.encode('utf-8'), id='path-verdict-non-ascii'),
     ])
-    def test_authority_verdict_matches_http1(self, which, value):
+    def test_authority_verdict_matches_http1(self, build, value):
         """The same octets are accepted or refused identically on both
         transports — one grammar, two header models."""
-        if which == 'authority':
-            frame = self._headers_frame([
-                (b':method', b'GET'), (b':path', b'/'), (b':scheme', b'https'),
-                (b':authority', value),
-            ])
-            h1_request = b'GET / HTTP/1.1\r\nHost: ' + value + b'\r\n\r\n'
-        else:
-            frame = self._headers_frame([
-                (b':method', b'GET'), (b':scheme', b'https'),
-                (b':authority', b'example.com'), (b':path', value),
-            ])
-            h1_request = b'GET ' + value + b' HTTP/1.1\r\nHost: h\r\n\r\n'
+        frame, h1_request = build(value)
         from blackbull.server.http1_actor import BadRequestError
         actor = object.__new__(_HTTP1Actor)
         actor._ssl = False

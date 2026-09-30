@@ -75,8 +75,11 @@ async def test_readuntil_sep_in_underlying():
 
 
 @pytest.mark.parametrize('prefix,under,r1,r2', [
+    # nothing is over-read: the second line is the leftover prefix plus the
+    # underlying bytes
     pytest.param(b'one\r\ntwo', b'three\r\n', b'one\r\n', b'twothree\r\n',
                  id='sep-in-prefix'),
+    # the over-read underlying bytes were pushed back, not lost
     pytest.param(b'GET / HTTP/1.1\r', b'\nHost: x\r\n',
                  b'GET / HTTP/1.1\r\n', b'Host: x\r\n',
                  id='sep-straddles-boundary'),
@@ -84,7 +87,6 @@ async def test_readuntil_sep_in_underlying():
 async def test_readuntil_sep_straddles_boundary(prefix, under, r1, r2):
     pr = PrefixReader(prefix, _Under(under))
     assert await pr.readuntil(b'\r\n') == r1
-    # the over-read underlying bytes were pushed back, not lost
     assert await pr.readuntil(b'\r\n') == r2
 
 
