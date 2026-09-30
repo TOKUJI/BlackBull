@@ -109,11 +109,15 @@ def _client_with_fakes(*, record: bool = False,
 # ---------------------------------------------------------------------------
 
 class TestSendRaw:
+    @pytest.mark.parametrize('op,data', [
+        pytest.param('send_raw', b'POST / HTTP/1.1\r\n\r\n', id='send-raw-unchanged'),
+        pytest.param('send_body_bytes', b'hello world', id='send-body-bytes-unchanged'),
+    ])
     @pytest.mark.asyncio
-    async def test_writes_data_unchanged(self):
+    async def test_writes_data_unchanged(self, op, data):
         c, w = _client_with_fakes()
-        await c.send_raw(b'POST / HTTP/1.1\r\n\r\n')
-        assert bytes(w.data) == b'POST / HTTP/1.1\r\n\r\n'
+        await getattr(c, op)(data)
+        assert bytes(w.data) == data
 
     @pytest.mark.asyncio
     async def test_empty_data_is_one_write(self):
@@ -252,12 +256,6 @@ class TestHeaderLines:
 # ---------------------------------------------------------------------------
 
 class TestBodyPrimitives:
-    @pytest.mark.asyncio
-    async def test_send_body_bytes_writes_unchanged(self):
-        c, w = _client_with_fakes()
-        await c.send_body_bytes(b'hello world')
-        assert bytes(w.data) == b'hello world'
-
     @pytest.mark.asyncio
     async def test_send_body_bytes_byte_interval(self):
         c, w = _client_with_fakes()

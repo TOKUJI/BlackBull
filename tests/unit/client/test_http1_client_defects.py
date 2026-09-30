@@ -66,24 +66,22 @@ def _response(fields: bytes, body: bytes = b'') -> bytes:
 # ===========================================================================
 
 class TestConflictingContentLength:
-    async def test_two_different_lengths_are_refused(self):
+    @pytest.mark.parametrize('cl_headers', [
+        pytest.param(b'content-length: 5\r\ncontent-length: 10\r\n',
+                     id='two-different-lengths'),
+        pytest.param(b'content-length: 5, 10\r\n',
+                     id='comma-combined-form'),
+    ])
+    async def test_two_different_lengths_are_refused(self, cl_headers):
         """CL.CL desync: believe the wrong one and the surplus becomes the
         next keep-alive response's status line.
 
         The server refuses this on the request side already
         (`_validate_message_framing`); a client that does not refuse it on
-        the response side is the same defect facing the other way.
+        the response side is the same defect facing the other way.  One
+        header line, two values is the same conflict, different spelling.
         """
-        reader = _Reader(_response(
-            b'content-length: 5\r\ncontent-length: 10\r\n', b'HELLOSURPLUS!'))
-
-        with pytest.raises(ProtocolError):
-            await _recipient().receive(reader)
-
-    async def test_the_comma_combined_form_is_refused_too(self):
-        """One header line, two values — the same conflict, different spelling."""
-        reader = _Reader(_response(b'content-length: 5, 10\r\n',
-                                   b'HELLOSURPLUS!'))
+        reader = _Reader(_response(cl_headers, b'HELLOSURPLUS!'))
 
         with pytest.raises(ProtocolError):
             await _recipient().receive(reader)

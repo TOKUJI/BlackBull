@@ -114,25 +114,19 @@ class TestControls:
     async def test_an_empty_body_on_a_body_allowed_method_is_zero(self):
         assert framing(await _send(method='POST')) == [(b'content-length', b'0')]
 
+    @pytest.mark.parametrize('method', [
+        pytest.param('GET', id='body-less-method'),
+        pytest.param('BREW', id='unknown-method'),
+    ])
     @pytest.mark.asyncio
-    async def test_an_empty_body_on_a_body_less_method_is_undeclared(self):
-        assert framing(await _send(method='GET')) == []
+    async def test_an_empty_body_on_a_body_less_method_is_undeclared(self, method):
+        assert framing(await _send(method=method)) == []
 
     @pytest.mark.asyncio
     async def test_an_explicit_zero_length_survives_on_a_body_less_method(self):
         assert framing(await _send(
             method='GET', headers=[(b'content-length', b'0')])) == [
             (b'content-length', b'0')]
-
-    @pytest.mark.asyncio
-    async def test_a_length_that_disagrees_with_the_body_is_refused(self):
-        with pytest.raises(ProtocolError):
-            await _send(headers=[(b'content-length', b'3')], body=b'hello')
-
-    @pytest.mark.asyncio
-    async def test_an_empty_body_with_a_declared_length_is_refused(self):
-        with pytest.raises(ProtocolError):
-            await _send(headers=[(b'content-length', b'5')], body=b'')
 
 
 # ---------------------------------------------------------------------------
@@ -180,12 +174,21 @@ class TestOneFraming:
             await _send(headers=[(b'transfer-encoding', value)],
                         body=_chunks(b'aa'))
 
+    @pytest.mark.parametrize('headers,body', [
+        pytest.param([(b'content-length', b'3')], b'hello',
+                     id='length-disagrees-with-body'),
+        pytest.param([(b'content-length', b'5')], b'',
+                     id='empty-body-with-declared-length'),
+        pytest.param([(b'transfer-encoding', b'gzip, chunked')], b'aa',
+                     id='refused-te-byte-body'),
+        pytest.param([(b'content-length', b'5, 9')], b'hello',
+                     id='comma-joined-conflicting-members'),
+    ])
     @pytest.mark.asyncio
     async def test_a_refused_transfer_encoding_is_refused_for_a_byte_body_too(
-            self):
+            self, headers, body):
         with pytest.raises(ProtocolError):
-            await _send(headers=[(b'transfer-encoding', b'gzip, chunked')],
-                        body=b'aa')
+            await _send(headers=headers, body=body)
 
     @pytest.mark.asyncio
     async def test_a_transfer_encoding_beside_a_content_length_is_refused(self):
@@ -266,11 +269,6 @@ class TestContentLengthValue:
         w = await _send(headers=[(b'content-length', b'5, 5')], body=b'hello')
         assert framing(w) == [(b'content-length', b'5')]
 
-    @pytest.mark.asyncio
-    async def test_comma_joined_conflicting_members_are_refused(self):
-        with pytest.raises(ProtocolError):
-            await _send(headers=[(b'content-length', b'5, 9')], body=b'hello')
-
     @pytest.mark.parametrize('value', [
         b'+5',       # sign
         b'-5',       # sign
@@ -322,10 +320,6 @@ class TestMethodBodyPolicy:
     @pytest.mark.asyncio
     async def test_a_body_less_method_declares_nothing(self, method):
         assert framing(await _send(method=method)) == []
-
-    @pytest.mark.asyncio
-    async def test_an_unknown_method_with_an_empty_body_declares_nothing(self):
-        assert framing(await _send(method='BREW')) == []
 
     @pytest.mark.asyncio
     async def test_an_upgrade_request_declares_nothing(self):

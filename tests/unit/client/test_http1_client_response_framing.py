@@ -332,22 +332,17 @@ async def test_transfer_encoding_http_list_forms_use_final_chunked(header):
 
 
 @pytest.mark.asyncio
-async def test_transfer_encoding_repeated_fields_are_combined_in_order():
+@pytest.mark.parametrize('headers', [
+    pytest.param(b'Transfer-Encoding: gzip\r\n'
+                 b'Transfer-Encoding: chunked\r\n',
+                 id='repeated-fields-combined'),
+    pytest.param(b'Transfer-Encoding: gzip,\r\n'
+                 b'Transfer-Encoding: ,chunked\r\n',
+                 id='repeated-empty-members-ignored'),
+])
+async def test_transfer_encoding_repeated_fields_are_combined_in_order(headers):
     reader = _Reader(
-        _head(200, headers=(b'Transfer-Encoding: gzip\r\n'
-                           b'Transfer-Encoding: chunked\r\n'))
-        + _chunked_body(b'payload'))
-
-    response = await HTTP1ResponseRecipient(request_method='GET').receive(reader)
-
-    assert response.body == b'payload'
-
-
-@pytest.mark.asyncio
-async def test_transfer_encoding_repeated_empty_members_are_ignored():
-    reader = _Reader(
-        _head(200, headers=(b'Transfer-Encoding: gzip,\r\n'
-                           b'Transfer-Encoding: ,chunked\r\n'))
+        _head(200, headers=headers)
         + _chunked_body(b'payload'))
 
     response = await HTTP1ResponseRecipient(request_method='GET').receive(reader)
@@ -1138,43 +1133,37 @@ class TestContentlessResponsesDoNotClaimABoundary:
     """
 
     @pytest.mark.asyncio
-    async def test_a_204_claiming_content_is_not_reusable(self):
-        reader = _Reader(b'HTTP/1.1 204 No Content\r\nContent-Length: 3\r\n'
-                         b'\r\nodd')
+    @pytest.mark.parametrize('wire,reusable', [
+        pytest.param(b'HTTP/1.1 204 No Content\r\nContent-Length: 3\r\n'
+                     b'\r\nodd', False, id='204-claiming-content'),
+        pytest.param(b'HTTP/1.1 204 No Content\r\n'
+                     b'Transfer-Encoding: chunked\r\n\r\n0\r\n\r\n', False,
+                     id='204-claiming-chunked'),
+        pytest.param(b'HTTP/1.1 204 No Content\r\n\r\n'
+                     b'HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n', True,
+                     id='204-without-boundary'),
+    ])
+    async def test_a_204_claiming_content_is_not_reusable(self, wire, reusable):
+        reader = _Reader(wire)
         recipient = HTTP1ResponseRecipient(request_method='GET')
 
         response = await recipient.receive(reader)
 
         assert response.body == b''
-        assert recipient.reusable is False
+        assert recipient.reusable is reusable
 
     @pytest.mark.asyncio
-    async def test_a_204_claiming_chunked_is_not_reusable(self):
-        reader = _Reader(b'HTTP/1.1 204 No Content\r\n'
-                         b'Transfer-Encoding: chunked\r\n\r\n0\r\n\r\n')
-        recipient = HTTP1ResponseRecipient(request_method='GET')
-
-        response = await recipient.receive(reader)
-
-        assert response.body == b''
-        assert recipient.reusable is False
-
-    @pytest.mark.asyncio
-    async def test_a_204_without_a_boundary_is_reusable(self):
-        reader = _Reader(b'HTTP/1.1 204 No Content\r\n\r\n'
-                         b'HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n')
-        recipient = HTTP1ResponseRecipient(request_method='GET')
-
-        response = await recipient.receive(reader)
-
-        assert response.body == b''
-        assert recipient.reusable is True
-
-    @pytest.mark.asyncio
-    async def test_a_head_response_keeps_the_length_it_only_describes(self):
-        reader = _Reader(b'HTTP/1.1 200 OK\r\nContent-Length: 17\r\n\r\n'
-                         b'HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n')
-        recipient = HTTP1ResponseRecipient(request_method='HEAD')
+    @pytest.mark.parametrize('method,wire', [
+        pytest.param('HEAD', b'HTTP/1.1 200 OK\r\nContent-Length: 17\r\n\r\n'
+                             b'HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n',
+                     id='head-keeps-length'),
+        pytest.param('GET', b'HTTP/1.1 304 Not Modified\r\nContent-Length: 17\r\n'
+                            b'\r\n',
+                     id='304-keeps-length'),
+    ])
+    async def test_a_head_response_keeps_the_length_it_only_describes(self, method, wire):
+        reader = _Reader(wire)
+        recipient = HTTP1ResponseRecipient(request_method=method)
 
         response = await recipient.receive(reader)
 
@@ -1268,14 +1257,3 @@ class TestContentlessResponsesDoNotClaimABoundary:
         assert recipient.protocol_switched is False, \
             'an ambiguous connection is not switching anything'
         assert recipient.reusable is False
-
-    @pytest.mark.asyncio
-    async def test_a_304_keeps_the_length_it_only_describes(self):
-        reader = _Reader(b'HTTP/1.1 304 Not Modified\r\nContent-Length: 17\r\n'
-                         b'\r\n')
-        recipient = HTTP1ResponseRecipient(request_method='GET')
-
-        response = await recipient.receive(reader)
-
-        assert response.body == b''
-        assert recipient.reusable is True
