@@ -45,10 +45,7 @@ class TestRequestProblemInformation:
                      id='session-expiry-absent'),
     ])
     def test_request_problem_information_default(self, mqtt, client_id, clean_start, key):
-        """Absent MQTT properties yield their spec defaults (§3.1.2.11
-        default 0, §3.2.2.3.1 server assumes 65535, §3.1.2.4 server default
-        Session Expiry) — the key is simply not present in decoded
-        properties."""
+        """An absent property is absent after decode."""
         connect = MQTTConnect(
             client_id=client_id,
             clean_start=clean_start,
@@ -186,7 +183,7 @@ class TestMaximumPacketSize:
         assert decoded.properties[key] == value
 
     @pytest.mark.parametrize('reason,reason_string', [
-        pytest.param(ReasonCode.SESSION_TAKEN_OVER,
+        pytest.param(ReasonCode.PACKET_TOO_LARGE,
                      'Packet exceeds maximum allowed size', id='packet-too-large'),
         pytest.param(ReasonCode.DISCONNECT_WITH_WILL,
                      'Client requested Will delivery', id='disconnect-with-will'),

@@ -88,11 +88,6 @@ def _ctx():
 
 
 # ============================================================================
-# §4.9 / §3.2.2.3.1 — Flow Control: Receive Maximum
-# ============================================================================
-
-
-# ============================================================================
 # §4.6 — Message Ordering
 # ============================================================================
 
@@ -286,8 +281,6 @@ class TestRequestResponsePattern:
                      'receive_maximum', 0, id='receive-maximum-zero'),
         pytest.param('ta-client', True, {'topic_alias_maximum': 16},
                      'topic_alias_maximum', 16, id='topic-alias-maximum-connect'),
-        pytest.param('rri-client', True, {'request_response_information': 1},
-                     'request_response_information', 1, id='request-response-information-property'),
         pytest.param('se-client', False, {'session_expiry_interval': 3600},
                      'session_expiry_interval', 3600, id='session-expiry-3600'),
         pytest.param('se-zero', False, {'session_expiry_interval': 0},

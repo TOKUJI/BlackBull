@@ -255,8 +255,3 @@ class TestWillMessageDelivery:
         wire = encode_packet(disconnect)
         decoded = decode_packet(wire)
         assert decoded.reason_code == ReasonCode.SUCCESS
-
-
-# ============================================================================
-# §3.1.3.3 — Will Delay Interval
-# ============================================================================
