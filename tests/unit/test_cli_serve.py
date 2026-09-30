@@ -114,13 +114,11 @@ def test_main_serve_missing_dir_returns_1(tmp_path, capsys):
     assert 'not found' in capsys.readouterr().err
 
 
-def test_main_serve_bad_bind_returns_1(site, capsys):
-    rc = cli.main(['serve', str(site), '--bind', '0.0.0.0'])  # no port
+@pytest.mark.parametrize('bind,err_frag', [
+    pytest.param('0.0.0.0', 'blackbull:', id='bad-bind'),
+    pytest.param('fd://3', 'fd://', id='fd-bind-rejected'),
+])
+def test_main_serve_bad_bind_returns_1(site, capsys, bind, err_frag):
+    rc = cli.main(['serve', str(site), '--bind', bind])
     assert rc == 1
-    assert 'blackbull:' in capsys.readouterr().err
-
-
-def test_main_serve_rejects_fd_bind(site, capsys):
-    rc = cli.main(['serve', str(site), '--bind', 'fd://3'])
-    assert rc == 1
-    assert 'fd://' in capsys.readouterr().err
+    assert err_frag in capsys.readouterr().err

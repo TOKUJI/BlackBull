@@ -115,16 +115,21 @@ def test_parse_rejects_empty_target(actor):
 # Both are request-target octets, and the authority becomes the host header
 # without passing the per-value CTL check the received headers went through.
 
-@pytest.mark.parametrize('bad', [b'\x00', b'\x01', b'\x1f', b'\x7f'])
-def test_absolute_form_rejects_a_ctl_in_the_authority(actor, bad):
+@pytest.mark.parametrize('part,bad', [
+    pytest.param('authority', b'\x00', id='ctl-in-authority-x00'),
+    pytest.param('authority', b'\x01', id='ctl-in-authority-x01'),
+    pytest.param('authority', b'\x1f', id='ctl-in-authority-x1f'),
+    pytest.param('authority', b'\x7f', id='ctl-in-authority-x7f'),
+    pytest.param('scheme', b'\x01', id='bad-octet-in-scheme-x01'),
+    pytest.param('scheme', b'\x1f', id='bad-octet-in-scheme-x1f'),
+    pytest.param('scheme', b'\x7f', id='bad-octet-in-scheme-x7f'),
+    pytest.param('scheme', b'\x80', id='bad-octet-in-scheme-x80'),
+])
+def test_absolute_form_rejects_a_ctl_in_the_authority(actor, part, bad):
+    target = ((b'http://ho' + bad + b'st/path') if part == 'authority'
+              else (b'ht' + bad + b'tp://host/path'))
     with pytest.raises(BadRequestError, match='request-target'):
-        actor._parse(_req(target=b'http://ho' + bad + b'st/path'))
-
-
-@pytest.mark.parametrize('bad', [b'\x01', b'\x1f', b'\x7f', b'\x80'])
-def test_absolute_form_rejects_a_bad_octet_in_the_scheme(actor, bad):
-    with pytest.raises(BadRequestError, match='request-target'):
-        actor._parse(_req(target=b'ht' + bad + b'tp://host/path'))
+        actor._parse(_req(target=target))
 
 
 def test_absolute_form_still_overrides_host(actor):
@@ -185,15 +190,13 @@ def test_parse_rejects_bare_cr_or_lf_in_header_value(actor, bad):
         actor._parse(_hdr(b'X-Thing: a' + bad + b'b'))
 
 
-def test_parse_allows_htab_inside_a_header_value(actor):
-    # HTAB is the one CTL a field value may carry (RFC 9110 §5.5).
-    conn = actor._parse(_hdr(b'X-Thing: a\tb'))
-    assert conn.headers.get(b'x-thing') == b'a\tb'
-
-
-def test_parse_allows_obs_text_in_a_header_value(actor):
-    conn = actor._parse(_hdr(b'X-Thing: caf\xc3\xa9'))
-    assert conn.headers.get(b'x-thing') == b'caf\xc3\xa9'
+@pytest.mark.parametrize('line,expected', [
+    pytest.param(b'X-Thing: a\tb', b'a\tb', id='htab-inside-value'),
+    pytest.param(b'X-Thing: caf\xc3\xa9', b'caf\xc3\xa9', id='obs-text'),
+])
+def test_parse_allows_htab_inside_a_header_value(actor, line, expected):
+    conn = actor._parse(_hdr(line))
+    assert conn.headers.get(b'x-thing') == expected
 
 
 def test_ctl_in_request_line_still_reports_the_request_line_error(actor):

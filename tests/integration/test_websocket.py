@@ -88,6 +88,9 @@ async def test_websocket_clean_close(ws_app):
     async with websockets.connect(uri) as ws:
         await ws.send('ping')
         await ws.recv()
+    assert ws.close_code == 1000, (
+        f'the closing handshake must complete normally; got {ws.close_code}'
+    )
 
 
 @pytest.mark.integration

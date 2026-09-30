@@ -98,29 +98,26 @@ def _ctx():
 class TestPingreqPingrespWireFormat:
     """§3.12, §3.13 — PINGREQ and PINGRESP are 2-byte fixed packets."""
 
-    def test_pingreq_is_exactly_two_bytes(self, mqtt):
-        """§3.12 — PINGREQ: fixed header 0xC0, Remaining Length 0."""
-        pingreq = MQTTPingreq()
-        wire = encode_packet(pingreq)
-        assert wire == b'\xC0\x00', \
-            "PINGREQ must be exactly 0xC0 0x00 per §3.12"
+    @pytest.mark.parametrize('packet,expected,label', [
+        pytest.param(MQTTPingreq(), b'\xC0\x00',
+                     'PINGREQ must be exactly 0xC0 0x00 per §3.12', id='pingreq-two-bytes'),
+        pytest.param(MQTTPingresp(), b'\xD0\x00',
+                     'PINGRESP must be exactly 0xD0 0x00 per §3.13', id='pingresp-two-bytes'),
+    ])
+    def test_pingreq_is_exactly_two_bytes(self, mqtt, packet, expected, label):
+        """§3.12/§3.13 — PINGREQ and PINGRESP are 2-byte fixed packets
+        (fixed header, Remaining Length 0)."""
+        wire = encode_packet(packet)
+        assert wire == expected, label
 
-    def test_pingresp_is_exactly_two_bytes(self, mqtt):
-        """§3.13 — PINGRESP: fixed header 0xD0, Remaining Length 0."""
-        pingresp = MQTTPingresp()
-        wire = encode_packet(pingresp)
-        assert wire == b'\xD0\x00', \
-            "PINGRESP must be exactly 0xD0 0x00 per §3.13"
-
-    def test_pingreq_round_trip(self, mqtt):
-        """§3.12 — PINGREQ decode yields MQTTPingreq."""
-        decoded = decode_packet(b'\xC0\x00')
-        assert isinstance(decoded[0], MQTTPingreq)
-
-    def test_pingresp_round_trip(self, mqtt):
-        """§3.13 — PINGRESP decode yields MQTTPingresp."""
-        decoded = decode_packet(b'\xD0\x00')
-        assert isinstance(decoded[0], MQTTPingresp)
+    @pytest.mark.parametrize('wire,cls', [
+        pytest.param(b'\xC0\x00', MQTTPingreq, id='pingreq-round-trip'),
+        pytest.param(b'\xD0\x00', MQTTPingresp, id='pingresp-round-trip'),
+    ])
+    def test_pingreq_round_trip(self, mqtt, wire, cls):
+        """§3.12/§3.13 — PINGREQ/PINGRESP decode yields its packet class."""
+        decoded = decode_packet(wire)
+        assert isinstance(decoded[0], cls)
 
 
 # ============================================================================

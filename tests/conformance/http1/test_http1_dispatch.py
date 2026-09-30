@@ -439,15 +439,27 @@ class TestHTTP11KeepAlive:
         assert wire.startswith(b'HTTP/1.1 200 OK\r\n')
         assert b'500 Internal Server Error' not in wire
 
-    async def test_incomplete_read_on_first_request_closes_silently(self):
+    async def test_incomplete_first_request_is_answered_400_and_closed(self):
         req = _http_request(method='GET', path='/', headers={'Host': 'localhost:8000'})
         first_line, _ = req.split(b'\r\n', 1)
         reader = MagicMock(spec=AbstractReader)
         reader.readuntil = AsyncMock(side_effect=IncompleteReadError(b'Host: localh'))
 
-        actor = HTTP1Actor(reader, _FakeWriter(), _noop_app, None,
+        writer = _FakeWriter()
+        actor = HTTP1Actor(reader, writer, _noop_app, None,
                            request=first_line + b'\r\n')
-        await actor.run()  # must return normally
+        await actor.run()  # must return normally — the EOF is absorbed
+
+        # RFC 9112 §2.2 — a truncated head is answered 400; RFC 9112 §9.6 —
+        # the close is announced rather than a reset.
+        wire = bytes(writer.written)
+        assert wire.startswith(b'HTTP/1.1 400 Bad Request'), (
+            f'a truncated head must be answered 400 (RFC 9112 §2.2); got {wire[:24]!r}'
+        )
+        assert b'connection: close' in wire.lower(), (
+            'the connection close must be announced, not a bare reset'
+        )
+        assert wire.count(b'HTTP/1.1 ') == 1, 'exactly one response before the close'
 
     async def test_incomplete_read_after_first_request_app_called_once(self):
         req = _http_request(method='GET', path='/one',

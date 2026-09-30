@@ -176,13 +176,13 @@ class TestEncodeFrame:
             assert int.from_bytes(frame[2:10], 'big') == length
             assert frame[10:] == payload
 
-    def test_binary_opcode(self):
-        frame = encode_frame(b'\x00\x01', opcode=0x2)
-        assert frame[0] & 0x0F == 0x2
-
-    def test_close_frame_opcode(self):
-        frame = encode_frame(b'\x03\xe8', opcode=0x8)
-        assert frame[0] & 0x0F == 0x8
+    @pytest.mark.parametrize('payload,opcode', [
+        pytest.param(b'\x00\x01', 0x2, id='binary-opcode'),
+        pytest.param(b'\x03\xe8', 0x8, id='close-frame-opcode'),
+    ])
+    def test_binary_opcode(self, payload, opcode):
+        frame = encode_frame(payload, opcode=opcode)
+        assert frame[0] & 0x0F == opcode
 
 
 class TestEncodeFrameHeader:
@@ -583,18 +583,14 @@ class TestUnmaskedFrameSendsClose:
     def _make_handler(self, raw_bytes: bytes):
         return _RecipientWrapper(raw_bytes)
 
-    async def test_unmasked_frame_sends_close_1002(self):
+    @pytest.mark.parametrize('raw,opcode', [
+        pytest.param(b'hello', 0x1, id='unmasked-text'),
+        pytest.param(b'\x00', 0x2, id='unmasked-binary'),
+    ])
+    async def test_unmasked_frame_sends_close_1002(self, raw, opcode):
         """CLOSE(1002) must appear on the wire when an unmasked frame is received."""
-        handler = self._make_handler(_make_unmasked_frame(b'hello', opcode=0x1))
+        handler = self._make_handler(_make_unmasked_frame(raw, opcode=opcode))
         await handler.receive()         # connect
-        with pytest.raises(Exception):
-            await handler.receive()
-        assert _CLOSE_1002 in bytes(handler.writer.written)
-
-    async def test_unmasked_binary_frame_sends_close_1002(self):
-        """Same for binary opcode."""
-        handler = self._make_handler(_make_unmasked_frame(b'\x00', opcode=0x2))
-        await handler.receive()
         with pytest.raises(Exception):
             await handler.receive()
         assert _CLOSE_1002 in bytes(handler.writer.written)

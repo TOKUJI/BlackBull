@@ -48,11 +48,18 @@ def test_sse_format_mapping_emits_named_fields():
     assert out == b'event: token\nid: 42\nretry: 3000\ndata: hello\n\n'
 
 
-def test_sse_format_multi_line_data_splits_lines():
+@pytest.mark.parametrize('event,expected', [
+    pytest.param({'data': 'line1\nline2\nline3'},
+                 b'data: line1\ndata: line2\ndata: line3\n\n',
+                 id='multi-line-data-splits'),
+    pytest.param({'data': 'ok'}, b'data: ok\n\n', id='missing-fields-omitted'),
+])
+def test_sse_format_multi_line_data_splits_lines(event, expected):
     """WHATWG §9.2.6 — each ``\\n`` in the data string emits its own
-    ``data:`` field; the client rejoins with ``\\n`` on receive."""
-    out = _format_sse_event({'data': 'line1\nline2\nline3'})
-    assert out == b'data: line1\ndata: line2\ndata: line3\n\n'
+    ``data:`` field; the client rejoins with ``\\n`` on receive. Only the
+    keys that are present should appear on the wire."""
+    out = _format_sse_event(event)
+    assert out == expected
 
 
 def test_sse_format_dict_data_is_json_serialised():
@@ -63,12 +70,6 @@ def test_sse_format_dict_data_is_json_serialised():
     assert 'data: ' in body
     data_line = next(ln for ln in body.split('\n') if ln.startswith('data:'))
     assert json.loads(data_line[len('data: '):]) == {'pct': 42}
-
-
-def test_sse_format_omits_missing_fields():
-    """Only the keys that are present should appear on the wire."""
-    out = _format_sse_event({'data': 'ok'})
-    assert out == b'data: ok\n\n'
 
 
 def test_sse_format_id_coerced_to_string():
