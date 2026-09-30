@@ -6875,6 +6875,21 @@ drain's logic and the framing decision differ, and it differs because
 <code>OPTIONS</code> is the opposite case: §9.3.7 <em>permits</em> content there, which
 is exactly why that path drains rather than refusing.</p>
 <h2 id="send-path-invariant">Send-path invariant<a class="headerlink" href="#send-path-invariant" title="Permanent link">&para;</a></h2>
+<p>HTTP ASGI send events are normalized by <code>blackbull.native._native_from_asgi</code>,
+shared by the handler/middleware adapters and both protocol senders.
+<code>NativeResponse(push=...)</code> carries a promised request; the HTTP/2 push
+callback consumes it directly. Its header arm describes request headers,
+so response middleware and route-header injection pass push messages through.
+<code>asgi_send_boundary</code> expands native messages at external-host and
+scope-declared middleware boundaries.</p>
+<p>The mutually exclusive <code>file_path</code> and <code>push</code> properties share the existing
+optional send storage. Only a push allocates a tagged path object; ordinary
+responses gain no slot or allocation. Senders and response middleware check
+whether this storage is empty before resolving the public properties.</p>
+<p>Middleware conversion copies header lists because middleware may mutate them.
+Direct sender conversion borrows response headers and trailers; each sender
+copies them before buffering or writing. This avoids consecutive copies while
+isolating buffered fields from later changes to the caller's list.</p>
 <p>Protocol senders never choose between joining and vectored I/O
 themselves.  They always call <code>BaseSender._write_many(parts)</code>,
 and the internal size gate (<code>_VECTORED_JOIN_THRESHOLD</code>, 32 KiB)

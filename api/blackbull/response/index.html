@@ -6153,28 +6153,10 @@ async def handler(conn, receive, send):
 
     <div class="doc doc-contents ">
 
-        <p>Handler-facing send adapter: every accepted shape → NativeResponse.</p>
-<p><strong>Every</strong> accepted shape becomes a
-<a class="autorefs autorefs-internal" href="../native/#blackbull.native.NativeResponse"><code>NativeResponse</code></a>, so everything above the route
-handler — route-header injection, middleware, access log, sender —
-observes one representation on the H1 path.  The handler boundary and
-<code>as_middleware</code>'s <code>call_next</code> both wrap through here, so global and
-per-route middleware see the same contract.</p>
-<p>Accepted shapes (full-form <code>send</code> — the compat contract, held until
-2027-07-29):</p>
-<ul>
-<li><code>Response</code> (incl. subclasses) — one NativeResponse (<code>to_native()</code>);</li>
-<li><code>StreamingResponse</code> / <code>EventSourceResponse</code> — driven; their own
-  start/body dict sequence converts per-event below;</li>
-<li><code>(bytes, status, headers)</code> 3-arg form — one NativeResponse;</li>
-<li>ASGI dicts — per-event: <code>http.response.start</code> → header arm (the
-  <code>trailers</code> flag → <code>expects_trailers</code>), <code>http.response.body</code> →
-  body chunk, <code>http.response.trailers</code> → trailers arm; push / pathsend /
-  disconnect / unknown pass through (the bilingual sender decides — push
-  is H2-only, pathsend is the static middleware's deferred form);</li>
-<li><code>NativeResponse</code> — pass through;</li>
-<li>anything else — pass through so the sender's type check decides.</li>
-</ul>
+        <p>Normalize handler and middleware emissions to native HTTP messages.</p>
+<p>Response objects and the <code>(bytes, status, headers)</code> form become a
+<code>NativeResponse</code>. Streaming responses use the same per-event converter
+as ASGI dictionaries. Unknown events and native messages pass through.</p>
 
 
     </div>

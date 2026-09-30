@@ -6044,22 +6044,24 @@ client before the client asks for it.  A typical use case is
 pushing a CSS file alongside the HTML page that references it,
 saving one round-trip.</p>
 <h3 id="triggering-a-push">Triggering a push<a class="headerlink" href="#triggering-a-push" title="Permanent link">&para;</a></h3>
-<p>The app signals a push by calling <code>send</code> with an
-<code>http.response.push</code> event before the final <code>http.response.body</code>:</p>
-<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/'</span><span class="p">)</span>
+<p>Send a <code>NativeResponse(push=...)</code> before completing the parent response. ASGI apps may
+also send the equivalent <code>http.response.push</code> dictionary:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.native</span><span class="w"> </span><span class="kn">import</span> <span class="n">NativeResponse</span>
+
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">index</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
-    <span class="c1"># Push a stylesheet before sending the HTML.</span>
-    <span class="k">await</span> <span class="n">send</span><span class="p">({</span>
-        <span class="s1">'type'</span><span class="p">:</span> <span class="s1">'http.response.push'</span><span class="p">,</span>
-        <span class="s1">'path'</span><span class="p">:</span> <span class="s1">'/static/style.css'</span><span class="p">,</span>
-        <span class="s1">'headers'</span><span class="p">:</span> <span class="p">[],</span>
-    <span class="p">})</span>
+    <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">NativeResponse</span><span class="p">(</span><span class="n">push</span><span class="o">=</span><span class="s1">'/static/style.css'</span><span class="p">))</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">'type'</span><span class="p">:</span> <span class="s1">'http.response.start'</span><span class="p">,</span> <span class="s1">'status'</span><span class="p">:</span> <span class="mi">200</span><span class="p">,</span>
                 <span class="s1">'headers'</span><span class="p">:</span> <span class="p">[(</span><span class="sa">b</span><span class="s1">'content-type'</span><span class="p">,</span> <span class="sa">b</span><span class="s1">'text/html'</span><span class="p">)]})</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">'type'</span><span class="p">:</span> <span class="s1">'http.response.body'</span><span class="p">,</span>
                 <span class="s1">'body'</span><span class="p">:</span> <span class="sa">b</span><span class="s1">'&lt;html&gt;...&lt;/html&gt;'</span><span class="p">})</span>
 </code></pre></div>
-<p><code>path</code> must be a plain string (percent-encoding decoded).
+<p>For a push, <code>header</code> contains the promised request's headers:
+<code>NativeResponse(push='/static/style.css', header=[(b'accept', b'text/css')])</code>.
+A push cannot also carry response status, body, trailers, or a file.
+Clear <code>push</code> or <code>file_path</code> with <code>None</code> before switching between them;
+assigning a conflicting path raises <code>ValueError</code> and preserves the message.
+<code>push</code> (ASGI <code>path</code>) must be a plain string (percent-encoding decoded).
 Pseudo-headers (<code>:method</code>, <code>:scheme</code>, <code>:authority</code>) are filled in
 automatically — do not include them in <code>headers</code>.</p>
 <h3 id="what-the-framework-does">What the framework does<a class="headerlink" href="#what-the-framework-does" title="Permanent link">&para;</a></h3>
@@ -6080,15 +6082,17 @@ automatically — do not include them in <code>headers</code>.</p>
 <p>The server advertises push support in <code>conn.extensions</code> when the peer permits
 it at request-dispatch time:</p>
 <div class="highlight"><pre><span></span><code><span class="k">if</span> <span class="s1">'http.response.push'</span> <span class="ow">in</span> <span class="n">conn</span><span class="o">.</span><span class="n">extensions</span><span class="p">:</span>
-    <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">'type'</span><span class="p">:</span> <span class="s1">'http.response.push'</span><span class="p">,</span>
-                <span class="s1">'path'</span><span class="p">:</span> <span class="s1">'/logo.png'</span><span class="p">,</span> <span class="s1">'headers'</span><span class="p">:</span> <span class="p">[]})</span>
+    <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">NativeResponse</span><span class="p">(</span><span class="n">push</span><span class="o">=</span><span class="s1">'/logo.png'</span><span class="p">))</span>
 </code></pre></div>
 <p>For HTTP/1.1 requests <code>conn.extensions</code> does not contain
 <code>'http.response.push'</code>, so the guard above keeps the same handler
 working on both protocols.  If the peer changes <code>SETTINGS_ENABLE_PUSH</code> after
 the scope was built, the send path checks the current connection permission as
 well: a late push event is logged and dropped without sending a
-<code>PUSH_PROMISE</code> or creating a pushed request.</p>
+<code>PUSH_PROMISE</code> or creating a pushed request. Pushes sent on HTTP/1.1, on
+streams without a push handler, or after response completion are also dropped.
+<code>NativeResponse</code> preserves its push path and headers across scope-declared middleware
+and external ASGI hosts as an <code>http.response.push</code> event.</p>
 <h3 id="caveats">Caveats<a class="headerlink" href="#caveats" title="Permanent link">&para;</a></h3>
 <ul>
 <li>Clients can disable server push by sending <code>SETTINGS_ENABLE_PUSH=0</code>.

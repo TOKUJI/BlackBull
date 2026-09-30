@@ -5850,6 +5850,8 @@ and one <code>send</code></strong>, while streaming is header-object then body-c
 <p><code>header</code> is <code>None</code> when absent (never <code>[]</code> — presence is decided by
 <code>is not None</code>).  <code>body</code> is <code>None</code> when absent; <code>b''</code> is a real
 empty body.  <code>more_body</code> marks a non-terminal body chunk (streaming).
+<code>push</code> makes this a promised request instead: its path is <code>push</code> and
+<code>header</code> contains request headers. It cannot carry response-only fields.
 <code>more_trailers</code> marks a non-terminal trailer event.
 <code>expects_trailers</code> preserves the ASGI <code>http.response.start</code>
 <code>trailers: True</code> flag so the sender withholds the terminal chunk until
@@ -6170,7 +6172,7 @@ raw <code>(conn, receive, send)</code> compat surface — exactly like
     <div class="doc doc-contents ">
 
         <p>Wrap <em>inner_send</em> so native send-channel objects arrive as ASGI dicts.</p>
-<p>Both native message types own a <code>to_asgi()</code>, and both cross the same two
+<p>Native message types own a <code>to_asgi()</code>, and cross the same two
 edges: the external-host boundary (uvicorn / <code>asgi=True</code>) and the
 scope-declared middleware's own send wrapper.  Consumers there subscript
 <code>event['type']</code>, so a native object reaching them raises in <em>their</em> code,
