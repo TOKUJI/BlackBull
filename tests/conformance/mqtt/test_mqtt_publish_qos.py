@@ -410,6 +410,10 @@ class TestPublishQoS2:
         actor = mqtt.serve(reader, writer, ctx)
         task = asyncio.create_task(actor.run())
         await asyncio.sleep(0.1)
+        # Third leg (§4.5): PUBREL for the same packet — the handshake must
+        # complete with PUBCOMP, not stop at PUBREC.
+        reader.feed_packet(MQTTPubrel(packet_id=999))
+        await asyncio.sleep(0.1)
         task.cancel()
         try:
             await task
@@ -417,10 +421,13 @@ class TestPublishQoS2:
             pass
 
         packets = writer.pop_packets()
-        # Subscriber should have sent PUBREC
-        pubrecs = [p for p in packets if isinstance(p, MQTTPubrec)]
-        assert len(pubrecs) >= 1, "Subscriber must send PUBREC for QoS 2 PUBLISH"
-        assert pubrecs[0].packet_id == 999
+        # Both acknowledgement legs, in order: PUBREC for the PUBLISH, then
+        # PUBCOMP for the PUBREL (§4.3.3 / §4.5).
+        acks = [(type(p).__name__, p.packet_id) for p in packets
+                if isinstance(p, (MQTTPubrec, MQTTPubcomp))]
+        assert acks == [('MQTTPubrec', 999), ('MQTTPubcomp', 999)], (
+            f'the QoS 2 handshake must complete: got {acks}'
+        )
 
 
 # ============================================================================

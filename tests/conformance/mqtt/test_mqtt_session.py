@@ -209,15 +209,29 @@ class TestSessionStatePreservation:
         """§3.1.2.11 — Subscriptions are preserved when Clean Start = 0
         and session has not expired."""
 
-        # Pre-populate session with subscriptions
-        mqtt.sessions['persist-sub'] = {
-            'subscriptions': {
-                ('sensors/temperature', 1),
-                ('alerts/#', 2),
-            },
-            'pending_qos2_in': {},
-            'pending_qos2_out': {},
-        }
+        # Connection 1: subscribe to both topics; the session must outlive the
+        # connection (Session Expiry Interval > 0).
+        reader = _FakeMQTTReader()
+        writer = _FakeMQTTWriter()
+        ctx = _ctx()
+        actor = mqtt.serve(reader, writer, ctx)
+        reader.feed_packet(MQTTConnect(
+            client_id='persist-sub',
+            clean_start=True,
+            keep_alive=60,
+            properties={'session_expiry_interval': 3600},
+        ))
+        reader.feed_packet(MQTTSubscribe(
+            packet_id=1,
+            subscriptions=[('sensors/temperature', 1), ('alerts/#', 2)],
+        ))
+        task = asyncio.create_task(actor.run())
+        await asyncio.sleep(0.05)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
         reader = _FakeMQTTReader()
         writer = _FakeMQTTWriter()
@@ -229,6 +243,7 @@ class TestSessionStatePreservation:
             client_id='persist-sub',
             clean_start=False,
             keep_alive=60,
+            properties={'session_expiry_interval': 3600},
         ))
 
         task = asyncio.create_task(actor.run())
@@ -244,17 +259,38 @@ class TestSessionStatePreservation:
         assert len(connacks) >= 1
         # Session Present should be True (session was found)
         assert connacks[0].session_present is True
+        # §3.1.2.11 — both subscriptions survived the reconnect.
+        filters = [s[0] for s in mqtt.sessions['persist-sub']['subscriptions']]
+        assert sorted(filters) == ['alerts/#', 'sensors/temperature'], (
+            f'subscriptions must survive a Clean Start = 0 reconnect; {filters}'
+        )
 
     @pytest.mark.asyncio
     async def test_subscriptions_discarded_with_clean_start_true(self, mqtt):
         """§3.1.2.3 — Subscriptions are discarded when Clean Start = 1."""
 
-        # Pre-populate session (should be discarded)
-        mqtt.sessions['cs-discard'] = {
-            'subscriptions': {('old/topic', 1)},
-            'pending_qos2_in': {},
-            'pending_qos2_out': {},
-        }
+        # Connection 1: subscribe; the session outlives the connection so the
+        # Clean Start = 1 discard has something to discard.
+        reader = _FakeMQTTReader()
+        writer = _FakeMQTTWriter()
+        ctx = _ctx()
+        actor = mqtt.serve(reader, writer, ctx)
+        reader.feed_packet(MQTTConnect(
+            client_id='cs-discard',
+            clean_start=True,
+            keep_alive=60,
+            properties={'session_expiry_interval': 3600},
+        ))
+        reader.feed_packet(MQTTSubscribe(
+            packet_id=1, subscriptions=[('old/topic', 1)],
+        ))
+        task = asyncio.create_task(actor.run())
+        await asyncio.sleep(0.05)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
         reader = _FakeMQTTReader()
         writer = _FakeMQTTWriter()
@@ -265,6 +301,7 @@ class TestSessionStatePreservation:
             client_id='cs-discard',
             clean_start=True,
             keep_alive=60,
+            properties={'session_expiry_interval': 3600},
         ))
 
         task = asyncio.create_task(actor.run())
@@ -280,6 +317,10 @@ class TestSessionStatePreservation:
         assert len(connacks) >= 1
         # Session Present should be False (session was discarded)
         assert connacks[0].session_present is False
+        # §3.1.2.3 — the old subscription went with it.
+        assert mqtt.sessions['cs-discard']['subscriptions'] == [], (
+            'Clean Start = 1 must discard the old subscriptions'
+        )
 
 
 # ============================================================================

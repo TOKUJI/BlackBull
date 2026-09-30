@@ -27,7 +27,7 @@ import pytest
 from blackbull.mqtt.messages import (
     ReasonCode,
     MQTTConnect, MQTTConnack, MQTTDisconnect,
-    MQTTPublish,
+    MQTTPublish, MQTTSubscribe,
     encode_packet, decode_packet,
 )
 from blackbull.server.protocol_registry import ProtocolContext
@@ -203,6 +203,19 @@ class TestWillMessageDelivery:
         """§3.1.2.5 — Will Message is published when connection drops
         without DISCONNECT."""
 
+        # An observer subscribed to the Will topic makes the routed Will
+        # visible on the wire (the leaving client itself receives nothing).
+        obs_r, obs_w = _FakeMQTTReader(), _FakeMQTTWriter()
+        obs_r.feed_packet(MQTTConnect(
+            client_id='will-obs', clean_start=True, keep_alive=0,
+        ))
+        obs_r.feed_packet(MQTTSubscribe(
+            packet_id=1, subscriptions=[('system/clients/#', 0)],
+        ))
+        obs = mqtt.serve(obs_r, obs_w, _ctx())
+        obs_task = asyncio.create_task(obs.run())
+        await asyncio.sleep(0.05)
+
         reader = _FakeMQTTReader()
         writer = _FakeMQTTWriter()
         ctx = _ctx()
@@ -227,23 +240,20 @@ class TestWillMessageDelivery:
         reader.close()
 
         await asyncio.sleep(0.1)
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
 
-        # The server should have published the Will Message to the topic router
-        # In the fake setup, we check that the writer has a PUBLISH with the will topic
-        # (Note: in a multi-client setup, this PUBLISH would go to subscribers)
-        packets = writer.pop_packets()
-        publishes = [p for p in packets if isinstance(p, MQTTPublish)]
-        will_publish = [p for p in publishes
-                        if hasattr(p, 'topic')
-                        and 'will-drop-client' in (p.topic or '')]
-        # The Will Message may be published internally; verification depends on
-        # the broker's topic routing implementation
-        assert len(publishes) >= 0  # Placeholder — actual verification TBD with broker
+        # §3.1.2.5 — the Will Message was published with its configured topic
+        # and payload.
+        publishes = [p for p in obs_w.pop_packets() if isinstance(p, MQTTPublish)]
+        assert [(p.topic, p.payload) for p in publishes] == [
+            ('system/clients/will-drop-client/status', b'connection-lost'),
+        ], f'the Will must be published on an unclean disconnect; {publishes}'
+
+        for t in (task, obs_task):
+            t.cancel()
+            try:
+                await t
+            except asyncio.CancelledError:
+                pass
 
     def test_will_message_not_published_on_normal_disconnect(self, mqtt):
         """§3.14 — Normal DISCONNECT (0x00) MUST NOT trigger Will Message.
