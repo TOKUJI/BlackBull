@@ -173,7 +173,8 @@ class Server:
         self.log_path = tmp_path / f'server-{time.monotonic_ns()}.log'
         self._log = open(self.log_path, 'w', buffering=1)
         env = child_env({'PYTHONUNBUFFERED': '1', 'BB_ACCESS_LOG': '0',
-                         'BB_SOCKET_REUSEPORT': str(reuseport)})
+                         'BB_SOCKET_REUSEPORT': str(reuseport)},
+                        cwd=str(_REPO_ROOT))
         # The worker count is an argument here; an inherited BB_WORKERS would
         # only be read when it is not.
         env.pop('BB_WORKERS', None)

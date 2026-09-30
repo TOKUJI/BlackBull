@@ -246,7 +246,7 @@ def test_auto_reload_picks_up_new_code(tmp_path: Path, child_env):
 
     # PYTHONUNBUFFERED makes any diagnostic output appear promptly when
     # the test fails.
-    env = child_env({'PYTHONUNBUFFERED': '1'})
+    env = child_env({'PYTHONUNBUFFERED': '1'}, cwd=str(tmp_path))
     env['BB_ACCESS_LOG'] = '0'   # quieter test output
     # Force watchfiles into polling mode for the subprocess's watcher.
     # watchfiles' default inotify backend silently drops the rewrite event on
