@@ -363,10 +363,7 @@ class TestExplicitFreshness:
         pytest.param(b'max-age="0"', 1_000.5, 2, id='quoted-delta-read'),
     ])
     async def test_zero_max_age_is_stale_at_once(self, cc, t2, n):
-        """Freshness directive value semantics: zero is stale at once,
-        s-maxage=0 wins over a positive max-age, a malformed value keeps the
-        configured default, a negative value is stale rather than defaulted,
-        and quoted delta-seconds are read."""
+        """Freshness directive value semantics decide the entry's lifetime."""
         mw = Cache(max_age=600)
         cn, counter = _make_handler(
             extra_headers=[(b'cache-control', cc)])
@@ -503,11 +500,7 @@ class TestStatedFreshnessSources:
                      id='escaped-closing-quote-unreadable'),
     ])
     async def test_a_quoted_value_that_is_no_number_states_no_lifetime(self, max_age, cc, t2):
-        """Malformed Cache-Control quoted values are not stored and cannot
-        inject directives: an unterminated, stray, or escaped quote leaves the
-        field unreadable (the response is not stored), a quoted value that is
-        no number states no lifetime (the configured default stands), and a
-        value that does not end at a comma is not stored either."""
+        """Malformed Cache-Control quoted values are not stored."""
         mw = Cache(max_age=max_age)
         cn, counter = _make_handler(
             extra_headers=[(b'cache-control', cc)])
