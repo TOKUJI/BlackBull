@@ -213,3 +213,19 @@ async def test_a_selected_variant_that_escapes_loses_the_whole_request(env):
     plain, body = await _collect(app, _scope(path='/item'))
     assert plain['status'] == 200
     assert body == b'ORIGINAL'
+
+
+async def test_a_hardlink_to_an_outside_inode_serves_the_outside_bytes(env):
+    """The sharper consequence of filename identity: a hard link to an
+    outside inode passes the path-based boundary (the link lives inside
+    the root) and the sentinel's bytes are served under the variant's
+    claimed encoding.  Nothing here is measurable from the path."""
+    www, outside = env
+    (www / 'item.gz').hardlink_to(outside / 'sentinel')
+    start, body = await _collect(
+        StaticFiles(directory=str(www)),
+        _scope(path='/item', headers={'accept-encoding': 'gzip'}))
+    assert start['status'] == 200
+    headers = dict(start['headers'])
+    assert headers.get(b'content-encoding') == b'gzip'
+    assert body == SENTINEL
