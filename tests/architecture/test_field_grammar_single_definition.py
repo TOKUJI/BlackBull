@@ -24,6 +24,7 @@ import blackbull.client.http1 as client_http1
 import blackbull.headers as headers_module
 import blackbull.middleware.cache as cache_module
 import blackbull.protocol.frame_types as frame_types
+import blackbull.protocol.framing as framing_module
 import blackbull.router as router
 import blackbull.server.http1_actor as http1_actor
 import blackbull.server.parser as parser
@@ -40,8 +41,8 @@ _READERS = {
     frame_types: ('TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS'),
     headers_module: ('TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS'),
     recipient: ('TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS'),
-    client_http1: ('TCHAR_OCTETS', 'TCHAR_SET', 'FIELD_VALUE_ALLOWED_OCTETS',
-                   'FIELD_VALUE_ALLOWED_SET'),
+    client_http1: ('TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS'),
+    framing_module: ('TCHAR_SET', 'FIELD_VALUE_ALLOWED_SET'),
     cache_module: ('TCHAR_SET', 'FIELD_VALUE_ALLOWED_SET'),
     parser: ('COMMON_METHODS', 'COMMON_SCHEMES', 'URI_SCHEME_RE',
              'method_token_is_valid'),
