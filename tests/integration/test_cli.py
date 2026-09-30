@@ -62,7 +62,6 @@ def _wait_until(predicate, deadline: float, poll: float = 0.1):
 @pytest.mark.timeout(45)
 def test_cli_serves_blackbull_app(tmp_path: Path, child_env):
     """``blackbull module:app`` resolves a BlackBull instance and serves it."""
-
     port = _free_port()
     script = tmp_path / 'cli_app.py'
     script.write_text(textwrap.dedent('''
@@ -122,7 +121,6 @@ def test_cli_serves_over_unix_domain_socket(tmp_path: Path, child_env):
     a TCP port.  Verify the CLI parses the spec, ASGIServer binds AF_UNIX,
     and a client can complete a request through the socket file.
     """
-
     sock_path = tmp_path / 'bb.sock'
     script = tmp_path / 'uds_app.py'
     script.write_text(textwrap.dedent('''
@@ -205,7 +203,6 @@ def test_cli_serves_raw_asgi_callable(tmp_path: Path, child_env):
     pointing the CLI at ``bench.peers.asgi_app:app`` (a raw ASGI app)
     just like every other peer server.
     """
-
     port = _free_port()
     script = tmp_path / 'raw_asgi_app.py'
     script.write_text(textwrap.dedent('''
@@ -324,9 +321,12 @@ def _spawn_server(tmp_path: Path, body: str, port: int, child_env,
     (tmp_path / 'shutdown_app.py').write_text(
         _SHUTDOWN_APP.format(body=body, hold=_SLOW_SECONDS).lstrip())
 
+    extra = dict(extra_env or {})
+    py_path = str(tmp_path)
+    if extra.get('PYTHONPATH'):
+        py_path = os.pathsep.join([py_path, extra['PYTHONPATH']])
     env = child_env({'BB_ACCESS_LOG': '0', 'PYTHONUNBUFFERED': '1',
-                     'PYTHONPATH': str(tmp_path)}, cwd=str(tmp_path))
-    env.update(extra_env or {})
+                     'PYTHONPATH': py_path, **extra}, cwd=str(tmp_path))
 
     proc = subprocess.Popen(
         [sys.executable, '-c', _CLI_ENTRY,
