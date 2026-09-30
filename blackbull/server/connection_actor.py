@@ -179,9 +179,9 @@ class ConnectionActor(Actor):
         cfg = _get_settings()
 
         # Slowloris defence at detection: a peer that connects and never sends
-        # its discriminator would hold a slot forever on the peek read.  Shares
-        # HTTP1Actor's ``header_timeout``, so the worst case is two bounded
-        # timeouts back to back (detect + first headers); ``0`` disables both.
+        # its discriminator would hold a slot forever on the peek read.  The
+        # TLS handshake, detection and the first headers each get their own
+        # ``header_timeout``, back to back.
         deadline = cfg.header_timeout if cfg.header_timeout > 0 else None
 
         # Per-connection registry state, not a per-connection timer: one
