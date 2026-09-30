@@ -48,26 +48,18 @@ async def test_on_decorator_registers_handler():
 
 
 @pytest.mark.asyncio
-async def test_intercept_decorator_returns_original_function():
-    """@app.intercept returns the original function unchanged."""
+@pytest.mark.parametrize('name', [
+    pytest.param('intercept', id='intercept-returns-original'),
+    pytest.param('on', id='on-returns-original'),
+])
+async def test_intercept_decorator_returns_original_function(name):
+    """@app.intercept and @app.on return the original function unchanged."""
     app = BlackBull()
 
     async def my_handler(event: Event):
         pass
 
-    returned = app.intercept('custom_event')(my_handler)
-    assert returned is my_handler
-
-
-@pytest.mark.asyncio
-async def test_on_decorator_returns_original_function():
-    """@app.on returns the original function unchanged."""
-    app = BlackBull()
-
-    async def my_handler(event: Event):
-        pass
-
-    returned = app.on('custom_event')(my_handler)
+    returned = getattr(app, name)('custom_event')(my_handler)
     assert returned is my_handler
 
 

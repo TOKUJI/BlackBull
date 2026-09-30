@@ -115,34 +115,25 @@ class TestH2TrailersFrameShape:
         assert frames[0][0] == FrameTypes.HEADERS, (
             f'expected HEADERS frame, got type {frames[0][0]!r}')
 
-    async def test_trailers_frame_has_end_stream_flag(self):
-        """The trailers HEADERS frame MUST carry the END_STREAM flag.
-
-        Rationale: trailers are the final event in an HTTP response;
-        END_STREAM signals to the peer that this stream is done.
-        """
+    @pytest.mark.parametrize('field,flag,label', [
+        pytest.param((b'x-processing-time', b'42ms'), HeaderFrameFlags.END_STREAM,
+                     'END_STREAM flag must be set', id='end-stream-flag'),
+        pytest.param((b'x-id', b'1'), HeaderFrameFlags.END_HEADERS,
+                     'END_HEADERS flag must be set', id='end-headers-flag'),
+    ])
+    async def test_trailers_frame_has_end_stream_flag(self, field, flag, label):
+        """The trailers HEADERS frame MUST carry END_STREAM (trailers are the
+        final event in the response) and END_HEADERS (the header block is
+        complete in a single frame, no CONTINUATION)."""
         sender, written, factory = _make_sender()
         await sender({
             'type': ASGIEvent.HTTP_RESPONSE_TRAILERS,
-            'headers': [(b'x-processing-time', b'42ms')],
+            'headers': [field],
         })
 
         _, flags, _, _, _ = _all_frames(bytes(written))[0]
-        assert flags & HeaderFrameFlags.END_STREAM, (
-            f'END_STREAM flag must be set; got flags={flags:#x}')
-
-    async def test_trailers_frame_has_end_headers_flag(self):
-        """The trailers HEADERS frame MUST carry END_HEADERS so the peer
-        knows the header block is complete in a single frame (no CONTINUATION)."""
-        sender, written, factory = _make_sender()
-        await sender({
-            'type': ASGIEvent.HTTP_RESPONSE_TRAILERS,
-            'headers': [(b'x-id', b'1')],
-        })
-
-        _, flags, _, _, _ = _all_frames(bytes(written))[0]
-        assert flags & HeaderFrameFlags.END_HEADERS, (
-            f'END_HEADERS flag must be set; got flags={flags:#x}')
+        assert flags & flag, (
+            f'{label}; got flags={flags:#x}')
 
     async def test_trailers_frame_has_stream_id_1(self):
         """The frame must be sent on the correct stream — stream_id=1
@@ -324,32 +315,26 @@ class TestH2TrailersFieldEncoding:
     """Trailer names and values must survive the round-trip through HPACK
     encoding → decoding without corruption."""
 
-    async def test_trailer_name_case_preserved(self):
-        """Trailer field names are lowercase per RFC 9113 §8.2.1 but the
-        sender must not alter the case the app provides."""
+    @pytest.mark.parametrize('field,idx,expected,label', [
+        pytest.param((b'x-request-id', b'42'), 0, 'x-request-id',
+                     'name round-trip', id='name-case-preserved'),
+        pytest.param((b'x-timing', b'p50=12ms; p99=340ms'), 1, 'p50=12ms; p99=340ms',
+                     'value round-trip', id='value-round-trips'),
+    ])
+    async def test_trailer_name_case_preserved(self, field, idx, expected, label):
+        """Trailer names and values must survive the round-trip through HPACK
+        encoding → decoding without corruption — the sender must not alter
+        the case the app provides."""
         sender, written, factory = _make_sender()
         await sender({
             'type': ASGIEvent.HTTP_RESPONSE_TRAILERS,
-            'headers': [(b'x-request-id', b'42')],
+            'headers': [field],
         })
 
         _, _, _, _, payload = _all_frames(bytes(written))[0]
         decoded = _decode_h2_headers(payload, factory)
-        name = decoded[0][0]
-        assert name == 'x-request-id', f'expected x-request-id, got {name!r}'
-
-    async def test_trailer_value_round_trips(self):
-        """A trailer value containing ASCII text must survive HPACK round-trip."""
-        sender, written, factory = _make_sender()
-        await sender({
-            'type': ASGIEvent.HTTP_RESPONSE_TRAILERS,
-            'headers': [(b'x-timing', b'p50=12ms; p99=340ms')],
-        })
-
-        _, _, _, _, payload = _all_frames(bytes(written))[0]
-        decoded = _decode_h2_headers(payload, factory)
-        value = decoded[0][1]
-        assert value == 'p50=12ms; p99=340ms', f'value round-trip failed: {value!r}'
+        assert decoded[0][idx] == expected, (
+            f'{label} failed: got {decoded[0][idx]!r}')
 
     async def test_multiple_trailer_fields_independent(self):
         """Each trailer field is a distinct HPACK entry."""

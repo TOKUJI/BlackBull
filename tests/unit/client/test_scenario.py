@@ -197,20 +197,17 @@ class TestScenarioFromBytes:
         assert len(scenario.steps) == 1
         assert isinstance(scenario.steps[0], Abort)
 
-    def test_sleep_opcode_consumes_one_param_byte(self):
-        # 0x01 = SLEEP; next byte indexes the duration table modulo len.
-        raw = bytes([1, 0])
+    @pytest.mark.parametrize('raw,cls,attr', [
+        pytest.param(bytes([1, 0]), Sleep, 'duration', id='sleep-opcode'),
+        pytest.param(bytes([2, 0]), ReadResponse, 'timeout', id='read-opcode'),
+    ])
+    def test_sleep_opcode_consumes_one_param_byte(self, raw, cls, attr):
+        # 0x01 = SLEEP, 0x02 = READ; the next byte indexes the duration /
+        # timeout table modulo len — one param byte per opcode.
         scenario = Scenario.from_bytes(raw)
         assert len(scenario.steps) == 1
-        assert isinstance(scenario.steps[0], Sleep)
-        assert scenario.steps[0].duration > 0
-
-    def test_read_opcode_consumes_one_param_byte(self):
-        raw = bytes([2, 0])
-        scenario = Scenario.from_bytes(raw)
-        assert len(scenario.steps) == 1
-        assert isinstance(scenario.steps[0], ReadResponse)
-        assert scenario.steps[0].timeout > 0
+        assert isinstance(scenario.steps[0], cls)
+        assert getattr(scenario.steps[0], attr) > 0
 
     def test_multiple_steps_decoded_in_order(self):
         # SEND(b'X'), SLEEP, READ — encoded by hand

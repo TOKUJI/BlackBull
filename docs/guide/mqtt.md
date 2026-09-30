@@ -112,6 +112,16 @@ trimmed of the broker's advertised limits (an assigned identifier is not
 optional), and only when neither fits is the connection refused with `0x95`
 — or closed outright when even that reply cannot fit — before creating a
 session.
+
+The limit also applies to outgoing PUBLISH and PUBREL packets. A packet
+that exceeds it is discarded, and its delivery is treated as complete
+[MQTT-3.1.2-25]. It is never queued or retried. The limit belongs to the
+connection: queued messages are rechecked against the reconnecting client's
+limit. Retained and Will messages follow the same rule. For a Shared
+Subscription, the message goes to a member that can receive it and is
+dropped only if no member can. The takeover (`0x8E`) and duplicate-CONNECT
+(`0x82`) DISCONNECTs are not size-checked.
+
 Broker-initiated protocol-error closure retires admission before processing the
 next command. Client DISCONNECT and transport failures use the FIFO `Detach`
 boundary: commands ordered before it were admitted while the connection was

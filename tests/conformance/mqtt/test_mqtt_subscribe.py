@@ -83,35 +83,22 @@ class TestSubscribePacket:
             decoded = decode_packet(wire)
             assert decoded.subscriptions[0][1] == qos
 
-    def test_subscribe_with_no_local_option(self):
-        """§3.8.2.1 — Subscription Options: No Local (bit 2).
-
-        No Local = 1 means the server MUST NOT forward messages published
-        by the subscribing client itself.
-        """
+    @pytest.mark.parametrize('option', [
+        pytest.param('retain_as_published', id='retain-as-published'),
+        pytest.param('no_local', id='no-local-option'),
+    ])
+    def test_subscribe_with_retain_as_published(self, option):
+        """§3.8.2.1 — Subscription Options bits survive the codec: Retain As
+        Published (bit 3) forwards retained messages with the original RETAIN
+        flag value; No Local (bit 2) forbids self-delivery."""
         sub = MQTTSubscribe(
             packet_id=1,
             subscriptions=[('test/topic', 1)],
-            subscription_options=[{'no_local': True}],
+            subscription_options=[{option: True}],
         )
         wire = encode_packet(sub)
         decoded = decode_packet(wire)
-        assert decoded.subscription_options[0]['no_local'] is True
-
-    def test_subscribe_with_retain_as_published(self):
-        """§3.8.2.1 — Subscription Options: Retain As Published (bit 3).
-
-        Retain As Published = 1 means the server forwards retained messages
-        with the original RETAIN flag value.
-        """
-        sub = MQTTSubscribe(
-            packet_id=1,
-            subscriptions=[('test/topic', 1)],
-            subscription_options=[{'retain_as_published': True}],
-        )
-        wire = encode_packet(sub)
-        decoded = decode_packet(wire)
-        assert decoded.subscription_options[0]['retain_as_published'] is True
+        assert decoded.subscription_options[0][option] is True
 
     def test_subscribe_with_retain_handling(self):
         """§3.8.2.1 — Subscription Options: Retain Handling (bits 5-4).
@@ -148,39 +135,22 @@ class TestSubscribeTopicFilters:
       - '#'  (multi-level wildcard): matches any number of levels (must be last)
     """
 
-    def test_subscribe_with_single_level_wildcard(self):
-        """§4.7.1.2 — Single-level wildcard '+' matches one level."""
+    @pytest.mark.parametrize('filter_str', [
+        pytest.param('sensors/+/temperature', id='single-level-wildcard'),
+        pytest.param('sensors/#', id='multi-level-wildcard'),
+        pytest.param('$share/group1/sensors/temperature', id='shared-subscription'),
+    ])
+    def test_subscribe_with_shared_subscription(self, filter_str):
+        """§3.8.3 — Topic Filter forms in SUBSCRIBE: '+' single-level,
+        '#' multi-level, and shared subscriptions
+        $share/{ShareName}/{TopicFilter} (§4.8)."""
         sub = MQTTSubscribe(
             packet_id=1,
-            subscriptions=[('sensors/+/temperature', 1)],
+            subscriptions=[(filter_str, 1)],
         )
         wire = encode_packet(sub)
         decoded = decode_packet(wire)
-        assert decoded.subscriptions[0][0] == 'sensors/+/temperature'
-
-    def test_subscribe_with_multi_level_wildcard(self):
-        """§4.7.1.3 — Multi-level wildcard '#' matches any number of levels."""
-        sub = MQTTSubscribe(
-            packet_id=1,
-            subscriptions=[('sensors/#', 1)],
-        )
-        wire = encode_packet(sub)
-        decoded = decode_packet(wire)
-        assert decoded.subscriptions[0][0] == 'sensors/#'
-
-    def test_subscribe_with_shared_subscription(self):
-        """§4.8 — Shared Subscriptions: $share/{ShareName}/{TopicFilter}.
-
-        Shared subscriptions allow multiple clients to share the same
-        subscription; only one client receives each message.
-        """
-        sub = MQTTSubscribe(
-            packet_id=1,
-            subscriptions=[('$share/group1/sensors/temperature', 1)],
-        )
-        wire = encode_packet(sub)
-        decoded = decode_packet(wire)
-        assert decoded.subscriptions[0][0] == '$share/group1/sensors/temperature'
+        assert decoded.subscriptions[0][0] == filter_str
 
 
 # ============================================================================

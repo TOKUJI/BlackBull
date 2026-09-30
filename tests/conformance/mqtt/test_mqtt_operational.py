@@ -173,39 +173,26 @@ class TestTopicAlias:
         and use only the Topic Alias.
     """
 
-    def test_publish_with_topic_alias_property(self, mqtt):
-        """§3.3.2.4 — PUBLISH can include Topic Alias property.
-
-        The first PUBLISH with a given alias MUST also include the Topic Name.
-        Subsequent PUBLISH with the same alias MAY omit the Topic Name.
-        """
-        # First publish: topic + alias (establishes mapping)
+    @pytest.mark.parametrize('topic,payload,packet_id,expected_topic', [
+        pytest.param('sensors/temperature', b'22.5', 1, 'sensors/temperature',
+                     id='alias-with-topic'),
+        pytest.param('', b'22.6', 2, '', id='alias-only-no-topic'),
+    ])
+    def test_publish_with_topic_alias_property(self, mqtt, topic, payload, packet_id, expected_topic):
+        """§3.3.2.4 — PUBLISH Topic Alias forms: the first PUBLISH with a
+        given alias MUST also include the Topic Name; subsequent PUBLISH
+        with the same alias MAY omit it (empty Topic Name)."""
         publish = MQTTPublish(
-            topic='sensors/temperature',
-            payload=b'22.5',
+            topic=topic,
+            payload=payload,
             qos=1,
-            packet_id=1,
+            packet_id=packet_id,
             properties={'topic_alias': 1},
         )
         wire = encode_packet(publish)
         decoded = decode_packet(wire)
         assert decoded.properties['topic_alias'] == 1
-        assert decoded.topic == 'sensors/temperature'
-
-    def test_publish_with_topic_alias_only(self, mqtt):
-        """§3.3.2.4 — PUBLISH with Topic Alias but no Topic Name
-        (uses previously established alias mapping)."""
-        publish = MQTTPublish(
-            topic='',  # empty Topic Name when using alias
-            payload=b'22.6',
-            qos=1,
-            packet_id=2,
-            properties={'topic_alias': 1},
-        )
-        wire = encode_packet(publish)
-        decoded = decode_packet(wire)
-        assert decoded.properties['topic_alias'] == 1
-        assert decoded.topic == ''  # Topic Name omitted
+        assert decoded.topic == expected_topic
 
     def test_topic_alias_zero_is_prohibited(self, mqtt):
         """§3.3.2.4 — Topic Alias value 0 is prohibited in PUBLISH."""
@@ -353,17 +340,6 @@ class TestNoLocalOption:
     subscriber if the message was published by the same client (same
     Client ID).
     """
-
-    def test_subscribe_with_no_local(self, mqtt):
-        """§3.8.2.1 — No Local = 1 prevents self-delivery."""
-        sub = MQTTSubscribe(
-            packet_id=1,
-            subscriptions=[('chat/room1', 1)],
-            subscription_options=[{'no_local': True}],
-        )
-        wire = encode_packet(sub)
-        decoded = decode_packet(wire)
-        assert decoded.subscription_options[0]['no_local'] is True
 
     def test_subscribe_without_no_local(self, mqtt):
         """§3.8.2.1 — No Local = 0 (default): messages are delivered normally."""
