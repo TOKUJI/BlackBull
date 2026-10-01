@@ -108,12 +108,12 @@ class ClientPuback(ActorMessage):
 
 @dataclass
 class ClientPubrec(ActorMessage):
-    """The client's PUBREC for an outbound QoS 2 message; the broker answers
-    with PUBREL for the same packet id.
+    """The client's PUBREC for an outbound QoS 2 message.
 
-    An error ``reason_code`` (§2.4) means the client rejected the PUBLISH: the
-    exchange still completes so both sides release the packet identifier, but
-    the window stops charging it (§4.9).
+    A ``reason_code`` below 0x80 is answered with PUBREL and the flow waits
+    for PUBCOMP (§4.3.3-4); an error code (§2.4) ends the exchange — no
+    PUBREL, and the packet identifier is released (§2.2.1).  Either way the
+    window stops charging the message (§4.9).
     """
 
     packet_id: int | None = field(default=None, compare=False, repr=False)
@@ -249,12 +249,16 @@ class _Window:
 
     ``limit`` is the Receive Maximum this connection declared (65535 when
     the property is absent), ``awaiting`` the packet ids it transmitted and
-    has not had acknowledged, ``redrives`` what it still owes from the
+    has not had acknowledged — never the session's stored pending count,
+    which spans connections — ``redrives`` what it still owes from the
     session, in send order.
     """
     limit: int = 65535
     awaiting: set[int] = field(default_factory=set)
     redrives: deque[int] = field(default_factory=deque)
+
+    def has_room(self) -> bool:
+        return len(self.awaiting) < self.limit
 
 
 def _new_broker_session() -> dict[str, Any]:
@@ -455,11 +459,11 @@ class BrokerActor(Actor):
         elif isinstance(msg, ClientPubrec):
             await self._on_pubrec(msg.sender, msg.packet_id, msg.reason_code)
         elif isinstance(msg, ClientPubcomp):
-            self._clear_pending(msg.sender, 'pending_qos2_out', msg.packet_id)
-            await self._drain_outbound(msg.sender)
+            await self._clear_pending(msg.sender, 'pending_qos2_out',
+                                      msg.packet_id)
         elif isinstance(msg, ClientPuback):
-            self._clear_pending(msg.sender, 'pending_qos1_out', msg.packet_id)
-            await self._drain_outbound(msg.sender)
+            await self._clear_pending(msg.sender, 'pending_qos1_out',
+                                      msg.packet_id)
         elif isinstance(msg, ClientPing):
             await msg.sender.send(Send(packet=MQTTPingresp()))
         elif isinstance(msg, ClientAuth):
@@ -569,14 +573,12 @@ class BrokerActor(Actor):
         self._retained[publish.topic] = publish
         return True
 
-    def _release_slot(self, conn, packet_id) -> None:
-        """The acknowledgement releases the window slot its send took."""
-        self._window[conn].awaiting.discard(packet_id)
-
-    def _book(self, conn, session, packet_id) -> None:
-        """Charge one QoS>0 PUBLISH transmission to the window (§4.9)."""
+    @staticmethod
+    def _book(session, window, packet_id) -> None:
+        """Book a new QoS>0 PUBLISH: its place in send order (§4.4) and one
+        window slot (§4.9).  A re-drive only takes the slot."""
         session['_send_order'][packet_id] = None
-        self._window[conn].awaiting.add(packet_id)
+        window.awaiting.add(packet_id)
 
     @staticmethod
     def _forget(session, bucket, packet_id) -> None:
@@ -584,11 +586,15 @@ class BrokerActor(Actor):
         session[bucket].pop(packet_id, None)
         session['_send_order'].pop(packet_id, None)
 
-    def _clear_pending(self, conn, bucket, packet_id) -> None:
-        self._release_slot(conn, packet_id)
+    async def _clear_pending(self, conn, bucket, packet_id) -> None:
+        """The client acknowledged this flow: free its slot, drop its state,
+        and let one more send through."""
+        window = self._window[conn]
+        window.awaiting.discard(packet_id)
         session = self._session_for(conn)
         if session is not None:
             self._forget(session, bucket, packet_id)
+            await self._drain_outbound(conn, session, window)
 
     # -- handlers -----------------------------------------------------------
 
@@ -768,7 +774,7 @@ class BrokerActor(Actor):
         redrives.extend(booked)
         for name in ('pending_qos1_out', 'pending_qos2_out'):
             redrives.extend(pid for pid in session[name] if pid not in booked)
-        await self._drain_outbound(conn)
+        await self._drain_outbound(conn, session, self._window[conn])
 
     async def _on_subscribe(self, conn, subscribe) -> None:
         session = self._session_for(conn)
@@ -948,7 +954,7 @@ class BrokerActor(Actor):
             # id we have already accepted must not be delivered a second time.
             await conn.send(Send(packet=MQTTPubrec(
                 packet_id=publish.packet_id, reason_code=ack)))
-            if not self._qos2_accept_inbound(conn, publish.packet_id):
+            if not self._qos2_accept_inbound(conn, publish.packet_id, ack):
                 return  # duplicate — PUBREC re-sent above; skip retain + route
         # QoS 0 has no acknowledgement to carry a reason code (§3.3.4), so a
         # refused retain cannot be reported on that path.  It is *not* answered
@@ -962,19 +968,22 @@ class BrokerActor(Actor):
         # online now are entitled to it.  Only the storage was declined.
         await self._route(publish, source_conn=conn)
 
-    def _qos2_accept_inbound(self, conn, packet_id) -> bool:
+    def _qos2_accept_inbound(self, conn, packet_id, reason) -> bool:
         """§4.3.3 — record a newly-received QoS 2 PUBLISH (PUBREC sent).
 
         Returns ``False`` when *packet_id* was already accepted (a DUP
         retransmit), so the caller re-sends PUBREC only and neither re-stores a
-        retained copy nor re-routes the message.
+        retained copy nor re-routes the message.  An error acknowledgement ends
+        the exchange instead (§2.2.1): nothing is recorded, so a later PUBLISH
+        reusing the identifier is a new message (MQTT-4.3.3-9).
         """
         session = self._session_for(conn)
         if session is None:
             return True
         if packet_id in session['pending_qos2_in']:
             return False
-        session['pending_qos2_in'][packet_id] = _QOS2_IN_PUBREC_SENT
+        if not MQTTReasonCode(reason).is_error:
+            session['pending_qos2_in'][packet_id] = _QOS2_IN_PUBREC_SENT
         return True
 
     async def _reject_publish(self, conn, publish, reason) -> None:
@@ -1094,15 +1103,6 @@ class BrokerActor(Actor):
             props['receive_maximum'] = self._receive_maximum
         return props
 
-    def _window_has_room(self, conn) -> bool:
-        """Whether this connection may transmit one more QoS>0 PUBLISH (§4.9).
-
-        The window counts what this connection transmitted unacknowledged —
-        never the session's stored pending count, which spans connections.
-        """
-        window = self._window[conn]
-        return len(window.awaiting) < window.limit
-
     async def _deliver(self, conn, session, publish, granted_qos, *,
                        retain=False) -> bool:
         """One message to one client; False when §3.1.2-25 discarded it
@@ -1120,7 +1120,7 @@ class BrokerActor(Actor):
             await conn.send(send)
             return True
 
-        if not self._window_has_room(conn):
+        if not self._window[conn].has_room():
             # Checked before queuing; any packet id encodes to the same size.
             if peer_limit is not None and not self._fits_peer(
                     peer_limit, Send(packet=MQTTPublish(
@@ -1173,23 +1173,22 @@ class BrokerActor(Actor):
         else:
             session['pending_qos2_out'][packet_id] = {
                 'state': _QOS2_OUT_PUBLISH_SENT, 'packet': out}
-        self._book(conn, session, packet_id)
+        self._book(session, self._window[conn], packet_id)
         await conn.send(send)
         return True
 
-    async def _drain_outbound(self, conn) -> None:
+    async def _drain_outbound(self, conn, session, window) -> None:
         """Fill this connection's send window — re-drives first.
 
         A pending PUBLISH this connection still owes goes out with DUP=1
         (§4.4) before anything the held queue: it was promised first.  One
         freed slot releases one send, which keeps the window a window.
         """
-        session = self._session_for(conn)
-        if session is None:
+        if session is None or (not window.redrives
+                               and not session['outbound_queue']):
             return
-        window = self._window[conn]
         peer_limit = self._peer_max_packet_size.get(conn)
-        while self._window_has_room(conn):
+        while window.has_room():
             redrive = self._next_redrive(session, window)
             if redrive is not None:
                 bucket_name, packet_id, send = redrive
@@ -1199,10 +1198,10 @@ class BrokerActor(Actor):
                     # cannot receive it at any window size.
                     self._forget(session, bucket_name, packet_id)
                     continue
-                self._book(conn, session, packet_id)
+                window.awaiting.add(packet_id)  # send order already booked
                 await conn.send(send)
                 continue
-            queue = session.get('outbound_queue')
+            queue = session['outbound_queue']
             if not queue:
                 return
             held = queue.popleft()
@@ -1248,9 +1247,18 @@ class BrokerActor(Actor):
 
     async def _on_pubrec(self, conn, packet_id,
                          reason_code=ReasonCode.SUCCESS) -> None:
+        session = self._session_for(conn)
+        window = self._window[conn]
+        if MQTTReasonCode(reason_code).is_error:
+            # §2.2.1 — an error PUBREC acknowledges the PUBLISH and ends the
+            # exchange: no PUBREL follows, and the packet identifier is free.
+            if session is not None:
+                self._forget(session, 'pending_qos2_out', packet_id)
+            window.awaiting.discard(packet_id)
+            await self._drain_outbound(conn, session, window)
+            return
         await conn.send(Send(packet=MQTTPubrel(
             packet_id=packet_id, reason_code=ReasonCode.SUCCESS)))
-        session = self._session_for(conn)
         if session is not None:
             # §4.3.3 — advance the outbound flow to await PUBCOMP; the PUBLISH is
             # now acknowledged so we no longer need to keep it for replay.
@@ -1261,10 +1269,6 @@ class BrokerActor(Actor):
             else:
                 session['pending_qos2_out'][packet_id] = {
                     'state': _QOS2_OUT_PUBREL_SENT}
-        if MQTTReasonCode(reason_code).is_error:
-            # §4.9 — a rejected PUBLISH stops charging the window.
-            self._release_slot(conn, packet_id)
-            await self._drain_outbound(conn)
 
     async def _on_detach(self, conn, graceful, session_expiry_interval=None) -> None:
         if conn is not None:

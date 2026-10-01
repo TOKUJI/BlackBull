@@ -151,9 +151,8 @@ async def test_a_rejected_pubrec_on_the_wire_frees_the_window():
         pkts = sub_writer.pop_packets()
         await _drain(sub_task, pub_task)
 
-    assert any(isinstance(p, MQTTPubrel)
-               and p.packet_id == first[0].packet_id for p in pkts), (
-        'the QoS 2 exchange did not complete after a rejected PUBREC')
+    assert not any(isinstance(p, MQTTPubrel) for p in pkts), (
+        'the exchange ends at the rejected PUBREC (§2.2.1); no PUBREL follows')
     assert [p.payload for p in pkts if isinstance(p, MQTTPublish)] == [b'b'], (
         'a rejected PUBLISH kept charging the window')
     assert not any(isinstance(p, MQTTPubcomp) for p in pkts), (

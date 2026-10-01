@@ -212,6 +212,35 @@ async def test_qos2_inbound_handshake():
                for p in conn.packets())
 
 
+async def test_an_error_pubrec_releases_the_inbound_id():
+    """An error PUBREC ends the exchange (§2.2.1): the identifier is free,
+    so a later PUBLISH reusing it is a new message (MQTT-4.3.3-9)."""
+    broker = BrokerActor(max_retained=1)
+    broker._store_retained(MQTTPublish(
+        topic='filler', payload=b'x', qos=0, packet_id=1, retain=True))
+    sub, pub = RecordingConn(), RecordingConn()
+    await _attach(broker, sub, client_id='sub')
+    await broker._handle(ClientSubscribe(
+        subscribe=MQTTSubscribe(packet_id=1, subscriptions=[('t', 2)]),
+        sender=sub))
+    await _attach(broker, pub, client_id='pub')
+    await broker._handle(ClientPublish(
+        publish=MQTTPublish(topic='t', payload=b'first', qos=2, packet_id=7,
+                            retain=True),
+        sender=pub))
+    assert any(isinstance(p, MQTTPubrec) and p.packet_id == 7
+               and p.reason_code == ReasonCode.QUOTA_EXCEEDED
+               for p in pub.packets()), (
+        'a refused retain must be acknowledged with an error PUBREC')
+
+    await broker._handle(ClientPublish(
+        publish=MQTTPublish(topic='t', payload=b'second', qos=2, packet_id=7),
+        sender=pub))
+    assert [p.payload for p in sub.packets()
+            if isinstance(p, MQTTPublish)] == [b'first', b'second'], (
+        'an identifier the broker had released was treated as a duplicate')
+
+
 async def test_will_delivered_on_abnormal_detach():
     from blackbull.mqtt.messages import MQTTSubscribe
     broker = BrokerActor()

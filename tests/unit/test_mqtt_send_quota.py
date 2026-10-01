@@ -319,9 +319,31 @@ class TestReplayAcrossMixedQoS:
 
         assert [p.payload for p in sub.publishes()] == [b'a', b'b'], (
             'a PUBLISH the client rejected still charges the window')
-        # The exchange completes regardless, so both sides release the id.
-        assert [p.packet_id for p in sub.packets()
-                if isinstance(p, MQTTPubrel)] == [first.packet_id]
+        assert not any(isinstance(p, MQTTPubrel) for p in sub.packets()), (
+            'the exchange ends at the rejected PUBREC (§2.2.1); no PUBREL')
+        assert first.packet_id not in \
+            broker._sessions['c1']['pending_qos2_out'], (
+            'a rejected PUBLISH must release its packet identifier')
+
+    async def test_a_rejected_publish_is_not_replayed(self):
+        """MQTT-4.4.0-2 — the rejected PUBLISH is acknowledged, so a resumed
+        session owes neither the PUBLISH nor a PUBREL for it."""
+        broker = BrokerActor()
+        sub, pub = RecordingConn(), RecordingConn()
+        await _attach(broker, sub, receive_maximum=1)
+        await _subscribe(broker, sub, qos=2)
+        await _attach(broker, pub, client_id='pub')
+        await _publish(broker, pub, payload=b'a', qos=2, packet_id=1)
+        await broker._handle(ClientPubrec(
+            packet_id=sub.publishes()[0].packet_id,
+            reason_code=ReasonCode.QUOTA_EXCEEDED, sender=sub))
+        await _detach(broker, sub)
+
+        conn = RecordingConn()
+        await _attach(broker, conn, clean_start=False)
+        assert not [p for p in conn.packets()
+                    if isinstance(p, (MQTTPublish, MQTTPubrel))], (
+            'a rejected PUBLISH was re-driven on reconnect')
 
     async def test_the_window_opens_when_the_qos2_flow_completes(self):
         broker = BrokerActor()
