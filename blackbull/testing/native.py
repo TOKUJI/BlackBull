@@ -509,10 +509,14 @@ class NativeTestServer:
         self._lifespan = LifespanManager(self.app)
         try:
             await self._lifespan.__aenter__()
-            self._bb_server._open_accepting([((_accept, None), self._sock)],
-                                            self._backlog)
         except BaseException:
             await self._close_socket()
+            raise
+        try:
+            self._bb_server._open_accepting([((_accept, None), self._sock)],
+                                            self._backlog)
+        except BaseException as exc:
+            await self.__aexit__(type(exc), exc, exc.__traceback__)
             raise
         self._async_client = httpx.AsyncClient(base_url=self.url,
                                                timeout=self._timeout)
