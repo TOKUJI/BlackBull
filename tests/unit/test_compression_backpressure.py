@@ -513,11 +513,12 @@ async def test_codec_selection_cache_returns_same_result_on_repeat():
 async def test_codec_selection_cache_bounded():
     """The cache must not grow unboundedly under hostile-peer load that
     rotates Accept-Encoding header values."""
+    from blackbull.middleware._accept_encoding import _accepted
     mw = Compression()
     for i in range(300):
         mw._select_codec(f'gzip;q=0.{i:03d}'.encode())
-    assert len(mw._codec_cache) <= 256, \
-        f'cache exceeded bound: {len(mw._codec_cache)}'
+    info = _accepted.cache_info()
+    assert info.currsize <= info.maxsize, f'cache exceeded bound: {info}'
 
 
 # ---------------------------------------------------------------------------

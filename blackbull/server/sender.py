@@ -826,13 +826,22 @@ class HTTP1Sender(BaseSender):
                                or code == 304)
         keep_length = (not contentless
                        and not (self._expect_trailers and not self._head_mode))
-        app_length = (parse_content_length(head.content_length)
-                      if keep_length and head.content_length else None)
-        if head.content_length or head.transfer_encoding:
+        lengths = head.content_length
+        if not (keep_length and lengths):
+            app_length = None
+        elif len(lengths) == 1 and lengths[0][1].isdigit():
+            app_length = int(lengths[0][1])
+        else:
+            app_length = parse_content_length(lengths)
+        if head.transfer_encoding:
             pairs = [
                 (name, value) for name, value in head
                 if name.lower() not in (b'content-length', b'transfer-encoding')
             ]
+        elif lengths:
+            pairs = list(head)
+            for field in lengths:
+                pairs.remove(field)
         else:
             pairs = head
 
