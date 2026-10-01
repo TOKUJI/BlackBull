@@ -260,6 +260,11 @@ class AbstractWriter(ABC):
 
 
 @cache
+def _reports_writing_paused(kind: type) -> bool:
+    return isinstance(getattr(kind, 'writing_paused', None), property)
+
+
+@cache
 def _lingers(kind: type) -> bool:
     """Whether *kind* defines ``linger_close`` as a coroutine function."""
     return iscoroutinefunction(getattr(kind, 'linger_close', None))
@@ -307,6 +312,7 @@ class AsyncioWriter(AbstractWriter):
         # attribute cannot reach.
         self._linger = (stream_writer.linger_close
                         if _lingers(type(stream_writer)) else None)
+        self._skips_unpaused_drain = _reports_writing_paused(type(stream_writer))
 
     async def _drain_with_timeout(self) -> None:
         """Drain the underlying StreamWriter, bounded by ``_write_timeout``.
@@ -318,7 +324,8 @@ class AsyncioWriter(AbstractWriter):
         plain ``drain()``.
         """
         dl = self._deadline
-        if dl is None:
+        if dl is None or (self._skips_unpaused_drain
+                          and not self._sw.writing_paused):
             await self._sw.drain()
             return
         try:
