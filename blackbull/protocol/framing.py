@@ -48,8 +48,9 @@ TransferCoding = tuple[bytes, tuple[tuple[bytes, bytes], ...]]
 #: list members.  16, shared by every side that reads the list.
 _MAX_EMPTY_TRANSFER_MEMBERS = 16
 
-# RFC 9112 §5.5: transfer-coding = token *( OWS ";" OWS token BWS "=" BWS
-# ( token / quoted-string ) ) — spelled once from the shared alphabets.
+# RFC 9110 §10.1.4: transfer-coding = token *( OWS ";" OWS
+# transfer-parameter ), transfer-parameter = token BWS "=" BWS
+# ( token / quoted-string ) — spelled once from the shared alphabets.
 _TOKEN = rb'[' + re.escape(TCHAR_OCTETS) + rb']+'
 _QUOTED = (rb'"(?:[' + re.escape(bytes(c for c in FIELD_VALUE_ALLOWED_OCTETS
                                   if c not in b'"\\')) + rb']|\\['
@@ -62,8 +63,8 @@ _PARAMETER = re.compile(rb'[ \t]*;[ \t]*(' + _TOKEN + rb')[ \t]*=[ \t]*('
 
 def split_transfer_codings(
         fields: Iterable[tuple[bytes, bytes]]) -> list[TransferCoding]:
-    """Every ``Transfer-Encoding`` member as RFC 9112 §5.5 writes one, or
-    ``ValueError``.
+    """Every ``Transfer-Encoding`` member as RFC 9110 §10.1.4 writes one,
+    or ``ValueError``.
 
     Commas split, OWS off, the coding token lowered, the parameters kept
     rather than dropped — a policy that refuses ``chunked`` carrying a
@@ -77,12 +78,16 @@ def split_transfer_codings(
     members: list[TransferCoding] = []
     empties = 0
     for _name, value in fields:
-        if not value.translate(None, _PLAIN_LIST_OCTETS):
-            # Every octet is a token octet, OWS or a comma: no parameter and
-            # no quoted string can hide behind one, so the plain comma split
-            # reads the same members as the grammar below; the
-            # OWS inside a member is what the strip and check are for.
-            for raw in (value.split(b',') if b',' in value else (value,)):
+        if value == b'chunked':  # the exact member is its own grammar check
+            members.append((b'chunked', ()))
+            continue
+        if not value.strip(_PLAIN_LIST_OCTETS):
+            # The strip empties only when every octet is a token octet, OWS
+            # or a comma: no parameter and no quoted string can hide behind
+            # one, so the plain comma split reads the same members as the
+            # grammar below; the OWS inside a member is what the strip and
+            # check are for.
+            for raw in value.split(b','):
                 member = raw.strip(b' \t')
                 if member.translate(None, TCHAR_OCTETS):
                     raise ValueError(

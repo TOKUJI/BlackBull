@@ -122,13 +122,13 @@ def _check_transfer_encoding(headers: Headers) -> None:
     because RFC 9112 §6.2 forbids a message from carrying both: which one
     describes the body would be the recipient's guess.
     """
+    fields = headers.getlist(b'transfer-encoding')
+    if not fields:
+        return  # an absent field is not a message the client would rewrite
     try:
-        members = split_transfer_codings(
-            headers.getlist(b'transfer-encoding'))
+        members = split_transfer_codings(fields)
     except ValueError as exc:
         raise ProtocolError(str(exc)) from exc
-    if not members:
-        return
     if headers.getlist(b'content-length'):
         raise ProtocolError(
             'Content-Length and Transfer-Encoding both present; '
