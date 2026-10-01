@@ -54,10 +54,10 @@ _TOKEN = rb'[' + re.escape(TCHAR_OCTETS) + rb']+'
 _QUOTED = (rb'"(?:[' + re.escape(bytes(c for c in FIELD_VALUE_ALLOWED_OCTETS
                                   if c not in b'"\\')) + rb']|\\['
            + re.escape(FIELD_VALUE_ALLOWED_OCTETS) + rb'])*"')
-_PARAM = (rb'[ \t]*;[ \t]*(' + _TOKEN + rb')[ \t]*=[ \t]*(' + _TOKEN
-          + rb'|' + _QUOTED + rb')')
-_PARAMETER = re.compile(_PARAM)
-_MEMBER = re.compile(rb'(' + _TOKEN + rb')((?:' + _PARAM + rb')*)')
+_PLAIN_LIST_OCTETS = TCHAR_OCTETS + b' \t,'
+_CODING = re.compile(_TOKEN)
+_PARAMETER = re.compile(rb'[ \t]*;[ \t]*(' + _TOKEN + rb')[ \t]*=[ \t]*('
+                        + _TOKEN + rb'|' + _QUOTED + rb')')
 
 
 def split_transfer_codings(
@@ -77,6 +77,25 @@ def split_transfer_codings(
     members: list[TransferCoding] = []
     empties = 0
     for _name, value in fields:
+        if not value.translate(None, _PLAIN_LIST_OCTETS):
+            # Every octet is a token octet, OWS or a comma: no parameter and
+            # no quoted string can hide behind one, so the plain comma split
+            # reads the same members as the grammar below; the
+            # OWS inside a member is what the strip and check are for.
+            for raw in (value.split(b',') if b',' in value else (value,)):
+                member = raw.strip(b' \t')
+                if member.translate(None, TCHAR_OCTETS):
+                    raise ValueError(
+                        f'invalid Transfer-Encoding token {member!r}')
+                if member:
+                    members.append((member.lower(), ()))
+                    continue
+                empties += 1
+                if empties > _MAX_EMPTY_TRANSFER_MEMBERS:
+                    raise ValueError(
+                        'too many empty Transfer-Encoding list members')
+                members.append((b'', ()))
+            continue
         pos = 0
         while True:
             pos = _skip_ows(value, pos)
@@ -90,17 +109,20 @@ def split_transfer_codings(
                     break
                 pos += 1
                 continue
-            match = _MEMBER.match(value, pos)
-            if match is None:
+            coding = _CODING.match(value, pos)
+            if coding is None:
                 raise ValueError(
                     f'invalid Transfer-Encoding member at position {pos}')
-            pos = _skip_ows(value, match.end())
+            pos = coding.end()
+            params: list[tuple[bytes, bytes]] = []
+            while (param := _PARAMETER.match(value, pos)) is not None:
+                params.append((param[1], param[2]))
+                pos = param.end()
+            pos = _skip_ows(value, pos)
             if pos < len(value) and value[pos] != 0x2c:  # comma
                 raise ValueError(
                     f'invalid Transfer-Encoding list separator at position {pos}')
-            members.append((
-                match.group(1).lower(),
-                tuple((m[1], m[2]) for m in _PARAMETER.finditer(match.group(2) or b''))))
+            members.append((coding[0].lower(), tuple(params)))
             if pos == len(value):
                 break
             pos += 1

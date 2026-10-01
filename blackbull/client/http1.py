@@ -661,10 +661,8 @@ class HTTP1ResponseRecipient:
                 members = split_transfer_codings(transfer_fields)
             except ValueError as exc:
                 raise ProtocolError(str(exc)) from exc
-            # RFC 9110 §5.6.1 — empty list members are ignorable, and this
-            # reader ignores them for framing.  The decomposition keeps them
-            # for the policies that count them (a sender rewriting the field
-            # must see every member) and bounds their number.
+            # RFC 9110 §5.6.1 — empty list members are ignorable; this reader
+            # drops them here, the policies that count them see them above.
             codings = [name for name, _params in members if name]
             if codings.count(b'chunked') > 1:
                 raise ProtocolError(
