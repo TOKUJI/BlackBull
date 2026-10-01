@@ -82,9 +82,9 @@ class _Child:
 @contextlib.asynccontextmanager
 async def _server_child(*, soft: int, backlog: str = '1024', park: float = 0.0,
                         loop: str = 'selector', tls: bool = False,
-                        unix: str | None = None):
+                        unix: str | None = None, app_fds: int = 0):
     env = dict(os.environ, PYTHONPATH=str(REPO_ROOT), ADMISSION_LOOP=loop,
-               ADMISSION_TLS='1' if tls else '0')
+               ADMISSION_TLS='1' if tls else '0', ADMISSION_APP_FDS=str(app_fds))
     if unix is not None:
         env['ADMISSION_UNIX'] = unix
     process = await asyncio.create_subprocess_exec(
@@ -107,11 +107,11 @@ async def _server_child(*, soft: int, backlog: str = '1024', park: float = 0.0,
 async def _burst(*, soft: int, saturate: bool, burst: int = BURST,
                  backlog: str = '1024', park: float = 0.0,
                  loop: str = 'selector', unix: str | None = None,
-                 ) -> tuple[Counter, dict, dict]:
+                 app_fds: int = 0) -> tuple[Counter, dict, dict]:
     """The clients' outcomes, the server's view after them, and its view once
     every client has gone."""
     async with _server_child(soft=soft, backlog=backlog, park=park, loop=loop,
-                             unix=unix) as child:
+                             unix=unix, app_fds=app_fds) as child:
         connect = _connector(child.info)
         idle: list = []
         try:
@@ -275,3 +275,33 @@ async def test_a_reader_failing_to_register_fails_run_and_closes_every_listener(
     for port in ports:
         with pytest.raises(ConnectionRefusedError):
             await asyncio.wait_for(asyncio.open_connection('127.0.0.1', port), 5)
+
+
+@pytest.mark.slow
+@pytest.mark.asyncio
+@pytest.mark.timeout(180)
+@pytest.mark.parametrize('loop', LOOPS)
+async def test_descriptors_the_app_holds_at_startup_do_not_eat_the_reserve(loop):
+    observed, server_view, settled = await _burst(
+        soft=TIGHT_FD_BUDGET, saturate=True, loop=loop, app_fds=48)
+
+    assert observed == Counter({'503': BURST}), observed
+    assert server_view['accept_errors'] == 0, server_view
+    assert settled['held'] == 0, settled
+
+
+def test_a_cap_set_in_code_is_honoured_as_given(monkeypatch):
+    import blackbull.server.server as server_mod
+    from blackbull import BlackBull
+    from blackbull.env import resolve_max_connections
+    from blackbull.server.server import Server
+
+    monkeypatch.delenv('BB_MAX_CONNECTIONS', raising=False)
+    monkeypatch.setattr(server_mod, '_fit_to_open_descriptors', lambda cap: 1)
+    explicit = Server(BlackBull(), max_connections=500)
+    derived = Server(BlackBull(), max_connections=resolve_max_connections('auto'))
+    for server in (explicit, derived):
+        server._accept_gate.arm = lambda *a, **k: []
+        server._open_accepting([])
+    assert explicit._max_connections == 500
+    assert derived._max_connections == 1

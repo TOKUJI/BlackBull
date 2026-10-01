@@ -74,6 +74,11 @@ FD_RESERVE = 64
 DEFAULT_COMPRESSION_MAX_INFLIGHT = max((os.cpu_count() or 1) * 2, 4)
 
 
+class DerivedCap(int):
+    """A connection cap ``auto`` derived from ``RLIMIT_NOFILE``, not one an
+    operator named; the server may lower it to the descriptors left."""
+
+
 def resolve_max_connections(raw: str | None) -> int:
     """Resolve ``BB_MAX_CONNECTIONS`` — ``auto``, ``0``, or a number.
 
@@ -97,7 +102,7 @@ def resolve_max_connections(raw: str | None) -> int:
         # Never fall to 0 — in this server's vocabulary 0 means *uncapped*,
         # so an arithmetic slip would turn the tightest host into the least
         # protected one.
-        return max(1, soft - FD_RESERVE)
+        return DerivedCap(max(1, soft - FD_RESERVE))
     try:
         value = int(raw)
     except ValueError:

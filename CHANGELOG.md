@@ -129,6 +129,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   bound.
 - `NativeTestServer` accepts the way `Server` does, so `max_connections=`
   counts its connections from accept.
+- `BB_MAX_CONNECTIONS=auto` also leaves room for the descriptors already open
+  when accepting starts, so a burst at the cap still gets its `503`s.
 - Less work per request on the HTTP/1.1 path: about 4 % fewer executed
   instructions on keep-alive and 6 % on one request per connection.
 

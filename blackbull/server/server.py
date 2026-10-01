@@ -18,6 +18,8 @@ half-written response.  ``open_socket()`` binds without serving — what the
 multi-worker master, and a test that needs a port before it forks, both use.
 """
 import asyncio
+import os
+import resource
 import errno
 import logging
 import socket
@@ -41,7 +43,7 @@ from .recipient import (AbstractReader, AsyncioReader,
                         _HTTP2_STREAM_QUEUE_DEPTH, _WS_READ_INLINE)
 from .cap_log import CapHitCounter, log_cap_hit
 from ..asgi import ASGIEvent
-from ..env import FD_RESERVE, get_settings
+from ..env import FD_RESERVE, DerivedCap, get_settings
 logger = logging.getLogger(__name__)
 
 
@@ -643,13 +645,21 @@ def _max_connections_report(resolved: int) -> tuple[str, str]:
     calling a derived value "explicit" sends someone hunting for a setting
     nobody wrote.
     """
-    import os  # noqa: PLC0415
-    raw = os.environ.get('BB_MAX_CONNECTIONS')
     if not resolved:
         return 'uncapped', 'no cap in force — relying on the OS descriptor limit'
-    if raw is None or raw.strip().lower() in ('', 'auto'):
+    if isinstance(resolved, DerivedCap):
         return str(resolved), 'derived from RLIMIT_NOFILE (BB_MAX_CONNECTIONS=auto)'
     return str(resolved), 'set explicitly via BB_MAX_CONNECTIONS'
+
+
+def _fit_to_open_descriptors(cap: int) -> int:
+    """*cap*, lowered so the descriptors already open leave the gate its reserve."""
+    try:
+        soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        open_now = len(os.listdir('/dev/fd'))
+    except OSError:
+        return cap
+    return max(1, min(cap, soft - open_now - _REFUSAL_RESERVE - _ACCEPTS_PER_TICK))
 
 
 class Server:
@@ -1214,6 +1224,14 @@ class Server:
         for _spec, sock in listening:
             if af_unix is not None and sock.family == af_unix:
                 _warn_if_unix_queue_full(sock)
+        if self._max_connections and isinstance(self._max_connections, DerivedCap):
+            fitted = _fit_to_open_descriptors(self._max_connections)
+            if fitted < self._max_connections:
+                logger.warning(
+                    'max_connections lowered from %d to %d: the descriptors '
+                    'already open when accepting opens leave no more room',
+                    self._max_connections, fitted)
+                self._max_connections = fitted
         settings = get_settings()
         self._running_servers = self._accept_gate.arm(
             listening, self._max_connections, backlog or settings.socket_backlog,
