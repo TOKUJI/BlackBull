@@ -32,7 +32,11 @@ def _validate_response_header_field(name: bytes, value: bytes) -> None:
 def _validate_response_header_fields(headers: HeaderList) -> None:
     """Validate a complete outbound field section before its first write."""
     for name, value in headers:
-        _validate_response_header_field(name, value)
+        if type(name) is not bytes or type(value) is not bytes:
+            _validate_response_header_field(name, value)
+        if (not name or name.translate(None, TCHAR_OCTETS)
+                or value.translate(None, FIELD_VALUE_ALLOWED_OCTETS)):
+            _validate_response_header_field(name, value)
 
 
 class Headers:

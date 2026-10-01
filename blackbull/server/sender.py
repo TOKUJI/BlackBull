@@ -653,13 +653,9 @@ class HTTP1Sender(BaseSender):
         match body:
             case bytes():
                 self._response_started = True
-                if isinstance(headers, Headers):
-                    h = headers
-                    _validate_response_header_fields(h)
-                else:
-                    header_pairs = list(headers)
-                    _validate_response_header_fields(header_pairs)
-                    h = Headers(header_pairs)
+                header_pairs = list(headers)
+                _validate_response_header_fields(header_pairs)
+                h = Headers(header_pairs)
                 if self._log_record is not None:
                     self._log_record.status = int(status)
                     self._log_record.response_bytes += len(body)
@@ -794,6 +790,9 @@ class HTTP1Sender(BaseSender):
         the transport, not the application payload.  Content-Length is parsed
         before rebuilding the field list so duplicate values cannot create two
         competing message boundaries.
+
+        *headers* must be the sender's own: when it carries no framing field
+        the server's is appended to it in place.
         """
         code = int(status)
         self._chunked = False
@@ -810,10 +809,12 @@ class HTTP1Sender(BaseSender):
                        and not (self._expect_trailers and not self._head_mode))
         app_length = (parse_content_length(headers.getlist(b'content-length'))
                       if keep_length else None)
-        pairs = [
+        carries_framing = (b'content-length' in headers
+                           or b'transfer-encoding' in headers)
+        pairs = ([
             (name, value) for name, value in headers
             if name.lower() not in (b'content-length', b'transfer-encoding')
-        ]
+        ] if carries_framing else [])
 
         if informational or code == 204:
             self._expect_trailers = False
@@ -845,7 +846,10 @@ class HTTP1Sender(BaseSender):
                           _content_length_bytes(expected)))
             self._content_length = expected
 
-        return Headers(pairs)
+        if carries_framing:
+            return Headers(pairs)
+        headers.append(pairs)
+        return headers
 
     def _track_content_length(self, content_len: int, more_body: bool) -> None:
         """Reject a declared-length stream that crosses its wire boundary."""
@@ -928,8 +932,11 @@ class HTTP1Sender(BaseSender):
         self._suppress_body = True
 
     def _render_start(self, status: HTTPStatus, headers: HeaderList) -> bytes:
-        """Build the status line + headers + blank-line as a single bytes blob."""
-        _validate_response_header_fields(headers)
+        """Build the status line + headers + blank-line as a single bytes blob.
+
+        *headers* must already be validated: the arms that buffer a head
+        validate it, and the framing fields added here are the server's own.
+        """
         parts: list[bytes] = [_status_line(status)]
         for k, v in headers:
             parts.append(k)

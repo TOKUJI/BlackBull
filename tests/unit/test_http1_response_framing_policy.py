@@ -376,3 +376,12 @@ async def test_declared_trailers_remain_chunked_and_complete_on_trailers():
 async def test_a_status_outside_httpstatus_is_refused_on_both_lanes(lane):
     with pytest.raises(ValueError):
         await _send_fixed(lane, [], status=299)
+
+
+@pytest.mark.asyncio
+async def test_the_applications_headers_object_is_not_modified():
+    from blackbull.headers import Headers
+    headers = Headers([(b'content-type', b'text/plain')])
+    sender = HTTP1Sender(MemoryWriter())
+    await sender(b'ok', HTTPStatus.OK, headers)
+    assert list(headers) == [(b'content-type', b'text/plain')]
