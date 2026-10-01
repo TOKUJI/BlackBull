@@ -330,7 +330,9 @@ class MQTT5Actor(Actor):
         elif isinstance(message, MQTTPuback):
             await broker.send(ClientPuback(packet_id=message.packet_id, sender=self))
         elif isinstance(message, MQTTPubrec):
-            await broker.send(ClientPubrec(packet_id=message.packet_id, sender=self))
+            await broker.send(ClientPubrec(packet_id=message.packet_id,
+                                           reason_code=message.reason_code,
+                                           sender=self))
         elif isinstance(message, MQTTPubrel):
             await broker.send(ClientPubrel(packet_id=message.packet_id, sender=self))
         elif isinstance(message, MQTTPubcomp):

@@ -154,7 +154,7 @@ conformance matrix:
 | Client Identifier | a zero-length Client Identifier is assigned an identifier no live or offline session holds, returned in CONNACK as `Assigned Client Identifier` (§3.2.2.3.7) |
 | Properties | the full MQTT 5 property set (§2.2.2.2) on every packet that carries properties |
 | Sessions | subscriptions and pending QoS state preserved across reconnects with Clean Start = 0 |
-| Flow control | the client's `Receive Maximum` (§3.1.2.11.3) is enforced in the outbound direction; the broker's own is advertised in CONNACK as a promise to conforming clients |
+| Flow control | the client's `Receive Maximum` (§3.1.2.11.3) is enforced in the outbound direction, per Network Connection; the broker's own is advertised in CONNACK as a promise to conforming clients |
 | Resource limits | packet size, session backlog, subscription and session counts, and retained-store size are bounded; the ones MQTT 5 has a property for are advertised — see below |
 
 The wire codec lives in `blackbull.mqtt.messages` (the 15 control-packet
@@ -303,6 +303,18 @@ turns a subscription into a leak, so the queue is bounded too. At the bound the
 **newest** message is refused and the oldest kept — a subscriber is owed what it
 was promised first, and has no way to detect a message silently dropped from the
 middle.
+
+**The send quota belongs to the connection, and retransmissions spend it
+too.** Every CONNECT re-declares the client's `Receive Maximum`; omitted means
+65535 *now*, not what the previous connection declared, and a declared zero is
+a Protocol Error (`0x82`), not "no limit". That window is shared by live
+deliveries and the `DUP=1` retransmissions of a resumed session (§4.4), which
+go first — they were promised first, in the order the originals were sent
+(MQTT-4.4.0-2). A PUBACK, a PUBCOMP, or a PUBREC that rejects the message
+frees one slot and advances the next retransmission; how many unacknowledged
+messages the *session* holds is not the quota and never widens it. Control
+packets (PUBREL and the acknowledgements of the client's own publishes) are
+not PUBLISH packets, so they flow even when the window is full.
 
 **Retained messages are capped by topic count, and correction is always
 allowed.** At the cap, a retained publish to a *new* topic is refused, but
