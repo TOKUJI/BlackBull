@@ -123,19 +123,6 @@ def _http_date() -> bytes:
     return _HTTP_DATE
 
 
-def _has_header(items, name: bytes) -> bool:
-    """Case-insensitive membership check over ``(key, value)`` tuples.
-
-    HTTP/2 field names are lowercase ASCII per RFC 9113 §8.2.1, but the
-    ASGI app may still hand us ``b'Date'`` or ``b'DATE'`` — its problem
-    to surface, ours to honour.  Used by HTTP2Sender to avoid
-    duplicating the auto-emitted ``date`` header when the app already
-    set one.
-    """
-    needle = name.lower()
-    return any(k.lower() == needle for k, _ in items)
-
-
 # The two builders below must stay byte-for-byte equivalent to the frame-object
 # path they replace — ``protocol.frame_types.Headers.save()``, not this module's
 # field-collection ``Headers`` — including how the shared HPACK dynamic table
@@ -154,15 +141,16 @@ def build_response_headers(encoder, stream_id: int, status,
     Injects a ``date`` header when the app did not supply one, mirroring the
     ``Headers.save()`` send path.  ``status`` may be an ``HTTPStatus``, an
     ``int``, or a ``str`` — it is normalised via ``str()`` exactly as the
-    object path does.
+    object path does.  A [`_Head`][] is already validated; any other
+    *headers* is validated here.
     """
-    if not isinstance(headers, (list, tuple)):
-        headers = tuple(headers)
-    _validate_response_header_fields(headers)
-    if _has_header(headers, b'date'):
-        fields = headers
+    if isinstance(headers, _Head):
+        has_date = headers.date
     else:
-        fields = (*headers, (b'date', _http_date()))
+        if not isinstance(headers, (list, tuple)):
+            headers = tuple(headers)
+        has_date = _validate_response_header_fields(headers)[2]
+    fields = headers if has_date else (*headers, (b'date', _http_date()))
 
     fast = hpack_fastpath.status_fast_bytes(str(status))
     if fast is not None:
@@ -1709,11 +1697,10 @@ class HTTP2Sender(BaseSender):
                     logger.warning('push sent but no push handler registered')
                 return
             if body._header is not None:
-                header_pairs = list(body._header)
-                _validate_response_header_fields(header_pairs)
+                head = _head(body._header)
                 await self._settle_buffered_head()
                 self._buffered_status = HTTPStatus(body.status)
-                self._buffered_headers = header_pairs
+                self._buffered_headers = head
                 self._expect_trailers = body.expects_trailers
                 if self._log_record is not None:
                     self._log_record.status = body.status
