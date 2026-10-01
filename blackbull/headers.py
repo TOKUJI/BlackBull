@@ -126,6 +126,15 @@ class Headers:
         self._index = index
         return self
 
+    @classmethod
+    def _adopt(cls, pairs: list[tuple[bytes, bytes]],
+               index: dict[bytes, list[tuple[bytes, bytes]]]) -> 'Headers':
+        """Take *pairs* and the index [`from_lowered`][] would build from them."""
+        self = cls.__new__(cls)
+        self._list = pairs
+        self._index = index
+        return self
+
     # ---- ASGI-compliant iterable ----------------------------------------
 
     def __iter__(self):
