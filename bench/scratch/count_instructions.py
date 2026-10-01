@@ -87,8 +87,29 @@ def _call(code, offset, callable_, arg0):
         _counts[f'C::{getattr(callable_, "__qualname__", callable_)}'] += 1
 
 
+#: With ``BB_CALLERS=a,b``, each entry into code whose file contains one of
+#: the substrings is counted by its nearest caller outside those files.
+_CALLERS = tuple(t for t in os.environ.get('BB_CALLERS', '').split(',') if t)
+
+
+def _start(code, offset):
+    if not _on or not any(t in code.co_filename for t in _CALLERS):
+        return None
+    frame = sys._getframe(1)
+    while frame and any(t in frame.f_code.co_filename for t in _CALLERS):
+        frame = frame.f_back
+    where = (f'{frame.f_code.co_filename.rsplit("/", 1)[-1]}:{frame.f_lineno}'
+             f' {frame.f_code.co_qualname}' if frame else '?')
+    _counts[f'{code.co_qualname} <- {where}'] += 1
+    return None
+
+
 def _arm() -> None:
     MON.use_tool_id(TOOL, 'instr-count')
+    if _CALLERS:
+        MON.register_callback(TOOL, MON.events.PY_START, _start)
+        MON.set_events(TOOL, MON.events.PY_START)
+        return
     if _C_CALLS:
         MON.register_callback(TOOL, MON.events.CALL, _call)
         MON.set_events(TOOL, MON.events.CALL)
