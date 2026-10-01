@@ -1474,17 +1474,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#sizing-the-connection-cap-under-uvloop" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Sizing the connection cap under uvloop
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#inspecting-the-bind" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5616,17 +5605,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#sizing-the-connection-cap-under-uvloop" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Sizing the connection cap under uvloop
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#inspecting-the-bind" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5796,28 +5774,14 @@ BlackBull documents this window rather than forcing it smaller.</p>
 startup, especially on <code>AF_UNIX</code>.  An adopted fd (<code>--bind fd://N</code>) keeps the
 backlog it was created with until accepting opens, and <code>BB_SOCKET_BACKLOG</code>
 after: size the startup burst where the socket is created, such as systemd's
-<code>Backlog=</code>.  <code>net.core.somaxconn</code> caps both.</p>
+<code>Backlog=</code>.  <code>net.core.somaxconn</code> caps both.  On shutdown an activated socket's
+file stays in place; a stale file left after <code>--reload</code> is replaced on the next
+start.</p>
 <p>On Linux, a worker that finds an <code>AF_UNIX</code> listener's queue full as it opens
 accepting logs one <code>socket_backlog</code> warning on <code>blackbull.caps</code>, naming the
 listener, the connections waiting and the backlog.  An adopted fd created in
 another network namespace (systemd <code>PrivateNetwork=yes</code>) cannot be read and is
 not checked.</p>
-<h2 id="sizing-the-connection-cap-under-uvloop">Sizing the connection cap under uvloop<a class="headerlink" href="#sizing-the-connection-cap-under-uvloop" title="Permanent link">&para;</a></h2>
-<p>Under <code>BB_UVLOOP=1</code>, accepting does not pause at <code>BB_MAX_CONNECTIONS</code>.
-Connections beyond the cap are refused using spare file descriptors, and when
-those run out, clients get no response at all.</p>
-<p>If you use uvloop and expect bursts beyond the cap:</p>
-<ul>
-<li>Do not rely on <code>BB_MAX_CONNECTIONS=auto</code>; it leaves only 64 spare
-  descriptors.</li>
-<li>Set <code>BB_MAX_CONNECTIONS ≤ RLIMIT_NOFILE − (peak burst + held + margin)</code>,
-  where <code>held</code> is what the process holds at its busiest besides client
-  connections: the connection pool's maximum, files opened per request times
-  concurrency, and anything opened lazily.  Do not count <code>held</code> at idle.</li>
-<li>Use a margin of at least 64, and more with TLS or with
-  <code>BB_SOCKET_REUSEPORT=1</code>.</li>
-</ul>
-<p>If a hard bound matters more than uvloop's speed, use the default event loop.</p>
 <h2 id="inspecting-the-bind">Inspecting the bind<a class="headerlink" href="#inspecting-the-bind" title="Permanent link">&para;</a></h2>
 <p><code>server.port</code> returns the kernel-assigned port number after
 <code>open_socket(port=0)</code> — useful in tests where you want an

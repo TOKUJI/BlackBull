@@ -4850,17 +4850,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.server.Server.client_connected_cb" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        client_connected_cb
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.server.server.Server.configure_mtls" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4939,17 +4928,6 @@
         
       </ul>
     </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.server.SocketManager" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        SocketManager
-      
-    </span>
-  </a>
   
 </li>
         
@@ -5678,17 +5656,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.server.Server.client_connected_cb" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        client_connected_cb
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.server.server.Server.configure_mtls" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5770,17 +5737,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#blackbull.server.server.SocketManager" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        SocketManager
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -5829,14 +5785,10 @@ the object under <code>BlackBull.run()</code>.  It resolves its
 
   
       dataclass
-  " href="../listener/#blackbull.server.listener.Listener"><code>Listener</code></a> set into bound sockets, groups
-them by TLS context so a listener terminates the certificate it names, and
-serves each group through
-<a class="autorefs autorefs-internal" title="SocketManager(socket_cb_pairs, ssl_context, cleanup_budget=None)
-
-  
-      async
-  " href="#blackbull.server.server.SocketManager"><code>SocketManager</code></a>.  Every accepted
+  " href="../listener/#blackbull.server.listener.Listener"><code>Listener</code></a> set into bound sockets, each
+terminating the TLS context its listener names, and accepts on them through
+<code>_AcceptGate</code>, which counts every accepted descriptor against the connection
+cap on any event loop.  Every accepted
 connection becomes a buffered protocol and, from there, one
 <a class="autorefs autorefs-internal" href="../connection_actor/#blackbull.server.connection_actor.ConnectionActor"><code>ConnectionActor</code></a>.
 <a class="autorefs autorefs-internal" href="#blackbull.server.server.LifespanManager"><code>LifespanManager</code></a> drives the ASGI
@@ -6045,28 +5997,6 @@ between "the server's" and "its own".</p>
 <div class="doc doc-object doc-function">
 
 
-<h4 id="blackbull.server.server.Server.client_connected_cb" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">client_connected_cb</span><span class="p">(</span><span class="n">reader</span><span class="p">,</span> <span class="n">writer</span><span class="p">)</span></code>
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-async"><code>async</code></small>
-  </span>
-
-<a href="#blackbull.server.server.Server.client_connected_cb" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Accept callback for the shared HTTP listener.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
 <h4 id="blackbull.server.server.Server.configure_mtls" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">configure_mtls</span><span class="p">(</span><span class="n">ca_cert</span><span class="p">)</span></code>
 
@@ -6095,10 +6025,7 @@ between "the server's" and "its own".</p>
 
     <div class="doc doc-contents ">
 
-        <p>Factory for <code>loop.create_server</code> — one buffered protocol per accept.</p>
-<p>The protocol spawns the serving task itself, a protocol factory being
-synchronous.  On an SSL transport <code>connection_made</code> fires after the
-handshake, so ALPN is already decided when that task runs.</p>
+        <p>One buffered protocol per accept; <code>_AcceptGate</code> serves it.</p>
 
 
     </div>
@@ -6235,45 +6162,6 @@ in a SIGKILL.</p>
 
 </div>
 
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="blackbull.server.server.SocketManager" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">SocketManager</span><span class="p">(</span><span class="n">socket_cb_pairs</span><span class="p">,</span> <span class="n">ssl_context</span><span class="p">,</span> <span class="n">cleanup_budget</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-async"><code>async</code></small>
-  </span>
-
-<a href="#blackbull.server.server.SocketManager" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Async context manager that creates asyncio servers from already-bound sockets.</p>
-<p><em>socket_cb_pairs</em> is an iterable of <code>(sock, protocol_factory)</code> — each
-socket is served by its own factory.  The shared HTTP listener and each
-port-bound non-ASGI protocol both come from
-<a class="autorefs autorefs-internal" title="connection_protocol_factory(bound_binding=None)" href="#blackbull.server.server.Server.connection_protocol_factory"><code>Server.connection_protocol_factory</code></a>, differing only in whether a
-binding is pre-committed.</p>
-<p>On enter: wraps each socket in <code>loop.create_server</code> (TCP) or
-<code>loop.create_unix_server</code> (AF_UNIX) and yields the list.  Accepting does
-not start here — the caller calls <code>start_serving()</code> on the servers.  Not
-<code>start_server</code>: that pairs a StreamReader/StreamWriter over asyncio's
-own buffering with every connection, and the whole point of the buffered
-protocol is that the connection owns exactly one buffer.
-On exit: closes all asyncio servers.</p>
-<p>Dispatches by <code>sock.family</code>: AF_INET / AF_INET6 take the TCP
-server, AF_UNIX takes the unix server.  Both honour the configured
-<code>socket_backlog</code> (asyncio's default of 100 is silently re-applied
-via <code>sock.listen(backlog)</code> otherwise, which produces wrk c=1024
-connect errors).</p>
-
-
-    </div>
-
-</div>
 
 
 

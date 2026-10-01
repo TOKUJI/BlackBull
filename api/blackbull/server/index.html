@@ -4167,17 +4167,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.Server.client_connected_cb" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        client_connected_cb
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.server.Server.configure_mtls" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5645,17 +5634,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.Server.client_connected_cb" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        client_connected_cb
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.server.Server.configure_mtls" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5934,28 +5912,6 @@ between "the server's" and "its own".</p>
 <div class="doc doc-object doc-function">
 
 
-<h4 id="blackbull.server.Server.client_connected_cb" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">client_connected_cb</span><span class="p">(</span><span class="n">reader</span><span class="p">,</span> <span class="n">writer</span><span class="p">)</span></code>
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-async"><code>async</code></small>
-  </span>
-
-<a href="#blackbull.server.Server.client_connected_cb" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Accept callback for the shared HTTP listener.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
 <h4 id="blackbull.server.Server.configure_mtls" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">configure_mtls</span><span class="p">(</span><span class="n">ca_cert</span><span class="p">)</span></code>
 
@@ -5984,10 +5940,7 @@ between "the server's" and "its own".</p>
 
     <div class="doc doc-contents ">
 
-        <p>Factory for <code>loop.create_server</code> — one buffered protocol per accept.</p>
-<p>The protocol spawns the serving task itself, a protocol factory being
-synchronous.  On an SSL transport <code>connection_made</code> fires after the
-handshake, so ALPN is already decided when that task runs.</p>
+        <p>One buffered protocol per accept; <code>_AcceptGate</code> serves it.</p>
 
 
     </div>

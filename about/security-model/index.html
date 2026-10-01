@@ -6010,9 +6010,10 @@ are the difference between the label and the whole truth:</p>
 </li>
 </ol>
 <p>Connections beyond the cap wait in the accept queue and each receives a
-   <code>503</code>, on the default event loop.  Under <code>BB_UVLOOP=1</code> a burst beyond the
-   cap can leave clients unanswered; see <a href="../../deployment/unix-and-fd/#sizing-the-connection-cap-under-uvloop">Sizing the connection cap under
-   uvloop</a>.</p>
+   <code>503</code>, on every event loop.  A TLS connection counts from accept, while its
+   handshake is still running.  Under <code>auto</code>, 48 descriptors stay for the
+   process's own use — listeners, connection pools, open files; if yours holds
+   more, set the cap explicitly.</p>
 <ol>
 <li>
 <p><strong>An MQTT session that never expires is bounded by the total, not by the

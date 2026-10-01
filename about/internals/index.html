@@ -5538,6 +5538,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#accept-admission" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Accept admission
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -6045,6 +6056,17 @@
     <span class="md-ellipsis">
       
         Rejecting requires lingering
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#accept-admission" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Accept admission
       
     </span>
   </a>
@@ -6783,6 +6805,14 @@ Lingering on every connection would put a timeout on the teardown path
 and a refusal's request may still be in the kernel's receive queue.</p>
 <p>Both bounds make the refusal <strong>best-effort</strong>, not a guarantee: a peer that
 stops reading meets the close.</p>
+<h3 id="accept-admission">Accept admission<a class="headerlink" href="#accept-admission" title="Permanent link">&para;</a></h3>
+<p><code>_AcceptGate</code> in <code>blackbull/server/server.py</code> calls <code>accept()</code> itself, through
+<code>loop.add_reader</code> and <code>loop.connect_accepted_socket</code>, on every event loop.
+Each accepted descriptor is counted from <code>accept()</code> until it closes — TLS
+handshakes and refusals included — and accepting pauses while the count is at
+<code>BB_MAX_CONNECTIONS</code> plus a refusal reserve.  Do not count in <code>connection_made</code>:
+over TLS it runs only after the handshake.  A loop that cannot register a
+reader fails <code>run()</code> with that error.</p>
 <h2 id="receive-path-invariant">Receive-path invariant<a class="headerlink" href="#receive-path-invariant" title="Permanent link">&para;</a></h2>
 <p>The request body crosses the framework as <strong><code>bytes</code></strong>, and the end of
 the body is carried by the call protocol rather than by a field beside
