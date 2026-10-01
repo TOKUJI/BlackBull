@@ -21,12 +21,14 @@ import os
 import time
 from abc import ABC, abstractmethod
 from http import HTTPStatus
+from functools import cache
 from inspect import iscoroutinefunction
 from email.utils import formatdate
 from itertools import chain
 from typing import NoReturn
 
 from ..protocol import hpack_fastpath
+from ..env import get_settings
 from ..protocol.frame_types import (FrameTypes, HeaderFrameFlags, DataFrameFlags,
                                     FrameBase, PseudoHeaders,
                                     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE)
@@ -70,6 +72,8 @@ _SENDFILE_CHUNK = 1024 * 1024
 # configuration surface without deployment data.
 _VECTORED_JOIN_THRESHOLD = 32 * 1024
 
+
+_STATUS_BY_CODE: dict[int, HTTPStatus] = {s.value: s for s in HTTPStatus}
 
 _STATUS_LINES: dict[HTTPStatus, bytes] = {
     s: f'HTTP/1.1 {s} {s.phrase}'.encode() + _CRLF for s in HTTPStatus
@@ -279,6 +283,12 @@ class AbstractWriter(ABC):
             'sendfile is not supported by this writer')
 
 
+@cache
+def _lingers(kind: type) -> bool:
+    """Whether *kind* defines ``linger_close`` as a coroutine function."""
+    return iscoroutinefunction(getattr(kind, 'linger_close', None))
+
+
 class AsyncioWriter(AbstractWriter):
     """Adapts an asyncio-compatible stream to ``AbstractWriter``.
 
@@ -317,12 +327,10 @@ class AsyncioWriter(AbstractWriter):
         self._protocol = protocol
         self._deadline = (WriteDeadline(write_timeout)
                           if write_timeout > 0 else None)
-        # Same mock hazard: the capability check has to be something a
-        # fabricated attribute cannot accidentally pass.
-        linger = getattr(stream_writer, 'linger_close', None)
-        self._linger = (linger
-                        if linger is not None and iscoroutinefunction(linger)
-                        else None)
+        # Same mock hazard: checked on the class, which a fabricated instance
+        # attribute cannot reach.
+        self._linger = (stream_writer.linger_close
+                        if _lingers(type(stream_writer)) else None)
 
     async def _drain_with_timeout(self) -> None:
         """Drain the underlying StreamWriter, bounded by ``_write_timeout``.
@@ -675,7 +683,8 @@ class HTTP1Sender(BaseSender):
                     header_pairs = list(body._header)
                     _validate_response_header_fields(header_pairs)
                     self._response_started = True
-                    self._buffered_status = HTTPStatus(body.status)
+                    self._buffered_status = (_STATUS_BY_CODE.get(body.status)
+                                             or HTTPStatus(body.status))
                     # Preserve the ASGI start `trailers: True` flag so a
                     # terminal body before the trailers event withholds the
                     # terminal chunk (lossless full-form compat).
@@ -1111,13 +1120,8 @@ class HTTP2Sender(BaseSender):
         self.max_frame_size = DEFAULT_MAX_FRAME_SIZE
         self._window_open: asyncio.Event | None = None
         # How long the peer may take to grant flow-control credit before the
-        # stream gives up.  Every caller that builds senders in bulk passes it,
-        # because one sender is created *per stream* and the fallback below
-        # puts a function-level import — resolved through
-        # ``importlib._bootstrap`` on every execution — on the per-request
-        # path.  The fallback serves direct instantiation only.
+        # stream gives up.
         if flow_control_timeout is None:
-            from ..env import get_settings  # noqa: PLC0415
             flow_control_timeout = get_settings().write_timeout
         self._flow_control_timeout: float = flow_control_timeout
         self._flow_control_cap = flow_control_cap

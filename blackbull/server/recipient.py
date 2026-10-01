@@ -46,6 +46,7 @@ from .ws_codec import (
 from .constants import WSCloseCode
 from .rate_window import RateWindow
 from ..asgi import ASGIEvent
+from ..env import get_settings
 from ..connection import Connection, disconnected, mark_disconnected
 from ..request import ClientDisconnected
 from ..protocol.frame_types import FrameBase, Data, DEFAULT_INITIAL_WINDOW_SIZE
@@ -944,8 +945,7 @@ class HTTP1Recipient(BaseRecipient):
         # All five fall back to settings when a caller does not inject them.
         if (chunk_size is None or chunk_max is None or max_body is None
                 or min_rate is None or min_rate_grace is None):
-            from ..env import get_settings as _get_settings  # noqa: PLC0415
-            _s = _get_settings()
+            _s = get_settings()
             if chunk_size is None:
                 chunk_size = _s.body_chunk_size
             if chunk_max is None:
@@ -1377,12 +1377,8 @@ class HTTP2Recipient(BaseRecipient):
         self._initial_consumed: bool = False
         self._done: bool = False
         if max_body is None or min_rate is None or min_rate_grace is None:
-            # Fallback for a directly-instantiated recipient (tests).  One
-            # recipient is built *per stream*, so the production path must not
-            # take it: a function-level relative import resolves through
-            # ``importlib._bootstrap`` on every execution.
-            from ..env import get_settings as _get_settings  # noqa: PLC0415
-            _s = _get_settings()
+            # Fallback for a directly-instantiated recipient (tests).
+            _s = get_settings()
             if max_body is None:
                 max_body = _s.max_body_size
             if min_rate is None:
@@ -1725,7 +1721,6 @@ class WebSocketRecipient(BaseRecipient):
             self._max_frame_payload: int = max_frame_payload
         else:
             try:
-                from ..env import get_settings  # noqa: PLC0415
                 self._max_frame_payload = get_settings().ws_max_frame_payload
             except Exception:
                 self._max_frame_payload = self._MAX_FRAME_PAYLOAD
@@ -1733,14 +1728,12 @@ class WebSocketRecipient(BaseRecipient):
             self._max_message_size: int = max_message_size
         else:
             try:
-                from ..env import get_settings  # noqa: PLC0415
                 self._max_message_size = get_settings().ws_max_message_size
             except Exception:
                 self._max_message_size = self._MAX_MESSAGE_SIZE
         self._assembler = FragmentAssembler(max_total=self._max_message_size)
         # Per connection, not shared: the budget is what *one* peer may spend.
         try:
-            from ..env import get_settings  # noqa: PLC0415
             _s = get_settings()
             self._control_meter = RateWindow(_s.frame_rate_limit,
                                              _s.frame_rate_window)
@@ -2547,7 +2540,6 @@ class RecipientFactory:
         # The liveness probe is read here, not in the recipient: this factory is
         # the *server's* entry point, and the probe answers a question only the
         # server has — how long an untrusted peer may hold a connection.
-        from ..env import get_settings  # noqa: PLC0415
         _cfg = get_settings()
         return WebSocketRecipient(reader, writer, dispatcher=dispatcher, conn=conn,
                                   ws_queue_depth=ws_queue_depth,

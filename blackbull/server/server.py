@@ -34,12 +34,14 @@ from ..protocol.rsock import (
     somaxconn, unix_accept_queue,
 )
 from .listener import HTTP, InheritedFd, Listener, Tcp, Unix
-from .sender import AbstractWriter
-from .recipient import (AbstractReader,
+from .conn_id import new_connection_id
+from .connection_actor import ConnectionActor
+from .sender import AbstractWriter, AsyncioWriter
+from .recipient import (AbstractReader, AsyncioReader,
                         _HTTP2_STREAM_QUEUE_DEPTH, _WS_READ_INLINE)
 from .cap_log import CapHitCounter, log_cap_hit
 from ..asgi import ASGIEvent
-from ..env import FD_RESERVE
+from ..env import FD_RESERVE, get_settings
 logger = logging.getLogger(__name__)
 
 
@@ -791,10 +793,9 @@ class Server:
         """One buffered protocol per accept; ``_AcceptGate`` serves it."""
         from .connection_protocol import ConnectionProtocol  # noqa: PLC0415
         from .sender import AsyncioWriter  # noqa: PLC0415
-        from ..env import get_settings as _get_settings  # noqa: PLC0415
 
         server = self
-        write_timeout = _get_settings().write_timeout
+        write_timeout = get_settings().write_timeout
 
         class _ServedConnection(ConnectionProtocol):
             async def serve(self):
@@ -848,11 +849,6 @@ class Server:
         has no `StreamWriter` to carry it — and peer/socket names and the TLS
         object are read from it, so it cannot be inferred.
         """
-        from .conn_id import new_connection_id  # noqa: PLC0415
-        from .connection_actor import ConnectionActor  # noqa: PLC0415
-        from .sender import AsyncioWriter  # noqa: PLC0415
-        from .recipient import AsyncioReader  # noqa: PLC0415
-
         if transport is None:
             transport = getattr(writer, 'transport', None)
         peername = transport.get_extra_info('peername') if transport else None
@@ -882,9 +878,8 @@ class Server:
         if isinstance(writer, AbstractWriter):
             wrapped_writer = writer
         else:
-            from ..env import get_settings as _get_settings  # noqa: PLC0415
             wrapped_writer = AsyncioWriter(
-                writer, write_timeout=_get_settings().write_timeout)
+                writer, write_timeout=get_settings().write_timeout)
 
         aggregator = self._cached_aggregator
 
@@ -942,8 +937,7 @@ class Server:
         listener built from those arguments, so there is one binding path and
         not two.
         """
-        from ..env import get_settings as _get_settings  # noqa: PLC0415
-        _cfg = _get_settings()
+        _cfg = get_settings()
         if self.bound_listeners:
             self._publish_socket_view()
             return
@@ -1206,8 +1200,7 @@ class Server:
         for _spec, sock in listening:
             if af_unix is not None and sock.family == af_unix:
                 _warn_if_unix_queue_full(sock)
-        from ..env import get_settings as _get_settings  # noqa: PLC0415
-        settings = _get_settings()
+        settings = get_settings()
         self._running_servers = self._accept_gate.arm(
             listening, self._max_connections, backlog or settings.socket_backlog,
             settings.header_deadline)

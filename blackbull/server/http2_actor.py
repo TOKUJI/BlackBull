@@ -14,6 +14,7 @@ from typing import Protocol, runtime_checkable
 from hpack import HPACKError
 
 from ..actor import Actor, Message
+from ..env import get_settings
 from ..event_aggregator import EventAggregator
 from ..logger import log, debug_gate
 from ..protocol.frame import FrameFactory
@@ -295,8 +296,7 @@ class HTTP2Actor(Actor):
         self._control_sender = SenderFactory.http2(writer, self.factory, 0)
         self._senders: dict = {}
         # Read from env at construction so tests can override before run().
-        from ..env import get_settings as _get_settings  # noqa: PLC0415
-        _cfg = _get_settings()
+        _cfg = get_settings()
         self.max_concurrent_streams: int = _cfg.h2_max_concurrent_streams
         self._request_timeout: float = _cfg.request_timeout
         self._frame_yield_every: int = _cfg.frame_yield_every
@@ -304,8 +304,7 @@ class HTTP2Actor(Actor):
         self._max_body_size: int = _cfg.max_body_size
         # These limits are connection-scoped on purpose: every one is
         # process-wide configuration, and a stream is a request — reading them
-        # per stream would put a settings lookup, and the function-level import
-        # that reaches it, on the per-request path.
+        # per stream would put a settings lookup on the per-request path.
         self._min_body_rate: float = _cfg.min_body_rate
         self._min_body_rate_grace: float = _cfg.min_body_rate_grace
         self._write_timeout: float = _cfg.write_timeout
@@ -738,8 +737,7 @@ class HTTP2Actor(Actor):
 
     async def run(self) -> None:
         """HTTP/2 connection state machine — process frames until connection closes."""
-        from ..env import get_settings as _get_settings  # noqa: PLC0415
-        cfg = _get_settings()
+        cfg = get_settings()
 
         # RFC 8441 §3 — never invite Extended CONNECT unless the operator has
         # opted in, because a peer that never sees the bit will not send it.
@@ -1572,14 +1570,13 @@ class HTTP2Actor(Actor):
         the same key the H/1.1 path uses — so ``WebSocketActor`` is shared
         between the two transports unchanged.
         """
-        from ..env import get_settings as _get_settings  # noqa: PLC0415
         from .conn_id import new_connection_id  # noqa: PLC0415
         from .websocket_actor import WebSocketActor  # noqa: PLC0415
         from .http2_ws import HTTP2WSReader, HTTP2WSWriter  # noqa: PLC0415
 
         # Without this per-connection cap a peer may hold
         # ``max_concurrent_streams`` idle WS streams.  ``0`` disables it.
-        cfg = _get_settings()
+        cfg = get_settings()
         ws_cap = cfg.h2_ws_max_streams_per_connection
         if ws_cap > 0 and self._ws_stream_count >= ws_cap:
             _ws_conn = stream.conn
