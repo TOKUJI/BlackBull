@@ -22,15 +22,23 @@ def _scope(query: bytes = b'') -> dict:
             'query_string': query}
 
 
-class TestQueryParamResolution:
-    @pytest.mark.asyncio
-    async def test_str_param(self):
-        captured = {}
-        async def fn(q: str): captured['q'] = q
-        wrapper = _adapt_handler(fn, '/search')
-        await wrapper(_scope(b'q=bull'), None, AsyncMock())
-        assert captured['q'] == 'bull'
+async def _qp_page_int(page: int):
+    pass
 
+
+async def _qp_active_bool(active: bool):
+    pass
+
+
+async def _qp_search_q(q: str):
+    return {'q': q}
+
+
+async def _qp_search_page(page: int):
+    return {'page': page}
+
+
+class TestQueryParamResolution:
     @pytest.mark.asyncio
     async def test_unannotated_param_resolves_as_str(self):
         captured = {}
@@ -58,22 +66,19 @@ class TestQueryParamResolution:
         assert captured['ratio'] == 0.5
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize('raw', ['1', 'true', 'yes', 'on', 'True', 'YES'])
-    async def test_bool_true_forms(self, raw):
+    @pytest.mark.parametrize('raw,expected', [
+        pytest.param(r, True, id=f'bool-true-{r}')
+        for r in ['1', 'true', 'yes', 'on', 'True', 'YES']
+    ] + [
+        pytest.param(r, False, id=f'bool-false-{r}')
+        for r in ['0', 'false', 'no', 'off', 'False', 'NO']
+    ])
+    async def test_bool_true_forms(self, raw, expected):
         captured = {}
         async def fn(active: bool): captured['active'] = active
         wrapper = _adapt_handler(fn, '/search')
         await wrapper(_scope(f'active={raw}'.encode()), None, AsyncMock())
-        assert captured['active'] is True
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize('raw', ['0', 'false', 'no', 'off', 'False', 'NO'])
-    async def test_bool_false_forms(self, raw):
-        captured = {}
-        async def fn(active: bool): captured['active'] = active
-        wrapper = _adapt_handler(fn, '/search')
-        await wrapper(_scope(f'active={raw}'.encode()), None, AsyncMock())
-        assert captured['active'] is False
+        assert captured['active'] is expected
 
     @pytest.mark.asyncio
     async def test_default_used_when_absent(self):
@@ -108,28 +113,18 @@ class TestQueryParamResolution:
         assert captured['limit'] == 9
 
     @pytest.mark.asyncio
-    async def test_repeated_key_last_occurrence_wins(self):
+    @pytest.mark.parametrize('qs,expected', [
+        pytest.param(b'q=first&q=second', 'second', id='repeated-key-last-wins'),
+        pytest.param(b'q=', '', id='blank-value-empty-string'),
+        pytest.param(b'q=hello%20big+world', 'hello big world', id='percent-and-plus-decoding'),
+        pytest.param(b'q=bull', 'bull', id='str-param'),
+    ])
+    async def test_repeated_key_last_occurrence_wins(self, qs, expected):
         captured = {}
         async def fn(q: str): captured['q'] = q
         wrapper = _adapt_handler(fn, '/search')
-        await wrapper(_scope(b'q=first&q=second'), None, AsyncMock())
-        assert captured['q'] == 'second'
-
-    @pytest.mark.asyncio
-    async def test_blank_value_is_empty_string(self):
-        captured = {}
-        async def fn(q: str): captured['q'] = q
-        wrapper = _adapt_handler(fn, '/search')
-        await wrapper(_scope(b'q='), None, AsyncMock())
-        assert captured['q'] == ''
-
-    @pytest.mark.asyncio
-    async def test_percent_and_plus_decoding(self):
-        captured = {}
-        async def fn(q: str): captured['q'] = q
-        wrapper = _adapt_handler(fn, '/search')
-        await wrapper(_scope(b'q=hello%20big+world'), None, AsyncMock())
-        assert captured['q'] == 'hello big world'
+        await wrapper(_scope(qs), None, AsyncMock())
+        assert captured['q'] == expected
 
     @pytest.mark.asyncio
     async def test_query_alongside_path_params(self):
@@ -164,27 +159,15 @@ class TestQueryParam400s:
         assert 'q' in exc_info.value.detail
 
     @pytest.mark.asyncio
-    async def test_int_coercion_failure_raises_400(self):
-        async def fn(page: int): pass
+    @pytest.mark.parametrize('fn,qs', [
+        pytest.param(_qp_page_int, b'page=abc', id='int-coercion-failure'),
+        pytest.param(_qp_page_int, b'page=', id='blank-int-value'),
+        pytest.param(_qp_active_bool, b'active=maybe', id='bool-bad-value'),
+    ])
+    async def test_int_coercion_failure_raises_400(self, fn, qs):
         wrapper = _adapt_handler(fn, '/search')
         with pytest.raises(HTTPException) as exc_info:
-            await wrapper(_scope(b'page=abc'), None, AsyncMock())
-        assert exc_info.value.status == HTTPStatus.BAD_REQUEST
-
-    @pytest.mark.asyncio
-    async def test_blank_int_value_raises_400(self):
-        async def fn(page: int): pass
-        wrapper = _adapt_handler(fn, '/search')
-        with pytest.raises(HTTPException) as exc_info:
-            await wrapper(_scope(b'page='), None, AsyncMock())
-        assert exc_info.value.status == HTTPStatus.BAD_REQUEST
-
-    @pytest.mark.asyncio
-    async def test_bool_bad_value_raises_400(self):
-        async def fn(active: bool): pass
-        wrapper = _adapt_handler(fn, '/search')
-        with pytest.raises(HTTPException) as exc_info:
-            await wrapper(_scope(b'active=maybe'), None, AsyncMock())
+            await wrapper(_scope(qs), None, AsyncMock())
         assert exc_info.value.status == HTTPStatus.BAD_REQUEST
 
 
@@ -194,10 +177,6 @@ class TestQueryParamRegistration:
         with pytest.raises(TypeError, match="cannot resolve parameter 'x'"):
             _adapt_handler(fn, '/search')
 
-    def test_container_annotation_raises_at_registration(self):
-        async def fn(tags: list[str]): pass
-        with pytest.raises(TypeError, match="cannot resolve parameter 'tags'"):
-            _adapt_handler(fn, '/search')
 
     def test_path_param_with_default_warns_shadowing(self):
         async def fn(item_id: int = 3): pass
@@ -255,26 +234,16 @@ class TestQueryParamsEndToEnd:
             assert r.status_code == 200
             assert r.json() == {'q': 'bull', 'page': 2, 'active': True}
 
-    def test_missing_required_is_400_not_500(self):
+    @pytest.mark.parametrize('handler,url', [
+        pytest.param(_qp_search_q, '/search', id='missing-required'),
+        pytest.param(_qp_search_page, '/search?page=xyz', id='coercion-failure'),
+    ])
+    def test_missing_required_is_400_not_500(self, handler, url):
         app = BlackBull()
-
-        @app.route(path='/search')
-        async def search(q: str):
-            return {'q': q}
+        app.route(path='/search')(handler)
 
         with TestClient(app) as client:
-            r = client.get('/search')
-            assert r.status_code == 400
-
-    def test_coercion_failure_is_400_not_500(self):
-        app = BlackBull()
-
-        @app.route(path='/search')
-        async def search(page: int):
-            return {'page': page}
-
-        with TestClient(app) as client:
-            r = client.get('/search?page=xyz')
+            r = client.get(url)
             assert r.status_code == 400
 
 

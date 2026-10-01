@@ -50,6 +50,7 @@ def _make_extended_connect_frame(
     scheme: str = 'https',
     stream_id: int = 1,
     subprotocols: str = '',
+    extensions: str = '',
     end_stream: bool = False,
 ) -> bytes:
     """HEADERS frame for RFC 8441 Extended CONNECT."""
@@ -63,6 +64,8 @@ def _make_extended_connect_frame(
     ]
     if subprotocols:
         headers.append((b'sec-websocket-protocol', subprotocols.encode()))
+    if extensions:
+        headers.append((b'sec-websocket-extensions', extensions.encode()))
     block = encoder.encode(headers)
     flags = HeaderFrameFlags.END_HEADERS
     if end_stream:
@@ -124,6 +127,39 @@ def _make_ws_data_frame(ws_frame_bytes: bytes, stream_id: int = 1,
     """DATA frame wrapping raw RFC 6455 WebSocket frame bytes."""
     flags = DataFrameFlags.END_STREAM if end_stream else 0
     return _make_raw_frame(FrameTypes.DATA, flags, stream_id, ws_frame_bytes)
+
+
+def _response_headers(writes) -> list[tuple[str, str]]:
+    """Every (name, value) pair from the HEADERS frames written to the wire.
+
+    Strict on purpose: a decode failure must fail the test, never hide the
+    headers the test is about to assert on.
+    """
+    from hpack import Decoder
+    all_bytes = b''.join(writes)
+    out: list[tuple[str, str]] = []
+    decoder = Decoder()
+    i = 0
+    while i + 9 <= len(all_bytes):
+        length = int.from_bytes(all_bytes[i:i+3], 'big')
+        if all_bytes[i+3] == 0x01 and length > 0:  # HEADERS
+            for k, v in decoder.decode(all_bytes[i+9:i+9+length]):
+                out.append((k.decode() if isinstance(k, bytes) else k,
+                            v.decode() if isinstance(v, bytes) else v))
+        i += 9 + length
+    return out
+
+
+def _echoed_ws_frame(writes) -> bytes:
+    """The payload of the first DATA frame sent back to the client."""
+    all_bytes = b''.join(writes)
+    i = 0
+    while i + 9 <= len(all_bytes):
+        length = int.from_bytes(all_bytes[i:i+3], 'big')
+        if all_bytes[i+3] == 0x00 and length > 0 and all_bytes[i+4] & 0x01 == 0:
+            return all_bytes[i+9:i+9+length]
+        i += 9 + length
+    raise AssertionError('no DATA frame echoed')
 
 
 def _make_h2_actor(app=None):
@@ -204,17 +240,21 @@ class TestExtendedConnectHandshake:
         await handler.run()
         return writer
 
-    async def test_scope_type_is_websocket(self):
+    @pytest.mark.parametrize('attr,expected', [
+        pytest.param('type', 'websocket', id='scope-type-websocket'),
+        pytest.param('http_version', '2', id='scope-http-version-2'),
+    ])
+    async def test_scope_type_is_websocket(self, attr, expected):
         captured = {}
 
         async def app(conn, receive, send):
-            captured['type'] = conn.type
+            captured[attr] = getattr(conn, attr)
             await receive()          # websocket.connect
             await send({'type': 'websocket.accept'})
             await receive()          # websocket.disconnect (from EOF)
 
         await self._run_with_app(app)
-        assert captured['type'] == 'websocket'
+        assert captured[attr] == expected
 
     async def test_split_headers_use_the_same_websocket_lifecycle(self):
         captured = {}
@@ -237,18 +277,6 @@ class TestExtendedConnectHandshake:
         assert captured['first_event'] == {'type': 'websocket.connect'}
         assert captured['last_event']['type'] == 'websocket.disconnect'
 
-    async def test_scope_http_version_is_2(self):
-        captured = {}
-
-        async def app(conn, receive, send):
-            captured['http_version'] = conn.http_version
-            await receive()
-            await send({'type': 'websocket.accept'})
-            await receive()
-
-        await self._run_with_app(app)
-        assert captured['http_version'] == '2'
-
     async def test_scope_path(self):
         captured = {}
 
@@ -266,7 +294,15 @@ class TestExtendedConnectHandshake:
         await handler.run()
         assert captured['path'] == '/chat-room'
 
-    async def test_scope_scheme_wss_for_https(self):
+    @pytest.mark.parametrize('scheme,expected', [
+        pytest.param('https', 'wss', id='https-to-wss'),
+        pytest.param('HTTPS', 'wss', id='HTTPS-to-wss'),
+        pytest.param('http', 'ws', id='http-to-ws'),
+        pytest.param('HTTP', 'ws', id='HTTP-to-ws'),
+    ])
+    async def test_scope_scheme_wss_for_https(self, scheme, expected):
+        """RFC8441 scope scheme mapping: https → wss, http → ws,
+        case-insensitively."""
         captured = {}
 
         async def app(conn, receive, send):
@@ -277,28 +313,11 @@ class TestExtendedConnectHandshake:
 
         handler, _, _ = _make_h2_actor(app)
         frames = [_client_settings(),
-                  _make_extended_connect_frame(scheme='https'),
+                  _make_extended_connect_frame(scheme=scheme),
                   None]
         handler.receive = AsyncMock(side_effect=frames)
         await handler.run()
-        assert captured['scheme'] == 'wss'
-
-    async def test_scope_scheme_ws_for_http(self):
-        captured = {}
-
-        async def app(conn, receive, send):
-            captured['scheme'] = conn.scheme
-            await receive()
-            await send({'type': 'websocket.accept'})
-            await receive()
-
-        handler, _, _ = _make_h2_actor(app)
-        frames = [_client_settings(),
-                  _make_extended_connect_frame(scheme='http'),
-                  None]
-        handler.receive = AsyncMock(side_effect=frames)
-        await handler.run()
-        assert captured['scheme'] == 'ws'
+        assert captured['scheme'] == expected
 
     async def test_scope_subprotocols_parsed(self):
         captured = {}
@@ -336,28 +355,8 @@ class TestExtendedConnectHandshake:
         handler.receive = AsyncMock(side_effect=frames)
         await handler.run()
 
-        # Find the HEADERS frame written to the wire
-        all_bytes = b''.join(writes)
-        # Scan for a HEADERS frame (type=0x01) containing :status 200
-        found_200 = False
-        decoder = Decoder()
-        i = 0
-        while i + 9 <= len(all_bytes):
-            length = int.from_bytes(all_bytes[i:i+3], 'big')
-            frame_type = all_bytes[i+3]
-            payload = all_bytes[i+9:i+9+length]
-            if frame_type == 0x01 and length > 0:  # HEADERS
-                try:
-                    hdrs = decoder.decode(payload)
-                    for k, v in hdrs:
-                        k = k.decode() if isinstance(k, bytes) else k
-                        v = v.decode() if isinstance(v, bytes) else v
-                        if k == ':status' and v == '200':
-                            found_200 = True
-                except Exception:
-                    pass
-            i += 9 + length
-        assert found_200, 'Expected :status 200 HEADERS frame on websocket.accept'
+        assert (':status', '200') in _response_headers(writes), \
+            'Expected :status 200 HEADERS frame on websocket.accept'
 
     async def test_subprotocol_included_in_200_headers(self):
         """websocket.accept(subprotocol='chat') must include sec-websocket-protocol
@@ -380,32 +379,85 @@ class TestExtendedConnectHandshake:
         handler.receive = AsyncMock(side_effect=frames)
         await handler.run()
 
-        all_bytes = b''.join(writes)
-        found_subprotocol = False
-        decoder = Decoder()
-        i = 0
-        while i + 9 <= len(all_bytes):
-            length = int.from_bytes(all_bytes[i:i+3], 'big')
-            frame_type = all_bytes[i+3]
-            payload = all_bytes[i+9:i+9+length]
-            if frame_type == 0x01 and length > 0:
-                try:
-                    hdrs = decoder.decode(payload)
-                    for k, v in hdrs:
-                        k = k.decode() if isinstance(k, bytes) else k
-                        v = v.decode() if isinstance(v, bytes) else v
-                        if k == 'sec-websocket-protocol' and v == 'chat':
-                            found_subprotocol = True
-                except Exception:
-                    pass
-            i += 9 + length
-        assert found_subprotocol, (
+        assert (':status', '200') in _response_headers(writes)
+        assert ('sec-websocket-protocol', 'chat') in _response_headers(writes), (
             'Expected sec-websocket-protocol: chat in 200 response headers')
 
 
 # ---------------------------------------------------------------------------
 # §5 — Data exchange: WebSocket frames in HTTP/2 DATA frames
 # ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestPermessageDeflateNegotiation:
+    """RFC 7692 negotiation over the RFC 8441 handshake (BLA-362)."""
+
+    @pytest.mark.parametrize('extensions, expect_extension, compressed', [
+        ('permessage-deflate', True, True),
+        ('permessage-deflate; server_max_window_bits=8', False, False),
+        ('', False, False),
+    ])
+    async def test_the_200_answers_the_offer_and_the_round_trip_works(
+            self, extensions, expect_extension, compressed):
+        """The 200 answers the offer exactly as H1's 101 would — an
+        accepted offer echoes the extension line and the round trip
+        carries RFC 7692 frames; a declined or absent offer answers
+        plain and the plain round trip keeps working."""
+        from blackbull.server.permessage_deflate import (
+            InboundDecompressor, OutboundCompressor, negotiate)
+        received = {}
+
+        async def app(conn, receive, send):
+            await receive()
+            await send({'type': 'websocket.accept'})
+            event = await receive()
+            received.update(event)
+            await send({'type': 'websocket.send', 'text': event['text']})
+            await receive()
+
+        params = None
+        if compressed:
+            params, _ = negotiate(b'permessage-deflate')
+            assert params is not None, 'this runtime must serve the bare offer'
+            payload = OutboundCompressor(
+                wbits=params.client_max_window_bits,
+                reset_per_message=params.client_no_context_takeover,
+            ).compress(b'hello')
+            ws_bytes = encode_frame(payload, opcode=WSOpcode.TEXT,
+                                    mask=True, rsv1=True)
+        else:
+            ws_bytes = encode_frame(b'hello', opcode=WSOpcode.TEXT, mask=True)
+
+        handler, _, writer = _make_h2_actor(app)
+        writes = []
+        writer.write = MagicMock(side_effect=lambda b: writes.append(b))
+        writer.drain = AsyncMock()
+        handler.receive = AsyncMock(side_effect=[
+            _client_settings(),
+            _make_extended_connect_frame(extensions=extensions),
+            _make_ws_data_frame(ws_bytes, stream_id=1),
+            None,
+        ])
+        await handler.run()
+
+        headers = _response_headers(writes)
+        assert (':status', '200') in headers, headers
+        assert any(k == 'sec-websocket-extensions'
+                   and v.startswith('permessage-deflate')
+                   for k, v in headers) == expect_extension, headers
+        assert received.get('text') == 'hello'
+        echoed = _echoed_ws_frame(writes)
+        if compressed:
+            assert echoed[0] & 0x40, 'server echo must be RFC 7692 compressed'
+            out = InboundDecompressor(
+                wbits=params.server_max_window_bits,
+                reset_per_message=params.server_no_context_takeover,
+            ).decompress(echoed[2:])
+            assert out == b'hello'
+        else:
+            assert not echoed[0] & 0x40, 'a declined offer must echo plain'
+            assert echoed[2:] == b'hello'
+
 
 @pytest.mark.asyncio
 class TestDataExchange:
@@ -558,46 +610,32 @@ class TestDataExchange:
 class TestNegativeCases:
     """CONNECT without :protocol or with wrong :protocol must not trigger RFC 8441."""
 
-    async def test_connect_without_protocol_not_websocket(self):
-        """Plain CONNECT (no :protocol) must not produce a websocket scope."""
+    @pytest.mark.parametrize('make_frame,reply_status,label', [
+        pytest.param(_make_normal_connect_frame, 200, 'CONNECT without :protocol',
+                     id='no-protocol'),
+        pytest.param(_make_connect_wrong_protocol_frame, 400, 'CONNECT with :protocol=ftp',
+                     id='wrong-protocol'),
+    ])
+    async def test_connect_without_protocol_not_websocket(self, make_frame, reply_status, label):
+        """Extended CONNECT without or with a wrong :protocol must not
+        produce a websocket scope."""
         scopes = []
 
         async def app(conn, receive, send):
             scopes.append(conn.type)
-            # Regular HTTP CONNECT — just reply
-            await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+            await send({'type': 'http.response.start', 'status': reply_status, 'headers': []})
             await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
 
         handler, _, _ = _make_h2_actor(app)
         handler.receive = AsyncMock(side_effect=[
             _client_settings(),
-            _make_normal_connect_frame(),
+            make_frame(),
             None,
         ])
         await handler.run()
 
         assert all(t != 'websocket' for t in scopes), (
-            f'CONNECT without :protocol must not produce websocket scope; got {scopes}')
-
-    async def test_connect_wrong_protocol_not_websocket(self):
-        """CONNECT + :protocol=ftp must not produce a websocket scope."""
-        scopes = []
-
-        async def app(conn, receive, send):
-            scopes.append(conn.type)
-            await send({'type': 'http.response.start', 'status': 400, 'headers': []})
-            await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
-
-        handler, _, _ = _make_h2_actor(app)
-        handler.receive = AsyncMock(side_effect=[
-            _client_settings(),
-            _make_connect_wrong_protocol_frame(),
-            None,
-        ])
-        await handler.run()
-
-        assert all(t != 'websocket' for t in scopes), (
-            f'CONNECT with :protocol=ftp must not produce websocket scope; got {scopes}')
+            f'{label} must not produce websocket scope; got {scopes}')
 
     async def test_multiple_ws_streams_multiplexed(self):
         """Two concurrent WebSocket streams on the same connection must each
@@ -1026,3 +1064,70 @@ class TestActorBackpressureBranch:
         assert recipient.disconnected, (
             'the reset stream left a handler waiting on a body that will '
             'never continue')
+
+
+# ---------------------------------------------------------------------------
+# Application accept headers on the 200 (BLA-378)
+# ---------------------------------------------------------------------------
+
+class TestAcceptHeadersOnThe200:
+    def _headers_200(self, app, request_frame=None):
+        from hpack import Decoder
+
+        writes = []
+
+        handler, _, writer = _make_h2_actor(app)
+        writer.write = MagicMock(side_effect=lambda b: writes.append(b))
+        writer.drain = AsyncMock()
+        frames = [_client_settings(),
+                  request_frame or _make_extended_connect_frame(),
+                  None]
+        handler.receive = AsyncMock(side_effect=frames)
+        asyncio.run(handler.run())
+
+        norm = _response_headers(writes)
+        return norm if (':status', '200') in norm else None
+
+    def test_accept_headers_reach_the_200_in_order(self):
+        async def app(conn, receive, send):
+            await receive()
+            await send({'type': 'websocket.accept', 'subprotocol': None,
+                        'headers': [[b'set-cookie', b'a=1'],
+                                    [b'x-mid', b'm'],
+                                    [b'set-cookie', b'b=2']]})
+            await receive()
+
+        found = self._headers_200(app)
+        assert found is not None
+        want = [('set-cookie', 'a=1'), ('x-mid', 'm'), ('set-cookie', 'b=2')]
+        assert [kv for kv in found if kv in want] == want
+
+    def test_a_native_accept_header_reaches_the_200(self):
+        from blackbull.native import NativeWSMessage
+
+        async def app(conn, receive, send):
+            await receive()
+            await send(NativeWSMessage.accept(None, [(b'x-review', b'ok')]))
+            await receive()
+
+        found = self._headers_200(app)
+        assert found is not None
+        assert ('x-review', 'ok') in found
+
+    def test_an_invalid_header_value_is_refused(self):
+        async def app(conn, receive, send):
+            await receive()
+            await send({'type': 'websocket.accept', 'subprotocol': None,
+                        'headers': [[b'x-review', b'ok\r\ninjected: 1']]})
+            await receive()
+
+        assert self._headers_200(app) is None
+
+    def test_a_reserved_protocol_header_is_refused(self):
+        async def app(conn, receive, send):
+            await receive()
+            await send({'type': 'websocket.accept', 'subprotocol': None,
+                        'headers': [[b'sec-websocket-accept', b'evil']]})
+            await receive()
+
+        assert self._headers_200(app) is None

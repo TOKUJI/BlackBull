@@ -239,16 +239,14 @@ def _write_app(script: Path, port: int, version: str) -> None:
 
 
 @pytest.mark.timeout(_HARD_TIMEOUT_SEC)
-def test_auto_reload_picks_up_new_code(tmp_path: Path):
+def test_auto_reload_picks_up_new_code(tmp_path: Path, child_env):
     port = _free_port()
     script = tmp_path / 'reload_app.py'
     _write_app(script, port, 'v1')
 
-    # Use the current interpreter so the subprocess shares the blackbull
-    # editable install of the test runner.  PYTHONUNBUFFERED makes any
-    # diagnostic output appear promptly when the test fails.
-    env = os.environ.copy()
-    env['PYTHONUNBUFFERED'] = '1'
+    # PYTHONUNBUFFERED makes any diagnostic output appear promptly when
+    # the test fails.
+    env = child_env({'PYTHONUNBUFFERED': '1'}, cwd=str(tmp_path))
     env['BB_ACCESS_LOG'] = '0'   # quieter test output
     # Force watchfiles into polling mode for the subprocess's watcher.
     # watchfiles' default inotify backend silently drops the rewrite event on

@@ -30,24 +30,26 @@ async def _call(mw, scope):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_trusted_xff_updates_client():
-    mw = TrustedProxy('127.0.0.1')
-    scope = _make_scope('127.0.0.1', {b'x-forwarded-for': b'203.0.113.5'})
+@pytest.mark.parametrize('proxy,peer,xff,expected', [
+    pytest.param('127.0.0.1', '127.0.0.1', b'203.0.113.5', ['203.0.113.5', 0],
+                 id='trusted-xff'),
+    pytest.param('127.0.0.1', '1.2.3.4', b'203.0.113.5', ['1.2.3.4', 12345],
+                 id='untrusted-peer'),
+    pytest.param('10.0.0.0/8', '10.42.0.1', b'203.0.113.7', ['203.0.113.7', 0],
+                 id='cidr-range-trusted'),
+    pytest.param('10.0.0.0/8', '192.168.1.1', b'203.0.113.7', ['192.168.1.1', 12345],
+                 id='cidr-range-outside'),
+])
+async def test_trusted_xff_updates_client(proxy, peer, xff, expected):
+    mw = TrustedProxy(proxy)
+    scope = _make_scope(peer, {b'x-forwarded-for': xff})
     scope, _ = await _call(mw, scope)
-    assert scope['client'] == ['203.0.113.5', 0]
-
-
-@pytest.mark.asyncio
-async def test_untrusted_peer_ignored():
-    mw = TrustedProxy('127.0.0.1')
-    scope = _make_scope('1.2.3.4', {b'x-forwarded-for': b'203.0.113.5'})
-    scope, _ = await _call(mw, scope)
-    assert scope['client'] == ['1.2.3.4', 12345]   # unchanged
+    assert scope['client'] == expected
 
 
 @pytest.mark.asyncio
 async def test_xff_chain_skips_trusted_hops():
-    """Leftmost non-trusted IP is the real client, not the intermediate proxy."""
+    """A trusted intermediate proxy permits traversal to its observed peer."""
     mw = TrustedProxy(['127.0.0.1', '10.0.0.1'])
     scope = _make_scope('127.0.0.1', {b'x-forwarded-for': b'203.0.113.5, 10.0.0.1'})
     scope, _ = await _call(mw, scope)
@@ -59,39 +61,15 @@ async def test_xff_chain_skips_trusted_hops():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_trusted_xfp_updates_scheme():
+@pytest.mark.parametrize('peer,expected', [
+    pytest.param('127.0.0.1', 'https', id='trusted-xfp'),
+    pytest.param('9.9.9.9', 'http', id='untrusted-xfp'),
+])
+async def test_trusted_xfp_updates_scheme(peer, expected):
     mw = TrustedProxy('127.0.0.1')
-    scope = _make_scope('127.0.0.1', {b'x-forwarded-proto': b'https'})
+    scope = _make_scope(peer, {b'x-forwarded-proto': b'https'})
     scope, _ = await _call(mw, scope)
-    assert scope['scheme'] == 'https'
-
-
-@pytest.mark.asyncio
-async def test_untrusted_xfp_ignored():
-    mw = TrustedProxy('127.0.0.1')
-    scope = _make_scope('9.9.9.9', {b'x-forwarded-proto': b'https'})
-    scope, _ = await _call(mw, scope)
-    assert scope['scheme'] == 'http'
-
-
-# ---------------------------------------------------------------------------
-# CIDR notation
-# ---------------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_cidr_range_trusted():
-    mw = TrustedProxy('10.0.0.0/8')
-    scope = _make_scope('10.42.0.1', {b'x-forwarded-for': b'203.0.113.7'})
-    scope, _ = await _call(mw, scope)
-    assert scope['client'] == ['203.0.113.7', 0]
-
-
-@pytest.mark.asyncio
-async def test_cidr_range_outside_not_trusted():
-    mw = TrustedProxy('10.0.0.0/8')
-    scope = _make_scope('192.168.1.1', {b'x-forwarded-for': b'203.0.113.7'})
-    scope, _ = await _call(mw, scope)
-    assert scope['client'] == ['192.168.1.1', 12345]
+    assert scope['scheme'] == expected
 
 
 # ---------------------------------------------------------------------------
@@ -122,31 +100,26 @@ async def test_forwarded_header_for_only():
 
 
 @pytest.mark.asyncio
-async def test_forwarded_multi_element_uses_leftmost():
-    """RFC 7239 §4 — elements are comma-separated; parse the leftmost only.
-
-    Splitting on ';' alone folded the second element's ``for=``
-    into the first value, poisoning ``scope['client']``.
-    """
+async def test_forwarded_multi_element_stops_at_untrusted_hop():
     mw = TrustedProxy('127.0.0.1')
     scope = _make_scope('127.0.0.1', {
         b'forwarded': b'for=203.0.113.1;proto=https, for=198.51.100.17',
     })
     scope, _ = await _call(mw, scope)
-    assert scope['client'] == ['203.0.113.1', 0]
-    assert scope['scheme'] == 'https'
+    assert scope['client'] == ['198.51.100.17', 0]
+    assert scope['scheme'] == 'http'
 
 
 @pytest.mark.asyncio
 async def test_forwarded_multi_element_no_proto_leak():
-    """A trailing element must not leak its params into the leftmost."""
+    """Only the selected element supplies the scheme."""
     mw = TrustedProxy('127.0.0.1')
     scope = _make_scope('127.0.0.1', {
         b'forwarded': b'for=203.0.113.1, for=198.51.100.17;proto=https',
     })
     scope, _ = await _call(mw, scope)
-    assert scope['client'] == ['203.0.113.1', 0]
-    assert scope['scheme'] == 'http'   # proto belongs to the 2nd element → ignored
+    assert scope['client'] == ['198.51.100.17', 0]
+    assert scope['scheme'] == 'https'
 
 
 # ---------------------------------------------------------------------------

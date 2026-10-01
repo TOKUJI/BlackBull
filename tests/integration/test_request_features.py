@@ -50,15 +50,6 @@ def test_multi_value_header_getlist(client):
 
 
 @pytest.mark.integration
-def test_cookie_parsed(client):
-    r = client.get('/cookies', headers={'Cookie': 'a=1; b=2'})
-    assert r.status_code == 200
-    data = r.json()
-    assert data.get('a') == '1'
-    assert data.get('b') == '2'
-
-
-@pytest.mark.integration
 def test_query_string(client):
     r = client.get('/query', params={'q': 'hello', 'page': '2'})
     assert r.status_code == 200

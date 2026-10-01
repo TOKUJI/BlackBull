@@ -83,10 +83,9 @@ class EventDispatcher:
 
         With ``blocking=False`` (the default) the handler is scheduled as an
         independent task when the event fires — it never delays the emitter.
-        With ``blocking=True`` the handler is awaited in registration order
-        before ``emit`` returns, so a side effect (e.g. resource cleanup) is
-        guaranteed to finish within the event's lifetime; its exceptions are
-        still isolated (logged, never propagated).
+        With ``blocking=True`` the handler is awaited in registration order,
+        subject to ``emit()``'s timeout and cancellation; its exceptions are
+        logged.
         """
         if blocking:
             self._blocking_observers[event_name].append(handler)
@@ -109,7 +108,7 @@ class EventDispatcher:
         """
         return event_name in self._registered
 
-    async def emit(self, event: Event) -> None:
+    async def emit(self, event: Event, *, timeout: float | None = None) -> None:
         """Dispatch ``event`` to all registered handlers.
 
         Delivery order:
@@ -117,22 +116,53 @@ class EventDispatcher:
         1. **Interceptors** — awaited in registration order; their exceptions
            propagate (and abort the remaining interceptors).
         2. **Blocking observers** — awaited in registration order; their
-           exceptions are caught and logged (isolated).  ``emit`` does not
-           return until they finish, so cleanup registered here is guaranteed
-           to complete within the event's lifetime.
+           exceptions are caught and logged.
         3. **Detached observers** — scheduled as independent tasks (isolated),
            tracked so they can be drained at shutdown via [`aclose`][].
+
+        ``timeout`` limits the wait for each interceptor and blocking
+        observer.  On expiry, cancellation is requested, a warning
+        identifies the handler, and dispatch continues without waiting for
+        it to stop.  ``None`` disables this limit.
         """
         for h in self._interceptors.get(event.name, []):
-            await h(event)
+            if timeout is None:
+                await h(event)
+            else:
+                await self._bounded_run(h, event, timeout)
 
         for h in self._blocking_observers.get(event.name, []):
-            await self._safe_observe(h, event)
+            if timeout is None:
+                await self._safe_observe(h, event)
+            else:
+                await self._bounded_run(
+                    lambda e, _h=h: self._safe_observe(_h, e),
+                    event, timeout, name=getattr(h, '__qualname__', repr(h)))
 
         for h in self._observers.get(event.name, []):
             task = asyncio.create_task(self._safe_observe(h, event))
             self._pending_tasks.add(task)
             task.add_done_callback(self._pending_tasks.discard)
+
+    async def _bounded_run(self, handler, event: Event, timeout: float,
+                           *, name: str | None = None) -> bool:
+        """Return False on timeout; otherwise return True or propagate the error."""
+        who = name or getattr(handler, '__qualname__', repr(handler))
+        task = asyncio.ensure_future(handler(event))
+        # wait_for would also wait for cancellation to finish.
+        try:
+            done, _pending = await asyncio.wait({task}, timeout=timeout)
+        except asyncio.CancelledError:
+            task.cancel()
+            raise
+        if not done:
+            task.cancel()
+            logger.warning(
+                'Event %r: handler %s cancelled after its %.1fs dispatch budget',
+                event.name, who, timeout)
+            return False
+        task.result()
+        return True
 
     async def _safe_observe(self, handler: EventHandler, event: Event) -> None:
         try:

@@ -224,9 +224,16 @@ def _qs_connection(query_string: bytes = b'q=hello&page=2') -> Connection:
 
 
 class TestQuery:
-    def test_query_last_value_wins(self):
-        conn = _qs_connection(b'tag=a&tag=b&done=true')
-        assert conn.query == {'tag': 'b', 'done': 'true'}
+    @pytest.mark.parametrize('qs,expected', [
+        pytest.param(b'tag=a&tag=b&done=true', {'tag': 'b', 'done': 'true'},
+                     id='last-value-wins'),
+        pytest.param(b'q=hello%20world&name=%E3%81%93%E3%82%93',
+                     {'q': 'hello world', 'name': 'こん'}, id='percent-decoding'),
+        pytest.param(b'a=&b=1', {'a': '', 'b': '1'}, id='blank-value'),
+    ])
+    def test_query_last_value_wins(self, qs, expected):
+        conn = _qs_connection(qs)
+        assert conn.query == expected
 
     def test_query_list_keeps_every_value(self):
         conn = _qs_connection(b'tag=a&tag=b')
@@ -246,14 +253,6 @@ class TestQuery:
     def test_query_empty_returns_empty_dict(self):
         assert _qs_connection(b'').query == {}
         assert _qs_connection(b'').query_list == {}
-
-    def test_query_decodes_percent_encoding(self):
-        conn = _qs_connection(b'q=hello%20world&name=%E3%81%93%E3%82%93')
-        assert conn.query == {'q': 'hello world', 'name': 'こん'}
-
-    def test_query_keeps_blank_value(self):
-        conn = _qs_connection(b'a=&b=1')
-        assert conn.query == {'a': '', 'b': '1'}
 
     def test_query_parses_once_and_caches(self):
         """Mutating the raw query_string after first access changes nothing —
@@ -313,57 +312,42 @@ class TestForm:
         assert await conn.json() == {'k': 1}   # body untouched by form()
 
     @pytest.mark.asyncio
-    async def test_form_content_type_with_charset_parameter(self):
+    @pytest.mark.parametrize('ct,body,expected', [
+        pytest.param(b'application/x-www-form-urlencoded; charset=UTF-8',
+                     b'name=alice', {'name': 'alice'}, id='charset-parameter'),
+        pytest.param(b'application/x-www-form-urlencoded',
+                     b'tag=a&tag=b', {'tag': 'b'}, id='last-value-wins'),
+    ])
+    async def test_form_content_type_with_charset_parameter(self, ct, body, expected):
         conn = Connection(
             method='POST', path='/submit', raw_path=b'/submit', query_string=b'',
             http_version='1.1', scheme='http',
             headers=Headers([(b'host', b'x'),
-                             (b'content-type',
-                              b'application/x-www-form-urlencoded; charset=UTF-8')]))
+                             (b'content-type', ct)]))
         conn._receive = _stub_receive([
-            {'type': 'http.request', 'body': b'name=alice', 'more_body': False}])
-        assert await conn.form() == {'name': 'alice'}
+            {'type': 'http.request', 'body': body, 'more_body': False}])
+        assert await conn.form() == expected
 
     @pytest.mark.asyncio
-    async def test_form_media_type_is_a_token_not_a_substring(self):
-        """A Content-Type that merely contains the urlencoded token is not a
-        form — the media type is compared as a token (BLA-286)."""
+    @pytest.mark.parametrize('ct', [
+        pytest.param(b'application/x-www-form-urlencoded-fake',
+                     id='token-not-substring'),
+        pytest.param(b'text/plain; note=application/x-www-form-urlencoded',
+                     id='parameter-value-not-media-type'),
+    ])
+    async def test_form_media_type_is_a_token_not_a_substring(self, ct):
+        """A Content-Type that merely contains the urlencoded token — in the
+        media type or smuggled in a parameter value — is not a form: only the
+        media-type token itself counts (BLA-286)."""
         conn = Connection(
             method='POST', path='/submit', raw_path=b'/submit', query_string=b'',
             http_version='1.1', scheme='http',
             headers=Headers([(b'host', b'x'),
-                             (b'content-type',
-                              b'application/x-www-form-urlencoded-fake')]))
-        conn._receive = _stub_receive([
-            {'type': 'http.request', 'body': b'name=alice', 'more_body': False}])
-        assert await conn.form() == {}   # not urlencoded → {} without touching body
-        assert await conn.text() == 'name=alice'
-
-    @pytest.mark.asyncio
-    async def test_form_parameter_value_does_not_make_a_form(self):
-        """A urlencoded token smuggled in a Content-Type *parameter value* is
-        not a form — only the media-type token itself counts (BLA-286)."""
-        conn = Connection(
-            method='POST', path='/submit', raw_path=b'/submit', query_string=b'',
-            http_version='1.1', scheme='http',
-            headers=Headers([(b'host', b'x'),
-                             (b'content-type',
-                              b'text/plain; note=application/x-www-form-urlencoded')]))
+                             (b'content-type', ct)]))
         conn._receive = _stub_receive([
             {'type': 'http.request', 'body': b'name=alice', 'more_body': False}])
         assert await conn.form() == {}   # not urlencoded → {} without touching body
         assert await conn.text() == 'name=alice'
-
-    @pytest.mark.asyncio
-    async def test_form_last_value_wins(self):
-        conn = Connection(
-            method='POST', path='/submit', raw_path=b'/submit', query_string=b'',
-            http_version='1.1', scheme='http',
-            headers=Headers([(b'host', b'x'),
-                             (b'content-type', b'application/x-www-form-urlencoded')]))
-        conn._receive = _stub_receive([
-            {'type': 'http.request', 'body': b'tag=a&tag=b', 'more_body': False}])
-        assert await conn.form() == {'tag': 'b'}
 
 
 # ---------------------------------------------------------------------------

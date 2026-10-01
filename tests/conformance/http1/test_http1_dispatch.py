@@ -138,11 +138,16 @@ class TestMakeSender:
         assert bytes(writer.written).startswith(b'HTTP/1.1 200')
 
     @pytest.mark.asyncio
-    async def test_response_start_writes_reason_phrase(self):
+    @pytest.mark.parametrize('status,needle', [
+        pytest.param(404, b'Not Found', id='reason-phrase'),
+        pytest.param(200, b'\r\n\r\n', id='blank-line-terminator'),
+    ])
+    async def test_response_start_writes_reason_phrase(self, status, needle):
+        """response_start writes a well-formed status head."""
         send, writer = _make_sender_and_writer()
-        await send({'type': 'http.response.start', 'status': 404, 'headers': []})
+        await send({'type': 'http.response.start', 'status': status, 'headers': []})
         await send({'type': 'http.response.body', 'body': b''})
-        assert b'Not Found' in bytes(writer.written)
+        assert needle in bytes(writer.written)
 
     @pytest.mark.asyncio
     async def test_response_start_writes_headers(self):
@@ -155,13 +160,6 @@ class TestMakeSender:
         written = bytes(writer.written)
         assert b'content-type: text/plain\r\n' in written
         assert b'content-length: 5\r\n' in written
-
-    @pytest.mark.asyncio
-    async def test_response_start_ends_with_blank_line(self):
-        send, writer = _make_sender_and_writer()
-        await send({'type': 'http.response.start', 'status': 200, 'headers': []})
-        await send({'type': 'http.response.body', 'body': b''})
-        assert b'\r\n\r\n' in bytes(writer.written)
 
     @pytest.mark.asyncio
     async def test_response_body_writes_bytes(self):
@@ -197,11 +195,16 @@ class TestMakeSender:
 class TestHTTP11AutoHeaders:
     """HTTP1Sender must auto-inject Content-Length and Date when absent."""
 
-    async def test_content_length_injected_when_absent(self):
+    @pytest.mark.parametrize('body,needle', [
+        pytest.param(b'hello', b'content-length:', id='content-length-injected'),
+        pytest.param(b'hi', b'date:', id='date-injected'),
+    ])
+    async def test_content_length_injected_when_absent(self, body, needle):
+        """Omitted standard headers are injected when absent."""
         send, writer = _make_sender_and_writer()
         await send({'type': 'http.response.start', 'status': 200, 'headers': []})
-        await send({'type': 'http.response.body', 'body': b'hello', 'more_body': False})
-        assert b'content-length:' in bytes(writer.written).lower()
+        await send({'type': 'http.response.body', 'body': body, 'more_body': False})
+        assert needle in bytes(writer.written).lower()
 
     async def test_content_length_value_matches_body(self):
         send, writer = _make_sender_and_writer()
@@ -209,12 +212,6 @@ class TestHTTP11AutoHeaders:
         await send({'type': 'http.response.start', 'status': 200, 'headers': []})
         await send({'type': 'http.response.body', 'body': body, 'more_body': False})
         assert f'content-length: {len(body)}'.encode() in bytes(writer.written).lower()
-
-    async def test_date_header_injected(self):
-        send, writer = _make_sender_and_writer()
-        await send({'type': 'http.response.start', 'status': 200, 'headers': []})
-        await send({'type': 'http.response.body', 'body': b'hi', 'more_body': False})
-        assert b'date:' in bytes(writer.written).lower()
 
     async def test_app_supplied_content_length_not_duplicated(self):
         send, writer = _make_sender_and_writer()
@@ -357,6 +354,34 @@ class TestHTTP11KeepAlive:
 
         assert call_count == 1
 
+    @pytest.mark.parametrize('version,expected', [
+        ('HTTP/1.1', b'HTTP/1.1 103 '),
+        ('HTTP/1.0', b''),
+    ], ids=['1.1-gets-the-interim', '1.0-does-not'])
+    async def test_an_app_interim_head_goes_only_to_a_peer_that_can_read_it(
+            self, version, expected):
+        """RFC 9110 §15.2 gives a 1xx to clients that speak HTTP/1.1. The
+        request line is the only place the sender learns which kind it has,
+        and the actor is the one that read it."""
+
+        async def app(scope, receive, send):
+            await send({'type': 'http.response.start', 'status': 103,
+                        'headers': []})
+            await send({'type': 'http.response.start', 'status': 200,
+                        'headers': [(b'content-length', b'2')]})
+            await send({'type': 'http.response.body', 'body': b'ok'})
+
+        raw = _http_request(version=version)
+        actor, writer = _make_actor(raw, app)
+        await actor.run()
+
+        wire = bytes(writer.written)
+        if expected:
+            assert wire.startswith(expected), wire
+        else:
+            assert wire.startswith(b'HTTP/1.1 200 '), wire
+            assert b'103' not in wire, wire
+
     @pytest.mark.parametrize('events', [
         [{'type': 'http.response.start', 'status': 200, 'headers': []}],
         [
@@ -414,15 +439,27 @@ class TestHTTP11KeepAlive:
         assert wire.startswith(b'HTTP/1.1 200 OK\r\n')
         assert b'500 Internal Server Error' not in wire
 
-    async def test_incomplete_read_on_first_request_closes_silently(self):
+    async def test_incomplete_first_request_is_answered_400_and_closed(self):
         req = _http_request(method='GET', path='/', headers={'Host': 'localhost:8000'})
         first_line, _ = req.split(b'\r\n', 1)
         reader = MagicMock(spec=AbstractReader)
         reader.readuntil = AsyncMock(side_effect=IncompleteReadError(b'Host: localh'))
 
-        actor = HTTP1Actor(reader, _FakeWriter(), _noop_app, None,
+        writer = _FakeWriter()
+        actor = HTTP1Actor(reader, writer, _noop_app, None,
                            request=first_line + b'\r\n')
-        await actor.run()  # must return normally
+        await actor.run()  # must return normally — the EOF is absorbed
+
+        # RFC 9112 §2.2 — a truncated head is answered 400; RFC 9112 §9.6 —
+        # the close is announced rather than a reset.
+        wire = bytes(writer.written)
+        assert wire.startswith(b'HTTP/1.1 400 Bad Request'), (
+            f'a truncated head must be answered 400 (RFC 9112 §2.2); got {wire[:24]!r}'
+        )
+        assert b'connection: close' in wire.lower(), (
+            'the connection close must be announced, not a bare reset'
+        )
+        assert wire.count(b'HTTP/1.1 ') == 1, 'exactly one response before the close'
 
     async def test_incomplete_read_after_first_request_app_called_once(self):
         req = _http_request(method='GET', path='/one',
@@ -955,15 +992,6 @@ class TestHTTP1Recipient:
         assert b''.join(e['body'] for e in events) == b'0123456789'
 
     @pytest.mark.asyncio
-    async def test_single_chunk_more_body_false(self):
-        from blackbull.server.recipient import HTTP1Recipient
-        conn = _conn([(b'content-length', b'5')])
-        reader = self._make_reader(b'hello')
-        r = HTTP1Recipient(reader, conn, chunk_size=65536)
-        event = await r()
-        assert event == {'type': 'http.request', 'body': b'hello', 'more_body': False}
-
-    @pytest.mark.asyncio
     async def test_exact_multiple_of_chunk_size(self):
         """No spurious empty trailing event when the body divides evenly."""
         from blackbull.server.recipient import HTTP1Recipient
@@ -980,13 +1008,22 @@ class TestHTTP1Recipient:
         assert events[-1]['more_body'] is False
 
     @pytest.mark.asyncio
-    async def test_empty_content_length_one_event(self):
+    @pytest.mark.parametrize('content_length,payload,chunk_size,expected', [
+        pytest.param(0, b'', 4,
+                     {'type': 'http.request', 'body': b'', 'more_body': False},
+                     id='empty-content-length-one-event'),
+        pytest.param(5, b'hello', 65536,
+                     {'type': 'http.request', 'body': b'hello', 'more_body': False},
+                     id='single-chunk-more-body-false'),
+    ])
+    async def test_empty_content_length_one_event(self, content_length, payload, chunk_size, expected):
+        """Body events are emitted with correct framing."""
         from blackbull.server.recipient import HTTP1Recipient
-        conn = _conn([(b'content-length', b'0')])
-        reader = self._make_reader(b'')
-        r = HTTP1Recipient(reader, conn, chunk_size=4)
+        conn = _conn([(b'content-length', str(content_length).encode())])
+        reader = self._make_reader(payload)
+        r = HTTP1Recipient(reader, conn, chunk_size=chunk_size)
         event = await r()
-        assert event == {'type': 'http.request', 'body': b'', 'more_body': False}
+        assert event == expected
 
     @pytest.mark.asyncio
     async def test_no_body_headers_one_empty_event(self):

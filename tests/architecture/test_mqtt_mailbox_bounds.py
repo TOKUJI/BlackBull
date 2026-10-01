@@ -12,6 +12,7 @@ from blackbull.mqtt.broker import (
 )
 from blackbull.mqtt.connection import MQTT5Actor, serve_connection
 from blackbull.mqtt.messages import (
+    ReasonCode,
     MQTTConnect, MQTTConnack, MQTTDisconnect, MQTTPingreq, MQTTPingresp,
     MQTTPublish, MQTTPubrel, MQTTSubscribe, decode_packet, encode_packet,
 )
@@ -193,7 +194,7 @@ async def test_close_flushes_queued_ack_and_wakes_blocked_reader(monkeypatch):
             await serve_connection(reader, writer, ctx(), broker)
     assert len(writer.packets) == 1
     assert isinstance(writer.packets[0], MQTTConnack)
-    assert writer.packets[0].reason_code != 0
+    assert writer.packets[0].reason_code != ReasonCode.SUCCESS
 
 
 async def test_cancelled_connection_detaches_when_broker_is_full():
@@ -458,7 +459,7 @@ async def test_input_budget_refusal_reaches_the_wire(monkeypatch):
         async with asyncio.timeout(1):
             await serve_connection(reader, writer, ctx(), broker)
             await broker._inbox.join()
-        assert any(isinstance(p, MQTTDisconnect) and p.reason_code == 0x97
+        assert any(isinstance(p, MQTTDisconnect) and p.reason_code == ReasonCode.QUOTA_EXCEEDED
                    for p in writer.packets)
         assert not broker._clients
 

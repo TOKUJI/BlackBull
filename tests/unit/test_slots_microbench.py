@@ -54,11 +54,15 @@ def test_stream_has_no_dict():
     assert hasattr(Stream, '__slots__')
 
 
-def test_http1_sender_has_no_dict():
-    s = HTTP1Sender(_FakeWriter())
+@pytest.mark.parametrize('cls', [
+    pytest.param(HTTP1Sender, id='http1-sender-no-dict'),
+    pytest.param(WebSocketSender, id='websocket-sender-no-dict'),
+])
+def test_http1_sender_has_no_dict(cls):
+    s = cls(_FakeWriter())
     assert not hasattr(s, '__dict__'), (
-        '__dict__ resurfaced on HTTP1Sender; check BaseSender and '
-        'HTTP1Sender __slots__ declarations.'
+        f'__dict__ resurfaced on {cls.__name__}; check BaseSender and '
+        f'{cls.__name__} __slots__ declarations.'
     )
 
 
@@ -68,14 +72,6 @@ def test_http2_sender_has_no_dict():
     assert not hasattr(s, '__dict__'), (
         '__dict__ resurfaced on HTTP2Sender; check BaseSender and '
         'HTTP2Sender __slots__ declarations.'
-    )
-
-
-def test_websocket_sender_has_no_dict():
-    s = WebSocketSender(_FakeWriter())
-    assert not hasattr(s, '__dict__'), (
-        '__dict__ resurfaced on WebSocketSender; check BaseSender and '
-        'WebSocketSender __slots__ declarations.'
     )
 
 
@@ -115,8 +111,12 @@ def test_print_per_instance_sizes(capsys):
     # A ``__dict__``-equipped instance picks up ~56 bytes from the
     # PyDictObject header alone on CPython 3.12, so any per-instance
     # size above ~200 bytes here would suggest slots have been broken.
+    # `HTTP2Sender` holds `_head_mode` and `_suppress_body`, the two facts
+    # the content rules need at write time. `_suppress_body` also tells the
+    # drop guard whether the missing content was the sender's own job, so it
+    # cannot be recomputed away.
     for name, size in sizes.items():
-        assert size < 200, (
+        assert size < 208, (
             f'{name} is {size} bytes — far above the slots-equipped '
             f'baseline (~48-96 bytes); check that __slots__ is still in '
             f'effect.'

@@ -18,6 +18,7 @@ from ..env import get_settings
 from ..event_aggregator import EventAggregator
 from ..logger import log, debug_gate
 from ..protocol.frame import FrameFactory
+from ..protocol.framing import method_is
 from ..protocol.frame_types import (
     ErrorCodes, FrameBase, FrameTypes,
     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE,
@@ -40,8 +41,8 @@ from .access_log import (
     open_record as _open_record,
     start_record as _start_record,
 )
-from ..asgi import (ASGIEvent, ASGIReceiveCallable, ASGISendCallable,
-                    HTTPResponsePushEvent)
+from ..asgi import ASGIEvent, ASGIReceiveCallable, ASGISendCallable
+from ..native import NativeResponse
 from .http1_actor import RequestActor
 
 logger = logging.getLogger(__name__)
@@ -407,7 +408,7 @@ class HTTP2Actor(Actor):
         self._next_push_stream_id += 2
         return sid
 
-    def make_sender(self, stream_id: int):
+    def make_sender(self, stream_id: int, head_mode: bool | None = None):
         if stream_id not in self._senders:
             sender = SenderFactory.http2(
                 self._writer, self.factory, stream_id,
@@ -417,8 +418,12 @@ class HTTP2Actor(Actor):
                 # SETTINGS received before this stream opened may have moved it.
                 initial_window=self._peer_initial_window_size,
                 flow_control_timeout=self._write_timeout,
+                head_mode=bool(head_mode),
             )
             self._senders[stream_id] = sender
+        elif head_mode is not None:
+            # Cached before the request head said what the method was.
+            self._senders[stream_id]._head_mode = head_mode
         return self._senders[stream_id]
 
     def _make_stream_recipient(self, stream_id: int) -> HTTP2Recipient:
@@ -1296,19 +1301,27 @@ class HTTP2Actor(Actor):
         a later CONTINUATION frame.
         """
         if stream.conn is not None:
-            # RFC 9113 §8.1 — a second field section is trailers, not a new
-            # request.  They are not surfaced to the app, so only the
-            # END_STREAM transition is observable.  Handling it here is what
-            # makes single-frame and fragmented trailers share one recipient,
-            # and what stops a second handler from starting.
-            if not header_frame.end_stream:
+            # A second field section is trailers: it must end the request,
+            # carry no pseudo-header field, and reach no handler; anything
+            # else earns the head's verdict.
+            if (not header_frame.end_stream or header_frame.malformed
+                    or header_frame.pseudo_headers):
+                reason = (header_frame.malformed_reason
+                          or ('pseudo-header in trailer section'
+                              if header_frame.pseudo_headers
+                              else 'section does not end the request'))
+                if _DEBUG:
+                    logger.debug(
+                        'Stream %d refused trailing field section — %s',
+                        stream.stream_id, reason)
+                self._retire_stream(stream.stream_id, via_rst=True)
                 await self.send_frame(self.factory.rst_stream(
                     stream.stream_id, ErrorCodes.PROTOCOL_ERROR))
-            else:
-                stream.on_data_received(end_stream=True)
-                recipient = self._recipients.get(stream.stream_id)
-                if recipient is not None:
-                    recipient.put_end_of_stream()
+                return True
+            stream.on_data_received(end_stream=True)
+            recipient = self._recipients.get(stream.stream_id)
+            if recipient is not None:
+                recipient.put_end_of_stream()
             return True
 
         if self._active_stream_count >= self.max_concurrent_streams:
@@ -1356,6 +1369,10 @@ class HTTP2Actor(Actor):
 
         stream.expected_content_length = _extract_content_length(conn)
         stream.conn = conn
+        # Before anything can refuse the request and write its own response:
+        # that response owes the same content rules as the application's.
+        self.make_sender(stream.stream_id,
+                         head_mode=method_is(conn.method, 'HEAD'))
 
         # Guarded inline rather than behind a predicate: a stream is a request,
         # and a method call to answer "no" measured 21 executed instructions
@@ -1592,20 +1609,31 @@ class HTTP2Actor(Actor):
         conn = stream.conn
         assert conn is not None
         conn.connection_id = self._connection_id or new_connection_id()
-        stream_send = self.make_sender(stream.stream_id)
+        stream_send = self.make_sender(stream.stream_id,
+                                       head_mode=method_is(conn.method,
+                                                           'HEAD'))
 
-        async def _ws_send_200(subprotocol=None):
+        # RFC 7692 permessage-deflate negotiation, shared with the HTTP/1.1
+        # handshake: the offer decides, the answer rides the 200, and the
+        # parameters reach WebSocketActor through ``conn._ws``.
+        from .permessage_deflate import negotiate_offer as _negotiate_deflate  # noqa: PLC0415
+        deflate_params, deflate_response = _negotiate_deflate(conn.headers)
+
+        async def _ws_send_200(subprotocol=None, app_headers=None):
             headers = []
             if subprotocol:
                 sp = subprotocol if isinstance(subprotocol, str) else subprotocol.decode()
                 headers = [(b'sec-websocket-protocol', sp.encode())]
+            if deflate_response is not None:
+                headers.append((b'sec-websocket-extensions', deflate_response))
+            headers.extend(app_headers or ())
             # Flushed now, not through http.response.start: HTTP2Sender
             # coalesces HEADERS with the first DATA, and an RFC 8441 accept has
             # no body, so the HEADERS would never leave and the handshake would
             # hang.  No END_STREAM — the stream stays open for WS DATA frames.
             await stream_send.send_response_headers(HTTPStatus(200), headers)
 
-        conn._ws = {'send_101': _ws_send_200}
+        conn._ws = {'send_101': _ws_send_200, 'deflate': deflate_params}
 
         ws_reader = HTTP2WSReader(
             credit_callback=self._make_consume_credit_callback(stream.stream_id))
@@ -1641,9 +1669,9 @@ class HTTP2Actor(Actor):
         task.add_done_callback(
             self._make_done_cb(stream.stream_id, is_ws=True))
 
-    async def _handle_push(self, event: HTTPResponsePushEvent,
+    async def _handle_push(self, event: NativeResponse,
                            parent_stream_id: int) -> None:
-        """Handle an 'http.response.push' ASGI event.
+        """Handle a native promised request.
 
         RFC 9113 §8.4 / §8.4.1 (safe, cacheable, body-less, always ``GET``)
         and §6.6 for the PUSH_PROMISE frame.  The ``:path`` split uses the
@@ -1667,7 +1695,7 @@ class HTTP2Actor(Actor):
         from .parser import _split_h2_path  # noqa: PLC0415
 
         push_stream_id = self._allocate_push_stream_id()
-        path = event.get('path', '/')
+        path = event.push
 
         parent = parent_stream.conn
         # Plain attribute reads, never ``.get()`` on a scope: under
@@ -1694,7 +1722,7 @@ class HTTP2Actor(Actor):
         regular = [
             (k.decode() if isinstance(k, bytes) else k,
              v.decode() if isinstance(v, bytes) else v)
-            for k, v in event.get('headers', [])
+            for k, v in (event._header or [])
             if not (k.decode() if isinstance(k, bytes) else k).startswith(':')
         ]
 

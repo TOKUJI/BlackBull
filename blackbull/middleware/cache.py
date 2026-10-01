@@ -125,8 +125,8 @@ class Cache:
             await call_next(conn, receive, send)
             return
 
-        cc = _joined(conn.headers, b'cache-control')
-        pragma = _joined(conn.headers, b'pragma')
+        cc = conn.headers.get_combined(b'cache-control')
+        pragma = conn.headers.get_combined(b'pragma')
         if _must_not_store(cc):
             await call_next(conn, receive, send)
             return
@@ -255,7 +255,7 @@ class _Capture:
             await self._send(event)
             return
         if (not isinstance(event, NativeResponse)
-                or event.file_path is not None
+                or event._extension is not None
                 or event.expects_trailers
                 or event.trailers is not None):
             # Nothing about this shape can be stored, and the rest of the
@@ -298,15 +298,6 @@ class _Capture:
 
 
 # --- header inspection helpers ---------------------------------------------
-
-def _joined(headers: Headers, name: bytes) -> bytes | None:
-    """The field's value, repeated fields joined as one list (RFC 9110 §5.2).
-
-    A directive in the second field line still binds.
-    """
-    values = [value for _, value in headers.getlist(name)]
-    return b','.join(values) if values else None
-
 
 def _origin(conn: Connection) -> tuple[str, str, int] | None:
     """Effective HTTP origin, after trusted middleware has applied rewrites.

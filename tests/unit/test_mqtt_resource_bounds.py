@@ -22,8 +22,9 @@ from blackbull.mqtt.broker import (
     Attach, BrokerActor, ClientPuback, ClientPublish, ClientSubscribe,
     Close, Send,
 )
-from blackbull.mqtt.connection import MQTT5Actor, PacketFramer, PacketTooLarge
+from blackbull.mqtt.connection import PacketFramer, PacketTooLarge, serve_connection
 from blackbull.mqtt.messages import (
+    MQTTPacketType, MQTTDecodeError,
     MQTTConnack, MQTTConnect, MQTTDisconnect, MQTTPuback, MQTTPublish,
     MQTTSubscribe, ReasonCode, encode_packet, encode_variable_byte_integer,
 )
@@ -103,7 +104,8 @@ def _ctx():
                            protocol='mqtt')
 
 
-def _oversized_header(declared: int, packet_type: int = 0x30) -> bytes:
+def _oversized_header(declared: int,
+                      packet_type: int = int(MQTTPacketType.PUBLISH) << 4) -> bytes:
     """A fixed header declaring *declared* body bytes, and nothing else.
 
     The point of building it by hand: the test must never allocate the
@@ -183,16 +185,15 @@ class TestPacketSizeBound:
         framer.feed(packet)
         assert len(list(framer)) == 1
 
-    async def test_connection_answers_disconnect_0x95_and_closes(self):
+    async def test_connection_answers_disconnect_with_packet_too_large_and_closes(self):
         """§3.14.2.1 — 0x95 Packet Too Large, then the connection ends."""
-        reader = _Reader(_oversized_header(64 * 1024 * 1024) + b'\x00' * 50)
+        reader = _Reader(encode_packet(MQTTConnect(client_id='large', clean_start=True, keep_alive=60))
+                         + _oversized_header(64 * 1024 * 1024) + b'\x00' * 50)
         writer = _Writer()
         broker = BrokerActor()
-        actor = MQTT5Actor(writer, broker, _ctx(), max_packet_size=4096)
-        drain = asyncio.create_task(actor.run())
+        drain = asyncio.create_task(broker.run())
         try:
-            await actor.read_loop(reader)
-            await asyncio.sleep(0)
+            await asyncio.wait_for(serve_connection(reader, writer, _ctx(), broker), 1)
         finally:
             drain.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -200,41 +201,43 @@ class TestPacketSizeBound:
 
         sent = bytes(writer.written)
         assert sent, 'connection closed silently; the peer learns nothing'
-        assert sent[0] >> 4 == 14, f'expected DISCONNECT (type 14), got {sent[0] >> 4}'
+        assert sent[0] >> 4 == MQTTPacketType.CONNACK, f'expected CONNACK first, got {sent[0] >> 4}'
         assert ReasonCode.PACKET_TOO_LARGE in sent, (
             f'DISCONNECT did not carry 0x95: {sent!r}')
 
-    async def test_junk_is_left_to_the_resync_not_answered_with_0x95(self):
-        """A size gate must not spend a fatal answer on a guess.
+    @pytest.mark.parametrize('complete', [False, True])
+    async def test_malformed_prefix_never_scans_for_an_oversized_candidate(self, complete):
+        candidate = encode_packet(MQTTPublish(topic='t', payload=b'p' * 200))
+        if not complete:
+            candidate = candidate[:3]
+        framer = PacketFramer(max_packet_size=128)
+        framer.feed(b'\x00\x00' + candidate)
+        with pytest.raises(MQTTDecodeError):
+            next(iter(framer))
 
-        The gate closes the connection, so it may only judge bytes that
-        really are a packet header.  Mid-junk the buffer starts wherever
-        the resync guessed, and arbitrary bytes read as a Remaining Length
-        decode to something enormous about as often as not — answering
-        *that* with ``DISCONNECT 0x95`` turns a desync the framer recovers
-        from into a connection the peer cannot re-establish its way out
-        of.  The junk below is the adversarial case: every byte after the
-        first parses as a variable-byte-integer continuation.
-        """
-        junk = bytes([0x00, 0xFF, 0xFF, 0xFF, 0x7F])
-        good = encode_packet(MQTTPublish(topic='t', payload=b'x', qos=0))
+    @pytest.mark.parametrize('prefix', [b'', b'\xc0\x00'])
+    async def test_fragmented_oversized_header_is_refused_at_each_boundary(self, prefix):
         framer = PacketFramer(max_packet_size=4096)
-        framer.feed(junk + good)
-
-        decoded = list(framer)     # must not raise PacketTooLarge
-        assert len(decoded) == 1 and decoded[0].topic == 't'
-
-    async def test_the_gate_still_fires_once_resynchronised(self):
-        """Recovering must not disarm the limit for the rest of the connection."""
-        junk = bytes([0x00, 0xFF, 0xFF, 0xFF, 0x7F])
-        good = encode_packet(MQTTPublish(topic='t', payload=b'x', qos=0))
-        framer = PacketFramer(max_packet_size=4096)
-        framer.feed(junk + good)
-        assert len(list(framer)) == 1          # resynced, boundary re-established
-
-        framer.feed(_oversized_header(64 * 1024 * 1024))
+        framer.feed(prefix)
+        assert len(list(framer)) == bool(prefix)
+        header = _oversized_header(64 * 1024 * 1024)
+        for byte in header[:-1]:
+            framer.feed(bytes([byte]))
+            assert list(framer) == []
+        framer.feed(header[-1:])
         with pytest.raises(PacketTooLarge):
             list(framer)
+
+    @pytest.mark.parametrize('extra', [0, 1])
+    async def test_fragmented_and_coalesced_packets_fit_individually(self, extra):
+        packet = encode_packet(MQTTPublish(topic='t', payload=b'p' * 200))
+        framer = PacketFramer(max_packet_size=len(packet) + extra)
+        for byte in packet[:-1]:
+            framer.feed(bytes([byte]))
+            assert list(framer) == []
+        framer.feed(packet[-1:] + packet)
+        assert [p.payload for p in framer] == [b'p' * 200, b'p' * 200]
+        assert not framer.buffered
 
     async def test_cap_hit_is_logged(self, caplog):
         framer = PacketFramer(max_packet_size=4096)
@@ -467,43 +470,9 @@ class TestRetainedBound:
         assert len(broker._retained) == 50
 
 
-# ===========================================================================
-# The framer's resync cost (audit ⚠, not a numbered gap)
-# ===========================================================================
-
-class TestResyncCost:
-    async def test_junk_prefix_costs_linear_work(self):
-        """Dropping one byte and re-decoding from the start is O(n²).
-
-        Asserted as a decode count rather than a wall clock: the quadratic
-        version calls the decoder once per dropped byte, so the counter
-        separates the two implementations by three orders of magnitude on
-        this input while staying immune to how fast the machine is.
-        """
-        import blackbull.mqtt.connection as conn_mod
-
-        calls = 0
-        real = conn_mod.decode_packet
-
-        def counting(data):
-            nonlocal calls
-            calls += 1
-            return real(data)
-
-        junk = bytes([0x00]) * 4000          # type 0 — reserved, never valid
-        good = encode_packet(MQTTPublish(topic='t', payload=b'x', qos=0))
-        framer = PacketFramer()
-        framer.feed(junk + good)
-
-        conn_mod.decode_packet = counting
-        try:
-            decoded = list(framer)
-        finally:
-            conn_mod.decode_packet = real
-
-        assert len(decoded) == 1 and decoded[0].topic == 't', (
-            'resync must still find the packet after the junk')
-        assert calls <= 40, (
-            f'{calls} decode attempts for a 4000-byte junk prefix — the framer '
-            f're-decodes per dropped byte, which is quadratic in the junk length'
-        )
+@pytest.mark.parametrize('length', [1, 4000])
+async def test_junk_prefix_is_terminal(length):
+    framer = PacketFramer()
+    framer.feed(b'\x00' * length + encode_packet(MQTTPublish(topic='t', payload=b'x')))
+    with pytest.raises(MQTTDecodeError):
+        next(iter(framer))

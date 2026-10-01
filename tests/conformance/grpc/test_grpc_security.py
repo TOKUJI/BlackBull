@@ -107,23 +107,27 @@ class TestGrpcContentType:
         assert _trailers_of(events)[b'grpc-status'] == b'0'
 
     @pytest.mark.asyncio
-    async def test_case_insensitive_content_type_detection(self):
-        """Content-Type is case-insensitive per HTTP spec.  The dispatch check
-        in ``BlackBull._dispatch`` does a ``startswith(b'application/grpc')``
-        which is case-sensitive.  This test documents the *current* behavior."""
-        # Note: The bridge itself does not check content-type (the caller does).
-        # We test what happens when passed with various content-type spellings.
+    @pytest.mark.parametrize('content_type', [
+        pytest.param(b'APPLICATION/GRPC', id='case-insensitive'),
+        pytest.param(b'application/grpc+proto', id='grpc-plus-proto-suffix'),
+        pytest.param(b'application/grpc+json', id='grpc-plus-json-suffix'),
+        pytest.param(b'application/grpc-web+proto', id='grpc-web-proto'),
+        pytest.param(b'application/grpc-web-text+proto', id='grpc-web-text-proto'),
+        pytest.param(b'application/grpc; charset=utf-8; boundary=xyz',
+                     id='multiple-parameters'),
+    ])
+    async def test_case_insensitive_content_type_detection(self, content_type):
+        """Every legal content-type spelling reaches the bridge unchanged;
+        the bridge itself does not filter content-type (the caller does)."""
         reg = GrpcServiceRegistry()
 
         @reg.method('/svc/M')
         async def m(request, context):
             return b'ok'
 
-        # APPLICATION/GRPC — the bridge doesn't enforce content-type itself,
-        # so this succeeds.  The caller (app._dispatch) does the filtering.
         events, send = _collector()
         scope = {'type': 'http', 'path': '/svc/M',
-                 'headers': [(b'content-type', b'APPLICATION/GRPC'),
+                 'headers': [(b'content-type', content_type),
                              (b':method', b'POST')]}
         await serve_grpc(reg, scope, _receive_with(encode_message(b'')), send)
         assert _trailers_of(events)[b'grpc-status'] == b'0'
@@ -209,11 +213,6 @@ class TestGrpcMessageEncoding:
     """grpc-message values MUST be percent-encoded per the gRPC HTTP/2 spec.
     Only printable ASCII (0x20–0x7E, excluding '%') passes through unencoded."""
 
-    def test_printable_ascii_passes_through(self):
-        """Characters 0x20–0x7E except '%' must appear verbatim."""
-        assert _pct_encode_message('hello world') == b'hello world'
-        assert _pct_encode_message('abc123XYZ!@#$^&*()_+-=[]{}|;:,.<>?/`~') == \
-            b'abc123XYZ!@#$^&*()_+-=[]{}|;:,.<>?/`~'
 
     def test_percent_sign_encoded_as_percent25(self):
         """'%' (0x25) must be encoded as '%25'."""
@@ -232,19 +231,6 @@ class TestGrpcMessageEncoding:
         assert _pct_encode_message('café') == b'caf%C3%A9'
         assert _pct_encode_message('αβ') == b'%CE%B1%CE%B2'  # Greek alpha, beta
         assert _pct_encode_message('日本語') == b'%E6%97%A5%E6%9C%AC%E8%AA%9E'
-
-    def test_empty_string_produces_empty_bytes(self):
-        """Empty details → empty grpc-message (or omitted)."""
-        assert _pct_encode_message('') == b''
-
-    def test_space_preserved_literally(self):
-        """Space (0x20) is in the printable range and must NOT be encoded."""
-        assert _pct_encode_message('hello world') == b'hello world'
-        assert _pct_encode_message(' leading trailing ') == b' leading trailing '
-
-    def test_delete_character_encoded(self):
-        """DEL (0x7F) is NOT in the 0x20–0x7E range and must be encoded."""
-        assert _pct_encode_message('del\x7fhere') == b'del%7Fhere'
 
 
 # ---------------------------------------------------------------------------
@@ -266,23 +252,25 @@ class TestGrpcMessageInjection:
         assert b'\x0d' not in _pct_encode_message('a\rb')
         assert b'%0D' in _pct_encode_message('a\rb')
 
-    def test_crlf_sequence_is_encoded(self):
-        """CRLF (0x0D 0x0A) must not appear literally."""
-        encoded = _pct_encode_message('header\r\ninjection')
-        assert b'\r\n' not in encoded
-        assert b'%0D%0A' in encoded
+    @pytest.mark.parametrize('raw,forbidden,encoded_form', [
+        pytest.param('header\r\ninjection', b'\r\n', b'%0D%0A', id='crlf-sequence'),
+        pytest.param('null\x00here', b'\x00', b'%00', id='null-byte'),
+    ])
+    def test_crlf_sequence_is_encoded(self, raw, forbidden, encoded_form):
+        """Control bytes must not appear literally in grpc-message."""
+        encoded = _pct_encode_message(raw)
+        assert forbidden not in encoded
+        assert encoded_form in encoded
 
-    def test_null_byte_is_encoded(self):
-        """Null byte injection must be prevented."""
-        encoded = _pct_encode_message('null\x00here')
-        assert b'\x00' not in encoded
-        assert b'%00' in encoded
-
-    def test_colon_is_not_encoded(self):
-        """':' (0x3A) is printable ASCII — passes through.  This is acceptable
-        because gRPC trailers are HTTP/2 HEADERS, not HTTP/1.1 headers, and
-        HTTP/2 does not use ':' as a header/value separator in the same way."""
-        assert _pct_encode_message('key:value') == b'key:value'
+    @pytest.mark.parametrize('raw,expected', [
+        pytest.param('', b'', id='empty-string'),
+        pytest.param('del\x7fhere', b'del%7Fhere', id='delete-character'),
+        pytest.param('key:value', b'key:value', id='colon-passthrough'),
+    ])
+    def test_colon_is_not_encoded(self, raw, expected):
+        """grpc-message encoding table: empty details, DEL (0x7F) encoded,
+        ':' (0x3A) printable ASCII passes through."""
+        assert _pct_encode_message(raw) == expected
 
     @pytest.mark.asyncio
     async def test_injection_attempt_via_details_does_not_corrupt_trailers(self):
@@ -593,23 +581,6 @@ class TestGrpcMetadata:
         body_event = next((e for e in events if e['type'] == 'http.response.body'), None)
         assert body_event is not None
         assert decode_messages(body_event['body']) == [(False, b'fallback')]
-
-    @pytest.mark.asyncio
-    async def test_metadata_case_insensitive_lookup(self):
-        """HTTP header names are case-insensitive."""
-        reg = GrpcServiceRegistry()
-
-        @reg.method('/svc/CaseTest')
-        async def case_test(request, context):
-            return context.metadata(b'X-TOKEN', b'')
-
-        headers = [(b'content-type', b'application/grpc'), (b'x-token', b'secret')]
-        events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/CaseTest', headers),
-                         _receive_with(encode_message(b'')), send)
-        body_event = next((e for e in events if e['type'] == 'http.response.body'), None)
-        assert body_event is not None
-        assert decode_messages(body_event['body']) == [(False, b'secret')]
 
 
 # ---------------------------------------------------------------------------

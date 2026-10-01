@@ -175,8 +175,13 @@ class TestWebsocketMiddleware:
 
     # --- ordering of accept / inner / close ------------------------------------
 
-    async def test_accept_is_sent_before_inner_is_called(self):
-        """``websocket.accept`` must be sent before ``inner`` is invoked."""
+    @pytest.mark.parametrize('a,b', [
+        pytest.param('websocket.accept', 'inner', id='accept-before-inner'),
+        pytest.param('inner', 'websocket.close', id='close-after-inner'),
+    ])
+    async def test_accept_is_sent_before_inner_is_called(self, a, b):
+        """``websocket.accept`` must be sent before ``inner`` is invoked;
+        ``websocket.close`` must be sent after ``inner`` returns."""
         order = []
 
         async def tracking_send(event):
@@ -188,26 +193,9 @@ class TestWebsocketMiddleware:
         receive = make_receive({'type': 'websocket.connect'})
         await websocket({}, receive, tracking_send, inner)
 
-        assert 'websocket.accept' in order
-        assert 'inner' in order
-        assert order.index('websocket.accept') < order.index('inner')
-
-    async def test_close_is_sent_after_inner_returns(self):
-        """``websocket.close`` must be sent after ``inner`` returns."""
-        order = []
-
-        async def tracking_send(event):
-            order.append(event.get('type'))
-
-        async def inner(scope, receive, send):
-            order.append('inner')
-
-        receive = make_receive({'type': 'websocket.connect'})
-        await websocket({}, receive, tracking_send, inner)
-
-        assert 'websocket.close' in order
-        assert 'inner' in order
-        assert order.index('inner') < order.index('websocket.close')
+        assert a in order
+        assert b in order
+        assert order.index(a) < order.index(b)
 
     async def test_full_sequence_is_accept_then_inner_then_close(self):
         """Complete event sequence must be: accept → inner → close."""
@@ -226,40 +214,8 @@ class TestWebsocketMiddleware:
 
 
 # ---------------------------------------------------------------------------
-# compress() — Accept-Encoding parsing
+# compress() — codec selection
 # ---------------------------------------------------------------------------
-
-class TestAcceptEncodingParsing:
-    """Compression._parse_accept_encoding must return codec names
-    sorted by descending q-value."""
-
-    def _parse(self, header: str) -> list[str]:
-        return Compression._parse_accept_encoding(header.encode())
-
-    def test_single_codec(self):
-        assert self._parse('gzip') == ['gzip']
-
-    def test_multiple_no_q(self):
-        result = self._parse('gzip, br')
-        assert set(result) == {'gzip', 'br'}
-
-    def test_q_values_sorted_descending(self):
-        result = self._parse('gzip;q=0.8, br;q=1.0, zstd;q=0.9')
-        assert result == ['br', 'zstd', 'gzip']
-
-    def test_implicit_q1_beats_explicit_lower(self):
-        result = self._parse('br, gzip;q=0.5')
-        assert result[0] == 'br'
-        assert result[-1] == 'gzip'
-
-    def test_empty_header_returns_empty(self):
-        assert self._parse('') == []
-
-    def test_wildcard_included(self):
-        result = self._parse('*;q=0.1, gzip')
-        assert 'gzip' in result
-        assert '*' in result
-
 
 class TestCodecSelection:
     """Compression._select_codec must prefer br > zstd > gzip
@@ -272,28 +228,27 @@ class TestCodecSelection:
         mw._available = {name: _gz.compress for name in available}
         return mw
 
-    def test_prefers_br_over_gzip(self):
-        mw = self._mw(['br', 'gzip'])
-        codec, _ = mw._select_codec(b'br, gzip')
-        assert codec == 'br'
-
-    def test_prefers_zstd_over_gzip(self):
-        mw = self._mw(['zstd', 'gzip'])
-        codec, _ = mw._select_codec(b'zstd, gzip')
-        assert codec == 'zstd'
+    @pytest.mark.parametrize('available,accept,expected', [
+        pytest.param(['br', 'gzip'], b'br, gzip', 'br', id='prefers-br'),
+        pytest.param(['zstd', 'gzip'], b'zstd, gzip', 'zstd', id='prefers-zstd'),
+    ])
+    def test_prefers_br_over_gzip(self, available, accept, expected):
+        mw = self._mw(available)
+        codec, _ = mw._select_codec(accept)
+        assert codec == expected
 
     def test_falls_back_to_gzip_when_br_unavailable(self):
         mw = self._mw(['gzip'])
         codec, _ = mw._select_codec(b'br, gzip')
         assert codec == 'gzip'
 
-    def test_returns_none_when_no_overlap(self):
+    @pytest.mark.parametrize('accept', [
+        pytest.param(b'br, zstd', id='no-overlap'),
+        pytest.param(b'', id='empty-accept'),
+    ])
+    def test_returns_none_when_no_overlap(self, accept):
         mw = self._mw(['gzip'])
-        assert mw._select_codec(b'br, zstd') is None
-
-    def test_returns_none_for_empty_accept(self):
-        mw = self._mw(['gzip'])
-        assert mw._select_codec(b'') is None
+        assert mw._select_codec(accept) is None
 
 
 # ---------------------------------------------------------------------------
@@ -543,12 +498,16 @@ class TestBrotliCompression:
         body_event = next(e for e in events if e.get('type') == 'http.response.body')
         assert _brotli.decompress(body_event['body']) == body
 
-    async def test_br_content_encoding_header(self):
+    @pytest.mark.parametrize('codec', [
+        pytest.param(b'br', id='br-content-encoding'),
+        pytest.param(b'zstd', id='zstd-content-encoding'),
+    ])
+    async def test_br_content_encoding_header(self, codec):
         async def handler(_scope, _receive, send):
             await send({'type': 'http.response.start', 'status': 200, 'headers': []})
             await send({'type': 'http.response.body', 'body': b'x' * 200, 'more_body': False})
 
-        scope = Connection.from_scope({'type': 'http', 'headers': Headers([(b'accept-encoding', b'br')])})
+        scope = Connection.from_scope({'type': 'http', 'headers': Headers([(b'accept-encoding', codec)])})
         events = []
 
         async def capture_send(event):
@@ -559,7 +518,7 @@ class TestBrotliCompression:
 
         start = next(e for e in events if e.get('type') == 'http.response.start')
         header_dict = {k: v for k, v in start.get('headers', [])}
-        assert header_dict.get(b'content-encoding') == b'br'
+        assert header_dict.get(b'content-encoding') == codec
 
     async def test_br_preferred_over_gzip(self):
         """When client accepts both br and gzip, br must be chosen."""
@@ -605,21 +564,3 @@ class TestZstdCompression:
         body_event = next(e for e in events if e.get('type') == 'http.response.body')
         dctx = _zstd.ZstdDecompressor()
         assert dctx.decompress(body_event['body']) == body
-
-    async def test_zstd_content_encoding_header(self):
-        async def handler(_scope, _receive, send):
-            await send({'type': 'http.response.start', 'status': 200, 'headers': []})
-            await send({'type': 'http.response.body', 'body': b'x' * 200, 'more_body': False})
-
-        scope = Connection.from_scope({'type': 'http', 'headers': Headers([(b'accept-encoding', b'zstd')])})
-        events = []
-
-        async def capture_send(event):
-            _collect(events, event)
-
-        await compress(scope, AsyncMock(return_value={'type': 'http.disconnect'}),
-                       capture_send, call_next=handler)
-
-        start = next(e for e in events if e.get('type') == 'http.response.start')
-        header_dict = {k: v for k, v in start.get('headers', [])}
-        assert header_dict.get(b'content-encoding') == b'zstd'

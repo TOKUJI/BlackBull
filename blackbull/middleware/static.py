@@ -24,6 +24,7 @@ from http import HTTPStatus
 from blackbull.connection import Connection
 from blackbull.env import get_settings, Environment
 from blackbull.native import NativeResponse
+from ._accept_encoding import select_encoding
 
 
 # Common web-asset MIME types that may be missing from the host's
@@ -176,12 +177,10 @@ class StaticFiles:
     # stat on every request.
     _STAT_TTL_S = float(os.environ.get('BB_STATIC_STAT_TTL_S', '1.0'))
 
-    # Server preference order for precompressed variant selection.
-    # Matches blackbull.middleware.compression's order (br > zstd > gzip).
-    _ENCODING_SUFFIXES: tuple[tuple[bytes, str], ...] = (
-        (b'br',   '.br'),
-        (b'zstd', '.zst'),
-        (b'gzip', '.gz'),
+    _ENCODING_SUFFIXES: tuple[tuple[str, str], ...] = (
+        ('br',   '.br'),
+        ('zstd', '.zst'),
+        ('gzip', '.gz'),
     )
 
     def __init__(self, directory: str | None = None, *,
@@ -248,7 +247,7 @@ class StaticFiles:
         # the from-disk-every-request contract extends to the sibling
         # existence check.
         # Key = original request path string, Value = dict of available encodings.
-        self._sibling_cache: dict[str, dict[bytes, str]] = {}
+        self._sibling_cache: dict[str, dict[str, str]] = {}
 
     @property
     def _root(self) -> Path:
@@ -303,7 +302,7 @@ class StaticFiles:
         # comparison against the pre-computed ``<root>/`` form — no
         # ``PurePath.relative_to`` allocation per request.
         target = os.path.realpath(os.path.join(self._root_str, decoded.lstrip('/')))
-        if target != self._root_str and not target.startswith(self._root_sep):
+        if not self._inside_root(target):
             await self._respond(send, HTTPStatus.BAD_REQUEST)
             return
 
@@ -315,8 +314,7 @@ class StaticFiles:
             # target so a crafted ``index`` can't escape the root.
             if self._index and os.path.isdir(target):
                 candidate = os.path.realpath(os.path.join(target, self._index))
-                if ((candidate == self._root_str or candidate.startswith(self._root_sep))
-                        and os.path.isfile(candidate)):
+                if self._inside_root(candidate) and os.path.isfile(candidate):
                     await self._serve(conn, send, candidate)
                     return
             if call_next:
@@ -327,25 +325,24 @@ class StaticFiles:
 
         await self._serve(conn, send, target)
 
-    @staticmethod
-    def _client_accepts(accept_header: bytes, encoding: bytes) -> bool:
-        """Cheap Accept-Encoding parser — True iff `encoding` is offered with q>0."""
-        if not accept_header:
-            return False
-        for token in accept_header.split(b','):
-            parts = token.strip().split(b';')
-            if parts[0].strip().lower() != encoding:
-                continue
-            for param in parts[1:]:
-                p = param.strip()
-                if p.startswith(b'q='):
-                    try:
-                        if float(p[2:]) <= 0:
-                            return False
-                    except ValueError:
-                        pass  # malformed q-value → treat as acceptable.
+    def _inside_root(self, resolved: str) -> bool:
+        """The one boundary definition: request target, index candidate and
+        any variant selection are judged here."""
+        return resolved == self._root_str or resolved.startswith(self._root_sep)
+
+    def _selection_within_root(self, served_path: str,
+                               verified_path: str) -> bool:
+        """Whether the final selection may be cached and sent.
+
+        Equal to ``verified_path``, or a plain sibling of it, is covered by
+        the walk in ``__call__`` — only a symlinked variant can leave the
+        root, so only it walks again, every request.  A swap inside one
+        request races the open; the window the requested target has always
+        had.
+        """
+        if served_path == verified_path or not os.path.islink(served_path):
             return True
-        return False
+        return self._inside_root(os.path.realpath(served_path))
 
     def _negotiate(self, conn, target: str) -> tuple[str, bytes]:
         """Pick which file to serve and what Content-Encoding to advertise.
@@ -363,13 +360,9 @@ class StaticFiles:
         per-request ``os.path.isfile`` syscalls for ``.br`` / ``.zst`` /
         ``.gz`` siblings happen only once per path.
         """
-        accept = b''
-        for k, v in conn.headers:
-            kl = k.lower()
-            if kl == b'range':
-                return target, b''
-            if kl == b'accept-encoding':
-                accept = v.lower()
+        if conn.headers.getlist(b'range'):
+            return target, b''
+        accept = conn.headers.get_combined(b'accept-encoding')
         if not accept:
             return target, b''
 
@@ -392,15 +385,18 @@ class StaticFiles:
                 if os.path.isfile(sibling):
                     siblings[enc] = sibling
 
-        for enc, _suffix in self._ENCODING_SUFFIXES:
-            sibling = siblings.get(enc)
-            if sibling is not None and self._client_accepts(accept, enc):
-                return sibling, enc
+        encoding = select_encoding(accept, siblings)
+        if encoding is not None:
+            return siblings[encoding], encoding.encode()
         return target, b''
 
     async def _serve(self, conn, send, path: str):
-        # Pick variant (precompressed sibling if available + accepted).
+        # Pick the variant, then hold the final selection to the root
+        # boundary before anything below can cache, open or send it.
         served_path, content_encoding = self._negotiate(conn, path)
+        if not self._selection_within_root(served_path, path):
+            await self._respond(send, HTTPStatus.BAD_REQUEST)
+            return
 
         body: bytes | None
         mime: bytes

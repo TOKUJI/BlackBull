@@ -46,17 +46,13 @@ def client():
 
 
 @pytest.mark.integration
-def test_put(client):
-    payload = {'key': 'value'}
-    r = client.put('/resource', json=payload)
-    assert r.status_code == 200
-    assert r.json() == payload
-
-
-@pytest.mark.integration
-def test_patch(client):
-    payload = {'field': 'updated'}
-    r = client.patch('/resource', json=payload)
+@pytest.mark.parametrize('method,payload', [
+    pytest.param('put', {'key': 'value'}, id='json-payload-echo-put'),
+    pytest.param('patch', {'field': 'updated'}, id='json-payload-echo-patch'),
+])
+def test_put(client, method, payload):
+    """PUT and PATCH echo their JSON payload back."""
+    r = getattr(client, method)('/resource', json=payload)
     assert r.status_code == 200
     assert r.json() == payload
 

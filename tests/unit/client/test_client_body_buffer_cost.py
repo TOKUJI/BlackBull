@@ -58,7 +58,7 @@ import pytest
 
 from blackbull.client.http1 import HTTP1ResponseRecipient
 from blackbull.client.http2 import HTTP2Client, _PendingResponse
-from blackbull.protocol.frame_types import FrameTypes
+from blackbull.protocol.frame_types import FrameTypes, PseudoHeaders
 from blackbull.server.recipient import AbstractReader
 from blackbull.server.sender import AbstractWriter
 
@@ -229,6 +229,9 @@ async def _http2_body_octets(client: HTTP2Client, total: int, *,
     """
     future = asyncio.get_running_loop().create_future()
     client._responses[1] = _PendingResponse(future=future)
+    head = client._factory.create(FrameTypes.HEADERS, 4, 1)
+    head.pseudo_headers[PseudoHeaders.STATUS] = '200'
+    await client._on_response_headers(head)
     shared = bytes(frame_size) if share_one_slice else None
     for _ in range(total // frame_size):
         payload = shared if shared is not None else bytes(frame_size)

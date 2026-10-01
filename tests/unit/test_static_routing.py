@@ -39,17 +39,15 @@ def _app(site: pathlib.Path, *, prefix: str = '/assets', **kw) -> BlackBull:
 
 
 class TestFileServing:
-    def test_serves_a_file_under_the_prefix(self, site):
+    @pytest.mark.parametrize('url,content', [
+        pytest.param('/assets/hello.txt', b'Hello, static world!', id='file-under-prefix'),
+        pytest.param('/assets/sub/deep.txt', b'deep', id='nested-file'),
+    ])
+    def test_serves_a_file_under_the_prefix(self, site, url, content):
         with TestClient(_app(site)) as client:
-            r = client.get('/assets/hello.txt')
+            r = client.get(url)
         assert r.status_code == 200
-        assert r.content == b'Hello, static world!'
-
-    def test_serves_a_nested_file(self, site):
-        with TestClient(_app(site)) as client:
-            r = client.get('/assets/sub/deep.txt')
-        assert r.status_code == 200
-        assert r.content == b'deep'
+        assert r.content == content
 
     def test_missing_file_under_the_prefix_is_404(self, site):
         with TestClient(_app(site)) as client:
@@ -82,23 +80,16 @@ class TestBarePrefixWithIndex:
     too or these regress.
     """
 
-    def test_prefix_with_trailing_slash_serves_index(self, site):
+    @pytest.mark.parametrize('url,content', [
+        pytest.param('/assets/', b'<h1>root index</h1>', id='trailing-slash'),
+        pytest.param('/assets', b'<h1>root index</h1>', id='no-trailing-slash'),
+        pytest.param('/assets/sub/', b'<h1>sub index</h1>', id='subdirectory-index'),
+    ])
+    def test_prefix_with_trailing_slash_serves_index(self, site, url, content):
         with TestClient(_app(site, index='index.html')) as client:
-            r = client.get('/assets/')
+            r = client.get(url)
         assert r.status_code == 200
-        assert r.content == b'<h1>root index</h1>'
-
-    def test_prefix_without_trailing_slash_serves_index(self, site):
-        with TestClient(_app(site, index='index.html')) as client:
-            r = client.get('/assets')
-        assert r.status_code == 200
-        assert r.content == b'<h1>root index</h1>'
-
-    def test_subdirectory_serves_its_index(self, site):
-        with TestClient(_app(site, index='index.html')) as client:
-            r = client.get('/assets/sub/')
-        assert r.status_code == 200
-        assert r.content == b'<h1>sub index</h1>'
+        assert r.content == content
 
     def test_directory_without_index_option_is_not_listed(self, site):
         with TestClient(_app(site)) as client:
@@ -129,17 +120,15 @@ class TestMultipleStaticMounts:
 
 
 class TestProductionGate:
-    def test_production_does_not_serve_static(self, site, monkeypatch):
-        monkeypatch.setenv('BLACKBULL_ENV', 'production')
+    @pytest.mark.parametrize('env,expected', [
+        pytest.param('production', 404, id='production-off'),
+        pytest.param('development', 200, id='development-on'),
+    ])
+    def test_production_does_not_serve_static(self, site, monkeypatch, env, expected):
+        monkeypatch.setenv('BLACKBULL_ENV', env)
         with TestClient(_app(site)) as client:
             r = client.get('/assets/hello.txt')
-        assert r.status_code == 404
-
-    def test_development_serves_static(self, site, monkeypatch):
-        monkeypatch.setenv('BLACKBULL_ENV', 'development')
-        with TestClient(_app(site)) as client:
-            r = client.get('/assets/hello.txt')
-        assert r.status_code == 200
+        assert r.status_code == expected
 
 
 class TestExplicitRoutesWin:

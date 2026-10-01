@@ -144,6 +144,9 @@ RETAIN_HANDLING_MASK = 0x03
 # 0b0010; every other non-PUBLISH packet's flags MUST be 0b0000.
 RESERVED_FLAGS_0010 = 0x02
 
+# §3.1.2.11.2 — 0xFFFFFFFF: the Session does not expire.
+SESSION_EXPIRY_NEVER = 0xFFFFFFFF
+
 
 def decode_publish_flags(flags_byte: int) -> PublishFlags:
     """§3.3.1 — DUP (bit 3), QoS (bits 2-1), RETAIN (bit 0).
@@ -170,59 +173,114 @@ def decode_publish_flags(flags_byte: int) -> PublishFlags:
 # §4 — Reason codes
 # ===========================================================================
 
-_REASON_CODE_NAMES: dict[int, str] = {
-    0x00: 'Success',
-    0x01: 'Granted QoS 1',
-    0x02: 'Granted QoS 2',
-    0x04: 'Disconnect with Will Message',
-    0x10: 'No matching subscribers',
-    0x11: 'No subscription existed',
-    0x18: 'Continue authentication',
-    0x19: 'Re-authenticate',
-    0x80: 'Unspecified error',
-    0x81: 'Malformed Packet',
-    0x82: 'Protocol Error',
-    0x83: 'Implementation specific error',
-    0x84: 'Unsupported Protocol Version',
-    0x85: 'Client Identifier not valid',
-    0x86: 'Bad User Name or Password',
-    0x87: 'Not authorized',
-    0x88: 'Server unavailable',
-    0x89: 'Server busy',
-    0x8A: 'Banned',
-    0x8B: 'Server shutting down',
-    0x8C: 'Bad authentication method',
-    0x8D: 'Keep Alive timeout',
-    0x8E: 'Session taken over',
-    0x8F: 'Topic Filter invalid',
-    0x90: 'Topic Name invalid',
-    0x91: 'Packet Identifier in use',
-    0x92: 'Packet Identifier not found',
-    0x93: 'Receive Maximum exceeded',
-    0x94: 'Topic Alias invalid',
-    0x95: 'Packet too large',
-    0x96: 'Message rate too high',
-    0x97: 'Quota exceeded',
-    0x98: 'Administrative action',
-    0x99: 'Payload format invalid',
-    0x9A: 'Retain not supported',
-    0x9B: 'QoS not supported',
-    0x9C: 'Use another server',
-    0x9D: 'Server moved',
-    0x9E: 'Shared Subscriptions not supported',
-    0x9F: 'Connection rate exceeded',
-    0xA0: 'Maximum connect time',
-    0xA1: 'Subscription Identifiers not supported',
-    0xA2: 'Wildcard Subscriptions not supported',
+class ReasonCode(IntEnum):
+    """§2.4 reason codes — the one definition of each value and name."""
+    SUCCESS = 0x00
+    GRANTED_QOS_1 = 0x01
+    GRANTED_QOS_2 = 0x02
+    DISCONNECT_WITH_WILL = 0x04
+    NO_MATCHING_SUBSCRIBERS = 0x10
+    NO_SUBSCRIPTION_EXISTED = 0x11
+    CONTINUE_AUTHENTICATION = 0x18
+    REAUTHENTICATE = 0x19
+    UNSPECIFIED_ERROR = 0x80
+    MALFORMED_PACKET = 0x81
+    PROTOCOL_ERROR = 0x82
+    IMPLEMENTATION_SPECIFIC_ERROR = 0x83
+    UNSUPPORTED_PROTOCOL_VERSION = 0x84
+    CLIENT_IDENTIFIER_NOT_VALID = 0x85
+    BAD_USER_NAME_OR_PASSWORD = 0x86
+    NOT_AUTHORIZED = 0x87
+    SERVER_UNAVAILABLE = 0x88
+    SERVER_BUSY = 0x89
+    BANNED = 0x8A
+    SERVER_SHUTTING_DOWN = 0x8B
+    BAD_AUTHENTICATION_METHOD = 0x8C
+    KEEP_ALIVE_TIMEOUT = 0x8D
+    SESSION_TAKEN_OVER = 0x8E
+    TOPIC_FILTER_INVALID = 0x8F
+    TOPIC_NAME_INVALID = 0x90
+    PACKET_IDENTIFIER_IN_USE = 0x91
+    PACKET_IDENTIFIER_NOT_FOUND = 0x92
+    RECEIVE_MAXIMUM_EXCEEDED = 0x93
+    TOPIC_ALIAS_INVALID = 0x94
+    PACKET_TOO_LARGE = 0x95
+    MESSAGE_RATE_TOO_HIGH = 0x96
+    QUOTA_EXCEEDED = 0x97
+    ADMINISTRATIVE_ACTION = 0x98
+    PAYLOAD_FORMAT_INVALID = 0x99
+    RETAIN_NOT_SUPPORTED = 0x9A
+    QOS_NOT_SUPPORTED = 0x9B
+    USE_ANOTHER_SERVER = 0x9C
+    SERVER_MOVED = 0x9D
+    SHARED_SUBSCRIPTIONS_NOT_SUPPORTED = 0x9E
+    CONNECTION_RATE_EXCEEDED = 0x9F
+    MAXIMUM_CONNECT_TIME = 0xA0
+    SUBSCRIPTION_IDENTIFIERS_NOT_SUPPORTED = 0xA1
+    WILDCARD_SUBSCRIPTIONS_NOT_SUPPORTED = 0xA2
+
+
+# §2.4 display names — keyed by member, so each value lives only in
+# `ReasonCode` and cannot drift from its name.
+_REASON_CODE_LABELS: dict[ReasonCode, str] = {
+    ReasonCode.SUCCESS: 'Success',
+    ReasonCode.GRANTED_QOS_1: 'Granted QoS 1',
+    ReasonCode.GRANTED_QOS_2: 'Granted QoS 2',
+    ReasonCode.DISCONNECT_WITH_WILL: 'Disconnect with Will Message',
+    ReasonCode.NO_MATCHING_SUBSCRIBERS: 'No matching subscribers',
+    ReasonCode.NO_SUBSCRIPTION_EXISTED: 'No subscription existed',
+    ReasonCode.CONTINUE_AUTHENTICATION: 'Continue authentication',
+    ReasonCode.REAUTHENTICATE: 'Re-authenticate',
+    ReasonCode.UNSPECIFIED_ERROR: 'Unspecified error',
+    ReasonCode.MALFORMED_PACKET: 'Malformed Packet',
+    ReasonCode.PROTOCOL_ERROR: 'Protocol Error',
+    ReasonCode.IMPLEMENTATION_SPECIFIC_ERROR: 'Implementation specific error',
+    ReasonCode.UNSUPPORTED_PROTOCOL_VERSION: 'Unsupported Protocol Version',
+    ReasonCode.CLIENT_IDENTIFIER_NOT_VALID: 'Client Identifier not valid',
+    ReasonCode.BAD_USER_NAME_OR_PASSWORD: 'Bad User Name or Password',
+    ReasonCode.NOT_AUTHORIZED: 'Not authorized',
+    ReasonCode.SERVER_UNAVAILABLE: 'Server unavailable',
+    ReasonCode.SERVER_BUSY: 'Server busy',
+    ReasonCode.BANNED: 'Banned',
+    ReasonCode.SERVER_SHUTTING_DOWN: 'Server shutting down',
+    ReasonCode.BAD_AUTHENTICATION_METHOD: 'Bad authentication method',
+    ReasonCode.KEEP_ALIVE_TIMEOUT: 'Keep Alive timeout',
+    ReasonCode.SESSION_TAKEN_OVER: 'Session taken over',
+    ReasonCode.TOPIC_FILTER_INVALID: 'Topic Filter invalid',
+    ReasonCode.TOPIC_NAME_INVALID: 'Topic Name invalid',
+    ReasonCode.PACKET_IDENTIFIER_IN_USE: 'Packet Identifier in use',
+    ReasonCode.PACKET_IDENTIFIER_NOT_FOUND: 'Packet Identifier not found',
+    ReasonCode.RECEIVE_MAXIMUM_EXCEEDED: 'Receive Maximum exceeded',
+    ReasonCode.TOPIC_ALIAS_INVALID: 'Topic Alias invalid',
+    ReasonCode.PACKET_TOO_LARGE: 'Packet too large',
+    ReasonCode.MESSAGE_RATE_TOO_HIGH: 'Message rate too high',
+    ReasonCode.QUOTA_EXCEEDED: 'Quota exceeded',
+    ReasonCode.ADMINISTRATIVE_ACTION: 'Administrative action',
+    ReasonCode.PAYLOAD_FORMAT_INVALID: 'Payload format invalid',
+    ReasonCode.RETAIN_NOT_SUPPORTED: 'Retain not supported',
+    ReasonCode.QOS_NOT_SUPPORTED: 'QoS not supported',
+    ReasonCode.USE_ANOTHER_SERVER: 'Use another server',
+    ReasonCode.SERVER_MOVED: 'Server moved',
+    ReasonCode.SHARED_SUBSCRIPTIONS_NOT_SUPPORTED: 'Shared Subscriptions not supported',
+    ReasonCode.CONNECTION_RATE_EXCEEDED: 'Connection rate exceeded',
+    ReasonCode.MAXIMUM_CONNECT_TIME: 'Maximum connect time',
+    ReasonCode.SUBSCRIPTION_IDENTIFIERS_NOT_SUPPORTED: 'Subscription Identifiers not supported',
+    ReasonCode.WILDCARD_SUBSCRIPTIONS_NOT_SUPPORTED: 'Wildcard Subscriptions not supported',
 }
+
+assert set(_REASON_CODE_LABELS) == set(ReasonCode), \
+    'every §2.4 code carries exactly one label'
+
+# §2.4 — この値以上がエラー側。閾値は UNSPECIFIED_ERROR から導く。
+_ERROR_THRESHOLD = int(ReasonCode.UNSPECIFIED_ERROR)
 
 
 class MQTTReasonCode(int):
-    """An MQTT 5.0 reason code (§2.4).
+    """An MQTT 5.0 reason code (§2.4) as received.
 
     A thin ``int`` subclass so any byte value (0-255) is representable without
-    raising — undefined codes report ``name == 'Unknown'``.  Codes ``< 0x80``
-    are success/normal; ``>= 0x80`` are errors (§2.4).
+    raising — undefined codes report ``name == 'Unknown'``.  Known values name
+    themselves through [`ReasonCode`][].
     """
 
     def __new__(cls, value: int) -> 'MQTTReasonCode':
@@ -234,45 +292,18 @@ class MQTTReasonCode(int):
 
     @property
     def name(self) -> str:  # type: ignore[override]
-        return _REASON_CODE_NAMES.get(int(self), 'Unknown')
+        return _REASON_CODE_LABELS.get(self, 'Unknown')
 
     @property
     def is_success(self) -> bool:
-        return int(self) < 0x80
+        return self < _ERROR_THRESHOLD
 
     @property
     def is_error(self) -> bool:
-        return int(self) >= 0x80
+        return self >= _ERROR_THRESHOLD
 
     def __repr__(self) -> str:
         return f'MQTTReasonCode(0x{int(self):02X}: {self.name})'
-
-
-class ReasonCode(IntEnum):
-    """The subset of §2.4 reason codes the broker references by name.
-
-    The single definition of these *values*; [`MQTTReasonCode`][] carries
-    the full §2.4 registry and the human-readable names.  Naming a member
-    here is what keeps a code from drifting between modules.
-    """
-    SUCCESS = 0x00
-    DISCONNECT_WITH_WILL = 0x04
-    MALFORMED_PACKET = 0x81
-    PROTOCOL_ERROR = 0x82
-    UNSUPPORTED_PROTOCOL_VERSION = 0x84
-    KEEP_ALIVE_TIMEOUT = 0x8D
-    SESSION_TAKEN_OVER = 0x8E
-    TOPIC_FILTER_INVALID = 0x8F
-    TOPIC_NAME_INVALID = 0x90
-    PACKET_TOO_LARGE = 0x95
-    QUOTA_EXCEEDED = 0x97
-    SHARED_SUBSCRIPTIONS_NOT_SUPPORTED = 0x9E
-
-
-# Guard against the typed subset and the name registry drifting apart: every
-# ReasonCode value must be a known §2.4 code.
-assert all(int(rc) in _REASON_CODE_NAMES for rc in ReasonCode), \
-    'ReasonCode member missing from _REASON_CODE_NAMES (§2.4 registry)'
 
 
 # ===========================================================================
@@ -295,23 +326,39 @@ def encode_variable_byte_integer(value: int) -> bytes:
     return bytes(out)
 
 
+def _read_vbi_at(data: bytes | bytearray, pos: int, end: int) -> tuple[int, int]:
+    """§1.5.5 — Decode a Variable Byte Integer in place; no buffer copies.
+
+    Returns ``(value, new_pos)``.  An integer still continuing when *end*
+    arrives is an incomplete read; one continuing on its fourth octet is
+    malformed.  A *non-minimal* encoding — one carrying a redundant
+    continuation octet — decodes normally: §1.5.5's minimum-bytes rule is
+    not enforced here (pinned in test_mqtt_codec_lengths.py).  Trailing
+    bytes beyond the integer are the caller's.
+    """
+    multiplier = 1
+    value = 0
+    consumed = 0
+    while pos < end:
+        byte = data[pos]
+        pos += 1
+        value += (byte & 0x7F) * multiplier
+        consumed += 1
+        if (byte & 0x80) == 0:
+            return value, pos
+        if consumed == 4:
+            raise MQTTDecodeError('Variable Byte Integer too long')
+        multiplier *= 128
+    raise IncompletePacket('Variable Byte Integer continues past buffer')
+
+
 def decode_variable_byte_integer(data: bytes) -> tuple[int, int]:
     """§1.5.5 — Decode a Variable Byte Integer; return ``(value, consumed)``.
 
     Trailing bytes beyond the integer are ignored (the caller tracks them).
     """
-    multiplier = 1
-    value = 0
-    consumed = 0
-    for byte in data:
-        value += (byte & 0x7F) * multiplier
-        consumed += 1
-        if multiplier > 128 * 128 * 128:
-            raise MQTTDecodeError('Variable Byte Integer too long')
-        if (byte & 0x80) == 0:
-            return value, consumed
-        multiplier *= 128
-    raise IncompletePacket('Variable Byte Integer continues past buffer')
+    value, pos = _read_vbi_at(data, 0, len(data))
+    return value, pos
 
 
 # ===========================================================================
@@ -359,9 +406,40 @@ _BYTE, _UINT16, _UINT32, _VBI, _UTF8, _BINARY, _PAIR = (
 )
 
 
+class PropertyId(IntEnum):
+    """§2.2.2.2 Table 2-3 property identifiers."""
+    PAYLOAD_FORMAT_INDICATOR = 0x01
+    MESSAGE_EXPIRY_INTERVAL = 0x02
+    CONTENT_TYPE = 0x03
+    RESPONSE_TOPIC = 0x08
+    CORRELATION_DATA = 0x09
+    SUBSCRIPTION_IDENTIFIER = 0x0B
+    SESSION_EXPIRY_INTERVAL = 0x11
+    ASSIGNED_CLIENT_IDENTIFIER = 0x12
+    SERVER_KEEP_ALIVE = 0x13
+    AUTHENTICATION_METHOD = 0x15
+    AUTHENTICATION_DATA = 0x16
+    REQUEST_PROBLEM_INFORMATION = 0x17
+    WILL_DELAY_INTERVAL = 0x18
+    REQUEST_RESPONSE_INFORMATION = 0x19
+    RESPONSE_INFORMATION = 0x1A
+    SERVER_REFERENCE = 0x1C
+    REASON_STRING = 0x1F
+    RECEIVE_MAXIMUM = 0x21
+    TOPIC_ALIAS_MAXIMUM = 0x22
+    TOPIC_ALIAS = 0x23
+    MAXIMUM_QOS = 0x24
+    RETAIN_AVAILABLE = 0x25
+    USER_PROPERTY = 0x26
+    MAXIMUM_PACKET_SIZE = 0x27
+    WILDCARD_SUBSCRIPTION_AVAILABLE = 0x28
+    SUBSCRIPTION_IDENTIFIER_AVAILABLE = 0x29
+    SHARED_SUBSCRIPTION_AVAILABLE = 0x2A
+
+
 class PropertyInfo(NamedTuple):
     """Static description of one MQTT 5.0 property identifier (§2.2.2.2)."""
-    identifier: int
+    identifier: PropertyId
     name: str
     wire_type: str
 
@@ -371,48 +449,71 @@ class PropertyInfo(NamedTuple):
 # ``properties`` dict (identical except User Property, which aggregates into
 # the plural ``user_properties`` list of (k, v) pairs).
 _PROPERTY_SPECS: tuple[tuple[int, str, str, str], ...] = (
-    (0x01, 'payload_format_indicator', 'payload_format_indicator', _BYTE),
-    (0x02, 'message_expiry_interval', 'message_expiry_interval', _UINT32),
-    (0x03, 'content_type', 'content_type', _UTF8),
-    (0x08, 'response_topic', 'response_topic', _UTF8),
-    (0x09, 'correlation_data', 'correlation_data', _BINARY),
-    (0x0B, 'subscription_identifier', 'subscription_identifier', _VBI),
-    (0x11, 'session_expiry_interval', 'session_expiry_interval', _UINT32),
-    (0x12, 'assigned_client_identifier', 'assigned_client_identifier', _UTF8),
-    (0x13, 'server_keep_alive', 'server_keep_alive', _UINT16),
-    (0x15, 'authentication_method', 'authentication_method', _UTF8),
-    (0x16, 'authentication_data', 'authentication_data', _BINARY),
-    (0x17, 'request_problem_information', 'request_problem_information', _BYTE),
-    (0x18, 'will_delay_interval', 'will_delay_interval', _UINT32),
-    (0x19, 'request_response_information', 'request_response_information', _BYTE),
-    (0x1A, 'response_information', 'response_information', _UTF8),
-    (0x1C, 'server_reference', 'server_reference', _UTF8),
-    (0x1F, 'reason_string', 'reason_string', _UTF8),
-    (0x21, 'receive_maximum', 'receive_maximum', _UINT16),
-    (0x22, 'topic_alias_maximum', 'topic_alias_maximum', _UINT16),
-    (0x23, 'topic_alias', 'topic_alias', _UINT16),
-    (0x24, 'maximum_qos', 'maximum_qos', _BYTE),
-    (0x25, 'retain_available', 'retain_available', _BYTE),
-    (0x26, 'user_property', 'user_properties', _PAIR),
-    (0x27, 'maximum_packet_size', 'maximum_packet_size', _UINT32),
-    (0x28, 'wildcard_subscription_available', 'wildcard_subscription_available', _BYTE),
-    (0x29, 'subscription_identifier_available', 'subscription_identifier_available', _BYTE),
-    (0x2A, 'shared_subscription_available', 'shared_subscription_available', _BYTE),
+    (PropertyId.PAYLOAD_FORMAT_INDICATOR,
+     'payload_format_indicator', 'payload_format_indicator', _BYTE),
+    (PropertyId.MESSAGE_EXPIRY_INTERVAL,
+     'message_expiry_interval', 'message_expiry_interval', _UINT32),
+    (PropertyId.CONTENT_TYPE, 'content_type', 'content_type', _UTF8),
+    (PropertyId.RESPONSE_TOPIC, 'response_topic', 'response_topic', _UTF8),
+    (PropertyId.CORRELATION_DATA,
+     'correlation_data', 'correlation_data', _BINARY),
+    (PropertyId.SUBSCRIPTION_IDENTIFIER,
+     'subscription_identifier', 'subscription_identifier', _VBI),
+    (PropertyId.SESSION_EXPIRY_INTERVAL,
+     'session_expiry_interval', 'session_expiry_interval', _UINT32),
+    (PropertyId.ASSIGNED_CLIENT_IDENTIFIER,
+     'assigned_client_identifier', 'assigned_client_identifier', _UTF8),
+    (PropertyId.SERVER_KEEP_ALIVE,
+     'server_keep_alive', 'server_keep_alive', _UINT16),
+    (PropertyId.AUTHENTICATION_METHOD,
+     'authentication_method', 'authentication_method', _UTF8),
+    (PropertyId.AUTHENTICATION_DATA,
+     'authentication_data', 'authentication_data', _BINARY),
+    (PropertyId.REQUEST_PROBLEM_INFORMATION,
+     'request_problem_information', 'request_problem_information', _BYTE),
+    (PropertyId.WILL_DELAY_INTERVAL,
+     'will_delay_interval', 'will_delay_interval', _UINT32),
+    (PropertyId.REQUEST_RESPONSE_INFORMATION,
+     'request_response_information', 'request_response_information', _BYTE),
+    (PropertyId.RESPONSE_INFORMATION,
+     'response_information', 'response_information', _UTF8),
+    (PropertyId.SERVER_REFERENCE,
+     'server_reference', 'server_reference', _UTF8),
+    (PropertyId.REASON_STRING, 'reason_string', 'reason_string', _UTF8),
+    (PropertyId.RECEIVE_MAXIMUM,
+     'receive_maximum', 'receive_maximum', _UINT16),
+    (PropertyId.TOPIC_ALIAS_MAXIMUM,
+     'topic_alias_maximum', 'topic_alias_maximum', _UINT16),
+    (PropertyId.TOPIC_ALIAS, 'topic_alias', 'topic_alias', _UINT16),
+    (PropertyId.MAXIMUM_QOS, 'maximum_qos', 'maximum_qos', _BYTE),
+    (PropertyId.RETAIN_AVAILABLE,
+     'retain_available', 'retain_available', _BYTE),
+    (PropertyId.USER_PROPERTY, 'user_property', 'user_properties', _PAIR),
+    (PropertyId.MAXIMUM_PACKET_SIZE,
+     'maximum_packet_size', 'maximum_packet_size', _UINT32),
+    (PropertyId.WILDCARD_SUBSCRIPTION_AVAILABLE,
+     'wildcard_subscription_available', 'wildcard_subscription_available', _BYTE),
+    (PropertyId.SUBSCRIPTION_IDENTIFIER_AVAILABLE,
+     'subscription_identifier_available', 'subscription_identifier_available', _BYTE),
+    (PropertyId.SHARED_SUBSCRIPTION_AVAILABLE,
+     'shared_subscription_available', 'shared_subscription_available', _BYTE),
 )
 
 # §2.2.2.2 Table 2-3 — {identifier: name}.  Exactly 27 entries.
 PROPERTY_IDENTIFIERS: dict[int, str] = {
-    pid: ident for pid, ident, _key, _wt in _PROPERTY_SPECS
+    int(pid): ident for pid, ident, _key, _wt in _PROPERTY_SPECS
 }
 
+# wire の int で引く表なのでキーは int に正規化する(値は enum から導出)。
 _PROP_BY_ID: dict[int, PropertyInfo] = {
-    pid: PropertyInfo(pid, ident, wt) for pid, ident, _key, wt in _PROPERTY_SPECS
+    int(pid): PropertyInfo(pid, ident, wt)
+    for pid, ident, _key, wt in _PROPERTY_SPECS
 }
 _PROP_BY_KEY: dict[str, tuple[int, str]] = {
     key: (pid, wt) for pid, _ident, key, wt in _PROPERTY_SPECS
 }
 _PROP_ID_TO_KEY: dict[int, str] = {
-    pid: key for pid, _ident, key, _wt in _PROPERTY_SPECS
+    int(pid): key for pid, _ident, key, _wt in _PROPERTY_SPECS
 }
 
 
@@ -422,28 +523,87 @@ def get_property_info(identifier: int) -> PropertyInfo | None:
 
 
 def _decode_vbi_at(data: bytes, pos: int, end: int) -> tuple[int, int]:
-    val, consumed = decode_variable_byte_integer(data[pos:end])
-    return val, pos + consumed
+    try:
+        return _read_vbi_at(data, pos, end)
+    except IncompletePacket as exc:
+        raise MQTTDecodeError(_CROSSING) from exc
 
 
-# Wire type → (value encoder, value decoder).  Module-level constant, so both
-# property codec paths are a single dict lookup instead of a 6-branch chain
-# (the original ``_encode_prop_value`` used bare ``if`` — not ``elif`` — so every
-# branch was evaluated even after a match).  Encoders take the raw value and
-# return the encoded bytes *without* the property-id prefix; decoders share a
-# uniform ``(data, pos, end) -> (value, new_pos)`` signature.  ``_PAIR`` (user
-# properties) is handled by guard clauses in both callers, not via this table.
+# §2.2.2 contract for the decoders below: consume only bytes inside the
+# declared Property Length.  A violation is MQTTDecodeError, never
+# IncompletePacket — the packet is already whole; nothing waits for more bytes.
+_CROSSING = 'property value crosses the declared Property Length'
+
+
+def _decode_u8_at(data: bytes, pos: int, end: int) -> tuple[int, int]:
+    if pos + 1 > end:
+        raise MQTTDecodeError(_CROSSING)
+    return data[pos], pos + 1
+
+
+def _decode_u16_at(data: bytes, pos: int, end: int) -> tuple[int, int]:
+    if pos + 2 > end:
+        raise MQTTDecodeError(_CROSSING)
+    return data[pos] << 8 | data[pos + 1], pos + 2
+
+
+def _decode_u32_at(data: bytes, pos: int, end: int) -> tuple[int, int]:
+    if pos + 4 > end:
+        raise MQTTDecodeError(_CROSSING)
+    return (data[pos] << 24 | data[pos + 1] << 16
+            | data[pos + 2] << 8 | data[pos + 3]), pos + 4
+
+
+def _decode_utf8_at(data: bytes, pos: int, end: int) -> tuple[str, int]:
+    if pos + 2 > end:
+        raise MQTTDecodeError(_CROSSING)
+    length = int.from_bytes(data[pos:pos + 2], 'big')
+    start = pos + 2
+    stop = start + length
+    if stop > end:
+        raise MQTTDecodeError(_CROSSING)
+    return data[start:stop].decode('utf-8'), stop
+
+
+def _decode_binary_at(data: bytes, pos: int, end: int) -> tuple[bytes, int]:
+    if pos + 2 > end:
+        raise MQTTDecodeError(_CROSSING)
+    length = int.from_bytes(data[pos:pos + 2], 'big')
+    start = pos + 2
+    stop = start + length
+    if stop > end:
+        raise MQTTDecodeError(_CROSSING)
+    return bytes(data[start:stop]), stop
+
+
+def _decode_pair_at(data: bytes, pos: int, end: int) -> tuple[tuple[str, str], int]:
+    pair_key, pos = _decode_utf8_at(data, pos, end)
+    pair_val, pos = _decode_utf8_at(data, pos, end)
+    return (pair_key, pair_val), pos
+
+
+# Wire type → (value encoder, value decoder); ``_PAIR`` is not an entry —
+# encode guards it, decode binds ``_decode_pair_at``.  Encoders return the
+# value bytes *without* the property-id prefix; decoders follow
+# ``(data, pos, end) -> (value, new_pos)``, staying inside the section.  This
+# table owns wire shape and bounds only; admissibility, multiplicity (User
+# Property is plural, the rest single) and value ranges are the message's
+# and the broker's.
 _WIRE_CODECS: dict[str, tuple[Callable[[Any], bytes],
                               Callable[[bytes, int, int], tuple[Any, int]]]] = {
-    _BYTE:   (lambda v: bytes([v & 0xFF]),
-              lambda d, p, e: (d[p], p + 1)),
-    _UINT16: (lambda v: int(v).to_bytes(2, 'big'),
-              lambda d, p, e: (int.from_bytes(d[p:p + 2], 'big'), p + 2)),
-    _UINT32: (lambda v: int(v).to_bytes(4, 'big'),
-              lambda d, p, e: (int.from_bytes(d[p:p + 4], 'big'), p + 4)),
+    _BYTE:   (lambda v: bytes([v & 0xFF]), _decode_u8_at),
+    _UINT16: (lambda v: int(v).to_bytes(2, 'big'), _decode_u16_at),
+    _UINT32: (lambda v: int(v).to_bytes(4, 'big'), _decode_u32_at),
     _VBI:    (lambda v: encode_variable_byte_integer(int(v)), _decode_vbi_at),
-    _UTF8:   (_encode_utf8, lambda d, p, e: _decode_utf8(d, p)),
-    _BINARY: (_encode_binary, lambda d, p, e: _decode_binary(d, p)),
+    _UTF8:   (_encode_utf8, _decode_utf8_at),
+    _BINARY: (_encode_binary, _decode_binary_at),
+}
+# Key and decoder are static per identifier: one lookup serves the decode
+# loop where separate key and wire-type hops would do three.
+_PROP_DECODE: dict[int, tuple[str, Callable[[bytes, int, int], tuple[Any, int]]]] = {
+    int(pid): (_PROP_ID_TO_KEY[pid],
+               _decode_pair_at if wt == _PAIR else _WIRE_CODECS[wt][1])
+    for pid, _ident, _key, wt in _PROPERTY_SPECS
 }
 
 
@@ -475,8 +635,7 @@ def decode_properties(data: bytes, offset: int = 0) -> tuple[dict[str, Any], int
 
     ``consumed`` counts the Property Length prefix plus the property bytes.
     """
-    length, len_consumed = decode_variable_byte_integer(data[offset:])
-    start = offset + len_consumed
+    length, start = _read_vbi_at(data, offset, len(data))
     end = start + length
     if end > len(data):
         raise IncompletePacket('Properties body truncated')
@@ -485,20 +644,15 @@ def decode_properties(data: bytes, offset: int = 0) -> tuple[dict[str, Any], int
     while pos < end:
         pid = data[pos]
         pos += 1
-        spec = _PROP_BY_ID.get(pid)
-        if spec is None:
+        entry = _PROP_DECODE.get(pid)
+        if entry is None:
             raise MQTTDecodeError(f'Unknown property identifier 0x{pid:02X}')
-        wire_type = spec.wire_type
-        runtime_key = _PROP_ID_TO_KEY[pid]
-        if wire_type == _PAIR:
-            pair_key, pos = _decode_utf8(data, pos)
-            pair_val, pos = _decode_utf8(data, pos)
-            props.setdefault(runtime_key, []).append((pair_key, pair_val))
-            continue
-        codec = _WIRE_CODECS.get(wire_type)
-        if codec is None:  # pragma: no cover - exhaustive above
-            raise MQTTDecodeError(f'Unhandled property wire type {wire_type!r}')
-        props[runtime_key], pos = codec[1](data, pos, end)
+        runtime_key, decoder = entry
+        value, pos = decoder(data, pos, end)
+        if decoder is _decode_pair_at:
+            props.setdefault(runtime_key, []).append(value)
+        else:
+            props[runtime_key] = value
     return props, end - offset
 
 
@@ -585,7 +739,7 @@ class MQTTConnack(MQTTMessage):
 
     packet_type: ClassVar[MQTTPacketType] = MQTTPacketType.CONNACK
     session_present: bool = False
-    reason_code: int = 0
+    reason_code: int = ReasonCode.SUCCESS
     properties: dict[str, Any] = field(default_factory=dict)
 
 
@@ -635,7 +789,7 @@ class MQTTPublish(MQTTMessage):
 class _PacketIdAck(MQTTMessage):
     """Shared shape for PUBACK/PUBREC/PUBREL/PUBCOMP (§3.4-§3.7)."""
     packet_id: int
-    reason_code: int = 0
+    reason_code: int = ReasonCode.SUCCESS
     properties: dict[str, Any] = field(default_factory=dict)
 
 
@@ -839,7 +993,7 @@ def _encode_connect(m: MQTTConnect) -> bytes:
 
 def _encode_connack(m: MQTTConnack) -> bytes:
     body = bytearray()
-    body.append(0x01 if m.session_present else 0x00)
+    body.append(int(m.session_present))
     body.append(int(m.reason_code) & 0xFF)
     body += encode_properties(m.properties)
     return _frame(MQTTPacketType.CONNACK, 0, bytes(body))
@@ -864,7 +1018,7 @@ def _encode_publish(m: MQTTPublish) -> bytes:
 
 
 def _encode_packet_id_ack(m: _PacketIdAck) -> bytes:
-    flags = RESERVED_FLAGS_0010 if m.packet_type == MQTTPacketType.PUBREL else 0x00
+    flags = RESERVED_FLAGS_0010 if m.packet_type == MQTTPacketType.PUBREL else 0
     body = bytearray()
     body += int(m.packet_id).to_bytes(2, 'big')
     body.append(int(m.reason_code) & 0xFF)
@@ -999,9 +1153,7 @@ def _decode_connect(body: bytes, flags: int) -> MQTTConnect:
     # §3.1.2 — Protocol Level (1), Connect Flags (1) and Keep Alive (2) are a
     # fixed 4-byte block after the protocol name.  A CONNECT whose declared
     # Remaining Length stops short of them must be rejected as a Malformed
-    # Packet (§1.5.5, §4.13) — a raw ``body[pos]`` here would raise IndexError,
-    # which the framer's ``except`` does not catch, unwinding ``read_loop``
-    # and dropping the connection instead of resyncing.
+    # Packet (§1.5.5, §4.13).
     if pos + 4 > len(body):
         raise MQTTDecodeError('CONNECT truncated before the fixed header fields')
     proto_level = body[pos]
@@ -1018,7 +1170,7 @@ def _decode_connect(body: bytes, flags: int) -> MQTTConnect:
     pos += 2
     # ProtocolLevel.V3_1_1 and earlier carry no Properties block; only decode
     # one from ProtocolLevel.V5_0.  Lenient decode lets the broker reject an
-    # unsupported protocol level with CONNACK 0x84 rather than crash here.
+    # unsupported protocol level with the UNSUPPORTED_PROTOCOL_VERSION CONNACK rather than crash here.
     properties: dict[str, Any] = {}
     if proto_level >= ProtocolLevel.V5_0:
         properties, c = decode_properties(body, pos)
@@ -1087,7 +1239,7 @@ def _decode_packet_id_ack(cls: type, body: bytes) -> _PacketIdAck:
     """
     packet_type = cls.packet_type
     packet_id = _decode_packet_id(body, 0, packet_type)
-    reason_code = 0
+    reason_code = ReasonCode.SUCCESS
     properties: dict[str, Any] = {}
     pos = 2
     if len(body) > 2:
@@ -1227,18 +1379,16 @@ def decode_packet(data: bytes) -> MQTTMessage:
 
     # §2.1.3 — reserved fixed-header flag bits.  PUBLISH carries DUP/QoS/RETAIN;
     # PUBREL/SUBSCRIBE/UNSUBSCRIBE MUST be 0b0010; all others MUST be 0b0000.
-    # A mismatch is a Malformed Packet — also the signal the actor's resync uses
-    # to skip junk bytes.
+    # A mismatch is a Malformed Packet.
     if packet_type != MQTTPacketType.PUBLISH:
         expected = RESERVED_FLAGS_0010 if packet_type in (
             MQTTPacketType.PUBREL, MQTTPacketType.SUBSCRIBE,
-            MQTTPacketType.UNSUBSCRIBE) else 0x00
+            MQTTPacketType.UNSUBSCRIBE) else 0
         if flags != expected:
             raise MQTTDecodeError(
                 f'Reserved flag bits 0x{flags:X} invalid for {packet_type.name}')
 
-    remaining_length, rl_consumed = decode_variable_byte_integer(data[1:])
-    header_len = 1 + rl_consumed
+    remaining_length, header_len = _read_vbi_at(data, 1, min(len(data), 5))
     total = header_len + remaining_length
     if total > len(data):
         raise IncompletePacket('Packet body truncated')
@@ -1251,9 +1401,7 @@ def decode_packet(data: bytes) -> MQTTMessage:
     # the whole declared packet.  An inner decoder that still claims "need more"
     # (IncompletePacket) or indexes past the body (IndexError) means the packet's
     # contents are inconsistent with its declared length — a Malformed Packet
-    # (§1.5.5, §4.13), not a short read.  Both must surface as MQTTDecodeError so
-    # the framer resyncs (drops a byte) instead of stalling forever on a body
-    # that will never grow, or unwinding read_loop on an uncaught IndexError.
+    # (§1.5.5, §4.13), not a short read.
     try:
         msg = decoder(body, flags)
     except IncompletePacket as exc:

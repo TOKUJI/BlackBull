@@ -9,17 +9,20 @@ the actor answers RST_STREAM.
 
 The request-level pseudo-header rules (RFC 9113 §8.3.1) live here: which
 pseudo-headers must be present, that ``:status`` may not appear in a request,
-and the ``:authority`` / ``Host`` authority grammar that decides the ``host``
+the value grammars of ``:method``, ``:scheme`` and ``:path``, and the
+``:authority`` / ``Host`` authority grammar that decides the ``host``
 a handler sees.  Field-level validation already happened when the frame parsed
 its payload.
 """
-from urllib.parse import unquote, urlsplit
-
 from ..protocol.frame_types import PseudoHeaders
+from ..protocol.field_grammar import (COMMON_METHODS, COMMON_SCHEMES,
+                                      URI_SCHEME_RE, method_token_is_valid)
+from ..protocol.framing import method_is
 import logging
 from ..connection import Connection
 from ..headers import Headers
 from .http1_actor import _TARGET_ALLOWED_OCTETS, _authority_is_valid
+from .request_target import split_path_query
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +80,7 @@ def _build_h2_connection(method: str, path: str, raw_path: bytes,
     return c
 
 
-def _split_h2_path(raw: str):
+def _split_h2_path(raw: str) -> tuple[str, bytes, bytes]:
     """Split an HTTP/2 ``:path`` pseudo into ASGI (path, raw_path, query_string).
 
     RFC 9113 §8.3.1: ``:path`` carries the origin-form request target
@@ -86,20 +89,8 @@ def _split_h2_path(raw: str):
     ``raw`` is always ``str`` — ``frame_types`` decodes pseudo-header values
     when the HEADERS frame is parsed, and the server-push caller passes the
     ASGI event's ``str`` path.
-
-    ``urlsplit`` (not ``urlparse``) so an RFC 3986 ``;`` path sub-delimiter
-    stays in the path component rather than being split off as obsolete RFC
-    2396 ``;params``.  The ``'%' in path`` guard keeps escape-free targets on
-    the plain fast path; unquote semantics match uvicorn ('+' stays literal,
-    malformed escapes pass through, ``errors='replace'`` can never raise).
     """
-    parsed = urlsplit(raw)
-    path = parsed.path
-    if '%' in path:
-        decoded = unquote(path, encoding='utf-8', errors='replace')
-    else:
-        decoded = path
-    return decoded, path.encode('utf-8'), parsed.query.encode('utf-8')
+    return split_path_query(raw.encode('utf-8'))
 
 
 def _request_headers_with_host(frame, *, require_present: bool) -> list | None:
@@ -109,7 +100,8 @@ def _request_headers_with_host(frame, *, require_present: bool) -> list | None:
     ``http``/``https`` request without ``:authority`` must carry a valid
     ``Host`` field (*require_present*).  The grammar is H1's
     ``_authority_is_valid`` (RFC 3986 §3.2 delimiters, controls and ASCII
-    rule, and §3.2.2's IP-literal); a present ``:authority`` replaces any
+    rule, the §3.2.2 IP-literal, and the ``host [":" port]`` shape), so
+    H/2 refuses what H/1 refuses; a present ``:authority`` replaces any
     literal
     ``Host`` handed to the application, mirroring H1's absolute-form override
     (RFC 9112 §3.2.2) so handlers see one ``host`` under either transport.
@@ -186,6 +178,13 @@ def parse_headers(frame) -> Connection | None:
     if method is None:
         frame._mark_malformed('missing :method')
         return None
+    # RFC 9110 §9.1 — method = token.  HTTP/1.1 grades its request line with
+    # the same rule (``http1_actor._parse``), so the two transports cannot
+    # disagree about which methods exist.
+    if (method not in COMMON_METHODS
+            and not method_token_is_valid(method.encode('utf-8'))):
+        frame._mark_malformed(f'invalid :method {method!r}')
+        return None
 
     # RFC 9112 §2.1 with RFC 3986 — the visible-ASCII rule HTTP/1.1 applies to
     # its request-target, so the transports cannot disagree about a path
@@ -198,7 +197,25 @@ def parse_headers(frame) -> Connection | None:
         frame._mark_malformed(f'invalid :path {path_pseudo!r}')
         return None
 
-    if method != 'CONNECT':
+    # RFC 3986 §3.1 — the scheme grammar.  No HTTP/1.1 counterpart to match:
+    # that transport grades only an absolute-form target's scheme (BLA-434).
+    # Graded whenever the field is present, like ``:path`` above.
+    scheme_pseudo = frame.pseudo_headers.get(PseudoHeaders.SCHEME)
+    if scheme_pseudo is None:
+        scheme = 'https'                # CONNECT omits :scheme (RFC 9113 §8.5)
+    elif scheme_pseudo in COMMON_SCHEMES:
+        scheme = scheme_pseudo          # members are lowercase — test-pinned
+    elif URI_SCHEME_RE.fullmatch(scheme_pseudo.encode('utf-8')) is None:
+        frame._mark_malformed(f'invalid :scheme {scheme_pseudo!r}')
+        return None
+    else:
+        # RFC 3986 §3.1 — an uppercase spelling is equivalent and the
+        # canonical form is lowercase.  The grammar kept the value ASCII, so
+        # this maps ASCII case only.
+        scheme = scheme_pseudo.lower()
+
+    connect = method_is(method, 'CONNECT')
+    if not connect:
         if PseudoHeaders.SCHEME not in frame.pseudo_headers:
             frame._mark_malformed('missing :scheme')
             return None
@@ -211,7 +228,7 @@ def parse_headers(frame) -> Connection | None:
 
     protocol = frame.pseudo_headers.get(PseudoHeaders.PROTOCOL, '')
 
-    if method == 'CONNECT' and protocol == 'websocket':
+    if connect and protocol == 'websocket':
         # RFC 8441 §4 — Extended CONNECT bootstrapping WebSocket over HTTP/2.
         # ``method`` is the true wire value, never a placeholder: it IS read
         # for websocket-typed Connections, by ``AccessLogRecord.from_conn``
@@ -219,7 +236,6 @@ def parse_headers(frame) -> Connection | None:
         # guard (``Cache``'s cacheable-methods check, for one).  Routing and
         # lifecycle events are unaffected — ``BlackBull._dispatch`` branches on
         # ``conn.type`` before any method-based dispatch.
-        scheme_pseudo = frame.pseudo_headers.get(PseudoHeaders.SCHEME, 'https')
         path, raw_path, query_string = '', b'', b''
         if p := frame.pseudo_headers.get(PseudoHeaders.PATH):
             path, raw_path, query_string = _split_h2_path(p)
@@ -233,7 +249,7 @@ def parse_headers(frame) -> Connection | None:
         # bridge, not stored here.
         return Connection(
             type='websocket', method=method,
-            scheme='wss' if scheme_pseudo == 'https' else 'ws',
+            scheme='wss' if scheme == 'https' else 'ws',
             path=path, raw_path=raw_path, query_string=query_string,
             headers=Headers.from_lowered(raw_headers), http_version='2',
         )
@@ -241,11 +257,6 @@ def parse_headers(frame) -> Connection | None:
     path, raw_path, query_string = '', b'', b''
     if p := frame.pseudo_headers.get(PseudoHeaders.PATH):
         path, raw_path, query_string = _split_h2_path(p)
-
-    # An absent or empty ``:scheme`` falls back to 'https'.  Absence is
-    # already rejected above for non-CONNECT requests, so this only covers
-    # CONNECT and the empty-value case.
-    scheme = frame.pseudo_headers.get(PseudoHeaders.SCHEME) or 'https'
 
     # Plain CONNECT is excluded from the host check: §8.5 gives its
     # ``:authority`` tunnel semantics, and the presence rule only binds
@@ -255,7 +266,7 @@ def parse_headers(frame) -> Connection | None:
     # field name malformed and ``HeadersFrame.parse_payload`` rejects the
     # frame before the pair reaches ``frame.headers``, so the list is
     # lowercase by protocol.  The injected ``host`` is a lowercase literal.
-    if method == 'CONNECT':
+    if connect:
         headers = Headers.from_lowered(frame.headers)
     else:
         raw_headers = _request_headers_with_host(
@@ -264,14 +275,8 @@ def parse_headers(frame) -> Connection | None:
             return None
         headers = Headers.from_lowered(raw_headers)
 
-    # A spec-illegal empty ``:method`` falls back to 'HEAD' instead of being
-    # rejected the way an empty ``:path`` is.  That asymmetry is a known
-    # conformance gap, deliberately left alone — closing it is a behaviour
-    # change, not a cleanup.
-    effective_method = method or 'HEAD'
-
     # ``root_path`` is NOT taken from the client-controlled X-Forwarded-Prefix;
     # only TrustedProxy sets it after verifying the peer.  Both branches leave
     # it at the field default ('') — the RFC-safe empty mount.
-    return _build_h2_connection(effective_method, path, raw_path,
+    return _build_h2_connection(method, path, raw_path,
                                 query_string, headers, scheme)

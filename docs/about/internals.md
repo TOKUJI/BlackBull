@@ -209,6 +209,12 @@ so the two disagreed for the rest of the request.
   [WebSockets — Fragmented messages](../guide/websockets.md#fragmented-messages)).
 - Supervisor strategy: **isolate** — a protocol error closes
   this connection only.
+- On end (handler return, error, cancel, peer close, timeout) the
+  recipient's read-loop task is cancelled and joined before the
+  transport closes — a reader parked on a full queue never wakes on
+  EOF alone.  Ownership: read-loop task and queue → `recipient.shutdown`;
+  watchdog → `disarm_watchdog`; control sends are single writes that end
+  on their own.
 
 ### Non-HTTP protocol handlers (the Non-ASGI bridge)
 
@@ -602,6 +608,24 @@ drain's logic and the framing decision differ, and it differs because
 is exactly why that path drains rather than refusing.
 
 ## Send-path invariant
+
+HTTP ASGI send events are normalized by `blackbull.native._native_from_asgi`,
+shared by the handler/middleware adapters and both protocol senders.
+`NativeResponse(push=...)` carries a promised request; the HTTP/2 push
+callback consumes it directly. Its header arm describes request headers,
+so response middleware and route-header injection pass push messages through.
+`asgi_send_boundary` expands native messages at external-host and
+scope-declared middleware boundaries.
+
+The mutually exclusive `file_path` and `push` properties share the existing
+optional send storage. Only a push allocates a tagged path object; ordinary
+responses gain no slot or allocation. Senders and response middleware check
+whether this storage is empty before resolving the public properties.
+
+Middleware conversion copies header lists because middleware may mutate them.
+Direct sender conversion borrows response headers and trailers; each sender
+copies them before buffering or writing. This avoids consecutive copies while
+isolating buffered fields from later changes to the caller's list.
 
 Protocol senders never choose between joining and vectored I/O
 themselves.  They always call `BaseSender._write_many(parts)`,

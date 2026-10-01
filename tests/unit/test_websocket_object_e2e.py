@@ -152,18 +152,15 @@ def test_subprotocol_negotiation_through_the_object():
             assert 'chat' in ws.receive_text()
 
 
-def test_bare_parameter_name_resolves_to_the_object():
+@pytest.mark.parametrize('url,expected', [
+    pytest.param('/object-bare', 'bare', id='bare-parameter'),
+    pytest.param('/object-with-conn', '/object-with-conn', id='with-connection'),
+])
+def test_bare_parameter_name_resolves_to_the_object(url, expected):
     app = _make_app()
     with TestClient(app) as client:
-        with client.websocket_connect('/object-bare') as ws:
-            assert ws.receive_text() == 'bare'
-
-
-def test_connection_can_be_injected_alongside_the_object():
-    app = _make_app()
-    with TestClient(app) as client:
-        with client.websocket_connect('/object-with-conn') as ws:
-            assert ws.receive_text() == '/object-with-conn'
+        with client.websocket_connect(url) as ws:
+            assert ws.receive_text() == expected
 
 
 def test_client_disconnect_ends_the_async_for_and_is_observable():
@@ -241,18 +238,14 @@ def test_middleware_plus_object_no_accept_in_handler():
             assert ws.receive_text() == 'hello'
 
 
-def test_middleware_plus_object_with_a_bare_accept():
+@pytest.mark.parametrize('url', [
+    pytest.param('/mw-object-accepts', id='middleware-plus-object'),
+    pytest.param('/mw-raw', id='middleware-raw-form'),
+])
+def test_middleware_plus_object_with_a_bare_accept(url):
     app = _middleware_app()
     with TestClient(app) as client:
-        with client.websocket_connect('/mw-object-accepts') as ws:
-            ws.send_text('hello')
-            assert ws.receive_text() == 'hello'
-
-
-def test_middleware_still_works_with_the_raw_form():
-    app = _middleware_app()
-    with TestClient(app) as client:
-        with client.websocket_connect('/mw-raw') as ws:
+        with client.websocket_connect(url) as ws:
             ws.send_text('hello')
             assert ws.receive_text() == 'hello'
 

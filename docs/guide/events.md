@@ -300,8 +300,8 @@ too, and is meant for **resource cleanup**.
 | `path` | `str` | Request / connection path |
 | `exception` | `BaseException` \| `None` | The error that occurred while handling the scope (whether it propagated or was turned into a 500), or `None` |
 
-Pair it with `blocking=True` so cleanup completes before the scope
-is gone:
+Pair it with `blocking=True` — blocking observers delay dispatch,
+but cancellation can interrupt cleanup:
 
 ```python
 @app.on('scope_completed', blocking=True)
@@ -389,6 +389,12 @@ async def on_disconnected(event):
 
 Both are **observation only** — the connection lifecycle is
 driven by the ASGI handler, not by interceptors.
+
+The server waits up to 5 seconds for each `websocket_disconnected`
+listener before continuing connection cleanup.  On timeout, it requests
+cancellation and logs a warning naming the listener, and the next
+listener is still served.  Detached observers are not awaited before
+the transport closes.
 
 ## Exception handling
 

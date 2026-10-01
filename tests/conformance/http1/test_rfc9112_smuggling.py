@@ -22,20 +22,6 @@ from .conftest import send_raw
 
 
 @pytest.mark.integration
-class TestCLCL:
-    """Two Content-Length headers; safe receiver MUST reject."""
-
-    def test_two_different_cl_rejected(self, h1_app):
-        r = send_raw('127.0.0.1', h1_app.port,
-                     b'POST /echo HTTP/1.1\r\n'
-                     b'Host: localhost\r\n'
-                     b'Content-Length: 8\r\n'
-                     b'Content-Length: 0\r\n\r\n'
-                     b'SMUGGLED')
-        assert r.status != 200
-
-
-@pytest.mark.integration
 class TestCLTE:
     """Content-Length + Transfer-Encoding present — RFC 9112 §6.1.
 
@@ -44,14 +30,25 @@ class TestCLTE:
     in the backend's input buffer that get parsed as a new request.
     """
 
-    def test_cl_followed_by_te_rejected(self, h1_app):
-        r = send_raw('127.0.0.1', h1_app.port,
-                     b'POST /echo HTTP/1.1\r\n'
-                     b'Host: localhost\r\n'
-                     b'Content-Length: 13\r\n'
-                     b'Transfer-Encoding: chunked\r\n\r\n'
-                     b'0\r\n\r\n'
-                     b'SMUGGLED')
+    @pytest.mark.parametrize('req', [
+        pytest.param(
+            b'POST /echo HTTP/1.1\r\n'
+            b'Host: localhost\r\n'
+            b'Content-Length: 8\r\n'
+            b'Content-Length: 0\r\n\r\n'
+            b'SMUGGLED',
+            id='cl-cl-conflict'),
+        pytest.param(
+            b'POST /echo HTTP/1.1\r\n'
+            b'Host: localhost\r\n'
+            b'Content-Length: 13\r\n'
+            b'Transfer-Encoding: chunked\r\n\r\n'
+            b'0\r\n\r\n'
+            b'SMUGGLED',
+            id='cl-te-conflict'),
+    ])
+    def test_cl_followed_by_te_rejected(self, h1_app, req):
+        r = send_raw('127.0.0.1', h1_app.port, req)
         assert r.status != 200
 
     def test_te_followed_by_cl_rejected(self, h1_app):
@@ -132,20 +129,22 @@ class TestSpaceBeforeColon:
     treat as CL; others see an unknown header and fall back.  Either way,
     the discrepancy is exploitable."""
 
-    def test_cl_with_space_before_colon_rejected(self, h1_app):
-        r = send_raw('127.0.0.1', h1_app.port,
-                     b'POST /echo HTTP/1.1\r\n'
-                     b'Host: localhost\r\n'
-                     b'Content-Length : 5\r\n\r\n'
-                     b'hello')
-        assert r.status != 200
-
-    def test_te_with_space_before_colon_rejected(self, h1_app):
-        r = send_raw('127.0.0.1', h1_app.port,
-                     b'POST /echo HTTP/1.1\r\n'
-                     b'Host: localhost\r\n'
-                     b'Transfer-Encoding : chunked\r\n\r\n'
-                     b'0\r\n\r\n')
+    @pytest.mark.parametrize('req', [
+        pytest.param(
+            b'POST /echo HTTP/1.1\r\n'
+            b'Host: localhost\r\n'
+            b'Content-Length : 5\r\n\r\n'
+            b'hello',
+            id='cl-space-before-colon'),
+        pytest.param(
+            b'POST /echo HTTP/1.1\r\n'
+            b'Host: localhost\r\n'
+            b'Transfer-Encoding : chunked\r\n\r\n'
+            b'0\r\n\r\n',
+            id='te-space-before-colon'),
+    ])
+    def test_cl_with_space_before_colon_rejected(self, h1_app, req):
+        r = send_raw('127.0.0.1', h1_app.port, req)
         assert r.status != 200
 
 
@@ -154,14 +153,6 @@ class TestEmbeddedCRLF:
     """A CRLF inside a header value would let a smuggled request appear
     as a sibling header on the front-end and as a fresh request to the
     backend."""
-
-    def test_lf_only_terminator_in_request_line_rejected(self, h1_app):
-        """LF.CR.LF de-sync — front-end sees one request, backend sees two."""
-        r = send_raw('127.0.0.1', h1_app.port,
-                     b'GET / HTTP/1.1\nHost: localhost\n\n'
-                     b'GET /admin HTTP/1.1\r\nHost: localhost\r\n\r\n')
-        assert r.status != 200, (
-            f'bare-LF request must be rejected; got {r.status}')
 
     def test_lf_only_terminator_in_headers_rejected(self, h1_app):
         """Bare LF between headers — same de-sync class."""

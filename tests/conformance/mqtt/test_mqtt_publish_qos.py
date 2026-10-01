@@ -18,7 +18,11 @@ Reference: MQTT Version 5.0, OASIS Standard
 import asyncio
 import pytest
 
+from tests.conformance.mqtt._harness import wait_idle, cancel_all
+
 from blackbull.mqtt.messages import (
+    RESERVED_FLAGS_0010,
+    ReasonCode,
     MQTTConnect, MQTTConnack, MQTTDisconnect,
     MQTTPublish, MQTTPuback, MQTTPubrec, MQTTPubrel, MQTTPubcomp,
     MQTTSubscribe, MQTTSuback,
@@ -178,25 +182,35 @@ class TestPublishQoS1:
       - §3.4.2: Respond with a PUBACK containing the same Packet Identifier
     """
 
-    # §3.3.2-2 — QoS 1 PUBLISH MUST include a Packet Identifier
-    def test_publish_qos1_has_packet_identifier(self, mqtt):
-        """§3.3.2-2 — A PUBLISH with QoS 1 MUST contain a Packet Identifier."""
+    # §3.3.2-2/-3 — QoS 1/2 PUBLISH MUST include a Packet Identifier
+    @pytest.mark.parametrize('qos,topic,payload,packet_id', [
+        pytest.param(1, 'test/qos1', b'hello-qos1', 10, id='qos1-has-packet-id'),
+        pytest.param(2, 'test/qos2', b'critical-data', 200, id='qos2-has-packet-id'),
+    ])
+    def test_publish_qos1_has_packet_identifier(self, mqtt, qos, topic, payload, packet_id):
+        """§3.3.2-2/-3 — A PUBLISH with QoS 1/2 MUST contain a Packet
+        Identifier."""
         publish = MQTTPublish(
-            topic='test/qos1',
-            payload=b'hello-qos1',
-            qos=1,
-            packet_id=10,
+            topic=topic,
+            payload=payload,
+            qos=qos,
+            packet_id=packet_id,
         )
         wire = encode_packet(publish)
         decoded = decode_packet(wire)
-        assert decoded.qos == 1
-        assert decoded.packet_id == 10
+        assert decoded.qos == qos
+        assert decoded.packet_id == packet_id
 
-    # §3.3.2-2 — QoS 1 without Packet Identifier is invalid
-    def test_publish_qos1_without_packet_id_raises(self, mqtt):
-        """§3.3.2-2 — QoS 1 PUBLISH without Packet Identifier MUST be rejected."""
+    # §3.3.2-2/-3 — QoS 1/2 without Packet Identifier is invalid
+    @pytest.mark.parametrize('qos,topic', [
+        pytest.param(1, 'test/qos1', id='qos1-missing-packet-id'),
+        pytest.param(2, 'test/qos2', id='qos2-missing-packet-id'),
+    ])
+    def test_publish_qos1_without_packet_id_raises(self, mqtt, qos, topic):
+        """§3.3.2-2/-3 — QoS 1/2 PUBLISH without Packet Identifier MUST be
+        rejected."""
         with pytest.raises(ValueError, match='[Pp]acket.*[Ii]dentifier'):
-            MQTTPublish(topic='test/qos1', payload=b'x', qos=1)
+            MQTTPublish(topic=topic, payload=b'x', qos=qos)
 
     @pytest.mark.asyncio
     async def test_qos1_puback_round_trip(self, mqtt):
@@ -230,19 +244,19 @@ class TestPublishQoS1:
         assert len(pubacks) >= 1, "Expected PUBACK after QoS 1 PUBLISH"
         assert pubacks[0].packet_id == 100, \
             "PUBACK Packet Identifier must match PUBLISH Packet Identifier"
-        assert pubacks[0].reason_code == 0x00, \
+        assert pubacks[0].reason_code == ReasonCode.SUCCESS, \
             "QoS 1 PUBACK should have reason code Success (0x00)"
 
     # §3.4.2.1 — PUBACK with error reason code
     @pytest.mark.parametrize("error_code", [
-        0x10,  # No matching subscribers
-        0x80,  # Unspecified error
-        0x83,  # Implementation specific error
-        0x87,  # Not authorized
-        0x8D,  # Topic Name invalid
-        0x8E,  # Packet too large
-        0x8F,  # Quota exceeded
-        0x91,  # Payload format invalid
+        ReasonCode.NO_MATCHING_SUBSCRIBERS,
+        ReasonCode.UNSPECIFIED_ERROR,
+        ReasonCode.IMPLEMENTATION_SPECIFIC_ERROR,
+        ReasonCode.NOT_AUTHORIZED,
+        ReasonCode.KEEP_ALIVE_TIMEOUT,
+        ReasonCode.SESSION_TAKEN_OVER,
+        ReasonCode.TOPIC_FILTER_INVALID,
+        ReasonCode.PACKET_IDENTIFIER_IN_USE,
     ])
     def test_puback_error_reason_codes(self, error_code):
         """§3.4.2.1 — PUBACK can carry error reason codes."""
@@ -275,25 +289,6 @@ class TestPublishQoS2:
       the message and sent PUBCOMP.  If the sender re-sends PUBREL,
       the receiver MUST re-send PUBCOMP.
     """
-
-    # §3.3.2-3 — QoS 2 PUBLISH MUST include a Packet Identifier
-    def test_publish_qos2_has_packet_identifier(self, mqtt):
-        """§3.3.2-3 — A PUBLISH with QoS 2 MUST contain a Packet Identifier."""
-        publish = MQTTPublish(
-            topic='test/qos2',
-            payload=b'critical-data',
-            qos=2,
-            packet_id=200,
-        )
-        wire = encode_packet(publish)
-        decoded = decode_packet(wire)
-        assert decoded.qos == 2
-        assert decoded.packet_id == 200
-
-    def test_publish_qos2_without_packet_id_raises(self, mqtt):
-        """§3.3.2-3 — QoS 2 PUBLISH without Packet Identifier MUST be rejected."""
-        with pytest.raises(ValueError, match='[Pp]acket.*[Ii]dentifier'):
-            MQTTPublish(topic='test/qos2', payload=b'x', qos=2)
 
     @pytest.mark.asyncio
     async def test_qos2_four_way_handshake(self, mqtt):
@@ -329,13 +324,13 @@ class TestPublishQoS2:
 
     # §3.5.2.1 — PUBREC reason codes
     @pytest.mark.parametrize("error_code", [
-        0x00,  # Success
-        0x10,  # No matching subscribers
-        0x80,  # Unspecified error
-        0x83,  # Implementation specific error
-        0x87,  # Not authorized
-        0x8D,  # Topic Name invalid
-        0x8E,  # Packet too large
+        ReasonCode.SUCCESS,
+        ReasonCode.NO_MATCHING_SUBSCRIBERS,
+        ReasonCode.UNSPECIFIED_ERROR,
+        ReasonCode.IMPLEMENTATION_SPECIFIC_ERROR,
+        ReasonCode.NOT_AUTHORIZED,
+        ReasonCode.KEEP_ALIVE_TIMEOUT,
+        ReasonCode.SESSION_TAKEN_OVER,
     ])
     def test_pubrec_reason_codes(self, error_code):
         """§3.5.2.1 — PUBREC can carry error reason codes."""
@@ -347,33 +342,22 @@ class TestPublishQoS2:
 
     # §3.6.1 — PUBREL fixed header flags MUST be 0x02
     def test_pubrel_fixed_header_flags(self, mqtt):
-        """§3.6.1 — PUBREL fixed header bits 3-0 MUST be 0b0010 (0x2)."""
-        pubrel = MQTTPubrel(packet_id=300, reason_code=0x00)
+        """§3.6.1 — PUBREL fixed header bits 3-0 MUST be RESERVED_FLAGS_0010."""
+        pubrel = MQTTPubrel(packet_id=300, reason_code=ReasonCode.SUCCESS)
         wire = encode_packet(pubrel)
-        assert (wire[0] & 0x0F) == 0x02, \
-            "PUBREL fixed header flags must be 0x02 per §3.6.1"
+        assert (wire[0] & 0x0F) == RESERVED_FLAGS_0010
 
-    # §3.6.2.1 — PUBREL reason codes
-    @pytest.mark.parametrize("error_code", [
-        0x00,  # Success
-        0x92,  # Packet Identifier not found
+    # §3.6.2.1 / §3.7.2.1 — PUBREL/PUBCOMP reason codes
+    @pytest.mark.parametrize('cls', [MQTTPubrel, MQTTPubcomp],
+                             ids=['pubrel-reason-codes', 'pubcomp-reason-codes'])
+    @pytest.mark.parametrize('error_code', [
+        ReasonCode.SUCCESS,
+        ReasonCode.PACKET_IDENTIFIER_NOT_FOUND,
     ])
-    def test_pubrel_reason_codes(self, error_code):
-        """§3.6.2.1 — PUBREL can carry reason codes."""
-        pubrel = MQTTPubrel(packet_id=300, reason_code=error_code)
-        wire = encode_packet(pubrel)
-        decoded = decode_packet(wire)
-        assert decoded.reason_code == error_code
-
-    # §3.7.2.1 — PUBCOMP reason codes
-    @pytest.mark.parametrize("error_code", [
-        0x00,  # Success
-        0x92,  # Packet Identifier not found
-    ])
-    def test_pubcomp_reason_codes(self, error_code):
-        """§3.7.2.1 — PUBCOMP can carry reason codes."""
-        pubcomp = MQTTPubcomp(packet_id=300, reason_code=error_code)
-        wire = encode_packet(pubcomp)
+    def test_pubrel_reason_codes(self, cls, error_code):
+        """§3.6.2.1/§3.7.2.1 — PUBREL and PUBCOMP can carry reason codes."""
+        pkt = cls(packet_id=300, reason_code=error_code)
+        wire = encode_packet(pkt)
         decoded = decode_packet(wire)
         assert decoded.reason_code == error_code
 
@@ -408,18 +392,21 @@ class TestPublishQoS2:
 
         actor = mqtt.serve(reader, writer, ctx)
         task = asyncio.create_task(actor.run())
-        await asyncio.sleep(0.1)
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+        await wait_idle(reader, writer)
+        # Third leg (§4.5): PUBREL for the same packet — the handshake must
+        # complete with PUBCOMP, not stop at PUBREC.
+        reader.feed_packet(MQTTPubrel(packet_id=999))
+        await wait_idle(reader, writer)
+        await cancel_all(task)
 
         packets = writer.pop_packets()
-        # Subscriber should have sent PUBREC
-        pubrecs = [p for p in packets if isinstance(p, MQTTPubrec)]
-        assert len(pubrecs) >= 1, "Subscriber must send PUBREC for QoS 2 PUBLISH"
-        assert pubrecs[0].packet_id == 999
+        # Both acknowledgement legs, in order: PUBREC for the PUBLISH, then
+        # PUBCOMP for the PUBREL (§4.3.3 / §4.5).
+        acks = [(type(p).__name__, p.packet_id) for p in packets
+                if isinstance(p, (MQTTPubrec, MQTTPubcomp))]
+        assert acks == [('MQTTPubrec', 999), ('MQTTPubcomp', 999)], (
+            f'the QoS 2 handshake must complete: got {acks}'
+        )
 
 
 # ============================================================================

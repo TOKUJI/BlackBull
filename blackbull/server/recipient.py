@@ -55,6 +55,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+_READ_LOOP_JOIN_TIMEOUT = 5.0
+
 # Defaults behind BB_STREAM_QUEUE_DEPTH / BB_WS_QUEUE_DEPTH (see
 # docs/reference/env-vars.md); ``WebSocketRecipient`` documents the two modes.
 _HTTP2_STREAM_QUEUE_DEPTH = 64
@@ -2351,23 +2353,30 @@ class WebSocketRecipient(BaseRecipient):
             self._watchdog.disarm()
 
     async def shutdown(self) -> None:
-        """Cancel and await the background read-loop task, and disarm the
-        idle watchdog.
+        """Disarm the watchdog and cancel the read loop, waiting up to 5 seconds.
 
-        A reader task that outlives its session keeps reading a dead transport
-        and warns at event-loop shutdown, so client sessions call this from
-        ``close()``.  Idempotent, and safe before the first ``__call__``.
+        Safe to call repeatedly or before reading starts; never joins itself.
+        The caller closes the transport even if the reader does not stop.
         """
         self._closed = True
         self.disarm_watchdog()
         task = self._reader_task
         self._reader_task = None
-        if task is not None and not task.done():
+        if (task is not None and task is not asyncio.current_task()
+                and not task.done()):
             task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass  # Expected: the task was cancelled intentionally.
+            # wait_for would also wait for cancellation to finish.
+            done, _pending = await asyncio.wait(
+                {task}, timeout=_READ_LOOP_JOIN_TIMEOUT)
+            if not done:
+                logger.warning(
+                    'read-loop task did not stop within %.1fs; leaving it to '
+                    'read a dead transport', _READ_LOOP_JOIN_TIMEOUT)
+            else:
+                try:
+                    task.result()
+                except asyncio.CancelledError:
+                    pass  # Expected: the task was cancelled intentionally.
 
     def _mark_connect_sent(self) -> None:
         """Claim the handshake read and arm the connection's timers.

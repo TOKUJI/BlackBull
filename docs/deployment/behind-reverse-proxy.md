@@ -1,43 +1,7 @@
 # Behind a reverse proxy
 
-For most production deployments, running BlackBull behind a reverse proxy is
-the simplest topology — the proxy handles TLS termination, static files, and
-load balancing across multiple processes.
-
-This page covers three proxies (nginx, HAProxy, Envoy), the choice between
-them, and the `TrustedProxy` middleware on the BlackBull side that recovers
-client IP and scheme from the proxy's forwarded headers.
-
-## Choosing a proxy
-
-The question that separates them is whether the proxy can speak **HTTP/2 to
-the backend**. BlackBull speaks HTTP/2 natively, so a proxy that downgrades to
-HTTP/1.1 on the back leg throws that away — you get HTTP/2 between client and
-proxy only.
-
-| Proxy | HTTP/2 to backend | Reach for it when |
-|---|---|---|
-| **nginx** | ⚠️ since 1.29.4 (2025-12) — new, [three CVEs so far][nginx-sec] | You already run nginx, and an HTTP/1.1 back leg is fine |
-| **HAProxy** | ✅ stable since 1.9 (2019) | You want the HTTP/2 back leg, high throughput, and a config you can read |
-| **Envoy** | ✅ stable since 2016 | Kubernetes or a service mesh; heavy gRPC; dynamic configuration |
-
-[nginx-sec]: https://nginx.org/en/security_advisories.html
-
-An HTTP/1.1 back leg is a perfectly good default. It is what the nginx section
-below configures, it is what most deployments run, and it costs nothing for
-ordinary request/response traffic. The HTTP/2 back leg earns its keep when the
-proxy would otherwise open many upstream connections — high-concurrency APIs,
-gRPC, or long-lived streams — because multiplexing collapses them onto one.
-
-!!! note "nginx's `proxy_http_version 2` is young"
-    nginx only gained HTTP/2 proxying to the backend in 1.29.4, and the
-    feature has already carried security advisories. HAProxy and Envoy have
-    shipped it for years. If you want the HTTP/2 back leg today, prefer one of
-    those; revisit nginx once the feature has more road behind it.
-
-Not covered: **Caddy** (capable, but little enterprise deployment — ask if you
-need it), **Traefik** (no HTTP/2 backend support), and **Apache httpd** (its
-HTTP/2 proxying has been experimental for a decade).
+Configure BlackBull's trusted proxies and use the examples below to connect
+nginx, HAProxy, or Envoy to its HTTP/1.1 or HTTP/2 listener.
 
 ## Common setup — the BlackBull side
 
@@ -62,21 +26,16 @@ from blackbull import TrustedProxy
 app.use(TrustedProxy(['127.0.0.1', '::1', '10.0.0.0/8']))
 ```
 
-| | Without middleware | With middleware |
-|---|---|---|
-| `conn.client` | the proxy's IP | real client IP (from `X-Forwarded-For`) |
-| `conn.scheme` | `'http'` | `'https'` (from `X-Forwarded-Proto`) |
+Set `trusted_proxies` to the proxies' actual source addresses; other peers'
+forwarding headers are ignored. Each trusted proxy must append its observed peer
+or overwrite the address chain.
+`conn.client` identifies the nearest untrusted hop, which may itself be a proxy.
 
-Supported headers, in precedence order:
-
-1. RFC 7239 `Forwarded` — `for=<ip>; proto=<scheme>`
-2. `X-Forwarded-For` — comma-separated chain; leftmost non-trusted IP wins
-3. `X-Forwarded-Proto`
-
-Headers are **only applied when the direct TCP peer is in the trusted set**,
-which is what stops a client forging `X-Forwarded-For` to spoof its own IP.
-Every configuration below sets these headers on the proxy side; the trusted
-set on the BlackBull side must match where the proxy actually connects from.
+BlackBull prefers `Forwarded` over `X-Forwarded-For` and `X-Forwarded-Proto`.
+The XFF-based examples below therefore remove incoming `Forwarded` and overwrite
+`X-Forwarded-Proto`. They also remove `X-Forwarded-Prefix`; if mounting under
+`/api`, overwrite it with `/api` instead. Proto and prefix must each be a single
+value, not a list accumulated across proxies.
 
 ## nginx
 
@@ -104,6 +63,8 @@ server {
         proxy_set_header   Host              $host;
         proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Forwarded "";
+        proxy_set_header   X-Forwarded-Prefix "";
         proxy_set_header   Connection        "";   # enable keep-alive upstream
     }
 
@@ -113,6 +74,10 @@ server {
         proxy_pass         http://blackbull;
         proxy_http_version 1.1;
         proxy_set_header   Host       $host;
+        proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Forwarded "";
+        proxy_set_header   X-Forwarded-Prefix "";
         proxy_set_header   Upgrade    $http_upgrade;
         proxy_set_header   Connection "upgrade";
         proxy_read_timeout 3600s;     # keep WS connection open
@@ -123,6 +88,10 @@ server {
         proxy_pass                http://blackbull;
         proxy_http_version        1.1;
         proxy_set_header          Host $host;
+        proxy_set_header          X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header          X-Forwarded-Proto $scheme;
+        proxy_set_header          Forwarded "";
+        proxy_set_header          X-Forwarded-Prefix "";
         proxy_set_header          Connection "";
         proxy_buffering           off;      # flush SSE events immediately
         proxy_cache               off;
@@ -158,7 +127,9 @@ frontend https_in
     bind *:80
     http-request redirect scheme https unless { ssl_fc }
 
-    # Forwarded headers — TrustedProxy reads these.
+    http-request del-header Forwarded
+    http-request del-header X-Forwarded-Prefix
+    # Standalone metadata must replace client-supplied values.
     http-request set-header X-Forwarded-Proto https if { ssl_fc }
     http-request set-header X-Forwarded-Proto http  unless { ssl_fc }
     option forwardfor                       # appends X-Forwarded-For
@@ -220,10 +191,12 @@ static_resources:
         typed_config:
           "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
           stat_prefix: ingress_http
-          use_remote_address: true      # populates X-Forwarded-For / -Proto
+          use_remote_address: true      # appends the observed peer to XFF
+          xff_num_trusted_hops: 0        # overwrites client-supplied proto
           upgrade_configs:
           - upgrade_type: websocket     # required for WebSocket
           route_config:
+            request_headers_to_remove: [forwarded, x-forwarded-prefix]
             virtual_hosts:
             - name: backend
               domains: ["*"]
@@ -287,24 +260,6 @@ For gRPC, this is the configuration you want — Envoy will multiplex all RPCs
 onto one upstream connection. See [gRPC](../guide/grpc.md).
 
 ## Docker
-
-```dockerfile
-FROM python:3.13-slim
-WORKDIR /app
-COPY . .
-RUN pip install .
-EXPOSE 8000
-CMD ["python", "app.py", "--port", "8000"]
-```
-
-Environment variables for secrets (never hardcode):
-
-```python
-import os
-DB_URL = os.environ['DATABASE_URL']
-SECRET = os.environ['SECRET_KEY']
-PORT   = int(os.environ.get('PORT', 8000))
-```
 
 In Compose, the proxy reaches BlackBull by service name, so the trusted set
 must cover the Docker network rather than loopback:

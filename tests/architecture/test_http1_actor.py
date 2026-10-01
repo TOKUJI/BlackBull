@@ -343,30 +343,21 @@ class TestScopePopulation:
         assert captured['server'] == ['example.com', 8080]
 
     @pytest.mark.asyncio
-    async def test_scheme_is_http_for_plain_connection(self):
+    @pytest.mark.parametrize('ssl,expected', [
+        pytest.param(False, 'http', id='plain-connection'),
+        pytest.param(True, 'https', id='tls-connection'),
+    ])
+    async def test_scheme_is_http_for_plain_connection(self, ssl, expected):
         raw = _http_request()
         captured = {}
 
         async def capture_app(scope, receive, send):
             captured.update(scope.as_scope() if hasattr(scope, 'as_scope') else scope)
 
-        actor, _writer = _make_actor(raw, capture_app, ssl=False)
+        actor, _writer = _make_actor(raw, capture_app, ssl=ssl)
         await actor.run()
 
-        assert captured['scheme'] == 'http'
-
-    @pytest.mark.asyncio
-    async def test_scheme_is_https_for_tls_connection(self):
-        raw = _http_request()
-        captured = {}
-
-        async def capture_app(scope, receive, send):
-            captured.update(scope.as_scope() if hasattr(scope, 'as_scope') else scope)
-
-        actor, _writer = _make_actor(raw, capture_app, ssl=True)
-        await actor.run()
-
-        assert captured['scheme'] == 'https'
+        assert captured['scheme'] == expected
 
     @pytest.mark.asyncio
     async def test_scheme_is_wss_for_tls_websocket(self):
@@ -442,17 +433,17 @@ class TestFillConnectionInfo:
         base.update(over)
         return Connection(**base)
 
-    def test_peername_sets_client(self):
-        actor = self._make_actor(peername=('10.0.0.1', 9999))
+    @pytest.mark.parametrize('actor_over,field,expected', [
+        pytest.param({'peername': ('10.0.0.1', 9999)}, 'client', ('10.0.0.1', 9999),
+                     id='peername-sets-client'),
+        pytest.param({'sockname': ('0.0.0.0', 7777)}, 'server', ('0.0.0.0', 7777),
+                     id='sockname-sets-server'),
+    ])
+    def test_peername_sets_client(self, actor_over, field, expected):
+        actor = self._make_actor(**actor_over)
         conn = self._conn(server=None)
         actor._fill_connection_info(conn)
-        assert conn.client == ('10.0.0.1', 9999)
-
-    def test_sockname_sets_server_when_no_host(self):
-        actor = self._make_actor(sockname=('0.0.0.0', 7777))
-        conn = self._conn(server=None)
-        actor._fill_connection_info(conn)
-        assert conn.server == ('0.0.0.0', 7777)
+        assert getattr(conn, field) == expected
 
     def test_host_header_not_overwritten_by_sockname(self):
         actor = self._make_actor(sockname=('0.0.0.0', 7777))
@@ -460,17 +451,15 @@ class TestFillConnectionInfo:
         actor._fill_connection_info(conn)
         assert conn.server == ('myhost', 80)
 
-    def test_ssl_true_sets_https(self):
-        actor = self._make_actor(ssl=True)
+    @pytest.mark.parametrize('ssl,expected', [
+        pytest.param(True, 'https', id='ssl-true-sets-https'),
+        pytest.param(False, 'http', id='ssl-false-leaves-scheme'),
+    ])
+    def test_ssl_true_sets_https(self, ssl, expected):
+        actor = self._make_actor(ssl=ssl)
         conn = self._conn(scheme='http', server=None)
         actor._fill_connection_info(conn)
-        assert conn.scheme == 'https'
-
-    def test_ssl_false_leaves_scheme(self):
-        actor = self._make_actor(ssl=False)
-        conn = self._conn(scheme='http', server=None)
-        actor._fill_connection_info(conn)
-        assert conn.scheme == 'http'
+        assert conn.scheme == expected
 
     def test_ssl_true_websocket_sets_wss(self):
         actor = self._make_actor(ssl=True)
@@ -768,3 +757,84 @@ async def test_request_completed_listener_forces_access_log_record():
     await actor.run()
 
     assert 'access_log' in seen['state_keys']
+
+
+# ---------------------------------------------------------------------------
+# Application accept headers on the 101 (BLA-378)
+# ---------------------------------------------------------------------------
+
+def _accepting_app(accept_event):
+    async def app(scope, receive, send):
+        await receive()                      # websocket.connect
+        await send(accept_event)
+        await receive()                      # until disconnect
+    return app
+
+
+class TestAcceptHeadersOnThe101:
+    async def _head(self, accept_event, request=None):
+        actor, writer = _make_actor(
+            request if request is not None else _ws_request(),
+            _accepting_app(accept_event))
+        await actor.run()
+        wire = bytes(writer.written)
+        return wire.split(b'\r\n\r\n')[0]
+
+    @pytest.mark.asyncio
+    async def test_an_asgi_accept_header_reaches_the_wire(self):
+        head = await self._head({'type': 'websocket.accept', 'subprotocol': None,
+                                 'headers': [[b'x-review', b'ok']]})
+        assert b'x-review: ok' in head
+
+    @pytest.mark.asyncio
+    async def test_a_native_accept_header_reaches_the_wire(self):
+        from blackbull.native import NativeWSMessage
+        head = await self._head(
+            NativeWSMessage.accept(None, [(b'x-review', b'ok')]))
+        assert b'x-review: ok' in head
+
+    @pytest.mark.asyncio
+    async def test_no_extra_headers_keeps_the_response_protocol_only(self):
+        head = await self._head({'type': 'websocket.accept', 'subprotocol': None})
+        assert len(head.split(b'\r\n')) == 5   # status + 3 protocol fields + Date
+
+    @pytest.mark.asyncio
+    async def test_duplicate_cookies_keep_order_and_multiplicity(self):
+        head = await self._head({'type': 'websocket.accept', 'subprotocol': None,
+                                 'headers': [[b'set-cookie', b'a=1'],
+                                             [b'x-mid', b'm'],
+                                             [b'set-cookie', b'b=2']]})
+        lines = head.split(b'\r\n')
+        want = [b'set-cookie: a=1', b'x-mid: m', b'set-cookie: b=2']
+        assert [ln for ln in lines if ln in want] == want
+
+    @pytest.mark.asyncio
+    async def test_subprotocol_extension_and_headers_combine(self):
+        request = _http_request(method='GET', path='/ws', headers={
+            'Host': 'localhost:8000',
+            'Upgrade': 'websocket',
+            'Connection': 'Upgrade',
+            'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==',
+            'Sec-WebSocket-Version': '13',
+            'Sec-WebSocket-Protocol': 'chat',
+            'Sec-WebSocket-Extensions': 'permessage-deflate',
+        })
+        head = await self._head({'type': 'websocket.accept', 'subprotocol': 'chat',
+                                 'headers': [[b'x-review', b'ok']]}, request)
+        assert b'sec-websocket-protocol: chat' in head
+        assert b'sec-websocket-extensions: permessage-deflate' in head
+        assert b'x-review: ok' in head
+
+    @pytest.mark.asyncio
+    async def test_a_reserved_protocol_header_is_refused(self):
+        head = await self._head({'type': 'websocket.accept', 'subprotocol': None,
+                                 'headers': [[b'sec-websocket-accept', b'evil']]})
+        assert b'Switching Protocols' not in head
+        assert b'evil' not in head
+
+    @pytest.mark.asyncio
+    async def test_an_invalid_header_value_is_refused(self):
+        head = await self._head({'type': 'websocket.accept', 'subprotocol': None,
+                                 'headers': [[b'x-review', b'ok\r\ninjected: 1']]})
+        assert b'Switching Protocols' not in head
+        assert b'injected' not in head

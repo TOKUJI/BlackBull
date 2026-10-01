@@ -19,66 +19,17 @@ from hpack import Encoder
 
 from blackbull.server.http2_actor import HTTP2Actor
 from blackbull.server.recipient import AbstractReader, IncompleteReadError
+from tests.pseudo_header_grammar import (ILLEGAL_METHODS, ILLEGAL_SCHEMES,
+                                         LEGAL_METHODS, LEGAL_SCHEMES)
 from blackbull.server.sender import AsyncioWriter
 from blackbull.protocol.frame import FrameFactory
 from blackbull.protocol.frame_types import (
     FrameTypes, FrameFlags, ErrorCodes,
     HeaderFrameFlags, DataFrameFlags, SettingFrameFlags,
 )
-
-
-# ---------------------------------------------------------------------------
-# Wire-format helpers (same as test_http2_dispatch.py)
-# ---------------------------------------------------------------------------
-
-def _make_h2_frame(type_byte: FrameTypes, flags: int = 0,
-                   stream_id: int = 0, payload: bytes = b'') -> bytes:
-    length = len(payload)
-    return (length.to_bytes(3, 'big') + type_byte
-            + bytes([flags]) + stream_id.to_bytes(4, 'big') + payload)
-
-
-def _make_headers_frame(stream_id: int = 1, end_stream: bool = False,
-                        end_headers: bool = True,
-                        fields: list[tuple[bytes, bytes]] | None = None) -> bytes:
-    encoder = Encoder()
-    if fields is None:
-        fields = [(b':method', b'GET'), (b':path', b'/'), (b':scheme', b'https'), (b':authority', b'example.com')]
-    block = encoder.encode(fields)
-    flags = HeaderFrameFlags.END_HEADERS if end_headers else 0
-    if end_stream:
-        flags |= HeaderFrameFlags.END_STREAM
-    return _make_h2_frame(FrameTypes.HEADERS, flags, stream_id, block)
-
-
-class _BufferReader(AbstractReader):
-    """Reader that drains a byte buffer frame by frame."""
-    def __init__(self, data: bytes):
-        self._buf = bytearray(data)
-
-    async def read(self, n: int) -> bytes:
-        if not self._buf:
-            return b''
-        chunk = bytes(self._buf[:n])
-        del self._buf[:n]
-        return chunk
-
-    async def readuntil(self, sep: bytes) -> bytes:
-        result = bytearray()
-        while True:
-            if not self._buf:
-                raise IncompleteReadError()
-            result.append(self._buf[0])
-            del self._buf[:1]
-            if bytes(result).endswith(sep):
-                return bytes(result)
-
-    async def readexactly(self, n: int) -> bytes:
-        if len(self._buf) < n:
-            raise IncompleteReadError()
-        chunk = bytes(self._buf[:n])
-        del self._buf[:n]
-        return chunk
+from tests.conformance.http2._harness import (
+    _make_h2_frame, _make_headers_frame, _BufferReader,
+)
 
 
 def _make_h2_actor(app=None):
@@ -130,15 +81,6 @@ class TestG1IdleStreamReceivesNonOpeningFrames:
         # Must have sent RST_STREAM or GOAWAY with PROTOCOL_ERROR.
         self._assert_error_sent(handler, ErrorCodes.PROTOCOL_ERROR)
 
-    @pytest.mark.asyncio
-    async def test_rst_on_idle_stream_is_protocol_error(self):
-        """RST_STREAM on idle stream → PROTOCOL_ERROR (RFC 9113 §6.4)."""
-        handler, app = _make_h2_actor()
-        rst = _make_h2_frame(FrameTypes.RST_STREAM, 0, stream_id=5,
-                             payload=(0).to_bytes(4, 'big'))
-        handler.receive = AsyncMock(side_effect=[self._settings(), rst, None])
-        await handler.run()
-        self._assert_error_sent(handler, ErrorCodes.PROTOCOL_ERROR)
 
     @pytest.mark.asyncio
     async def test_window_update_on_idle_stream_is_protocol_error(self):
@@ -387,7 +329,8 @@ class TestG5ConnectionSpecificHeadersForbidden:
 # ═══════════════════════════════════════════════════════════════════════
 
 async def _check_malformed(fields):
-    """Drive a HEADERS block and require RST_STREAM(PROTOCOL_ERROR) on 1."""
+    """Drive a HEADERS block and require RST_STREAM(PROTOCOL_ERROR) on 1,
+    with the application never entered."""
     handler, app = _make_h2_actor()
     h = _make_headers_frame(1, end_stream=True, fields=fields)
     settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
@@ -399,6 +342,8 @@ async def _check_malformed(fields):
                 and frame.FrameType() == FrameTypes.RST_STREAM
                 and frame.stream_id == 1
                 and frame.error_code == ErrorCodes.PROTOCOL_ERROR):
+            assert app.await_count == 0, (
+                f'malformed request with fields {fields} reached the handler')
             return
     pytest.fail(f'Malformed request with fields {fields} was not rejected '
                 f'with RST_STREAM(PROTOCOL_ERROR)')
@@ -408,13 +353,17 @@ class TestG6MissingMandatoryPseudoHeaders:
     """RFC 9113 §8.3.1: All HTTP/2 requests MUST include exactly one valid
     value for :method, :scheme, and :path.  Omission → malformed."""
 
+    @pytest.mark.parametrize('fields', [
+        pytest.param([(b':path', b'/'), (b':scheme', b'https'),
+                      (b':authority', b'example.com')],
+                     id='missing-method'),
+        pytest.param([(b':method', b'GET'), (b':scheme', b'https'),
+                      (b':authority', b'example.com')],
+                     id='missing-path'),
+    ])
     @pytest.mark.asyncio
-    async def test_missing_method_is_malformed(self):
-        await _check_malformed([(b':path', b'/'), (b':scheme', b'https'), (b':authority', b'example.com')])
-
-    @pytest.mark.asyncio
-    async def test_missing_path_is_malformed(self):
-        await _check_malformed([(b':method', b'GET'), (b':scheme', b'https'), (b':authority', b'example.com')])
+    async def test_missing_method_is_malformed(self, fields):
+        await _check_malformed(fields)
 
     @pytest.mark.asyncio
     async def test_missing_scheme_is_malformed(self):
@@ -491,6 +440,58 @@ class TestG6PathOctets:
             if hasattr(call.args[0], 'FrameType')
             and call.args[0].FrameType() == FrameTypes.RST_STREAM
         ]
+
+
+class TestG6MethodAndSchemeGrammar:
+    """RFC 9113 §8.3.1 with RFC 9110 §9.1 and RFC 3986 §3.1 — ``:method`` is a
+    token and ``:scheme`` is a URI scheme.  §8.2.1's field octets admit a
+    separator and an underscore, so neither rule falls out of field validity;
+    HTTP/1.1 grades its request-line method with the same token rule, so the
+    two transports must refuse the same methods."""
+
+    @staticmethod
+    def _fields(method: bytes = b'GET', scheme: bytes = b'https') -> list:
+        return [(b':method', method), (b':path', b'/'),
+                (b':scheme', scheme), (b':authority', b'example.com')]
+
+    @staticmethod
+    async def _accepted(fields):
+        handler, app = _make_h2_actor()
+        h = _make_headers_frame(1, end_stream=True, fields=fields)
+        handler.receive = AsyncMock(side_effect=[
+            _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b''), h, None])
+        await handler.run()
+        assert app.await_count == 1
+        assert not _sent_rst_streams(handler, 1)
+
+    @pytest.mark.parametrize('overrides', [
+        pytest.param({'method': m}, id=f'method-not-token-{m.hex()}')
+        for m in ILLEGAL_METHODS
+    ] + [
+        pytest.param({'scheme': s}, id=f'scheme-not-uri-scheme-{s.hex()}')
+        for s in ILLEGAL_SCHEMES
+    ])
+    @pytest.mark.asyncio
+    async def test_a_method_that_is_not_a_token_is_malformed(self, overrides):
+        await _check_malformed(self._fields(**overrides))
+
+    @pytest.mark.parametrize('method', LEGAL_METHODS)
+    @pytest.mark.asyncio
+    async def test_a_token_method_is_accepted(self, method):
+        await self._accepted(self._fields(method=method))
+
+    @pytest.mark.parametrize('scheme', LEGAL_SCHEMES)
+    @pytest.mark.asyncio
+    async def test_a_uri_scheme_is_accepted(self, scheme):
+        await self._accepted(self._fields(scheme=scheme))
+
+    @pytest.mark.parametrize('scheme', [b'HTTPS', b'HTTP'])
+    @pytest.mark.asyncio
+    async def test_an_uppercase_scheme_still_requires_an_authority(self, scheme):
+        """The scheme may be uppercase — ``test_a_uri_scheme_is_accepted``
+        defends that.  What must be refused is the missing authority."""
+        await _check_malformed([(b':method', b'GET'), (b':path', b'/'),
+                                (b':scheme', scheme)])
 
 
 def _make_raw_headers_frame(block: bytes, stream_id: int = 1) -> bytes:
@@ -706,36 +707,31 @@ class TestG13FieldCharacterValidation:
     its separators included — and a value is §5.5 field-content.
     Violations → malformed."""
 
+    @pytest.mark.parametrize('field,label', [
+        pytest.param((b'Content-Type', b'text/html'), 'uppercase field name',
+                     id='uppercase-name'),
+        pytest.param((b'x-test', b'value\r\ninjection'), 'CR in field value',
+                     id='cr-in-value'),
+        pytest.param((b'x-test', b'value\ninjection'), 'LF in field value',
+                     id='lf-in-value'),
+        pytest.param((b'x-test', b'value\x00injection'), 'NUL in field value',
+                     id='nul-in-value'),
+    ])
     @pytest.mark.asyncio
-    async def test_uppercase_field_name_is_malformed(self):
-        await self._check_malformed_field(
-            (b'Content-Type', b'text/html'),
-            'uppercase field name')
+    async def test_uppercase_field_name_is_malformed(self, field, label):
+        await self._check_malformed_field(field, label)
 
+    @pytest.mark.parametrize('field,label', [
+        pytest.param((b'x-colon:name', b'value'), 'colon in field name',
+                     id='colon-in-name'),
+        pytest.param((b'', b'v'), 'empty field name',
+                     id='empty-name'),
+    ])
     @pytest.mark.asyncio
-    async def test_field_value_with_cr_is_malformed(self):
-        await self._check_malformed_field(
-            (b'x-test', b'value\r\ninjection'),
-            'CR in field value')
-
-    @pytest.mark.asyncio
-    async def test_field_value_with_lf_is_malformed(self):
-        await self._check_malformed_field(
-            (b'x-test', b'value\ninjection'),
-            'LF in field value')
-
-    @pytest.mark.asyncio
-    async def test_field_value_with_nul_is_malformed(self):
-        await self._check_malformed_field(
-            (b'x-test', b'value\x00injection'),
-            'NUL in field value')
-
-    @pytest.mark.asyncio
-    async def test_field_name_with_colon_is_malformed(self):
-        """§8.2.1: Field names MUST NOT include colon (except pseudo-headers)."""
-        await self._check_malformed_field(
-            (b'x-colon:name', b'value'),
-            'colon in field name')
+    async def test_field_name_with_colon_is_malformed(self, field, label):
+        """§8.2.1: Field names MUST NOT include colon (except pseudo-headers);
+        RFC 9110 §5.6.2 — token = 1*tchar, so no octets is not a name."""
+        await self._check_malformed_field(field, label)
 
     @pytest.mark.parametrize('value', [b' value', b'value ', b'\tvalue',
                                        b'value\t'])
@@ -745,15 +741,20 @@ class TestG13FieldCharacterValidation:
         await self._check_malformed_field(
             (b'x-test', value), f'boundary whitespace in {value!r}')
 
+    @pytest.mark.parametrize('value', [
+        pytest.param(b'value with\tinner whitespace', id='inner-whitespace'),
+        pytest.param(b'value\x80\xff', id='obs-text'),
+    ])
     @pytest.mark.asyncio
-    async def test_field_value_with_inner_whitespace_still_reaches_the_app(self):
+    async def test_field_value_with_inner_whitespace_still_reaches_the_app(self, value):
         """The edge is what the MUST is about: SP and HTAB stay legal inside
-        a field value, so this one is not malformed."""
+        a field value, and obs-text (0x80-0xFF) is inside RFC 9110's
+        field-content — neither is malformed."""
         handler, app = _make_h2_actor()
         fields = [
             (b':method', b'GET'), (b':path', b'/'), (b':scheme', b'https'),
             (b':authority', b'example.com'),
-            (b'x-test', b'value with\tinner whitespace'),
+            (b'x-test', value),
         ]
         h = _make_headers_frame(1, end_stream=True, fields=fields)
         settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
@@ -782,24 +783,38 @@ class TestG13FieldCharacterValidation:
         await self._check_malformed_field(
             (name, b'v'), f'separator in {name!r}')
 
+    @pytest.mark.parametrize('bad_field', [
+        (b'x-trailer', b' value'), (b'x-trailer', b'value '),
+        (b'x-trailer', b'value\x00'), (b'x-trailer', b'value\r'),
+        (b'X-Trailer', b'value'),
+        (b':method', b'GET'), (b':status', b'200'),
+    ])
     @pytest.mark.asyncio
-    async def test_an_empty_field_name_is_malformed(self):
-        """RFC 9110 §5.6.2 — ``token = 1*tchar``, so no octets is not a name."""
-        await self._check_malformed_field((b'', b'v'), 'empty field name')
+    async def test_a_malformed_trailer_field_is_malformed(self, bad_field):
+        handler, app = _make_h2_actor()
+        head = _make_headers_frame(1, end_stream=False)
+        trailers = _make_headers_frame(1, end_stream=True, fields=[bad_field])
+        settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
+        handler.receive = AsyncMock(
+            side_effect=[settings, head, trailers, None])
+        await handler.run()
+
+        assert [f.error_code for f in _sent_rst_streams(handler, 1)] \
+            == [ErrorCodes.PROTOCOL_ERROR], \
+            f'Trailer violation ({bad_field!r}) was not answered with ' \
+            f'RST_STREAM(PROTOCOL_ERROR)'
+        assert app.await_count == 0, \
+            f'Trailer violation ({bad_field!r}) reached the application'
 
     @pytest.mark.asyncio
-    async def test_obs_text_in_a_field_value_still_reaches_the_app(self):
-        """obs-text (0x80-0xFF) is inside RFC 9110's field-content, so the
-        widened grammar must not swallow it."""
+    async def test_a_valid_trailer_field_section_is_accepted(self):
         handler, app = _make_h2_actor()
-        fields = [
-            (b':method', b'GET'), (b':path', b'/'), (b':scheme', b'https'),
-            (b':authority', b'example.com'),
-            (b'x-test', b'value\x80\xff'),
-        ]
-        h = _make_headers_frame(1, end_stream=True, fields=fields)
+        head = _make_headers_frame(1, end_stream=False)
+        trailers = _make_headers_frame(
+            1, end_stream=True, fields=[(b'x-trailer', b'value')])
         settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
-        handler.receive = AsyncMock(side_effect=[settings, h, None])
+        handler.receive = AsyncMock(
+            side_effect=[settings, head, trailers, None])
         await handler.run()
 
         assert app.await_count == 1
@@ -922,29 +937,20 @@ class TestG15ClientPushPromise:
         assert 'client sent PUSH_PROMISE' in connection_error.call_args.args[1]
         assert app.await_count == 0
 
+    @pytest.mark.parametrize('head', [
+        pytest.param(_make_headers_frame(1, end_stream=False), id='open-stream'),
+        pytest.param(_make_headers_frame(1, end_stream=True), id='half-closed-stream'),
+    ])
     @pytest.mark.asyncio
-    async def test_a_push_promise_on_an_open_stream_goes_away(self):
-        """The open-stream case used to raise out of the responder lookup."""
+    async def test_a_push_promise_on_an_open_stream_goes_away(self, head):
+        """PUSH_PROMISE is a connection PROTOCOL_ERROR whatever the stream
+        state (the open-stream case used to raise out of the responder
+        lookup; half-closed(remote) used to answer RST_STREAM(STREAM_CLOSED))."""
         handler, app = _make_h2_actor()
         connection_error = self._observe_connection_error(handler)
         settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
         handler.receive = AsyncMock(side_effect=[
-            settings, _make_headers_frame(1, end_stream=False),
-            self._push_promise(), None])
-        await handler.run()
-
-        assert _sent_goaway_codes(handler) == [ErrorCodes.PROTOCOL_ERROR]
-        assert _sent_rst_streams(handler, 1) == []
-        assert 'client sent PUSH_PROMISE' in connection_error.call_args.args[1]
-
-    @pytest.mark.asyncio
-    async def test_a_push_promise_on_a_half_closed_stream_goes_away(self):
-        """Half-closed(remote) used to answer RST_STREAM(STREAM_CLOSED)."""
-        handler, app = _make_h2_actor()
-        connection_error = self._observe_connection_error(handler)
-        settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
-        handler.receive = AsyncMock(side_effect=[
-            settings, _make_headers_frame(1, end_stream=True),
+            settings, head,
             self._push_promise(), None])
         await handler.run()
 

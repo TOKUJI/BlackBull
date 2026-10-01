@@ -74,7 +74,7 @@ class TestTheBrokerRefusesToRouteIt:
             sender=conn))
         conn.outbox.clear()
 
-    async def test_a_qos_3_publish_disconnects_with_0x81(self):
+    async def test_a_qos_3_publish_disconnects_with_malformed_packet(self):
         broker, pub = BrokerActor(), RecordingConn()
         await self._attach(broker, pub)
 

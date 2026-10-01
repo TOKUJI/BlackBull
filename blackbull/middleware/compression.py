@@ -18,11 +18,12 @@ import functools
 import gzip
 import threading
 from collections.abc import Callable
-from ..asgi import ASGIEvent
 from ..connection import Connection
 from ..headers import Headers
 from ..native import NativeResponse
+from ..protocol.framing import is_informational
 from ..server.cap_log import log_cap_hit
+from ._accept_encoding import select_encoding
 from .utils import as_middleware
 
 _MIN_SIZE = 100  # default minimum body size to bother compressing
@@ -39,7 +40,6 @@ _BROTLI_QUALITY = 4
 # fall-back instead of unbounded executor queue growth.  ``0`` disables.
 import os as _os  # noqa: PLC0415
 _MAX_INFLIGHT = max((_os.cpu_count() or 1) * 2, 4)
-_SERVER_PREFERENCE = ['br', 'zstd', 'gzip']  # server-side priority order
 
 # Content-Type prefixes whose payloads are already compressed or binary and
 # should not be re-compressed (compressing them wastes CPU with no size gain).
@@ -218,46 +218,19 @@ class Compression:
         # peer can't grow it unboundedly.
         self._codec_cache: dict[bytes, tuple[str, Callable[[bytes], bytes]] | None] = {}
 
-    @staticmethod
-    def _parse_accept_encoding(header: bytes) -> list[str]:
-        """Parse Accept-Encoding and return codec names sorted by descending q-value.
-
-        Example: b'br;q=1.0, gzip;q=0.8' → ['br', 'gzip']
-        """
-        result: list[tuple[float, str]] = []
-        for token in header.split(b','):
-            parts = token.strip().split(b';')
-            name = parts[0].strip().lower().decode('ascii', errors='ignore')
-            q = 1.0
-            for param in parts[1:]:
-                param = param.strip()
-                if param.startswith(b'q='):
-                    try:
-                        q = float(param[2:])
-                    except ValueError:
-                        pass  # malformed q-value → keep the default quality.
-            if name:
-                result.append((q, name))
-        result.sort(key=lambda x: x[0], reverse=True)
-        return [name for _, name in result]
-
     def _select_codec(self, accept_header: bytes) -> tuple[str, Callable[[bytes], bytes]] | None:
         """Pick the best codec that the client accepts and the server has installed.
 
         Server preference order (br > zstd > gzip) is applied among the
-        codecs the client lists, regardless of their q-values, because the
+        accepted codecs, regardless of positive q-values, because the
         server knows which codec yields better compression.
         Returns ``None`` when there is no overlap.
         """
         cache = self._codec_cache
         if accept_header in cache:
             return cache[accept_header]
-        accepted = set(self._parse_accept_encoding(accept_header))
-        result: tuple[str, Callable[[bytes], bytes]] | None = None
-        for codec in _SERVER_PREFERENCE:
-            if codec in accepted and codec in self._available:
-                result = (codec, self._available[codec])
-                break
+        codec = select_encoding(accept_header, self._available)
+        result = (codec, self._available[codec]) if codec is not None else None
         if len(cache) < 256:
             cache[accept_header] = result
         return result
@@ -329,7 +302,8 @@ class Compression:
             # H1 native path: the header arm is a NativeResponse — stamp Vary
             # directly on its header list (zero-copy; no expansion).  Absence
             # is ``is not None`` — never truthiness.
-            if isinstance(event, NativeResponse):
+            if (isinstance(event, NativeResponse)
+                    and (event._extension is None or event.push is None)):
                 if event._header is not None:
                     headers = Headers(event._header)
                     if _is_compressible_content_type(headers) and \
@@ -340,14 +314,6 @@ class Compression:
             # of every body event just to have the next line's `isinstance`
             # reject it — a per-chunk cost on a streamed response, for a
             # wrapper that only ever cares about the start event.
-            elif isinstance(event, dict) and \
-                    event.get('type') == ASGIEvent.HTTP_RESPONSE_START:
-                headers = Headers(event.get('headers', []))
-                if _is_compressible_content_type(headers) and \
-                        not headers.get(b'content-encoding'):
-                    hdrs = list(event.get('headers', []))
-                    _merge_vary(hdrs)
-                    event = {**event, 'headers': hdrs}
             await send(event)
         return vary_send
 
@@ -359,7 +325,7 @@ class Compression:
             await call_next(conn, receive, send)
             return
 
-        accept = conn.headers.get(b'accept-encoding', b'')
+        accept = conn.headers.get_combined(b'accept-encoding') or b''
         selection = self._select_codec(accept)
         if selection is None:
             # No codec the client accepts (e.g. no/identity Accept-Encoding).
@@ -455,7 +421,8 @@ class Compression:
             # against v0.67.0 on m7a.8xlarge: static −3.4〜−6.3 %, json-comp
             # −1.2〜−3.2 %).  Trailer shapes and plain dict events keep the
             # ``_dict_event`` lane.
-            if isinstance(event, NativeResponse):
+            if (isinstance(event, NativeResponse)
+                    and (event._extension is None or event.push is None)):
                 # Pass-through: a forward-verbatim decision is already made,
                 # so later objects are relayed untouched (mirrors the
                 # ``_dict_event`` fast path).
@@ -494,6 +461,12 @@ class Compression:
                     start_forwarded = True
                     return
 
+                if is_informational(int(event.status)):
+                    # An interim carries no content, so holding it for a
+                    # body waits for one that cannot come.
+                    await send(event)
+                    return
+
                 if (not streaming and not skip_compression
                         and not start_forwarded
                         and event._header is not None
@@ -519,7 +492,7 @@ class Compression:
                 await send(event)
                 return
 
-            # A plain dict — ``push``, or an event the native seam does not
+            # A push message or an event the native seam does not
             # model.  Uncompressible for the same reason; release a held
             # header first so the sender has its headers before the thing that
             # depends on them.

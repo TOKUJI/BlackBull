@@ -26,6 +26,7 @@ import blackbull.middleware.cache as cache_module
 import blackbull.protocol.frame_types as frame_types
 import blackbull.router as router
 import blackbull.server.http1_actor as http1_actor
+import blackbull.server.parser as parser
 import blackbull.server.recipient as recipient
 from blackbull.protocol import field_grammar
 from blackbull.protocol.frame_types import (
@@ -34,14 +35,17 @@ from blackbull.protocol.frame_types import (
 
 #: Each reader and the grammar names it imports.
 _READERS = {
-    http1_actor: ('TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS'),
+    http1_actor: ('TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS',
+                  'COMMON_METHODS_OCTETS', 'method_token_is_valid'),
     frame_types: ('TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS'),
     headers_module: ('TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS'),
     recipient: ('TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS'),
     client_http1: ('TCHAR_OCTETS', 'TCHAR_SET', 'FIELD_VALUE_ALLOWED_OCTETS',
                    'FIELD_VALUE_ALLOWED_SET'),
     cache_module: ('TCHAR_SET', 'FIELD_VALUE_ALLOWED_SET'),
-    router: ('TCHAR_OCTETS',),
+    parser: ('COMMON_METHODS', 'COMMON_SCHEMES', 'URI_SCHEME_RE',
+             'method_token_is_valid'),
+    router: ('method_token_is_valid',),
 }
 
 #: The names the grammar owns.  A reader that assigns one of these has
@@ -51,6 +55,9 @@ _OWNED_BY_THE_GRAMMAR = frozenset({
     'FIELD_NAME_INVALID_RE', '_FIELD_NAME_INVALID_RE', '_FIELD_NAME_OCTETS',
     'FIELD_VALUE_INVALID_RE', '_FIELD_VALUE_INVALID_RE',
     'FIELD_VALUE_ALLOWED_OCTETS', '_FIELD_VCHAR', '_BLOCK_ALLOWED_OCTETS',
+    'COMMON_METHODS_OCTETS', '_COMMON_METHODS_OCTETS',
+    'COMMON_METHODS', '_COMMON_METHODS',
+    'COMMON_SCHEMES', '_COMMON_SCHEMES',
 })
 
 #: RFC 9110 §5.6.2 — names are lowercase in HTTP/2 (RFC 9113 §8.2).
@@ -111,13 +118,29 @@ def test_every_reader_reads_the_one_definition():
                 module.__name__, name)
 
 
-def test_the_router_method_check_is_the_same_alphabet():
-    """The router's input is a ``str``, so it cannot use the bytes table; its
-    delete table is built from the same alphabet, and this pins the two."""
-    wrong = [c for c in range(256)
-             if (chr(c).translate(router._TCHAR_DELETE) == '')
-             is not (c in field_grammar.TCHAR_SET)]
-    assert wrong == []
+def test_the_common_value_fast_path_is_inside_the_grammar():
+    """The request paths skip the grammar for the values nearly every request
+    carries.  A member that does not satisfy its own rule would be accepted
+    outright, so every set is pinned against the rule it stands in for; the
+    H/2 parser also hands a ``COMMON_SCHEMES`` hit on without case mapping,
+    so the members are lowercase (RFC 3986 §3.1)."""
+    for method in field_grammar.COMMON_METHODS_OCTETS:
+        assert field_grammar.method_token_is_valid(method), method
+    for method in field_grammar.COMMON_METHODS:
+        assert field_grammar.method_token_is_valid(method.encode('utf-8')), method
+    for scheme in field_grammar.COMMON_SCHEMES:
+        assert field_grammar.URI_SCHEME_RE.fullmatch(
+            scheme.encode('utf-8')), scheme
+        assert scheme == scheme.lower(), scheme
+
+
+def test_the_two_spellings_of_the_common_method_set_are_one_set():
+    """HTTP/1.1 grades a request-line method as octets and HTTP/2 carries
+    ``:method`` as text.  The two spellings name one set; a method reachable
+    through one fast path and not the other would make the transports accept
+    different methods again."""
+    assert field_grammar.COMMON_METHODS == frozenset(
+        method.decode('ascii') for method in field_grammar.COMMON_METHODS_OCTETS)
 
 
 def test_h2_name_rule_is_the_shared_alphabet_lowercased():

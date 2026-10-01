@@ -14,8 +14,8 @@ through the whole app (``BlackBull.__call__`` → ``_dispatch`` →
    headers** (the framing real gRPC clients require).  httpx therefore never
    observed response completion and its transport asserted
    (``response_complete.is_set()``) on all gRPC calls — in the
-   2026-07-07 audit.  ``HTTP2Client`` handles trailers natively, and folds
-   them into ``res.headers``.
+   2026-07-07 audit.  ``HTTP2Client`` handles trailers natively and exposes
+   them as ``res.trailers``.
 
    Pure-REST assertions (no trailers on the wire) still use ``TestClient``.
 """
@@ -75,7 +75,7 @@ async def _grpc_call(port: int, path: str, payload: bytes,
     """Send one gRPC-style POST over a real h2c socket.
 
     Returns the ``ClientResponse``; gRPC status/message ride in
-    ``res.headers`` (trailing headers are folded in by ``HTTP2Client``).
+    ``res.trailers``.
     """
     hdrs = [('content-type', 'application/grpc')] + (headers or [])
     async with HTTP2Client('127.0.0.1', port) as c:
@@ -83,11 +83,15 @@ async def _grpc_call(port: int, path: str, payload: bytes,
 
 
 def _grpc_status(res) -> str:
-    return res.headers.get(b'grpc-status', b'').decode()
+    # gRPC puts these in the trailer section; a path that fails before the
+    # handler runs may put them in the head instead.
+    return (res.trailers.get(b'grpc-status', b'')
+            or res.headers.get(b'grpc-status', b'')).decode()
 
 
 def _grpc_message(res) -> str:
-    return res.headers.get(b'grpc-message', b'').decode()
+    return (res.trailers.get(b'grpc-message', b'')
+            or res.headers.get(b'grpc-message', b'')).decode()
 
 
 # ---------------------------------------------------------------------------

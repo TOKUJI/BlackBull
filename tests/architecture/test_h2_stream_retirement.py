@@ -10,6 +10,8 @@ from http import HTTPStatus
 from types import SimpleNamespace
 
 import pytest
+
+from blackbull.native import NativeResponse
 from hpack import Decoder, Encoder
 
 from blackbull.connection import Connection
@@ -898,10 +900,7 @@ async def test_promised_stream_reset_during_write_preserves_other_streams():
             task.add_done_callback(actor._make_done_cb(stream_id))
         actor._active_stream_count = 2
         push_task = task_group.create_task(
-            actor._handle_push(
-                {"type": "http.response.push", "path": "/asset", "headers": []},
-                1,
-            )
+            actor._handle_push(NativeResponse(push="/asset"), 1)
         )
 
         await asyncio.wait_for(writer.promise_written.wait(), timeout=1)
@@ -950,10 +949,7 @@ async def test_parent_reset_during_promise_write_resets_promised_stream():
     async with asyncio.TaskGroup() as task_group:
         actor._task_group = task_group
         parent_task = task_group.create_task(
-            actor._handle_push(
-                {"type": "http.response.push", "path": "/asset", "headers": []},
-                1,
-            )
+            actor._handle_push(NativeResponse(push="/asset"), 1)
         )
         sibling_task = task_group.create_task(sibling_work())
         actor._stream_tasks.update({1: parent_task, 3: sibling_task})
@@ -999,10 +995,7 @@ async def test_parent_reset_preserves_cancellation_when_promised_reset_fails():
     async with asyncio.TaskGroup() as task_group:
         actor._task_group = task_group
         parent_task = task_group.create_task(
-            actor._handle_push(
-                {"type": "http.response.push", "path": "/asset", "headers": []},
-                1,
-            )
+            actor._handle_push(NativeResponse(push="/asset"), 1)
         )
         actor._stream_tasks[1] = parent_task
         actor._active_stream_count = 1
@@ -1034,9 +1027,7 @@ async def test_push_without_both_live_parent_and_task_group_creates_nothing(
     else:
         actor._task_group = object()
 
-    await actor._handle_push(
-        {"type": "http.response.push", "path": "/asset", "headers": []}, 1
-    )
+    await actor._handle_push(NativeResponse(push="/asset"), 1)
 
     assert actor._next_push_stream_id == 2
     assert not [

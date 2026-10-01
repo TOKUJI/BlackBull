@@ -113,17 +113,14 @@ async def _warnings_from_one_sender_per_stream(*, tls: bool) -> list[str]:
     return handler.messages
 
 
-async def test_a_dead_tls_connection_is_discovered_once():
-    """The lane the 264,278 log lines came from."""
-    messages = await _warnings_from_one_sender_per_stream(tls=True)
-    assert not messages, (
-        f'{len(messages)} of {STREAMS} streams wrote into a transport already '
-        f'known to be gone; first: {messages[0]!r}')
-
-
-async def test_a_dead_plaintext_connection_is_discovered_once():
-    """Same defect, the cleartext lane — 4,415 lines in the same run."""
-    messages = await _warnings_from_one_sender_per_stream(tls=False)
+@pytest.mark.parametrize('tls', [
+    pytest.param(True, id='dead-tls-connection'),
+    pytest.param(False, id='dead-plaintext-connection'),
+])
+async def test_a_dead_tls_connection_is_discovered_once(tls):
+    """The lane the 264,278 log lines came from (TLS) and the cleartext lane
+    — 4,415 lines in the same run."""
+    messages = await _warnings_from_one_sender_per_stream(tls=tls)
     assert not messages, (
         f'{len(messages)} of {STREAMS} streams wrote into a transport already '
         f'known to be gone; first: {messages[0]!r}')

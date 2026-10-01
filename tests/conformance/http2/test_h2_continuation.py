@@ -55,21 +55,8 @@ def _make_h2_frame(type_byte: FrameTypes, flags: FrameFlags | int,
 # ---------------------------------------------------------------------------
 
 class TestHeadersFrameFlags:
-    """HEADERS frame must correctly expose the END_HEADERS flag."""
-
-    def test_headers_with_end_headers_flag_reports_nonzero(self):
-        """HEADERS frame with END_HEADERS (0x04) must have ``end_headers != 0``."""
-        factory = FrameFactory()
-        raw = _make_h2_frame(FrameTypes.HEADERS, HeaderFrameFlags.END_HEADERS, 1, b'')
-        frame = factory.load(raw)
-        assert frame.end_headers != 0
-
-    def test_headers_without_end_headers_flag_reports_zero(self):
-        """HEADERS frame without END_HEADERS must have ``end_headers == 0``."""
-        factory = FrameFactory()
-        raw = _make_h2_frame(FrameTypes.HEADERS, SettingFrameFlags.INIT, 1, b'')
-        frame = factory.load(raw)
-        assert frame.end_headers == 0
+    """END_STREAM is an independent HEADERS flag (the END_HEADERS
+    exposure cases live in TestContinuationFrameParsing)."""
 
     def test_end_stream_flag_independent_of_end_headers(self):
         """END_STREAM (0x01) and END_HEADERS (0x04) are independent bits."""
@@ -101,42 +88,45 @@ class TestContinuationFrameParsing:
         """``FrameTypes.CONTINUATION`` must exist and equal ``b'\\x09'``."""
         assert FrameTypes.CONTINUATION == b'\x09'
 
-    def test_factory_load_continuation_without_end_headers_does_not_raise(self):
-        """``FrameFactory.load()`` must parse a CONTINUATION frame (no END_HEADERS).
-
-        """
+    @pytest.mark.parametrize('flags', [
+        pytest.param(SettingFrameFlags.INIT, id='without-end-headers'),
+        pytest.param(HeaderFrameFlags.END_HEADERS, id='with-end-headers'),
+    ])
+    def test_factory_load_continuation_without_end_headers_does_not_raise(self, flags):
+        """``FrameFactory.load()`` must parse a CONTINUATION frame in either
+        end_headers state."""
         factory = FrameFactory()
-        raw = _make_h2_frame(FrameTypes.CONTINUATION, SettingFrameFlags.INIT, 1, b'\x00')
-        frame = factory.load(raw)
-        assert frame.FrameType() == FrameTypes.CONTINUATION
-
-    def test_factory_load_continuation_with_end_headers_does_not_raise(self):
-        """``FrameFactory.load()`` must parse a CONTINUATION frame with END_HEADERS."""
-        factory = FrameFactory()
-        raw = _make_h2_frame(FrameTypes.CONTINUATION, HeaderFrameFlags.END_HEADERS, 1, b'\x00')
+        raw = _make_h2_frame(FrameTypes.CONTINUATION, flags, 1, b'\x00')
         frame = factory.load(raw)              # P1 bug: KeyError here
         assert frame.FrameType() == FrameTypes.CONTINUATION
 
-    def test_continuation_frame_exposes_end_headers_flag(self):
-        """A parsed CONTINUATION frame must expose its END_HEADERS flag."""
+    @pytest.mark.parametrize('frame_type,flags', [
+        pytest.param(FrameTypes.CONTINUATION, HeaderFrameFlags.END_HEADERS,
+                     id='continuation-end-headers'),
+        pytest.param(FrameTypes.HEADERS, HeaderFrameFlags.END_HEADERS,
+                     id='headers-end-headers'),
+    ])
+    def test_continuation_frame_exposes_end_headers_flag(self, frame_type, flags):
+        """A parsed frame must expose its END_HEADERS flag as nonzero."""
         factory = FrameFactory()
-        raw = _make_h2_frame(FrameTypes.CONTINUATION, HeaderFrameFlags.END_HEADERS, 1, b'')
+        raw = _make_h2_frame(frame_type, flags, 1, b'')
         frame = factory.load(raw)
         assert frame.end_headers != 0
 
-    def test_intermediate_continuation_frame_has_end_headers_zero(self):
-        """Intermediate CONTINUATION frame (no END_HEADERS) must have ``end_headers == 0``."""
+    @pytest.mark.parametrize('frame_type,flags,stream_id,attr,expected', [
+        pytest.param(FrameTypes.CONTINUATION, SettingFrameFlags.INIT, 1,
+                     'end_headers', 0, id='continuation-intermediate-zero'),
+        pytest.param(FrameTypes.HEADERS, SettingFrameFlags.INIT, 1,
+                     'end_headers', 0, id='headers-without-end-headers-zero'),
+        pytest.param(FrameTypes.CONTINUATION, HeaderFrameFlags.END_HEADERS, 3,
+                     'stream_id', 3, id='continuation-carries-stream-id'),
+    ])
+    def test_intermediate_continuation_frame_has_end_headers_zero(self, frame_type, flags, stream_id, attr, expected):
+        """CONTINUATION/HEADERS frame fields are decoded correctly."""
         factory = FrameFactory()
-        raw = _make_h2_frame(FrameTypes.CONTINUATION, SettingFrameFlags.INIT, 1, b'')
+        raw = _make_h2_frame(frame_type, flags, stream_id, b'')
         frame = factory.load(raw)
-        assert frame.end_headers == 0
-
-    def test_continuation_frame_carries_stream_id(self):
-        """CONTINUATION frame must be associated with the same stream as HEADERS."""
-        factory = FrameFactory()
-        raw = _make_h2_frame(FrameTypes.CONTINUATION, HeaderFrameFlags.END_HEADERS, 3, b'')
-        frame = factory.load(raw)
-        assert frame.stream_id == 3
+        assert getattr(frame, attr) == expected
 
 
 # ---------------------------------------------------------------------------

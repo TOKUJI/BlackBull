@@ -155,8 +155,9 @@ regardless of file size.
 If a file `app.js` has a sibling on disk like `app.js.br`,
 `app.js.zst`, or `app.js.gz`, `StaticFiles` will serve the
 sibling (with the right `Content-Encoding` header) when the
-client's `Accept-Encoding` allows it.  Preference order is
-`br > zstd > gzip`.
+client's `Accept-Encoding` allows it, using the same
+[acceptance rules as dynamic compression](middleware.md#compression-compress).
+Preference order is `br > zstd > gzip`.
 
 ```
 public/
@@ -241,6 +242,25 @@ revalidation of a large asset costs no disk I/O.  Pass
   `400 Bad Request`.
 - **Directory listing**: Requests for bare directories return
   `404`; no directory listing is ever served.
+- **Precompressed variants**: the check applies to the file finally
+  selected — original, index or a `.br` / `.zst` / `.gz` sibling.  A
+  sibling symlink resolving outside the root answers `400` before it is
+  cached, opened or sent; symlinks resolving inside keep serving.  It
+  re-runs every request (a swap between requests is refused on the next
+  one) but not within one request — do not leave the served tree writable
+  by untrusted users.
+- **A selected variant that escapes loses the whole request**: the
+  refusal is `400` even when the original or another variant would
+  have served — an outward-symlinked `file.gz` with `Accept-Encoding:
+  gzip` refuses although `file` itself is fine.  There is no fallback
+  to the next candidate.
+- **A variant is its filename**: a hard link of the original named
+  `file.gz` is served as `Content-Encoding: gzip` although its bytes
+  are plain.  Identity is never measured (`st_nlink` would not make it
+  robust) — keep the served tree's names honest.  Hard links are not
+  detected at all: a hard link inside the root serves whatever file it
+  links to, even outside the root — keep the served tree free of links
+  you did not create.
 
 ## Inspecting registered roots
 

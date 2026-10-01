@@ -392,17 +392,16 @@ print(json.dumps(records))
 
 
 @pytest.mark.timeout(30)
-def test_a_real_somaxconn_cap_names_somaxconn(tmp_path):
+def test_a_real_somaxconn_cap_names_somaxconn(tmp_path, child_env):
     """The same, with the kernel doing the capping in a private namespace."""
     unshare = shutil.which('unshare')
     if unshare is None or subprocess.run(
             [unshare, '-rn', 'true'], capture_output=True).returncode != 0:
         pytest.skip('unprivileged network namespaces are unavailable')
-    root = Path(__file__).resolve().parents[2]
     done = subprocess.run(
         [unshare, '-rn', sys.executable, '-c', _IN_NETNS, str(tmp_path / 's.sock')],
         capture_output=True, text=True, timeout=20,
-        env={**os.environ, 'PYTHONPATH': str(root)})
+        env=child_env())
     assert done.returncode == 0, done.stderr
     [record] = json.loads(done.stdout)
     assert record['limit'] == 3

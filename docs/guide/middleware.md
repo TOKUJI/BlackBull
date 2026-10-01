@@ -6,6 +6,12 @@ handler's signature.  The shape is the same as Starlette /
 Quart / ASGI 3.0 generally, with one BlackBull convenience
 (`@as_middleware`) layered on top.
 
+## Trusted proxy identity
+
+When using `TrustedProxy`, register it before middleware that reads client IP,
+scheme, or mount prefix. See [reverse-proxy setup](../deployment/behind-reverse-proxy.md#trusted-proxy-headers)
+for the required proxy and trust settings.
+
 ## Writing a middleware
 
 ```python
@@ -112,7 +118,9 @@ runtime, and unannotated middleware keeps working exactly as before.
     On BlackBull's own HTTP path (HTTP/1.1 and HTTP/2), the response events
     a middleware's inner `send` wrapper observes are `NativeResponse`
     objects — not dicts.  A middleware that subscripts `event['type']`
-    must instead branch on the object's arms: `event.header is not None`
+    must first pass through `event.push is not None` messages: their headers
+    describe a promised request, not the response. For responses, branch on
+    the object's arms: `event.header is not None`
     (header arm, with `event.status` / `event.header.get(b'name')`),
     `event.body is not None` (body chunk, with `event.more_body`), and
     `event.trailers is not None`.  The `@as_middleware` decorator
@@ -140,7 +148,7 @@ from blackbull.native import NativeResponse
 async def add_header_mw(conn, receive, send, call_next):
     async def wrapped(event):
         if isinstance(event, NativeResponse):
-            if event.header is not None:
+            if event.push is None and event.header is not None:
                 # header arm — append zero-copy; visible to the sender
                 event.header.append(b'x-custom', b'1')
         else:
@@ -270,8 +278,10 @@ closes the connection itself.
 
 ### `Compression` / `compress`
 
-Compresses HTTP response bodies using the codec the client prefers
-(brotli > zstd > gzip, based on `Accept-Encoding`):
+Compresses HTTP response bodies using an accepted codec in server preference
+order: brotli > zstd > gzip. `q=0` excludes a codec even when `*` permits others;
+positive q values do not change this order. A malformed quality or parameter
+refuses its named codec; a refusal in any duplicate also takes precedence.
 
 ```python
 from blackbull.middleware import compress
@@ -487,7 +497,8 @@ async def request_id_mw(conn, receive, send, call_next):
     conn.state['request_id'] = req_id.decode()
 
     async def tagged_send(event):
-        if isinstance(event, NativeResponse) and event.header is not None:
+        if (isinstance(event, NativeResponse) and event.push is None
+                and event.header is not None):
             event.header.append(b'x-request-id', req_id)
         await send(event)
 
@@ -550,7 +561,8 @@ async def log_status_mw(conn, receive, send, call_next):
 
     async def intercepting_send(event):
         nonlocal captured_status
-        if isinstance(event, NativeResponse) and event.header is not None:
+        if (isinstance(event, NativeResponse) and event.push is None
+                and event.header is not None):
             captured_status = event.status
         await send(event)
 

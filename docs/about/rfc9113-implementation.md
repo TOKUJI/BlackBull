@@ -582,7 +582,11 @@ after every pre-dispatch mutation of the `Connection` (e.g. late
 Malformed requests are RST PROTOCOL_ERROR *before the application sees them*,
 checked at two points: the direct-HEADERS path in
 `HTTP2Actor._on_headers_frame()` and the post-CONTINUATION path in
-`HTTP2Actor._on_continuation_frame()`.  Content-length is validated by
+`HTTP2Actor._on_continuation_frame()`.  The trailing field section is a field
+section too (§8.1), so `_complete_header_block()`'s trailers branch grades it
+with §8.2.1 and §8.3 and gives the request the same verdict instead of
+completing it.
+Content-length is validated by
 accumulating `stream.received_data_bytes`: excess on any frame → immediate RST;
 deficit at END_STREAM → RST (padding excluded).  *Because* §8.1.1 makes the
 server, not the app, responsible for rejecting framing-level malformation — a
@@ -612,7 +616,15 @@ Pseudo-headers are parsed and validated before dispatch.  **§8.3.1 Request
 Pseudo-Headers** — `:method`, `:scheme`, `:path`, `:authority`; the `:path`
 split for pushed requests lives in `HTTP2Actor._handle_push()`, and a
 request's `:path` is graded with the visible-ASCII rule HTTP/1.1 applies to
-its request-target.
+its request-target.  `:method` is an RFC 9110 §9.1 token and `:scheme` an RFC
+3986 §3.1 scheme, each graded wherever the field is present — §5.5/§5.6.2
+field validity alone lets `G,ET` and `a_b` through, and HTTP/1.1 refuses the
+first on its request line, so the transports would otherwise accept different
+methods.  The scheme rule has no HTTP/1.1 counterpart to match: that
+transport grades only an absolute-form target's scheme.  A scheme is
+case-insensitive and its canonical form is lowercase (RFC 3986 §3.1, RFC 9110
+§4.2.3), so `:scheme` is taken in that one spelling and the host rule, the
+RFC 8441 ws/wss mapping and `conn.scheme` all read it.
 `:authority` is validated and surfaced by `_request_headers_with_host() in
 parser.py` (v0.54.0): an `http(s)` request carrying neither `:authority` nor
 `Host` is malformed, as is an authority containing userinfo, RFC 3986 §3.2

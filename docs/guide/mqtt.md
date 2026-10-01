@@ -104,7 +104,24 @@ Server-only packet types received from the client also end admission instead
 of being skipped; a non-CONNECT first command cannot establish a connection.
 Reconnecting requires a **new** network connection, which can resume an existing
 session. Session takeover invalidates the old actor, so its delayed commands
-cannot publish or alter the replacement session, even while its writer flushes.
+cannot publish or alter the replacement session, even while its writer
+flushes. A zero-length Client Identifier never takes part in that: the
+broker assigns an unused identifier and reports it in CONNACK. Every
+CONNACK honours the peer's Maximum Packet Size: the full reply, then one
+trimmed of the broker's advertised limits (an assigned identifier is not
+optional), and only when neither fits is the connection refused with `0x95`
+— or closed outright when even that reply cannot fit — before creating a
+session.
+
+The limit also applies to outgoing PUBLISH and PUBREL packets. A packet
+that exceeds it is discarded, and its delivery is treated as complete
+[MQTT-3.1.2-25]. It is never queued or retried. The limit belongs to the
+connection: queued messages are rechecked against the reconnecting client's
+limit. Retained and Will messages follow the same rule. For a Shared
+Subscription, the message goes to a member that can receive it and is
+dropped only if no member can. The takeover (`0x8E`) and duplicate-CONNECT
+(`0x82`) DISCONNECTs are not size-checked.
+
 Broker-initiated protocol-error closure retires admission before processing the
 next command. Client DISCONNECT and transport failures use the FIFO `Detach`
 boundary: commands ordered before it were admitted while the connection was
@@ -134,6 +151,7 @@ conformance matrix:
 | Will (LWT) | delivered on abnormal disconnect; suppressed on a normal `DISCONNECT` (`0x00`) |
 | Keep-alive | PINGREQ / PINGRESP; an idle connection is closed (Will fired) at 1.5× the negotiated Keep Alive (§3.1.2.10) |
 | Session takeover | a second CONNECT for a live Client Identifier disconnects the prior connection with `0x8E` (§3.1.4) |
+| Client Identifier | a zero-length Client Identifier is assigned an identifier no live or offline session holds, returned in CONNACK as `Assigned Client Identifier` (§3.2.2.3.7) |
 | Properties | the full MQTT 5 property set (§2.2.2.2) on every packet that carries properties |
 | Sessions | subscriptions and pending QoS state preserved across reconnects with Clean Start = 0 |
 | Flow control | the client's `Receive Maximum` (§3.1.2.11.3) is enforced in the outbound direction; the broker's own is advertised in CONNACK as a promise to conforming clients |
@@ -141,7 +159,25 @@ conformance matrix:
 
 The wire codec lives in `blackbull.mqtt.messages` (the 15 control-packet
 dataclasses, `encode_packet` / `decode_packet`, the property system, reason
-codes, and `topic_matches_filter`). The broker is an actor model split across a
+codes, and `topic_matches_filter`).  `decode_packet` raises two classes:
+`IncompletePacket` means the buffer is short — the packet is not whole
+yet, and `PacketFramer` keeps the partial bytes buffered for the next
+`feed` — while `MQTTDecodeError` means the bytes are invalid.  Inside an
+already-whole packet the first is converted to the second at exactly two
+places: the property context (`_decode_vbi_at`, where "incomplete" can
+only mean a value crossing the declared Property Length) and
+`decode_packet`'s inner wrap (a body inconsistent with its Remaining
+Length).  Nothing else converts.
+
+Variable Byte Integers accept **non-minimal encodings**: a value whose
+encoding carries a redundant continuation octet (0 in two octets, 300 in
+three) decodes normally.  A non-minimal encoding violates [MQTT-1.5.5-1]
+("the minimum number of bytes necessary"); by the spec's definition such a
+packet is a Malformed Packet (Terminology; §4.13.1).  This runtime does
+not enforce that.  The tolerance is pinned in
+`tests/unit/test_mqtt_codec_lengths.py`.
+
+The broker is an actor model split across a
 few small modules: `blackbull.mqtt.broker` holds the `BrokerActor`, which owns
 all routing state (subscriptions, sessions, retained messages) and, processing
 its inbox serially, needs no locks; `blackbull.mqtt.connection` holds the
@@ -197,6 +233,9 @@ of those is bounded, and each bound is **advertised in CONNACK** where MQTT 5
 has a property for it. Local aggregate quotas can also be reached by legal
 traffic, for example when a subscriber's network slows down.
 
+DISCONNECT refusals below apply after CONNECT admission. Earlier packet-size
+or input-budget refusals close the connection silently.
+
 | Limit | Default | Advertised as | Over the limit |
 |---|---|---|---|
 | `BB_MQTT_MAX_PACKET_SIZE` | 1 MiB | `Maximum Packet Size` (§3.2.2.3.6) | `DISCONNECT` **0x95 Packet Too Large**, connection closed |
@@ -249,11 +288,12 @@ that barrier acknowledges routing work, not completion of socket writes.
 Normal broker and connection mailbox shutdowns emit DEBUG lifecycle logs under
 `blackbull.mqtt.broker` and `blackbull.mqtt.connection`.
 
-**The packet limit is judged from the header.** MQTT 5 lets a peer declare a
-Remaining Length of 268,435,455 bytes (256 MiB) and then deliver it slowly. The
-check runs as soon as the fixed header is readable, so the payload is never
-buffered — the broker refuses on what the peer *claimed*, not on what it
-managed to send.
+**The packet limit includes the fixed header** and is checked as soon as the
+header is complete; zero disables it. Packet decoding errors or oversized
+declarations end the connection without forwarding trailing packets. Malformed
+input closes silently before CONNECT admission; afterward it receives DISCONNECT
+(`0x81`). Keep Alive bounds receive idleness after CONNECT, not total
+packet-assembly time; zero disables that idle check.
 
 **The backlog exists because flow control is not a licence to forget.** When a
 client's `Receive Maximum` window is full, matching messages are held rather

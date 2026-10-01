@@ -40,16 +40,30 @@ class TestRequestLine:
                      b'GET HTTP/1.1\r\nHost: localhost\r\n\r\n')
         assert r.status != 200
 
-    def test_bare_lf_in_request_line_rejected(self, h1_app):
+    @pytest.mark.parametrize('req', [
+        pytest.param(b'GET / HTTP/1.1\nHost: localhost\n\n',
+                     id='bare-lf-request-line'),
+        pytest.param(b'GET / HTTP/1.1\nHost: localhost\n\n'
+                     b'GET /admin HTTP/1.1\r\nHost: localhost\r\n\r\n',
+                     id='lf-cr-lf-desync'),
+    ])
+    def test_bare_lf_in_request_line_rejected(self, h1_app, req):
         """§2.2: a recipient MUST NOT interpret a bare LF as a CRLF.
 
         Accepting LF-only line terminators is a request-smuggling vector
         (the LF.CR.LF de-sync class).
         """
+        r = send_raw('127.0.0.1', h1_app.port, req)
+        assert r.status != 200
+
+    def test_lf_terminated_http_version_rejected(self, h1_app):
+        """§2.3/§4: a version token ending in LF (``HTTP/1.1\\n``) is not
+        ``HTTP/DIGIT.DIGIT`` — the LF.CR.LF de-sync class.  MUST NOT yield 200.
+        """
         r = send_raw('127.0.0.1', h1_app.port,
-                     b'GET / HTTP/1.1\nHost: localhost\n\n')
-        assert r.status != 200, (
-            f'bare LF without CR MUST be rejected; got {r.status}')
+                     b'GET / HTTP/1.1\n\r\nHost: localhost\r\n\r\n')
+        assert r.status == 400, (
+            f'LF-terminated HTTP-version must be rejected with 400; got {r.status}')
 
     def test_lowercase_method_accepted_as_unknown(self, h1_app):
         """§9.1 (RFC 9110): methods are case-sensitive; ``get`` is not ``GET``.
@@ -130,30 +144,26 @@ class TestFieldSyntax:
                      b'\r\n')
         assert r.status != 200
 
-    def test_tab_in_field_value_accepted(self, h1_app):
-        """§5: field-value MAY contain HTAB (0x09)."""
-        r = send_raw('127.0.0.1', h1_app.port,
-                     b'GET / HTTP/1.1\r\n'
+    @pytest.mark.parametrize('req', [
+        pytest.param(b'GET / HTTP/1.1\r\n'
                      b'Host: localhost\r\n'
                      b'X-Has-Tab: a\tb\r\n'
-                     b'\r\n')
-        assert r.status == 200
-
-    def test_leading_optional_whitespace_in_value_stripped(self, h1_app):
-        """OWS surrounding field-value is not part of the value."""
-        r = send_raw('127.0.0.1', h1_app.port,
-                     b'GET / HTTP/1.1\r\n'
+                     b'\r\n',
+                     id='tab-in-field-value'),
+        pytest.param(b'GET / HTTP/1.1\r\n'
                      b'Host:    localhost   \r\n'   # OWS on both sides
-                     b'\r\n')
-        assert r.status == 200
-
-    def test_empty_field_value_accepted(self, h1_app):
-        """§5: field-value MAY be empty (e.g. ``Header:\r\n``)."""
-        r = send_raw('127.0.0.1', h1_app.port,
-                     b'GET / HTTP/1.1\r\n'
+                     b'\r\n',
+                     id='ows-stripped'),
+        pytest.param(b'GET / HTTP/1.1\r\n'
                      b'Host: localhost\r\n'
                      b'X-Empty:\r\n'
-                     b'\r\n')
+                     b'\r\n',
+                     id='empty-field-value'),
+    ])
+    def test_tab_in_field_value_accepted(self, h1_app, req):
+        """Field-value acceptance rules (§5): HTAB allowed, OWS stripped,
+        empty value allowed."""
+        r = send_raw('127.0.0.1', h1_app.port, req)
         assert r.status == 200
 
     def test_nul_in_field_value_rejected(self, h1_app):

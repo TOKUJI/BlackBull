@@ -88,6 +88,9 @@ async def test_websocket_clean_close(ws_app):
     async with websockets.connect(uri) as ws:
         await ws.send('ping')
         await ws.recv()
+    assert ws.close_code == 1000, (
+        f'the closing handshake must complete normally; got {ws.close_code}'
+    )
 
 
 @pytest.mark.integration
@@ -115,3 +118,24 @@ async def test_websocket_permessage_deflate_negotiated(ws_app):
         await ws.send(msg)
         reply = await ws.recv()
     assert reply == msg
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_an_unservable_window_offer_falls_back_to_plain(ws_app):
+    """A window the runtime cannot serve must be declined, not accepted
+    and then crash the connection — plain echo keeps working (BLA-362)."""
+    from websockets.extensions.permessage_deflate import (
+        ClientPerMessageDeflateFactory,
+    )
+    uri = f'ws://127.0.0.1:{ws_app.port}/echo'
+    factory = ClientPerMessageDeflateFactory(server_max_window_bits=8)
+    async with websockets.connect(uri, extensions=[factory]) as ws:
+        ext_objs = (
+            getattr(ws, 'extensions', None)
+            or getattr(getattr(ws, 'protocol', None), 'extensions', None)
+            or []
+        )
+        assert ext_objs == [], f'expected a plain connection; got {ext_objs}'
+        await ws.send('still alive')
+        assert await ws.recv() == 'still alive'

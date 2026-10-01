@@ -29,6 +29,8 @@ from typing import NoReturn
 
 from ..protocol import hpack_fastpath
 from ..env import get_settings
+from ..protocol.framing import (NO_CONTENT_GENERATED_STATUSES, is_informational,
+                                parse_content_length)
 from ..protocol.frame_types import (FrameTypes, HeaderFrameFlags, DataFrameFlags,
                                     FrameBase, PseudoHeaders,
                                     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE)
@@ -45,7 +47,7 @@ from ..asgi import (
     WebSocketSendEvent,
 )
 from ..headers import Headers, HeaderList, _validate_response_header_fields
-from ..native import NativeResponse, NativeWSMessage
+from ..native import NativeResponse, NativeWSMessage, _native_from_asgi
 
 from ..logger import debug_gate  # noqa: E402
 logger = logging.getLogger(__name__)
@@ -119,32 +121,6 @@ def _http_date() -> bytes:
         _HTTP_DATE = formatdate(timeval=now, localtime=False, usegmt=True).encode('ascii')
         _HTTP_DATE_TS = now
     return _HTTP_DATE
-
-
-def _is_informational(status) -> bool:
-    """True for a 1xx status — a provisional response, not the final one.
-
-    An interim response shares the sender with the final response that must
-    still follow it, so it neither completes the exchange nor commits a
-    status, and it carries no content framing (RFC 9110 §8.6, §15.2).
-    """
-    return int(status) < 200
-
-
-def _parse_content_length(headers: Headers) -> int | None:
-    """Return one unambiguous Content-Length value from response headers."""
-    values: list[int] = []
-    for _name, raw in headers.getlist(b'content-length'):
-        for member in raw.split(b','):
-            value = member.strip(b' \t')
-            if not value or not value.isdigit():
-                raise ValueError('invalid Content-Length response header')
-            values.append(int(value))
-    if not values:
-        return None
-    if any(value != values[0] for value in values[1:]):
-        raise ValueError('conflicting Content-Length response headers')
-    return values[0]
 
 
 def _has_header(items, name: bytes) -> bool:
@@ -492,6 +468,13 @@ class BaseSender(ABC):
         self._writer = writer
         self._closed = False
 
+    async def _settle_buffered_head(self) -> None:
+        """A head that never got content is complete — settle it before the
+        next one would overwrite it."""
+        if self._buffered_status is not None:
+            await self._send_interim(self._buffered_status,
+                                    self._buffered_headers)
+
     def mark_client_gone(self) -> None:
         """The peer is gone — drop further writes instead of raising.
 
@@ -578,6 +561,7 @@ class HTTP1Sender(BaseSender):
     """
 
     __slots__ = (
+        'supports_interim',
         '_buffered_status', '_buffered_headers', '_chunked',
         '_expect_trailers', '_head_mode', '_log_record', '_started',
         '_completed', '_trailers_started', '_content_length',
@@ -585,8 +569,10 @@ class HTTP1Sender(BaseSender):
         '_response_started', '_poisoned',
     )
 
-    def __init__(self, writer: AbstractWriter):
+    def __init__(self, writer: AbstractWriter, *,
+                 supports_interim: bool = True):
         super().__init__(writer)
+        self.supports_interim = supports_interim
         self._buffered_status: HTTPStatus | None = None
         self._buffered_headers: Headers | None = None
         self._chunked: bool = False
@@ -647,12 +633,17 @@ class HTTP1Sender(BaseSender):
         if self._completed or self._poisoned:
             return
 
-        begins_response = (
-            isinstance(body, bytes)
-            or (isinstance(body, NativeResponse) and body._header is not None)
-            or (isinstance(body, dict)
-                and body.get('type') == ASGIEvent.HTTP_RESPONSE_START)
-        )
+        if isinstance(body, dict):
+            body = _native_from_asgi(body, copy_headers=False)
+
+        if (isinstance(body, NativeResponse) and body._extension is not None
+                and body.push is not None):
+            logger.warning('HTTP1Sender: push sent on HTTP/1; dropped')
+            return
+
+        begins_response = (isinstance(body, bytes)
+                           or (isinstance(body, NativeResponse)
+                               and body._header is not None))
         if self._started and begins_response:
             # Once final headers are on the wire, another response head would
             # splice a second status line into the unfinished message.
@@ -673,16 +664,15 @@ class HTTP1Sender(BaseSender):
                     self._log_record.status = int(status)
                     self._log_record.response_bytes += len(body)
                 await self._flush(status, h, body)
-                if not _is_informational(status):
+                if not is_informational(status):
                     self._completed = True
 
             case NativeResponse():
-                # One object may carry header, body, and/or trailers; each arm
-                # does what the correspondingly named dict arm below does.
                 if body._header is not None:
                     header_pairs = list(body._header)
                     _validate_response_header_fields(header_pairs)
                     self._response_started = True
+                    await self._settle_buffered_head()
                     self._buffered_status = (_STATUS_BY_CODE.get(body.status)
                                              or HTTPStatus(body.status))
                     # Preserve the ASGI start `trailers: True` flag so a
@@ -701,7 +691,7 @@ class HTTP1Sender(BaseSender):
                                 elif hkl == b'content-encoding':
                                     self._log_record.resp_content_encoding = hv
                         self._log_record.mark('start_arm_out')
-                if body.file_path is not None:
+                if body._extension is not None:
                     if await self._pathsend(body.file_path):
                         self._completed = True
                     return
@@ -712,41 +702,6 @@ class HTTP1Sender(BaseSender):
                     self._response_started = True
                     await self._handle_trailers(
                         body.trailers, body.more_trailers)
-
-            case {'type': ASGIEvent.HTTP_RESPONSE_START}:
-                header_pairs = list(body.get('headers', []))
-                _validate_response_header_fields(header_pairs)
-                self._response_started = True
-                self._buffered_status = HTTPStatus(body.get('status', HTTPStatus.OK))
-                self._expect_trailers = bool(body.get('trailers', False))
-                self._buffered_headers = Headers(header_pairs)
-                if self._log_record is not None:
-                    self._log_record.status = body.get('status', '-')
-                    self._log_record.mark('start_arm_in')
-                    for hk, hv in body.get('headers', []):
-                        if isinstance(hk, bytes):
-                            hkl = hk.lower()
-                            if hkl == b'content-type':
-                                self._log_record.resp_content_type = hv
-                            elif hkl == b'content-encoding':
-                                self._log_record.resp_content_encoding = hv
-                    self._log_record.mark('start_arm_out')
-
-            case {'type': ASGIEvent.HTTP_RESPONSE_BODY}:
-                self._response_started = True
-                await self._handle_body_content(body.get('body', b''),
-                                                body.get('more_body', False))
-
-            case {'type': ASGIEvent.HTTP_RESPONSE_TRAILERS}:
-                self._response_started = True
-                await self._handle_trailers(
-                    body.get('headers', []),
-                    bool(body.get('more_trailers', False)))
-
-            case {'type': ASGIEvent.HTTP_RESPONSE_PATHSEND}:
-                self._response_started = True
-                if await self._pathsend(body['path']):
-                    self._completed = True
 
             case {'type': str() as event_type}:
                 logger.warning('HTTP1Sender: unknown event type %r', event_type)
@@ -844,19 +799,23 @@ class HTTP1Sender(BaseSender):
         self._chunked = False
         self._content_length = None
         self._body_bytes = 0
-        self._informational = _is_informational(status)
-        content_forbidden = self._informational or code in (204, 205, 304)
-        self._suppress_body = self._head_mode or content_forbidden
-
-        keep_length = (not self._informational and code not in (204, 205)
+        # One classification answers both questions below. A 304 is bodyless
+        # but keeps Content-Length as metadata, where a 205 does not.
+        informational = is_informational(status)
+        contentless = informational or code in (204, 205)
+        self._informational = informational
+        self._suppress_body = (self._head_mode or contentless
+                               or code == 304)
+        keep_length = (not contentless
                        and not (self._expect_trailers and not self._head_mode))
-        app_length = _parse_content_length(headers) if keep_length else None
+        app_length = (parse_content_length(headers.getlist(b'content-length'))
+                      if keep_length else None)
         pairs = [
             (name, value) for name, value in headers
             if name.lower() not in (b'content-length', b'transfer-encoding')
         ]
 
-        if self._informational or code == 204:
+        if informational or code == 204:
             self._expect_trailers = False
         elif code == 205:
             self._expect_trailers = False
@@ -915,7 +874,7 @@ class HTTP1Sender(BaseSender):
         headers = self._ensure_framing_headers(
             status, headers, len(body), more_body)
         self._track_content_length(len(body), more_body)
-        if not _is_informational(status):
+        if not is_informational(status):
             self._started = True
         self._ensure_date_header(headers)
 
@@ -943,6 +902,30 @@ class HTTP1Sender(BaseSender):
             await self._write_many((head, body))
         else:
             await self._write(head)
+
+    async def _send_interim(self, status: HTTPStatus,
+                            headers: HeaderList) -> None:
+        """Settle a head that never got content, and leave the response
+        open for its final one.  RFC 9110 §15.2 puts an interim response
+        before the final one on the same response, so leaving it buffered
+        would let the next head overwrite it.  A `start` settles the one
+        before it, and the flush that already classifies the status does the
+        work — nothing is asked twice.
+
+        An HTTP/1.0 peer is sent nothing: §15.2 gives a 1xx to clients that
+        speak HTTP/1.1, and the state is settled the same way because the
+        interim still has no content and the final head still follows."""
+        if self.supports_interim:
+            await self._write(self._render_start(
+                status,
+                self._ensure_framing_headers(
+                    status, headers, 0, more_body=False)))
+        self._buffered_status = None
+        self._buffered_headers = None
+        self._expect_trailers = False
+        # RFC 9112 §6.3 rule 1: an interim response carries no content, so a
+        # body event cannot end it. The next `start` recomputes this.
+        self._suppress_body = True
 
     def _render_start(self, status: HTTPStatus, headers: HeaderList) -> bytes:
         """Build the status line + headers + blank-line as a single bytes blob."""
@@ -978,7 +961,7 @@ class HTTP1Sender(BaseSender):
         headers = self._ensure_framing_headers(
             status, headers, size, more_body=False)
         self._track_content_length(size, more_body=False)
-        if not _is_informational(status):
+        if not is_informational(status):
             self._started = True
         self._ensure_date_header(headers)
 
@@ -991,7 +974,7 @@ class HTTP1Sender(BaseSender):
 
         if self._suppress_body:
             await self._write(head)
-            return not _is_informational(status)
+            return not is_informational(status)
 
         await self._write(head)
 
@@ -1006,7 +989,7 @@ class HTTP1Sender(BaseSender):
                             raise ConnectionResetError(
                                 'sendfile made no valid forward progress')
                         offset += sent
-                    return not _is_informational(status)
+                    return not is_informational(status)
                 except NotImplementedError:
                     # TLS / unsupported transport — fall back to read+write.
                     f.seek(offset)
@@ -1024,7 +1007,7 @@ class HTTP1Sender(BaseSender):
             # safely replace this response on the same connection.
             self._poisoned = True
             raise
-        return not _is_informational(status)
+        return not is_informational(status)
 
 
 class FlowControlStalled(Exception):
@@ -1094,6 +1077,7 @@ class HTTP2Sender(BaseSender):
         '_flow_control_cap',
         '_buffered_status', '_buffered_headers', '_expect_trailers',
         '_buffered_body', '_buffered_trailers', '_auto_flush_task',
+        '_head_mode', '_suppress_body',
         '_log_record',
     )
 
@@ -1102,8 +1086,11 @@ class HTTP2Sender(BaseSender):
                  conn_window: 'ConnectionWindow | None' = None,
                  initial_window: int | None = None,
                  flow_control_timeout: float | None = None,
-                 flow_control_cap: str = 'write_timeout'):
+                 flow_control_cap: str = 'write_timeout',
+                 head_mode: bool = False):
         super().__init__(writer)
+        self._head_mode = head_mode
+        self._suppress_body = False
         self._factory = factory
         self._stream_id = stream_id
         self._push_callback = push_callback
@@ -1162,6 +1149,7 @@ class HTTP2Sender(BaseSender):
         self._expect_trailers = False
         self._buffered_body = None
         self._buffered_trailers = None
+        self._suppress_body = False
         self._log_record = None
         self._auto_flush_task = None
 
@@ -1198,10 +1186,20 @@ class HTTP2Sender(BaseSender):
         if self._closed:
             return
         headers = headers or []
-        # END_STREAM rides the DATA frame below, never HEADERS.
+        # END_STREAM rides the DATA frame below, never HEADERS — unless the
+        # head was promised no content, when there is no DATA to ride on.
+        informational = is_informational(status)
+        forbidden = (self._head_mode or informational
+                     or int(status) in (204, 205, 304))
+        self._suppress_body = forbidden
         h_bytes = build_response_headers(
             self._factory.encoder, self._stream_id, status, headers,
-            end_stream=False)
+            end_stream=forbidden and not informational)
+        if forbidden:
+            await self._write(h_bytes)
+            if not is_informational(status):
+                self._end_stream_sent = True
+            return
 
         total = len(body)
         sid_bytes = self._stream_id.to_bytes(4, 'big')
@@ -1272,6 +1270,25 @@ class HTTP2Sender(BaseSender):
         self._buffered_status = None
         self._buffered_headers = None
         await self._write_response_start_and_body(body, False, status, headers, expect)
+
+    async def _send_interim(self, status: HTTPStatus,
+                            headers: list[tuple[bytes, bytes]],
+                            ) -> None:
+        """Write an interim head now and leave the stream open for its final
+        one.  Both event arms funnel here.  RFC 9112 §6.1 forbids
+        Content-Length and Transfer-Encoding in a contentless message, and
+        transfer-encoding is connection-specific: RFC 9113 §8.2.2 keeps it
+        out of HTTP/2 entirely."""
+        kept = [(hk, hv) for hk, hv in headers
+                if hk.lower() not in (b'content-length',
+                                      b'transfer-encoding')]
+        await self.send_response_headers(status, kept)
+        self._buffered_status = None
+        self._buffered_headers = None
+        self._expect_trailers = False
+        # RFC 9112 §6.3 rule 1: an interim carries no content, so a body
+        # event cannot end it.
+        self._suppress_body = True
 
     async def send_response_headers(
         self, status: HTTPStatus, headers: list[tuple[bytes, bytes]],
@@ -1467,6 +1484,11 @@ class HTTP2Sender(BaseSender):
                     await self._write_response_start_and_body(
                         buffered_body, False, buffered_status,
                         buffered_headers, self._expect_trailers)
+                    if self._suppress_body:
+                        # No content before the final head: RFC 9113 §8.1
+                        # leaves an informational response part of the same
+                        # exchange.
+                        return
                     await self._write_data(
                         payload,
                         end_stream=end_stream and not self._expect_trailers)
@@ -1477,11 +1499,15 @@ class HTTP2Sender(BaseSender):
                     self._buffered_status = None
                     self._buffered_headers = None
         else:
+            if self._suppress_body:
+                # No content before the final head: RFC 9113 §8.1 leaves an
+                # informational response part of the same exchange.
+                return
             await self._write_data(
                 payload, end_stream=end_stream and not self._expect_trailers)
         if self._log_record is not None and end_stream:
             self._log_record.mark('body_arm_out')
-        if end_stream and not self._expect_trailers:
+        if end_stream and not self._expect_trailers and not self._suppress_body:
             self._end_stream_sent = True
 
     async def _handle_trailers(
@@ -1513,9 +1539,32 @@ class HTTP2Sender(BaseSender):
             headers = self._buffered_trailers
             self._buffered_trailers = None
 
+        if self._suppress_body and self._buffered_status is None:
+            # RFC 9112 §6.3 rule 1: no trailer section either. The head
+            # already carried END_STREAM, so there is nothing left to say.
+            self._expect_trailers = False
+            return
+
         if self._buffered_status is not None:
+            self._suppress_body = (
+                self._head_mode
+                or self._buffered_status in NO_CONTENT_GENERATED_STATUSES)
             buffered_body = self._buffered_body
             self._buffered_body = None
+            if self._suppress_body:
+                # RFC 9112 §6.3 rule 1: such a response "cannot contain a
+                # message body or trailer section". The head terminates it.
+                head_status = self._buffered_status
+                informational = is_informational(head_status)
+                await self._write(build_response_headers(
+                    self._factory.encoder, self._stream_id,
+                    head_status, self._buffered_headers or [],
+                    end_stream=not informational))
+                self._buffered_status = None
+                self._buffered_headers = None
+                if not informational:
+                    self._end_stream_sent = True
+                return
             h_bytes = build_response_headers(
                 self._factory.encoder, self._stream_id,
                 self._buffered_status, self._buffered_headers or [],
@@ -1568,21 +1617,34 @@ class HTTP2Sender(BaseSender):
             await self._write(body.save())
             return
 
+        if isinstance(body, dict):
+            body = _native_from_asgi(body, copy_headers=False)
+
         if isinstance(body, bytes):
             # RFC 9113 §8.1, as in the dict branch below.
             if self._end_stream_sent:
-                logger.warning(
-                    'HTTP2Sender: dropping bytes write on stream %d — '
-                    'END_STREAM already sent (ASGI app sent a body after '
-                    'the response was complete)',
-                    self._stream_id)
+                if not self._suppress_body:
+                    logger.warning(
+                        'HTTP2Sender: dropping bytes write on stream %d — '
+                        'END_STREAM already sent (ASGI app sent a body after '
+                        'the response was complete)',
+                        self._stream_id)
                 return
             if self._log_record is not None:
                 self._log_record.status = int(status)
                 self._log_record.response_bytes += len(body)
+            informational = is_informational(status)
+            forbidden = (self._head_mode or informational
+                         or int(status) in (204, 205, 304))
+            self._suppress_body = forbidden
             h_bytes = build_response_headers(
                 self._factory.encoder, self._stream_id, status, headers,
-                end_stream=False)
+                end_stream=forbidden and not informational)
+            if forbidden:
+                await self._write(h_bytes)
+                if not informational:
+                    self._end_stream_sent = True
+                return
 
             total = len(body)
             sid_bytes = self._stream_id.to_bytes(4, 'big')
@@ -1602,15 +1664,23 @@ class HTTP2Sender(BaseSender):
 
         elif isinstance(body, NativeResponse):
             if self._end_stream_sent:
-                logger.warning(
-                    'HTTP2Sender: dropping NativeResponse on stream %d — '
-                    'END_STREAM already sent (ASGI app sent a response after '
-                    'the response was complete)',
-                    self._stream_id)
+                if not self._suppress_body:
+                    logger.warning(
+                        'HTTP2Sender: dropping NativeResponse on stream %d — '
+                        'END_STREAM already sent (ASGI app sent a response after '
+                        'the response was complete)',
+                        self._stream_id)
+                return
+            if body._extension is not None and body.push is not None:
+                if self._push_callback is not None:
+                    await self._push_callback(body, self._stream_id)
+                else:
+                    logger.warning('push sent but no push handler registered')
                 return
             if body._header is not None:
                 header_pairs = list(body._header)
                 _validate_response_header_fields(header_pairs)
+                await self._settle_buffered_head()
                 self._buffered_status = HTTPStatus(body.status)
                 self._buffered_headers = header_pairs
                 self._expect_trailers = body.expects_trailers
@@ -1641,48 +1711,14 @@ class HTTP2Sender(BaseSender):
             # the peer would treat as a stream error.  Application bug to
             # surface; sender's job is to not make it worse on the wire.
             if self._end_stream_sent:
-                logger.warning(
-                    'HTTP2Sender: dropping %r on stream %d — END_STREAM already '
-                    'sent (ASGI app sent an event after the response was complete)',
-                    event_type, self._stream_id)
+                if not self._suppress_body:
+                    logger.warning(
+                        'HTTP2Sender: dropping %r on stream %d — END_STREAM already '
+                        'sent (ASGI app sent an event after the response was complete)',
+                        event_type, self._stream_id)
                 return
 
-            if event_type == ASGIEvent.HTTP_RESPONSE_START:
-                # Buffered, not written: HEADERS coalesces with the first body.
-                header_pairs = list(body.get('headers', []))
-                _validate_response_header_fields(header_pairs)
-                self._buffered_status = HTTPStatus(body.get('status', 200))
-                self._buffered_headers = header_pairs
-                self._expect_trailers = bool(body.get('trailers', False))
-                if self._log_record is not None:
-                    self._log_record.status = body.get('status', '-')
-                    self._log_record.mark('start_arm_in')
-                    for hk, hv in body.get('headers', []):
-                        if isinstance(hk, bytes):
-                            hkl = hk.lower()
-                            if hkl == b'content-type':
-                                self._log_record.resp_content_type = hv
-                            elif hkl == b'content-encoding':
-                                self._log_record.resp_content_encoding = hv
-                    self._log_record.mark('start_arm_out')
-
-            elif event_type == ASGIEvent.HTTP_RESPONSE_BODY:
-                await self._handle_body_content(
-                    body.get('body', b''), not body.get('more_body', False))
-
-            elif event_type == ASGIEvent.HTTP_RESPONSE_TRAILERS:
-                await self._handle_trailers(
-                    list(body.get('headers', [])),
-                    bool(body.get('more_trailers', False)))
-
-            elif event_type == ASGIEvent.HTTP_RESPONSE_PUSH:
-                if self._push_callback is not None:
-                    await self._push_callback(body, self._stream_id)
-                else:
-                    logger.warning('http.response.push received but no push handler registered')
-
-            else:
-                logger.info('HTTP2Sender: unhandled event type %r', event_type)
+            logger.info('HTTP2Sender: unhandled event type %r', event_type)
 
         else:
             raise TypeError(f'HTTP2Sender expected bytes, dict, or FrameBase, got {type(body)!r}')
@@ -1811,20 +1847,23 @@ class SenderFactory:
         return AsyncioWriter(stream_writer)
 
     @staticmethod
-    def http1(stream_writer) -> HTTP1Sender:
-        return HTTP1Sender(SenderFactory._ensure_writer(stream_writer))
+    def http1(stream_writer, *, supports_interim: bool = True) -> HTTP1Sender:
+        return HTTP1Sender(SenderFactory._ensure_writer(stream_writer),
+                           supports_interim=supports_interim)
 
     @staticmethod
     def http2(stream_writer, factory, stream_id: int,
               push_callback=None,
               conn_window: 'ConnectionWindow | None' = None,
               initial_window: int | None = None,
-              flow_control_timeout: float | None = None) -> HTTP2Sender:
+              flow_control_timeout: float | None = None,
+              head_mode: bool = False) -> HTTP2Sender:
         return HTTP2Sender(SenderFactory._ensure_writer(stream_writer),
                            factory, stream_id, push_callback,
                            conn_window=conn_window,
                            initial_window=initial_window,
-                           flow_control_timeout=flow_control_timeout)
+                           flow_control_timeout=flow_control_timeout,
+                           head_mode=head_mode)
 
     @staticmethod
     def websocket(stream_writer, *, compressor=None) -> WebSocketSender:

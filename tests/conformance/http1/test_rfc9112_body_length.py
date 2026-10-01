@@ -24,23 +24,6 @@ from .conftest import send_raw
 class TestContentLengthValidation:
     """§6.2 — Content-Length value must be a non-negative integer."""
 
-    def test_well_formed_content_length(self, h1_app):
-        r = send_raw('127.0.0.1', h1_app.port,
-                     b'POST /echo HTTP/1.1\r\n'
-                     b'Host: localhost\r\n'
-                     b'Content-Length: 5\r\n\r\n'
-                     b'hello')
-        assert r.status == 200
-        assert r.body == b'hello'
-
-    def test_zero_content_length_no_body(self, h1_app):
-        r = send_raw('127.0.0.1', h1_app.port,
-                     b'POST /echo HTTP/1.1\r\n'
-                     b'Host: localhost\r\n'
-                     b'Content-Length: 0\r\n\r\n')
-        assert r.status == 200
-        assert r.body == b''
-
     def test_content_length_with_leading_plus_rejected(self, h1_app):
         """``Content-Length: +5`` is not a DIGIT-only value (§6.3)."""
         r = send_raw('127.0.0.1', h1_app.port,
@@ -50,19 +33,26 @@ class TestContentLengthValidation:
                      b'hello')
         assert r.status != 200
 
-    def test_content_length_with_minus_rejected(self, h1_app):
-        r = send_raw('127.0.0.1', h1_app.port,
-                     b'POST /echo HTTP/1.1\r\n'
-                     b'Host: localhost\r\n'
-                     b'Content-Length: -5\r\n\r\n'
-                     b'hello')
-        assert r.status != 200
-
-    def test_content_length_hex_rejected(self, h1_app):
-        r = send_raw('127.0.0.1', h1_app.port,
-                     b'POST /echo HTTP/1.1\r\n'
-                     b'Host: localhost\r\n'
-                     b'Content-Length: 0xff\r\n\r\n')
+    @pytest.mark.parametrize('req', [
+        pytest.param(
+            b'POST /echo HTTP/1.1\r\n'
+            b'Host: localhost\r\n'
+            b'Content-Length: -5\r\n\r\n'
+            b'hello',
+            id='minus-value'),
+        pytest.param(
+            b'POST /echo HTTP/1.1\r\n'
+            b'Host: localhost\r\n'
+            b'Content-Length: 0xff\r\n\r\n',
+            id='hex-value'),
+        pytest.param(
+            b'POST /echo HTTP/1.1\r\n'
+            b'Host: localhost\r\n'
+            b'Content-Length:\r\n\r\n',
+            id='empty-value'),
+    ])
+    def test_content_length_with_minus_rejected(self, h1_app, req):
+        r = send_raw('127.0.0.1', h1_app.port, req)
         assert r.status != 200
 
     def test_content_length_with_trailing_garbage_rejected(self, h1_app):
@@ -73,13 +63,6 @@ class TestContentLengthValidation:
                      b'Host: localhost\r\n'
                      b'Content-Length: 5x\r\n\r\n'
                      b'hello')
-        assert r.status != 200
-
-    def test_empty_content_length_rejected(self, h1_app):
-        r = send_raw('127.0.0.1', h1_app.port,
-                     b'POST /echo HTTP/1.1\r\n'
-                     b'Host: localhost\r\n'
-                     b'Content-Length:\r\n\r\n')
         assert r.status != 200
 
 

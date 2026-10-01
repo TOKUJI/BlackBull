@@ -1,6 +1,8 @@
 import multiprocessing
 import os
 import pathlib
+import subprocess
+import sys
 import pytest
 import pytest_asyncio
 
@@ -108,3 +110,54 @@ def manage_cert_and_key():
         )
 
     yield
+
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture
+def child_env(tmp_path_factory):
+    """Environment for a test's child process (BLA-448).
+
+    Every child of the test must import and run blackbull from the tree
+    under test.  ``make`` applies ``extra``, then pins ``PYTHONPATH``
+    ahead of the caller's entries, provides the ``blackbull`` executable
+    itself (a harness shim over this tree, never an installed script —
+    its directory leads the child's ``sys.path``, where an extensionless
+    file cannot shadow the package), and probes the import the child will
+    see from the child's own cwd — failing if the claim would not hold.
+    ``BB_TEST_TREE_ROOT`` lets a child assert the same in its own process.
+    """
+
+    bin_dir = tmp_path_factory.mktemp('bla-448-bin')
+
+    def make(extra: dict[str, str] | None = None, *, cwd=None) -> dict[str, str]:
+        env = os.environ.copy()
+        want = (extra or {}).get('PYTHONPATH', '').split(os.pathsep)
+        have = env.get('PYTHONPATH', '').split(os.pathsep)
+        env.update({k: v for k, v in (extra or {}).items()
+                    if k != 'PYTHONPATH'})
+        env['PYTHONPATH'] = os.pathsep.join(
+            [str(REPO_ROOT)] + [p for p in want + have if p])
+        env['BB_TEST_TREE_ROOT'] = str(REPO_ROOT)
+        shim = bin_dir / 'blackbull'
+        if not shim.exists():
+            shim.write_text(
+                f'#!{sys.executable}\n'
+                'from blackbull.cli import main\n'
+                'raise SystemExit(main())\n')
+            shim.chmod(0o755)
+        env['PATH'] = f'{bin_dir}{os.pathsep}' + env.get('PATH', '')
+        probe = subprocess.run(
+            [sys.executable, '-c',
+             "import importlib.util as u; print(u.find_spec('blackbull').origin)"],
+            env=env, cwd=cwd, capture_output=True, text=True, errors='replace',
+            timeout=30)
+        found = (probe.stdout or '').strip()
+        assert probe.returncode == 0 and found, probe.stderr
+        resolved = pathlib.Path(found)
+        assert resolved.resolve().is_relative_to(REPO_ROOT), (
+            f'child would import blackbull from {resolved}, not this checkout')
+        return env
+
+    return make

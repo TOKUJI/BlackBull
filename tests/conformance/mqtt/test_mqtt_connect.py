@@ -26,6 +26,10 @@ import asyncio
 import pytest
 
 from blackbull.mqtt.messages import (
+    ConnectFlags,
+    MQTTPacketType,
+    ProtocolLevel,
+    ReasonCode,
     MQTTConnect, MQTTConnack, MQTTDisconnect,
     MQTTPublish, MQTTSubscribe, MQTTSuback,
     encode_packet, decode_packet,
@@ -134,7 +138,7 @@ class TestConnectAcceptance:
         packets = writer.pop_packets()
         connacks = [p for p in packets if isinstance(p, MQTTConnack)]
         assert len(connacks) >= 1, "Expected CONNACK after CONNECT"
-        assert connacks[0].reason_code in (0x00,), \
+        assert connacks[0].reason_code in (ReasonCode.SUCCESS,), \
             f"Expected CONNACK Success (0x00), got 0x{connacks[0].reason_code:02X}"
 
     @pytest.mark.asyncio
@@ -151,7 +155,7 @@ class TestConnectAcceptance:
             clean_start=True,
             keep_alive=60,
         ))
-        reader.feed_packet(MQTTDisconnect(reason_code=0))
+        reader.feed_packet(MQTTDisconnect(reason_code=ReasonCode.SUCCESS))
 
         task = asyncio.create_task(actor.run())
         await asyncio.sleep(0.05)
@@ -301,11 +305,11 @@ class TestConnackValidation:
         """§3.2.2.2 — CONNACK Success (0x00), Session Present = 0."""
         connack = MQTTConnack(
             session_present=False,
-            reason_code=0x00,
+            reason_code=ReasonCode.SUCCESS,
         )
         wire = encode_packet(connack)
         decoded = decode_packet(wire)
-        assert decoded.reason_code == 0x00
+        assert decoded.reason_code == ReasonCode.SUCCESS
         assert decoded.session_present is False
 
     def test_connack_with_server_keep_alive(self, mqtt):
@@ -313,7 +317,7 @@ class TestConnackValidation:
         overriding the client's requested Keep Alive."""
         connack = MQTTConnack(
             session_present=False,
-            reason_code=0x00,
+            reason_code=ReasonCode.SUCCESS,
             properties={'server_keep_alive': 120},
         )
         wire = encode_packet(connack)
@@ -325,7 +329,7 @@ class TestConnackValidation:
         must include Assigned Client Identifier."""
         connack = MQTTConnack(
             session_present=False,
-            reason_code=0x00,
+            reason_code=ReasonCode.SUCCESS,
             properties={'assigned_client_identifier': 'auto-gen-xyz'},
         )
         wire = encode_packet(connack)
@@ -333,15 +337,15 @@ class TestConnackValidation:
         assert decoded.properties.get('assigned_client_identifier') == 'auto-gen-xyz'
 
     @pytest.mark.parametrize("reason_code", [
-        0x84,  # Unsupported Protocol Version
-        0x85,  # Client Identifier not valid
-        0x86,  # Bad User Name or Password
-        0x87,  # Not authorized
-        0x88,  # Server unavailable
-        0x89,  # Server busy
-        0x8A,  # Banned
-        0x8C,  # Bad authentication method
-        0x8D,  # Topic Name invalid  (unlikely for CONNACK but in register)
+        ReasonCode.UNSUPPORTED_PROTOCOL_VERSION,
+        ReasonCode.CLIENT_IDENTIFIER_NOT_VALID,
+        ReasonCode.BAD_USER_NAME_OR_PASSWORD,
+        ReasonCode.NOT_AUTHORIZED,
+        ReasonCode.SERVER_UNAVAILABLE,
+        ReasonCode.SERVER_BUSY,
+        ReasonCode.BANNED,
+        ReasonCode.BAD_AUTHENTICATION_METHOD,
+        ReasonCode.KEEP_ALIVE_TIMEOUT,
     ])
     def test_connack_error_reason_codes(self, reason_code):
         """§3.2.2.2 — CONNACK error reason codes are correctly encoded."""
@@ -372,12 +376,12 @@ class TestUnsupportedProtocolVersion:
         # by constructing the raw bytes directly.
         # Protocol Level is at a fixed offset after Protocol Name "MQTT"
         connect_bytes = bytes([
-            0x10,           # CONNECT, flags=0
+            int(MQTTPacketType.CONNECT) << 4,
             13,             # Remaining Length (protocol(6) + level(1) + flags(1) + keepalive(2) + clientid(3))
             0x00, 0x04,     # Protocol Name length = 4
             0x4D, 0x51, 0x54, 0x54,  # "MQTT"
-            0x04,           # Protocol Level = 4 (MQTT 3.1.1)
-            0x02,           # Connect Flags: Clean Start
+            ProtocolLevel.V3_1_1,
+            ConnectFlags.CLEAN_START,
             0x00, 0x3C,     # Keep Alive = 60
             0x00, 0x01,     # Client ID length = 1
             0x41,           # Client ID = "A"
@@ -404,30 +408,30 @@ class TestDisconnectBehavior:
     """
 
     def test_disconnect_with_reason_code_normal(self, mqtt):
-        """§3.14.2.1 — DISCONNECT with reason code 0x00 (Normal disconnection)."""
-        disconnect = MQTTDisconnect(reason_code=0x00)
+        """§3.14.2.1 — DISCONNECT with the Success reason code."""
+        disconnect = MQTTDisconnect(reason_code=ReasonCode.SUCCESS)
         wire = encode_packet(disconnect)
         decoded = decode_packet(wire)
-        assert decoded.reason_code == 0x00
+        assert decoded.reason_code == ReasonCode.SUCCESS
 
-    @pytest.mark.parametrize("reason_code,reason_name", [
-        (0x00, 'Normal disconnection'),
-        (0x04, 'Disconnect with Will Message'),
-        (0x80, 'Unspecified error'),
-        (0x81, 'Malformed Packet'),
-        (0x82, 'Protocol Error'),
-        (0x87, 'Not authorized'),
-        (0x89, 'Server busy'),
-        (0x8E, 'Packet too large'),
-        (0x8F, 'Quota exceeded'),
-        (0x95, 'Server moved'),
-        (0x98, 'Subscription Identifiers not supported'),
+    @pytest.mark.parametrize("reason_code", [
+        ReasonCode.SUCCESS,
+        ReasonCode.DISCONNECT_WITH_WILL,
+        ReasonCode.UNSPECIFIED_ERROR,
+        ReasonCode.MALFORMED_PACKET,
+        ReasonCode.PROTOCOL_ERROR,
+        ReasonCode.NOT_AUTHORIZED,
+        ReasonCode.SERVER_BUSY,
+        ReasonCode.SESSION_TAKEN_OVER,
+        ReasonCode.TOPIC_FILTER_INVALID,
+        ReasonCode.PACKET_TOO_LARGE,
+        ReasonCode.ADMINISTRATIVE_ACTION,
     ])
-    def test_disconnect_reason_codes(self, reason_code, reason_name):
+    def test_disconnect_reason_codes(self, reason_code):
         """§3.14.2.1 — All valid DISCONNECT reason codes are encodable."""
         disconnect = MQTTDisconnect(
             reason_code=reason_code,
-            properties={'reason_string': reason_name},
+            properties={'reason_string': 'reason'},
         )
         wire = encode_packet(disconnect)
         decoded = decode_packet(wire)
@@ -437,12 +441,12 @@ class TestDisconnectBehavior:
         """§3.14 — DISCONNECT with no reason code (pre-5.0 compatible).
         In MQTT 5.0, a DISCONNECT packet MAY omit the Reason Code and Properties
         if they are zero-length."""
-        # Minimal DISCONNECT: just the fixed header (0xE0, 0x00)
+        # Minimal DISCONNECT: just the fixed header
         disconnect = MQTTDisconnect()  # no reason code, no properties
         wire = encode_packet(disconnect)
-        assert wire[0] == 0xE0  # CONNECT type + 0 flags
+        assert wire[0] == (int(MQTTPacketType.DISCONNECT) << 4)
         # The remaining length should be 0 if no reason code
-        assert wire[1] == 0x00
+        assert wire[1] == 0
 
 
 # ============================================================================

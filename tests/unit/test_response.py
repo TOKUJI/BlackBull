@@ -271,16 +271,16 @@ def test_cookie_header_value_contains_name_and_value():
     assert b'session_id=xyz' in v
 
 
-def test_cookie_header_httponly_by_default():
-    assert b'HttpOnly' in cookie_header('sid', 'abc')[1]
+@pytest.mark.parametrize('needle', [
+    pytest.param(b'HttpOnly', id='httponly-by-default'),
+    pytest.param(b'Path=/', id='path-attribute'),
+])
+def test_cookie_header_httponly_by_default(needle):
+    assert needle in cookie_header('sid', 'abc')[1]
 
 
 def test_cookie_header_no_httponly():
     assert b'HttpOnly' not in cookie_header('sid', 'abc', http_only=False)[1]
-
-
-def test_cookie_header_path():
-    assert b'Path=/' in cookie_header('sid', 'abc')[1]
 
 
 # ---------------------------------------------------------------------------
@@ -410,3 +410,53 @@ def test_WebSocketResponse_bytes_uses_bytes_field(payload):
     result = WebSocketResponse(payload)
     assert result.get('type') == 'websocket.send'
     assert result.get('bytes') == payload
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('kind', ['http.response.start', 'http.response.trailers'])
+async def test_native_conversion_copies_headers_before_middleware_mutates_them(kind):
+    headers = [(b'x-original', b'1')]
+
+    async def middleware(event):
+        pairs = event.header if kind == 'http.response.start' else event.trailers
+        pairs.append((b'x-middleware', b'2'))
+
+    await _wrap_send_native(middleware)({'type': kind, 'headers': headers})
+    assert headers == [(b'x-original', b'1')]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('streaming', [False, True])
+async def test_dict_events_keep_their_contract_through_native_adapter(streaming):
+    from blackbull.response import StreamingResponse
+
+    events = [
+        {'type': 'http.response.start', 'status': 201, 'headers': [], 'trailers': True},
+        {'type': 'http.response.body', 'body': None, 'more_body': True},
+        {'type': 'http.response.trailers', 'headers': [(b'x-t', b'1')],
+         'more_trailers': True},
+        {'type': 'http.response.pathsend', 'path': '/tmp/body.txt'},
+        {'type': 'custom.event', 'value': 1},
+    ]
+    output = []
+
+    async def send(event):
+        output.extend(event.to_asgi() if isinstance(event, NativeResponse) else [event])
+
+    class DictStream(StreamingResponse):
+        async def __call__(self, conn, receive, send):
+            for event in events:
+                await send(event)
+
+    async def chunks():
+        yield b''
+
+    wrapped = _wrap_send_native(send)
+    if streaming:
+        await wrapped(DictStream(chunks()))
+    else:
+        for event in events:
+            await wrapped(event)
+    expected = [dict(e) for e in events]
+    expected[1]['body'] = b''
+    assert output == expected

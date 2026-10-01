@@ -24,6 +24,8 @@ Key behaviours:
 import pytest
 
 from blackbull.mqtt.messages import (
+    PropertyId,
+    ReasonCode,
     MQTTAuth, MQTTConnect, MQTTConnack,
     encode_packet, decode_packet,
     MQTTReasonCode,
@@ -94,46 +96,25 @@ class TestPropertyIdentifiers:
 class TestPropertyValueValidation:
     """Type-specific validation for property values."""
 
-    def test_receive_maximum_range(self):
-        """§3.2.2.3.1 — Receive Maximum: 16-bit integer, 1–65535.
-        0 is invalid (the server MUST treat 0 as "no receive maximum")."""
-        # Within valid range
+    @pytest.mark.parametrize('client_id,props,key,value', [
+        pytest.param('rm-client', {'receive_maximum': 100}, 'receive_maximum', 100,
+                     id='receive-maximum-in-range'),
+        pytest.param('ta-client', {'topic_alias_maximum': 0}, 'topic_alias_maximum', 0,
+                     id='topic-alias-maximum-zero'),
+        pytest.param('mps-client', {'maximum_packet_size': 262144}, 'maximum_packet_size', 262144,
+                     id='maximum-packet-size-256kb'),
+    ])
+    def test_maximum_packet_size(self, client_id, props, key, value):
+        """Numeric CONNECT properties round-trip."""
         connect = MQTTConnect(
-            client_id='rm-client',
+            client_id=client_id,
             clean_start=True,
             keep_alive=60,
-            properties={'receive_maximum': 100},
+            properties=props,
         )
         wire = encode_packet(connect)
         decoded = decode_packet(wire)
-        assert decoded.properties['receive_maximum'] == 100
-
-    def test_topic_alias_maximum_range(self):
-        """§3.2.2.3.6 — Topic Alias Maximum: 16-bit integer.
-        0 = server does not accept topic aliases."""
-        connect = MQTTConnect(
-            client_id='ta-client',
-            clean_start=True,
-            keep_alive=60,
-            properties={'topic_alias_maximum': 0},
-        )
-        wire = encode_packet(connect)
-        decoded = decode_packet(wire)
-        assert decoded.properties['topic_alias_maximum'] == 0
-
-    def test_maximum_packet_size(self):
-        """§3.2.2.3.4 — Maximum Packet Size: 32-bit integer.
-        Represents the maximum packet size (in bytes) the server is willing
-        to accept.  0 = no limit."""
-        connect = MQTTConnect(
-            client_id='mps-client',
-            clean_start=True,
-            keep_alive=60,
-            properties={'maximum_packet_size': 262144},  # 256 KB
-        )
-        wire = encode_packet(connect)
-        decoded = decode_packet(wire)
-        assert decoded.properties['maximum_packet_size'] == 262144
+        assert decoded.properties[key] == value
 
     def test_content_type_utf8(self):
         """§2.2.2.2 — Content Type is a UTF-8 string (MIME type)."""
@@ -200,7 +181,7 @@ class TestPropertiesPerPacketType:
             assert decoded.properties['user_properties'] == [('app', 'test')]
 
         # Test user properties on all ACK packet types
-        _encode_decode_user_props(MQTTConnack, session_present=False, reason_code=0)
+        _encode_decode_user_props(MQTTConnack, session_present=False, reason_code=ReasonCode.SUCCESS)
         _encode_decode_user_props(MQTTConnect, client_id='up', clean_start=True, keep_alive=60)
 
 
@@ -223,15 +204,14 @@ class TestAuthPacket:
     def test_auth_fixed_header_flags(self):
         """§3.15.1 — AUTH fixed header flags MUST be 0x00."""
         auth = MQTTAuth(
-            reason_code=0x18,  # Continue authentication
+            reason_code=ReasonCode.CONTINUE_AUTHENTICATION,
             properties={
                 'authentication_method': 'SCRAM-SHA-256',
                 'authentication_data': b'client-first-message',
             },
         )
         wire = encode_packet(auth)
-        assert (wire[0] & 0x0F) == 0x00, \
-            "AUTH fixed header flags must be 0x00 per §3.15.1"
+        assert (wire[0] & 0x0F) == 0
 
     @pytest.mark.parametrize("auth_method", [
         'SCRAM-SHA-1',
@@ -243,7 +223,7 @@ class TestAuthPacket:
     def test_auth_with_authentication_method(self, auth_method):
         """§3.15.2.2 — AUTH carries Authentication Method and Data."""
         auth = MQTTAuth(
-            reason_code=0x18,
+            reason_code=ReasonCode.CONTINUE_AUTHENTICATION,
             properties={
                 'authentication_method': auth_method,
                 'authentication_data': b'some-auth-data',
@@ -253,44 +233,27 @@ class TestAuthPacket:
         decoded = decode_packet(wire)
         assert decoded.properties['authentication_method'] == auth_method
 
-    def test_auth_continue_authentication(self):
-        """§3.15.2.1 — AUTH reason code 0x18: Continue Authentication."""
+    @pytest.mark.parametrize('reason,data', [
+        pytest.param(ReasonCode.CONTINUE_AUTHENTICATION, b'server-first-message',
+                     id='continue-authentication'),
+        pytest.param(ReasonCode.REAUTHENTICATE, b'reauth-data',
+                     id='re-authenticate'),
+        pytest.param(ReasonCode.SUCCESS, b'final-server-proof',
+                     id='auth-success'),
+    ])
+    def test_auth_continue_authentication(self, reason, data):
+        """§3.15.2.1 — AUTH packet reason codes round-trip (0x18 Continue
+        Authentication, 0x19 Re-authentication, 0x00 Success)."""
         auth = MQTTAuth(
-            reason_code=0x18,  # Continue authentication
+            reason_code=reason,
             properties={
                 'authentication_method': 'SCRAM-SHA-256',
-                'authentication_data': b'server-first-message',
+                'authentication_data': data,
             },
         )
         wire = encode_packet(auth)
         decoded = decode_packet(wire)
-        assert decoded.reason_code == 0x18
-
-    def test_auth_re_authenticate(self):
-        """§3.15.2.1 / §4.12.2 — AUTH reason code 0x19: Re-authentication."""
-        auth = MQTTAuth(
-            reason_code=0x19,  # Re-authenticate
-            properties={
-                'authentication_method': 'SCRAM-SHA-256',
-                'authentication_data': b'reauth-data',
-            },
-        )
-        wire = encode_packet(auth)
-        decoded = decode_packet(wire)
-        assert decoded.reason_code == 0x19
-
-    def test_auth_success(self):
-        """§3.15.2.1 — AUTH reason code 0x00: Success (authentication complete)."""
-        auth = MQTTAuth(
-            reason_code=0x00,
-            properties={
-                'authentication_method': 'SCRAM-SHA-256',
-                'authentication_data': b'final-server-proof',
-            },
-        )
-        wire = encode_packet(auth)
-        decoded = decode_packet(wire)
-        assert decoded.reason_code == 0x00
+        assert decoded.reason_code == reason
 
     def test_auth_without_reason_code(self):
         """§3.15.2 — AUTH without a reason code (pre-5.0 compatibility)."""
@@ -353,7 +316,9 @@ class TestEnhancedAuthenticationFlow:
 
     def test_auth_failure_reason_codes(self):
         """§4.12.1 — Authentication failure reason codes."""
-        for code in (0x86, 0x87, 0x8C):
+        for code in (ReasonCode.BAD_USER_NAME_OR_PASSWORD,
+                     ReasonCode.NOT_AUTHORIZED,
+                     ReasonCode.BAD_AUTHENTICATION_METHOD):
             auth = MQTTAuth(
                 reason_code=code,
                 properties={

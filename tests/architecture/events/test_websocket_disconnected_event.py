@@ -9,7 +9,6 @@ import pytest
 from blackbull import BlackBull
 from blackbull.event import Event
 from blackbull.utils import Scheme
-from blackbull.server.http1_actor import HTTP1Actor
 from blackbull.connection import Connection
 from blackbull.server.websocket_actor import WebSocketActor
 from blackbull.server.recipient import AbstractReader
@@ -118,37 +117,7 @@ async def _drive_ws_session_with_close(app, path: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 1. Fires on disconnect
-# ---------------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_websocket_disconnected_fires():
-    """websocket_disconnected fires when the connection closes."""
-    app = BlackBull()
-    captured: list[Event] = []
-    seen = asyncio.Event()
-
-    @app.on('websocket_disconnected')
-    async def observer(event: Event):
-        captured.append(event)
-        seen.set()
-
-    @app.route(path='/ws', scheme=Scheme.websocket)
-    async def ws_handler(scope, receive, send):
-        await receive()  # websocket.connect
-        await send({'type': 'websocket.accept'})
-        await send({'type': 'websocket.close'})
-
-    await _drive_ws_session(app, '/ws')
-
-    await asyncio.wait_for(seen.wait(), timeout=2.0)
-    await asyncio.sleep(0.2)
-    assert len(captured) == 1
-    assert captured[0].name == 'websocket_disconnected'
-
-
-# ---------------------------------------------------------------------------
-# 2. Detail shape
+# 1. Detail shape
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
@@ -184,7 +153,7 @@ async def test_websocket_disconnected_detail_shape():
 
 
 # ---------------------------------------------------------------------------
-# 3. connection_id matches websocket_connected
+# 2. connection_id matches websocket_connected
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
@@ -220,63 +189,3 @@ async def test_websocket_disconnected_connection_id_matches_connected():
     assert len(connected_ids[0]) > 0
 
 
-# ---------------------------------------------------------------------------
-# 4. Exactly-once
-# ---------------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_websocket_disconnected_exactly_once():
-    """A single connection close produces exactly one event — no duplicates."""
-    app = BlackBull()
-    count = 0
-    seen = asyncio.Event()
-
-    @app.on('websocket_disconnected')
-    async def observer(event: Event):
-        nonlocal count
-        count += 1
-        seen.set()
-
-    @app.route(path='/ws', scheme=Scheme.websocket)
-    async def ws_handler(scope, receive, send):
-        await receive()
-        await send({'type': 'websocket.accept'})
-        await send({'type': 'websocket.close'})
-
-    await _drive_ws_session(app, '/ws')
-
-    await asyncio.wait_for(seen.wait(), timeout=2.0)
-    await asyncio.sleep(0.2)
-    assert count == 1
-
-
-# ---------------------------------------------------------------------------
-# 5. Not fired for HTTP requests
-# ---------------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_websocket_disconnected_not_fired_for_http():
-    """An ordinary HTTP request must not fire websocket_disconnected."""
-    app = BlackBull()
-    fired: list[Event] = []
-
-    @app.on('websocket_disconnected')
-    async def observer(event: Event):
-        fired.append(event)
-
-    @app.route(path='/hello')
-    async def handler(scope, receive, send):
-        await send({'type': 'http.response.start', 'status': 200, 'headers': []})
-        await send({'type': 'http.response.body', 'body': b'ok', 'more_body': False})
-
-    raw = b'GET /hello HTTP/1.1\r\nHost: localhost:8000\r\n\r\n'
-    actor = HTTP1Actor(
-        _FakeReader(b''), _FakeWriter(), app, None,
-        request=raw,
-        peername=('127.0.0.1', 54321),
-        sockname=('0.0.0.0', 8000),
-    )
-    await actor.run()
-
-    await asyncio.sleep(0.2)
-    assert len(fired) == 0

@@ -853,12 +853,12 @@ def test_reload_groups_distinct_cleanup_failures(monkeypatch):
     termination_error = RuntimeError("terminate failed")
     watcher_error = RuntimeError("watcher failed")
     reclaim_error = RuntimeError("reclaim failed")
-    monkeypatch.setattr(server, "_terminate_all", lambda: termination_error)
+    monkeypatch.setattr(server, "_terminate_all", lambda: ([], termination_error))
     monkeypatch.setattr(server, "_stop_watcher", lambda: watcher_error)
     monkeypatch.setattr(
         server,
         "_reclaim_processes",
-        lambda *_args, **_kwargs: ([], reclaim_error),
+        lambda *_args, **_kwargs: ([], [], reclaim_error),
     )
 
     with pytest.raises(ExceptionGroup) as raised:

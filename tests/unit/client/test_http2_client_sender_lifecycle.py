@@ -51,7 +51,9 @@ class TestSenderRelease:
 
         assert c._senders == {}, 'the send is over; nothing may still sweep it'
 
-        c._complete(1)
+        c._responses[1].final_seen = True
+        c._responses[1].status = 200
+        await c._complete(1)
         await task
         assert c._senders == {}
 
@@ -92,7 +94,9 @@ class TestSenderRelease:
         await asyncio.sleep(0)
         assert c._writer.payload_bytes == 10, 'expected the upload to park'
 
-        c._complete(1)                          # early END_STREAM response
+        c._responses[1].final_seen = True
+        c._responses[1].status = 200
+        await c._complete(1)                    # early END_STREAM response
         await asyncio.sleep(0)
 
         c._on_window_update(_StreamWindowUpdate(stream_id=1, increment=100))

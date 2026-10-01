@@ -14,6 +14,8 @@ Reference: MQTT Version 5.0, OASIS Standard
 import pytest
 
 from blackbull.mqtt.messages import (
+    RESERVED_FLAGS_0010,
+    ReasonCode,
     MQTTSubscribe, MQTTSuback,
     MQTTUnsubscribe, MQTTUnsuback,
     encode_packet, decode_packet,
@@ -41,8 +43,7 @@ class TestSubscribePacket:
             subscriptions=[('test/topic', 0)],
         )
         wire = encode_packet(sub)
-        assert (wire[0] & 0x0F) == 0x02, \
-            "SUBSCRIBE fixed header flags must be 0x02 per §3.8.1"
+        assert (wire[0] & 0x0F) == RESERVED_FLAGS_0010
 
     def test_subscribe_single_topic(self):
         """§3.8.2 — SUBSCRIBE with a single Topic Filter."""
@@ -82,35 +83,22 @@ class TestSubscribePacket:
             decoded = decode_packet(wire)
             assert decoded.subscriptions[0][1] == qos
 
-    def test_subscribe_with_no_local_option(self):
-        """§3.8.2.1 — Subscription Options: No Local (bit 2).
-
-        No Local = 1 means the server MUST NOT forward messages published
-        by the subscribing client itself.
-        """
+    @pytest.mark.parametrize('option', [
+        pytest.param('retain_as_published', id='retain-as-published'),
+        pytest.param('no_local', id='no-local-option'),
+    ])
+    def test_subscribe_with_retain_as_published(self, option):
+        """§3.8.2.1 — Subscription Options bits survive the codec: Retain As
+        Published (bit 3) forwards retained messages with the original RETAIN
+        flag value; No Local (bit 2) forbids self-delivery."""
         sub = MQTTSubscribe(
             packet_id=1,
             subscriptions=[('test/topic', 1)],
-            subscription_options=[{'no_local': True}],
+            subscription_options=[{option: True}],
         )
         wire = encode_packet(sub)
         decoded = decode_packet(wire)
-        assert decoded.subscription_options[0]['no_local'] is True
-
-    def test_subscribe_with_retain_as_published(self):
-        """§3.8.2.1 — Subscription Options: Retain As Published (bit 3).
-
-        Retain As Published = 1 means the server forwards retained messages
-        with the original RETAIN flag value.
-        """
-        sub = MQTTSubscribe(
-            packet_id=1,
-            subscriptions=[('test/topic', 1)],
-            subscription_options=[{'retain_as_published': True}],
-        )
-        wire = encode_packet(sub)
-        decoded = decode_packet(wire)
-        assert decoded.subscription_options[0]['retain_as_published'] is True
+        assert decoded.subscription_options[0][option] is True
 
     def test_subscribe_with_retain_handling(self):
         """§3.8.2.1 — Subscription Options: Retain Handling (bits 5-4).
@@ -147,39 +135,22 @@ class TestSubscribeTopicFilters:
       - '#'  (multi-level wildcard): matches any number of levels (must be last)
     """
 
-    def test_subscribe_with_single_level_wildcard(self):
-        """§4.7.1.2 — Single-level wildcard '+' matches one level."""
+    @pytest.mark.parametrize('filter_str', [
+        pytest.param('sensors/+/temperature', id='single-level-wildcard'),
+        pytest.param('sensors/#', id='multi-level-wildcard'),
+        pytest.param('$share/group1/sensors/temperature', id='shared-subscription'),
+    ])
+    def test_subscribe_with_shared_subscription(self, filter_str):
+        """§3.8.3 — Topic Filter forms in SUBSCRIBE: '+' single-level,
+        '#' multi-level, and shared subscriptions
+        $share/{ShareName}/{TopicFilter} (§4.8)."""
         sub = MQTTSubscribe(
             packet_id=1,
-            subscriptions=[('sensors/+/temperature', 1)],
+            subscriptions=[(filter_str, 1)],
         )
         wire = encode_packet(sub)
         decoded = decode_packet(wire)
-        assert decoded.subscriptions[0][0] == 'sensors/+/temperature'
-
-    def test_subscribe_with_multi_level_wildcard(self):
-        """§4.7.1.3 — Multi-level wildcard '#' matches any number of levels."""
-        sub = MQTTSubscribe(
-            packet_id=1,
-            subscriptions=[('sensors/#', 1)],
-        )
-        wire = encode_packet(sub)
-        decoded = decode_packet(wire)
-        assert decoded.subscriptions[0][0] == 'sensors/#'
-
-    def test_subscribe_with_shared_subscription(self):
-        """§4.8 — Shared Subscriptions: $share/{ShareName}/{TopicFilter}.
-
-        Shared subscriptions allow multiple clients to share the same
-        subscription; only one client receives each message.
-        """
-        sub = MQTTSubscribe(
-            packet_id=1,
-            subscriptions=[('$share/group1/sensors/temperature', 1)],
-        )
-        wire = encode_packet(sub)
-        decoded = decode_packet(wire)
-        assert decoded.subscriptions[0][0] == '$share/group1/sensors/temperature'
+        assert decoded.subscriptions[0][0] == filter_str
 
 
 # ============================================================================
@@ -200,28 +171,28 @@ class TestSubackPacket:
         """§3.9.2.1 — SUBACK grants a maximum QoS for each subscription."""
         suback = MQTTSuback(
             packet_id=1,
-            reason_codes=[0, 1, 2],  # Granted QoS 0, 1, 2
+            reason_codes=[ReasonCode.SUCCESS, ReasonCode.GRANTED_QOS_1, ReasonCode.GRANTED_QOS_2],  # Granted QoS 0, 1, 2
         )
         wire = encode_packet(suback)
         decoded = decode_packet(wire)
         assert decoded.packet_id == 1
-        assert decoded.reason_codes == [0, 1, 2]
+        assert decoded.reason_codes == [ReasonCode.SUCCESS, ReasonCode.GRANTED_QOS_1, ReasonCode.GRANTED_QOS_2]
 
-    @pytest.mark.parametrize("reason_code,meaning", [
-        (0x00, 'Granted QoS 0'),
-        (0x01, 'Granted QoS 1'),
-        (0x02, 'Granted QoS 2'),
-        (0x80, 'Unspecified error'),
-        (0x83, 'Implementation specific error'),
-        (0x87, 'Not authorized'),
-        (0x8F, 'Topic Filter invalid'),
-        (0x91, 'Packet Identifier in use'),
-        (0x97, 'Quota exceeded'),
-        (0x9E, 'Shared Subscriptions not supported'),
-        (0xA1, 'Subscription Identifiers not supported'),
-        (0xA2, 'Wildcard Subscriptions not supported'),
+    @pytest.mark.parametrize("reason_code", [
+        ReasonCode.SUCCESS,
+        ReasonCode.GRANTED_QOS_1,
+        ReasonCode.GRANTED_QOS_2,
+        ReasonCode.UNSPECIFIED_ERROR,
+        ReasonCode.IMPLEMENTATION_SPECIFIC_ERROR,
+        ReasonCode.NOT_AUTHORIZED,
+        ReasonCode.TOPIC_FILTER_INVALID,
+        ReasonCode.PACKET_IDENTIFIER_IN_USE,
+        ReasonCode.QUOTA_EXCEEDED,
+        ReasonCode.SHARED_SUBSCRIPTIONS_NOT_SUPPORTED,
+        ReasonCode.SUBSCRIPTION_IDENTIFIERS_NOT_SUPPORTED,
+        ReasonCode.WILDCARD_SUBSCRIPTIONS_NOT_SUPPORTED,
     ])
-    def test_suback_reason_codes(self, reason_code, meaning):
+    def test_suback_reason_codes(self, reason_code):
         """§3.9.2.1 — All valid SUBACK reason codes are encodable."""
         suback = MQTTSuback(
             packet_id=42,
@@ -235,7 +206,7 @@ class TestSubackPacket:
         """§3.9.2.2 — SUBACK may include Reason String and User Properties."""
         suback = MQTTSuback(
             packet_id=1,
-            reason_codes=[2, 0x80],
+            reason_codes=[ReasonCode.GRANTED_QOS_2, ReasonCode.UNSPECIFIED_ERROR],
             properties={
                 'reason_string': 'QoS 2 granted; second subscription failed',
                 'user_properties': [('broker', 'blackbull')],
@@ -243,7 +214,7 @@ class TestSubackPacket:
         )
         wire = encode_packet(suback)
         decoded = decode_packet(wire)
-        assert decoded.reason_codes == [2, 0x80]
+        assert decoded.reason_codes == [ReasonCode.GRANTED_QOS_2, ReasonCode.UNSPECIFIED_ERROR]
         assert decoded.properties['reason_string'] == (
             'QoS 2 granted; second subscription failed'
         )
@@ -269,8 +240,7 @@ class TestUnsubscribePacket:
             topics=['test/topic'],
         )
         wire = encode_packet(unsub)
-        assert (wire[0] & 0x0F) == 0x02, \
-            "UNSUBSCRIBE fixed header flags must be 0x02 per §3.10.1"
+        assert (wire[0] & 0x0F) == RESERVED_FLAGS_0010
 
     def test_unsubscribe_single_topic(self):
         """§3.10.2 — UNSUBSCRIBE with a single Topic Filter."""
@@ -317,21 +287,21 @@ class TestUnsubackPacket:
         """§3.11.2.1 — UNSUBACK Success (0x00)."""
         unsuback = MQTTUnsuback(
             packet_id=10,
-            reason_codes=[0x00, 0x00],
+            reason_codes=[ReasonCode.SUCCESS, ReasonCode.SUCCESS],
         )
         wire = encode_packet(unsuback)
         decoded = decode_packet(wire)
         assert decoded.packet_id == 10
-        assert decoded.reason_codes == [0x00, 0x00]
+        assert decoded.reason_codes == [ReasonCode.SUCCESS, ReasonCode.SUCCESS]
 
     @pytest.mark.parametrize("reason_code", [
-        0x00,  # Success
-        0x11,  # No subscription existed
-        0x80,  # Unspecified error
-        0x83,  # Implementation specific error
-        0x87,  # Not authorized
-        0x8F,  # Topic Filter invalid
-        0x91,  # Packet Identifier in use
+        ReasonCode.SUCCESS,
+        ReasonCode.NO_SUBSCRIPTION_EXISTED,
+        ReasonCode.UNSPECIFIED_ERROR,
+        ReasonCode.IMPLEMENTATION_SPECIFIC_ERROR,
+        ReasonCode.NOT_AUTHORIZED,
+        ReasonCode.TOPIC_FILTER_INVALID,
+        ReasonCode.PACKET_IDENTIFIER_IN_USE,
     ])
     def test_unsuback_reason_codes(self, reason_code):
         """§3.11.2.1 — All valid UNSUBACK reason codes."""
@@ -347,7 +317,7 @@ class TestUnsubackPacket:
         """§3.11.2.2 — UNSUBACK may include Reason String."""
         unsuback = MQTTUnsuback(
             packet_id=5,
-            reason_codes=[0x00, 0x11],
+            reason_codes=[ReasonCode.SUCCESS, ReasonCode.NO_SUBSCRIPTION_EXISTED],
             properties={'reason_string': 'First OK, second did not exist'},
         )
         wire = encode_packet(unsuback)

@@ -73,20 +73,18 @@ async def _unsubscribe(broker, conn, packet_id, topics):
 class TestConnectDecodeBounds:
     async def test_connect_truncated_after_protocol_name_is_malformed(self):
         """A CONNECT whose Remaining Length covers only the protocol name must
-        raise MQTTDecodeError (which the framer resyncs on), not an IndexError
+        raise MQTTDecodeError, not an IndexError
         that unwinds the read loop."""
         # 0x10 = CONNECT, RL=6, body = 2-byte-len-prefixed "MQTT" only.
         packet = b'\x10\x06\x00\x04MQTT'
         with pytest.raises(MQTTDecodeError):
             decode_packet(packet)
 
-    async def test_framer_resyncs_past_a_truncated_connect(self):
-        """The framer drops the malformed CONNECT byte-by-byte and does not
-        raise IncompletePacket forever (which would stall the connection)."""
+    async def test_framer_rejects_a_truncated_connect(self):
         framer = PacketFramer()
         framer.feed(b'\x10\x06\x00\x04MQTT')
-        # Draining the framer must terminate without raising.
-        assert list(framer) == []
+        with pytest.raises(MQTTDecodeError):
+            list(framer)
 
 
 # ===========================================================================
@@ -123,7 +121,7 @@ class TestTopicValidation:
                    for m in pub.outbox)
         assert any(isinstance(m, Close) for m in pub.outbox)
 
-    async def test_subscribe_invalid_filter_gets_0x8f(self):
+    async def test_subscribe_invalid_filter_gets_topic_filter_invalid(self):
         broker, conn = BrokerActor(), RecordingConn()
         await _attach(broker, conn)
         # '#' not terminal — an invalid Topic Filter (§4.7.1.2).
@@ -137,7 +135,7 @@ class TestTopicValidation:
         await _attach(broker, conn)
         await _subscribe(broker, conn, 6, [('ok/1', 1), ('bad/#/x', 2), ('ok/2', 0)])
         suback = [p for p in conn.packets() if isinstance(p, MQTTSuback)][0]
-        assert suback.reason_codes == [1, ReasonCode.TOPIC_FILTER_INVALID, 0]
+        assert suback.reason_codes == [ReasonCode.GRANTED_QOS_1, ReasonCode.TOPIC_FILTER_INVALID, ReasonCode.SUCCESS]
 
 
 # ===========================================================================
@@ -326,7 +324,7 @@ class TestSubscriptionOptions:
         await _attach(broker, conn)
         await _subscribe(broker, conn, 1, [('$share/g/t', 0)])
         suback = [p for p in conn.packets() if isinstance(p, MQTTSuback)][0]
-        assert suback.reason_codes == [0]
+        assert suback.reason_codes == [ReasonCode.SUCCESS]
         assert ReasonCode.SHARED_SUBSCRIPTIONS_NOT_SUPPORTED not in \
             suback.reason_codes
         assert [s[0] for s in broker._sessions['c1']['subscriptions']] == \

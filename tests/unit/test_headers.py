@@ -2,6 +2,29 @@ import pytest
 from blackbull.headers import Headers
 
 
+@pytest.mark.parametrize(('pairs', 'expected'), [
+    ([], None),
+    ([(b'Example', b'')], b''),
+    ([(b'Example', b'alpha')], b'alpha'),
+    ([(b'Example', b'alpha'), (b'example', b'beta')], b'alpha, beta'),
+    ([(b'Example', b''), (b'example', b'beta')], b', beta'),
+    ([(b'Example', b'alpha'), (b'other', b'ignored'),
+      (b'EXAMPLE', b''), (b'example', b'beta')], b'alpha, , beta'),
+])
+def test_combined_list_field(pairs, expected):
+    headers = Headers(pairs)
+    assert headers.get_combined(b'example') == expected
+    assert headers.get_combined(b'EXAMPLE') == expected
+    assert list(headers) == pairs
+
+
+def test_combined_field_observes_append():
+    headers = Headers([(b'Example', b'alpha')])
+    assert headers.get_combined(b'example') == b'alpha'
+    headers.append(b'EXAMPLE', b'beta')
+    assert headers.get_combined(b'example') == b'alpha, beta'
+
+
 @pytest.fixture
 def h():
     return Headers([(b'content-type', b'text/html'), (b'x-custom', b'a')])
@@ -15,13 +38,12 @@ def test_len_empty():
     assert len(Headers([])) == 0
 
 
-def test_getitem_present(h):
-    result = h[b'content-type']
-    assert result == [(b'content-type', b'text/html')]
-
-
-def test_getitem_case_insensitive(h):
-    result = h[b'Content-Type']
+@pytest.mark.parametrize('key', [
+    pytest.param(b'content-type', id='present'),
+    pytest.param(b'Content-Type', id='case-insensitive'),
+])
+def test_getitem_present(h, key):
+    result = h[key]
     assert result == [(b'content-type', b'text/html')]
 
 
@@ -75,13 +97,13 @@ def test_get_sf_item_with_params():
     assert h.get_sf_item(b'x-thing') == (5, {'foo': Token('bar')})
 
 
-def test_get_sf_item_absent_returns_none():
-    assert Headers([]).get_sf_item(b'deprecation') is None
-
-
-def test_get_sf_item_malformed_returns_none():
-    h = Headers([(b'deprecation', b'@later')])
-    assert h.get_sf_item(b'deprecation') is None
+@pytest.mark.parametrize('method,name', [
+    pytest.param('get_sf_item', b'deprecation', id='item-absent'),
+    pytest.param('get_sf_list', b'accept-query', id='list-absent'),
+    pytest.param('get_sf_dict', b'priority', id='dict-absent'),
+])
+def test_get_sf_item_absent_returns_none(method, name):
+    assert getattr(Headers([]), method)(name) is None
 
 
 def test_get_sf_item_case_insensitive():
@@ -103,15 +125,6 @@ def test_get_sf_list_inner_list():
     ]
 
 
-def test_get_sf_list_absent_returns_none():
-    assert Headers([]).get_sf_list(b'accept-query') is None
-
-
-def test_get_sf_list_malformed_returns_none():
-    h = Headers([(b'accept-query', b'"unterminated')])
-    assert h.get_sf_list(b'accept-query') is None
-
-
 def test_get_sf_dict():
     h = Headers([(b'priority', b'u=2, i')])
     assert h.get_sf_dict(b'priority') == {'u': (2, {}), 'i': (True, {})}
@@ -122,14 +135,15 @@ def test_get_sf_dict_combines_field_lines():
     assert h.get_sf_dict(b'priority') == {'u': (2, {}), 'i': (True, {})}
 
 
-def test_get_sf_dict_absent_returns_none():
-    assert Headers([]).get_sf_dict(b'priority') is None
-
-
-def test_get_sf_dict_malformed_returns_none():
+@pytest.mark.parametrize('field,value,method', [
+    pytest.param(b'deprecation', b'@later', 'get_sf_item', id='item-malformed'),
+    pytest.param(b'accept-query', b'"unterminated', 'get_sf_list', id='list-malformed'),
+    pytest.param(b'priority', b'u=2, ???', 'get_sf_dict', id='dict-malformed'),
+])
+def test_get_sf_dict_malformed_returns_none(field, value, method):
     # Strict parsing: one bad member poisons the whole field (RFC 9651 §1.1).
-    h = Headers([(b'priority', b'u=2, ???')])
-    assert h.get_sf_dict(b'priority') is None
+    h = Headers([(field, value)])
+    assert getattr(h, method)(field) is None
 
 
 def test_get_sf_item_multiple_lines_of_single_item_is_malformed():

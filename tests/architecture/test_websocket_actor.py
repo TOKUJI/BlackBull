@@ -1,7 +1,7 @@
 """Tests for WebSocketActor (Phase 6 Step 5)."""
 import asyncio
 import pytest
-from unittest.mock import AsyncMock
+from unittest.mock import ANY, AsyncMock
 
 from blackbull.connection import Connection
 from blackbull.event_aggregator import EventAggregator
@@ -167,7 +167,7 @@ async def test_websocket_lifecycle_events(
     await actor.run()
 
     aggregator.on_websocket_connected.assert_called_once_with(conn, None)
-    aggregator.on_websocket_disconnected.assert_called_once_with(conn, code=1006)
+    aggregator.on_websocket_disconnected.assert_called_once_with(conn, code=1006, timeout=ANY)
 
 
 @pytest.mark.asyncio
@@ -212,7 +212,7 @@ async def test_websocket_protocol_error_isolated(
     # the close code and only updated it from a disconnect *event*, which a
     # protocol violation never produces (it emits the exception instead), so
     # the copy stayed at its default.  One record now, read from the recipient.
-    aggregator.on_websocket_disconnected.assert_called_once_with(conn, code=1002)
+    aggregator.on_websocket_disconnected.assert_called_once_with(conn, code=1002, timeout=ANY)
 
 
 @pytest.mark.asyncio
@@ -228,6 +228,16 @@ async def test_protocol_violation_closes_writer(
 
     actor = WebSocketActor(fake_bad_frame_reader, fake_writer, conn, app, aggregator)
     await actor.run()
+
+    # P1 §7.2 — the violation closes the connection explicitly: the writer
+    # is closed, and the peer saw the violation's CLOSE(1002) first.
+    assert fake_writer.closed, (
+        'writer.close() must be called after protocol violation'
+    )
+    close_1002 = encode_frame((1002).to_bytes(2, 'big'), opcode=0x8)
+    assert close_1002 in bytes(fake_writer.written), (
+        'CLOSE(1002) must be written before the writer is closed'
+    )
 
 
 @pytest.mark.asyncio
@@ -259,4 +269,6 @@ async def test_cancellation_propagates_and_is_not_reported_as_error(
     # The finally cleanup still fires on cancellation.
     aggregator.on_websocket_disconnected.assert_called_once()
 
-    assert fake_writer.closed, 'writer.close() must be called after protocol violation'
+    assert fake_writer.closed, (
+        'the finally cleanup must close the writer even on cancellation'
+    )

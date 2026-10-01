@@ -25,12 +25,10 @@ from the actual bug). Two guards:
    via a single HEADERS frame (``_on_headers_frame``'s complete-in-one-frame
    branch) and once via a HEADERS+CONTINUATION split (``_on_continuation_
    frame``'s independent call to the same replacement helper).
-3. **Empty ``:method`` fallback is pinned** — ``parse_headers``'s
-   ``effective_method = method or 'HEAD'`` preserves a pre-refactor
-   placeholder quirk for a spec-illegal empty ``:method``, confirmed live
-   (not dead code) by direct observation. Pinned so a future change to
-   either side (the frame parser starting to reject it, or the fallback
-   value changing) is a deliberate decision, not silent drift.
+3. **An empty ``:method`` never reaches the builder** — RFC 9110 §5.6.2
+   makes ``token = 1*tchar``, so an empty ``:method`` is malformed at the
+   frame parser the way an empty ``:path`` is, and no placeholder method is
+   substituted in its place (BLA-433).
 """
 import asyncio
 import dataclasses
@@ -234,25 +232,17 @@ async def test_extensions_sentinel_replaced_before_app_sees_connection_via_conti
 
 
 # ---------------------------------------------------------------------------
-# Guard 3 — the empty-`:method` fallback quirk is pinned, not just documented
+# Guard 3 — an empty `:method` never reaches the builder
 # ---------------------------------------------------------------------------
 
-def test_empty_method_pseudo_header_is_not_rejected_and_falls_back_to_head():
-    """``parse_headers``'s ``effective_method = method or 'HEAD'``
-    (blackbull/server/parser.py) deliberately preserves a pre-refactor
-    placeholder quirk for a spec-illegal empty ``:method`` value, rather than
-    silently changing behaviour as a side effect of the Phase 1 restructure
-    (`BLA-124` [private]). Confirmed live
-    (not dead code): the frame-level parser does not reject an empty
-    ``:method`` the way it rejects an empty ``:path`` (see the adjacent
-    ``path_pseudo == ''`` check in ``parse_headers``), so this branch is
-    reachable from the wire today.
+def test_empty_method_pseudo_header_is_malformed_and_builds_nothing():
+    """RFC 9110 §5.6.2 makes ``token = 1*tchar``, so an empty ``:method`` is
+    malformed at the frame parser and no ``Connection`` is built for it — the
+    pre-refactor placeholder that substituted 'HEAD' is gone (BLA-433).
 
-    This is itself a latent RFC 9113 §8.3.1 conformance gap — an empty
-    pseudo-header value should arguably be rejected like an empty ``:path``
-    is — but fixing it is a conformance decision out of scope for the alloc
-    hygiene work; this test only pins today's observed behaviour so a future
-    change to either side is deliberate, not accidental.
+    Pinned here rather than only in the conformance suite because the builder
+    is where a placeholder method would reappear: a reintroduction would be a
+    decision, not silent drift.
     """
     encoder = Encoder()
     block = encoder.encode([
@@ -266,12 +256,9 @@ def test_empty_method_pseudo_header_is_not_rejected_and_falls_back_to_head():
 
     conn = parser_mod.parse_headers(frame)
 
-    assert not frame.malformed, (
-        'an empty :method is not currently rejected at the frame level — '
-        'if this now fails, either the conformance gap was closed (update '
-        'this test to assert frame.malformed and conn is None) or something '
-        'regressed')
-    assert conn is not None
-    assert conn.method == 'HEAD', (
-        "parse_headers's empty-:method fallback changed — this must be a "
-        "deliberate decision (see the docstring), not an accidental drift")
+    assert frame.malformed, (
+        'an empty :method must be malformed — if this fails, a placeholder '
+        'method is being substituted again and the accept set has drifted '
+        'from HTTP/1.1 (see TestH1H2MethodAcceptSetParity)')
+    assert ':method' in (frame.malformed_reason or '')
+    assert conn is None

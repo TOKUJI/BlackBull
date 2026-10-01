@@ -115,21 +115,20 @@ async def _census(driver, n: int) -> float:
 
 
 @pytest.mark.asyncio
-async def test_native_h1_body_less_get_leaves_no_cycle():
+@pytest.mark.parametrize('raw,msg', [
+    pytest.param(_raw_get,
+                 'body-less GET leaves {per_req:.1f} cycle-objs/request — the v0.60.0 '
+                 'per-request reference cycle has been reintroduced',
+                 id='body-less-get'),
+    pytest.param(_raw_post,
+                 'POST reading request.body() leaves {per_req:.1f} cycle-objs/request — '
+                 'conn._receive is cycling through the recipient again',
+                 id='request-body-read'),
+])
+async def test_native_h1_body_less_get_leaves_no_cycle(raw, msg):
     app = _app()
-    per_req = await _census(lambda: _drive_h1(app, _raw_get()), n=500)
-    assert per_req < 1.0, (
-        f'body-less GET leaves {per_req:.1f} cycle-objs/request — the v0.60.0 '
-        f'per-request reference cycle has been reintroduced')
-
-
-@pytest.mark.asyncio
-async def test_native_h1_request_body_read_leaves_no_cycle():
-    app = _app()
-    per_req = await _census(lambda: _drive_h1(app, _raw_post()), n=500)
-    assert per_req < 1.0, (
-        f'POST reading request.body() leaves {per_req:.1f} cycle-objs/request — '
-        f'conn._receive is cycling through the recipient again')
+    per_req = await _census(lambda: _drive_h1(app, raw()), n=500)
+    assert per_req < 1.0, msg.format(per_req=per_req)
 
 
 @pytest.mark.asyncio

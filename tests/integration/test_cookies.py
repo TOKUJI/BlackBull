@@ -46,6 +46,7 @@ def test_set_cookie_present_in_response(client):
 @pytest.mark.integration
 def test_set_cookie_httponly_and_samesite(client):
     r = client.get('/set-cookie')
+    assert r.status_code == 200
     cookie = r.headers.get('set-cookie', '')
     assert 'session=abc123' in cookie
     assert 'HttpOnly' in cookie
