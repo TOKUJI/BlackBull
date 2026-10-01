@@ -3897,6 +3897,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#blackbull.protocol.framing.split_transfer_codings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        split_transfer_codings
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5571,6 +5582,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#blackbull.protocol.framing.split_transfer_codings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        split_transfer_codings
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5741,6 +5763,33 @@ frames one normally, so a peer that sends one has to be read to the
 length it declared — leaving those octets behind would desynchronise the
 reader from the very peer that was already misbehaving. The generation
 rule lives on the sender beside it, not in here.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.protocol.framing.split_transfer_codings" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">split_transfer_codings</span><span class="p">(</span><span class="n">fields</span><span class="p">)</span></code>
+
+<a href="#blackbull.protocol.framing.split_transfer_codings" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Every <code>Transfer-Encoding</code> member as RFC 9110 §10.1.4 writes one,
+or <code>ValueError</code>.</p>
+<p>Commas split, OWS off, the coding token lowered, the parameters kept
+rather than dropped — a policy that refuses <code>chunked</code> carrying a
+parameter sees one, a policy that reads only the names drops them as its
+own decision.  An empty member stays <code>(b'', ())</code> (<code>chunked,</code> is not
+<code>chunked</code> to a sender rewriting the field; a reader ignores empties
+per RFC 9110 §5.6.1).  A member outside the grammar raises — a
+parameter this reading cannot see through must not hide a different
+final coding — as does a list over the empty-member bound.</p>
 
 
     </div>
