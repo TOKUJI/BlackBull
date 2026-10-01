@@ -21,7 +21,8 @@ from ..asgi import ASGIReceiveCallable, ASGISendCallable
 from ..connection import (
     Connection, bind_receive_channel)
 from ..headers import Headers
-from ..protocol.framing import method_is, parse_content_length
+from ..protocol.framing import (method_is, parse_content_length,
+                                split_transfer_codings)
 from .deadline import ConnectionDeadline
 from .request_target import split_path_query
 from .recipient import (CONNECTION_MUST_CLOSE, CONNECTION_NEEDS_DRAIN,
@@ -273,16 +274,19 @@ def _validate_message_framing(headers: 'Headers') -> int:
     These are the rules every smuggling-class incident I'm aware of has
     exploited.  The ``Content-Length`` half is
     [`parse_content_length`][blackbull.protocol.framing.parse_content_length]
-    — the same answer the senders give, so no third reading of the field can
-    drift from them.  What is here is the combination policy:
+    and the ``Transfer-Encoding`` half is
+    [`split_transfer_codings`][blackbull.protocol.framing.split_transfer_codings]
+    — the same answers the senders give, so no third reading of either field
+    can drift from them.  What is here is the combination policy:
 
     * §6.1 — if both ``Content-Length`` and ``Transfer-Encoding`` are
       present, the message is anomalous.  We reject (the spec also
       allows "ignore CL, use TE"; rejecting is the safer policy).
     * §6.1 — unknown ``Transfer-Encoding`` codings → 501 Not Implemented.
-      We accept exactly ``chunked``; anything else (``gzip``, the
-      ``identity, chunked`` multi-coding form, etc.) raises
-      [`NotImplementedFramingError`][].
+      We accept exactly ``chunked`` — the lone token, so a parameter on it
+      counts as anything else (the shared split keeps parameters precisely
+      so this stays a decision).  ``gzip``, the ``identity, chunked``
+      multi-coding form, etc. raise [`NotImplementedFramingError`][].
 
     Returns the declared body length — the validated ``Content-Length``, or 0
     when the message declares none (``chunked`` included: that framing
@@ -308,28 +312,34 @@ def _validate_message_framing(headers: 'Headers') -> int:
             raise BadRequestError(str(exc)) from exc
 
     if tes:
-        codings = [c.strip().lower()
-                   for _, raw_value in tes for c in raw_value.split(b',')]
-        if codings == [b'chunked']:
-            pass  # RFC 9112 §6.1 — the one accepted form
-        elif b'chunked' not in codings:
+        try:
+            members = split_transfer_codings(tes)
+        except ValueError as exc:
+            # A list no reading can split (``gzip;bad``, a field of commas)
+            # declares a length no one can determine.
+            raise BadRequestError(str(exc)) from exc
+        if members == [(b'chunked', ())]:
+            return declared  # RFC 9112 §6.1 — the one accepted form
+        codings = [name for name, _params in members]
+        if b'chunked' not in codings:
             # A coding we don't implement, chunked absent (``gzip``,
             # ``deflate``) ⇒ 501 (nginx parity).
             raise NotImplementedFramingError(
                 f'Transfer-Encoding {codings!r} is not implemented')
-        elif codings[-1] != b'chunked' or codings.count(b'chunked') > 1:
+        if codings[-1] != b'chunked' or codings.count(b'chunked') > 1:
             # chunked present but not the sole final coding (``chunked, gzip``,
-            # ``chunked, chunked``) ⇒ the message length is undeterminable, and
-            # a server MUST NOT process it (SMUG-TE-NOT-FINAL-CHUNKED).
+            # ``chunked, chunked``; a parametered ``chunked`` counts too) ⇒ the
+            # length is undeterminable, and a server MUST NOT process the
+            # message (SMUG-TE-NOT-FINAL-CHUNKED).
             raise BadRequestError(
                 f'Transfer-Encoding with chunked not the sole final coding: '
                 f'{codings!r}')
-        else:
-            # chunked IS final but preceded by a coding we can't decode
-            # (``gzip, chunked``) ⇒ 501.
-            raise NotImplementedFramingError(
-                f'Transfer-Encoding {codings!r} applies an unimplemented '
-                f'content coding before chunked')
+        # chunked IS final and sole but the list is still not the one accepted
+        # form: a coding precedes it (``gzip, chunked``) or a parameter sits on
+        # it (``chunked; ext=1``, RFC 9112 §7.1) ⇒ 501.
+        raise NotImplementedFramingError(
+            f'Transfer-Encoding {members!r} applies an unimplemented '
+            f'coding or parameter with chunked')
 
     return declared
 
