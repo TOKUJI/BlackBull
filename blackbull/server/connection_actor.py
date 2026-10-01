@@ -182,7 +182,7 @@ class ConnectionActor(Actor):
         # its discriminator would hold a slot forever on the peek read.  The
         # TLS handshake, detection and the first headers each get their own
         # ``header_timeout``, back to back.
-        deadline = cfg.header_timeout if cfg.header_timeout > 0 else None
+        deadline = cfg.header_deadline
 
         # Per-connection registry state, not a per-connection timer: one
         # process-wide scanner walks the registry (see ``deadline.py``).  Bound

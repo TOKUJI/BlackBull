@@ -505,8 +505,7 @@ Each accepted descriptor is counted from `accept()` until it closes — TLS
 handshakes and refusals included — and accepting pauses while the count is at
 `BB_MAX_CONNECTIONS` plus a refusal reserve.  Do not count in `connection_made`:
 over TLS it runs only after the handshake.  A loop that cannot register a
-reader falls back to its own accept and logs a WARNING; the cap then bounds
-requests, not descriptors.
+reader fails `run()` with that error.
 
 ## Receive-path invariant
 

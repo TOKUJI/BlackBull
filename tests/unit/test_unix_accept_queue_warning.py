@@ -157,13 +157,9 @@ def _fresh_settings():
 @pytest.mark.asyncio
 @pytest.mark.timeout(30)
 @pytest.mark.parametrize('how', ['bound', 'adopted'])
-@pytest.mark.parametrize('accept', ['uncapped', 'capped', 'loop_fallback'])
+@pytest.mark.parametrize('accept', ['uncapped', 'capped'])
 async def test_a_full_queue_at_open_warns_once_with_waiting_and_backlog(
         tmp_path, caplog, monkeypatch, how, accept):
-    if accept == 'loop_fallback':
-        def _no_readers(*_args):
-            raise NotImplementedError('no readers on this loop')
-        monkeypatch.setattr(asyncio.get_running_loop(), 'add_reader', _no_readers)
     served = _server(tmp_path, how, 0 if accept == 'uncapped' else 64,
                      monkeypatch)
     path = served[1]
@@ -171,8 +167,7 @@ async def test_a_full_queue_at_open_warns_once_with_waiting_and_backlog(
         refused = await _open_during_startup(served, BACKLOG + 3)
     assert refused == 2, 'the kernel admits backlog + 1 on AF_UNIX'
 
-    warnings = [r for r in _backlog_warnings(caplog)
-                if 'could not arm a listener' not in r.getMessage()]
+    warnings = _backlog_warnings(caplog)
     assert len(warnings) == 1, [r.getMessage() for r in warnings]
     record = warnings[0]
     assert record.name == 'blackbull.caps'

@@ -9,7 +9,6 @@ import asyncio
 import contextlib
 import importlib.util
 import json
-import logging
 import os
 import socket
 import sys
@@ -250,21 +249,13 @@ async def test_stalled_tls_handshakes_pause_accepting_at_the_limit(loop):
 @pytest.mark.asyncio
 @pytest.mark.timeout(60)
 @pytest.mark.parametrize('fails_on', [1, 2], ids=['first', 'second'])
-async def test_a_reader_failing_to_register_leaves_every_listener_accepting(
-        monkeypatch, caplog, fails_on):
-    """A loop that cannot register a reader: every listener still accepts,
-    through the loop's own accept, and the operator is told once."""
+async def test_a_reader_failing_to_register_fails_run_and_closes_every_listener(
+        monkeypatch, fails_on):
     from blackbull import BlackBull
     from blackbull.server.listener import Listener, Tcp
     from blackbull.server.server import Server
 
-    app = BlackBull()
-
-    @app.route(path='/')
-    async def index():
-        return 'ok'
-
-    server = Server(app, max_connections=64, listeners=[
+    server = Server(BlackBull(), max_connections=64, listeners=[
         Listener(Tcp(0, host='127.0.0.1')) for _ in range(3)])
     server.open_socket()
     ports = [socks[0].getsockname()[1] for _l, socks in server.bound_listeners]
@@ -279,21 +270,8 @@ async def test_a_reader_failing_to_register_leaves_every_listener_accepting(
         return real_add_reader(fd, *args)
 
     monkeypatch.setattr(loop, 'add_reader', _refuse)
-    runner = asyncio.create_task(server.run())
-    try:
-        with caplog.at_level(logging.WARNING, logger='blackbull.server.server'):
-            for port in ports:
-                reader, writer = await asyncio.wait_for(
-                    asyncio.open_connection('127.0.0.1', port), 5)
-                writer.write(REQUEST)
-                line = await asyncio.wait_for(reader.readline(), 5)
-                writer.close()
-                assert line.startswith(b'HTTP/1.1 200'), (port, line)
-    finally:
-        await asyncio.wait_for(server.stop(drain_timeout=1.0), 5)
-        await asyncio.wait({runner}, timeout=5)
-        server.close_socket()
-    warnings = [r for r in caplog.records if r.levelno == logging.WARNING
-                and 'accept' in r.getMessage().lower()]
-    assert len(warnings) == 1, [r.getMessage() for r in warnings]
-    assert 'BB_MAX_CONNECTIONS' in warnings[0].getMessage()
+    with pytest.raises(NotImplementedError, match='no readers'):
+        await asyncio.wait_for(server.run(), 5)
+    for port in ports:
+        with pytest.raises(ConnectionRefusedError):
+            await asyncio.wait_for(asyncio.open_connection('127.0.0.1', port), 5)

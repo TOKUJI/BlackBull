@@ -26,6 +26,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   handshake.
 - `BB_HEADER_TIMEOUT` now also bounds the TLS handshake, including that of a
   port-bound protocol with `tls=True` such as MQTT.
+- An event loop that cannot register a reader on a listener now fails
+  `Server.run()` with that error, instead of serving without the descriptor
+  bound.
+- `NativeTestServer` accepts the way `Server` does, so `max_connections=`
+  counts its connections from accept.
 
 - Added client-owned write and WebSocket size bounds, and applied the
   response minimum-body-rate floor to HTTP/2 streams.

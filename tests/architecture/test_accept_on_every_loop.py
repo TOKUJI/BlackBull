@@ -154,6 +154,41 @@ def test_alpn_selects_http2_or_http1_over_tls(loop):
     _run(loop, main)
 
 
+@pytest.mark.timeout(60)
+@pytest.mark.parametrize('loop', LOOPS)
+def test_a_disabled_header_timeout_leaves_tls_to_the_loops_own_bound(
+        loop, monkeypatch):
+    from blackbull.env import reset_settings_cache
+
+    monkeypatch.setenv('BB_HEADER_TIMEOUT', '0')
+    reset_settings_cache()
+
+    async def main():
+        server = Server(_app(), max_connections=64,
+                        ssl_context=_anonymous_tls(server=True,
+                                                   alpn=['http/1.1']))
+        server.open_socket(0)
+        runner = asyncio.create_task(server.run())
+        try:
+            await _until(lambda: getattr(server, '_running_servers', None))
+            reader, writer = await asyncio.wait_for(asyncio.open_connection(
+                '127.0.0.1', server.port,
+                ssl=_anonymous_tls(server=False, alpn=['http/1.1'])), 5)
+            writer.write(REQUEST)
+            line = await asyncio.wait_for(reader.readline(), 5)
+            writer.close()
+            assert line.startswith(b'HTTP/1.1 200'), line
+        finally:
+            await asyncio.wait_for(server.stop(drain_timeout=1.0), 5)
+            await asyncio.wait({runner}, timeout=5)
+            server.close_socket()
+
+    try:
+        _run(loop, main)
+    finally:
+        reset_settings_cache()
+
+
 # ---------------------------------------------------------------------------
 # A listener's reader goes before its descriptor
 # ---------------------------------------------------------------------------
@@ -424,9 +459,8 @@ HEADER_TIMEOUT = 1.0
 
 @pytest.mark.timeout(60)
 @pytest.mark.parametrize('loop', LOOPS)
-@pytest.mark.parametrize('path', ['gate', 'loop_fallback'])
 def test_silent_tls_connects_release_accepting_within_the_header_timeout(
-        loop, path, monkeypatch):
+        loop, monkeypatch):
     """A client that never sends a ClientHello holds its admission only as
     long as ``BB_HEADER_TIMEOUT`` would let a cleartext client withhold its
     head; until then a burst of them can pause every listener."""
@@ -434,16 +468,10 @@ def test_silent_tls_connects_release_accepting_within_the_header_timeout(
 
     from blackbull.env import reset_settings_cache
 
-    if path == 'loop_fallback' and loop == 'uvloop':
-        pytest.skip('uvloop add_reader cannot be refused from a test')
     monkeypatch.setenv('BB_HEADER_TIMEOUT', str(HEADER_TIMEOUT))
     reset_settings_cache()
 
     async def main():
-        if path == 'loop_fallback':
-            def refuse(*_args):
-                raise NotImplementedError('no readers on this loop')
-            asyncio.get_running_loop().add_reader = refuse
         server = Server(_app(), max_connections=4, listeners=[
             Listener(Tcp(0, host='127.0.0.1')),
             Listener(Tcp(0, host='127.0.0.1'),
@@ -458,9 +486,8 @@ def test_silent_tls_connects_release_accepting_within_the_header_timeout(
             for _ in range(20):
                 silent.append(socket.create_connection(('127.0.0.1', tls)))
             started = time.monotonic()
-            if path == 'gate':
-                await _until(lambda: server._accept_gate._paused)
-                await _served(plain, timeout=HEADER_TIMEOUT + 4)
+            await _until(lambda: server._accept_gate._paused)
+            await _served(plain, timeout=HEADER_TIMEOUT + 4)
             for sock in silent:
                 sock.setblocking(False)
             while True:

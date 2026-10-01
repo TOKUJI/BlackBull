@@ -235,6 +235,11 @@ class Settings:
     cpu_pinning: str = _env_vars.BB_CPU_PINNING
     frame_yield_every: int = _env_vars.BB_FRAME_YIELD_EVERY
 
+    @property
+    def header_deadline(self) -> float | None:
+        """``header_timeout`` as a deadline: ``None`` when it is disabled."""
+        return self.header_timeout or None
+
 
 @_functools.cache
 def get_settings() -> Settings:

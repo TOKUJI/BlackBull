@@ -556,7 +556,7 @@ class TestTimeoutHandling:
         with pytest.raises((asyncio.TimeoutError, TimeoutError,
                             ConnectionResetError, OSError)):
             await asyncio.wait_for(
-                server.client_connected_cb(reader, sw),
+                server._serve_connection(reader, sw),
                 timeout=1.0,
             )
 
@@ -594,7 +594,7 @@ class TestTimeoutHandling:
         with pytest.raises((asyncio.TimeoutError, TimeoutError,
                             ConnectionResetError, OSError)):
             await asyncio.wait_for(
-                server.client_connected_cb(reader, sw),
+                server._serve_connection(reader, sw),
                 timeout=1.0,
             )
 
@@ -653,7 +653,7 @@ class TestMTLS:
 
 
 # ---------------------------------------------------------------------------
-# client_connected_cb dispatch — migrated from test_server_dispatch.py
+# _serve_connection dispatch — migrated from test_server_dispatch.py
 # ---------------------------------------------------------------------------
 
 from unittest.mock import patch
@@ -743,7 +743,7 @@ async def _dispatch_noop_app(scope, receive, send):
 
 
 class TestClientConnectedCbDispatch:
-    """ASGIServer.client_connected_cb() must route to the correct handler class."""
+    """ASGIServer._serve_connection() must route to the correct handler class."""
 
     @pytest.mark.asyncio
     async def test_websocket_request_dispatches_to_websocket_actor(self):
@@ -753,7 +753,7 @@ class TestClientConnectedCbDispatch:
         server = ASGIServer(_dispatch_noop_app)
 
         with patch.object(_WebSocketActor_dispatch, 'run', new=AsyncMock()) as mock_ws_run:
-            await server.client_connected_cb(reader, writer)
+            await server._serve_connection(reader, writer)
 
         assert mock_ws_run.called, (
             "An HTTP Upgrade: websocket request must be routed to WebSocketActor."
@@ -778,7 +778,7 @@ class TestClientConnectedCbDispatch:
 
         with patch.object(_HTTP1Actor_dispatch, '__init__', capturing_init):
             with patch.object(_HTTP1Actor_dispatch, 'run', noop_run):
-                await server.client_connected_cb(reader, writer)
+                await server._serve_connection(reader, writer)
 
         assert dispatched_type.get('actor') == 'HTTP1Actor'
 
@@ -791,7 +791,7 @@ class TestClientConnectedCbDispatch:
         server = ASGIServer(_dispatch_noop_app)
 
         with patch.object(_WebSocketActor_dispatch, 'run', new=AsyncMock()) as mock_run:
-            await server.client_connected_cb(reader, writer)
+            await server._serve_connection(reader, writer)
 
         assert mock_run.called
 
@@ -806,7 +806,7 @@ class TestClientConnectedCbDispatch:
             pass
 
         with patch.object(_HTTP1Actor_dispatch, 'run', noop_run):
-            await server.client_connected_cb(reader, writer)
+            await server._serve_connection(reader, writer)
 
         assert writer.closed
 
@@ -827,7 +827,7 @@ class TestClientConnectedCbDispatch:
         reader = _DispatchReader(raw)
         writer = _DispatchWriter()
 
-        await server.client_connected_cb(reader, writer)
+        await server._serve_connection(reader, writer)
 
         assert writer.closed, 'New connection must be closed when the limit is reached'
 
@@ -844,7 +844,7 @@ class TestClientConnectedCbDispatch:
             pass
 
         with patch.object(_HTTP1Actor_dispatch, 'run', noop_run):
-            await server.client_connected_cb(reader, writer)
+            await server._serve_connection(reader, writer)
 
         assert server._active_connections == 0, (
             f'Counter should be 0 after connection closes, got {server._active_connections}'

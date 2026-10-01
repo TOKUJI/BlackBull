@@ -15,9 +15,8 @@ import sys
 
 import pytest
 
-from blackbull import BlackBull
 from blackbull.server import server as server_mod
-from blackbull.server.server import Server, _AcceptGate, _Admission
+from blackbull.server.server import _AcceptGate, _Admission
 
 
 class _Quiet(asyncio.Protocol):
@@ -61,15 +60,6 @@ def test_an_admission_releases_once():
     admission.release()
     admission.release()
     assert gate._descriptors_held == 0
-
-
-def test_a_connection_lost_without_an_admission_releases_nothing():
-    """A protocol the gate never admitted — a test server's, a fallback
-    accept's — must not drive the count below zero."""
-    server = Server(BlackBull())
-    protocol = server.connection_protocol_factory()()
-    protocol.connection_lost(None)
-    assert server._accept_gate._descriptors_held == 0
 
 
 @pytest.mark.asyncio
@@ -317,7 +307,8 @@ def test_a_failed_arm_leaves_no_reader():
         running.add_reader = _refuse_second
         gate = _AcceptGate()
         try:
-            assert gate.arm([((_Quiet, None), s) for s in socks], 64, 16) is None
+            with pytest.raises(OSError, match='no reader for you'):
+                gate.arm([((_Quiet, None), s) for s in socks], 64, 16)
             assert len(calls) == 2
             assert _registered(running, fds) == [False] * 3
         finally:
@@ -487,21 +478,19 @@ class _Unlistenable(_FlakySocket):
 @pytest.mark.asyncio
 @pytest.mark.timeout(30)
 @pytest.mark.parametrize('failing', ['listen', 'add_reader'])
-async def test_the_fallback_warning_names_what_failed(
-        listener, monkeypatch, caplog, failing):
+async def test_a_listener_that_cannot_be_armed_raises_its_cause(
+        listener, monkeypatch, failing):
     sock = listener
     if failing == 'listen':
         sock = _Unlistenable(listener, [])
+        expected = OSError
     else:
         def _refuse(*_args):
             raise NotImplementedError('no readers on this loop')
         monkeypatch.setattr(asyncio.get_running_loop(), 'add_reader', _refuse)
-    with caplog.at_level(logging.WARNING, logger='blackbull.server.server'):
-        assert _AcceptGate().arm([((_Quiet, None), sock)], 64, 16) is None
-    [record] = [r for r in caplog.records if r.levelno == logging.WARNING]
-    message = record.getMessage()
-    assert f'{failing}()' in message, message
-    assert 'BB_MAX_CONNECTIONS' in message
+        expected = NotImplementedError
+    with pytest.raises(expected):
+        _AcceptGate().arm([((_Quiet, None), sock)], 64, 16)
 
 
 # ---------------------------------------------------------------------------
