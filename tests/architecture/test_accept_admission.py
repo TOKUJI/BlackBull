@@ -288,3 +288,20 @@ async def test_descriptors_the_app_holds_at_startup_do_not_eat_the_reserve(loop)
     assert observed == Counter({'503': BURST}), observed
     assert server_view['accept_errors'] == 0, server_view
     assert settled['held'] == 0, settled
+
+
+def test_a_cap_set_in_code_is_honoured_as_given(monkeypatch):
+    import blackbull.server.server as server_mod
+    from blackbull import BlackBull
+    from blackbull.env import resolve_max_connections
+    from blackbull.server.server import Server
+
+    monkeypatch.delenv('BB_MAX_CONNECTIONS', raising=False)
+    monkeypatch.setattr(server_mod, '_fit_to_open_descriptors', lambda cap: 1)
+    explicit = Server(BlackBull(), max_connections=500)
+    derived = Server(BlackBull(), max_connections=resolve_max_connections('auto'))
+    for server in (explicit, derived):
+        server._accept_gate.arm = lambda *a, **k: []
+        server._open_accepting([])
+    assert explicit._max_connections == 500
+    assert derived._max_connections == 1

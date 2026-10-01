@@ -43,7 +43,7 @@ from .recipient import (AbstractReader, AsyncioReader,
                         _HTTP2_STREAM_QUEUE_DEPTH, _WS_READ_INLINE)
 from .cap_log import CapHitCounter, log_cap_hit
 from ..asgi import ASGIEvent
-from ..env import FD_RESERVE, get_settings
+from ..env import FD_RESERVE, DerivedCap, get_settings
 logger = logging.getLogger(__name__)
 
 
@@ -647,14 +647,9 @@ def _max_connections_report(resolved: int) -> tuple[str, str]:
     """
     if not resolved:
         return 'uncapped', 'no cap in force — relying on the OS descriptor limit'
-    if _cap_is_derived():
+    if isinstance(resolved, DerivedCap):
         return str(resolved), 'derived from RLIMIT_NOFILE (BB_MAX_CONNECTIONS=auto)'
     return str(resolved), 'set explicitly via BB_MAX_CONNECTIONS'
-
-
-def _cap_is_derived() -> bool:
-    raw = os.environ.get('BB_MAX_CONNECTIONS')
-    return raw is None or raw.strip().lower() in ('', 'auto')
 
 
 def _fit_to_open_descriptors(cap: int) -> int:
@@ -1229,7 +1224,7 @@ class Server:
         for _spec, sock in listening:
             if af_unix is not None and sock.family == af_unix:
                 _warn_if_unix_queue_full(sock)
-        if self._max_connections and _cap_is_derived():
+        if self._max_connections and isinstance(self._max_connections, DerivedCap):
             fitted = _fit_to_open_descriptors(self._max_connections)
             if fitted < self._max_connections:
                 logger.warning(
