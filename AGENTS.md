@@ -21,7 +21,7 @@ cause a user or developer to make a mistake. Prefer a name, type, signature,
 or test; do not restate one in prose. The same holds for a pull request
 description: a summary, not a second copy of the commit message.
 
-Run `just typecheck`, `just test`, and `just docs` as applicable. When behavior
+Run `just typecheck`, `just test`, and `just docs-build` as applicable. When behavior
 or an API changes, update `docs/guide/` for users or `docs/about/` for internals.
 
 ## Architecture invariants
