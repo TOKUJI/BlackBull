@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import asyncio
 import json as _json
+import socket
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from typing import Any, Iterable, Mapping
@@ -466,7 +467,7 @@ class NativeTestServer:
         self._timeout = timeout
         self._server_kwargs = server_kwargs
         self._bb_server: Any = None
-        self._asyncio_server: asyncio.AbstractServer | None = None
+        self._sock: socket.socket | None = None
         self._lifespan: Any = None
         self._async_client: httpx.AsyncClient | None = None
         self._loop_thread: Any = None
@@ -497,22 +498,25 @@ class NativeTestServer:
             self.connections_served += 1
             return protocol_factory()
 
-        # ``loop.create_server`` rather than ``Server.open_socket``: the latter
-        # binds 0.0.0.0 + :: (right for a real deployment, wrong for a test
-        # that should never leave the loopback).  Everything downstream of
-        # accept is the production path.
-        self._asyncio_server = await asyncio.get_running_loop().create_server(
-            _accept, self.host, self.port, backlog=self._backlog)
-        sockets = self._asyncio_server.sockets or ()
-        if not sockets:
-            raise RuntimeError('NativeTestServer failed to bind a socket.')
-        self.port = sockets[0].getsockname()[1]
+        # Its own socket rather than ``Server.open_socket``: the latter binds
+        # 0.0.0.0 + :: (right for a real deployment, wrong for a test that
+        # should never leave the loopback).  Everything from accept on is the
+        # production path, ``_AcceptGate`` included.
+        self._sock = socket.create_server((self.host, self.port),
+                                          backlog=self._backlog)
+        self.port = self._sock.getsockname()[1]
 
         self._lifespan = LifespanManager(self.app)
         try:
             await self._lifespan.__aenter__()
         except BaseException:
             await self._close_socket()
+            raise
+        try:
+            self._bb_server._open_accepting([((_accept, None), self._sock)],
+                                            self._backlog)
+        except BaseException as exc:
+            await self.__aexit__(type(exc), exc, exc.__traceback__)
             raise
         self._async_client = httpx.AsyncClient(base_url=self.url,
                                                timeout=self._timeout)
@@ -534,17 +538,17 @@ class NativeTestServer:
                 await self._close_socket()
 
     async def _close_socket(self) -> None:
-        if self._asyncio_server is None:
+        if self._sock is None:
             return
-        self._asyncio_server.close()
         try:
-            await asyncio.wait_for(self._asyncio_server.wait_closed(),
-                                   timeout=self._timeout)
+            await self._bb_server.stop(drain_timeout=self._timeout)
         except (asyncio.TimeoutError, asyncio.CancelledError):
             # A wedged connection handler must not turn a passing test into a
             # hang; the socket is closed either way.
             pass
-        self._asyncio_server = None
+        finally:
+            self._sock.close()
+            self._sock = None
 
     # -- sync form ----------------------------------------------------------
 

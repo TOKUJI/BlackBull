@@ -1,9 +1,11 @@
 """Connection Actor — owns one transport and spawns its protocol actor."""
 import asyncio
+import time
 import logging
 from collections.abc import Awaitable, Callable
 
 from ..actor import Actor, Message
+from ..env import get_settings
 from ..event_aggregator import EventAggregator
 from .cap_log import _LazyCapHitCounter
 from .deadline import ConnectionDeadline
@@ -71,7 +73,6 @@ class ConnectionActor(Actor):
                                  if bound_binding is not None else 'http')
 
     async def run(self) -> None:
-        import time  # noqa: PLC0415
         # Per-connection cap-hit state, bound on the ambient contextvar so every
         # log_cap_hit() in this task tree picks it up without constructor
         # plumbing (TaskGroup children inherit the context).  Lazy: the real
@@ -175,14 +176,13 @@ class ConnectionActor(Actor):
         await self._reader.fill(n)
 
     async def _dispatch(self) -> None:
-        from ..env import get_settings as _get_settings  # noqa: PLC0415
-        cfg = _get_settings()
+        cfg = get_settings()
 
         # Slowloris defence at detection: a peer that connects and never sends
-        # its discriminator would hold a slot forever on the peek read.  Shares
-        # HTTP1Actor's ``header_timeout``, so the worst case is two bounded
-        # timeouts back to back (detect + first headers); ``0`` disables both.
-        deadline = cfg.header_timeout if cfg.header_timeout > 0 else None
+        # its discriminator would hold a slot forever on the peek read.  The
+        # TLS handshake, detection and the first headers each get their own
+        # ``header_timeout``, back to back.
+        deadline = cfg.header_deadline
 
         # Per-connection registry state, not a per-connection timer: one
         # process-wide scanner walks the registry (see ``deadline.py``).  Bound

@@ -29,6 +29,10 @@ import uuid as _uuid
 import warnings
 from .di import Depends, _resolve_depends
 from .connection import stashed_connection
+from .response import (
+    Response as _Response, JSONResponse as _JSONResponse,
+    StreamingResponse as _StreamingResponse,
+)
 from .utils import Scheme, do_nothing, is_client_error, is_server_error
 
 # See the module docstring for why RouteGroup is re-exported rather than defined.
@@ -610,10 +614,6 @@ async def _send_native(result, conn, receive, send) -> bool:
     ``_send_converted`` raises, since a converter must itself return a native
     shape).
     """
-    from .response import (
-        Response as _Response, JSONResponse as _JSONResponse,
-        StreamingResponse as _StreamingResponse,
-    )
     if result is None:
         return True
     if isinstance(result, _StreamingResponse):

@@ -58,6 +58,13 @@ _on = False
 
 
 _BY_FUNC = os.environ.get('BB_BY_FUNC', '')
+#: wrk lanes: path and Lua script.  ``churn`` is the EC2 A/B's
+#: one-request-per-connection lane.
+_WRK_LANES = {
+    'conn': ('/conn', None),
+    'plaintext': ('/plaintext', None),
+    'churn': ('/plaintext', f'{MAIN}/bench/wrk/no_keepalive.lua'),
+}
 
 
 def _instr(code, offset):
@@ -69,8 +76,44 @@ def _instr(code, offset):
     return MON.DISABLE if not _on else None
 
 
+#: With ``BB_C_CALLS=1``, calls into C functions are counted instead, by name:
+#: the syscalls and builtins that instruction counts cannot see.
+_C_CALLS = os.environ.get('BB_C_CALLS') == '1'
+
+
+def _call(code, offset, callable_, arg0):
+    if _on and type(callable_).__name__ in ('builtin_function_or_method',
+                                            'method_descriptor'):
+        _counts[f'C::{getattr(callable_, "__qualname__", callable_)}'] += 1
+
+
+#: With ``BB_CALLERS=a,b``, each entry into code whose file contains one of
+#: the substrings is counted by its nearest caller outside those files.
+_CALLERS = tuple(t for t in os.environ.get('BB_CALLERS', '').split(',') if t)
+
+
+def _start(code, offset):
+    if not _on or not any(t in code.co_filename for t in _CALLERS):
+        return None
+    frame = sys._getframe(1)
+    while frame and any(t in frame.f_code.co_filename for t in _CALLERS):
+        frame = frame.f_back
+    where = (f'{frame.f_code.co_filename.rsplit("/", 1)[-1]}:{frame.f_lineno}'
+             f' {frame.f_code.co_qualname}' if frame else '?')
+    _counts[f'{code.co_qualname} <- {where}'] += 1
+    return None
+
+
 def _arm() -> None:
     MON.use_tool_id(TOOL, 'instr-count')
+    if _CALLERS:
+        MON.register_callback(TOOL, MON.events.PY_START, _start)
+        MON.set_events(TOOL, MON.events.PY_START)
+        return
+    if _C_CALLS:
+        MON.register_callback(TOOL, MON.events.CALL, _call)
+        MON.set_events(TOOL, MON.events.CALL)
+        return
     MON.register_callback(TOOL, MON.events.INSTRUCTION, _instr)
     MON.set_events(TOOL, MON.events.INSTRUCTION)
 
@@ -91,10 +134,12 @@ async def _gen(lane: str, port: int, n: int) -> int:
     # EC2 A/B runs wrk -t4 -c32 and h2load -c32 -m16, and the per-loop-iteration
     # overhead (selectors, _run_once) amortises differently at c=1 than at
     # c=32 — which moves the *denominator* of every ratio computed here.
-    if lane == 'conn':
+    if lane in _WRK_LANES:
+        path, script = _WRK_LANES[lane]
         cmd = ['wrk', f'-t{os.environ.get("BB_WRK_THREADS", "1")}',
                f'-c{os.environ.get("BB_WRK_CONNS", "1")}', f'-d{n}s',
-               f'http://127.0.0.1:{port}/conn']
+               *(['-s', script] if script else []),
+               f'http://127.0.0.1:{port}{path}']
     else:
         cmd = ['h2load', '-c', os.environ.get('BB_H2_CONNS', '1'),
                '-m', os.environ.get('BB_H2_STREAMS', '1'), '-n', str(n),
@@ -104,7 +149,7 @@ async def _gen(lane: str, port: int, n: int) -> int:
         stderr=asyncio.subprocess.STDOUT)
     out, _ = await p.communicate()
     text = out.decode()
-    if lane == 'conn':
+    if lane in _WRK_LANES:
         for line in text.splitlines():
             if 'requests in' in line:
                 return int(line.split()[0])
@@ -122,7 +167,7 @@ async def _run(lane: str, n: int) -> int:
     port = server.port
     task = asyncio.create_task(server.run())
     await asyncio.sleep(0.4)
-    await _gen(lane, port, 3 if lane == 'conn' else 50)   # warm-up, unmonitored
+    await _gen(lane, port, 3 if lane in _WRK_LANES else 50)   # warm-up, unmonitored
     _arm()
     _on = True
     served = await _gen(lane, port, n)
@@ -135,7 +180,7 @@ async def _run(lane: str, n: int) -> int:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument('--lane', choices=('conn', 'h2'), default='conn')
+    ap.add_argument('--lane', choices=(*_WRK_LANES, 'h2'), default='conn')
     ap.add_argument('--n', type=int, default=300)
     ap.add_argument('--out', required=True)
     args = ap.parse_args()

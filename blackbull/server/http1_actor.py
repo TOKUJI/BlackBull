@@ -3,9 +3,11 @@
 HTTP1Actor drives the keep-alive loop for one TCP connection.
 RequestActor owns the lifetime of a single HTTP request.
 """
+import asyncio
 import ipaddress
 import logging
 import re
+import time as _time
 from base64 import b64encode, b64decode
 from binascii import Error as BinasciiError
 from collections.abc import Awaitable, Callable
@@ -13,6 +15,7 @@ from hashlib import sha1
 from http import HTTPStatus
 
 from ..actor import Actor, Message
+from ..env import get_settings
 from ..event_aggregator import EventAggregator
 from ..asgi import ASGIReceiveCallable, ASGISendCallable
 from ..connection import (
@@ -435,11 +438,13 @@ def _parse_host_header(value: bytes, default_port: int) -> tuple[str, int]:
     return _dec(host), default_port
 
 
-def _validate_host(headers: 'Headers') -> None:
+def _validate_host(headers: 'Headers') -> bytes | None:
     """RFC 9112 §3.2 / §7.2 — Host MUST be present and contain a valid
     URI-authority component.  Inputs such as ``host: 0/0`` and an empty
     host are accepted by a lenient parser and rejected with 400 by nginx;
     this check keeps BlackBull on the RFC side of that split.
+
+    Returns the Host value as received, or ``None`` when there is none.
     """
     hosts = headers.getlist(b'host')
     if len(hosts) > 1:
@@ -448,12 +453,14 @@ def _validate_host(headers: 'Headers') -> None:
     if not hosts:
         # The version-aware presence rule lives in ``_parse``, which knows the
         # request version; this helper only grades a value that is present.
-        return
-    value = hosts[0][1].strip(b' \t')
+        return None
+    received = hosts[0][1]
+    value = received.strip(b' \t')
     if not value:
         raise BadRequestError('empty Host header value')
     if not _authority_is_valid(value):
         raise BadRequestError(f'invalid Host authority {value!r}')
+    return received
 
 
 # ---------------------------------------------------------------------------
@@ -566,7 +573,6 @@ class HTTP1Actor(Actor):
     _ssl: bool = False
     _line_cache: 'dict[bytes, tuple[bytes, bytes]] | None' = None
     _line_cache_bytes: int = 0
-    _max_line: int | None = None
     #: Body length the current request declares, as validated by
     #: [`_validate_message_framing`][]; 0 when it declares none.
     _declared_body_len: int = 0
@@ -608,10 +614,7 @@ class HTTP1Actor(Actor):
 
     async def run(self) -> None:
         """Keep-alive loop — process requests until connection closes."""
-        import asyncio  # noqa: PLC0415
-        import time as _time  # noqa: PLC0415
-        from ..env import get_settings as _get_settings  # noqa: PLC0415
-        cfg = _get_settings()
+        cfg = get_settings()
         driven_without_connection_actor = self._deadline is None
         if driven_without_connection_actor:
             self._deadline = ConnectionDeadline()
@@ -848,13 +851,7 @@ class HTTP1Actor(Actor):
         (``BB_HEADER_MAX_TOTAL``) is enforced in ``run()``, which sees the
         accumulating buffer; per-line is cheaper here, post-split.
         """
-        # Memoised per connection.  The cost removed is not ``get_settings()``
-        # (it is ``functools.cache``d) but the ``from ..env import`` statement
-        # that would run ahead of it on every single parse.
-        max_line = self._max_line
-        if max_line is None:
-            from ..env import get_settings as _get_settings  # noqa: PLC0415
-            max_line = self._max_line = _get_settings().header_max_line
+        max_line = get_settings().header_max_line
         lines = data.split(b'\r\n')
         # No line can be longer than the block that contains it, so the
         # per-line walk is only reachable for a block that is itself over the
@@ -1055,11 +1052,11 @@ class HTTP1Actor(Actor):
         # RFC 9112 §6 — framing rejected before any body byte is read.  ``run``
         # weighs the returned length against ``BB_MAX_BODY_SIZE``.
         self._declared_body_len = _validate_message_framing(headers)
-        _validate_host(headers)
+        host_value = _validate_host(headers)
         # RFC 9112 §3.2 / §7.2 — every HTTP/1.1 (and later 1.x) request MUST
         # carry a Host header (RFC9112-7.1-MISSING-HOST); only HTTP/1.0, which
         # predates Host, may omit it (COMP-HTTP10-NO-HOST).
-        if version != b'HTTP/1.0' and not headers.getlist(b'host'):
+        if version != b'HTTP/1.0' and host_value is None:
             raise BadRequestError(
                 f'missing Host header on {version.decode("ascii")} request '
                 f'(RFC 9112 §3.2)')
@@ -1087,9 +1084,9 @@ class HTTP1Actor(Actor):
         if asterisk_form:
             conn._asterisk_form = True
 
-        if headers.getlist(b'host'):
+        if host_value is not None:
             default_port = _HTTPS_PORT if self._ssl else _HTTP_PORT
-            host, port = _parse_host_header(headers.get(b'host'), default_port)
+            host, port = _parse_host_header(host_value, default_port)
             conn.server = (host, port)
 
         if headers.getlist(b'upgrade'):
@@ -1247,8 +1244,6 @@ class HTTP1Actor(Actor):
         where the native lane answers 200 (COMP-HEAD-NO-BODY).
         ``test_head_dual_path.py`` is the guard.
         """
-        import asyncio  # noqa: PLC0415
-
         # Only when something consumes it (access log / phase trace /
         # request_completed listener).  Otherwise ``None``, skipping a
         # per-request allocation and the ``conn.state`` dict it forces — the

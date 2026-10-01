@@ -369,3 +369,10 @@ async def test_declared_trailers_remain_chunked_and_complete_on_trailers():
     assert _values(head, b'transfer-encoding') == [b'chunked']
     assert body == b'2\r\nok\r\n0\r\nx-end: yes\r\n\r\n'
     assert sender._completed is True
+
+
+@pytest.mark.parametrize('lane', ['dict', 'native'])
+@pytest.mark.asyncio
+async def test_a_status_outside_httpstatus_is_refused_on_both_lanes(lane):
+    with pytest.raises(ValueError):
+        await _send_fixed(lane, [], status=299)

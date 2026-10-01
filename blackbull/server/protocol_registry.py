@@ -37,6 +37,7 @@ from typing import Any
 
 from ..event_aggregator import EventAggregator
 from .deadline import ConnectionDeadline
+from .http1_actor import HTTP1Actor
 from .recipient import AbstractReader, _HTTP2_STREAM_QUEUE_DEPTH, _WS_READ_INLINE
 from .sender import AbstractWriter
 
@@ -246,7 +247,6 @@ class Http1Binding(ProtocolBinding):
         return True
 
     async def serve(self, conn: ConnectionView) -> None:
-        from .http1_actor import HTTP1Actor  # noqa: PLC0415
         # Nothing is pre-read.  Detection does not consume, so the actor reads
         # the whole head in one scan — pulling the first line here would split
         # that scan in two and, worse, hand the actor a head it must then

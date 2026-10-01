@@ -18,7 +18,7 @@ from blackbull.protocol.rsock import adopt_inherited_sockets, close_sockets
 from blackbull.server.listener import InheritedFd, Listener, Tcp
 from blackbull.server.multiworker import MultiWorkerServer
 from blackbull.server.reload import exec_self_with_sockets
-from blackbull.server.server import LifespanManager, Server, SocketManager
+from blackbull.server.server import LifespanManager, Server
 
 
 class _CloseProbe:
@@ -38,17 +38,22 @@ class _CloseProbe:
             raise OSError("close failed")
 
 
-class _AsyncServerProbe(_CloseProbe):
-    def __init__(self, *, fail_close: bool = False):
-        super().__init__(fail=fail_close)
-        self.wait_closed_calls = 0
-
-    async def wait_closed(self):
-        self.wait_closed_calls += 1
-
-
 class _SocketProbe(_CloseProbe):
     family = socket.AF_INET
+    type = socket.SOCK_STREAM
+
+    def listen(self, _backlog):
+        pass
+
+    def setblocking(self, _flag):
+        pass
+
+
+def _refuse_readers(monkeypatch):
+    def add_reader(*_args):
+        raise NotImplementedError("no readers on this loop")
+
+    monkeypatch.setattr(asyncio.get_running_loop(), "add_reader", add_reader)
 
 
 class _GetSockNameFailure(_CloseProbe):
@@ -111,167 +116,24 @@ class _ProcessProbe:
 
 
 @pytest.mark.asyncio
-async def test_socket_manager_rolls_back_servers_created_before_later_failure(
+async def test_a_listener_that_cannot_be_armed_fails_run_and_closes_every_socket(
     monkeypatch,
 ):
-    first = _AsyncServerProbe(fail_close=True)
-    second = _AsyncServerProbe()
-    calls = 0
-
-    async def create_server(*_args, **_kwargs):
-        nonlocal calls
-        calls += 1
-        if calls == 3:
-            raise RuntimeError("third create failed")
-        return (first, second)[calls - 1]
-
-    loop = asyncio.get_running_loop()
-    monkeypatch.setattr(loop, "create_server", create_server)
-    monkeypatch.setattr(
-        "blackbull.env.get_settings",
-        lambda: SimpleNamespace(socket_backlog=16),
-    )
-    socks = [SimpleNamespace(family=socket.AF_INET) for _ in range(3)]
-
-    with pytest.raises(RuntimeError, match="third create failed"):
-        async with SocketManager(
-            [(sock, asyncio.Protocol) for sock in socks], None
-        ):
-            pass
-
-    assert first.close_calls == 1
-    assert second.close_calls == 1
-    assert first.wait_closed_calls == 1
-    assert second.wait_closed_calls == 1
-
-
-@pytest.mark.asyncio
-async def test_later_tls_group_failure_closes_earlier_group(monkeypatch):
-    app = BlackBull()
-    server = Server(app)
+    server = Server(BlackBull())
     plain_socket = _SocketProbe()
     tls_socket = _SocketProbe()
-    tls_marker = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     server.bound_listeners = [
         (Listener(Tcp(1)), [plain_socket]),
-        (Listener(Tcp(2), tls=tls_marker), [tls_socket]),
+        (Listener(Tcp(2), tls=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)),
+         [tls_socket]),
     ]
-    first_group = _AsyncServerProbe()
-    primary = RuntimeError("TLS group failed")
-    calls = 0
+    _refuse_readers(monkeypatch)
 
-    async def create_server(*_args, **_kwargs):
-        nonlocal calls
-        calls += 1
-        if calls == 2:
-            raise primary
-        return first_group
+    with pytest.raises(NotImplementedError, match="no readers"):
+        await asyncio.wait_for(server.run(), 5)
 
-    loop = asyncio.get_running_loop()
-    monkeypatch.setattr(loop, "create_server", create_server)
-    monkeypatch.setattr(
-        server, "connection_protocol_factory", lambda _binding: asyncio.Protocol
-    )
-    monkeypatch.setattr(
-        "blackbull.env.get_settings",
-        lambda: SimpleNamespace(socket_backlog=16),
-    )
-
-    with pytest.raises(RuntimeError) as raised:
-        await server.run()
-
-    assert raised.value is primary
-    assert first_group.close_calls == 1
-    assert first_group.wait_closed_calls == 1
     assert plain_socket.close_calls == 1
     assert tls_socket.close_calls == 1
-
-
-@pytest.mark.asyncio
-async def test_start_serving_partial_failure_reclaims_real_connection(monkeypatch):
-    async def app(scope, receive, send):
-        assert scope["type"] == "lifespan"
-        await receive()
-        await send({"type": "lifespan.startup.complete"})
-        await receive()
-        await send({"type": "lifespan.shutdown.complete"})
-
-    server = Server(app)
-    first_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    first_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    first_socket.bind(("127.0.0.1", 0))
-    first_socket.listen()
-    address = first_socket.getsockname()
-    second_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    second_socket.bind(("127.0.0.1", 0))
-    second_socket.listen()
-    server.bound_listeners = [
-        (Listener(Tcp(address[1])), [first_socket, second_socket])
-    ]
-    connection_started = asyncio.Event()
-    connection_tasks = []
-    server_transports = []
-    release = asyncio.Event()
-
-    async def parked_connection(transport):
-        connection_started.set()
-        try:
-            await release.wait()
-        finally:
-            transport.close()
-
-    class TrackingProtocol(asyncio.Protocol):
-        def connection_made(self, transport):
-            server_transports.append(transport)
-            task = asyncio.create_task(parked_connection(transport))
-            connection_tasks.append(task)
-            server._connection_tasks.add(task)
-            task.add_done_callback(server._connection_tasks.discard)
-
-    primary = RuntimeError("second start_serving failed")
-
-    class StartFailure(_AsyncServerProbe):
-        reader = None
-        writer = None
-
-        async def start_serving(self):
-            self.reader, self.writer = await asyncio.open_connection(*address)
-            await asyncio.wait_for(connection_started.wait(), timeout=2)
-            raise primary
-
-    failing_server = StartFailure()
-    loop = asyncio.get_running_loop()
-    create_server = loop.create_server
-    calls = 0
-
-    async def create_one_real_server(factory, **kwargs):
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            return await create_server(factory, **kwargs)
-        return failing_server
-
-    monkeypatch.setattr(loop, "create_server", create_one_real_server)
-    monkeypatch.setattr(server, "connection_protocol_factory", lambda _binding: TrackingProtocol)
-
-    try:
-        with pytest.raises(RuntimeError) as raised:
-            await server.run()
-        assert raised.value is primary
-        assert connection_tasks
-        assert all(task.done() for task in connection_tasks)
-        assert server_transports
-        assert all(transport.is_closing() for transport in server_transports)
-        assert await asyncio.wait_for(failing_server.reader.read(), timeout=2) == b""
-        assert failing_server.close_calls == 1
-        assert failing_server.wait_closed_calls == 1
-    finally:
-        release.set()
-        if failing_server.writer is not None:
-            failing_server.writer.close()
-            await failing_server.writer.wait_closed()
-        for sock in (first_socket, second_socket):
-            sock.close()
 
 
 def test_open_socket_failure_closes_new_sockets_and_allows_retry(monkeypatch):
@@ -532,7 +394,7 @@ async def test_stop_close_failure_finishes_cleanup_and_is_reported_by_run():
     actual_servers = list(server._running_servers)
     first_error = OSError("first server close failed")
 
-    class CloseFailure(_AsyncServerProbe):
+    class CloseFailure(_CloseProbe):
         def close(self):
             self.close_calls += 1
             raise first_error
@@ -553,7 +415,6 @@ async def test_stop_close_failure_finishes_cleanup_and_is_reported_by_run():
 
         assert stopped.value is first_error
         assert ran.value is first_error
-        assert failure.wait_closed_calls >= 1
         assert all(not item.is_serving() for item in actual_servers)
         assert connection.done()
         assert shutdown_seen.is_set()
@@ -620,6 +481,9 @@ async def test_run_waits_for_in_progress_stop_despite_repeated_cancellation(
             connection_tasks.append(task)
             server._connection_tasks.add(task)
             task.add_done_callback(server._connection_tasks.discard)
+
+        async def serve(self):
+            pass
 
     monkeypatch.setattr(
         server, "connection_protocol_factory", lambda _binding: TrackingProtocol

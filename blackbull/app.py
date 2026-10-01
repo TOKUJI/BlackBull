@@ -28,6 +28,11 @@ from .server.protocol_registry import RawBinding
 logger = logging.getLogger(__name__)
 _DEBUG = debug_gate(logger)
 
+#: Value-to-member lookups without ``Enum.__call__``'s two Python frames; see
+#: ``_PSEUDO_BY_BYTES`` in ``blackbull/protocol/frame_types.py``.
+_SCHEME_BY_VALUE: dict[str, Scheme] = {m.value: m for m in Scheme}
+_METHOD_BY_VALUE: dict[str, HTTPMethod] = {m.value: m for m in HTTPMethod}
+
 
 
 def _wrap_send_native(raw_send: ASGISendCallable):
@@ -562,9 +567,8 @@ class BlackBull:
             await function(conn, receive, send)
             return
 
-        try:
-            scheme = Scheme(conn.type)
-        except ValueError:
+        scheme = _SCHEME_BY_VALUE.get(conn.type)
+        if scheme is None:
             self._logger.error(f'Invalid scheme ({conn.type}) is requested.')
             raise Exception('Invalid scheme is requested.')
 
@@ -597,16 +601,13 @@ class BlackBull:
         raw_send = send
         send = _wrap_send_native(send)
 
-        try:
-            # RFC 9110 §9.1 — methods are case-sensitive tokens.  Prefer the
-            # HTTPMethod enum; for anything outside it — IANA registrations it
-            # hasn't caught up with (QUERY, RFC 10008; no member before 3.16)
-            # or extension tokens — keep the raw str so the router still
-            # matches and returns the correct Allow header.  StrEnum equality
-            # makes the two interchangeable as router keys.
-            method = HTTPMethod(conn.method)
-        except ValueError:
-            method = conn.method
+        # RFC 9110 §9.1 — methods are case-sensitive tokens.  Prefer the
+        # HTTPMethod enum; for anything outside it — IANA registrations it
+        # hasn't caught up with (QUERY, RFC 10008; no member before 3.16)
+        # or extension tokens — keep the raw str so the router still
+        # matches and returns the correct Allow header.  StrEnum equality
+        # makes the two interchangeable as router keys.
+        method = _METHOD_BY_VALUE.get(conn.method, conn.method)
 
         path = conn.path
         if _DEBUG:
