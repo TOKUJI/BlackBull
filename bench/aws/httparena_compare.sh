@@ -8,8 +8,8 @@
 # scripts/validate.sh and scripts/benchmark.sh, pulls results back,
 # and tears the instance down.
 #
-# Cost estimate: c7i.2xlarge at ~$0.36/hr × ~30 min = ~$0.18.
-# Override INSTANCE_TYPE to c7i.xlarge (~$0.18/hr) for ~$0.09.
+# AMD (c7a) by default: no SMT, so every vCPU is a physical core and runs
+# stay comparable across instance sizes.
 #
 # Usage:
 #   bash bench/aws/httparena_compare.sh
@@ -79,7 +79,7 @@ set -euo pipefail
 # headroom that the loadgen isn't competing with the framework for CPU.
 # Set BEFORE sourcing config.sh so config.sh's `: "${INSTANCE_TYPE:=...}"`
 # default no-ops (env-set value wins).  Override with the env var.
-: "${INSTANCE_TYPE:=c7i.2xlarge}"
+: "${INSTANCE_TYPE:=c7a.2xlarge}"
 export INSTANCE_TYPE
 
 # shellcheck source=config.sh
