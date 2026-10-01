@@ -259,6 +259,21 @@ class AbstractWriter(ABC):
             'sendfile is not supported by this writer')
 
 
+class _Head(list):
+    """A response head's fields, owned by the sender, with what framing needs
+    to know about them (see ``_validate_response_header_fields``)."""
+
+    __slots__ = ('content_length', 'transfer_encoding', 'date')
+
+
+def _head(fields) -> _Head:
+    """Copy *fields* into a validated [`_Head`][]."""
+    head = _Head(fields)
+    (head.content_length, head.transfer_encoding,
+     head.date) = _validate_response_header_fields(head)
+    return head
+
+
 @cache
 def _reports_writing_paused(kind: type) -> bool:
     return isinstance(getattr(kind, 'writing_paused', None), property)
@@ -581,7 +596,7 @@ class HTTP1Sender(BaseSender):
         super().__init__(writer)
         self.supports_interim = supports_interim
         self._buffered_status: HTTPStatus | None = None
-        self._buffered_headers: Headers | None = None
+        self._buffered_headers: _Head | None = None
         self._chunked: bool = False
         self._expect_trailers: bool = False
         # Set True once the status line + headers have hit the wire
@@ -660,9 +675,7 @@ class HTTP1Sender(BaseSender):
         match body:
             case bytes():
                 self._response_started = True
-                header_pairs = list(headers)
-                _validate_response_header_fields(header_pairs)
-                h = Headers(header_pairs)
+                h = _head(headers)
                 if self._log_record is not None:
                     self._log_record.status = int(status)
                     self._log_record.response_bytes += len(body)
@@ -672,8 +685,7 @@ class HTTP1Sender(BaseSender):
 
             case NativeResponse():
                 if body._header is not None:
-                    header_pairs = list(body._header)
-                    _validate_response_header_fields(header_pairs)
+                    head = _head(body._header)
                     self._response_started = True
                     await self._settle_buffered_head()
                     self._buffered_status = (_STATUS_BY_CODE.get(body.status)
@@ -682,7 +694,7 @@ class HTTP1Sender(BaseSender):
                     # terminal body before the trailers event withholds the
                     # terminal chunk (lossless full-form compat).
                     self._expect_trailers = body.expects_trailers
-                    self._buffered_headers = Headers(header_pairs)
+                    self._buffered_headers = head
                     if self._log_record is not None:
                         self._log_record.status = body.status
                         self._log_record.mark('start_arm_in')
@@ -789,8 +801,8 @@ class HTTP1Sender(BaseSender):
         self._head_mode = False
         self._log_record = None
 
-    def _ensure_framing_headers(self, status: HTTPStatus, headers: Headers,
-                                body_len: int, more_body: bool) -> Headers:
+    def _ensure_framing_headers(self, status: HTTPStatus, head: _Head,
+                                body_len: int, more_body: bool) -> list:
         """Derive the sole legal framing from status and body mode.
 
         Transfer-Encoding belongs to the server because it describes bytes on
@@ -798,8 +810,8 @@ class HTTP1Sender(BaseSender):
         before rebuilding the field list so duplicate values cannot create two
         competing message boundaries.
 
-        *headers* must be the sender's own: when it carries no framing field
-        the server's is appended to it in place.
+        When *head* carries no framing field the server's is appended to it
+        in place.
         """
         code = int(status)
         self._chunked = False
@@ -814,14 +826,15 @@ class HTTP1Sender(BaseSender):
                                or code == 304)
         keep_length = (not contentless
                        and not (self._expect_trailers and not self._head_mode))
-        app_length = (parse_content_length(headers.getlist(b'content-length'))
-                      if keep_length else None)
-        carries_framing = (b'content-length' in headers
-                           or b'transfer-encoding' in headers)
-        pairs = ([
-            (name, value) for name, value in headers
-            if name.lower() not in (b'content-length', b'transfer-encoding')
-        ] if carries_framing else [])
+        app_length = (parse_content_length(head.content_length)
+                      if keep_length and head.content_length else None)
+        if head.content_length or head.transfer_encoding:
+            pairs = [
+                (name, value) for name, value in head
+                if name.lower() not in (b'content-length', b'transfer-encoding')
+            ]
+        else:
+            pairs = head
 
         if informational or code == 204:
             self._expect_trailers = False
@@ -853,10 +866,7 @@ class HTTP1Sender(BaseSender):
                           _content_length_bytes(expected)))
             self._content_length = expected
 
-        if carries_framing:
-            return Headers(pairs)
-        headers.append(pairs)
-        return headers
+        return pairs
 
     def _track_content_length(self, content_len: int, more_body: bool) -> None:
         """Reject a declared-length stream that crosses its wire boundary."""
@@ -874,20 +884,18 @@ class HTTP1Sender(BaseSender):
         self._body_bytes = total
 
     @staticmethod
-    def _ensure_date_header(headers: Headers) -> None:
-        # RFC 9110 §6.6.1 — origin server SHOULD generate Date.  The check is
-        # case-sensitive because the HTTP/1.1 path stores headers in the
-        # framework's canonical capitalisation; HTTP/2 needs ``_has_header``.
-        if b'Date' not in headers:
-            headers.append(b'Date', _http_date())
+    def _ensure_date_header(fields: list, head: _Head) -> None:
+        # RFC 9110 §6.6.1 — origin server SHOULD generate Date.
+        if not head.date:
+            fields.append((b'Date', _http_date()))
 
-    async def _flush(self, status: HTTPStatus, headers: Headers, body: bytes, more_body: bool = False) -> None:
+    async def _flush(self, status: HTTPStatus, head: _Head, body: bytes, more_body: bool = False) -> None:
         headers = self._ensure_framing_headers(
-            status, headers, len(body), more_body)
+            status, head, len(body), more_body)
         self._track_content_length(len(body), more_body)
-        if not is_informational(status):
+        if not self._informational:
             self._started = True
-        self._ensure_date_header(headers)
+        self._ensure_date_header(headers, head)
 
         # Coalescing status line, headers and body into one write makes the
         # response one drain instead of one per header line: uncoalesced, a
@@ -970,14 +978,14 @@ class HTTP1Sender(BaseSender):
             raise ValueError('pathsend cannot be combined with response trailers')
 
         size = os.path.getsize(path)
-        headers = self._buffered_headers
+        head = self._buffered_headers
         status = self._buffered_status
         headers = self._ensure_framing_headers(
-            status, headers, size, more_body=False)
+            status, head, size, more_body=False)
         self._track_content_length(size, more_body=False)
-        if not is_informational(status):
+        if not self._informational:
             self._started = True
-        self._ensure_date_header(headers)
+        self._ensure_date_header(headers, head)
 
         head = self._render_start(status, headers)
         self._buffered_status = None

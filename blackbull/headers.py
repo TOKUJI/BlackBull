@@ -29,14 +29,35 @@ def _validate_response_header_field(name: bytes, value: bytes) -> None:
         raise ValueError('invalid HTTP response header value')
 
 
-def _validate_response_header_fields(headers: HeaderList) -> None:
-    """Validate a complete outbound field section before its first write."""
-    for name, value in headers:
-        if type(name) is not bytes or type(value) is not bytes:
-            _validate_response_header_field(name, value)
-        if (not name or name.translate(None, TCHAR_OCTETS)
+def _validate_response_header_fields(
+        headers: HeaderList) -> tuple[list | None, bool, bool]:
+    """Validate a complete outbound field section before its first write.
+
+    Returns what message framing needs from the same pass: the
+    ``Content-Length`` fields (``None`` when absent), and whether
+    ``Transfer-Encoding`` and ``Date`` are present.
+    """
+    content_length = None
+    transfer_encoding = date = False
+    for field in headers:
+        name, value = field
+        if (type(name) is not bytes or type(value) is not bytes
+                or not name or name.translate(None, TCHAR_OCTETS)
                 or value.translate(None, FIELD_VALUE_ALLOWED_OCTETS)):
             _validate_response_header_field(name, value)
+        size = len(name)
+        if size == 14:
+            if name.lower() == b'content-length':
+                if content_length is None:
+                    content_length = []
+                content_length.append(field)
+        elif size == 17:
+            if name.lower() == b'transfer-encoding':
+                transfer_encoding = True
+        elif size == 4:
+            if name.lower() == b'date':
+                date = True
+    return content_length, transfer_encoding, date
 
 
 class Headers:
