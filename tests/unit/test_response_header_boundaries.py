@@ -250,3 +250,14 @@ async def test_buffered_start_owns_its_header_snapshot(protocol, native):
         assert (b'x-original', b'1') in pairs
         assert not any(k == b'x-late' for k, _ in pairs)
     assert headers == [(b'x-original', b'1'), (b'x-late', b'2')]
+
+
+@pytest.mark.parametrize('attempt', [1, 2])
+def test_an_invalid_content_type_is_refused_every_time(attempt):
+    with pytest.raises(ValueError):
+        Response(b'', content_type='text/plain\r\nx-injected: 1')
+
+
+def test_a_content_type_becomes_its_validated_pair():
+    assert Response(b'', content_type='text/plain').headers == [
+        (b'content-type', b'text/plain')]

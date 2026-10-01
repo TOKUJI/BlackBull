@@ -616,18 +616,18 @@ async def _send_native(result, conn, receive, send) -> bool:
     """
     if result is None:
         return True
-    if isinstance(result, _StreamingResponse):
-        await result(conn, receive, send)
-    elif inspect.isasyncgen(result):
-        # Backpressure flows naturally: each ``await send()`` on a body event
-        # blocks on flow-control credit (HTTP/2) or drain (HTTP/1).
-        await _StreamingResponse(result)(conn, receive, send)
-    elif isinstance(result, _Response):
+    if isinstance(result, _Response):
         await send(result)
     elif isinstance(result, bytes):
         await send(_Response(result))
     elif isinstance(result, str):
         await send(_Response(result.encode()))
+    elif isinstance(result, _StreamingResponse):
+        await result(conn, receive, send)
+    elif inspect.isasyncgen(result):
+        # Backpressure flows naturally: each ``await send()`` on a body event
+        # blocks on flow-control credit (HTTP/2) or drain (HTTP/1).
+        await _StreamingResponse(result)(conn, receive, send)
     elif dataclasses.is_dataclass(result) and not isinstance(result, type):
         # Dataclass instance → recurse so nested dataclasses serialise too.
         await send(_JSONResponse(_to_jsonable(result)))
