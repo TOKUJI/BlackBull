@@ -1,11 +1,7 @@
 """The send quota belongs to a Network Connection (§4.9) and replay spends it.
 
-``Receive Maximum`` is not session state: every CONNECT re-declares it, and an
-omitted property means 65535 *now*, not whatever the previous connection left
-behind.  The window it sets is shared by live delivery and the §4.4
-retransmissions of a resumed session, so a reconnect that lowers the limit
-replays within it and an acknowledgement — not the stored pending count — is
-what advances the next retransmission.
+An omitted `Receive Maximum` means 65535 on *this* connection, and the window
+is shared by live delivery and the §4.4 retransmissions of a resumed session.
 """
 from __future__ import annotations
 
@@ -71,7 +67,6 @@ async def _publish(broker, source, *, payload=b'x', qos=1, packet_id=1,
 
 
 async def _three_unacked(broker, *, receive_maximum=3):
-    """A persistent session holding three unacknowledged QoS 1 messages."""
     sub, pub = RecordingConn(), RecordingConn()
     await _attach(broker, sub, receive_maximum=receive_maximum)
     await _subscribe(broker, sub, qos=1)
@@ -85,7 +80,6 @@ async def _three_unacked(broker, *, receive_maximum=3):
 
 class TestQuotaIsPerConnection:
     async def test_a_window_of_three_carries_three_messages(self):
-        """The control case from the issue: initial_limit=3, initial_sent=3."""
         broker = BrokerActor()
         sub, _pub, _pids = await _three_unacked(broker)
         assert [p.payload for p in sub.publishes()] == [b'\x00', b'\x01', b'\x02']
@@ -119,7 +113,6 @@ class TestQuotaIsPerConnection:
         assert [p.packet_id for p in conn.publishes()] == pids
 
     async def test_reconnect_omitting_the_limit_applies_the_default(self):
-        """What the last connection declared says nothing about this one."""
         broker = BrokerActor()
         sub, pub, pids = await _three_unacked(broker)
         await _detach(broker, sub)
@@ -183,7 +176,6 @@ class TestReplayAdvancesOnAck:
         assert all(p.dup for p in conn.publishes())
 
     async def test_replays_outrank_the_held_queue(self):
-        """The client is owed what it was promised first."""
         broker = BrokerActor()
         sub, pub, pids = await _three_unacked(broker)
         await _detach(broker, sub)
@@ -216,8 +208,6 @@ class TestReplayAdvancesOnAck:
         assert [p.dup for p in conn.publishes()] == [True, False, False]
 
     async def test_an_ack_of_an_unsent_message_does_not_widen_the_window(self):
-        """The stored pending count is not the quota: an acknowledgement
-        releases the slot its transmission took, and nothing else."""
         broker = BrokerActor()
         sub, pub, pids = await _three_unacked(broker, receive_maximum=4)
         await _publish(broker, pub, payload=b'four', packet_id=4)

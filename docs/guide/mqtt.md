@@ -305,16 +305,14 @@ was promised first, and has no way to detect a message silently dropped from the
 middle.
 
 **The send quota belongs to the connection, and retransmissions spend it
-too.** Every CONNECT re-declares the client's `Receive Maximum`; omitted means
-65535 *now*, not what the previous connection declared, and a declared zero is
-a Protocol Error (`0x82`), not "no limit". That window is shared by live
-deliveries and the `DUP=1` retransmissions of a resumed session (§4.4), which
-go first — they were promised first, in the order the originals were sent
-(MQTT-4.4.0-2). A PUBACK, a PUBCOMP, or a PUBREC that rejects the message
-frees one slot and advances the next retransmission; how many unacknowledged
-messages the *session* holds is not the quota and never widens it. Control
-packets (PUBREL and the acknowledgements of the client's own publishes) are
-not PUBLISH packets, so they flow even when the window is full.
+too.** Every CONNECT re-declares the client's `Receive Maximum`; an omitted
+property means 65535, and a declared zero is a Protocol Error (`0x82`). That
+window is shared by live deliveries and the `DUP=1` retransmissions of a
+resumed session (§4.4), which go first, in the order the originals were sent
+(MQTT-4.4.0-2). An acknowledgement frees one slot; how many unacknowledged
+messages the *session* holds is never the quota. Control packets (PUBREL and
+the acknowledgements of the client's own publishes) flow even when the window
+is full.
 
 **Retained messages are capped by topic count, and correction is always
 allowed.** At the cap, a retained publish to a *new* topic is refused, but
