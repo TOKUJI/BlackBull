@@ -4,7 +4,8 @@ argv: ``<RLIMIT_NOFILE> <backlog> [startup-park-seconds]``.
 
 Environment: ``ADMISSION_LOOP=uvloop`` runs under uvloop; ``ADMISSION_TLS=1``
 serves TLS with a certificate-less context, enough for a client that never
-sends a ClientHello; ``ADMISSION_UNIX=<path>`` listens there instead of TCP.
+sends a ClientHello; ``ADMISSION_UNIX=<path>`` listens there instead of TCP;
+``ADMISSION_APP_FDS=<n>`` has the application hold *n* descriptors from startup.
 
 stdin: ``r`` prints a report and keeps serving; an empty line prints one and
 stops.
@@ -39,8 +40,13 @@ UNIX = os.environ.get('ADMISSION_UNIX')
 app = BlackBull()
 
 
+APP_FDS = int(os.environ.get('ADMISSION_APP_FDS', '0'))
+_held_by_app: list[int] = []
+
+
 @app.on_startup
 async def _park():
+    _held_by_app.extend(os.open(os.devnull, os.O_RDONLY) for _ in range(APP_FDS))
     if PARK:
         await asyncio.sleep(PARK)
 
