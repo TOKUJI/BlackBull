@@ -49,7 +49,15 @@ import blackbull                                    # noqa: E402
 from blackbull.server import ASGIServer             # noqa: E402
 
 sys.path.insert(0, MAIN)
-from bench.peers.native_app import app              # noqa: E402
+#: ``BB_APP=<path/to/app.py>`` measures that file's ``app`` instead.
+if os.environ.get('BB_APP'):
+    import importlib                                # noqa: E402
+    _app_path = os.path.abspath(os.environ['BB_APP'])
+    sys.path.insert(0, os.path.dirname(_app_path))
+    app = importlib.import_module(
+        os.path.basename(_app_path).removesuffix('.py')).app
+else:
+    from bench.peers.native_app import app          # noqa: E402
 
 MON = sys.monitoring
 TOOL = MON.PROFILER_ID
@@ -64,6 +72,7 @@ _WRK_LANES = {
     'conn': ('/conn', None),
     'plaintext': ('/plaintext', None),
     'churn': ('/plaintext', f'{MAIN}/bench/wrk/no_keepalive.lua'),
+    'arena-baseline': ('/', f'{MAIN}/bench/wrk/httparena_baseline.lua'),
 }
 
 
