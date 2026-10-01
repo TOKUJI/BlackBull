@@ -42,7 +42,7 @@ _READERS = {
     headers_module: ('TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS'),
     recipient: ('TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS'),
     client_http1: ('TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS'),
-    framing_module: ('TCHAR_SET', 'FIELD_VALUE_ALLOWED_SET'),
+    framing_module: ('TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS'),
     cache_module: ('TCHAR_SET', 'FIELD_VALUE_ALLOWED_SET'),
     parser: ('COMMON_METHODS', 'COMMON_SCHEMES', 'URI_SCHEME_RE',
              'method_token_is_valid'),

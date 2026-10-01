@@ -4,15 +4,12 @@ Whatever side reads or writes it answers ``Content-Length`` identically, so
 the answer is here once: one value, written once, in ``1*DIGIT``, agreed on by
 every occurrence.  A message that carries two boundaries does not have one.
 
-``Transfer-Encoding`` has one reading here too — what its list names.  What
-each side does about the names stays with each side: a server's refusal
-grade, a sender's rewriting contract and a reader's framing are three
-policies over one list.
 """
+import re
 from collections.abc import Iterable
 from http import HTTPMethod
 
-from .field_grammar import FIELD_VALUE_ALLOWED_SET, TCHAR_SET
+from .field_grammar import FIELD_VALUE_ALLOWED_OCTETS, TCHAR_OCTETS
 
 __all__ = ('NO_CONTENT_GENERATED_STATUSES', 'NO_CONTENT_STATUSES',
            'TransferCoding', 'is_informational', 'method_is',
@@ -43,16 +40,24 @@ def parse_content_length(fields: Iterable[tuple[bytes, bytes]]
     return values[0]
 
 
-#: One member of a ``Transfer-Encoding`` list: the lowered coding token and
-#: the parameters written on it, each ``(name, value)`` pair as written —
-#: the value being a token or a quoted string, quotes included, nothing
-#: decoded.
+#: One ``Transfer-Encoding`` member: the lowered coding and its parameters,
+#: each value as written — a token or a quoted string, quotes kept.
 TransferCoding = tuple[bytes, tuple[tuple[bytes, bytes], ...]]
 
 #: RFC 9110 §5.6.1 lets a recipient ignore "a reasonable number" of empty
-#: list members.  The number is here, because the list is read here once: a
-#: field of commas is bounded work whatever side reads it.
+#: list members.  16, shared by every side that reads the list.
 _MAX_EMPTY_TRANSFER_MEMBERS = 16
+
+# RFC 9112 §5.5: transfer-coding = token *( OWS ";" OWS token BWS "=" BWS
+# ( token / quoted-string ) ) — spelled once from the shared alphabets.
+_TOKEN = rb'[' + re.escape(TCHAR_OCTETS) + rb']+'
+_QUOTED = (rb'"(?:[' + re.escape(bytes(c for c in FIELD_VALUE_ALLOWED_OCTETS
+                                  if c not in b'"\\')) + rb']|\\['
+           + re.escape(FIELD_VALUE_ALLOWED_OCTETS) + rb'])*"')
+_PARAM = (rb'[ \t]*;[ \t]*(' + _TOKEN + rb')[ \t]*=[ \t]*(' + _TOKEN
+          + rb'|' + _QUOTED + rb')')
+_PARAMETER = re.compile(_PARAM)
+_MEMBER = re.compile(rb'(' + _TOKEN + rb')((?:' + _PARAM + rb')*)')
 
 
 def split_transfer_codings(
@@ -60,70 +65,44 @@ def split_transfer_codings(
     """Every ``Transfer-Encoding`` member as RFC 9112 §5.5 writes one, or
     ``ValueError``.
 
-    What the list *is* is answered once: the occurrences split on their
-    commas, OWS off, each coding token lowered, and the parameters kept
-    rather than dropped — so a policy that refuses ``chunked`` carrying a
-    parameter sees one, and a policy that reads only the names drops them
-    as a decision instead of never being shown them.  An empty member stays
-    in the list as ``(b'', ())``: a sender that would rewrite the field must
-    see every member it would be rewriting away (``chunked, `` is not
-    ``chunked``), while a reader that ignores empties per RFC 9110 §5.6.1
-    leaves them out at its own policy step.
-
-    A member that is not
-    ``token *( OWS ";" OWS token OWS "=" OWS ( token / quoted-string ) )``
-    raises: a parameter this reading cannot see through must not be able to
-    hide a different final coding from it.  So does a list holding more
-    empty members than the bound above.
+    Commas split, OWS off, the coding token lowered, the parameters kept
+    rather than dropped — a policy that refuses ``chunked`` carrying a
+    parameter sees one, a policy that reads only the names drops them as its
+    own decision.  An empty member stays ``(b'', ())`` (``chunked, `` is not
+    ``chunked`` to a sender rewriting the field; a reader ignores empties
+    per RFC 9110 §5.6.1).  A member outside the grammar raises — a
+    parameter this reading cannot see through must not hide a different
+    final coding — as does a list over the empty-member bound.
     """
     members: list[TransferCoding] = []
-    empty_members = 0
+    empties = 0
     for _name, value in fields:
         pos = 0
         while True:
             pos = _skip_ows(value, pos)
-            if pos == len(value):
-                # An empty field and the member after a trailing comma are
-                # both empty members, but not an unbounded amount of work.
-                empty_members += 1
-                if empty_members > _MAX_EMPTY_TRANSFER_MEMBERS:
+            if pos == len(value) or value[pos] == 0x2c:  # empty member
+                empties += 1
+                if empties > _MAX_EMPTY_TRANSFER_MEMBERS:
                     raise ValueError(
                         'too many empty Transfer-Encoding list members')
                 members.append((b'', ()))
-                break
-            if value[pos] == 0x2c:  # comma: empty member
-                empty_members += 1
-                if empty_members > _MAX_EMPTY_TRANSFER_MEMBERS:
-                    raise ValueError(
-                        'too many empty Transfer-Encoding list members')
-                members.append((b'', ()))
+                if pos == len(value):
+                    break
                 pos += 1
                 continue
-
-            name, pos = _transfer_token(value, pos)
-            params: list[tuple[bytes, bytes]] = []
-            pos = _skip_ows(value, pos)
-            while pos < len(value) and value[pos] == 0x3b:  # ';'
-                pos = _skip_ows(value, pos + 1)
-                param, pos = _transfer_token(value, pos)
-                pos = _skip_ows(value, pos)
-                if pos >= len(value) or value[pos] != 0x3d:  # '='
-                    raise ValueError(
-                        'Transfer-Encoding parameter requires "="')
-                pos = _skip_ows(value, pos + 1)
-                start = pos
-                if pos < len(value) and value[pos] == 0x22:
-                    pos = _transfer_quoted_string(value, pos)
-                else:
-                    _, pos = _transfer_token(value, pos)
-                params.append((param, value[start:pos]))
-                pos = _skip_ows(value, pos)
-            members.append((name.lower(), tuple(params)))
+            match = _MEMBER.match(value, pos)
+            if match is None:
+                raise ValueError(
+                    f'invalid Transfer-Encoding member at position {pos}')
+            pos = _skip_ows(value, match.end())
+            if pos < len(value) and value[pos] != 0x2c:  # comma
+                raise ValueError(
+                    f'invalid Transfer-Encoding list separator at position {pos}')
+            members.append((
+                match.group(1).lower(),
+                tuple((m[1], m[2]) for m in _PARAMETER.finditer(match.group(2) or b''))))
             if pos == len(value):
                 break
-            if value[pos] != 0x2c:
-                raise ValueError(
-                    'invalid Transfer-Encoding list separator')
             pos += 1
     return members
 
@@ -132,36 +111,6 @@ def _skip_ows(value: bytes, pos: int) -> int:
     while pos < len(value) and value[pos] in (0x20, 0x09):
         pos += 1
     return pos
-
-
-def _transfer_token(value: bytes, pos: int) -> tuple[bytes, int]:
-    start = pos
-    while pos < len(value) and value[pos] in TCHAR_SET:
-        pos += 1
-    if pos == start:
-        raise ValueError(
-            f'invalid Transfer-Encoding token at position {pos}')
-    return value[start:pos], pos
-
-
-def _transfer_quoted_string(value: bytes, pos: int) -> int:
-    """The opening quote is consumed here.  quoted-pair permits only
-    HTAB/SP/VCHAR/obs-text after the backslash."""
-    pos += 1
-    while pos < len(value):
-        octet = value[pos]
-        if octet == 0x22:
-            return pos + 1
-        if octet == 0x5c:
-            pos += 1
-            if pos >= len(value) or value[pos] not in FIELD_VALUE_ALLOWED_SET:
-                raise ValueError(
-                    'invalid quoted Transfer-Encoding parameter')
-        elif octet not in FIELD_VALUE_ALLOWED_SET:
-            raise ValueError(
-                'invalid quoted Transfer-Encoding parameter')
-        pos += 1
-    raise ValueError('unterminated quoted Transfer-Encoding parameter')
 
 
 def parse_status(value: str | bytes) -> int | None:

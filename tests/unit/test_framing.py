@@ -1,8 +1,5 @@
-"""Unit tests for ``blackbull.protocol.framing.split_transfer_codings`` —
-the one reading of a ``Transfer-Encoding`` list (BLA-459).  Each side's
-policy over the list keeps its own tests: the server's refusals in
-``tests/unit/test_audit_sprint63.py``, the sender's and reader's in
-``tests/unit/client/``.
+"""The one reading of a ``Transfer-Encoding`` list (BLA-459).  Each side's
+policy over it keeps its own tests, in ``tests/unit/`` and ``test_audit_sprint63``.
 """
 import pytest
 
@@ -26,23 +23,20 @@ class TestDecomposition:
                 (b'chunked', ((b'ext', b'1'),))]
 
     def test_parameter_names_and_values_stay_as_written(self):
-        # Only the coding token is lowered; a parameter is kept verbatim —
-        # quotes, case and all.
+        # Only the coding token is lowered; parameters are verbatim.
         assert split_transfer_codings(
             [(b'transfer-encoding', b'GZip;P="a,B"')]) == [
                 (b'gzip', ((b'P', b'"a,B"'),))]
 
     def test_a_quoted_parameter_value_keeps_its_commas_and_quotes(self):
-        # The comma inside the quoted string is not a member separator; the
-        # value is kept as written, nothing decoded.
+        # A quoted comma is not a member separator; the value keeps its quotes.
         assert split_transfer_codings(
             [(b'transfer-encoding', b'gzip;parameter="a,b", chunked')]) == [
                 (b'gzip', ((b'parameter', b'"a,b"'),)), (b'chunked', ())]
 
     def test_an_empty_member_stays_a_member(self):
-        # One policy refuses ``chunked, `` as "a second, empty member" and
-        # another ignores it per RFC 9110 §5.6.1 — the reading keeps it so
-        # both are decisions.
+        # A sender counts them and a reader ignores them (RFC 9110 §5.6.1):
+        # the reading keeps both decisions possible.
         assert split_transfer_codings(
             [(b'transfer-encoding', b'chunked, ')]) == [
                 (b'chunked', ()), (b'', ())]
@@ -66,8 +60,7 @@ class TestRefusals:
         b'gzip;parameter="a\x00b"',
     ])
     def test_a_member_that_is_not_the_grammar_raises(self, value):
-        # A parameter the reading cannot see through must not be able to
-        # hide a different final coding from it.
+        # An unseen-through parameter must not hide a different final coding.
         with pytest.raises(ValueError):
             split_transfer_codings([(b'transfer-encoding', value)])
 
@@ -78,8 +71,7 @@ class TestRefusals:
             split_transfer_codings([(b'transfer-encoding', b',' * 16)])
 
     def test_the_bound_counts_empty_members_across_fields(self):
-        # The reading is of the whole field section: 8 + 9 empty members are
-        # 17, over the bound whatever fields carried them.
+        # The reading is of the whole field section: 8 + 9 empties are 17.
         with pytest.raises(ValueError):
             split_transfer_codings([
                 (b'transfer-encoding', b',' * 7),
