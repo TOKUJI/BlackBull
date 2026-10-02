@@ -651,9 +651,8 @@ class HTTP2Actor(Actor):
         advances_watermark = (
             stream is not None and stream.state != StreamState.IDLE
         )
-        owned = any(owner is not None for owner in (
-            task, sender, recipient, stream,
-        ))
+        owned = (task is not None or sender is not None
+                 or recipient is not None or stream is not None)
 
         if sender is not None:
             retire = getattr(sender, 'retire_stream', None)

@@ -29,10 +29,6 @@ def _validate_response_header_field(name: bytes, value: bytes) -> None:
         raise ValueError('invalid HTTP response header value')
 
 
-_PAIR = frozenset({2})
-_BYTES = frozenset({bytes})
-
-
 def _validate_response_header_fields(
         headers: HeaderList) -> tuple[list | None, bool, bool]:
     """Validate a complete outbound field section before its first write.
@@ -41,34 +37,27 @@ def _validate_response_header_fields(
     ``Content-Length`` fields (``None`` when absent), and whether
     ``Transfer-Encoding`` and ``Date`` are present.
     """
-    fields = headers if isinstance(headers, list) else list(headers)
-    if not fields:
-        return None, False, False
-    if {*map(len, fields)} == _PAIR:
-        names, values = zip(*fields)
-        if {*map(type, names), *map(type, values)} == _BYTES and b'' not in names:
-            # Only the separators may survive deleting every legal octet.
-            joined = b'\n'.join(names)
-            separators = b'\n' * (len(fields) - 1)
-            if (joined.translate(None, TCHAR_OCTETS) == separators
-                    and b'\n'.join(values).translate(
-                        None, FIELD_VALUE_ALLOWED_OCTETS) == separators):
-                lowered = joined.lower().split(b'\n')
-                count = lowered.count(b'content-length')
-                content_length = (
-                    None if not count
-                    else [fields[lowered.index(b'content-length')]] if count == 1
-                    else [fields[i] for i, name in enumerate(lowered)
-                          if name == b'content-length'])
-                return (content_length, b'transfer-encoding' in lowered,
-                        b'date' in lowered)
-    for name, value in fields:
-        _validate_response_header_field(name, value)
-    # Every field is valid; only a bytes subclass gets here.
-    lowered = [bytes(name).lower() for name, _value in fields]
-    content_length = [field for field, name in zip(fields, lowered)
-                      if name == b'content-length'] or None
-    return content_length, b'transfer-encoding' in lowered, b'date' in lowered
+    content_length = None
+    transfer_encoding = date = False
+    for field in headers:
+        name, value = field
+        if (type(name) is not bytes or type(value) is not bytes
+                or not name or name.translate(None, TCHAR_OCTETS)
+                or value.translate(None, FIELD_VALUE_ALLOWED_OCTETS)):
+            _validate_response_header_field(name, value)
+        size = len(name)
+        if size == 14:
+            if name.lower() == b'content-length':
+                if content_length is None:
+                    content_length = []
+                content_length.append(field)
+        elif size == 17:
+            if name.lower() == b'transfer-encoding':
+                transfer_encoding = True
+        elif size == 4:
+            if name.lower() == b'date':
+                date = True
+    return content_length, transfer_encoding, date
 
 
 class Headers:

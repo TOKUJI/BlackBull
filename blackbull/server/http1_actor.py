@@ -5,6 +5,7 @@ RequestActor owns the lifetime of a single HTTP request.
 """
 import asyncio
 import ipaddress
+from functools import lru_cache
 import logging
 import re
 import time as _time
@@ -403,6 +404,11 @@ def _authority_is_valid(value: bytes) -> bool:
     if match is None:
         return True
     return match[0] in (b'[', b']') and _ip_literal_is_valid(value)
+
+
+# A client repeats its authority on every request; the answer depends only on
+# the bytes, so it is remembered (bounded: the bytes are the peer's).
+_authority_is_valid = lru_cache(maxsize=256)(_authority_is_valid)
 
 
 def _parse_host_header(value: bytes, default_port: int) -> tuple[str, int]:

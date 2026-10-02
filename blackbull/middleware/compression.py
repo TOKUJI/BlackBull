@@ -216,6 +216,7 @@ class Compression:
         # q-values + iterating the server-preference list on every request
         # showed up in py-spy profiles.  Bounded so a hostile
         # peer can't grow it unboundedly.
+        self._codec_cache: dict[bytes, tuple[str, Callable[[bytes], bytes]] | None] = {}
 
     def _select_codec(self, accept_header: bytes) -> tuple[str, Callable[[bytes], bytes]] | None:
         """Pick the best codec that the client accepts and the server has installed.
@@ -225,8 +226,14 @@ class Compression:
         server knows which codec yields better compression.
         Returns ``None`` when there is no overlap.
         """
+        cache = self._codec_cache
+        if accept_header in cache:
+            return cache[accept_header]
         codec = select_encoding(accept_header, self._available)
-        return (codec, self._available[codec]) if codec is not None else None
+        result = (codec, self._available[codec]) if codec is not None else None
+        if len(cache) < 256:
+            cache[accept_header] = result
+        return result
 
     async def _compress(self, compressor: Callable[[bytes], bytes],
                         body: bytes) -> bytes | None:
