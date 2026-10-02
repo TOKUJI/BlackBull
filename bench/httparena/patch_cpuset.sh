@@ -14,30 +14,29 @@ cd ~/HttpArena
 # IDs exist on our small boxes, so every hardcoded cpuset is the SAME quirk —
 # a reference-host cpuset that has to be rescaled onto this box's vCPUs.
 #
-# On the small instances the vCPUs are a contiguous 0..V-1 range (the sibling
-# half collapses away), so the reference's half/half split becomes simply:
-#
-#     server    = 0 .. V/2-1        load-gen = V/2 .. V-1        redis = core 0
-#
-# which is exactly the reference's 0-63 primary span divided by D = 64/V:
-#
-#     c7i.2xlarge  V=8   D=8     server 0-3    load-gen 4-7
-#     c7i.4xlarge  V=16  D=4     server 0-7    load-gen 8-15
-#     c7i.6xlarge  V=24  D=8/3   server 0-11   load-gen 12-23
-#     c7i.8xlarge  V=32  D=2     server 0-15   load-gen 16-31
-#
-# Computed from nproc so it self-adjusts to whichever instance we launch on.
-#
-# NOTE: pinning the server off the load-gen cores is a real STEADY-STATE win
-# (≈4-6×: runs 2-3 went 356k/255k → ~1550k/1550k msg/s once the server stopped
-# contending with the load generator).  It does NOT cure the run-1 cold-burst
-# collapse — run 1 still returns near-total Unavailable even pinned — so that
-# cold-start failure is a separate problem, not CPU contention.
+# Split by physical core, as the reference does: the server gets the lower
+# half of the cores with all their SMT threads, the load generator the upper
+# half, redis the server's first core.  Read from the kernel's topology, since
+# sibling numbering differs by instance family (c7i: N and N+V/2); on an
+# instance without SMT (c7a) this is simply the lower and upper half of 0..V-1.
 V=$(nproc)                              # total vCPUs on this box
-H=$(( V / 2 ))                          # half-way point
-SERVER_CPUS="0-$(( H - 1 ))"            # server under test = lower half
-LOADGEN_CPUS="${H}-$(( V - 1 ))"        # load generator     = upper half
-REDIS_CPUS="0"                          # redis co-locates on the server's core 0
+_TOPO=$(lscpu -p=CPU,CORE | grep -v '^#')
+_CORES=$(cut -d, -f2 <<<"$_TOPO" | sort -un | paste -sd' ')
+read -r -a _CORE_IDS <<<"$_CORES"
+H=$(( ${#_CORE_IDS[@]} / 2 ))           # half of the physical cores
+_cpus_of() {                            # CPUs whose core rank is in [$1, $2)
+    awk -F, -v lo="$1" -v hi="$2" -v ids="$_CORES" '
+        BEGIN { n = split(ids, c, " "); for (i = 1; i <= n; i++) rank[c[i]] = i - 1 }
+        rank[$2] >= lo && rank[$2] < hi { print $1 }' <<<"$_TOPO" \
+    | sort -n | awk '            # "a-b" runs: framework.sh reads a cpuset only if it has a "-"
+        NR == 1 { a = b = $1; next }
+        $1 == b + 1 { b = $1; next }
+        { out = out sep a "-" b; sep = ","; a = b = $1 }
+        END { print out sep a "-" b }'
+}
+SERVER_CPUS=$(_cpus_of 0 "$H")
+LOADGEN_CPUS=$(_cpus_of "$H" "${#_CORE_IDS[@]}")
+REDIS_CPUS=$(_cpus_of 0 1)
 echo "patch_cpuset.sh: V=$V  server=$SERVER_CPUS  load-gen=$LOADGEN_CPUS  redis=$REDIS_CPUS" >&2
 
 # redis.sh: default REDIS_CPUSET (0,64 → server core 0)
