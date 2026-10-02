@@ -37,8 +37,9 @@ from blackbull.protocol.frame_types import (
 _READERS = {
     http1_actor: ('TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS',
                   'COMMON_METHODS_OCTETS', 'method_token_is_valid'),
-    frame_types: ('TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS'),
-    headers_module: ('TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS'),
+    frame_types: ('LOWERCASE_TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS'),
+    headers_module: ('TCHAR_OCTETS', 'LOWERCASE_TCHAR_OCTETS',
+                     'FIELD_VALUE_ALLOWED_OCTETS'),
     recipient: ('TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS'),
     client_http1: ('TCHAR_OCTETS', 'TCHAR_SET', 'FIELD_VALUE_ALLOWED_OCTETS',
                    'FIELD_VALUE_ALLOWED_SET'),
@@ -52,6 +53,7 @@ _READERS = {
 #: respelled the grammar, which is how the two transports drifted apart.
 _OWNED_BY_THE_GRAMMAR = frozenset({
     'TCHAR_OCTETS', '_TCHAR_OCTETS', 'TCHAR_SET', '_TCHAR_SET',
+    'LOWERCASE_TCHAR_OCTETS', '_NAME_OCTETS',
     'FIELD_NAME_INVALID_RE', '_FIELD_NAME_INVALID_RE', '_FIELD_NAME_OCTETS',
     'FIELD_VALUE_INVALID_RE', '_FIELD_VALUE_INVALID_RE',
     'FIELD_VALUE_ALLOWED_OCTETS', '_FIELD_VCHAR', '_BLOCK_ALLOWED_OCTETS',
@@ -95,6 +97,8 @@ def _assigned_names(module) -> set:
 def test_the_alphabet_is_the_rfc_one():
     assert field_grammar.TCHAR_SET == _RFC_TCHAR
     assert frozenset(field_grammar.TCHAR_OCTETS) == _RFC_TCHAR
+    assert (frozenset(field_grammar.LOWERCASE_TCHAR_OCTETS)
+            == _RFC_TCHAR - _UPPERCASE)
 
 
 def test_the_allowed_value_octets_are_the_rfc_ones():

@@ -10,7 +10,8 @@ from collections.abc import Iterable
 from typing import TypeAlias
 
 from .protocol import structured_fields as sf
-from .protocol.field_grammar import FIELD_VALUE_ALLOWED_OCTETS, TCHAR_OCTETS
+from .protocol.field_grammar import (
+    FIELD_VALUE_ALLOWED_OCTETS, LOWERCASE_TCHAR_OCTETS, TCHAR_OCTETS)
 
 HeaderList: TypeAlias = Iterable[tuple[bytes, bytes]]
 
@@ -29,35 +30,50 @@ def _validate_response_header_field(name: bytes, value: bytes) -> None:
         raise ValueError('invalid HTTP response header value')
 
 
-def _validate_response_header_fields(
-        headers: HeaderList) -> tuple[list | None, bool, bool]:
-    """Validate a complete outbound field section before its first write.
+class _MinimalResponseHeaders(list):
+    """A response field section as a sender owns it: every field validated,
+    every name lowercase, and the framing fields located.  Nothing is indexed
+    — the senders need only these three facts, not a [`Headers`][]."""
 
-    Returns what message framing needs from the same pass: the
-    ``Content-Length`` fields (``None`` when absent), and whether
-    ``Transfer-Encoding`` and ``Date`` are present.
+    __slots__ = ('content_length', 'transfer_encoding', 'date')
+
+
+def _minimal_response_headers(fields: Iterable) -> _MinimalResponseHeaders:
+    """Copy *fields* into the form a sender writes, before its first write.
+
+    *fields* holds ``(name, value)`` pairs in any two-item form ASGI allows.
+    Raises on a field that cannot remain one field on the wire, and
+    lowercases a name that is not already.  ``content_length`` is the list of
+    Content-Length fields (``None`` when absent); ``transfer_encoding`` and
+    ``date`` say whether those are present.
     """
+    head = _MinimalResponseHeaders(fields)
     content_length = None
     transfer_encoding = date = False
-    for field in headers:
+    for field in head:
         name, value = field
         if (type(name) is not bytes or type(value) is not bytes
-                or not name or name.translate(None, TCHAR_OCTETS)
+                or not name or name.translate(None, LOWERCASE_TCHAR_OCTETS)
                 or value.translate(None, FIELD_VALUE_ALLOWED_OCTETS)):
             _validate_response_header_field(name, value)
+            name = name.lower()
+            head[head.index(field)] = field = (name, value)
         size = len(name)
         if size == 14:
-            if name.lower() == b'content-length':
+            if name == b'content-length':
                 if content_length is None:
                     content_length = []
                 content_length.append(field)
         elif size == 17:
-            if name.lower() == b'transfer-encoding':
+            if name == b'transfer-encoding':
                 transfer_encoding = True
         elif size == 4:
-            if name.lower() == b'date':
+            if name == b'date':
                 date = True
-    return content_length, transfer_encoding, date
+    head.content_length = content_length
+    head.transfer_encoding = transfer_encoding
+    head.date = date
+    return head
 
 
 class Headers:

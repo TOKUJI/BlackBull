@@ -10,6 +10,10 @@ TCHAR_OCTETS = (b"!#$%&'*+-.^_`|~"
 #: The same, for per-octet membership.
 TCHAR_SET: frozenset[int] = frozenset(TCHAR_OCTETS)
 
+#: tchar without uppercase: the octets of a name already in the lowercase
+#: form HTTP/2 requires (RFC 9113 §8.2) and BlackBull sends on both transports.
+LOWERCASE_TCHAR_OCTETS = TCHAR_OCTETS.translate(None, b'ABCDEFGHIJKLMNOPQRSTUVWXYZ')
+
 #: RFC 9110 §5.5 field-content — a field value's octets: HTAB, SP, VCHAR,
 #: obs-text.
 FIELD_VALUE_ALLOWED_OCTETS = bytes(
