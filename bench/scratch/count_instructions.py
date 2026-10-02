@@ -123,7 +123,30 @@ def _start(code, offset):
     return None
 
 
+#: With ``BB_GC=1``, nothing is traced: garbage collections and the time
+#: spent in them are counted instead, per generation.
+_GC = os.environ.get('BB_GC') == '1'
+_gc_started: dict = {}
+
+
+def _gc_event(phase, info):
+    import time
+    if not _on:
+        return
+    if phase == 'start':
+        _gc_started['t'] = time.perf_counter()
+    else:
+        gen = info.get('generation')
+        _counts[f'gc::collections_gen{gen}'] += 1
+        _counts[f'gc::usec_gen{gen}'] += int(
+            (time.perf_counter() - _gc_started.get('t', time.perf_counter())) * 1e6)
+
+
 def _arm() -> None:
+    if _GC:
+        import gc
+        gc.callbacks.append(_gc_event)
+        return
     MON.use_tool_id(TOOL, 'instr-count')
     if _CALLERS:
         MON.register_callback(TOOL, MON.events.PY_START, _start)
@@ -138,6 +161,10 @@ def _arm() -> None:
 
 
 def _disarm() -> None:
+    if _GC:
+        import gc
+        gc.callbacks.remove(_gc_event)
+        return
     MON.set_events(TOOL, 0)
     MON.free_tool_id(TOOL)
 

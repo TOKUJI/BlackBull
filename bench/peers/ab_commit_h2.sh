@@ -31,6 +31,9 @@
 #   H2_STREAMS   h2load max concurrent streams per connection (default 16)
 #   H2_N         requests in the measured run   (default 100000)
 #   H2_WARMUP    requests in the discarded warmup (default 10000)
+#   APP          serve this app through the blackbull CLI instead of bench/app.py
+#   APP_PYTHONPATH  extra import path for APP (e.g. bench/httparena)
+#   TLS_CERT / TLS_KEY  with APP: serve HTTPS (ALPN h2) with these files
 #
 # Output: bench/results/ab-h2-<UTC>/report.md + raw.tsv + h2load logs.
 
@@ -78,7 +81,7 @@ OUTDIR="bench/results/ab-h2-${TS}Z"
 mkdir -p "$OUTDIR"
 REPORT="$OUTDIR/report.md"
 RAW="$OUTDIR/raw.tsv"
-BASE_URL="http://127.0.0.1:${PORT}"
+BASE_URL="$([ -n "${TLS_CERT:-}" ] && echo https || echo http)://127.0.0.1:${PORT}"
 
 SHA_BASE="$(git rev-parse --short "$REF_BASE")"
 SHA_TREAT="$(git rev-parse --short "$REF_TREAT")"
@@ -175,15 +178,21 @@ PY
     fi
 }
 
+if [ -n "${APP:-}" ]; then
+    SERVER_CMD=(.venv/bin/blackbull "$APP" --bind "127.0.0.1:${PORT}")
+    [ -n "${TLS_CERT:-}" ] && SERVER_CMD+=(--certfile "$TLS_CERT" --keyfile "$TLS_KEY")
+else
+    SERVER_CMD=("$PY" bench/app.py --no-tls --port "$PORT")
+fi
+
 start_server() {
     BB_UVLOOP="$BB_UVLOOP" BB_WORKERS=1 BB_ACCESS_LOG=0 \
         BB_FORCE_ASGI_SCOPE="$BB_FORCE_ASGI_SCOPE" \
-        setsid "${PIN_SERVER[@]}" "$PY" bench/app.py --no-tls \
-            --port "$PORT" \
-            >"$OUTDIR/server.log" 2>&1 &
+        PYTHONPATH="${APP_PYTHONPATH:-}" \
+        setsid "${PIN_SERVER[@]}" "${SERVER_CMD[@]}" >"$OUTDIR/server.log" 2>&1 &
     SERVER_PID=$!
     for _ in $(seq 1 60); do
-        if curl -s --max-time 2 -o /dev/null -w '%{http_code}' \
+        if curl -sk --max-time 2 -o /dev/null -w '%{http_code}' \
                 "$BASE_URL$URL_PATH" 2>/dev/null | grep -q '200'; then
             return 0
         fi

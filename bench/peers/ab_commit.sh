@@ -24,6 +24,9 @@
 #   THREADS    wrk threads                    (default 4)
 #   CONNS      wrk connections                (default 32)
 #   URL_PATH   path to hammer                 (default /plaintext)
+#   APP        app import path                (default bench.peers.native_app:app)
+#   APP_PYTHONPATH  extra import path for APP  (e.g. bench/httparena)
+#   TLS_CERT / TLS_KEY  serve HTTPS with these files
 #   PORT       bind port                      (default 8443)
 #   BB_UVLOOP  0 = pure-Python identity       (default 0)
 #   PIPELINE   wrk pipeline depth             (default 1 = serialized keep-alive)
@@ -84,7 +87,7 @@ OUTDIR="bench/results/ab-commit-${TS}Z"
 mkdir -p "$OUTDIR"
 REPORT="$OUTDIR/report.md"
 RAW="$OUTDIR/raw.tsv"
-BASE_URL="http://127.0.0.1:${PORT}"
+BASE_URL="$([ -n "${TLS_CERT:-}" ] && echo https || echo http)://127.0.0.1:${PORT}"
 
 SHA_BASE="$(git rev-parse --short "$REF_BASE")"
 SHA_TREAT="$(git rev-parse --short "$REF_TREAT")"
@@ -147,7 +150,7 @@ kill_server() {
     if command -v fuser >/dev/null 2>&1; then
         fuser -k -9 -n tcp "$PORT" 2>/dev/null || true
     fi
-    pkill -9 -f "bench.peers.native_app" 2>/dev/null || true
+    pkill -9 -f "blackbull ${APP:-bench.peers.native_app}" 2>/dev/null || true
     for _ in $(seq 1 20); do
         ss -tln 2>/dev/null | grep -q ":$PORT " || return 0
         sleep 0.25
@@ -190,8 +193,10 @@ PY
 start_server() {
     BB_UVLOOP="$BB_UVLOOP" BB_WORKERS=1 BB_ACCESS_LOG=0 \
         BB_FORCE_ASGI_SCOPE="$BB_FORCE_ASGI_SCOPE" \
-        setsid "${PIN_SERVER[@]}" .venv/bin/blackbull bench.peers.native_app:app \
+        PYTHONPATH="${APP_PYTHONPATH:-}" \
+        setsid "${PIN_SERVER[@]}" .venv/bin/blackbull "${APP:-bench.peers.native_app:app}" \
             --bind "127.0.0.1:${PORT}" \
+            ${TLS_CERT:+--certfile "$TLS_CERT" --keyfile "$TLS_KEY"} \
             >"$OUTDIR/server.log" 2>&1 &
     SERVER_PID=$!
     for _ in $(seq 1 60); do
@@ -200,7 +205,7 @@ start_server() {
         # lanes (/preencoded, /1kb) with "server not ready".  Send the same
         # Accept-Encoding as wrk so the probe exercises the same middleware
         # branch the measurement will.
-        if curl -s -o /dev/null --max-time 2 -w '%{http_code}' \
+        if curl -sk -o /dev/null --max-time 2 -w '%{http_code}' \
                 $WRK_HEADERS "$BASE_URL$URL_PATH" 2>/dev/null | grep -q '^200'; then
             return 0
         fi
