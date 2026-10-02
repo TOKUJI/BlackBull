@@ -141,7 +141,7 @@ def build_response_headers(encoder, stream_id: int, status,
     Injects a ``date`` header when the app did not supply one, mirroring the
     ``Headers.save()`` send path.  ``status`` may be an ``HTTPStatus``, an
     ``int``, or a ``str`` — it is normalised via ``str()`` exactly as the
-    object path does.  A [`_Head`][] is already validated; any other
+    object path does.  A ``_Head`` is already validated; any other
     *headers* is validated here.
     """
     if isinstance(headers, _Head):
