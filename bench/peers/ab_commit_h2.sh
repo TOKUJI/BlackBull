@@ -34,6 +34,10 @@
 #   APP          serve this app through the blackbull CLI instead of bench/app.py
 #   APP_PYTHONPATH  extra import path for APP (e.g. bench/httparena)
 #   TLS_CERT / TLS_KEY  with APP: serve HTTPS (ALPN h2) with these files
+#   H2_URIS      file of request URIs for h2load -i, used in place of URL_PATH
+#                (which stays the readiness probe); each line's origin is
+#                replaced with this server's
+#   H2_HEADER    one extra request header, e.g. 'Accept-Encoding: gzip'
 #
 # Output: bench/results/ab-h2-<UTC>/report.md + raw.tsv + h2load logs.
 
@@ -82,6 +86,12 @@ mkdir -p "$OUTDIR"
 REPORT="$OUTDIR/report.md"
 RAW="$OUTDIR/raw.tsv"
 BASE_URL="$([ -n "${TLS_CERT:-}" ] && echo https || echo http)://127.0.0.1:${PORT}"
+H2_TARGET=("$BASE_URL$URL_PATH")
+if [ -n "${H2_URIS:-}" ]; then
+    sed -E "s#^[a-z]+://[^/]+##; s#^#${BASE_URL}#" "$H2_URIS" >"$OUTDIR/uris.txt"
+    H2_TARGET=(-i "$OUTDIR/uris.txt")
+fi
+[ -n "${H2_HEADER:-}" ] && H2_TARGET+=(-H "$H2_HEADER")
 
 SHA_BASE="$(git rev-parse --short "$REF_BASE")"
 SHA_TREAT="$(git rev-parse --short "$REF_TREAT")"
@@ -208,9 +218,9 @@ start_server() {
 measure() {
     local tag="$1"
     "${PIN_LOAD[@]}" h2load -c "$H2_CONNS" -m "$H2_STREAMS" -n "$H2_WARMUP" \
-        "$BASE_URL$URL_PATH" >/dev/null 2>&1
+        "${H2_TARGET[@]}" >/dev/null 2>&1
     "${PIN_LOAD[@]}" h2load -c "$H2_CONNS" -m "$H2_STREAMS" -n "$H2_N" \
-        "$BASE_URL$URL_PATH" >"$OUTDIR/h2_${tag}.txt" 2>&1
+        "${H2_TARGET[@]}" >"$OUTDIR/h2_${tag}.txt" 2>&1
     awk '/finished in/ {print $4}' "$OUTDIR/h2_${tag}.txt"
 }
 
@@ -241,7 +251,7 @@ printf 'phase\tround\tarm\trps\tproof\n' >"$RAW"
 
 echo "ab_commit_h2.sh: $SHA_BASE (base) vs $SHA_TREAT (treat)"
 echo "  files: ${FILES[*]}"
-echo "  lane : HTTP/2 cleartext (h2c), h2load -c $H2_CONNS -m $H2_STREAMS -n $H2_N $URL_PATH"
+echo "  lane : h2load -c $H2_CONNS -m $H2_STREAMS -n $H2_N ${H2_TARGET[*]}"
 echo "  uvloop=$BB_UVLOOP  rounds=$ROUNDS (ABBA)"
 echo "  pin  : server=${SERVER_CPUS:-none} load=${LOAD_CPUS:-none}"
 echo "  phases: $PHASES"
@@ -272,11 +282,11 @@ restore_tree
 {
     echo "# A/B — $SHA_BASE (base) vs $SHA_TREAT (treat)"
     echo ""
-    echo "EC2 m7a.2xlarge, HTTP/2 cleartext (h2c), single worker."
+    echo "$(uname -n), HTTP/2, single worker."
     echo ""
     echo "| | |"
     echo "|---|---|"
-    echo "| Lane | \`h2load -c $H2_CONNS -m $H2_STREAMS -n $H2_N $URL_PATH\` |"
+    echo "| Lane | \`h2load -c $H2_CONNS -m $H2_STREAMS -n $H2_N ${H2_TARGET[*]}\` |"
     echo "| Rounds | $ROUNDS ABBA per phase |"
     echo "| uvloop | $BB_UVLOOP |"
     echo "| scope | $BB_FORCE_ASGI_SCOPE |"

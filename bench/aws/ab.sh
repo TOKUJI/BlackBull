@@ -26,6 +26,9 @@
 #   empty entries fall back to the single values)
 #   H2_PROFILES (comma-separated h2load URL paths — each runs ab_commit_h2.sh
 #   after the H1 lanes; '' = no H2 lane) with H2_CONNS/H2_STREAMS/H2_N/H2_WARMUP
+#   and H2_URIS/H2_HEADER (instance paths; see ab_commit_h2.sh)
+#   APP / APP_PYTHONPATH / TLS_CERT / TLS_KEY (see ab_commit.sh; instance paths)
+#   APP_ENV (extra VAR=value words for the served app, e.g. its data paths)
 #   EXPECT_LINES (raw.tsv completeness per session; default
 #                1+ROUNDS*4*number-of-PHASES)
 #   AB_FINISH_LOG (finish progress log; default bench/results/ab-finish.log)
@@ -82,6 +85,13 @@ H2_CONNS="${H2_CONNS:-32}"
 H2_STREAMS="${H2_STREAMS:-16}"
 H2_N="${H2_N:-100000}"
 H2_WARMUP="${H2_WARMUP:-10000}"
+H2_URIS="${H2_URIS:-}"
+H2_HEADER="${H2_HEADER:-}"
+APP="${APP:-}"
+APP_PYTHONPATH="${APP_PYTHONPATH:-}"
+TLS_CERT="${TLS_CERT:-}"
+TLS_KEY="${TLS_KEY:-}"
+APP_ENV="${APP_ENV:-}"
 EXPECT_LINES_EXPLICIT=0
 [ -n "${EXPECT_LINES:-}" ] && EXPECT_LINES_EXPLICIT=1
 # Each phase contributes four rows per round (base, treat, treat, base), plus
@@ -130,6 +140,8 @@ ab_env() {  # $1 = url, $2 = wrk script ('' = none), $3 = wrk script args
     printf "PEER_MW='%s' " "$PEER_MW"
     printf "WRK_HEADERS='%s' " "$WRK_HEADERS"
     printf "WRK_SCRIPT='%s' WRK_SCRIPT_ARGS='%s' " "$2" "$3"
+    printf "APP='%s' APP_PYTHONPATH='%s' TLS_CERT='%s' TLS_KEY='%s' %s " \
+        "$APP" "$APP_PYTHONPATH" "$TLS_CERT" "$TLS_KEY" "$APP_ENV"
 }
 
 case "$MODE" in
@@ -199,9 +211,9 @@ launch)
         # are appended here.
         for u in "${H2URLS[@]}"; do
             log="bench/results/ec2-ab-h2-$(printf '%s' "${u#/}" | tr '/' '_').log"
-            printf 'env %s H2_CONNS=%q H2_STREAMS=%q H2_N=%q H2_WARMUP=%q bash bench/peers/ab_commit_h2.sh > %q 2>&1\n' \
+            printf 'env %s H2_CONNS=%q H2_STREAMS=%q H2_N=%q H2_WARMUP=%q H2_URIS=%q H2_HEADER=%q bash bench/peers/ab_commit_h2.sh > %q 2>&1\n' \
                 "$(ab_env "$u" '' '')" \
-                "$H2_CONNS" "$H2_STREAMS" "$H2_N" "$H2_WARMUP" "$log"
+                "$H2_CONNS" "$H2_STREAMS" "$H2_N" "$H2_WARMUP" "$H2_URIS" "$H2_HEADER" "$log"
         done
     } > "$RUNNER"
 
