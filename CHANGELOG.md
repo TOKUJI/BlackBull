@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+- **Response header names are sent lowercase on HTTP/1.1 and HTTP/2.**  An
+  HTTP/2 response carried the application's `Content-Type` as written, which
+  RFC 9113 §8.2.2 forbids and a strict client rejects as malformed; trailers
+  did the same.  Names are now lowercased where the sender takes the
+  response, so HTTP/1.1 responses, the server's own `Date` included, arrive
+  lowercase too (names are case-insensitive, RFC 9110 §5.1), as do the events
+  `to_asgi()` gives an external ASGI host.
 - **A lifespan task that dies after its startup ack is reported at once**,
   not only at shutdown.  Serving continues; the shutdown failure still
   surfaces exactly as before.

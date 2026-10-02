@@ -46,7 +46,8 @@ from ..asgi import (
     WebSocketCloseEvent,
     WebSocketSendEvent,
 )
-from ..headers import Headers, HeaderList, _validate_response_header_fields
+from ..headers import (
+    Headers, HeaderList, _MinimalResponseHeaders, _minimal_response_headers)
 from ..native import NativeResponse, NativeWSMessage, _native_from_asgi
 
 from ..logger import debug_gate  # noqa: E402
@@ -123,19 +124,6 @@ def _http_date() -> bytes:
     return _HTTP_DATE
 
 
-def _has_header(items, name: bytes) -> bool:
-    """Case-insensitive membership check over ``(key, value)`` tuples.
-
-    HTTP/2 field names are lowercase ASCII per RFC 9113 §8.2.1, but the
-    ASGI app may still hand us ``b'Date'`` or ``b'DATE'`` — its problem
-    to surface, ours to honour.  Used by HTTP2Sender to avoid
-    duplicating the auto-emitted ``date`` header when the app already
-    set one.
-    """
-    needle = name.lower()
-    return any(k.lower() == needle for k, _ in items)
-
-
 # The two builders below must stay byte-for-byte equivalent to the frame-object
 # path they replace — ``protocol.frame_types.Headers.save()``, not this module's
 # field-collection ``Headers`` — including how the shared HPACK dynamic table
@@ -156,13 +144,9 @@ def build_response_headers(encoder, stream_id: int, status,
     ``int``, or a ``str`` — it is normalised via ``str()`` exactly as the
     object path does.
     """
-    if not isinstance(headers, (list, tuple)):
-        headers = tuple(headers)
-    _validate_response_header_fields(headers)
-    if _has_header(headers, b'date'):
-        fields = headers
-    else:
-        fields = (*headers, (b'date', _http_date()))
+    if not isinstance(headers, _MinimalResponseHeaders):
+        headers = _minimal_response_headers(headers)
+    fields = headers if headers.date else (*headers, (b'date', _http_date()))
 
     fast = hpack_fastpath.status_fast_bytes(str(status))
     if fast is not None:
@@ -185,9 +169,8 @@ def build_trailers(encoder, stream_id: int, headers) -> bytes:
     This is the basis for the gRPC ``grpc-status`` trailers path — a unary
     RPC response carries a second HEADERS frame with regular fields only.
     """
-    if not isinstance(headers, (list, tuple)):
-        headers = tuple(headers)
-    _validate_response_header_fields(headers)
+    if not isinstance(headers, _MinimalResponseHeaders):
+        headers = _minimal_response_headers(headers)
     payload = encoder.encode(headers)
     flags = HeaderFrameFlags.END_HEADERS.value | HeaderFrameFlags.END_STREAM.value
     return (len(payload).to_bytes(3, 'big') + FrameTypes.HEADERS.value
@@ -257,21 +240,6 @@ class AbstractWriter(ABC):
         """
         raise NotImplementedError(
             'sendfile is not supported by this writer')
-
-
-class _Head(list):
-    """A response head's fields, owned by the sender, with what framing needs
-    to know about them (see ``_validate_response_header_fields``)."""
-
-    __slots__ = ('content_length', 'transfer_encoding', 'date')
-
-
-def _head(fields) -> _Head:
-    """Copy *fields* into a validated [`_Head`][]."""
-    head = _Head(fields)
-    (head.content_length, head.transfer_encoding,
-     head.date) = _validate_response_header_fields(head)
-    return head
 
 
 @cache
@@ -596,7 +564,7 @@ class HTTP1Sender(BaseSender):
         super().__init__(writer)
         self.supports_interim = supports_interim
         self._buffered_status: HTTPStatus | None = None
-        self._buffered_headers: _Head | None = None
+        self._buffered_headers: _MinimalResponseHeaders | None = None
         self._chunked: bool = False
         self._expect_trailers: bool = False
         # Set True once the status line + headers have hit the wire
@@ -675,7 +643,7 @@ class HTTP1Sender(BaseSender):
         match body:
             case bytes():
                 self._response_started = True
-                h = _head(headers)
+                h = _minimal_response_headers(headers)
                 if self._log_record is not None:
                     self._log_record.status = int(status)
                     self._log_record.response_bytes += len(body)
@@ -685,7 +653,7 @@ class HTTP1Sender(BaseSender):
 
             case NativeResponse():
                 if body._header is not None:
-                    head = _head(body._header)
+                    head = _minimal_response_headers(body._header)
                     self._response_started = True
                     await self._settle_buffered_head()
                     self._buffered_status = (_STATUS_BY_CODE.get(body.status)
@@ -698,13 +666,11 @@ class HTTP1Sender(BaseSender):
                     if self._log_record is not None:
                         self._log_record.status = body.status
                         self._log_record.mark('start_arm_in')
-                        for hk, hv in body._header:
-                            if isinstance(hk, bytes):
-                                hkl = hk.lower()
-                                if hkl == b'content-type':
-                                    self._log_record.resp_content_type = hv
-                                elif hkl == b'content-encoding':
-                                    self._log_record.resp_content_encoding = hv
+                        for hk, hv in head:
+                            if hk == b'content-type':
+                                self._log_record.resp_content_type = hv
+                            elif hk == b'content-encoding':
+                                self._log_record.resp_content_encoding = hv
                         self._log_record.mark('start_arm_out')
                 if body._extension is not None:
                     if await self._pathsend(body.file_path):
@@ -770,8 +736,7 @@ class HTTP1Sender(BaseSender):
         """Write one part of the trailer section for dict and native paths."""
         if not (self._expect_trailers or self._chunked):
             return
-        headers = list(headers)
-        _validate_response_header_fields(headers)
+        headers = _minimal_response_headers(headers)
         if not self._trailers_started:
             await self._write(b'0\r\n')
             self._trailers_started = True
@@ -801,7 +766,8 @@ class HTTP1Sender(BaseSender):
         self._head_mode = False
         self._log_record = None
 
-    def _ensure_framing_headers(self, status: HTTPStatus, head: _Head,
+    def _ensure_framing_headers(self, status: HTTPStatus,
+                                head: _MinimalResponseHeaders,
                                 body_len: int, more_body: bool) -> list:
         """Derive the sole legal framing from status and body mode.
 
@@ -831,7 +797,7 @@ class HTTP1Sender(BaseSender):
         if head.content_length or head.transfer_encoding:
             pairs = [
                 (name, value) for name, value in head
-                if name.lower() not in (b'content-length', b'transfer-encoding')
+                if name not in (b'content-length', b'transfer-encoding')
             ]
         else:
             pairs = head
@@ -884,12 +850,13 @@ class HTTP1Sender(BaseSender):
         self._body_bytes = total
 
     @staticmethod
-    def _ensure_date_header(fields: list, head: _Head) -> None:
+    def _ensure_date_header(fields: list, head: _MinimalResponseHeaders) -> None:
         # RFC 9110 §6.6.1 — origin server SHOULD generate Date.
         if not head.date:
-            fields.append((b'Date', _http_date()))
+            fields.append((b'date', _http_date()))
 
-    async def _flush(self, status: HTTPStatus, head: _Head, body: bytes, more_body: bool = False) -> None:
+    async def _flush(self, status: HTTPStatus, head: _MinimalResponseHeaders,
+                     body: bytes, more_body: bool = False) -> None:
         headers = self._ensure_framing_headers(
             status, head, len(body), more_body)
         self._track_content_length(len(body), more_body)
@@ -1302,8 +1269,7 @@ class HTTP2Sender(BaseSender):
         transfer-encoding is connection-specific: RFC 9113 §8.2.2 keeps it
         out of HTTP/2 entirely."""
         kept = [(hk, hv) for hk, hv in headers
-                if hk.lower() not in (b'content-length',
-                                      b'transfer-encoding')]
+                if hk not in (b'content-length', b'transfer-encoding')]
         await self.send_response_headers(status, kept)
         self._buffered_status = None
         self._buffered_headers = None
@@ -1549,7 +1515,7 @@ class HTTP2Sender(BaseSender):
         """
         if self._closed:
             return
-        _validate_response_header_fields(headers)
+        headers = _minimal_response_headers(headers)
         if more_trailers:
             if self._buffered_trailers is None:
                 self._buffered_trailers = headers
@@ -1700,8 +1666,7 @@ class HTTP2Sender(BaseSender):
                     logger.warning('push sent but no push handler registered')
                 return
             if body._header is not None:
-                header_pairs = list(body._header)
-                _validate_response_header_fields(header_pairs)
+                header_pairs = _minimal_response_headers(body._header)
                 await self._settle_buffered_head()
                 self._buffered_status = HTTPStatus(body.status)
                 self._buffered_headers = header_pairs
@@ -1709,13 +1674,11 @@ class HTTP2Sender(BaseSender):
                 if self._log_record is not None:
                     self._log_record.status = body.status
                     self._log_record.mark('start_arm_in')
-                    for hk, hv in body._header:
-                        if isinstance(hk, bytes):
-                            hkl = hk.lower()
-                            if hkl == b'content-type':
-                                self._log_record.resp_content_type = hv
-                            elif hkl == b'content-encoding':
-                                self._log_record.resp_content_encoding = hv
+                    for hk, hv in header_pairs:
+                        if hk == b'content-type':
+                            self._log_record.resp_content_type = hv
+                        elif hk == b'content-encoding':
+                            self._log_record.resp_content_encoding = hv
                     self._log_record.mark('start_arm_out')
             if body.body is not None:
                 await self._handle_body_content(body._body, not body.more_body)

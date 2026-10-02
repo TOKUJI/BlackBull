@@ -12,7 +12,7 @@ from io import BytesIO
 from itertools import chain
 
 from . import hpack_fastpath, structured_fields
-from .field_grammar import FIELD_VALUE_ALLOWED_OCTETS, TCHAR_OCTETS
+from .field_grammar import FIELD_VALUE_ALLOWED_OCTETS, LOWERCASE_TCHAR_OCTETS
 
 import logging
 from ..logger import log, debug_gate
@@ -355,11 +355,6 @@ _HOP_BY_HOP_HEADERS: frozenset[bytes] = frozenset((
 ))
 
 
-#: The shared token alphabet with the uppercase octets removed — RFC 9113 §8.2
-#: puts an HTTP/2 name in lowercase, so uppercase is not a name octet here.
-_NAME_OCTETS = TCHAR_OCTETS.translate(None, b'ABCDEFGHIJKLMNOPQRSTUVWXYZ')
-
-
 def field_name_is_valid(name: bytes) -> bool:
     """RFC 9113 §8.2.1 — is *name* a legal HTTP/2 field name?
 
@@ -372,7 +367,7 @@ def field_name_is_valid(name: bytes) -> bool:
     if not name:
         return False
     start = 1 if name[0] == 0x3A else 0
-    return not name[start:].translate(None, _NAME_OCTETS)
+    return not name[start:].translate(None, LOWERCASE_TCHAR_OCTETS)
 
 
 def field_value_is_valid(value: bytes) -> bool:
