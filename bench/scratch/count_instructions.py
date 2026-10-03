@@ -28,6 +28,7 @@ import asyncio
 import collections
 import json
 import os
+import tempfile
 import sys
 
 REPO = os.environ.get('BB_REPO', '/home/toshio/work/BlackBull')
@@ -66,6 +67,7 @@ _on = False
 
 
 _BY_FUNC = os.environ.get('BB_BY_FUNC', '')
+_HTTPARENA = os.path.expanduser(os.environ.get('BB_HTTPARENA', '~/HttpArena'))
 #: wrk lanes: path and Lua script.  ``churn`` is the EC2 A/B's
 #: one-request-per-connection lane.
 _WRK_LANES = {
@@ -73,6 +75,14 @@ _WRK_LANES = {
     'plaintext': ('/plaintext', None),
     'churn': ('/plaintext', f'{MAIN}/bench/wrk/no_keepalive.lua'),
     'arena-baseline': ('/', f'{MAIN}/bench/wrk/httparena_baseline.lua'),
+    'arena-json-comp': ('/', f'{MAIN}/bench/wrk/httparena_json_comp.lua'),
+    'arena-static': ('/', f'{_HTTPARENA}/requests/static-rotate.lua'),
+}
+#: h2load lanes: request paths, or ``None`` for HttpArena's static-h2 URI list.
+_H2_LANES = {
+    'h2': '/1kb',
+    'arena-h2': '/baseline2?a=1&b=1',
+    'arena-static-h2': None,
 }
 
 
@@ -113,7 +123,30 @@ def _start(code, offset):
     return None
 
 
+#: With ``BB_GC=1``, nothing is traced: garbage collections and the time
+#: spent in them are counted instead, per generation.
+_GC = os.environ.get('BB_GC') == '1'
+_gc_started: dict = {}
+
+
+def _gc_event(phase, info):
+    import time
+    if not _on:
+        return
+    if phase == 'start':
+        _gc_started['t'] = time.perf_counter()
+    else:
+        gen = info.get('generation')
+        _counts[f'gc::collections_gen{gen}'] += 1
+        _counts[f'gc::usec_gen{gen}'] += int(
+            (time.perf_counter() - _gc_started.get('t', time.perf_counter())) * 1e6)
+
+
 def _arm() -> None:
+    if _GC:
+        import gc
+        gc.callbacks.append(_gc_event)
+        return
     MON.use_tool_id(TOOL, 'instr-count')
     if _CALLERS:
         MON.register_callback(TOOL, MON.events.PY_START, _start)
@@ -128,6 +161,10 @@ def _arm() -> None:
 
 
 def _disarm() -> None:
+    if _GC:
+        import gc
+        gc.callbacks.remove(_gc_event)
+        return
     MON.set_events(TOOL, 0)
     MON.free_tool_id(TOOL)
 
@@ -150,13 +187,25 @@ async def _gen(lane: str, port: int, n: int) -> int:
                *(['-s', script] if script else []),
                f'http://127.0.0.1:{port}{path}']
     else:
+        path = _H2_LANES[lane]
+        if path is None:
+            with open(f'{_HTTPARENA}/requests/static-h2-uris.txt') as fh:
+                uris = fh.read().replace('https://localhost:8443',
+                                         f'http://127.0.0.1:{port}')
+            uri_file = tempfile.NamedTemporaryFile('w', suffix='.txt', delete=False)
+            uri_file.write(uris)
+            uri_file.close()
+            target = ['-i', uri_file.name]
+        else:
+            target = [f'http://127.0.0.1:{port}{path}']
         cmd = ['h2load', '-c', os.environ.get('BB_H2_CONNS', '1'),
-               '-m', os.environ.get('BB_H2_STREAMS', '1'), '-n', str(n),
-               f'http://127.0.0.1:{port}/1kb']
+               '-m', os.environ.get('BB_H2_STREAMS', '1'), '-n', str(n), *target]
     p = await asyncio.create_subprocess_exec(
         *cmd, stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT)
     out, _ = await p.communicate()
+    if lane in _H2_LANES and _H2_LANES[lane] is None:
+        os.unlink(target[1])
     text = out.decode()
     if lane in _WRK_LANES:
         for line in text.splitlines():
@@ -189,7 +238,7 @@ async def _run(lane: str, n: int) -> int:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument('--lane', choices=(*_WRK_LANES, 'h2'), default='conn')
+    ap.add_argument('--lane', choices=(*_WRK_LANES, *_H2_LANES), default='conn')
     ap.add_argument('--n', type=int, default=300)
     ap.add_argument('--out', required=True)
     args = ap.parse_args()

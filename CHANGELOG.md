@@ -155,6 +155,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Less work per request on the HTTP/1.1 path, the response-header checks
   added in this release included: about 5 % fewer executed instructions than
   v0.80.0 on keep-alive and 6 % on one request per connection.
+- Less work per request on HTTP/2, whose request fields are now checked in one
+  pass, and for precompressed static files: only the siblings the client
+  accepts are looked up, and the file selected is stat'ed once.
 
 - Added client-owned write and WebSocket size bounds, and applied the
   response minimum-body-rate floor to HTTP/2 streams.

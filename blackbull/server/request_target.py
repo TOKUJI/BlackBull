@@ -1,7 +1,10 @@
 """Path-plus-query decomposition shared by the HTTP wire parsers."""
+from functools import lru_cache
 from urllib.parse import unquote
 
 
+# Clients repeat their targets; bounded because the bytes are the peer's.
+@lru_cache(maxsize=128)
 def split_path_query(target: bytes) -> tuple[str, bytes, bytes]:
     # Split before decoding: encoded delimiters are path data.  Leading //
     # belongs to the path, not an authority as in a generic URI reference.

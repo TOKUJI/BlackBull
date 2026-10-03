@@ -641,8 +641,7 @@ class HTTP2Actor(Actor):
         elif task is not None:
             self._stream_tasks.pop(stream_id, None)
             self._active_stream_count = max(0, self._active_stream_count - 1)
-            current = asyncio.current_task()
-            if task is not current and not task.done():
+            if not task.done() and task is not asyncio.current_task():
                 task.cancel()
 
         sender = self._senders.pop(stream_id, None)
@@ -651,9 +650,8 @@ class HTTP2Actor(Actor):
         advances_watermark = (
             stream is not None and stream.state != StreamState.IDLE
         )
-        owned = any(owner is not None for owner in (
-            task, sender, recipient, stream,
-        ))
+        owned = (task is not None or sender is not None
+                 or recipient is not None or stream is not None)
 
         if sender is not None:
             retire = getattr(sender, 'retire_stream', None)

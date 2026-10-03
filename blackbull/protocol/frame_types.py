@@ -380,6 +380,9 @@ def field_value_is_valid(value: bytes) -> bool:
     return not value.translate(None, FIELD_VALUE_ALLOWED_OCTETS)
 
 
+_EDGE_WHITESPACE = (0x20, 0x09)
+
+
 def field_value_has_boundary_whitespace(value: bytes) -> bool:
     """RFC 9113 §8.2.1 — SP or HTAB at either end of a field value.
 
@@ -387,8 +390,20 @@ def field_value_has_boundary_whitespace(value: bytes) -> bool:
     question and not folded into [`field_value_is_valid`][]: it is about the
     position, not the octet.
     """
-    return bool(value) and (value[0] in (0x20, 0x09)
-                            or value[-1] in (0x20, 0x09))
+    return bool(value) and (value[0] in _EDGE_WHITESPACE
+                            or value[-1] in _EDGE_WHITESPACE)
+
+
+def _field_defect(name: bytes, value: bytes) -> str:
+    """Which rule refuses a request field that ``Headers.parse_payload``'s
+    combined test refused."""
+    if not field_name_is_valid(name):
+        return f'invalid character in field name: {name!r}'
+    if not field_value_is_valid(value):
+        return f'prohibited character in field value: {value!r}'
+    if field_value_has_boundary_whitespace(value):
+        return f'field value starts or ends with whitespace: {value!r}'
+    return f'undefined pseudo-header: {name!r}'
 
 
 def no_hpack_context(frame: 'FrameBase', codec: str) -> TypeError:
@@ -527,44 +542,26 @@ class Headers(FrameBase):
 
         seen_regular = False
         for k, v in fields:
-            kb_raw = bytes(k)  # bytes(...) normalizes memoryview/bytearray
+            kb = bytes(k)  # bytes(...) normalizes memoryview/bytearray
             vb = v if isinstance(v, bytes) else bytes(v)
-            # RFC 9113 §8.2.1 — field-name octet validation, which is the
-            # RFC 9110 §5.6.2 token alphabet plus a leading colon: it rejects
-            # the separators, uppercase, controls/SP and 0x7F-0xFF too.
-            if not field_name_is_valid(kb_raw):
-                self._mark_malformed(f'invalid character in field name: {kb_raw!r}')
+            pseudo_key = _PSEUDO_BY_BYTES.get(kb)
+            # RFC 9113 §8.2.1 / §8.3 in one test; _field_defect names the rule.
+            # Edge SP/HTAB is refused here but trimmed on HTTP/1.1 (RFC 9112
+            # §5): the transports diverge by design.
+            if ((pseudo_key is None
+                    and (not kb or kb.translate(None, LOWERCASE_TCHAR_OCTETS)))
+                    or vb.translate(None, FIELD_VALUE_ALLOWED_OCTETS)
+                    or (vb and (vb[0] in _EDGE_WHITESPACE
+                                or vb[-1] in _EDGE_WHITESPACE))):
+                self._mark_malformed(_field_defect(kb, vb))
                 return
-            # RFC 9113 §8.2.1 — a field value is RFC 9110 §5.5 field-content
-            # (its MUSTs are the NUL/LF/CR and edge-SP/HTAB cases of that), and
-            # MUST NOT start or end with SP or HTAB.  Both apply to
-            # pseudo-header and regular field values alike.  RFC 9112 §5 trims
-            # the edge whitespace on the HTTP/1.1 side instead, so this is
-            # where the two transports diverge by design, not by accident.
-            if not field_value_is_valid(vb):
-                self._mark_malformed(f'prohibited character in field value: {vb!r}')
-                return
-            if field_value_has_boundary_whitespace(vb):
-                self._mark_malformed(
-                    f'field value starts or ends with whitespace: {vb!r}')
-                return
-            kb = kb_raw  # already lowercase per the check above
 
-            if kb[:1] == b':':
+            if pseudo_key is not None:
                 # RFC 9113 §8.3 — pseudo-header fields MUST appear before any
-                # regular header field in a header block.
+                # regular header field in a header block.  Whether the field
+                # suits a request or a response is decided one layer up.
                 if seen_regular:
                     self._mark_malformed(f'pseudo-header after regular: {kb!r}')
-                    return
-                # RFC 9113 §8.3 — pseudo-header name must be one of the
-                # defined fields (rejects unknown ":foo").  The
-                # request-vs-response check (e.g. ":status" not on requests)
-                # is enforced one layer up.
-                # One bytes-keyed lookup does both the membership check and
-                # the value lookup, over one representation of the six names.
-                pseudo_key = _PSEUDO_BY_BYTES.get(kb)
-                if pseudo_key is None:
-                    self._mark_malformed(f'unknown pseudo-header: {kb!r}')
                     return
                 # RFC 9113 §8.3.1 — each defined request pseudo-header field
                 # MUST NOT appear more than once.

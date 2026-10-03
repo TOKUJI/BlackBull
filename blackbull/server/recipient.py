@@ -1380,6 +1380,9 @@ class HTTP2Recipient(BaseRecipient):
         self._uncredited: int = 0
         self._end_of_stream_on_headers: bool = False
         self._initial_consumed: bool = False
+        #: A disconnect for a stream whose queue was never needed; delivered
+        #: by ``__call__`` after the empty body, as the queue would have.
+        self._disconnect_pending: bool = False
         self._done: bool = False
         if max_body is None or min_rate is None or min_rate_grace is None:
             # Fallback for a directly-instantiated recipient (tests).
@@ -1562,12 +1565,12 @@ class HTTP2Recipient(BaseRecipient):
     def put_disconnect(self) -> None:
         """Unblock a waiting __call__() with an http.disconnect event.
 
-        Skipped when end-of-stream-on-headers has been delivered and no queue
-        was ever created — no consumer can be waiting.
+        Without a queue, a stream that ended on HEADERS has no consumer
+        waiting, so none is created for the disconnect.
         """
-        if (self._queue is None
-                and self._end_of_stream_on_headers
-                and self._initial_consumed):
+        if self._queue is None and self._end_of_stream_on_headers:
+            if not self._initial_consumed:
+                self._disconnect_pending = True
             return
         try:
             self._ensure_queue().put_nowait((_H2_DISCONNECT, 0))
@@ -1599,7 +1602,7 @@ class HTTP2Recipient(BaseRecipient):
             self._initial_consumed = True
             self._done = True
             return {'type': ASGIEvent.HTTP_REQUEST, 'body': b'', 'more_body': False}
-        item = await self._take()
+        item = _H2_DISCONNECT if self._disconnect_pending else await self._take()
         if item is _H2_DISCONNECT:
             self._done = True
             return {'type': ASGIEvent.HTTP_DISCONNECT}
