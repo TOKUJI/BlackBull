@@ -15,7 +15,8 @@ from blackbull.mqtt.broker import BrokerActor
 from blackbull.mqtt.connection import serve_connection
 from blackbull.mqtt.messages import (
     ReasonCode,
-    MQTTConnect, MQTTConnack, MQTTPublish, MQTTPuback,
+    MQTTConnect, MQTTConnack, MQTTPublish, MQTTPuback, MQTTPubcomp, MQTTPubrec,
+    MQTTPubrel,
     MQTTSubscribe, MQTTSuback, MQTTPingreq, MQTTPingresp, MQTTDisconnect,
     encode_packet, decode_packet,
 )
@@ -118,6 +119,44 @@ async def test_pingreq_answered_locally():
         pkts = writer.pop_packets()
         await _drain(task)
     assert any(isinstance(p, MQTTPingresp) for p in pkts)
+
+
+async def test_a_rejected_pubrec_on_the_wire_frees_the_window():
+    """§4.9 — a PUBREC carrying an error code stops charging the window,
+    so the next message goes out without waiting for a PUBCOMP."""
+    async with _running_broker() as broker:
+        sub_reader, pub_reader = _FakeReader(), _FakeReader()
+        sub_writer, sub_task = await _serve(broker, sub_reader, _ctx('s'))
+        _pub_writer, pub_task = await _serve(broker, pub_reader, _ctx('p'))
+        sub_reader.feed_packet(MQTTConnect(
+            client_id='c1', clean_start=True, keep_alive=60,
+            properties={'receive_maximum': 1}))
+        sub_reader.feed_packet(MQTTSubscribe(
+            packet_id=1, subscriptions=[('t', 2)]))
+        pub_reader.feed_packet(MQTTConnect(
+            client_id='pub', clean_start=True, keep_alive=60))
+        pub_reader.feed_packet(MQTTPublish(
+            topic='t', payload=b'a', qos=2, packet_id=1))
+        pub_reader.feed_packet(MQTTPublish(
+            topic='t', payload=b'b', qos=2, packet_id=2))
+        await asyncio.sleep(0.1)
+        first = [p for p in sub_writer.pop_packets()
+                 if isinstance(p, MQTTPublish)]
+        assert [p.payload for p in first] == [b'a']
+
+        sub_reader.feed_packet(MQTTPubrec(
+            packet_id=first[0].packet_id,
+            reason_code=ReasonCode.QUOTA_EXCEEDED))
+        await asyncio.sleep(0.1)
+        pkts = sub_writer.pop_packets()
+        await _drain(sub_task, pub_task)
+
+    assert not any(isinstance(p, MQTTPubrel) for p in pkts), (
+        'the exchange ends at the rejected PUBREC (§2.2.1); no PUBREL follows')
+    assert [p.payload for p in pkts if isinstance(p, MQTTPublish)] == [b'b'], (
+        'a rejected PUBLISH kept charging the window')
+    assert not any(isinstance(p, MQTTPubcomp) for p in pkts), (
+        'the broker invented a PUBCOMP for an exchange it only acknowledged')
 
 
 async def test_disconnect_detaches_client():

@@ -24,7 +24,7 @@ from ..actor import Actor, Message as ActorMessage
 from ..server.cap_log import log_cap_hit
 from .mailbox import Mailbox, MailboxClosed, MailboxTooLarge
 from .messages import (
-    MQTTConnect, MQTTConnack, MQTTDisconnect,
+    MQTTConnect, MQTTConnack, MQTTDisconnect, MQTTReasonCode,
     MQTTPublish, MQTTPuback, MQTTPubrec, MQTTPubrel, MQTTPubcomp,
     MQTTSubscribe, MQTTSuback,
     MQTTUnsubscribe, MQTTUnsuback, MQTTPingresp, MQTTAuth,
@@ -108,10 +108,16 @@ class ClientPuback(ActorMessage):
 
 @dataclass
 class ClientPubrec(ActorMessage):
-    """The client's PUBREC for an outbound QoS 2 message; the broker answers
-    with PUBREL for the same packet id."""
+    """The client's PUBREC for an outbound QoS 2 message.
+
+    A ``reason_code`` below 0x80 is answered with PUBREL and the flow waits
+    for PUBCOMP (§4.3.3-4); an error code (§2.4) ends the exchange — no
+    PUBREL, and the packet identifier is released (§2.2.1).  Either way the
+    window stops charging the message (§4.9).
+    """
 
     packet_id: int | None = field(default=None, compare=False, repr=False)
+    reason_code: int = ReasonCode.SUCCESS
 
 
 @dataclass
@@ -237,6 +243,24 @@ class _Held:
     retain: bool
 
 
+@dataclass
+class _Window:
+    """§4.9 — one Network Connection's outbound quota.
+
+    ``limit`` is the Receive Maximum this connection declared (65535 when
+    the property is absent), ``awaiting`` the packet ids it transmitted and
+    has not had acknowledged — never the session's stored pending count,
+    which spans connections — ``redrives`` what it still owes from the
+    session, in send order.
+    """
+    limit: int = 65535
+    awaiting: set[int] = field(default_factory=set)
+    redrives: deque[int] = field(default_factory=deque)
+
+    def has_room(self) -> bool:
+        return len(self.awaiting) < self.limit
+
+
 def _new_broker_session() -> dict[str, Any]:
     """Per-client session state owned by the broker (§3.1.2.11)."""
     return {
@@ -257,10 +281,10 @@ def _new_broker_session() -> dict[str, Any]:
         # (``BB_MQTT_MAX_QUEUED_MESSAGES``) because "hold everything" is how
         # a client that never acknowledges turns a subscription into a leak.
         'outbound_queue': deque(),
-        # The client's declared Receive Maximum (§3.1.2.11.3).  65535 is the
-        # protocol default when the property is absent — a real bound, not
-        # "unlimited", which is why it can be stored as a plain number.
-        'receive_maximum': 65535,
+        # packet_id -> None: unacknowledged outbound sends in send order.
+        # §4.4 (MQTT-4.4.0-2) requires retransmissions in that order, which
+        # spans both QoS buckets while each bucket only knows its own.
+        '_send_order': {},
         # The interval the client declared (§3.1.2.11.2), and the monotonic
         # instant it resolves to.  They are separate because the interval is
         # session state that survives a reconnect, while the deadline only
@@ -322,6 +346,9 @@ class BrokerActor(Actor):
         self._client_by_conn = {}   # id(conn) -> client_id
         # conn -> Maximum Packet Size declared in CONNECT; absent = no limit.
         self._peer_max_packet_size: dict[Actor, int] = {}
+        # §4.9 — one window per Network Connection.  A session outlives
+        # connections, so it holds QoS flows and never a window.
+        self._window: dict[Actor, _Window] = {}
         self._sessions = {}         # client_id -> session dict
         self._retained = {}         # topic -> MQTTPublish
         self._wills = {}            # client_id -> MQTTPublish (Will template)
@@ -430,13 +457,13 @@ class BrokerActor(Actor):
         elif isinstance(msg, ClientPubrel):
             await self._on_pubrel(msg.sender, msg.packet_id)
         elif isinstance(msg, ClientPubrec):
-            await self._on_pubrec(msg.sender, msg.packet_id)
+            await self._on_pubrec(msg.sender, msg.packet_id, msg.reason_code)
         elif isinstance(msg, ClientPubcomp):
-            self._clear_pending(msg.sender, 'pending_qos2_out', msg.packet_id)
-            await self._drain_outbound(msg.sender)
+            await self._clear_pending(msg.sender, 'pending_qos2_out',
+                                      msg.packet_id)
         elif isinstance(msg, ClientPuback):
-            self._clear_pending(msg.sender, 'pending_qos1_out', msg.packet_id)
-            await self._drain_outbound(msg.sender)
+            await self._clear_pending(msg.sender, 'pending_qos1_out',
+                                      msg.packet_id)
         elif isinstance(msg, ClientPing):
             await msg.sender.send(Send(packet=MQTTPingresp()))
         elif isinstance(msg, ClientAuth):
@@ -504,16 +531,15 @@ class BrokerActor(Actor):
     def _alloc_pid(session) -> int:
         """§2.2.1 — allocate a non-zero Packet Identifier not currently in use.
 
-        Skips ids still awaiting acknowledgement in either QoS>0 outbound bucket,
-        so a connection with a very high in-flight fan-out cannot hand out an id
-        that is still live (the old ``(_next_pid % 65535) + 1`` could).
+        Skips ids still awaiting acknowledgement in either QoS>0 outbound
+        bucket, so a high in-flight fan-out cannot hand out a live id.
         """
-        in_use = (session.get('pending_qos1_out') or {}).keys() \
-            | (session.get('pending_qos2_out') or {}).keys()
+        pending1 = session.get('pending_qos1_out') or {}
+        pending2 = session.get('pending_qos2_out') or {}
         pid = session.get('_next_pid', 0)
         for _ in range(65535):
             pid = (pid % 65535) + 1
-            if pid not in in_use:
+            if pid not in pending1 and pid not in pending2:
                 session['_next_pid'] = pid
                 return pid
         # All 65535 identifiers are in flight — far past any conformant bound.
@@ -547,10 +573,28 @@ class BrokerActor(Actor):
         self._retained[publish.topic] = publish
         return True
 
-    def _clear_pending(self, conn, bucket, packet_id) -> None:
+    @staticmethod
+    def _book(session, window, packet_id) -> None:
+        """Book a new QoS>0 PUBLISH: its place in send order (§4.4) and one
+        window slot (§4.9).  A re-drive only takes the slot."""
+        session['_send_order'][packet_id] = None
+        window.awaiting.add(packet_id)
+
+    @staticmethod
+    def _forget(session, bucket, packet_id) -> None:
+        """A flow that is done: drop its state and its place in send order."""
+        session[bucket].pop(packet_id, None)
+        session['_send_order'].pop(packet_id, None)
+
+    async def _clear_pending(self, conn, bucket, packet_id) -> None:
+        """The client acknowledged this flow: free its slot, drop its state,
+        and let one more send through."""
+        window = self._window[conn]
+        window.awaiting.discard(packet_id)
         session = self._session_for(conn)
         if session is not None:
-            session[bucket].pop(packet_id, None)
+            self._forget(session, bucket, packet_id)
+            await self._drain_outbound(conn, session, window)
 
     # -- handlers -----------------------------------------------------------
 
@@ -566,6 +610,11 @@ class BrokerActor(Actor):
         if connect.proto_level != ProtocolLevel.V5_0:
             await self._refuse(conn, ReasonCode.UNSUPPORTED_PROTOCOL_VERSION,
                                limit=limit)
+            return
+        # §3.1.2.11.3 — a declared zero is a Protocol Error, not "no limit";
+        # 65535 is the answer only to an absent property.
+        if connect.properties.get('receive_maximum') == 0:
+            await self._refuse(conn, ReasonCode.PROTOCOL_ERROR, limit=limit)
             return
 
         client_id = connect.client_id
@@ -624,6 +673,7 @@ class BrokerActor(Actor):
         if existing_conn is not None and existing_conn is not conn:
             self._client_by_conn.pop(id(existing_conn), None)
             self._peer_max_packet_size.pop(existing_conn, None)
+            self._window.pop(existing_conn, None)
             await existing_conn.send(Send(packet=MQTTDisconnect(
                 reason_code=ReasonCode.SESSION_TAKEN_OVER)))
             await existing_conn.send(Close(
@@ -674,20 +724,15 @@ class BrokerActor(Actor):
                 session['_expiry'] = expiry
                 self._sessions[client_id] = session
 
-        # §3.1.2.11.3 — the client's Receive Maximum bounds what we may have in
-        # flight towards it.  Absent means 65535, the protocol's own default;
-        # this is session state, so a Clean Start = 0 reconnect that omits the
-        # property keeps what the client last declared rather than silently
-        # widening its window.
         # Connected again: the away-clock stops.  A session with a live
         # connection is not a candidate for the sweep at any interval.
         session['_expires_at'] = None
         self._arm_expiry_timer()
 
-        declared = connect.properties.get('receive_maximum')
-        if declared:
-            session['receive_maximum'] = declared
-        session.setdefault('receive_maximum', 65535)
+        # §4.9 — the quota belongs to this Network Connection: absent means
+        # 65535 *now*, not what the previous connection declared.
+        self._window[conn] = _Window(
+            limit=connect.properties.get('receive_maximum') or 65535)
         session.setdefault('outbound_queue', deque())
 
         if ack is None:
@@ -705,32 +750,31 @@ class BrokerActor(Actor):
             await self._replay_pending(conn, session)
 
     async def _replay_pending(self, conn, session) -> None:
-        """§4.4 — retransmit unacknowledged outbound messages on a
-        session-present reconnect.  Replayed PUBLISH frames carry DUP=1
-        (§3.3.1.1): QoS 1 PUBLISH awaiting PUBACK and QoS 2 PUBLISH awaiting
-        PUBREC.  A QoS 2 exchange already past PUBREC re-drives its PUBREL.
+        """§4.4 — re-drive the outbound state of a session-present reconnect.
 
-        A re-drive exceeding the limit is dropped and its flow completed."""
+        A QoS 2 exchange already past PUBREC re-drives its PUBREL at once: a
+        control packet, never gated by the send quota (§4.9).  The PUBLISH
+        re-drives owe in send order (MQTT-4.4.0-2) and share this
+        connection's window with live delivery — see ``_drain_outbound``.  A
+        re-drive the peer's Maximum Packet Size cannot carry is dropped and
+        its flow completed (§3.1.2-25).
+        """
         peer_limit = self._peer_max_packet_size.get(conn)
-        redrives = [
-            (session['pending_qos1_out'], packet_id,
-             Send(packet=replace(pending, dup=True)))
-            for packet_id, pending in session['pending_qos1_out'].items()]
-        for packet_id, entry in session['pending_qos2_out'].items():
-            publish = entry.get('packet')
-            if entry.get('state') == _QOS2_OUT_PUBLISH_SENT and publish is not None:
-                redrives.append((session['pending_qos2_out'], packet_id,
-                                 Send(packet=replace(publish, dup=True))))
-            else:  # PUBREL_SENT — the PUBLISH is acknowledged; re-drive PUBREL
-                redrives.append((session['pending_qos2_out'], packet_id,
-                                 Send(packet=MQTTPubrel(
-                                     packet_id=packet_id,
-                                     reason_code=ReasonCode.SUCCESS))))
-        for bucket, packet_id, send in redrives:
+        for packet_id, entry in list(session['pending_qos2_out'].items()):
+            if entry.get('state') != _QOS2_OUT_PUBREL_SENT:
+                continue
+            send = Send(packet=MQTTPubrel(
+                packet_id=packet_id, reason_code=ReasonCode.SUCCESS))
             if peer_limit is None or self._fits_peer(peer_limit, send):
                 await conn.send(send)
             else:
-                bucket.pop(packet_id, None)
+                self._forget(session, 'pending_qos2_out', packet_id)
+        redrives = self._window[conn].redrives
+        booked = session['_send_order']
+        redrives.extend(booked)
+        for name in ('pending_qos1_out', 'pending_qos2_out'):
+            redrives.extend(pid for pid in session[name] if pid not in booked)
+        await self._drain_outbound(conn, session, self._window[conn])
 
     async def _on_subscribe(self, conn, subscribe) -> None:
         session = self._session_for(conn)
@@ -910,7 +954,7 @@ class BrokerActor(Actor):
             # id we have already accepted must not be delivered a second time.
             await conn.send(Send(packet=MQTTPubrec(
                 packet_id=publish.packet_id, reason_code=ack)))
-            if not self._qos2_accept_inbound(conn, publish.packet_id):
+            if not self._qos2_accept_inbound(conn, publish.packet_id, ack):
                 return  # duplicate — PUBREC re-sent above; skip retain + route
         # QoS 0 has no acknowledgement to carry a reason code (§3.3.4), so a
         # refused retain cannot be reported on that path.  It is *not* answered
@@ -924,19 +968,22 @@ class BrokerActor(Actor):
         # online now are entitled to it.  Only the storage was declined.
         await self._route(publish, source_conn=conn)
 
-    def _qos2_accept_inbound(self, conn, packet_id) -> bool:
+    def _qos2_accept_inbound(self, conn, packet_id, reason) -> bool:
         """§4.3.3 — record a newly-received QoS 2 PUBLISH (PUBREC sent).
 
         Returns ``False`` when *packet_id* was already accepted (a DUP
         retransmit), so the caller re-sends PUBREC only and neither re-stores a
-        retained copy nor re-routes the message.
+        retained copy nor re-routes the message.  An error acknowledgement ends
+        the exchange instead (§2.2.1): nothing is recorded, so a later PUBLISH
+        reusing the identifier is a new message (MQTT-4.3.3-9).
         """
         session = self._session_for(conn)
         if session is None:
             return True
         if packet_id in session['pending_qos2_in']:
             return False
-        session['pending_qos2_in'][packet_id] = _QOS2_IN_PUBREC_SENT
+        if not MQTTReasonCode(reason).is_error:
+            session['pending_qos2_in'][packet_id] = _QOS2_IN_PUBREC_SENT
         return True
 
     async def _reject_publish(self, conn, publish, reason) -> None:
@@ -1056,12 +1103,6 @@ class BrokerActor(Actor):
             props['receive_maximum'] = self._receive_maximum
         return props
 
-    @staticmethod
-    def _in_flight(session) -> int:
-        """QoS>0 PUBLISH packets sent and not yet acknowledged (§4.9)."""
-        return len(session.get('pending_qos1_out') or {}) \
-            + len(session.get('pending_qos2_out') or {})
-
     async def _deliver(self, conn, session, publish, granted_qos, *,
                        retain=False) -> bool:
         """One message to one client; False when §3.1.2-25 discarded it
@@ -1079,7 +1120,7 @@ class BrokerActor(Actor):
             await conn.send(send)
             return True
 
-        if self._in_flight(session) >= session.get('receive_maximum', 65535):
+        if not self._window[conn].has_room():
             # Checked before queuing; any packet id encodes to the same size.
             if peer_limit is not None and not self._fits_peer(
                     peer_limit, Send(packet=MQTTPublish(
@@ -1132,26 +1173,70 @@ class BrokerActor(Actor):
         else:
             session['pending_qos2_out'][packet_id] = {
                 'state': _QOS2_OUT_PUBLISH_SENT, 'packet': out}
+        self._book(session, self._window[conn], packet_id)
         await conn.send(send)
         return True
 
-    async def _drain_outbound(self, conn) -> None:
-        """Release held messages as acknowledgements free the window.
+    async def _drain_outbound(self, conn, session, window) -> None:
+        """Fill this connection's send window — re-drives first.
 
-        Called after every event that clears an in-flight slot.  One
-        acknowledgement releases at most one message, which is what keeps
-        the window a window rather than a burst.
+        A pending PUBLISH this connection still owes goes out with DUP=1
+        (§4.4) before anything the held queue: it was promised first.  One
+        freed slot releases one send, which keeps the window a window.
         """
-        session = self._session_for(conn)
-        if session is None:
+        if session is None or (not window.redrives
+                               and not session['outbound_queue']):
             return
-        queue = session.get('outbound_queue')
-        limit = session.get('receive_maximum', 65535)
         peer_limit = self._peer_max_packet_size.get(conn)
-        while queue and self._in_flight(session) < limit:
+        while window.has_room():
+            redrive = self._next_redrive(session, window)
+            if redrive is not None:
+                bucket_name, packet_id, send = redrive
+                if peer_limit is not None \
+                        and not self._fits_peer(peer_limit, send):
+                    # §3.1.2-25 — dropped and its flow completed: this peer
+                    # cannot receive it at any window size.
+                    self._forget(session, bucket_name, packet_id)
+                    continue
+                window.awaiting.add(packet_id)  # send order already booked
+                await conn.send(send)
+                continue
+            queue = session['outbound_queue']
+            if not queue:
+                return
             held = queue.popleft()
             await self._send_qos(conn, session, held.publish, held.qos,
                                  held.retain, peer_limit)
+
+    @staticmethod
+    def _next_redrive(session, window):
+        """The next pending PUBLISH this connection owes, or ``None``.
+
+        What a transmitted message waits for is its answer, not another copy,
+        so an entry already sent on this connection is skipped, and one
+        acknowledged while still owed here is simply gone.
+        """
+        pending1 = session['pending_qos1_out']
+        pending2 = session['pending_qos2_out']
+        awaiting = window.awaiting
+        while window.redrives:
+            packet_id = window.redrives.popleft()
+            if packet_id in awaiting:
+                continue
+            bucket_name = 'pending_qos1_out'
+            publish = pending1.get(packet_id)
+            if publish is None:
+                bucket_name = 'pending_qos2_out'
+                entry = pending2.get(packet_id)
+                if (entry is None
+                        or entry.get('state') != _QOS2_OUT_PUBLISH_SENT):
+                    continue  # done, or re-driven as a PUBREL
+                publish = entry.get('packet')
+                if publish is None:
+                    continue
+            return (bucket_name, packet_id,
+                    Send(packet=replace(publish, dup=True)))
+        return None
 
     async def _on_pubrel(self, conn, packet_id) -> None:
         await conn.send(Send(packet=MQTTPubcomp(
@@ -1160,10 +1245,20 @@ class BrokerActor(Actor):
         if session is not None:
             session['pending_qos2_in'].pop(packet_id, None)
 
-    async def _on_pubrec(self, conn, packet_id) -> None:
+    async def _on_pubrec(self, conn, packet_id,
+                         reason_code=ReasonCode.SUCCESS) -> None:
+        session = self._session_for(conn)
+        window = self._window[conn]
+        if MQTTReasonCode(reason_code).is_error:
+            # §2.2.1 — an error PUBREC acknowledges the PUBLISH and ends the
+            # exchange: no PUBREL follows, and the packet identifier is free.
+            if session is not None:
+                self._forget(session, 'pending_qos2_out', packet_id)
+            window.awaiting.discard(packet_id)
+            await self._drain_outbound(conn, session, window)
+            return
         await conn.send(Send(packet=MQTTPubrel(
             packet_id=packet_id, reason_code=ReasonCode.SUCCESS)))
-        session = self._session_for(conn)
         if session is not None:
             # §4.3.3 — advance the outbound flow to await PUBCOMP; the PUBLISH is
             # now acknowledged so we no longer need to keep it for replay.
@@ -1179,6 +1274,7 @@ class BrokerActor(Actor):
         if conn is not None:
             self._seen_connections.add(conn)
         self._peer_max_packet_size.pop(conn, None)
+        self._window.pop(conn, None)
         client_id = self._client_by_conn.pop(id(conn), None)
         if client_id is None:
             return
