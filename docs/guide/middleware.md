@@ -161,6 +161,10 @@ async def add_header_mw(conn, receive, send, call_next):
     await call_next(conn, receive, wrapped)
 ```
 
+Append header names in lowercase, as above: BlackBull sends every name
+lowercase and converts only the ones that are not, so a lowercase name is
+faster on BlackBull.
+
 On the native path a complete response is **one object, one `send`**
 (header + body together), while a streamed response is a header object
 followed by body-chunk objects.  Remember the presence contract: test

@@ -268,7 +268,7 @@ def _declares_content(headers: 'Headers') -> bool:
     return bool(cl) and bool(cl.lstrip(b'0'))
 
 
-def _validate_message_framing(headers: 'Headers') -> int:
+def _validate_message_framing(cls: list | None, tes: list | None) -> int:
     """RFC 9112 §6 — reject framing-header combinations that are unsafe.
 
     These are the rules every smuggling-class incident I'm aware of has
@@ -296,9 +296,6 @@ def _validate_message_framing(headers: 'Headers') -> int:
     plus the fallback probe's ``bytes.lower()`` allocation, on the per-request
     path.
     """
-    cls = headers.getlist(b'content-length')
-    tes = headers.getlist(b'transfer-encoding')
-
     if cls and tes:
         raise BadRequestError(
             'Content-Length and Transfer-Encoding both present '
@@ -448,7 +445,7 @@ def _parse_host_header(value: bytes, default_port: int) -> tuple[str, int]:
     return _dec(host), default_port
 
 
-def _validate_host(headers: 'Headers') -> bytes | None:
+def _validate_host(hosts: list | None) -> bytes | None:
     """RFC 9112 §3.2 / §7.2 — Host MUST be present and contain a valid
     URI-authority component.  Inputs such as ``host: 0/0`` and an empty
     host are accepted by a lenient parser and rejected with 400 by nginx;
@@ -456,8 +453,7 @@ def _validate_host(headers: 'Headers') -> bytes | None:
 
     Returns the Host value as received, or ``None`` when there is none.
     """
-    hosts = headers.getlist(b'host')
-    if len(hosts) > 1:
+    if hosts is not None and len(hosts) > 1:
         raise BadRequestError(
             f'multiple Host headers ({len(hosts)} — smuggling vector)')
     if not hosts:
@@ -586,6 +582,9 @@ class HTTP1Actor(Actor):
     #: Body length the current request declares, as validated by
     #: [`_validate_message_framing`][]; 0 when it declares none.
     _declared_body_len: int = 0
+    #: ``(content_length, chunked)`` of the request ``_parse`` validated last.
+    _request_framing: tuple[int | None, bool] = (None, False)
+    _expects_continue: bool = False
 
     def __init__(
         self,
@@ -978,6 +977,7 @@ class HTTP1Actor(Actor):
         do_lookup = len(cache) > 0
 
         raw: list[tuple[bytes, bytes]] = []
+        index: dict[bytes, list[tuple[bytes, bytes]]] = {}
         for line in lines[idx + 1:]:
             if not line:
                 # Empty line = end of headers; anything after is body (already
@@ -997,6 +997,11 @@ class HTTP1Actor(Actor):
                     # *this* block: the hit was proved clean when it was
                     # admitted, and its bytes have not changed since.
                     raw.append(hit)
+                    same = index.get(hit[0])
+                    if same is None:
+                        index[hit[0]] = [hit]
+                    else:
+                        same.append(hit)
                     continue
             # RFC 9112 §5.2 — obs-fold MUST be rejected in requests.  Indexing
             # skips the one-byte slice a `line[:1]` comparison would allocate;
@@ -1036,6 +1041,11 @@ class HTTP1Actor(Actor):
                     f'{key!r}: {value!r}')
             pair = (lkey, value)
             raw.append(pair)
+            same = index.get(lkey)
+            if same is None:
+                index[lkey] = [pair]
+            else:
+                same.append(pair)
             # Admission last, and tested against the *resulting* byte total, so
             # the budget is a ceiling no final line can step over.
             if (cacheable
@@ -1050,19 +1060,31 @@ class HTTP1Actor(Actor):
         if authority_override is not None:
             raw = [(k, v) for k, v in raw if k != b'host']
             raw.append((b'host', authority_override))
-        # Names were lowercased in the loop above while being validated;
-        # `Headers.__init__` would lowercase them a second time.
-        headers = Headers.from_lowered(raw)
+            headers = Headers.from_lowered(raw)
+            index = headers._index
+        else:
+            # The loop above lowercased each name and indexed it.
+            headers = Headers._adopt(raw, index)
 
         # RFC 9110 §8.3 — Content-Type is a singleton; multiple values are
         # ambiguous and a request-smuggling surface (COMP-DUPLICATE-CT).
-        if len(headers.getlist(b'content-type')) > 1:
+        content_types = index.get(b'content-type')
+        if content_types is not None and len(content_types) > 1:
             raise BadRequestError('multiple Content-Type headers')
 
         # RFC 9112 §6 — framing rejected before any body byte is read.  ``run``
         # weighs the returned length against ``BB_MAX_BODY_SIZE``.
-        self._declared_body_len = _validate_message_framing(headers)
-        host_value = _validate_host(headers)
+        content_length = index.get(b'content-length')
+        transfer_encoding = index.get(b'transfer-encoding')
+        self._declared_body_len = _validate_message_framing(
+            content_length, transfer_encoding)
+        self._request_framing = (
+            self._declared_body_len if content_length else None,
+            transfer_encoding is not None)
+        expect = index.get(b'expect')
+        self._expects_continue = (
+            expect is not None and expect[0][1].lower() == b'100-continue')
+        host_value = _validate_host(index.get(b'host'))
         # RFC 9112 §3.2 / §7.2 — every HTTP/1.1 (and later 1.x) request MUST
         # carry a Host header (RFC9112-7.1-MISSING-HOST); only HTTP/1.0, which
         # predates Host, may omit it (COMP-HTTP10-NO-HOST).
@@ -1099,14 +1121,15 @@ class HTTP1Actor(Actor):
             host, port = _parse_host_header(host_value, default_port)
             conn.server = (host, port)
 
-        if headers.getlist(b'upgrade'):
+        upgrade = index.get(b'upgrade')
+        if upgrade:
             # RFC 9110 §7.8 — a server MAY ignore an Upgrade it does not
             # support and MUST NOT fail the request over it.  Only WebSocket
             # may switch ``conn.type``; any other token (notably curl's default
             # ``Upgrade: h2c`` probe on ``--http2``) is served as ordinary
             # HTTP/1.1, because dispatch has no route for it and the connection
             # would close with no reply.
-            if headers.get(b'upgrade').strip().lower() == b'websocket':
+            if upgrade[0][1].strip().lower() == b'websocket':
                 conn.type = 'websocket'
                 conn.scheme = 'ws'
 
@@ -1283,8 +1306,7 @@ class HTTP1Actor(Actor):
         # drops the interim response from request two onward and the peer
         # stalls until its own Expect timeout; written after the capture, the
         # interim status lands in the record the real response owns.
-        if (conn.http_version != '1.0'
-                and conn.headers.get(b'expect').lower() == b'100-continue'):
+        if conn.http_version != '1.0' and self._expects_continue:
             await send(b'', HTTPStatus.CONTINUE)
 
         # Inline access-log capture into the sender — avoids the per-event
@@ -1305,9 +1327,10 @@ class HTTP1Actor(Actor):
         first_request_on_connection = inner_receive is None
         if first_request_on_connection:
             inner_receive = RecipientFactory.http1(
-                self._reader, conn, body_timeout=cfg.body_timeout, deadline=dl)
+                self._reader, conn, body_timeout=cfg.body_timeout, deadline=dl,
+                framing=self._request_framing)
         else:
-            inner_receive.bind(conn)
+            inner_receive.bind(conn, self._request_framing)
 
         if conn._asterisk_form:
             # RFC 9112 §3.2.4 — ``OPTIONS *`` targets the origin, not a
@@ -1372,7 +1395,8 @@ class HTTP1Actor(Actor):
     def _should_keep_alive(self, conn) -> bool:
         """Return True if the connection should persist after this request."""
         http_version = conn.http_version
-        connection = conn.headers.get(b'connection', b'').lower()
+        fields = conn.headers._index.get(b'connection')
+        connection = fields[0][1].lower() if fields else b''
         if http_version == '1.1':
             return connection != b'close'
         return connection == b'keep-alive'

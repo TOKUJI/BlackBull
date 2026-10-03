@@ -10,7 +10,8 @@ from collections.abc import Iterable
 from typing import TypeAlias
 
 from .protocol import structured_fields as sf
-from .protocol.field_grammar import FIELD_VALUE_ALLOWED_OCTETS, TCHAR_OCTETS
+from .protocol.field_grammar import (
+    FIELD_VALUE_ALLOWED_OCTETS, LOWERCASE_TCHAR_OCTETS, TCHAR_OCTETS)
 
 HeaderList: TypeAlias = Iterable[tuple[bytes, bytes]]
 
@@ -29,10 +30,50 @@ def _validate_response_header_field(name: bytes, value: bytes) -> None:
         raise ValueError('invalid HTTP response header value')
 
 
-def _validate_response_header_fields(headers: HeaderList) -> None:
-    """Validate a complete outbound field section before its first write."""
-    for name, value in headers:
-        _validate_response_header_field(name, value)
+class _MinimalResponseHeaders(list):
+    """A response field section as a sender owns it: every field validated,
+    every name lowercase, and the framing fields located.  Nothing is indexed
+    — the senders need only these three facts, not a [`Headers`][]."""
+
+    __slots__ = ('content_length', 'transfer_encoding', 'date')
+
+
+def _minimal_response_headers(fields: Iterable) -> _MinimalResponseHeaders:
+    """Copy *fields* into the form a sender writes, before its first write.
+
+    *fields* holds ``(name, value)`` pairs in any two-item form ASGI allows.
+    Raises on a field that cannot remain one field on the wire, and
+    lowercases a name that is not already.  ``content_length`` is the list of
+    Content-Length fields (``None`` when absent); ``transfer_encoding`` and
+    ``date`` say whether those are present.
+    """
+    head = _MinimalResponseHeaders(fields)
+    content_length = None
+    transfer_encoding = date = False
+    for field in head:
+        name, value = field
+        if (type(name) is not bytes or type(value) is not bytes
+                or not name or name.translate(None, LOWERCASE_TCHAR_OCTETS)
+                or value.translate(None, FIELD_VALUE_ALLOWED_OCTETS)):
+            _validate_response_header_field(name, value)
+            name = name.lower()
+            head[head.index(field)] = field = (name, value)
+        size = len(name)
+        if size == 14:
+            if name == b'content-length':
+                if content_length is None:
+                    content_length = []
+                content_length.append(field)
+        elif size == 17:
+            if name == b'transfer-encoding':
+                transfer_encoding = True
+        elif size == 4:
+            if name == b'date':
+                date = True
+    head.content_length = content_length
+    head.transfer_encoding = transfer_encoding
+    head.date = date
+    return head
 
 
 class Headers:
@@ -98,6 +139,15 @@ class Headers:
         index: dict[bytes, list[tuple[bytes, bytes]]] = {}
         for pair in pairs:
             index.setdefault(pair[0], []).append(pair)
+        self._index = index
+        return self
+
+    @classmethod
+    def _adopt(cls, pairs: list[tuple[bytes, bytes]],
+               index: dict[bytes, list[tuple[bytes, bytes]]]) -> 'Headers':
+        """Take *pairs* and the index [`from_lowered`][] would build from them."""
+        self = cls.__new__(cls)
+        self._list = pairs
         self._index = index
         return self
 

@@ -380,6 +380,10 @@ package to parse the body manually.
     lengths are accepted only when every numeric value is equal, then emitted
     as one canonical field.
 
+    Response header names are sent lowercase on both transports, whatever
+    case the application wrote: names are case-insensitive (RFC 9110 §5.1),
+    and HTTP/2 requires lowercase (RFC 9113 §8.2.2).
+
     On the native path a `Response` (or subclass) is serialised via
     `Response.to_native()`.  A subclass that overrides `__call__` to emit a
     custom event sequence is honoured on the WebSocket / external-host

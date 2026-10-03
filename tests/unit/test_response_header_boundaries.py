@@ -1,5 +1,6 @@
 """Outbound HTTP field boundaries shared by response helpers and senders."""
 import asyncio
+from http import HTTPStatus
 
 import pytest
 
@@ -250,3 +251,87 @@ async def test_buffered_start_owns_its_header_snapshot(protocol, native):
         assert (b'x-original', b'1') in pairs
         assert not any(k == b'x-late' for k, _ in pairs)
     assert headers == [(b'x-original', b'1'), (b'x-late', b'2')]
+
+
+@pytest.mark.parametrize('attempt', [1, 2])
+def test_an_invalid_content_type_is_refused_every_time(attempt):
+    with pytest.raises(ValueError):
+        Response(b'', content_type='text/plain\r\nx-injected: 1')
+
+
+def test_a_content_type_becomes_its_validated_pair():
+    assert Response(b'', content_type='text/plain').headers == [
+        (b'content-type', b'text/plain')]
+
+
+_MIXED = [(b'Content-Type', b'text/plain'), (b'X-Trace', b'1')]
+
+
+def _h2_blocks(writer, factory) -> list:
+    """The field list of every HEADERS frame on the wire, in order."""
+    data, blocks = bytes(writer.data), []
+    while data:
+        length = int.from_bytes(data[:3], 'big')
+        if data[3] == 0x1:
+            blocks.append(factory.decoder.decode(data[9:9 + length], raw=True))
+        data = data[9 + length:]
+    return blocks
+
+
+async def _send_mixed_case_head(sender, form):
+    if form == 'native':
+        await sender(NativeResponse(status=200, header=list(_MIXED), body=b'ok'))
+    elif form == 'asgi':
+        await sender({'type': 'http.response.start', 'status': 200,
+                      'headers': list(_MIXED)})
+        await sender({'type': 'http.response.body', 'body': b'ok'})
+    else:
+        await sender(b'ok', HTTPStatus.OK, list(_MIXED))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('form', ['native', 'asgi', 'bytes'])
+async def test_h1_sends_response_field_names_lowercase(form):
+    writer = _Writer()
+    await _send_mixed_case_head(HTTP1Sender(writer), form)
+    head = bytes(writer.data).split(b'\r\n\r\n', 1)[0]
+    names = [line.split(b':', 1)[0] for line in head.split(b'\r\n')[1:]]
+    assert {b'content-type', b'x-trace', b'date'} <= set(names)
+    assert names == [name.lower() for name in names]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('form', ['native', 'asgi', 'bytes'])
+async def test_h2_sends_response_field_names_lowercase(form):
+    """RFC 9113 §8.2.2 (BLA-524)."""
+    writer, factory = _Writer(), FrameFactory()
+    await _send_mixed_case_head(HTTP2Sender(writer, factory, 1), form)
+    [fields] = _h2_blocks(writer, factory)
+    assert (b'content-type', b'text/plain') in fields
+    assert (b'x-trace', b'1') in fields
+    assert all(name == name.lower() for name, _ in fields)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('protocol', ['h1', 'h2'])
+async def test_trailer_field_names_leave_lowercase(protocol):
+    writer, factory = _Writer(), FrameFactory()
+    sender = (HTTP1Sender(writer) if protocol == 'h1'
+              else HTTP2Sender(writer, factory, 1))
+    await sender({'type': 'http.response.start', 'status': 200,
+                  'headers': [], 'trailers': True})
+    await sender({'type': 'http.response.body', 'body': b'ok'})
+    await sender({'type': 'http.response.trailers',
+                  'headers': [(b'Grpc-Status', b'0')]})
+    if protocol == 'h1':
+        assert bytes(writer.data).endswith(b'0\r\ngrpc-status: 0\r\n\r\n')
+    else:
+        assert _h2_blocks(writer, factory)[-1] == [(b'grpc-status', b'0')]
+
+
+def test_external_asgi_events_carry_lowercase_field_names():
+    events = NativeResponse(status=200, header=list(_MIXED), body=b'',
+                            trailers=[(b'X-Sum', b'1')]).to_asgi()
+    assert list(events[0]['headers']) == [
+        (b'content-type', b'text/plain'), (b'x-trace', b'1')]
+    assert list(events[-1]['headers']) == [(b'x-sum', b'1')]

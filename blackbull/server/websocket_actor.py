@@ -11,7 +11,7 @@ from ..asgi import (ASGIEvent, WebSocketAcceptEvent, WebSocketCloseEvent,
                     WebSocketSendEvent)
 from .conn_id import new_connection_id
 from .constants import WSCloseCode
-from ..headers import _validate_response_header_fields
+from ..headers import _MinimalResponseHeaders, _minimal_response_headers
 from .permessage_deflate import (
     DeflateParams, InboundDecompressor, OutboundCompressor,
 )
@@ -31,7 +31,7 @@ _HANDSHAKE_OWNED = frozenset({
 })
 
 
-def _app_accept_headers(raw) -> list[tuple[bytes, bytes]] | None:
+def _app_accept_headers(raw) -> _MinimalResponseHeaders | None:
     """Check the accept event's extra headers; order and multiplicity stay.
 
     A name the handshake owns, or a field that would break the response
@@ -39,15 +39,12 @@ def _app_accept_headers(raw) -> list[tuple[bytes, bytes]] | None:
     """
     if not raw:
         return None
-    out: list[tuple[bytes, bytes]] = []
-    for item in raw:
-        name, value = item
-        if name.lower() in _HANDSHAKE_OWNED:
+    out = _minimal_response_headers((name, value) for name, value in raw)
+    for name, _ in out:
+        if name in _HANDSHAKE_OWNED:
             raise ValueError(
                 f'{name!r} is owned by the WebSocket handshake and cannot '
                 f'be set from websocket.accept headers')
-        out.append((name, value))
-    _validate_response_header_fields(out)
     return out
 
 

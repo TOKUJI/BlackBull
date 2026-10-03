@@ -471,6 +471,11 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
             return
         await asyncio.shield(self._drain_waiter)
 
+    @property
+    def writing_paused(self) -> bool:
+        """Whether [`drain`][] would wait."""
+        return self._drain_waiter is not None
+
     def pause_writing(self) -> None:
         if self._drain_waiter is None:
             self._drain_waiter = asyncio.get_running_loop().create_future()

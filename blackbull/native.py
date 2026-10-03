@@ -26,7 +26,7 @@ Design invariants (validated in ``bench/scratch/send-model-c.py``):
 """
 from __future__ import annotations
 
-from .headers import _validate_response_header_fields
+from .headers import _minimal_response_headers
 
 
 class _HeaderView:
@@ -390,23 +390,21 @@ class NativeResponse:
         if isinstance(extension, _PushPath):
             return [{'type': 'http.response.push', 'path': extension.path,
                      'headers': list(self._header) if self._header is not None else []}]
-        # Validate both sections before materialising the first event.  The
-        # external-ASGI boundary sends the returned list in order, so finding
-        # a bad trailer after returning the start/body would be too late.
-        if self._header is not None:
-            _validate_response_header_fields(self._header)
-        if self.trailers is not None:
-            _validate_response_header_fields(self.trailers)
+        # Both sections before the first event: the external-ASGI boundary
+        # sends the returned list in order, so a bad trailer found after the
+        # start/body would be too late.  Each is a copy, so an append on the
+        # live response (CORS) cannot reach an event the cache middleware
+        # stored.
+        header = (_minimal_response_headers(self._header)
+                  if self._header is not None else None)
+        trailers = (_minimal_response_headers(self.trailers)
+                    if self.trailers is not None else None)
 
         events: list[dict] = []
-        if self._header is not None:
+        if header is not None:
             start: dict = {'type': 'http.response.start',
                            'status': self.status,
-                           # Copy: the cache middleware stores these events,
-                           # and an in-place append on the live response
-                           # (CORS / header injection) must not leak into a
-                           # stored entry via list aliasing.
-                           'headers': list(self._header)}
+                           'headers': header}
             if self.expects_trailers:
                 start['trailers'] = True
             events.append(start)
@@ -417,10 +415,10 @@ class NativeResponse:
             events.append({'type': 'http.response.body',
                            'body': self._body,
                            'more_body': self.more_body})
-        if self.trailers is not None:
+        if trailers is not None:
             trailer_event: dict = {
                 'type': 'http.response.trailers',
-                'headers': list(self.trailers),
+                'headers': trailers,
             }
             if self.more_trailers:
                 trailer_event['more_trailers'] = True

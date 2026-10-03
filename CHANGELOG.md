@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+- **Response header names are sent lowercase on HTTP/1.1 and HTTP/2.**  An
+  HTTP/2 response carried the application's `Content-Type` as written, which
+  RFC 9113 §8.2.2 forbids and a strict client rejects as malformed; trailers
+  did the same.  Names are now lowercased where the sender takes the
+  response, so HTTP/1.1 responses, the server's own `Date` included, arrive
+  lowercase too (names are case-insensitive, RFC 9110 §5.1), as do the events
+  `to_asgi()` gives an external ASGI host.
 - **A `Transfer-Encoding` list is split one way.**  The server's request
   validator, the request sender's pre-flight check and the response reader
   each had their own comma split, and the three disagreed at the margin:
@@ -145,8 +152,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   counts its connections from accept.
 - `BB_MAX_CONNECTIONS=auto` also leaves room for the descriptors already open
   when accepting starts, so a burst at the cap still gets its `503`s.
-- Less work per request on the HTTP/1.1 path: about 4 % fewer executed
-  instructions on keep-alive and 6 % on one request per connection.
+- Less work per request on the HTTP/1.1 path, the response-header checks
+  added in this release included: about 5 % fewer executed instructions than
+  v0.80.0 on keep-alive and 6 % on one request per connection.
 
 - Added client-owned write and WebSocket size bounds, and applied the
   response minimum-body-rate floor to HTTP/2 streams.

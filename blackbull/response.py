@@ -72,6 +72,21 @@ def _normalize_headers(headers) -> list[tuple[bytes, bytes]]:
     return out
 
 
+#: Validated ``content-type`` pairs by the ``str`` they came from; bounded,
+#: since a content type is almost always a constant of the application.
+_CONTENT_TYPE_PAIRS: dict[str, tuple[bytes, bytes]] = {}
+_CONTENT_TYPE_PAIRS_MAX = 64
+
+
+def _content_type_pair(content_type) -> tuple[bytes, bytes]:
+    pair = _CONTENT_TYPE_PAIRS.get(content_type) if type(content_type) is str else None
+    if pair is None:
+        [pair] = _normalize_headers([(b'content-type', content_type)])
+        if type(content_type) is str and len(_CONTENT_TYPE_PAIRS) < _CONTENT_TYPE_PAIRS_MAX:
+            _CONTENT_TYPE_PAIRS[content_type] = pair
+    return pair
+
+
 async def _emit_response(send, body: bytes, status, headers) -> None:
     """Send a complete non-streamed HTTP response as ASGI ``start`` + ``body``.
 
@@ -110,8 +125,9 @@ class Response:
         # A dict or a list of (name, value) pairs; str or bytes names/values.
         # See _normalize_headers for the accepted shapes and the ASCII /
         # RFC 9110 §5.5 coercion rules.
-        self.headers = _normalize_headers([(b'content-type', content_type)])
-        self.headers.extend(_normalize_headers(headers))
+        self.headers = [_content_type_pair(content_type)]
+        if headers:
+            self.headers.extend(_normalize_headers(headers))
 
     async def __call__(self, conn, receive, send) -> None:
         """Drive this response as an ASGI app: emit ``start`` then ``body``.
