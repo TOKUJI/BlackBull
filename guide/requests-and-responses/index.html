@@ -6429,6 +6429,9 @@ flag is preserved losslessly via <code>NativeResponse.expects_trailers</code>, a
 body before any response bytes are written.  Repeated or comma-joined
 lengths are accepted only when every numeric value is equal, then emitted
 as one canonical field.</p>
+<p>Response header names are sent lowercase on both transports, whatever
+case the application wrote: names are case-insensitive (RFC 9110 §5.1),
+and HTTP/2 requires lowercase (RFC 9113 §8.2.2).</p>
 <p>On the native path a <code>Response</code> (or subclass) is serialised via
 <code>Response.to_native()</code>.  A subclass that overrides <code>__call__</code> to emit a
 custom event sequence is honoured on the WebSocket / external-host

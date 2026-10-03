@@ -6076,6 +6076,9 @@ WebSocket / external-host lanes —
         <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">event</span><span class="p">)</span>
     <span class="k">await</span> <span class="n">call_next</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">wrapped</span><span class="p">)</span>
 </code></pre></div>
+<p>Append header names in lowercase, as above: BlackBull sends every name
+lowercase and converts only the ones that are not, so a lowercase name is
+faster on BlackBull.</p>
 <p>On the native path a complete response is <strong>one object, one <code>send</code></strong>
 (header + body together), while a streamed response is a header object
 followed by body-chunk objects.  Remember the presence contract: test
