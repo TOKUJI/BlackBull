@@ -141,6 +141,9 @@ bench/results/baselines/*
 !bench/results/baselines/pre_sprint9d/
 bench/results/baselines/pre_sprint9d/*
 !bench/results/baselines/pre_sprint9d/README.md
+!bench/results/bla445/
+bench/results/bla445/*
+!bench/results/bla445/README.md
 
 # Bench output that landed at the repo root instead of under
 # bench/results/<run>/.  The harness itself anchors every artifact to its
