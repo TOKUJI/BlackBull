@@ -24,12 +24,10 @@ from ..server.rate_window import ByteRateFloor
 from ..server.recipient import (AbstractReader, AsyncioReader,
                                 IncompleteReadError, ReadLimitExceeded,
                                 _accepts_read_limit)
-from ..protocol.field_grammar import (
-    FIELD_VALUE_ALLOWED_OCTETS, FIELD_VALUE_ALLOWED_SET, TCHAR_OCTETS,
-    TCHAR_SET)
+from ..protocol.field_grammar import FIELD_VALUE_ALLOWED_OCTETS, TCHAR_OCTETS
 from ..protocol.framing import (is_informational, method_is,
                                 parse_content_length, parse_status,
-                                response_has_content)
+                                response_has_content, split_transfer_codings)
 from ..server.sender import AbstractWriter, AsyncioWriter
 from ._connect import DEFAULT_CONNECT_TIMEOUT, open_connection as _open_connection
 from .exceptions import ConnectionError, ProtocolError, ResponseTooLarge
@@ -90,48 +88,6 @@ _CLOSE_DELIMITED = 'close'
 _HEXDIG = frozenset(b'0123456789abcdefABCDEF')
 
 
-# Empty list members are tolerated for interoperability, but the parser must
-# not spend unbounded work on a peer sending only commas.  The head-size budget
-# remains the total byte bound; this is only a small structural sanity bound.
-_MAX_EMPTY_TRANSFER_MEMBERS = 16
-
-
-def _skip_ows(value: bytes, pos: int) -> int:
-    while pos < len(value) and value[pos] in (0x20, 0x09):
-        pos += 1
-    return pos
-
-
-def _te_token(value: bytes, pos: int) -> tuple[bytes, int]:
-    start = pos
-    while pos < len(value) and value[pos] in TCHAR_SET:
-        pos += 1
-    if pos == start:
-        raise ProtocolError(
-            f'invalid Transfer-Encoding token at position {pos}')
-    return value[start:pos], pos
-
-
-def _te_quoted_string(value: bytes, pos: int) -> int:
-    """The opening quote is consumed here.  quoted-pair permits only
-    HTAB/SP/VCHAR/obs-text after the backslash."""
-    pos += 1
-    while pos < len(value):
-        octet = value[pos]
-        if octet == 0x22:
-            return pos + 1
-        if octet == 0x5c:
-            pos += 1
-            if pos >= len(value) or value[pos] not in FIELD_VALUE_ALLOWED_SET:
-                raise ProtocolError(
-                    'invalid quoted Transfer-Encoding parameter')
-        elif octet not in FIELD_VALUE_ALLOWED_SET:
-            raise ProtocolError(
-                'invalid quoted Transfer-Encoding parameter')
-        pos += 1
-    raise ProtocolError('unterminated quoted Transfer-Encoding parameter')
-
-
 def _declared_content_length(headers: Headers) -> int | None:
     """The message's declared body length, or ``None`` when it declares none.
 
@@ -166,16 +122,19 @@ def _check_transfer_encoding(headers: Headers) -> None:
     because RFC 9112 §6.2 forbids a message from carrying both: which one
     describes the body would be the recipient's guess.
     """
-    codings = [member.strip(b' \t').lower()
-               for _name, raw in headers.getlist(b'transfer-encoding')
-               for member in raw.split(b',')]
-    if not codings:
-        return
+    fields = headers.getlist(b'transfer-encoding')
+    if not fields:
+        return  # an absent field is not a message the client would rewrite
+    try:
+        members = split_transfer_codings(fields)
+    except ValueError as exc:
+        raise ProtocolError(str(exc)) from exc
     if headers.getlist(b'content-length'):
         raise ProtocolError(
             'Content-Length and Transfer-Encoding both present; '
             'RFC 9112 §6.2 forbids a message from carrying both')
-    if codings != [b'chunked']:
+    if members != [(b'chunked', ())]:
+        codings = [name for name, _params in members]
         raise ProtocolError(
             f'unsupported Transfer-Encoding {b", ".join(codings)!r}: '
             f'this client writes chunked framing only')
@@ -657,67 +616,6 @@ class HTTP1ResponseRecipient:
             self._unpaid_framing = short
         return data
 
-    @staticmethod
-    def _parse_transfer_encoding(
-            fields: list[tuple[bytes, bytes]],) -> list[bytes]:
-        """Parse repeated/comma-combined ``Transfer-Encoding`` fields.
-
-        This is deliberately narrower than a general HTTP field parser: it
-        returns only coding names because response framing does not interpret
-        coding parameters.  It nevertheless validates the complete grammar so
-        a malformed ignored parameter cannot hide a different final coding.
-        Empty list members are accepted within a fixed bound, as permitted by
-        the HTTP list rules used by the client for compatibility.
-        """
-        codings: list[bytes] = []
-        empty_members = 0
-        skip_ows, token, quoted_string = _skip_ows, _te_token, _te_quoted_string
-
-        for _, value in fields:
-            pos = 0
-            while True:
-                pos = skip_ows(value, pos)
-                if pos == len(value):
-                    # An empty field and the member after a trailing comma are
-                    # both harmless, but not an unbounded amount of work.
-                    empty_members += 1
-                    if empty_members > _MAX_EMPTY_TRANSFER_MEMBERS:
-                        raise ProtocolError(
-                            'too many empty Transfer-Encoding list members')
-                    break
-                if value[pos] == 0x2c:  # comma: empty member
-                    empty_members += 1
-                    if empty_members > _MAX_EMPTY_TRANSFER_MEMBERS:
-                        raise ProtocolError(
-                            'too many empty Transfer-Encoding list members')
-                    pos += 1
-                    continue
-
-                coding, pos = token(value, pos)
-                pos = skip_ows(value, pos)
-                while pos < len(value) and value[pos] == 0x3b:  # ';'
-                    pos = skip_ows(value, pos + 1)
-                    _, pos = token(value, pos)
-                    pos = skip_ows(value, pos)
-                    if pos >= len(value) or value[pos] != 0x3d:  # '='
-                        raise ProtocolError(
-                            'Transfer-Encoding parameter requires "="')
-                    pos = skip_ows(value, pos + 1)
-                    if pos < len(value) and value[pos] == 0x22:
-                        pos = quoted_string(value, pos)
-                    else:
-                        _, pos = token(value, pos)
-                    pos = skip_ows(value, pos)
-                codings.append(coding.lower())
-                if pos == len(value):
-                    break
-                if value[pos] != 0x2c:
-                    raise ProtocolError(
-                        'invalid Transfer-Encoding list separator')
-                pos += 1
-
-        return codings
-
     @classmethod
     def _body_framing(cls, status: int, headers: Headers,
                       request_method: str | bytes | HTTPMethod | None
@@ -759,7 +657,13 @@ class HTTP1ResponseRecipient:
                 raise ProtocolError(
                     'Content-Length and Transfer-Encoding both present in '
                     'the response (response-splitting vector)')
-            codings = cls._parse_transfer_encoding(transfer_fields)
+            try:
+                members = split_transfer_codings(transfer_fields)
+            except ValueError as exc:
+                raise ProtocolError(str(exc)) from exc
+            # RFC 9110 §5.6.1 — empty list members are ignorable; this reader
+            # drops them here, the policies that count them see them above.
+            codings = [name for name, _params in members if name]
             if codings.count(b'chunked') > 1:
                 raise ProtocolError(
                     f'chunked applied more than once: {codings!r}')

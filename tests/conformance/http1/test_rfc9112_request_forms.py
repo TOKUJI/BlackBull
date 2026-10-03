@@ -125,6 +125,43 @@ class TestTransferEncodingValidation:
                      b'Transfer-Encoding: gzip\r\n\r\n')
         assert r.status == 501
 
+    # BLA-459 — these used to split into members the validator named wrongly
+    # and answer 501.  The one reading puts each where it belongs: 400 for a
+    # length no reading can determine.
+
+    @pytest.mark.parametrize('te', [
+        b'gzip;bad',                 # a parameter the grammar refuses
+        b'chunked; ext=1, gzip',     # parametered chunked, not final
+        b'chunked; ext=1, chunked',  # parametered chunked, doubled
+        b',' * 16,                    # 17 empty members: over the bound
+    ])
+    def test_te_undeterminable_is_400_and_closes(self, h1_app, te):
+        r = send_raw('127.0.0.1', h1_app.port,
+                     b'POST /echo HTTP/1.1\r\nHost: localhost\r\n'
+                     b'Transfer-Encoding: ' + te + b'\r\n\r\n'
+                     b'5\r\nhello\r\n0\r\n\r\n')
+        assert r.status == 400
+        assert r.closed                  # the next request's boundary is unknown
+        assert b'hello' not in r.body    # the application never ran
+
+    def test_te_parametered_chunked_alone_is_501(self, h1_app):
+        # The refusal vocabulary stays the server's own: a coding it cannot
+        # decode is 501, not 400.
+        r = send_raw('127.0.0.1', h1_app.port,
+                     b'POST /echo HTTP/1.1\r\nHost: localhost\r\n'
+                     b'Transfer-Encoding: chunked; ext=1\r\n\r\n'
+                     b'5\r\nhello\r\n0\r\n\r\n')
+        assert r.status == 501
+
+    def test_te_chunked_alone_runs_the_app(self, h1_app):
+        # The control: the one accepted form reaches the application.
+        r = send_raw('127.0.0.1', h1_app.port,
+                     b'POST /echo HTTP/1.1\r\nHost: localhost\r\n'
+                     b'Transfer-Encoding: chunked\r\n\r\n'
+                     b'5\r\nhello\r\n0\r\n\r\n')
+        assert r.status == 200
+        assert r.body == b'hello'
+
 
 @pytest.mark.integration
 class TestChunkFramingOnTheWire:
