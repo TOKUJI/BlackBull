@@ -103,6 +103,24 @@ async def test_h1_rejects_invalid_native_field_name_before_buffering():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('field, message', [
+    ((b'', b'value'), 'header name'),
+    ((b'x-extra', b'value', b'third'), 'unpack'),
+], ids=['empty-name', 'three-items'])
+async def test_h1_rejects_a_malformed_native_field_before_buffering(field, message):
+    writer = _Writer()
+    # Through the setter: the constructor's annotation would refuse the
+    # three-item field under beartype, before the sender is reached.
+    native = NativeResponse(status=200)
+    native.header = [(b'x-ok', b'value'), field]
+
+    with pytest.raises(ValueError, match=message):
+        await HTTP1Sender(writer)(native)
+
+    assert writer.data == b''
+
+
+@pytest.mark.asyncio
 async def test_h1_final_boundary_rechecks_mutated_response_headers():
     native = Response(b'').to_native()
     assert native.header is not None

@@ -16,6 +16,7 @@ import mimetypes
 import os
 import time
 from collections import OrderedDict
+from stat import S_ISLNK, S_ISREG
 from email.utils import formatdate, parsedate_to_datetime
 from pathlib import Path
 from urllib.parse import unquote
@@ -24,7 +25,7 @@ from http import HTTPStatus
 from blackbull.connection import Connection
 from blackbull.env import get_settings, Environment
 from blackbull.native import NativeResponse
-from ._accept_encoding import select_encoding
+from ._accept_encoding import acceptable_encodings
 
 
 # Common web-asset MIME types that may be missing from the host's
@@ -131,6 +132,15 @@ def _not_modified(headers, etag: bytes, mtime_ns: int) -> bool:
     return False
 
 
+def _file_stat(path: str) -> os.stat_result | None:
+    """``os.path.isfile`` that keeps the stat it took."""
+    try:
+        st = os.stat(path)
+    except (OSError, ValueError):
+        return None
+    return st if S_ISREG(st.st_mode) else None
+
+
 class StaticFiles:
     """Serve files from one directory, as route middleware or on its own.
 
@@ -177,11 +187,12 @@ class StaticFiles:
     # stat on every request.
     _STAT_TTL_S = float(os.environ.get('BB_STATIC_STAT_TTL_S', '1.0'))
 
-    _ENCODING_SUFFIXES: tuple[tuple[str, str], ...] = (
-        ('br',   '.br'),
-        ('zstd', '.zst'),
-        ('gzip', '.gz'),
-    )
+    #: Precompressed sibling suffix and Content-Encoding token per coding.
+    _VARIANTS: dict[str, tuple[str, bytes]] = {
+        'br': ('.br', b'br'),
+        'zstd': ('.zst', b'zstd'),
+        'gzip': ('.gz', b'gzip'),
+    }
 
     def __init__(self, directory: str | None = None, *,
                  url_prefix: str = '', root_dir: str | Path | None = None,
@@ -239,15 +250,9 @@ class StaticFiles:
         self._cache: OrderedDict[
             str, tuple[int, int, bytes, bytes, bytes, float]
         ] = OrderedDict()
-        # Per-path sibling-availability cache: target → {b'br': sibling_path, ...}.
-        # _negotiate calls os.path.isfile for each encoding suffix on every
-        # request; when caching is enabled we memoise the answer after the
-        # first lookup (deterministic for the lifetime of the server).
-        # When caching is disabled we recompute siblings every request so
-        # the from-disk-every-request contract extends to the sibling
-        # existence check.
-        # Key = original request path string, Value = dict of available encodings.
-        self._sibling_cache: dict[str, dict[str, str]] = {}
+        # target → the codings with a sibling on disk, probed once when
+        # caching is enabled; otherwise every request probes afresh.
+        self._sibling_cache: dict[str, frozenset[str]] = {}
 
     @property
     def _root(self) -> Path:
@@ -306,7 +311,8 @@ class StaticFiles:
             await self._respond(send, HTTPStatus.BAD_REQUEST)
             return
 
-        if not os.path.isfile(target):
+        st = _file_stat(target)
+        if st is None:
             # Directory request → serve the configured index file when one
             # is set (off by default, so ``app.static()`` callers keep the
             # exact-file-only behaviour).  The index candidate is run
@@ -314,89 +320,74 @@ class StaticFiles:
             # target so a crafted ``index`` can't escape the root.
             if self._index and os.path.isdir(target):
                 candidate = os.path.realpath(os.path.join(target, self._index))
-                if self._inside_root(candidate) and os.path.isfile(candidate):
-                    await self._serve(conn, send, candidate)
-                    return
+                if self._inside_root(candidate):
+                    st = _file_stat(candidate)
+                    if st is not None:
+                        await self._serve(conn, send, candidate, st)
+                        return
             if call_next:
                 await call_next(conn, receive, send)
             else:
                 await self._respond(send, HTTPStatus.NOT_FOUND)
             return
 
-        await self._serve(conn, send, target)
+        await self._serve(conn, send, target, st)
 
     def _inside_root(self, resolved: str) -> bool:
         """The one boundary definition: request target, index candidate and
         any variant selection are judged here."""
         return resolved == self._root_str or resolved.startswith(self._root_sep)
 
-    def _selection_within_root(self, served_path: str,
-                               verified_path: str) -> bool:
-        """Whether the final selection may be cached and sent.
+    def _negotiate(self, conn, target: str, st: os.stat_result,
+                   ranged: bool,
+                   ) -> tuple[str, bytes, os.stat_result] | None:
+        """The file to serve, its Content-Encoding (``b''`` for none) and its
+        stat, or ``None`` when the selected precompressed sibling resolves
+        outside the root: the request is then refused, not served another
+        variant.
 
-        Equal to ``verified_path``, or a plain sibling of it, is covered by
-        the walk in ``__call__`` — only a symlinked variant can leave the
-        root, so only it walks again, every request.  A swap inside one
-        request races the open; the window the requested target has always
-        had.
+        A range request never selects a sibling; its byte offsets name the
+        original.
         """
-        if served_path == verified_path or not os.path.islink(served_path):
-            return True
-        return self._inside_root(os.path.realpath(served_path))
-
-    def _negotiate(self, conn, target: str) -> tuple[str, bytes]:
-        """Pick which file to serve and what Content-Encoding to advertise.
-
-        Returns ``(path_to_serve, content_encoding)``.  `content_encoding`
-        is ``b''`` for uncompressed; ``b'br'`` / ``b'zstd'`` / ``b'gzip'``
-        when a precompressed sibling (``<path>.<suffix>``) was selected.
-
-        Range requests bypass the precompressed-sibling lookup — encoded
-        bodies have a different size than the original and serving a
-        Range over an encoded variant is messy.  Matches what nginx
-        does with ``gzip_static`` + Range.
-
-        Sibling file-existence is memoised in ``_sibling_cache`` so the
-        per-request ``os.path.isfile`` syscalls for ``.br`` / ``.zst`` /
-        ``.gz`` siblings happen only once per path.
-        """
-        if conn.headers.getlist(b'range'):
-            return target, b''
+        if ranged:
+            return target, b'', st
         accept = conn.headers.get_combined(b'accept-encoding')
         if not accept:
-            return target, b''
-
-        # Sibling existence: cached if `cache=True`, recomputed every
-        # request otherwise (so the from-disk-every-request contract
-        # extends to the sibling existence check).
+            return target, b'', st
+        present = None
         if self._cache_enabled:
-            siblings = self._sibling_cache.get(target)
-            if siblings is None:
-                siblings = {}
-                for enc, suffix in self._ENCODING_SUFFIXES:
-                    sibling = target + suffix
-                    if os.path.isfile(sibling):
-                        siblings[enc] = sibling
-                self._sibling_cache[target] = siblings
-        else:
-            siblings = {}
-            for enc, suffix in self._ENCODING_SUFFIXES:
-                sibling = target + suffix
-                if os.path.isfile(sibling):
-                    siblings[enc] = sibling
+            present = self._sibling_cache.get(target)
+            if present is None:
+                present = self._sibling_cache[target] = frozenset(
+                    name for name, (suffix, _) in self._VARIANTS.items()
+                    if os.path.isfile(target + suffix))
+        for name in acceptable_encodings(accept):
+            if present is not None and name not in present:
+                continue
+            suffix, token = self._VARIANTS[name]
+            sibling = target + suffix
+            try:
+                sibling_st = os.lstat(sibling)
+                if S_ISLNK(sibling_st.st_mode):
+                    # The walk in __call__ covered the directory; only a link
+                    # can leave the root, and it is followed every request.
+                    sibling_st = os.stat(sibling)
+                    if (S_ISREG(sibling_st.st_mode) and not self._inside_root(
+                            os.path.realpath(sibling))):
+                        return None
+            except OSError:
+                continue
+            if S_ISREG(sibling_st.st_mode):
+                return sibling, token, sibling_st
+        return target, b'', st
 
-        encoding = select_encoding(accept, siblings)
-        if encoding is not None:
-            return siblings[encoding], encoding.encode()
-        return target, b''
-
-    async def _serve(self, conn, send, path: str):
-        # Pick the variant, then hold the final selection to the root
-        # boundary before anything below can cache, open or send it.
-        served_path, content_encoding = self._negotiate(conn, path)
-        if not self._selection_within_root(served_path, path):
+    async def _serve(self, conn, send, path: str, st: os.stat_result):
+        ranges = conn.headers.getlist(b'range')
+        selection = self._negotiate(conn, path, st, bool(ranges))
+        if selection is None:
             await self._respond(send, HTTPStatus.BAD_REQUEST)
             return
+        served_path, content_encoding, st = selection
 
         body: bytes | None
         mime: bytes
@@ -413,14 +404,8 @@ class StaticFiles:
             mtime_ns, size, body, mime, _, _ = cached_entry
             self._cache.move_to_end(served_path)
         else:
-            # Cache miss, stale TTL, or caching disabled — re-stat to
-            # confirm the entry is still valid (or to learn it for the
-            # first time when caching is off).
-            try:
-                st = os.stat(served_path)
-            except OSError:
-                await self._respond(send, HTTPStatus.NOT_FOUND)
-                return
+            # Cache miss, stale TTL, or caching disabled: the stat taken
+            # while selecting this file decides.
             size = st.st_size
             mtime_ns = st.st_mtime_ns
 
@@ -465,11 +450,7 @@ class StaticFiles:
                         or 'application/octet-stream').encode()
                 body = None
 
-        range_hdr = None
-        for k, v in conn.headers:
-            if k.lower() == b'range':
-                range_hdr = v.decode()
-                break
+        range_hdr = ranges[0][1].decode() if ranges else None
 
         start, end = 0, size - 1
         status = HTTPStatus.OK
