@@ -47,6 +47,9 @@ yt-show issue:
 yt-version name:
     scripts/youtrack.sh version "{{name}}"
 
+yt-version-release name date:
+    scripts/youtrack.sh version-release "{{name}}" "{{date}}"
+
 yt-create summary description:
     scripts/youtrack.sh create "{{summary}}" "{{description}}"
 

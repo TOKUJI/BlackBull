@@ -13,8 +13,18 @@ api() {
 }
 
 case "${1:-}" in
-  version)
-    [[ $# -eq 2 ]] || { echo 'usage: just yt-version NAME' >&2; exit 2; }
+  version|version-release)
+    if [[ $1 == version-release ]]; then
+      [[ $# -eq 3 ]] || { echo 'usage: just yt-version-release NAME YYYY-MM-DD' >&2; exit 2; }
+      release_date=$(jq -en --arg date "$3" '
+        if ($date | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$")) then
+          ($date + "T00:00:00Z" | fromdateiso8601) as $seconds |
+          if ($seconds | strftime("%Y-%m-%d")) == $date then $seconds * 1000
+          else error("Invalid release date") end
+        else error("Expected YYYY-MM-DD") end')
+    else
+      [[ $# -eq 2 ]] || { echo 'usage: just yt-version NAME' >&2; exit 2; }
+    fi
     project=$(api --get "${base}/api/admin/projects" \
       --data-urlencode 'query=BLA' --data-urlencode 'fields=id,shortName' \
       --data-urlencode '$top=100' |
@@ -25,7 +35,12 @@ case "${1:-}" in
     values=$(api --get "${base}/api/admin/customFieldSettings/bundles/version/${bundle}/values" \
       --data-urlencode 'fields=id,name,released,archived,releaseDate' --data-urlencode '$top=-1')
     existing=$(jq -c --arg name "$2" '[.[] | select(.name == $name)]' <<< "$values")
-    if [[ $(jq 'length' <<< "$existing") -gt 0 ]]; then
+    if [[ $1 == version-release ]]; then
+      element=$(jq -er 'if length == 1 then .[0].id else error("Version must already exist and be unique") end' <<< "$existing")
+      jq -n --argjson date "$release_date" '{released:true,releaseDate:$date}' |
+        api -X POST "${base}/api/admin/customFieldSettings/bundles/version/${bundle}/values/${element}?fields=id,name,released,archived,releaseDate" \
+          --data-binary @- | jq .
+    elif [[ $(jq 'length' <<< "$existing") -gt 0 ]]; then
       jq '.[0]' <<< "$existing"
     else
       jq -n --arg name "$2" '{name:$name,"$type":"VersionBundleElement",released:false}' |
@@ -104,7 +119,7 @@ case "${1:-}" in
     exec "$0" command "$2" 'State Fixed'
     ;;
   *)
-    echo 'usage: just yt-version NAME | yt-search [QUERY] | yt-show ISSUE | yt-create SUMMARY DESCRIPTION | yt-comment ISSUE TEXT | yt-update ISSUE DESCRIPTION_FILE | yt-article [ARTICLE] | yt-article-update ARTICLE CONTENT_FILE | yt-command ISSUE COMMAND... | yt-close ISSUE' >&2
+    echo 'usage: just yt-version NAME | yt-version-release NAME YYYY-MM-DD | yt-search [QUERY] | yt-show ISSUE | yt-create SUMMARY DESCRIPTION | yt-comment ISSUE TEXT | yt-update ISSUE DESCRIPTION_FILE | yt-article [ARTICLE] | yt-article-update ARTICLE CONTENT_FILE | yt-command ISSUE COMMAND... | yt-close ISSUE' >&2
     exit 2
     ;;
 esac
