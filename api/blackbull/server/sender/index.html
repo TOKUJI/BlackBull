@@ -7056,7 +7056,8 @@ consistency but are unused for WebSocket connections.</p>
 <p>Injects a <code>date</code> header when the app did not supply one, mirroring the
 <code>Headers.save()</code> send path.  <code>status</code> may be an <code>HTTPStatus</code>, an
 <code>int</code>, or a <code>str</code> — it is normalised via <code>str()</code> exactly as the
-object path does.</p>
+object path does.  <em>headers</em> that is not yet a
+<code>_MinimalResponseHeaders</code> goes through that pass here.</p>
 
 
     </div>

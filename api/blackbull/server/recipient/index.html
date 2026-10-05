@@ -7580,8 +7580,8 @@ consume-crediting mode.</p>
     <div class="doc doc-contents ">
 
         <p>Unblock a waiting <strong>call</strong>() with an http.disconnect event.</p>
-<p>Skipped when end-of-stream-on-headers has been delivered and no queue
-was ever created — no consumer can be waiting.</p>
+<p>Without a queue, a stream that ended on HEADERS has no consumer
+waiting, so none is created for the disconnect.</p>
 
 
     </div>
