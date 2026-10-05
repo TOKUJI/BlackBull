@@ -144,8 +144,8 @@ testing = [
     # test file importing blackbull then fails at collection.  Pin both until
     # beartype 0.23 compatibility is verified; the runtime dependency above
     # stays unpinned (the failure needs blanket decoration).
-    "beartype>=0.22,<0.23.0rc0",
-    "pytest-beartype>=0.2,<0.3",
+    "beartype>=0.22,<0.24.0",
+    "pytest-beartype>=0.2,<0.4",
     "httpx[http2]",
     "websockets",
     "hypothesis",
