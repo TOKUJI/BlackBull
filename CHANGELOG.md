@@ -3,7 +3,64 @@
 All notable changes to BlackBull are recorded here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## Unreleased
+## Versioning
+
+BlackBull uses [ZeroVer](https://0ver.org/) prior to a 1.0 commitment:
+
+- `0.MINOR.PATCH`
+- `MINOR` advances at a sprint close that changes what users see — a new
+  capability, a new or changed public API, new environment variables, or a
+  behaviour change an application has to react to.  Not every sprint earns
+  one: a version bump asks every adopter to work out what changed, and
+  spending one on an unchanged public surface spends their attention for
+  nothing.  The minor number therefore does **not** equal the sprint number —
+  patch releases and combined-sprint releases have introduced an offset
+  (Sprint 49 closed as `v0.43.0`; Sprint 97 closed as `v0.73.1`).
+- **Decide on the strongest justification present, not the first one found.**
+  A release usually satisfies more than one of the conditions above, and they
+  are not equally strong: a documented public-API addition qualifies formally,
+  while a behaviour change an application must react to is what the *effective
+  surface* test is actually asking about.  Name the strongest — the release
+  notes are what tells an adopter whether they have work to do, and leading
+  with a formal qualifier buries that.  (v0.79.0 was first explained as a MINOR
+  because it added `app.drain_events()`, a test seam an adopter can ignore
+  entirely.  The version was right; the reason given was the weaker of the two
+  it had.  What earned it was MQTT QoS 3 becoming a disconnect.)
+
+- **MINOR is judged by effective surface, not the diff.**  Removing a public
+  API key that has been deprecated with a documented replacement long enough
+  for adopters to have migrated is a **PATCH**: an adopter who followed the
+  deprecation does nothing, so the surface they see is unchanged.  Only a
+  removal that forces action on current, doc-following adopters is a MINOR.
+  (Sprint 99 removed `scope['http2_priority']`, deprecated since v0.31.0; it
+  shipped as v0.75.0 under the pre-change rule, which now reads it as a
+  PATCH.)
+- **Exception (2026-06-25)**: Sprints 50 through 54 are not independently
+  released — they ship together as `v0.44.0` (the next minor after `v0.43.0`),
+  the MQTT-broker debut plus its actor-model rebuild and the protocol-agnostic
+  connection dispatcher.  Normal per-sprint versioning resumes at the next
+  sprint close as `v0.45.0`.
+- **Exception (2026-08-16)**: the attack-resistance programme ships as **one**
+  MINOR when it is complete, not one release per sprint.  It spans several
+  sprints (request-body limits, WebSocket message bounds, MQTT resource
+  bounds, HTTP/2 time bounds, frame-rate metering) and its deliverable is a
+  *coherent* resource-governance surface — a partial release would advertise a
+  security posture the code does not hold yet, and would ask adopters to
+  re-read the same subject three times.  Sprints inside the programme close
+  without cutting a release; `[Unreleased]` accumulates until the last one
+  lands.
+- `PATCH` covers bug fixes, security fixes, and harness work — whether they
+  land between sprints or close one.
+- No `1.0.0` until the framework's identity (pure-Python H1 parser,
+  BlackBull-internal `ASGIServer`, per-process tick scanner deadline
+  subsystem) and public API have stabilised across several sprints.
+
+The runtime version is exposed as `blackbull.__version__` via
+`importlib.metadata.version("blackbull")` — single source of truth is
+`pyproject.toml`.  Re-run `pip install -e .` after a local version bump
+so the editable install's metadata catches up.
+
+## [Unreleased]
 
 - **Response header names are sent lowercase on HTTP/1.1 and HTTP/2.**  An
   HTTP/2 response carried the application's `Content-Type` as written, which
@@ -245,65 +302,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `blackbull.client`, and `H1CSendRawBytes` or `H2CSendRawBytes` from
   `blackbull.fault_injection` — a bare `SendRawBytes` there is the HTTP/2
   server step.  Removal no earlier than 2027-08-19.
-
-## Versioning
-
-BlackBull uses [ZeroVer](https://0ver.org/) prior to a 1.0 commitment:
-
-- `0.MINOR.PATCH`
-- `MINOR` advances at a sprint close that changes what users see — a new
-  capability, a new or changed public API, new environment variables, or a
-  behaviour change an application has to react to.  Not every sprint earns
-  one: a version bump asks every adopter to work out what changed, and
-  spending one on an unchanged public surface spends their attention for
-  nothing.  The minor number therefore does **not** equal the sprint number —
-  patch releases and combined-sprint releases have introduced an offset
-  (Sprint 49 closed as `v0.43.0`; Sprint 97 closed as `v0.73.1`).
-- **Decide on the strongest justification present, not the first one found.**
-  A release usually satisfies more than one of the conditions above, and they
-  are not equally strong: a documented public-API addition qualifies formally,
-  while a behaviour change an application must react to is what the *effective
-  surface* test is actually asking about.  Name the strongest — the release
-  notes are what tells an adopter whether they have work to do, and leading
-  with a formal qualifier buries that.  (v0.79.0 was first explained as a MINOR
-  because it added `app.drain_events()`, a test seam an adopter can ignore
-  entirely.  The version was right; the reason given was the weaker of the two
-  it had.  What earned it was MQTT QoS 3 becoming a disconnect.)
-
-- **MINOR is judged by effective surface, not the diff.**  Removing a public
-  API key that has been deprecated with a documented replacement long enough
-  for adopters to have migrated is a **PATCH**: an adopter who followed the
-  deprecation does nothing, so the surface they see is unchanged.  Only a
-  removal that forces action on current, doc-following adopters is a MINOR.
-  (Sprint 99 removed `scope['http2_priority']`, deprecated since v0.31.0; it
-  shipped as v0.75.0 under the pre-change rule, which now reads it as a
-  PATCH.)
-- **Exception (2026-06-25)**: Sprints 50 through 54 are not independently
-  released — they ship together as `v0.44.0` (the next minor after `v0.43.0`),
-  the MQTT-broker debut plus its actor-model rebuild and the protocol-agnostic
-  connection dispatcher.  Normal per-sprint versioning resumes at the next
-  sprint close as `v0.45.0`.
-- **Exception (2026-08-16)**: the attack-resistance programme ships as **one**
-  MINOR when it is complete, not one release per sprint.  It spans several
-  sprints (request-body limits, WebSocket message bounds, MQTT resource
-  bounds, HTTP/2 time bounds, frame-rate metering) and its deliverable is a
-  *coherent* resource-governance surface — a partial release would advertise a
-  security posture the code does not hold yet, and would ask adopters to
-  re-read the same subject three times.  Sprints inside the programme close
-  without cutting a release; `[Unreleased]` accumulates until the last one
-  lands.
-- `PATCH` covers bug fixes, security fixes, and harness work — whether they
-  land between sprints or close one.
-- No `1.0.0` until the framework's identity (pure-Python H1 parser,
-  BlackBull-internal `ASGIServer`, per-process tick scanner deadline
-  subsystem) and public API have stabilised across several sprints.
-
-The runtime version is exposed as `blackbull.__version__` via
-`importlib.metadata.version("blackbull")` — single source of truth is
-`pyproject.toml`.  Re-run `pip install -e .` after a local version bump
-so the editable install's metadata catches up.
-
-## [Unreleased]
 
 ### Changed
 
