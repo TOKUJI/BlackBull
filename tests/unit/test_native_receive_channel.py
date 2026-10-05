@@ -289,6 +289,16 @@ class TestHTTP2NativeChannel:
         assert await asyncio.wait_for(r.next_chunk(), timeout=1) is None
 
     @pytest.mark.asyncio
+    async def test_a_disconnect_before_the_first_read_follows_the_empty_body(self):
+        r = HTTP2Recipient()
+        r.mark_end_of_stream_on_headers()
+        r.put_disconnect()
+        assert await r() == {'type': 'http.request', 'body': b'',
+                             'more_body': False}
+        assert await asyncio.wait_for(r(), timeout=1) == {
+            'type': 'http.disconnect'}
+
+    @pytest.mark.asyncio
     async def test_consume_time_credit_still_replays(self):
         """Flow control is replayed when the app *pops*, on either channel."""
         credited: list[int] = []

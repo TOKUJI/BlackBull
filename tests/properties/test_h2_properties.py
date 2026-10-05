@@ -16,11 +16,11 @@ from http import HTTPStatus
 from unittest.mock import AsyncMock
 
 import pytest
-from hypothesis import example, given, strategies as st
+from hypothesis import assume, example, given, strategies as st
 
 from blackbull.protocol.field_grammar import (
     FIELD_VALUE_ALLOWED_OCTETS, TCHAR_SET)
-from hpack import HPACKError
+from hpack import Encoder, HPACKError
 
 from blackbull.protocol.frame import FrameFactory
 from blackbull.protocol.frame_types import (
@@ -295,6 +295,26 @@ class TestFieldValidationProperties:
         which start with a single colon, included)."""
         assert field_name_is_valid(name)
         assert field_name_is_valid(b':' + name)
+
+    @given(name=_safe_name | st.binary(max_size=12),
+           value=_safe_value | st.binary(max_size=24))
+    @example(name=b'', value=b'v')
+    @example(name=b'x-test', value=b' v')
+    def test_a_field_block_is_malformed_exactly_when_a_rule_refuses_a_field(
+            self, name, value):
+        """The block's verdict on a regular field is the named rules'."""
+        assume(name[:1] != b':' and name not in (
+            b'te', b'connection', b'keep-alive', b'proxy-connection',
+            b'transfer-encoding', b'upgrade'))
+        block = Encoder().encode([(b':method', b'GET'), (b':path', b'/'),
+                                  (b':scheme', b'https'), (name, value)])
+        wire = (len(block).to_bytes(3, 'big') + b'\x01\x05'
+                + (1).to_bytes(4, 'big') + block)
+        frame = FrameFactory().load(wire)
+        refused = (not field_name_is_valid(name)
+                   or not field_value_is_valid(value)
+                   or field_value_has_boundary_whitespace(value))
+        assert frame.malformed == refused
 
 
 # ═══════════════════════════════════════════════════════════════════════

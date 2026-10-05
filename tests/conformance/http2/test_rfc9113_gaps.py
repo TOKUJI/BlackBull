@@ -378,6 +378,15 @@ class TestG6MissingMandatoryPseudoHeaders:
             (b':authority', b'example.com'),
         ])
 
+    @pytest.mark.parametrize('name', [b':foo', b':Path', b':'])
+    @pytest.mark.asyncio
+    async def test_an_undefined_pseudo_header_is_malformed(self, name):
+        """§8.3: a pseudo-header field the protocol does not define."""
+        await _check_malformed([
+            (b':method', b'GET'), (b':path', b'/'), (b':scheme', b'https'),
+            (b':authority', b'example.com'), (name, b'x'),
+        ])
+
     @pytest.mark.asyncio
     async def test_empty_path_for_http_uri_is_malformed(self):
         """§8.3.1: :path MUST NOT be empty for http/https URIs."""

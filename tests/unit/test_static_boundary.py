@@ -52,14 +52,6 @@ async def _collect(app, scope) -> tuple[dict, bytes]:
     return start, body
 
 
-class _Spy(StaticFiles):
-    """Counts how often the selection boundary is consulted."""
-
-    def _selection_within_root(self, served_path: str, verified_path: str):
-        self.consulted = getattr(self, 'consulted', 0) + 1
-        return super()._selection_within_root(served_path, verified_path)
-
-
 @pytest.fixture
 def env(tmp_path: pathlib.Path):
     """A served root with one file and an outside-root sentinel target."""
@@ -120,10 +112,11 @@ async def test_the_index_sibling_takes_the_same_walk(env):
     assert (start['status'], body) == (200, b'INDEX')
 
 
-async def test_a_sibling_swapped_between_requests_is_caught(env):
+@pytest.mark.parametrize('cache', [False, True])
+async def test_a_sibling_swapped_between_requests_is_caught(env, cache):
     www, outside = env
     (www / 'item.gz').write_bytes(gzip.compress(b'GOOD'))
-    app = StaticFiles(directory=str(www), cache=True)
+    app = StaticFiles(directory=str(www), cache=cache)
     start, body = await _collect(app, _scope(
         path='/item', headers={'accept-encoding': 'gzip'}))
     assert (start['status'], body) == (200, gzip.compress(b'GOOD'))
@@ -166,21 +159,6 @@ async def test_range_skips_the_sibling_and_stays_inside(env):
     assert start['status'] == 206
     assert body == b'ORIG'
     assert SENTINEL not in body
-
-
-@pytest.mark.parametrize('headers', [
-    {},
-    {'accept-encoding': 'gzip'},
-    {'range': 'bytes=0-3', 'accept-encoding': 'gzip'},
-])
-async def test_every_serve_path_consults_the_selection_boundary(env, headers):
-    www, _ = env
-    (www / 'item.gz').write_bytes(gzip.compress(b'GOOD'))
-    app = _Spy(directory=str(www))
-    await _collect(app, _scope(path='/item', headers=headers))
-    assert getattr(app, 'consulted', 0) == 1
-    await _collect(app, _scope(path='/item', headers=headers))
-    assert app.consulted == 2
 
 
 async def test_a_hardlinked_sibling_claims_its_encoding(env):
