@@ -13,6 +13,26 @@ api() {
 }
 
 case "${1:-}" in
+  version)
+    [[ $# -eq 2 ]] || { echo 'usage: just yt-version NAME' >&2; exit 2; }
+    project=$(api --get "${base}/api/admin/projects" \
+      --data-urlencode 'query=BLA' --data-urlencode 'fields=id,shortName' \
+      --data-urlencode '$top=100' |
+      jq -er '[.[] | select(.shortName == "BLA")] | if length == 1 then .[0].id else error("BLA project is not unique") end')
+    bundle=$(api --get "${base}/api/admin/projects/${project}/customFields" \
+      --data-urlencode 'fields=field(name),bundle(id)' --data-urlencode '$top=100' |
+      jq -er '[.[] | select(.field.name == "Fix versions")] | if length == 1 then .[0].bundle.id else error("Fix versions field is not unique") end')
+    values=$(api --get "${base}/api/admin/customFieldSettings/bundles/version/${bundle}/values" \
+      --data-urlencode 'fields=id,name,released,archived,releaseDate' --data-urlencode '$top=-1')
+    existing=$(jq -c --arg name "$2" '[.[] | select(.name == $name)]' <<< "$values")
+    if [[ $(jq 'length' <<< "$existing") -gt 0 ]]; then
+      jq '.[0]' <<< "$existing"
+    else
+      jq -n --arg name "$2" '{name:$name,"$type":"VersionBundleElement",released:false}' |
+        api -X POST "${base}/api/admin/customFieldSettings/bundles/version/${bundle}/values?fields=id,name,released,archived,releaseDate" \
+          --data-binary @- | jq .
+    fi
+    ;;
   search)
     shift
     query="${*:-project: BLA #Unresolved}"
@@ -84,7 +104,7 @@ case "${1:-}" in
     exec "$0" command "$2" 'State Fixed'
     ;;
   *)
-    echo 'usage: just yt-search [QUERY] | yt-show ISSUE | yt-create SUMMARY DESCRIPTION | yt-comment ISSUE TEXT | yt-update ISSUE DESCRIPTION_FILE | yt-article [ARTICLE] | yt-article-update ARTICLE CONTENT_FILE | yt-command ISSUE COMMAND... | yt-close ISSUE' >&2
+    echo 'usage: just yt-version NAME | yt-search [QUERY] | yt-show ISSUE | yt-create SUMMARY DESCRIPTION | yt-comment ISSUE TEXT | yt-update ISSUE DESCRIPTION_FILE | yt-article [ARTICLE] | yt-article-update ARTICLE CONTENT_FILE | yt-command ISSUE COMMAND... | yt-close ISSUE' >&2
     exit 2
     ;;
 esac
