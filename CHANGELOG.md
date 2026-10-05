@@ -62,6 +62,8 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.81.0] — 2026-10-05
+
 - **Response header names are sent lowercase on HTTP/1.1 and HTTP/2.**  An
   HTTP/2 response carried the application's `Content-Type` as written, which
   RFC 9113 §8.2.2 forbids and a strict client rejects as malformed; trailers
