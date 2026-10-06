@@ -16,25 +16,9 @@ defined points in the application's lifetime.
 | Blocks the emitter? | Yes | Yes | No |
 | Typical use | Auth, validation, rewriting | Resource cleanup (`scope_completed`) | Logging, metrics, tracing |
 
-Two axes are in play: **does the hook block the emitter** (is it
-awaited before `emit` returns?) and **can its failure affect the
-emitter** (does the exception propagate?).
-
-- `intercept` blocks *and* propagates — it participates in the
-  request and may abort it. Writing an authentication check as a
-  plain observer would silently let unauthorized requests through:
-  the request proceeds before the observer finishes, and an
-  observer cannot signal failure. Auth belongs here.
-- `on` (the default) neither blocks nor propagates — fire-and-forget
-  observation. Putting slow telemetry in an interceptor would add
-  latency to every request; put it here instead.
-- `on(..., blocking=True)` blocks but does **not** propagate — the
-  "observe but block" mode. Use it when a side effect must *complete*
-  within the event's lifetime yet must not be able to break what
-  emitted it. The canonical case is releasing a per-request resource
-  on `scope_completed` (close a DB session, delete a temp file): the
-  cleanup has to finish before the scope is gone, but a failing
-  cleanup must not corrupt a response that is already sent.
+Use interceptors for authorization or validation: an observer cannot reject
+a request. Use detached observers for telemetry; use blocking observers for
+cleanup that must be awaited. Cancellation can interrupt awaited hooks.
 
 ## `@app.intercept` — synchronous interception
 
@@ -93,10 +77,9 @@ async def close_session(event: Event):
         await session.close()
 ```
 
-This is the right mode for cleanup keyed to an event's completion:
-the work is guaranteed to finish within the event's lifetime (unlike
-a detached observer, which may outlive the scope), but a failure in
-one cleanup handler neither aborts the others nor breaks the emitter.
+Use this mode for cleanup before the event returns. Cancellation can still
+interrupt cleanup; an ordinary handler exception is logged and does not
+abort later observers or the emitter.
 Blocking observers run after any interceptors and before any detached
 observers for the same event.
 
@@ -397,19 +380,6 @@ listener is still served.  Detached observers are not awaited before
 the transport closes.
 
 ## Exception handling
-
-Restated:
-
-- **Interceptor raises** → remaining interceptors for that event
-  do not run; the exception propagates to the emitter (the
-  framework code that called `emit`).  For lifespan events, this
-  typically aborts startup or shutdown.
-- **Observer raises** (detached or `blocking=True`) → the exception
-  is caught and logged at `ERROR` on the `blackbull` logger; other
-  observers for the same event continue to run; the emitter never
-  sees the exception.  A blocking observer is awaited but still
-  isolated, so a failing cleanup on `scope_completed` cannot break a
-  response that has already been sent.
 
 There is no built-in re-emission of failures as a separate
 `error` event.  If you want one, register a wrapper observer

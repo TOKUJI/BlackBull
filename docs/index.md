@@ -27,32 +27,17 @@ runs unchanged under uvicorn, Hypercorn, or `httpx.ASGITransport`.
     [Conformance](about/conformance.md) for the protocol-level
     test coverage behind the standards-compliance claims.
 
-## What you get
+## Serving and interoperability
 
-- **Routing + middleware** in the shape ASGI apps already use, with
-  optional simplified handler signatures that drop `(scope, receive,
-  send)` boilerplate when you don't need them.
-- **HTTP/1.1, HTTP/2, and WebSocket** on the same listener — ALPN
-  negotiates HTTP/2; cleartext h2c is detected on first preface bytes;
-  WebSocket-over-HTTP/2 (RFC 8441) is available as an opt-in.
-- **gRPC and MQTT 5 beside HTTP** — `app.enable_grpc()` serves gRPC
-  (all four RPC shapes, `gzip` compression) over the same HTTP/2 port;
-  `app.add_extension(MQTTExtension(...))` runs a pure-Python MQTT 5
-  broker on its own port, in the same process.
-- **An edge inference serving shape** — SSE token streaming with
-  HTTP/2 multiplexing beside MQTT device ingest and `$share/…`
-  work queues, in one process that `pip install`s on ARM with no
-  C toolchain.  See [Edge inference serving](guide/edge-inference.md).
-- **Standards conformance** — RFC 9112 (HTTP/1.1), RFC 9113
-  (HTTP/2 — h2spec passes), RFC 6455 (WebSocket — Autobahn passes),
-  RFC 8441 (Extended CONNECT for WebSocket over HTTP/2).
-- **Predictable behaviour under load** — per-connection deadline
-  subsystem, per-stream queue depth controls, cooperative event-loop
-  yielding.
-- **Pre-fork multi-worker** with `SO_REUSEPORT`, optional `uvloop`,
-  hot-reload via `watchfiles`, AF_UNIX + systemd socket activation.
-- **PEP 561 typed** distribution (downstream type-checkers honour
-  the inline annotations).
+- HTTP/1.1, prior-knowledge h2c and WebSocket upgrades share the HTTP listener.
+  HTTP/2 over TLS uses ALPN; RFC 8441 WebSocket streams are opt-in.
+- gRPC uses HTTP/2 on that listener. MQTT uses an extension and its own
+  listener, with one worker owning broker state.
+- Native handlers and middleware use `Connection`. External-ASGI hosting
+  converts at the boundary; use `BB_FORCE_ASGI_SCOPE=1` to serve a foreign
+  ASGI app on BlackBull's server.
+- See [Conformance](about/conformance.md) for coverage and
+  [Security model](about/security-model.md) for default resource bounds.
 
 ## Install
 
@@ -105,4 +90,4 @@ ASGI-triplet form.
   TLS, AF_UNIX, systemd activation, and reverse-proxy topologies.
 - Curious about the design? [Architecture](about/architecture.md) covers
   the actor model, protocol ownership, and fault injection;
-  [Internals](about/internals.md) walks the implementation in detail.
+  [Internals](about/internals.md) states implementation invariants and code ownership.

@@ -1,21 +1,7 @@
-"""The listening server: binds sockets, accepts connections, drives lifespan.
+"""Listener, accept-admission and lifespan ownership.
 
-[`Server`][blackbull.server.server.Server] — ``ASGIServer`` is an alias — is
-the object under ``BlackBull.run()``.  It resolves its
-[`Listener`][blackbull.server.listener.Listener] set into bound sockets, each
-terminating the TLS context its listener names, and accepts on them through
-``_AcceptGate``, which counts every accepted descriptor against the connection
-cap on any event loop.  Every accepted
-connection becomes a buffered protocol and, from there, one
-[`ConnectionActor`][blackbull.server.connection_actor.ConnectionActor].
-[`LifespanManager`][blackbull.server.server.LifespanManager] drives the ASGI
-lifespan handshake around all of it.
-
-``run()`` blocks until ``stop()``.  ``stop()`` closes the listeners first, then
-lets the requests already in flight finish inside a drain budget instead of
-cancelling them, because a cancelled handler leaves a client holding a
-half-written response.  ``open_socket()`` binds without serving — what the
-multi-worker master, and a test that needs a port before it forks, both use.
+Count TLS handshakes from accept. Stop listeners before draining accepted
+work. open_socket binds without serving for embedding and forked workers.
 """
 import asyncio
 import os
@@ -516,16 +502,10 @@ class _StartupAbandoned(Exception):
 
 
 class LifespanManager:
-    """Async context manager that drives the ASGI lifespan protocol.
+    """Drive ASGI startup and shutdown, raising RuntimeError on reported failure.
 
-    On enter: launches the app's lifespan task and delivers 'lifespan.startup'.
-    Raises RuntimeError if the app responds with 'lifespan.startup.failed'.
-    On exit: delivers 'lifespan.shutdown'; 'lifespan.shutdown.failed' raises
-    RuntimeError with the app's message.
-
-    Implemented as a class (not asynccontextmanager) so that __aenter__ and
-    __aexit__ can be called independently — e.g. startup() / shutdown() — without
-    leaving a zombie async-generator that asyncio tries to finalize on loop close.
+    Startup and shutdown may be called separately; keep the lifespan task owned
+    until shutdown completes.
     """
 
     def __init__(self, app, cleanup_budget=None, *, cleanup_timeout=_CLEANUP_TIMEOUT,
@@ -588,8 +568,7 @@ class LifespanManager:
             raise
 
     def _lifespan_task_ended(self, task: asyncio.Task) -> None:
-        # The death is visible here and not only at shutdown — the server
-        # serves the whole time in between (BLA-446).
+        # Report lifespan death while serving, not only during shutdown.
         if (self._startup_acked and not task.cancelled()
                 and task.exception() is not None):
             logger.error('Lifespan task failed after startup: %r',
@@ -637,13 +616,7 @@ class LifespanManager:
 
 
 def _max_connections_report(resolved: int) -> tuple[str, str]:
-    """Describe the connection cap in force, and where it came from.
-
-    ``BB_MAX_CONNECTIONS`` resolves to a plain integer long before it reaches
-    the server, so the origin is re-read from the environment here: the number
-    alone cannot say whether an operator chose it or the fd budget did, and
-    calling a derived value "explicit" sends someone hunting for a setting
-    nobody wrote.
+    """Report the effective cap and distinguish operator selection from the automatic FD budget.
     """
     if not resolved:
         return 'uncapped', 'no cap in force — relying on the OS descriptor limit'
@@ -954,13 +927,6 @@ class Server:
 
     def open_socket(self, port=0, unix_path: str | None = None,
                     inherited_fd: int | None = None):
-        """Bind every listener this server was asked for.
-
-        A caller that named ``listeners=`` gets those.  A caller that said it
-        the old way — a port, a Unix path, or an inherited fd — gets one
-        listener built from those arguments, so there is one binding path and
-        not two.
-        """
         _cfg = get_settings()
         if self.bound_listeners:
             self._publish_socket_view()
@@ -1025,8 +991,6 @@ class Server:
         socks = create_configured_sockets(
             where.port, _cfg, reuseport=_cfg.socket_reuseport, host=where.host)
         if not socks:
-            # Binding is the availability check.  A connect probe before it was
-            # racy, IPv4-localhost only, and hid the OS error.
             logger.error(f'Failed to bind port {where.port}. Try another port.')
             raise RuntimeError(
                 f'Failed to bind port {where.port} (see log for the OS error, '

@@ -28,19 +28,10 @@ so callers write `app.run(port=8000)` rather than
 both trigger the master-process path (long-lived supervisor
 around the worker pool).
 
-Full signature:
-
-```python
-def run(port=None, certfile=None, keyfile=None,
-        workers=None, unix_path=None, inherited_fd=None,
-        max_connections=None, stream_queue_depth=None,
-        ws_queue_depth=None, reload=None, reload_paths=None):
-    ...
-```
-
-Each argument left unset (`None`) falls back to the value declared
-on the bound [`AppConfig`](../guide/configuration.md#declarative-startup-with-appconfig)
-(if any), then to `serve()`'s built-in default.  Declaring the
+See [BlackBull.run](../api/blackbull/app.md) for its signature.
+Unset arguments resolve through BLACKBULL_* environment values, `.env`,
+AppConfig and built-in defaults; see [Configuration](../guide/configuration.md).
+Declaring the
 settings once keeps `__main__` to a single line:
 
 ```python

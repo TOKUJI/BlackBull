@@ -1,22 +1,6 @@
-"""``blackbull`` console-script entry point.
+"""Console entry point for module:attribute ASGI applications.
 
-Resolves a ``module:attribute`` import path to an ASGI 3.0 callable
-(typically a [`blackbull.BlackBull`][blackbull.BlackBull] instance, but any ASGI app
-works) and serves it via [`blackbull.app.serve`][blackbull.app.serve].
-
-Usage::
-
-    blackbull myapp:app --bind 0.0.0.0:8443 \\
-              --certfile cert.pem --keyfile key.pem --workers 4
-
-Flags mirror [`blackbull.app.serve`][blackbull.app.serve] kwargs; anything left
-unspecified falls back to the matching ``BB_*`` environment variable
-(see [`blackbull.env`][blackbull.env]).
-
-This module is registered as the ``blackbull`` console script via
-``[project.scripts]`` in ``pyproject.toml``.  The in-Python entry
-``app.run(...)`` (synchronous) is the preferred path for embedded
-callers (notebooks, test harnesses, ``examples/*.py``).
+CLI arguments use serve() configuration precedence; see docs/guide/configuration.md.
 """
 from __future__ import annotations
 
@@ -28,11 +12,7 @@ import tomllib
 from typing import Any
 
 from .app import serve as _serve
-#: Read for its *field defaults*, never for a live value: ``--help`` states
-#: what the env var ships with, not what this shell happens to export.  The
-#: field default is that number, and tests/architecture/test_documented_defaults
-#: holds it to what ``get_settings()`` selects — so interpolating here removes
-#: the copy rather than adding a fourth one to keep in step.
+# Help shows field defaults, not live environment values.
 from .env import Settings
 
 
@@ -199,13 +179,7 @@ def _split_bind(spec: str):
 
 
 def _import_app(spec: str) -> Any:
-    """Resolve ``module.path:attribute`` into the named attribute.
-
-    Mirrors uvicorn / hypercorn / granian convention.  The attribute
-    may be any ASGI callable; we don't introspect or wrap.  Raises
-    [`SystemExit`][] (via the caller's ``main`` wrapper) on import
-    or attribute failure with a focused message — argparse's own error
-    output is reserved for syntactic problems.
+    """Resolve module:attribute without wrapping; main reports import or attribute failures.
     """
     if ':' not in spec:
         raise ValueError(
@@ -487,9 +461,7 @@ def main(argv: list[str] | None = None) -> int:
     if addr[0] == 'tcp':
         _, host, port = addr
         if host not in ('', '0.0.0.0', '::', '127.0.0.1', 'localhost'):
-            # v1 of the CLI honours only the port — BlackBull's socket
-            # layer binds dual-stack on all interfaces.  Warn so users
-            # don't think their interface filter is in effect.
+            # Warn when a bind host cannot restrict the dual-stack listener.
             print(
                 f'blackbull: --bind host {host!r} is advisory in v1; '
                 f'binding dual-stack on port {port} for now.',

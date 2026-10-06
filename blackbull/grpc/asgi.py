@@ -1,14 +1,7 @@
-"""ASGI bridge that serves gRPC calls over BlackBull's HTTP/2 layer.
+"""gRPC call semantics over the existing HTTP/2 receive/send bridge.
 
-gRPC is HTTP/2 with a fixed request shape (``POST /package.Service/Method``,
-``content-type: application/grpc``) and a Length-Prefixed-Message body, where
-the call result is reported in ``grpc-status`` / ``grpc-message`` *trailers*.
-All four RPC kinds — unary, server-, client-, and bidirectional-streaming —
-ride the existing (scope, receive, send) bridge; no new protocol Actor.
-
-``serve_grpc`` is dispatched when the request content-type is
-``application/grpc`` and a registry was installed via
-``app.enable_grpc(...)``.
+Status is reported in trailers; reuse stream isolation and flow control
+rather than introducing another protocol actor.
 """
 from __future__ import annotations
 
@@ -42,18 +35,8 @@ try:
 except ValueError:
     MAX_MESSAGE_SIZE = 4 * 1024 * 1024
 
-# Server-streaming write-coalescing threshold.  Each yielded message otherwise
-# becomes its own ``http.response.body`` event → its own DATA frame → its own
-# drain; a handler streaming thousands of small messages then pays thousands of
-# per-message round-trips through the sender + event loop, and under many
-# concurrent streams that dominates (a 5000-message call took 0.1–2.3 s, so a
-# real gRPC client with a deadline times the call out / closes the connection
-# mid-stream — the "streaming collapse" the bench hit).  Coalescing consecutive
-# messages into one DATA frame (up to ~one default max-frame worth) cuts the
-# round-trips ~1000× for bulk streams.  Multiple length-prefixed gRPC messages
-# in one DATA frame is valid on the wire (clients frame on the 5-byte prefix,
-# not on DATA boundaries).  The buffer is always flushed at stream end and
-# before any trailing status, so no message is ever withheld past the call.
+# Batch length-prefixed messages independently of DATA boundaries.
+# Flush partial batches on producer suspension, at end, and before status.
 try:
     _STREAM_BATCH_BYTES = int(os.environ.get('BB_GRPC_STREAM_BATCH_BYTES', 16 * 1024))
 except ValueError:
@@ -169,15 +152,7 @@ def _req_field(conn, name, default=None):
 
 
 class GrpcContext:
-    """Per-call context handed to a gRPC handler.
-
-    Exposes request metadata (the HTTP/2 headers), the call deadline and peer,
-    and lets the handler set the outgoing status, a human-readable message,
-    leading/trailing metadata, or abort the call outright — the subset of
-    grpcio's ``ServicerContext`` that a raw-bytes transport can honour.
-
-    [`send_initial_metadata`][] is the only door to the response-start
-    machinery [`serve_grpc`][] binds before the handler runs.
+    """Per-call metadata, peer, deadline and response status/metadata controls for raw-byte handlers.
     """
 
     __slots__ = ('conn', 'code', 'details', '_trailing', '_deadline',
@@ -453,26 +428,10 @@ async def _send_trailers_only(send, status: GrpcStatus, details: str,
                               content_type: bytes = _GRPC_CONTENT_TYPE,
                               trailing: list[tuple[bytes, bytes]] | None = None
                               ) -> None:
-    """Emit a gRPC error response: HTTP 200, no message, ``grpc-status`` in
-    a *trailing* HEADERS frame.
+    """Emit HTTP 200 with no message and status in END_STREAM trailing HEADERS.
 
-    A strict gRPC client (grpcio, grpc-go) reads ``grpc-status`` only from a
-    HEADERS frame carrying END_STREAM (true Trailers-Only) or from a trailing
-    HEADERS frame — never from a non-terminal HEADERS frame.  The earlier
-    implementation put ``grpc-status`` in the initial HEADERS and then sent an
-    empty END_STREAM DATA frame; the client read the HEADERS as ordinary
-    initial metadata, found no trailing status, and surfaced UNKNOWN
-    ("Stream removed (Data frame with END_STREAM flag received)").  BlackBull's
-    own ``HTTP2Client`` is lenient about this, which hid the bug.
-
-    Routing through ``http.response.start(trailers=True)`` + ``…trailers`` emits
-    Response-Headers followed by a trailing HEADERS frame (END_STREAM) with the
-    status — the same trailers machinery the success path uses, minus the DATA
-    frame — which every conformant gRPC client accepts.
-
-    *trailing* is handler-set trailing metadata (``set_trailing_metadata``);
-    grpcio delivers it on non-OK calls too — the rich-error model's
-    ``grpc-status-details-bin`` rides it through ``abort``."""
+    Preserve handler-set trailing metadata on errors, including details-bin.
+    """
     await send(NativeResponse(
         status=200,
         header=[(b'content-type', content_type),
@@ -591,11 +550,6 @@ def _response_headers(content_type: bytes,
                       response_encoding: bytes | None = None,
                       initial_metadata: list[tuple[bytes, bytes]] | None = None
                       ) -> list[tuple[bytes, bytes]]:
-    """The response header list, without deciding what object carries it.
-
-    Split from [`_response_start`][] so the unary path can fold these
-    headers into the same object as its body and trailers.
-    """
     headers = [(b'content-type', content_type),
                (b'grpc-accept-encoding', _GRPC_ACCEPT_ENCODING)]
     # Advertise the encoding used for any compressed response messages.  Present
@@ -668,17 +622,7 @@ async def _serve_unary(handler, request, context, send, content_type,
         await send(NativeResponse(trailers=trailers))
         return
 
-    # Nothing sent yet, and a unary response is fully known here — headers,
-    # body and status trailers all at once — so it goes as **one** object.
-    # Three objects cost three constructions and three sender dispatches to
-    # describe a single response.
-    #
-    # ``more_body=True`` is deliberate and load-bearing, not an oversight:
-    # HTTP2Sender only takes its trailers-coalescing path for a *non-terminal*
-    # body chunk, holding HEADERS + DATA so they flush together with the
-    # trailing HEADERS in one write.  END_STREAM belongs on the trailers
-    # either way (RFC 9113 §8.1); marking the body terminal here would split
-    # that single write in two.
+    # END_STREAM belongs on the trailers, not the body (RFC 9113 §8.1).
     context._started = True
     await send(NativeResponse.with_trailers(
         200,
@@ -699,13 +643,8 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
     reported there.  The generator is always finalised (``aclose``) — including
     on client cancellation — so its ``finally``/cleanup runs."""
     agen = handler(request, context)
-    # HEADERS are sent once via context._start_response() — idempotent, and
-    # shared with context.send_initial_metadata so a handler that flushed
-    # leading metadata early doesn't double-send the start event.
-    # Coalesce consecutive messages into one DATA frame per flush.  Bytes are
-    # accumulated as already-gRPC-framed messages (5-byte prefix + body) so the
-    # buffer can be sent verbatim; flushed when it reaches _STREAM_BATCH_BYTES
-    # and, unconditionally, at stream end / before any trailing status.
+    # context._start_response is idempotent after early initial metadata.
+    # Buffer already-length-prefixed messages independently of DATA boundaries.
     buf = bytearray()
     # Serialises concurrent flushes (the idle flusher below vs the drive
     # loop's batch flush): each flush snapshots-and-clears under the lock, so
@@ -723,16 +662,8 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
             await context._start_response()
             await send(NativeResponse(body=data, more_body=True))
 
-    # Loop-idle flushing: the drive loop marks the buffer dirty after each
-    # message; this task only gets to run once the producer *suspends* (a
-    # synchronous burst never yields the loop between messages, so the burst
-    # keeps batching into one DATA frame).  The moment the producer genuinely
-    # waits — a health Watch parked on a status change, a chat stream parked
-    # on input — the loop runs this task and everything already yielded goes
-    # out.  Without it, a partial batch was withheld until the *next* message
-    # completed, which for an indefinitely-parked producer meant never
-    # (grpc.health Watch clients otherwise never receive their initial
-    # status).
+    # Flush partial batches when the producer suspends; synchronous bursts
+    # may continue batching. A parked producer must not withhold yielded messages.
     flush_wanted = asyncio.Event()
     finished = False
 
@@ -762,12 +693,6 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
     # Unannotated for the per-request-closure reason (see
     # app.py::_wrap_send_native); takes nothing, returns nothing.
     async def _drive():
-        # Coalesce consecutive messages into one DATA frame.  A *synchronous*
-        # burst (the bulk case — thousands of tiny messages yielded without
-        # awaiting) buffers into ``buf`` and flushes only at ~one max-frame
-        # worth, turning thousands of per-message sends+drains into a handful;
-        # the idle flusher above covers producers that suspend.  The tail is
-        # flushed at stream end / before any trailing status.
         it = agen.__aiter__()
         while True:
             try:
@@ -813,13 +738,8 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
             send, context, GrpcStatus.INTERNAL, str(exc), content_type)
         return
     finally:
-        # Stop the idle flusher first (gracefully — an in-flight flush is
-        # allowed to complete rather than be cancelled mid-send; by now any
-        # error trailers went out with the buffer already drained, so it can
-        # only no-op or finish delivering committed messages).  Then finalise
-        # the generator so its cleanup runs on every exit path (normal
-        # completion, error, or client cancellation).  Both are best-effort:
-        # neither may mask the status we already reported.
+        # Finish any committed flush before finalizing the generator on every exit.
+        # Cleanup must not mask the status already reported.
         await _stop_idle_flusher()
         try:
             await agen.aclose()
@@ -853,9 +773,10 @@ async def _finish_stream_error(send, context: GrpcContext, status: GrpcStatus,
 
 
 async def serve_grpc(registry: GrpcServiceRegistry, conn, receive, send) -> None:
-    """Serve a single gRPC call (unary or server-streaming) through the ASGI
-    (scope, receive, send) bridge.  Never raises for handler/protocol errors:
-    every failure path is reported as a gRPC status."""
+    """Serve any of the four gRPC call shapes through Connection/receive/send.
+
+    Report handler and protocol failures as gRPC status.
+    """
     path = _req_field(conn, 'path', '')
     context = GrpcContext(conn)
     # Echo the request's content-type subtype (application/grpc+proto, +json, …)

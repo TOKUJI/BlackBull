@@ -1,21 +1,7 @@
-"""Programmable HTTP/1.1 **server-side** scenario model.
+"""HTTP/1.1 server-side scenarios for a target client.
 
-A [`ScenarioH1Server`][] is a sequence of typed *steps* that
-[`H1FaultServer`][blackbull.fault_injection.h1_server.H1FaultServer] walks in order
-against a connected client.  This is the server-side half of the HTTP/1.1
-toolkit: a programmable server that drives a target *client* through
-deliberate misbehaviour — a status line delivered a byte at a time, a
-``Content-Length`` that overstates the body, a chunked body that stops
-mid-chunk, a connection dropped mid-response.
-
-The symmetric client-side half — a programmable *client* driving a real
-server — is [`blackbull.fault_injection.scenario_h1`][blackbull.fault_injection.scenario_h1].  Its vocabulary
-looks similar and is **not** reusable here: ``ReadResponse`` names the
-other end of the wire.  Two vocabularies, because there are two roles.
-
-Everything a scenario emits is raw bytes; there is no typed
-``SendResponse`` step.  ``docs/guide/fault_injection.md`` says why that is
-load-bearing.
+Output is raw bytes. Client-side ReadResponse vocabulary belongs to the
+other role and must not be reused here.
 """
 from __future__ import annotations
 
@@ -92,12 +78,7 @@ class SendRawBytes:
 
 @dataclass(frozen=True)
 class SendStatusLine:
-    """Emit a status line, field by field.
-
-    Nothing validates: a status line with no reason phrase, an impossible
-    version, or a three-digit code that is not a status are all faults
-    worth staging.  What it buys over raw bytes is that the *shape* is
-    legible — a reader sees which field the scenario is bending.
+    """Emit status-line fields without validation; malformed values are intentional.
     """
     code: int = 200
     reason: str = 'OK'
@@ -109,11 +90,7 @@ class SendStatusLine:
 
 @dataclass(frozen=True)
 class SendHeader:
-    """Emit one header line.
-
-    ``fold`` writes it as an obs-fold continuation (RFC 9112 §5.2, which
-    deprecates the form and requires a recipient to reject or normalise
-    it) — expressible before only as a hand-built byte string.
+    """Emit a header; fold=True emits obs-fold (RFC 9112 §5.2).
     """
     name: str
     value: str
@@ -299,21 +276,13 @@ class ScenarioH1ServerResult:
     #: The client's request head, once one arrived.  HTTP/1.1-specific:
     #: HTTP/2 has no single "head" to capture, it has frames.
     request_head: bytes = b''
-    #: Things a ``WaitForRequest(match=...)`` step read and passed over.
-    #: Non-zero means the connection is **desynced** — HTTP/1.1 responses
-    #: are positional, so a request the scenario skipped is one it can no
-    #: longer answer.  Surfaced rather than inferred.  (The HTTP/2 half
-    #: counts the same thing under the same name; there it is harmless,
-    #: because streams are independent.)
+    # Skipped HTTP/1.1 requests desynchronize positional responses; the executor
+    # cannot later answer them. HTTP/2 stream responses are independent.
     wait_skipped: int = 0
     #: One ``(match, matched)`` pair per [`ExpectRequest`][] step, in
     #: order — what the scenario assumed, and whether it held.
     expectations: list = field(default_factory=list)
-    #: True when a ``HalfClose`` step actually shut down the write side.
-    #: False both when no such step ran and when the transport refused it
-    #: (TLS has no half-close), so a test can tell "did not ask" from
-    #: "asked and it did not happen" — a silently skipped half-close
-    #: otherwise reads as a pass.
+    #: True on successful write-side half-close; False if absent or unsupported.
     half_closed: bool = False
 
 
@@ -410,13 +379,7 @@ def scenario_from_json(src: str) -> ScenarioH1Server:
     return ScenarioH1Server(steps=tuple(steps), name=name)
 
 
-# ---------------------------------------------------------------------------
-# Byte assembly for the typed steps
-# ---------------------------------------------------------------------------
-#
-# Here rather than in the production sender, for the reason the module
-# docstring gives: a breaker that shares the production serialiser cannot
-# emit a fault that serialiser has.
+# Fault step serialization must permit bytes the production sender refuses.
 
 
 def encode_status_line(step: SendStatusLine) -> bytes:

@@ -31,7 +31,7 @@ app.enable_grpc(grpc)
 async def healthz():
     return {'ok': True}
 
-app.run(port=8443, cert='cert.pem', key='key.pem')   # gRPC needs HTTP/2 (TLS+ALPN)
+app.run(port=8443, certfile='cert.pem', keyfile='key.pem')   # gRPC needs HTTP/2 (TLS+ALPN)
 ```
 
 ## The handler contract

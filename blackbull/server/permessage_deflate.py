@@ -1,18 +1,7 @@
-"""permessage-deflate (RFC 7692) negotiation and per-message codec.
+"""WebSocket compression negotiation and per-connection codec state.
 
-This module is small on purpose.  It does two things:
-
-1. **Handshake**: parse a peer's ``Sec-WebSocket-Extensions`` offer, decide
-   whether to accept ``permessage-deflate``, and produce the response-side
-   ``Sec-WebSocket-Extensions`` header value.
-
-2. **Per-connection state**: hold the streaming inflate/deflate state plus
-   the ``*_no_context_takeover`` flags so ``WebSocketRecipient`` can
-   decompress inbound messages and ``WebSocketSender`` can compress
-   outbound ones.
-
-The actual wire-level use of RSV1 happens in [`ws_codec`][] and
-[`recipient`][]; this module just owns the policy + state.
+Keep RSV1 framing in the WebSocket codec and recipient; negotiated context
+takeover governs reuse across messages.
 """
 from __future__ import annotations
 
@@ -84,17 +73,10 @@ def negotiate(offer_header: bytes | None) -> tuple[DeflateParams | None, bytes |
 
 
 def _accept_offer(raw_offer: bytes) -> DeflateParams | None:
-    """Parse one ``;``-separated offer and validate it; ``None`` declines.
+    """Parse an offer, returning None for unsupported or malformed parameters.
 
-    RFC 7692 §7.1.1 requires declining an offer with a parameter not
-    defined for an offer, an invalid value, a repeated name, or a
-    configuration the server does not support — including a window this
-    runtime's zlib cannot instantiate (8, on CPython, measured into
-    ``_SERVED_WBITS`` once per process).  An unusable window declines the
-    offer; it is never rounded up past the peer's constraint.
-
-    One pass over the offer, in three stages per parameter: lexical
-    splitting, the §7.1.1 checks, and the params assembly.
+    Decline unknown or duplicate names, invalid values, and windows this zlib
+    cannot build. Never round a window beyond the peer's constraint.
     """
     seen: set[bytes] = set()
     snc = cnc = False

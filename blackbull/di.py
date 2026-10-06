@@ -1,22 +1,7 @@
 """Per-request dependency injection for simplified handlers.
 
-``Depends`` marks a simplified-handler parameter as *provided by the
-framework* rather than by the request::
-
-    async def get_db():                    # async-generator provider
-        pool = await create_pool()
-        try:
-            yield pool                     # ← injected value
-        finally:
-            await pool.close()             # ← runs after the response is sent
-
-    @app.route(path='/items/{id:int}')
-    async def get_item(id: int, db=Depends(get_db)):
-        return await db.fetch_item(id)
-
-Everything is resolved at **registration time**, so a handler that declares
-no ``Depends`` parameter carries no dependency machinery at all: no
-per-request stack, and no loop over an empty list.
+Async-generator providers finalize after response sending; put cleanup in
+finally. Provider forms are resolved at registration, not during dispatch.
 """
 import ast
 import inspect
@@ -29,26 +14,11 @@ __all__ = ['Depends']
 
 
 def _cleanup_after_bare_yield(provider) -> bool:
-    """True when *provider* has cleanup code that an exception would skip.
+    """Detect cleanup that an exception thrown at yield would skip.
 
-    An async-generator provider is driven through
-    [`asynccontextmanager`][contextlib.asynccontextmanager], so an exception in the handler is
-    re-raised **at the yield**.  Statements written after a bare ``yield``
-    therefore never run on that path — the resource leaks precisely when
-    something went wrong.  A WebSocket makes this bite harder than HTTP,
-    because a socket ends by exception far more often than a request does.
-
-    The shape reported is narrow on purpose: a ``yield`` that is not inside a
-    ``try`` at all, with at least one statement reachable after it — reachable,
-    not merely later in the file, so an early-exit ``yield``/``return`` branch
-    is not charged for the wrapped yield further down.  A yield inside any
-    ``try`` is left alone — ``finally`` covers every path, and ``except`` /
-    ``else`` mean the author is deliberately telling success from failure (the
-    commit-or-rollback provider).  A yield with nothing after it has no
-    cleanup to lose, and an ``async with`` around the yield cleans up by
-    itself.  Returns False rather than guessing when the source is
-    unavailable (C-defined, REPL, ``exec``) — a diagnostic must never be the
-    reason registration fails.
+    Only warn for a reachable statement after a yield outside try. Do not infer
+    leaks from another branch's cleanup or fail registration when source cannot
+    be inspected. finally or an enclosing async context manager owns cleanup.
     """
     try:
         tree = ast.parse(textwrap.dedent(inspect.getsource(provider)))
@@ -79,13 +49,9 @@ def _cleanup_after_bare_yield(provider) -> bool:
 
 
 def _reaches_a_statement_after(y, fn, parent, block) -> bool:
-    """True when a statement can run after *y* resumes.
+    """Check reachability after this yield, not later source lines.
 
-    Asked per enclosing block rather than per line: a degraded-mode provider
-    exits early (``yield None`` then ``return``) and the resource-holding
-    yield sits further down, wrapped.  Counting every later *line* in the
-    function reports that shape as a leak, when the statements counted are on
-    a path the yield never reaches.
+    An early return branch must not inherit another branch's cleanup warning.
     """
     node = y
     while id(node) in parent and not isinstance(node, ast.stmt):
@@ -107,28 +73,13 @@ def _reaches_a_statement_after(y, fn, parent, block) -> bool:
 
 
 class Depends:
-    """Declare a per-request provider for one simplified-handler parameter.
+    """Inject a zero-argument provider with a default such as db=Depends(get_db).
 
-    Use as the parameter's *default value*: ``db=Depends(get_db)``.
-
-    Provider forms (detected once, here):
-
-    * **async generator** — yields the injected value exactly once; the code
-      after ``yield`` (or the ``finally`` block) runs after the response has
-      been sent, LIFO when several providers are active.
-    * **async function** — awaited for the value; no cleanup.
-    * **sync function** — called for the value; no cleanup.
-
-    Args:
-        provider: Zero-parameter callable in one of the three forms above.
-        use_cache: When ``True`` (default), parameters of one handler that
-            name the *same* provider share a single instance per request;
-            ``use_cache=False`` calls the provider once per parameter.
-
-    Raises:
-        TypeError: At construction, when *provider* is not callable, takes
-            parameters (including a nested ``Depends`` default — not
-            supported in v1), or is a sync generator function.
+    Async generators yield exactly once and finalize after response sending,
+    LIFO across providers; put cleanup in finally so exceptions cannot skip it.
+    Async functions are awaited; sync functions are called without cleanup.
+    use_cache=True shares one value per provider per request. False invokes it
+    per parameter. Sync generators and nested Depends parameters are rejected.
     """
 
     __slots__ = ('provider', 'use_cache', '_kind', '_acm_factory')

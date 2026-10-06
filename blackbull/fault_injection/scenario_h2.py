@@ -1,61 +1,8 @@
-"""Programmable HTTP/2 wire-level scenario model.
+"""HTTP/2 server-side fault scenarios.
 
-A [`ScenarioH2`][] is a sequence of typed *steps* that the
-[`blackbull.fault_injection.h2_server.H2FaultServer`][blackbull.fault_injection.h2_server.H2FaultServer] executor
-walks in order against a connected HTTP/2 client.  This is the
-*server-side* half of the [`blackbull.fault_injection`][blackbull.fault_injection] toolkit:
-a programmable server that emits deliberate misbehaviour toward a
-client — half-closed streams, exhausted flow-control windows,
-illegal SETTINGS, weird frame sequences — expressed as data, not
-procedural test code.
-
-The symmetric *client-side* half (programmable HTTP/1.1 client
-driving deliberate misbehaviour toward a server) lives in
-[`blackbull.fault_injection.scenario_h1`][blackbull.fault_injection.scenario_h1].
-
-Use cases:
-
-  * HTTP/2 client-library authors testing their client's resilience
-    against a misbehaving server.
-  * Proxy / load-balancer authors testing what their transit code
-    does when an upstream emits illegal frame sequences.
-  * Security researchers reproducing CVE-class patterns
-    (CONTINUATION-flood, RST-flood) from a deterministic harness.
-
-Steps
------
-
-* [`SendFrame`][] — emit one parsed ``FrameBase`` instance.
-  The executor handles serialisation through the existing
-  [`FrameFactory`][blackbull.protocol.frame.FrameFactory].
-* [`SendRawBytes`][] — escape hatch for bytes the framework's
-  ``FrameFactory`` cannot construct (e.g. illegal frame types,
-  oversized frames, malformed length fields).
-* [`WaitForClientFrame`][] — pause until an inbound frame from
-  the client matches the *declarative match dict*.  Fields supported:
-
-  ===============  =========================================
-  ``type``         ``'HEADERS'``, ``'SETTINGS'``, etc.
-  ``stream_id``    Integer; ``None`` = any.
-  ``flags_set``    List of flag names (uppercase) that must be set.
-  ``flags_unset``  List of flag names that must be unset.
-  ===============  =========================================
-
-* [`Sleep`][] — idle without sending or reading.
-* [`Abort`][] — hard-close the underlying transport (RST on
-  Linux).
-* [`CloseGracefully`][] — send a GOAWAY frame, then close
-  cleanly.
-
-Serialisation
--------------
-
-[`scenario_to_json`][] / [`scenario_from_json`][] round-trip
-through JSON Lines, so a [`SendFrame`][] frame has to be
-reconstructable from its serialised form — the classes in
-`ROUND_TRIP_FRAME_CLASSES`.  Everything else, a padded DATA
-frame included, goes through [`SendRawBytes`][], which always
-round-trips.
+WaitForClientFrame match dictionaries accept type, stream_id, flags_set
+flags_unset and error_code. JSON Lines supports only ROUND_TRIP_FRAME_CLASSES for
+SendFrame; use SendRawBytes for other or malformed frame encodings.
 """
 from __future__ import annotations
 
@@ -85,16 +32,9 @@ class StepOpH2(str, enum.Enum):
 
 @dataclass(frozen=True)
 class SendFrame:
-    """Emit one parsed frame onto the connection.
+    """Emit a typed frame; use SendRawBytes for unsupported or malformed encodings.
 
-    Routed through [`FrameFactory`][blackbull.protocol.frame.FrameFactory] so
-    the on-wire serialisation matches the framework's normal output.
-    Use [`SendRawBytes`][] for frames the factory cannot construct.
-
-    ``declared_length`` overrides the header's length field without
-    changing the bytes actually written — "the peer lied about how much is
-    coming", which a serialiser that computes the length cannot say.
-    Leave it ``None`` (the default) and nothing changes.
+    A declared_length override changes only the header, not the emitted payload.
     """
     frame: Frame
     declared_length: int | None = None
@@ -118,15 +58,9 @@ class SendRawBytes:
 
 @dataclass(frozen=True)
 class WaitForClientFrame:
-    """Block until an inbound frame matches ``match``.
+    """Consume until a frame matches, skipping nonmatches.
 
-    Declarative grammar — see module docstring for the supported
-    keys.  Frames the client sends that do *not* match are still
-    consumed (the executor remains responsive to the wire) but do
-    not advance this step.
-
-    On ``timeout`` expiry the executor records the miss on
-    [`ScenarioH2Result`][] and proceeds to the next step.
+    Timeout records a miss and proceeds to the next step.
     """
     match: dict = field(default_factory=dict)
     timeout: float = 5.0
@@ -134,16 +68,7 @@ class WaitForClientFrame:
 
 @dataclass(frozen=True)
 class ExpectClientFrame:
-    """Read one inbound frame and record whether it matched.
-
-    A guard, not a filter: nothing is skipped and the executor moves on
-    either way.  It answers a different question from
-    [`WaitForClientFrame`][] — *is the client under test behaving as
-    this scenario assumes?* — and a scenario whose premise silently failed
-    would otherwise look like a pass.
-
-    The HTTP/1.1 half has the same pair for the same reason
-    (``ExpectRequest``); the names differ only where the unit does.
+    """Consume exactly one frame and record whether it matched; never filter.
     """
     match: dict = field(default_factory=dict)
     timeout: float = 5.0
@@ -197,10 +122,7 @@ H2Step = Union[
     HalfClose,
 ]
 
-#: The name the other three vocabularies use.  ``H2Step`` stays for the
-#: callers that already import it; new code should read ``Step``, so a
-#: reader comparing the four files is not told they differ where they do
-#: not.
+# Step is the canonical alias; H2Step remains compatible.
 Step = H2Step
 
 
@@ -274,11 +196,7 @@ class ScenarioH2Result:
     terminated: bool = False
 
     elapsed_s: float = 0.0
-    #: True when a ``HalfClose`` step actually shut down the write side.
-    #: False both when no such step ran and when the transport refused it
-    #: (TLS has no half-close), so a test can tell "did not ask" from
-    #: "asked and it did not happen" — a silently skipped half-close
-    #: otherwise reads as a pass.
+    #: True on successful write-side half-close; False if absent or unsupported.
     half_closed: bool = False
 
 
@@ -634,7 +552,6 @@ def _payload_from_record(payload: bytes) -> bytes:
 
 
 def _frame_from_dict(d: dict) -> Frame:
-    """Reconstruct a frame from [`_frame_to_dict`][]'s output."""
     from blackbull.protocol import frame_types  # local; avoids import-time cost
 
     name = d['class']
@@ -712,11 +629,7 @@ def _frame_from_dict(d: dict) -> Frame:
 
 
 def scenario_to_json(scenario: ScenarioH2) -> str:
-    """Serialise *scenario* to JSON Lines (one step per line).
-
-    Header lines (``send_preface`` flag, ``initial_settings``) sit on
-    the first line under the op ``HEADER`` so the file is one
-    line-oriented stream with no out-of-band metadata.
+    """Serialize JSON Lines; the first HEADER carries send_preface and initial_settings.
     """
     lines = [json.dumps({
         'op': 'HEADER',

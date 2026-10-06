@@ -1,13 +1,7 @@
-"""In-process MQTT test environment: drive ``on_message`` taps with no socket.
+"""In-process MQTT tap tests.
 
-[`MQTTTestBroker`][] feeds PUBLISHes into an app's registered taps directly --
-topic matching and ``{name}`` captures included -- with no TCP socket, no
-CONNECT and no MQTT client.  Taps run inline and a failing one raises, so a
-test is deterministic whatever the extension's ``tap_mode`` says.
-
-Only the tap pipeline is exercised.  Broker routing, QoS flows and retained
-messages belong to the conformance suite, not to this helper.  The MQTT guide
-shows a test written against it.
+Taps run inline and failures propagate regardless of configured tap mode.
+This does not exercise routing, CONNECT, QoS or retained messages.
 """
 from __future__ import annotations
 

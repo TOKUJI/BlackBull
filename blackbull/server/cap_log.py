@@ -1,60 +1,15 @@
-"""Cap-hit observability.
+"""Resource-cap refusal records on blackbull.caps.
 
-Every user-tunable resource cap in BlackBull (header sizes, the four
-timeouts, connection cap, WS frame cap, WS queue depth, H/2 stream
-caps, compression in-flight) is silent by default when it rejects
-traffic.  Operators see the consequence — a 503, a CLOSE 1009, a
-dropped event — but no record naming the cap.  Regressions like the
-1 MiB WS frame default that shipped in v0.35.0 (caught by the
-43 conformance lane in v0.39.0) can hide across releases.
-
-This module emits one ``WARNING``-level record per cap rejection on
-the ``blackbull.caps`` logger so a deployment that subscribes to
-that logger gets actionable visibility without grep-walking the
-framework code.
-
-Surface:
-
-- [`log_cap_hit`][] — the single emission point.  Call from any
-  cap-rejection site with the cap name, requested value, and limit.
-- [`CapHitCounter`][] — per-connection state for the "first hit
-  per cap logs in full; later hits silently counted; summary on
-  [`flush`][CapHitCounter.flush]" rate-limit pattern.
-- [`CapHitCounter.bind`][CapHitCounter.bind] — context manager that installs the
-  counter on a ``ContextVar``.  All
-  [`log_cap_hit`][] calls inside the ``with`` block (including
-  those in child tasks created via ``asyncio.TaskGroup``, which
-  inherit context) automatically pick up the counter.  Zero
-  plumbing through actor constructors.
-
-Every emitted record carries a ``connection_id`` so SIEM /
-log-aggregation pipelines can correlate first-hit, intermediate
-summary, and graceful-close summary records that all belong to the
-same connection — useful when ``peer`` is shared across many
-clients behind a NAT.
-
-The counter also runs two dirty-flush triggers so a connection
-torn down by RST (or any abnormal path that skips graceful
-``flush``) still emits a summary for any suppressed hits:
-
-- **Threshold trigger**: after ``flush_threshold`` suppressed hits
-  on any single cap, emit an intermediate summary and reset counts.
-  Default 100; set to 0 to disable.
-- **Interval trigger**: an asyncio timer task started on the first
-  suppressed hit emits an intermediate summary after
-  ``flush_interval`` seconds if any cap still has suppressed
-  hits.  Default 60.0 s; set to 0 to disable.
-
+Use log_cap_hit at enforcement sites. A bound CapHitCounter propagates to
+child tasks through context; flush suppressed-hit summaries at teardown.
+Threshold and interval flushes cover abnormal closes.
 """
 import asyncio
 import contextvars
 import logging
 from typing import Any, Optional, Union
 
-# Sub-hierarchy so operators can route / filter independently of the
-# rest of ``blackbull.*``.  WARN level is the default emission level;
-# operators may raise to ERROR (silence) or drop to INFO (show the
-# rate-limit summaries that today fire at WARN too).
+# Refusals and suppressed-hit summaries use WARNING on blackbull.caps.
 _logger = logging.getLogger('blackbull.caps')
 
 
@@ -62,15 +17,7 @@ __all__ = ('log_cap_hit', 'CapHitCounter')
 
 
 def _gen_connection_id() -> str:
-    """Cheap opaque per-connection id (fallback when the accept path did
-    not supply one).
-
-    Delegates to [`new_connection_id`][blackbull.server.conn_id.new_connection_id] —
-    process-prefix + monotonic sequence, collision-free within a process.
-    The previous 4-byte ``os.urandom`` form was NOT collision-resistant at
-    churn: 32-bit random ids collide with ~1.2 % probability at 10 k
-    concurrent connections and ~50 % at 65 k by the birthday bound (the
-    old "~10⁻⁹ at 65 k" claim here was wrong by orders of magnitude).
+    """Return an opaque id from new_connection_id when accept supplied none.
     """
     from .conn_id import new_connection_id  # noqa: PLC0415
     return new_connection_id()
@@ -131,13 +78,7 @@ class CapHitCounter:
         return self._connection_id
 
     def _first(self, cap: str) -> bool:
-        """Return ``True`` iff *cap* has not been seen on this counter.
-
-        Always updates internal state.  Suppression tally increments
-        for every subsequent call.  After incrementing, dispatches to
-        the dirty-flush triggers so a long-lived (or abnormally
-        terminated) connection still gets aggregate visibility
-        without ``flush``.
+        """Record a cap hit; return whether it is first, tally repeats and trigger summaries.
         """
         if cap in self._suppressed:
             was_zero = self._suppressed[cap] == 0
@@ -154,12 +95,7 @@ class CapHitCounter:
         return True
 
     def _maybe_dirty_flush(self) -> None:
-        """Threshold-driven intermediate summary.
-
-        If any cap's suppressed count has reached [`_flush_threshold`][],
-        emit one summary per cap with non-zero counts, then reset all
-        counts to 0 and cancel the interval timer (a fresh hit will
-        re-arm it).
+        """Emit and reset suppressed totals at the configured threshold.
         """
         if self._flush_threshold <= 0:
             return
@@ -221,10 +157,7 @@ class CapHitCounter:
         connection_id: Optional[str],
         message: str,
     ) -> None:
-        """Common emission path shared by graceful flush and the dirty triggers.
-
-        Iterates ``_suppressed`` (which the caller has not yet cleared);
-        emits one record per cap with a non-zero count.
+        """Emit nonzero suppressed totals without clearing them.
         """
         if not _logger.isEnabledFor(logging.WARNING):
             return
@@ -243,11 +176,7 @@ class CapHitCounter:
                 )
 
     def _emit_intermediate_summary(self) -> None:
-        """Dirty-flush emission — does not clear state.
-
-        The caller ([`_maybe_dirty_flush`][] or [`_timer_run`][])
-        resets the counts immediately afterwards, so this method just
-        emits without touching state.
+        """Emit without clearing counts; the caller owns reset.
         """
         self._emit_summary_records(
             peer=None, protocol=None, connection_id=None,
@@ -289,19 +218,10 @@ class CapHitCounter:
 
 
 class _LazyCapHitCounter:
-    """Deferred [`CapHitCounter`][] bound once per connection.
+    """Create the cap counter only on first use.
 
-    The accept path runs once per TCP connection, but a cap is hit only on
-    abuse/misconfiguration — so the overwhelming majority of connections build
-    a counter (and generate its connection id) that never records
-    anything.  This holder makes that machinery
-    pay-for-what-you-use: nothing is constructed until the first cap actually
-    fires.
-
-    Bound on the ambient contextvar by ``ConnectionActor``; TaskGroup
-    children inherit the *same* holder by reference, so whichever task hits the
-    first cap materialises the real counter for all of them — identical
-    cross-task propagation to an eager counter.
+    Context children must share this holder so the first hit initializes their
+    common counter and connection identity.
     """
 
     __slots__ = ('_counter', '_kwargs')
@@ -371,33 +291,11 @@ def log_cap_hit(
     connection_id: Optional[str] = None,
     advice: Optional[str] = None,
 ) -> None:
-    """Emit one cap-hit record on ``blackbull.caps`` at WARN level.
+    """Log a cap refusal with structured fields and operator advice.
 
-    *advice* is appended to the message: what the operator should change.
-
-    The structured fields land in ``record.extra`` (``cap``,
-    ``requested``, ``limit``, ``peer``, ``scope_path``, ``protocol``,
-    ``connection_id``) so log handlers can route or aggregate
-    without parsing the message string.
-
-    Resolution order for the rate-limit counter:
-
-    1. The explicit *counter* keyword argument, if given.
-    2. The active [`CapHitCounter`][] from the ambient
-       ``ContextVar`` (set via
-       [`CapHitCounter.bind`][CapHitCounter.bind]).
-    3. ``None`` — every call emits, no rate limiting.
-
-    ``connection_id`` resolution mirrors the counter chain:
-
-    1. The explicit ``connection_id`` keyword argument, if given.
-    2. The active counter's [`CapHitCounter.connection_id`][CapHitCounter.connection_id].
-    3. ``None`` — record carries ``connection_id=None``.
-
-    The first call per ``(counter, cap)`` emits a full record;
-    subsequent calls return silently and increment the counter's
-    suppression tally.  ``counter.flush()`` at connection close
-    emits one summary per suppressed cap.
+    Explicit counter and connection_id override ambient context. Without a
+    counter, every call emits. With one, first hits emit and repeats accumulate
+    until flush; the connection owner must flush at teardown.
     """
     active = counter if counter is not None else _current_counter.get()
     # A lazily-bound holder materialises its real counter (and its

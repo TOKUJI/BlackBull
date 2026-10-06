@@ -17,9 +17,7 @@ from .field_grammar import FIELD_VALUE_ALLOWED_OCTETS, LOWERCASE_TCHAR_OCTETS
 import logging
 from ..logger import log, debug_gate
 logger = logging.getLogger(__name__)
-#: Read once at import: a disabled ``logger.debug`` on a per-request path
-#: costs 24 executed instructions to emit nothing.  Same bargain as
-#: ``@log`` — see [`blackbull.logger.debug_gate`][blackbull.logger.debug_gate].
+# debug_gate reads the logger level at import, like @log.
 _DEBUG = debug_gate(logger)
 
 
@@ -59,12 +57,7 @@ class FrameTypes(bytes, Enum):
 
 
 class FrameFlags(IntEnum):
-    """Common base for all HTTP/2 frame flag enums.
-
-    Inheriting from this empty base allows type annotations to reference
-    ``FrameFlags`` instead of listing every concrete flag enum.  Because
-    ``FrameFlags`` itself has no members, Python's restriction on subclassing
-    a non-empty ``IntEnum`` does not apply.
+    """Common annotation base for frame flag enums.
     """
 
 
@@ -133,11 +126,7 @@ class ErrorCodes(IntEnum):
 
 
 class FrameFormatError(ValueError):
-    """A frame the RFC calls malformed, carrying the code its own section names.
-
-    A parser that raises a bare ``Exception`` leaves the caller to guess the
-    error code from the message, and the guess is the thing the peer acts on.
-    ``ValueError`` because that is what the padding checks already raised.
+    """Malformed frame with its RFC-defined error code.
     """
 
     def __init__(self, message: str, error_code: ErrorCodes) -> None:
@@ -220,10 +209,7 @@ class SettingFrame(FrameBase):
     initial_window_size = None
     FRAME_TYPE = FrameTypes.SETTINGS
 
-    # RFC 9113 §6.5.2 — SETTINGS identifier (2-byte) → attribute name.
-    # Module-level constant: allocated once at import, so parsing a SETTINGS
-    # frame is a single dict lookup + setattr per entry rather than a bound
-    # method per identifier.
+    # RFC 9113 §6.5.2: SETTINGS identifier to attribute name.
     _SETTING_ATTRS: dict[bytes, str] = {
         b'\x00\x01': 'header_table_size',
         b'\x00\x02': 'enable_push',
@@ -319,30 +305,8 @@ class PseudoHeaders(StrEnum):
     PROTOCOL  = ':protocol'
 
 
-# RFC 9113 §8.3 — known pseudo-header field names.  At the frame parser
-# level we accept any of these (a HEADERS frame is parsed identically for
-# requests and responses).  The request-vs-response distinction (e.g.
-# ":status" is response-only, ":method"/":scheme"/":path" are request-only)
-# is enforced one layer up by ``parse_headers`` on the server side and by
-# the HTTP/2 client on the client side.
-#: Wire name -> member, built once at import.
-#:
-#: This replaces a frozenset of the same six names *plus* a
-#: ``PseudoHeaders(k_str)`` coercion.  Membership was checked against one
-#: representation and the value looked up in the other, so the list existed
-#: twice and a ``str`` was allocated purely to feed the second check.
-#:
-#: ``PseudoHeaders(value)`` is not a constructor — members are singletons
-#: created when the class body ran, and the call is a lookup routed through
-#: the metaclass (``EnumType.__call__`` -> ``Enum.__new__`` ->
-#: ``_value2member_map_``): two Python frames to do one dict lookup.  A
-#: plain module-level dict is that lookup without the frames, and it returns
-#: the same singletons.
-#:
-#: Keyed by ``bytes`` because the wire is bytes.  A module-level dict rather
-#: than a helper function or a classmethod on purpose: a helper is a call,
-#: and the call is what this removes — wrapping it gives back roughly a
-#: third of the saving to buy an API with one caller.
+# Accept known pseudo-fields here; request/response restrictions are enforced
+# by server parse_headers and the HTTP/2 client.
 _PSEUDO_BY_BYTES: dict[bytes, PseudoHeaders] = {
     m.value.encode('ascii'): m for m in PseudoHeaders
 }
@@ -407,18 +371,9 @@ def _field_defect(name: bytes, value: bytes) -> str:
 
 
 def no_hpack_context(frame: 'FrameBase', codec: str) -> TypeError:
-    """The refusal for a header frame that cannot name its connection's codec.
+    """Refuse header framing without the connection-owned shared HPACK context.
 
-    HPACK state is connection-wide and the peer keeps exactly one table for it
-    (RFC 7541 §2.3, RFC 9113 §4.3), so a substitute codec is never a weaker
-    version of the right one — it is a different table.  Both directions fail
-    the same way and silently: a private encoder writes indices the peer
-    resolves against entries someone else inserted, and a block that never
-    reaches the connection's decoder leaves it behind its peer for good.
-    Valid-looking bytes, wrong fields, no exception on either side.
-
-    The message has to send the reader to the connection rather than to the
-    signature, because "missing argument" is answered by passing *any* codec.
+    Never substitute a private encoder or decoder (RFC 7541 §2.3, RFC 9113 §4.3).
     """
     return TypeError(
         f'{frame.FRAME_TYPE.name} frame on stream {frame.stream_id} has no '
@@ -470,9 +425,7 @@ class Headers(FrameBase):
         # Values stored as str so they can flow directly into the ASGI scope
         # (which requires str for method/path/scheme).
         self.pseudo_headers: dict[PseudoHeaders, str] = {}
-        # Regular headers stored as bytes — ASGI requires bytes pairs and hpack
-        # returns bytes when decoded with raw=True (avoids the ~4% CPU cost of
-        # hpack's _unicode_if_needed bytes→str→bytes round-trip).
+        # Keep regular headers as bytes pairs throughout decoding.
         self.headers: list[tuple[bytes, bytes]] = []
 
         # Set by parse_payload when the header block violates RFC 9113 §8.1.2 /
@@ -532,8 +485,7 @@ class Headers(FrameBase):
                 return
             remaining -= 5
 
-        # raw=True keeps hpack output as bytes and bypasses its
-        # _unicode_if_needed UTF-8 decode (~4% CPU under load).
+        # raw=True preserves bytes header values.
         block = payload.read(remaining)
         if continued:
             block = bytes(block) + bytes(continued)
@@ -835,11 +787,7 @@ class Data(FrameBase):
             data_length = length - pad_length - 1
             self.payload = payload.read(data_length)
         else:
-            # Non-padded is the common case: the payload IS the frame data, so
-            # skip the BytesIO wrap + read copy.
-            # FrameFactory.load already sliced data to exactly ``length``; the
-            # conditional preserves BytesIO.read(length) semantics for the rare
-            # over-long input without copying when it already fits.
+            # FrameFactory.load bounds data to length; preserve truncation for direct calls.
             self.payload = data if len(data) == length else data[:length]
         if _DEBUG:
             logger.debug(self.payload)

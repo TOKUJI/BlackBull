@@ -1,19 +1,7 @@
-"""Extension mechanism — the single, generic plugin contract.
+"""Extensions register through app.add_extension and public app APIs.
 
-An [`Extension`][] wires itself into a [`BlackBull`][blackbull.app.BlackBull]
-application through the public ``app.*`` API: routes, middleware, event
-listeners, and — for non-HTTP protocols — ``app.register_protocol_handler``.
-Registration goes through one core method, [`BlackBull.add_extension`][BlackBull.add_extension], so
-the core class carries **no** protocol-specific surface.
-
-This generalises the convention that ``OpenAPIExtension`` already followed
-(``extension_key`` + ``init_app(app)`` + self-storage in ``app.extensions``).
-Protocol extensions (the MQTT broker is the reference) are *just* extensions
-that call ``register_protocol_handler`` in ``init_app`` — there is
-deliberately no separate "protocol extension" base class until a second
-protocol justifies one.
-
-See ``docs/guide/extensions.md``.
+Protocol extensions use the same lifecycle and registration mechanism;
+do not add a separate protocol-extension base without a shared requirement.
 """
 from __future__ import annotations
 

@@ -1,6 +1,6 @@
 # Hello World
 
-The minimal BlackBull app — full ASGI 3.0 form.
+A full-form BlackBull handler using a native Connection.
 
 ```python title="myapp.py"
 from blackbull import BlackBull, Response
@@ -28,13 +28,13 @@ $ curl localhost:8000/
 Hello, world!
 ```
 
-That's a complete server: an HTTP/1.1 listener bound on
-`127.0.0.1:8000` with one route registered.  No external server
-process and no separate framework package — `BlackBull` is both.
+This binds port 8000 on every interface. To bind only loopback, use
+`app.run(listeners=[Listener(Tcp(8000, host='127.0.0.1'))])` with
+`Listener` and `Tcp` imported from `blackbull`; see [Listeners](../guide/listeners.md).
 
 ## The full triplet
 
-Every HTTP handler receives three arguments:
+Full-form HTTP handlers receive three arguments; simplified handlers can omit them:
 
 | Argument | Type | Role |
 |---|---|---|

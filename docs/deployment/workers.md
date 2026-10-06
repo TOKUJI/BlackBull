@@ -126,48 +126,15 @@ multi-worker-only; a single-worker server is never pinned.
 
 ### Workers vs cores under connection churn
 
-The "one worker per core" advice assumes long-lived connections.
-When connections are short-lived — every request opens a new
-connection (`Connection: close`), or the workload rotates them
-every few requests — raising `BB_WORKERS` above the core count
-costs real throughput.  Measured on a 16-core cpuset, `/`
-endpoint, best-of-3:
-
-| workload | W=16 | W=32 | W=64 | loss 16→64 |
-|---|---:|---:|---:|---:|
-| keep-alive | 292k | 284k | 279k req/s | ~4.5 % |
-| churn | 96k | 90k | 81k req/s | ~16 % |
-
-The churn loss is two stacked costs: the shared listener's
-**accept race** — every connection wakes every worker, which
-profiles show as `accept()` growing from ~3 % to ~11 % of worker
-time at 4× oversubscription — plus the general oversubscription
-amplification of per-connection work.
-
-Neither of the obvious knobs fixes it:
-
-- `BB_SOCKET_REUSEPORT=1` removes the accept race, but the
-  kernel's hash spreads a burst of new connections unevenly
-  across the per-worker queues and leaves cores idle — in the
-  same run it was still *slower* than the shared socket under
-  churn (87k vs 96k req/s at W=16).
-- `BB_CPU_PINNING=off` made no measurable difference (A/B at the
-  same worker counts).
-
-For churn-heavy deployments keep `BB_WORKERS` at or below the
-core count; extra workers buy contention, not throughput.
+Start at or below the available physical-core count and tune against your
+workload. Extra workers contend for CPU and accept queues, especially when
+clients reconnect frequently. Compare shared listeners and
+`BB_SOCKET_REUSEPORT=1` under that workload before choosing either.
 
 ## Warm-up before fork
 
-A worker that has just forked runs interpreted bytecode: no
-specialization, no filled caches, cold branch predictors.  Every
-worker pays that cost separately, and under a pre-fork model it is
-paid *N* times for the same code.
-
-`@app.on_warmup` moves the payment forward.  The hook runs once in
-the master, before the listening socket is created and before any
-worker forks, so the heap it warms is the heap every worker
-inherits:
+`@app.on_warmup` runs once before binding listeners and forking workers.
+Only warm reusable code and data here; open per-worker resources at startup.
 
 ```python
 @app.on_warmup
@@ -178,15 +145,6 @@ async def warm(app):
         headers=Headers([(b'content-type', b'application/grpc')]))
     await app.warm_request(conn, body=req_bytes, n=2000)
 ```
-
-Two mechanisms carry the warmth across `fork()`.  PEP 659
-specialization lives in the code objects, which are shared pages,
-so it survives.  Reference-count churn would otherwise dirty those
-pages and copy them per worker, so the framework calls
-`gc.collect()` and then `gc.freeze()` once warm-up finishes —
-`gc.freeze()` moves surviving objects to a permanent generation the
-collector no longer traverses, which is what keeps the pages shared
-rather than copied.
 
 The hook must therefore warm and nothing else.  A DB pool or a
 socket opened here would be inherited by every worker as the *same*
@@ -255,11 +213,10 @@ BB_HEADER_TIMEOUT=3 python app.py
 BB_HEADER_TIMEOUT=0 python app.py
 ```
 
-HTTP/2 has no equivalent header timeout because the protocol
-doesn't allow a peer to drip header bytes one at a time —
-`HEADERS` and `CONTINUATION` frames carry their length in the
-frame header, and the `MAX_HEADER_LIST_SIZE` SETTING bounds the
-total.
+HTTP/2 uses the same BB_HEADER_TIMEOUT for an unfinished HEADERS/CONTINUATION
+block. A breach closes the connection with GOAWAY(ENHANCE_YOUR_CALM), because
+HPACK state is shared across streams. Frame lengths do not prevent a peer
+from stalling mid-frame or mid-block.
 
 ### Oversized headers — memory exhaustion
 
@@ -274,12 +231,8 @@ than only the first:
 | `BB_HEADER_MAX_LINE` | `8192` | A single header line (or the request line) exceeds this |
 | `BB_HEADER_MAX_TOTAL` | `65536` | The full header block exceeds this |
 
-A request that exceeds either limit gets
-`431 Request Header Fields Too Large` and the connection is
-closed.  The exception is a `BB_HEADER_MAX_TOTAL` overrun with no
-line terminator inside the budget: that start-line never ended, so
-it is answered `400 Bad Request` — 431 would tell a peer to send
-fewer header fields than the zero it has sent.
+Oversized request lines receive 400; oversized fields or an oversized field
+block receive 431. Both close the HTTP/1.1 connection.
 
 Either way the server discards a bounded amount of what the peer
 is still sending before it closes, because a close with unread
@@ -294,7 +247,7 @@ The defaults match Apache's `LimitRequestLine` /
 | Limit | Default | Behaviour |
 |---|---|---|
 | `BB_MAX_CONNECTIONS` | `auto` per worker | Connections beyond the cap are refused at accept time.  Combine with `BB_SOCKET_BACKLOG` for graceful overload.  `0` = unlimited. |
-| `BB_REQUEST_TIMEOUT` | `0` (off) | Per-HTTP/2-stream deadline in seconds.  Set in production (e.g. `30`) so an ASGI handler hung on an upstream call can't keep its stream slot indefinitely.  Stream is cancelled via `RST_STREAM CANCEL`. |
+| `BB_REQUEST_TIMEOUT` | `0` (off) | Handler deadline in seconds. HTTP/1.1 answers 408 and closes; HTTP/2 cancels the stream with `RST_STREAM CANCEL`. Set a positive budget compatible with long-lived requests. |
 
 ## Shutdown
 
@@ -380,12 +333,11 @@ python app.py --cert /etc/ssl/site.pem --key /etc/ssl/site.key
 What each line buys you:
 
 - `BB_WORKERS=0` — fills the CPU budget without hand-counting.
-- `BB_UVLOOP=1` — typical 1.5-2× throughput on HTTP/2 hot paths.
+- `BB_UVLOOP=1` — use uvloop when the `[speed]` extra is installed.
 - `BB_HEADER_TIMEOUT=3` — slowloris defence; 3 s is plenty
   behind a buffering reverse proxy.
-- `BB_REQUEST_TIMEOUT=30` — evicts stalled handlers from HTTP/2
-  stream slots.
-- `BB_MAX_CONNECTIONS=1000` — caps memory at a known ceiling.
+- `BB_REQUEST_TIMEOUT=30` — cancels stalled HTTP/1.1 and HTTP/2 handlers.
+- `BB_MAX_CONNECTIONS=1000` — bounds concurrent connections per worker; size it together with per-connection and per-stream budgets.
 - `BB_ACCESS_LOG=1` — leave on unless a separate log aggregator
   is consuming structured logs.
 

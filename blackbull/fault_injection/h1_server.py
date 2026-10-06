@@ -1,27 +1,7 @@
-"""A deliberately misbehaving HTTP/1.1 server.
+"""Deliberately malformed HTTP/1.1 server.
 
-The HTTP/1.1 half of the fault-injection grid's *server* direction — the
-cell the toolkit did not have.  Point your own HTTP/1.1 client at it and
-assert that the client survives what a real server can do wrong::
-
-    scenario = ScenarioH1Server(steps=[
-        WaitForRequest(),
-        SendRawBytes(b'HTTP/1.1 200 OK\\r\\nContent-Length: 100\\r\\n\\r\\nshort'),
-        CloseGracefully(),
-    ])
-    async with H1FaultServer(scenario) as srv:
-        with pytest.raises(...):
-            await my_client.get(f'http://{srv.host}:{srv.port}/')
-
-**It assembles every byte itself**, importing nothing from
-``blackbull.server.sender`` or ``blackbull.server.response`` —
-``tests/unit/test_fault_injection_h1_server.py::TestTheBreakerIsIndependent``
-pins that, because the property is invisible until the day it matters.
-
-Two safety locks, the same pair [`H2FaultServer`][] carries and both in
-scope for security reports per ``SECURITY.md``: it refuses to start in a
-production context, and it refuses a non-loopback bind without an explicit
-``allow_remote=True``.
+Assemble output independently of production senders. Production mode is
+refused; non-loopback binds require allow_remote=True.
 """
 from __future__ import annotations
 

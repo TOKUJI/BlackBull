@@ -442,10 +442,8 @@ same limit:
 The second exists because the first cannot see what a frame *becomes*.
 Two paths grow a message after the frame check has already passed:
 
-- **Decompression.** With `permessage-deflate` negotiated, the frame on
-  the wire is compressed.  Deflate ratios measured in this tree reach
-  **1028.8:1**, so a 1 MiB frame — comfortably legal under the frame cap
-  — inflates to roughly 1 GiB.
+- **Decompression.** A compressed frame can inflate beyond the frame cap;
+  the message cap applies to the inflated payload.
 - **Fragmentation.** Each continuation frame is individually legal; the
   sum is what costs memory.
 
@@ -467,9 +465,8 @@ BB_WS_MAX_MESSAGE_SIZE=262144 python app.py
 
 The default is the largest message the Autobahn test suite sends, chosen
 so conformance passes with nothing configured.  **If your application
-does not serve huge messages, lower it.**  The default bounds the
-amplification but does not remove it: at the ratio above, a peer still
-buys 16 MiB of your memory for about 16 KiB of its own bandwidth.
+does not serve huge messages, lower it.** Budget per-connection buffering
+across concurrent peers; this cap is not a process-memory limit.
 
 ## Read-ahead and back-pressure
 

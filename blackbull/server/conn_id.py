@@ -1,15 +1,6 @@
-"""Cheap process-unique connection ids.
+"""Connection IDs with a per-process prefix and monotonic sequence.
 
-Format: ``<12-hex process prefix><8-hex sequence>`` (20 hex characters).
-The prefix is drawn once per process and re-drawn in forked children via
-``os.register_at_fork``, so ids are unique within a process by construction
-(monotonic sequence, no birthday bound) and collide across processes only if
-two 48-bit prefixes collide — ~3×10⁻¹² for a 32-worker fleet.
-
-Neither of the obvious alternatives fits: ``uuid.uuid4()`` costs an entropy
-syscall and ~2 µs per accept, and a 32-bit random id has real birthday-bound
-collision odds at production churn — ~1.2 % at 10 k concurrent connections,
-~50 % at 65 k.
+Regenerate the random prefix after fork so children cannot share an ID sequence.
 """
 from __future__ import annotations
 

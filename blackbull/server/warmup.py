@@ -1,34 +1,7 @@
-"""Pre-fork warm-up — run an app's warm-up hooks *once* in the master before it
-binds a listening socket or forks workers, so every worker is born warm.
+"""Best-effort warm-up before binding and fork.
 
-Motivation
-----------
-One asyncio event loop per worker services both ``accept()`` and request
-processing, so a **cold** CPU-bound coroutine — a fresh gRPC codec encoding
-thousands of streams, a burst of cold TLS handshakes — can hold the loop until
-the kernel listen backlog overflows and a colocated load generator's redial
-storm turns the transient into an ``ECONNREFUSED`` collapse.  The empirical
-tell is that the *second* run of the same process is always clean: warmth, not
-structure, is the differentiator.
-
-Warm-up registered via [`BlackBull.on_warmup`][BlackBull.on_warmup] therefore runs here, once,
-before the listening socket exists:
-
-* **Before bind + fork** (multi-worker): forked workers inherit the warmed heap
-  via copy-on-write.  PEP 659's adaptive specialization lives in the code
-  objects on the heap, so it survives ``fork()``; ``gc.collect()`` +
-  ``gc.freeze()`` keep the warmed pages COW-shared instead of being dirtied by
-  the first post-fork collection.
-* **Before serving** (single-worker): the one process is warm before it binds.
-
-Safety
-------
-Warm-up is best-effort and must never crash the master: every failure is logged
-and swallowed, degrading to a cold start.  It uses only in-process ASGI drives
-and in-memory (``ssl.MemoryBIO``) handshakes — never a socket, a live
-connection, or a lingering event loop that a subsequent ``fork()`` could
-inherit (the classic ``preload_app`` hazard).  The temporary loop
-[`run_warmup`][] uses is closed before it returns.
+Never leave a live socket, task or temporary event loop for workers to inherit.
+Failures log and fall back to cold startup; the wall-clock budget must bound boot.
 """
 import asyncio
 import gc
@@ -71,13 +44,9 @@ def _name(fn) -> str:
 
 
 def run_warmup(app, ssl_context=None) -> None:
-    """Synchronous pre-fork entry point (called from ``serve`` before bind/fork).
+    """Run best-effort warmup hooks before fork in a temporary, closed event loop.
 
-    No-op when *app* registered no [`BlackBull.on_warmup`][BlackBull.on_warmup] hooks.  Otherwise
-    runs the hooks (plus the built-in TLS warm-up when *ssl_context* is set) in a
-    **temporary** event loop that is closed before returning, so a subsequent
-    ``fork()`` never inherits a live loop.  Ends with ``gc.collect()`` +
-    ``gc.freeze()`` to keep the warmed pages copy-on-write-shared across fork.
+    Single-worker startup runs hooks on the serving loop instead.
     """
     hooks = getattr(app, '_warmup_hooks', None)
     if not hooks:
@@ -94,11 +63,7 @@ def run_warmup(app, ssl_context=None) -> None:
 
 
 async def warmup_inline(app, ssl_context=None) -> None:
-    """Async warm-up used by the single-worker path (runs on the serving loop).
-
-    Same behaviour as [`run_warmup`][] minus the temporary-loop management:
-    the single-worker process never forks, so warming on the loop that will go
-    on to serve is both correct and cheaper.  Never raises.
+    """Run best-effort hooks on the serving loop; log hook failures without preventing startup.
     """
     hooks = getattr(app, '_warmup_hooks', None)
     if not hooks:
@@ -144,12 +109,7 @@ def _freeze() -> None:
 
 
 async def warm_tls(ssl_context, *, n: int = _DEFAULT_TLS_N) -> None:
-    """Prime the TLS handshake path with *n* in-memory handshakes (no socket).
-
-    Drives full handshakes between the server *ssl_context* and a throwaway
-    client context over paired ``ssl.MemoryBIO`` buffers, faulting in the
-    OpenSSL / RSA / ALPN code the TLS benchmark profiles hit cold on run-1.
-    Self-contained: creates no listener and no file descriptor.
+    """Warm TLS using in-memory SSL BIOs, without binding a listener.
     """
     if ssl_context is None or n <= 0:
         return

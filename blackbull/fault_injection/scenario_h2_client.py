@@ -1,26 +1,7 @@
-"""Programmable HTTP/2 **client-side** scenario model.
+"""HTTP/2 client-side scenarios for a target server.
 
-A [`ScenarioH2Client`][] is a sequence of typed *steps* that
-[`blackbull.client.http2.HTTP2Client.execute_scenario`][blackbull.client.http2.HTTP2Client.execute_scenario] walks in order
-against a live connection.  This is the client-side half of the HTTP/2
-toolkit: a programmable client that drives a target *server* through
-deliberate misbehaviour — a preface that never arrives, a header block
-opened and abandoned, a Rapid Reset burst, a window never opened.
-
-Its twin is [`blackbull.fault_injection.scenario_h1`][blackbull.fault_injection.scenario_h1], the client-side
-vocabulary one protocol over, and this module takes that twin's names
-wherever the two mean the same thing: [`SendRawBytes`][],
-[`ReadResponse`][], [`Sleep`][], [`Abort`][], and the fields of
-[`ScenarioH2ClientResult`][].
-
-Two steps have no HTTP/1.1 counterpart:
-
-* [`SendPreface`][] — HTTP/1.1 has no connection preface.
-* [`SendFrame`][] — HTTP/2 is framed where HTTP/1.1 is a byte stream, so
-  the typed step builds a frame rather than a blob.
-
-The bytes are assembled here and not by the production send path;
-``docs/guide/fault_injection.md`` says why.
+Assemble fault bytes independently of production request sending. Shared
+transport steps do not make the two wire roles interchangeable.
 """
 from __future__ import annotations
 
@@ -149,18 +130,7 @@ class Abort:
 
 @dataclass(frozen=True)
 class WaitForServerFrame:
-    """Read frames until one satisfies ``match``, or the timeout wins.
-
-    A **filter**: non-matching frames are read, counted in
-    ``wait_skipped``, and passed over.  Twin of
-    [`WaitForClientFrame`][blackbull.fault_injection.scenario_h2.WaitForClientFrame].
-
-    This is what makes an HTTP/2 client scenario able to observe a
-    *verdict*.  A single ``ReadResponse`` cannot: the first frame any
-    correct server sends is its handshake SETTINGS, so a GOAWAY or
-    RST_STREAM is always further down the stream, at a depth that varies
-    by peer.  A scenario that had to guess that depth was a scenario
-    written against one server.
+    """Filter frames until match or timeout; count and consume nonmatches in wait_skipped.
     """
     match: dict = field(default_factory=dict)
     timeout: float = 5.0
@@ -221,17 +191,9 @@ class ScenarioH2ClientResult:
     steps_completed: int = 0
     #: Seconds from the first step to the last.
     elapsed_s: float = 0.0
-    #: True when a ``HalfClose`` step actually shut down the write side.
-    #: False both when no such step ran and when the transport refused it
-    #: (TLS has no half-close), so a test can tell "did not ask" from
-    #: "asked and it did not happen" — a silently skipped half-close
-    #: otherwise reads as a pass.
+    #: True on successful write-side half-close; False if absent or unsupported.
     half_closed: bool = False
-    #: Everything a read step received, in order.  ``response`` stays the
-    #: most recent one for back-compat; this is what a scenario needs when
-    #: the peer sends more than one thing — a pipelined pair on HTTP/1.1, or
-    #: the handshake frames an HTTP/2 verdict arrives behind.  Before it
-    #: existed, the second read overwrote the first and the loss was silent.
+    # All responses in wire order; response remains the most recent one.
     received: list = field(default_factory=list)
     #: Bytes read from the peer.  Named for who the peer is, mirroring
     #: ``client_bytes_received`` on the broken-server results.
@@ -342,13 +304,7 @@ def scenario_from_json(src: str) -> ScenarioH2Client:
 
 
 def encode_headers(step: SendHeaders) -> bytes:
-    """Assemble one HEADERS frame from *step*.
-
-    HPACK encoding goes through the ``hpack`` package the server also uses,
-    because a *correct* block is the baseline every header fault is a
-    deviation from — hand-rolling it would make even the well-formed case a
-    guess.  ``raw_block`` is the escape hatch for blocks HPACK will not
-    produce.
+    """Build HEADERS using HPACK; raw_block permits arbitrary encoded bytes.
     """
     if step.raw_block is not None:
         block = step.raw_block
@@ -388,11 +344,7 @@ def encode_frame(step: SendFrame) -> bytes:
 
 # Unannotated: see tests/unit/test_deprecated_send_bytes_spellings.py::test_the_warning_is_attributed_to_the_callers_line.
 def __getattr__(name):
-    """PEP 562 — warn when the deprecated spelling is actually used.
-
-    A module-level assignment would alias silently; going through
-    ``__getattr__`` means only a caller who reaches for ``SendBytes`` is
-    warned, and is warned at their own call site.
+    """Deprecated SendBytes alias for SendRawBytes; removal no earlier than 2027-08-19.
     """
     if name == 'SendBytes':
         import warnings  # noqa: PLC0415

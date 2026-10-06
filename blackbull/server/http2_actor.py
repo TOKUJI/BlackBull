@@ -46,8 +46,7 @@ from ..native import NativeResponse
 from .http1_actor import RequestActor
 
 logger = logging.getLogger(__name__)
-#: Read once at import; the cost this buys is measured in
-#: [`blackbull.logger.debug_gate`][blackbull.logger.debug_gate].
+# DEBUG enablement is fixed at import.
 _DEBUG = debug_gate(logger)
 
 
@@ -170,11 +169,9 @@ def _resolve_priority(stream: 'Stream', conn: Connection) -> dict[str, int | boo
 
 
 class StreamActor(Actor):
-    """Owns one HTTP/2 stream.
+    """Run one HTTP/2 request through RequestActor with a native Connection.
 
-    Single-shot like RequestActor: run() processes one stream and returns.
-    Delegates to RequestActor for ASGI dispatch.
-    Supervisor strategy: isolate — RST_STREAM on unhandled error.
+    Isolate unhandled failure with RST_STREAM; do not share per-stream state.
     """
 
     def __init__(
@@ -519,11 +516,7 @@ class HTTP2Actor(Actor):
 
     @log
     async def send_frame(self, frame: FrameBase) -> None:
-        """Send a raw HTTP/2 frame via the control-plane sender.
-
-        Every emitted RST_STREAM passes through here, which is what makes
-        this the one place the G8 blind spot can be closed without dusting
-        the counter across a dozen refusal sites.
+        """Send a control frame and meter every emitted RST_STREAM at this boundary.
         """
         terminal_reset = (frame.FrameType() == FrameTypes.RST_STREAM
                           and not self._goaway_sent)
@@ -576,11 +569,7 @@ class HTTP2Actor(Actor):
     async def _connection_error(
         self, error_code: 'ErrorCodes', reason: str = '',
     ) -> None:
-        """Send GOAWAY with ``error_code``, half-close the writer, mark exit.
-
-        The write half is closed rather than left open because h2spec's
-        VerifyConnectionClose only succeeds on a real TCP close; the frame
-        loop then drains on the next iteration via EOF.  Idempotent.
+        """Idempotently send error GOAWAY, close the write side and mark connection exit.
         """
         if self._goaway_sent:
             return
@@ -816,18 +805,10 @@ class HTTP2Actor(Actor):
         await self._close_connection(ErrorCodes.ENHANCE_YOUR_CALM)
 
     async def _liveness_watchdog(self) -> None:
-        """Bound how long a peer may take, without touching the frame read.
+        """Enforce header, idle and PING deadlines by closing the writer.
 
-        ``BB_HEADER_TIMEOUT``, ``BB_H2_IDLE_TIMEOUT`` and
-        ``BB_H2_PING_TIMEOUT`` (see ``docs/reference/env-vars.md``) share one
-        loop because a timestamp answers all three.  It sleeps to the earliest
-        deadline that applies and re-evaluates on waking, so an idle connection
-        costs one wake-up per idle period rather than a fixed tick.
-
-        All three end the connection by closing the *writer*: the frame loop is
-        parked in a read, and closing the transport makes that read return EOF,
-        a path the loop already handles.  Cancelling it would abandon a
-        partially-read frame and leave teardown racing the stream tasks.
+        Do not cancel a partially read frame; closing wakes the reader for ordered
+        stream teardown. Re-evaluate the applicable deadline after each wakeup.
         """
         if self._h2_idle_timeout <= 0 and self._header_timeout <= 0:
             return
@@ -914,10 +895,7 @@ class HTTP2Actor(Actor):
         _tasks_since_yield = 0
         _yield_every = self._frame_yield_every
         _loop = asyncio.get_running_loop()
-        # Bound once: read on every inbound frame, and the attribute walk is
-        # the avoidable half of the cost.  The clock read itself stays — it is
-        # what makes ``BB_H2_IDLE_TIMEOUT`` mean the period it says, and a
-        # stated time bound is not traded for a fraction of a microsecond.
+        # Read activity time on every frame to enforce BB_H2_IDLE_TIMEOUT.
         _loop_time = _loop.time
 
         while data := await self.receive():
@@ -1203,11 +1181,7 @@ class HTTP2Actor(Actor):
         A ``BB_REQUEST_TIMEOUT`` expiry sends RST_STREAM CANCEL and lets the
         task complete normally, so it does not cancel the TaskGroup.
         """
-        # One dispatch path, never a fork on the aggregator: ``StreamActor`` is
-        # already None-tolerant in both fields that would differ, and a second
-        # path would duplicate ``RequestActor``'s plumbing while losing this
-        # one's failure handling — the part a peer can act on, since a raising
-        # stream is reset with INTERNAL_ERROR rather than left silent.
+        # StreamActor failure resets with INTERNAL_ERROR instead of leaving a silent stream.
         def _start_stream():
             return StreamActor(
                 stream_id=stream_id,
@@ -1372,10 +1346,8 @@ class HTTP2Actor(Actor):
         self.make_sender(stream.stream_id,
                          head_mode=method_is(conn.method, 'HEAD'))
 
-        # Guarded inline rather than behind a predicate: a stream is a request,
-        # and a method call to answer "no" measured 21 executed instructions
-        # per request where this comparison costs seven.  The refusal
-        # re-checks; it, not this, is where the limit is enforced.
+        # Keep the common admission check inline; the refusal path rechecks
+        # and enforces the limit.
         declared = stream.expected_content_length
         if (declared is not None and declared > self._max_body_size > 0
                 and await self._refuse_oversized_declared_body(
@@ -1390,11 +1362,7 @@ class HTTP2Actor(Actor):
             # No body: skip the queue allocation and let the recipient
             # synthesise the empty http.request event if one is asked for.
             stream_recipient.mark_end_of_stream_on_headers()
-        # ``open_record`` owns the gate and returns ``None`` when nothing will
-        # read the record.  Capture is inline in the sender's own arms, which
-        # guard on that None.  A wrapping ``send`` cannot do the job: the
-        # dict-shaped wrapper never sees a NativeResponse, so status and bytes
-        # regress to '-' and 0 — and it costs a per-event coroutine dispatch.
+        # Capture native sends inside sender arms; None means no record consumer.
         log_record = _open_record(conn, self._aggregator)
         send._log_record = log_record
         self._spawn_stream_task(tg, stream.stream_id, conn, stream_recipient, send, log_record)
@@ -1464,18 +1432,9 @@ class HTTP2Actor(Actor):
             header_frame, stream, send, tg)
 
     async def _refuse_oversized_declared_body(self, stream, conn, send) -> bool:
-        """413 the stream whose head declared more body than the cap allows.
+        """Answer an oversized declared body with 413, then RST_STREAM(NO_ERROR).
 
-        RFC 9113 §8.1 names the sequence: the complete response before the
-        request finishes, then ``RST_STREAM(NO_ERROR)``.  Why the connection
-        survives here where HTTP/1.1's refusal must close it:
-        ``BB_MAX_BODY_SIZE`` in ``docs/reference/env-vars.md``.  A body with no
-        ``content-length`` declares nothing to refuse; ``HTTP2Recipient``
-        counts that one as DATA arrives.
-
-        Callers gate on the same comparison inline, so the common answer costs
-        no call.  This re-checks because it, not the gate, is where the limit
-        is enforced: a caller that forgot the guard still gets it right.
+        Keep sibling streams alive. Undeclared bodies are counted by HTTP2Recipient.
         """
         declared = stream.expected_content_length
         cap = self._max_body_size
@@ -1565,10 +1524,7 @@ class HTTP2Actor(Actor):
             logger.warning('DATA for stream %d but no recipient found', stream.stream_id)
 
     async def _on_goaway_frame(self, last_stream_id: int) -> None:
-        """Handle an incoming GOAWAY: echo one back and signal all recipients.
-
-        Echoing the peer's last_stream_id is how it learns what it may safely
-        retry (RFC 9113 §6.8).
+        """Send GOAWAY with the supplied peer-stream id and signal all recipients.
         """
         await self.send_frame(self.factory.goaway(last_stream_id))
         _signal_recipients(self._recipients)

@@ -1,328 +1,80 @@
 # Conformance
 
-BlackBull is exercised against three published RFC conformance
-suites in addition to the in-tree pytest tests under
-`tests/conformance/`.
+Passing tests establish coverage of their cases, not complete protocol
+conformance or absence of defects.
 
 ## Coverage summary
 
-| Layer | Suite | Standard | Where it runs |
-|---|---|---|---|
-| HTTP/1.1 | in-tree `tests/conformance/http1/` | RFC 9110, RFC 9112 | `pytest` + CI |
-| HTTP/1.1 corpus replay | `tests/conformance/http1/test_h1_user_corpus_replay.py` | curated divergence set | `pytest` + CI (docker-free) |
-| HTTP/2 + HPACK | [h2spec](https://github.com/summerwind/h2spec) (external) | RFC 9113, RFC 7541 | CI + local harness under `bench/conformance/` |
-| WebSocket | [Autobahn|Testsuite](https://github.com/crossbario/autobahn-testsuite) (external) | RFC 6455, RFC 7692 | CI + local harness (Docker) |
-| WebSocket over HTTP/2 | in-tree `tests/conformance/http2/test_rfc8441.py` | RFC 8441 | `pytest` + CI |
-
-A push to `master` (or any PR against it) triggers
-[`.github/workflows/conformance.yml`](https://github.com/TOKUJI/BlackBull/blob/master/.github/workflows/conformance.yml),
-which runs the three external/external-shape suites on a fresh
-`ubuntu-latest` runner: h2spec, Autobahn|Testsuite, and the
-docker-free corpus replay.  The README's *RFC conformance* badge
-tracks that workflow's status; per-run artefacts (h2spec JUnit
-XML, Autobahn `index.json`, pytest output) are attached for 30
-days.  A weekly cron also runs the suite so upstream container /
-binary-release changes don't silently regress us between pushes.
-
-## HTTP/1.1 (in-tree pytest)
-
-Covers RFC 9110 (HTTP Semantics) and RFC 9112 (HTTP/1.1 message
-framing).  ~250 conformance test functions across the
-`tests/conformance/http1/` tree, organised by RFC section:
-
-| File | Covers |
-|---|---|
-| [`test_rfc9112_body_length.py`](https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_rfc9112_body_length.py) | `Content-Length`, body framing, `HEAD` / `GET` body disagreement (RFC 9110 §9.3) |
-| [`test_rfc9112_chunked.py`](https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_rfc9112_chunked.py) | `Transfer-Encoding: chunked` framing, trailers |
-| [`test_rfc9112_connection.py`](https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_rfc9112_connection.py) | Keep-alive, `Connection: close`, half-close |
-| [`test_rfc9112_pipelining.py`](https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_rfc9112_pipelining.py) | HTTP/1.1 pipelining with and without bodies |
-| [`test_rfc9112_smuggling.py`](https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_rfc9112_smuggling.py) | Request smuggling — CL.CL, CL.TE, TE.CL, TE.TE |
-| [`test_rfc9112_slowloris.py`](https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_rfc9112_slowloris.py) | Slowloris partial-headers defence (`BB_HEADER_TIMEOUT`) |
-| [`test_rfc9110_body_cap.py`](https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_rfc9110_body_cap.py) | `BB_MAX_BODY_SIZE` → 413 on both framings, refused before the body is read, and the connection close that stops a refusal becoming a smuggling window |
-| [`test_http1_dispatch.py`](https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_http1_dispatch.py) | ASGI dispatch — 1xx / 204 / 304 body suppression (RFC 9110 §15), auto-headers |
-
-```bash
-pytest tests/conformance/http1/ -q
-```
-
-Invalid HTTP raises `BadRequestError` at parse time in
-[`blackbull/server/parser.py`](https://github.com/TOKUJI/BlackBull/blob/master/blackbull/server/parser.py)
-— before the request reaches any application code.  The
-smuggling tests above cover the CVE classes that follow from
-`Content-Length` / `Transfer-Encoding` disagreement.
-
-## HTTP/2 — `h2spec`
-
-`h2spec` is the de-facto external conformance suite for HTTP/2
-and HPACK — ~146 numbered cases covering frame format, stream
-state, flow control, error codes, and header-block decoding.
-
-Install (one-time):
-
-```bash
-curl -L -sS https://github.com/summerwind/h2spec/releases/download/v2.6.0/h2spec_linux_amd64.tar.gz \
-    | tar -xz -C ~/.local/bin h2spec
-chmod +x ~/.local/bin/h2spec
-```
-
-Run against a locally-running TLS server on `:8443`:
-
-```bash
-# Start any BlackBull HTTPS server, then:
-bash bench/conformance/h2spec_run.sh                 # full suite (~2-5 min)
-bash bench/conformance/h2spec_run.sh hpack           # HPACK section only
-bash bench/conformance/h2spec_run.sh http2/6.5       # specific section
-```
-
-Output is teed to
-`bench/conformance/results/h2spec_<timestamp>.{txt,xml}` (both
-gitignored).  The XML is JUnit-format and machine-readable; the
-TXT ends with a `N tests, P passed, S skipped, F failed` line
-you can grep for the headline number.
-
-In-tree pytest tests under `tests/conformance/http2/` cover
-BlackBull-specific behaviour h2spec does not exercise (RFC 8441
-Extended CONNECT, CONTINUATION boundary cases, server-response
-shapes, and the `BB_MAX_BODY_SIZE` / `BB_MIN_BODY_RATE` refusals in
-`test_rfc9113_body_cap.py`), and run in normal `pytest` runs.
-
-Inbound request field sections use one completion path whether END_HEADERS is
-carried by HEADERS or a later CONTINUATION.  The opening HEADERS frame owns the
-stream's END_STREAM transition, so an empty request, a DATA-bearing request,
-request trailers, and RFC 8441 Extended CONNECT keep the same lifecycle at
-every legal field-block split.  A CONTINUATION on a different stream from its
-opening HEADERS is a connection-level PROTOCOL_ERROR, as required by RFC 9113
-§6.10.
-
-The in-tree client tests also exercise negative validation for malformed
-response HEADERS and fixed-length control frames before response or raw-stream
-dispatch, including the RFC-required connection-versus-stream error scope.
-The h2spec command above targets the BlackBull server; it does not establish
-full conformance of `HTTP2Client`, whose client-side coverage remains the
-focused pytest suite and is not a claim of complete client conformance.
-
-## WebSocket — Autobahn|Testsuite
-
-The de-facto external conformance suite for WebSocket — ~500
-numbered cases over framing, control frames, UTF-8 validation,
-close codes, fragmentation, and `permessage-deflate`.
-
-The harness drives the suite from a Docker image against a
-plaintext WebSocket echo server.  Docker is required.
-
-```bash
-# Terminal 1 — start the echo server BlackBull provides for the test
-python bench/conformance/autobahn_app.py --port 9001
-
-# Terminal 2 — run Autobahn against it
-bash bench/conformance/autobahn_run.sh               # full fuzzingclient run
-CASES='1.*' bash bench/conformance/autobahn_run.sh   # subset (e.g. all of §1.x)
-```
-
-The §9 *Limits and performance* cases send messages up to 16 MiB
-(9.1.6 text / 9.2.6 binary; the fragmented 9.4.x cases top out at
-4 MiB), so both WebSocket size limits must be at least the case
-size.  The shipped defaults accept every §9 case with nothing
-configured — `BB_WS_MAX_FRAME_PAYLOAD` at 64 MiB and
-`BB_WS_MAX_MESSAGE_SIZE` at exactly the 16 MiB the suite needs.
-Lower either for stricter exposure on untrusted-peer deployments;
-that is a deviation from the configuration this suite was run
-under.
-
-Reports land in `bench/conformance/results/autobahn_<timestamp>.<unique>/`
-with an HTML index — open `index.html` in a browser for the
-case-by-case breakdown.
-
-Each run also preserves unbuffered tester output in `tester.log`, the harness
-status in `exit-code.txt`, and Docker's exit/OOM state in `container-state.json`
-before removing its container. The state file is unavailable if container
-creation fails. Cleanup bounds each Docker operation to 10 seconds; case
-budgets belong to Autobahn and the total run budget belongs to the CI step.
-These diagnostics are included in the CI artifacts even if no index is
-produced. An interrupted tester can lose buffered progress and its end-of-run
-reports, so the last printed case alone does not identify the cause of death.
-Failure to inspect or remove an owned tester container turns an otherwise
-successful run into a failure. If the tester already failed, its original exit
-code remains the primary diagnosis while cleanup warnings record the secondary
-failure.
-
-The heavy lane asks the pinned tester's own `CaseSet` to resolve its selectors,
-then partitions those concrete IDs by their first two components. Every
-subgroup runs in a fresh tester container, so memory retained by a completed
-subgroup cannot accumulate into the next one. The manifest must contain all
-156 expected IDs exactly once, and each report must contain exactly its
-subgroup's IDs with accepted verdicts.
-
-The heavy lane retries the complete sequence once. A retry creates a fresh
-result group and starts again at the first subgroup; it never combines reports
-from different attempts. Success requires every subgroup process to exit
-successfully and every report to pass both the exact-ID and verdict checks. A
-crash with a partial or otherwise passing report is not a pass. A timeout, OOM
-kill, and protocol failure require different diagnoses and must not be
-classified as runner contention without evidence.
-
-## WebSocket over HTTP/2 (RFC 8441)
-
-There is no external h2spec-style harness for RFC 8441 yet.
-The in-tree pytest tests under
-`tests/conformance/http2/test_rfc8441.py` are the current source
-of truth for this surface.  RFC 8441 is also opt-in via
-`BB_H2_ENABLE_WEBSOCKET=1` (see
-[WebSockets](../guide/websockets.md#transport-http11-upgrade-vs-http2-extended-connect)).
-
-## Filing a non-conformance
-
-If a conformance run regresses (a case that previously passed
-starts failing), re-run the latest harness, attach the failing
-case's verbatim transcript to the report, and file an issue on
-the GitHub repo with:
-
-- the RFC section citation (e.g. RFC 9113 §6.5.2);
-- the case ID from h2spec or Autobahn (e.g. `http2/6.5/2`,
-  Autobahn `1.1.5`);
-- the transcript and any wireshark / `tshark` capture if
-  available.
-
-## Fuzz and property-based tests
-
-In addition to the RFC suites, the codebase exercises the parser
-and protocol layers with two unstructured-input harnesses.
-
-### atheris coverage-guided fuzz
-
-[`tests/conformance/http1/fuzz/fuzz_http1.py`](https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/fuzz/fuzz_http1.py)
-drives BlackBull's HTTP/1.1 parser with random byte sequences
-via [atheris](https://github.com/google/atheris).  The harness
-has run 100k+ iterations across corpus seeds without a process
-crash.  Targets:
-
-- `blackbull/server/parser.py` — request-line + header parsing
-- `blackbull/protocol/` — frame and HPACK decoding
-
-### Differential corpus vs nginx
-
-`tests/conformance/http1/fuzz/user-corpus/` holds 7 captured
-input/response pairs where BlackBull and nginx differ on the
-same input, each categorised:
-
-| Category | Meaning | Count |
+| Surface | Check | Scope |
 |---|---|---|
-| `STATUS_DIFFER` | RFC-defensible divergence (BlackBull is RFC-correct; nginx is permissive) | 2 |
-| `BOTH_REJECTED` | Both servers reject the malformed input | 4 |
-| `OK` | Both servers respond identically | 1 |
+| HTTP/1.1 | tests/conformance/http1/ | RFC 9110/9112 framing, dispatch and resource refusals |
+| HTTP/2 + HPACK | h2spec plus tests/conformance/http2/ | h2spec's RFC 7540/7541 cases; in-tree RFC 9113 behavior |
+| WebSocket | Autobahn plus in-tree tests | RFC 6455/7692 framing, compression and limits |
+| WebSocket over HTTP/2 | tests/conformance/http2/test_rfc8441.py | Opt-in RFC 8441 transport |
+| Client validation | In-tree client tests | Focused malformed-response and error-scope checks; server h2spec results do not validate clients |
 
-Both `STATUS_DIFFER` entries are **RFC-defensible** — BlackBull is
-the stricter reader — and are kept in the corpus deliberately rather
-than treated as bugs:
+[The conformance workflow](https://github.com/TOKUJI/BlackBull/blob/master/.github/workflows/conformance.yml)
+owns external-suite versions, case partitions, budgets and artifact retention.
+It runs on pushes, PRs and its schedule. Check the workflow result together
+with its artifacts; a partial report is not a passing run.
 
-| Wire request | nginx | BlackBull | Why we're right |
-|---|---|---|---|
-| `GET&nbsp;&nbsp;http://localhost/x HTTP/1.0` (double-SP between method and target) | 200 | 400 | RFC 9112 §3 — request-line tokens are separated by exactly one SP.  nginx is lenient; we reject. |
-| `GET&nbsp;&nbsp;http://localhost/x HTTP/9.9` (double-SP **and** unknown version) | 505 | 400 | Validation-order choice: the request-line SP grammar (RFC 9112 §3) is checked before the HTTP version, so the malformed line is 400 first.  nginx reports the version problem (505) instead.  A *well-formed* request with an unsupported version does get 505 from BlackBull (RFC 9110 §15.6.6). |
-
-Both are also recorded in
-[`tests/conformance/http1/fuzz/user-corpus/diff_README.md`](https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/fuzz/user-corpus/).
-We are not chasing nginx parity unless a real user need appears —
-being stricter than a permissive server is a conformance result, not
-a defect.
-
-#### Docker-free regression replay
-
-The full differential test
-([`test_http1_differential.py`](https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_http1_differential.py))
-spins up nginx via `testcontainers` and skips at collection when
-Docker isn't reachable — which excludes most CI runners.  A
-companion test runs against just BlackBull:
+## In-tree tests
 
 ```bash
-pytest tests/conformance/http1/test_h1_user_corpus_replay.py -q
+pytest tests/conformance/ -q
 ```
 
-For each `diff_*.meta.json` sidecar, it sends the recorded
-`wire_request_latin1` to a live in-process BlackBull and asserts
-the response status code still matches the recorded
-`blackbull_status`.  Runs in well under a second; no Docker, no
-network egress.  A failure pinpoints which curated edge case
-moved without re-running the Hypothesis sweep against nginx.
+The HTTP/1.1 corpus replay needs no Docker and is included above. The live
+nginx differential test requires Docker/testcontainers and skips when they
+are unavailable. For a changed recorded status, decide whether it is a
+regression before regenerating the corpus under Docker; do not update the
+expectation merely to make a test pass.
 
-If you change the HTTP/1.1 parser or dispatch path and a corpus
-entry's status shifts, decide whether the shift is:
+## HTTP/2 — h2spec
 
-- a **real regression** — fix the change that moved the status; or
-- an **intentional behaviour change** — delete the obsolete
-  `.meta.json` / `.jsonl` pair, regenerate by running the full
-  differential test under Docker, and commit the refreshed
-  recording.
+Install the version pinned by the workflow and start a BlackBull TLS server
+on port 8443. Then run:
 
-## Verifying your fork stays RFC-correct
+```bash
+bash bench/conformance/h2spec_run.sh
+bash bench/conformance/h2spec_run.sh hpack
+bash bench/conformance/h2spec_run.sh http2/6.5
+```
 
-If you're carrying a patch on top of BlackBull and want assurance
-that your changes haven't broken protocol conformance, this is
-the recommended order:
+Results are saved as bench/conformance/results/h2spec_<timestamp>.txt and
+.xml. Read the final test/failure counts and process status; XML is JUnit.
+RFC 8441, response validation and BlackBull resource-policy cases also need
+the in-tree tests.
 
-1. **Run the in-tree pytest suite**:
-   ```bash
-   pytest tests/conformance/ -q
-   ```
-   This covers HTTP/1.1 (RFC 9110, RFC 9112), HTTP/2 BlackBull-
-   specific cases, and RFC 8441 — fastest signal, no external
-   dependencies.
+## WebSocket — Autobahn
 
-2. **Run the docker-free corpus replay**:
-   ```bash
-   pytest tests/conformance/http1/test_h1_user_corpus_replay.py -q
-   ```
-   Confirms the curated divergence set still holds.  Single
-   second.
+Docker is required. In separate terminals:
 
-3. **Run h2spec locally** (RFC 9113 + RFC 7541):
-   ```bash
-   openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem \
-       -days 365 -nodes -subj '/CN=localhost'
-   python bench/conformance/h2spec_app.py --port 8443 \
-       --cert cert.pem --key key.pem &
-   bash bench/conformance/h2spec_run.sh
-   ```
-   ~2-5 minutes.  Output: `bench/conformance/results/h2spec_*.{txt,xml}`.
+```bash
+python bench/conformance/autobahn_app.py --port 9001
+bash bench/conformance/autobahn_run.sh
+```
 
-4. **Run Autobahn|Testsuite locally** (RFC 6455 + RFC 7692):
-   ```bash
-   python bench/conformance/autobahn_app.py --port 9001 &
-   bash bench/conformance/autobahn_run.sh
-   ```
-   Requires Docker.  ~3-10 minutes.  Browse
-   `bench/conformance/results/autobahn_*/index.html` for the
-   case-by-case breakdown.
+Use `CASES='1.*'` for a subset. Full limits cases need messages up to 16 MiB;
+if you lower frame/message caps, record that configuration when interpreting
+those refusals.
 
-5. **Push to a branch and let CI run** the same three external
-   suites in parallel on `ubuntu-latest`.  The
-   [`conformance.yml`](https://github.com/TOKUJI/BlackBull/blob/master/.github/workflows/conformance.yml)
-   workflow runs on every push and PR to master; its badge in
-   the README turns red if any suite regresses.
+Reports are under bench/conformance/results/autobahn_<timestamp>.<unique>/.
+Keep index.json/index.html, tester.log, exit-code.txt and container-state.json
+when present. Missing reports, timeout, OOM and protocol failure are distinct
+outcomes. A successful report from a failed process is not a pass; a failed
+container inspection/removal also fails the harness. The workflow and
+bench/conformance/autobahn_run.sh own retry and cleanup rules.
 
-A clean run of all five steps means your fork passes the same
-RFC-conformance bar that BlackBull itself ships with.  None of
-this proves the absence of bugs — these are published suites
-with finite coverage — but a regression in any of them is a
-hard signal you've changed protocol-level behaviour.
+## Fuzzing and failure reports
 
-### Hypothesis property tests
+The HTTP/1.1 atheris entry point is
+[tests/conformance/http1/fuzz/fuzz_http1.py](https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/fuzz/fuzz_http1.py).
+Property tests under tests/properties/ exercise structured random inputs.
+The curated nginx divergence corpus records intentional validation-policy
+choices; nginx disagreement alone does not establish a defect.
 
-[`tests/properties/`](https://github.com/TOKUJI/BlackBull/tree/master/tests/properties)
-uses [hypothesis](https://hypothesis.readthedocs.io/) to
-generate structured random inputs for header parsing
-([`test_headers.py`](https://github.com/TOKUJI/BlackBull/blob/master/tests/properties/test_headers.py))
-and HTTP/2 frame round-tripping
-([`test_http2_frame.py`](https://github.com/TOKUJI/BlackBull/blob/master/tests/properties/test_http2_frame.py)),
-checking invariants (round-trip equality, header-name
-case-insensitivity) across many shapes.
-
-## Other testing surfaces
-
-- [Testing](../guide/testing.md) — how to write tests for your
-  own application using BlackBull's clients or
-  `httpx.ASGITransport`.
-- The differential fuzz corpus above records RFC-defensible
-  divergences from nginx; see
-  [`KNOWN_LIMITATIONS.md`](https://github.com/TOKUJI/BlackBull/blob/master/KNOWN_LIMITATIONS.md)
-  for the documented entries.
+For a failure, retain the exact build and configuration, failing case ID,
+transcript, process status and available packet capture. Cite the violated
+requirement when filing an issue. See [Testing](../guide/testing.md) for
+application tests and [Security model](security-model.md) for configured bounds.

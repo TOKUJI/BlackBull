@@ -1,10 +1,4 @@
-"""Case-insensitive, ordered, multi-valued HTTP header store.
-
-Provides:
-
-- `Headers`: satisfies the ASGI ``Iterable[tuple[bytes, bytes]]`` contract while
-  adding ``get``, ``getlist``, case-insensitive lookup, ``append``, and ``+`` concatenation.
-- `HeaderList`: type alias for ``Iterable[tuple[bytes, bytes]]``.
+"""Ordered, multi-valued byte headers with case-insensitive lookup.
 """
 from collections.abc import Iterable
 from typing import TypeAlias
@@ -77,35 +71,11 @@ def _minimal_response_headers(fields: Iterable) -> _MinimalResponseHeaders:
 
 
 class Headers:
-    """Ordered multi-valued HTTP header store.
+    """Ordered multi-valued headers with bytes names and values.
 
-    Satisfies the ASGI ``Iterable[[byte string, byte string]]`` contract
-    while also providing O(1) dict-like lookup.
-
-    **Invariants**:
-
-    - Header names and values are always ``bytes`` (per ASGI spec).
-    - Lookups are case-insensitive: the internal index is keyed on
-      ``name.lower()`` (RFC 7230 §3.2 — header field names are case-insensitive).
-      ``__contains__``, ``__getitem__``, ``getlist``, and ``get`` accept any
-      casing; iteration preserves the original casing of the input.
-    - Insertion order of duplicate names is preserved (RFC 7230 §3.2.2).
-
-    Examples::
-
-        headers = Headers([(b'set-cookie', b'a=1'), (b'set-cookie', b'b=2')])
-
-        list(headers)
-        # [(b'set-cookie', b'a=1'), (b'set-cookie', b'b=2')]   # ASGI iteration
-
-        headers.getlist(b'set-cookie')
-        # [(b'set-cookie', b'a=1'), (b'set-cookie', b'b=2')]
-
-        headers.getlist(b'missing')
-        # []
-
-        headers.get(b'host')          # first value, or default
-        # b'localhost:8000'
+    Lookups ignore name casing; iteration preserves input casing and duplicate
+    order. get returns the first value or its default; getlist returns all
+    matching (name, value) pairs, or an empty list.
     """
 
     def __init__(self, pairs: Iterable[tuple[bytes, bytes]]):
@@ -116,23 +86,10 @@ class Headers:
 
     @classmethod
     def from_lowered(cls, pairs: list[tuple[bytes, bytes]]) -> 'Headers':
-        """Build from pairs whose names are **already lowercase**.
+        """Adopt pairs whose names the caller guarantees are lowercase.
 
-        The caller must guarantee that; nothing here checks it, and a name
-        containing uppercase would be indexed unreachably (every accessor
-        lowercases before its fallback probe, so the field would be
-        invisible to lookup while still appearing in iteration).
-
-        Two callers can guarantee it.  ``http1_actor._parse`` lowercases
-        each name while validating it, so re-lowercasing in ``__init__``
-        recomputes a known answer.  HTTP/2 field names are lowercase by
-        protocol — RFC 9113 §8.2.1 makes an uppercase name malformed, and
-        ``HeadersFrame.parse_payload`` rejects the frame before any pair
-        reaches the header list.
-
-        Takes ownership of *pairs* rather than copying it; the parser
-        builds a throwaway list per request, and the copy is the point of
-        the shortcut.  Do not pass a list you intend to keep mutating.
+        Uppercase names would become unreachable through lookup. Do not mutate the
+        list after handing it over; this path takes ownership instead of copying.
         """
         self = cls.__new__(cls)
         self._list = pairs
@@ -175,13 +132,7 @@ class Headers:
 
     # ---- dict-like lookup (returns list of pairs) -----------------------
 
-    # Every accessor probes with the caller's bytes before lowercasing.
-    # `_index` is keyed lowercased, so a probe can only hit on a key the
-    # `.lower()` path would also have found — the fast path is exactly
-    # semantics-preserving, not a heuristic.  It pays off because callers
-    # overwhelmingly pass a lowercase literal (`headers.get(b'content-type')`),
-    # for which `bytes.lower()` costs more than the dict lookup it precedes.
-    # A mixed-case caller pays one extra failed probe.
+    # The index uses lowercase bytes keys; mixed-case lookups normalize on a miss.
 
     def __contains__(self, name: bytes) -> bool:
         return name in self._index or name.lower() in self._index

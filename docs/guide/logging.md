@@ -5,16 +5,18 @@ distinct purpose:
 
 | Logger | Level | What it carries |
 |---|---|---|
-| `blackbull.access` | `INFO` | One record per completed HTTP/1.1 request (access log) |
+| `blackbull.access` | `INFO` | One record per completed HTTP/1.1 request or HTTP/2 stream |
 | `blackbull.caps` | `WARNING` | One record per cap rejection (header sizes, timeouts, connection cap, WS frame cap, H/2 stream caps, compression in-flight, …) |
 | `blackbull` (+ children) | `DEBUG` | Internal framework events (frame parsing, HPACK, routing decisions, TLS handshake) |
 
-All three follow standard `logging` semantics — no handlers
-attached by default, so nothing is printed until you opt in.
+Configure levels and handlers through Python logging. Importing the package
+does not install a sink; serving with BB_ASYNC_LOGGING=1 installs the default
+async stderr sink. Access output still depends on its INFO level and
+BB_ACCESS_LOG.
 
 ## Access log — `blackbull.access`
 
-For every completed HTTP/1.1 request the server emits one `INFO`
+For every completed HTTP/1.1 request or HTTP/2 stream the server emits one `INFO`
 record on the `blackbull.access` logger.  Default format:
 
 ```
@@ -86,9 +88,7 @@ logging.getLogger('blackbull.access').handlers[0].setFormatter(
 ### Disabling the access log
 
 Set the level above `INFO`, or set the environment variable
-`BB_ACCESS_LOG=0` (which gates record formatting at the call
-site — useful when running benchmarks that don't want logging
-overhead).
+`BB_ACCESS_LOG=0` to disable access-record formatting.
 
 ## Built-in async logging sinks
 
@@ -113,11 +113,7 @@ on/off switch; the timeout bounds visibility latency at low rate. To force an
 immediate per-record flush, disable async logging (`BB_ASYNC_LOGGING=0`, the
 synchronous path).
 
-When the access logger is left in its default state, records are enqueued on a
-fast path that skips the stdlib `logging.Logger._log` machinery (~93% of the
-per-emit cost). This is transparent: if you attach your own handlers or filters
-to `blackbull.access` (see the next section), BlackBull automatically uses the
-standard logging path so they are honoured.
+Custom handlers and filters attached to `blackbull.access` are honored.
 
 For the full list see [environment variables](../reference/env-vars.md).
 
@@ -205,13 +201,7 @@ importing framework modules, or restart the process.
 
 ### The same applies to internal `DEBUG` logging
 
-Framework modules on a per-request path — request dispatch, HTTP/2
-frame parsing, the response senders — read the `DEBUG` level once
-at import and branch on the result, for the same reason `@log`
-does.  A `logger.debug(...)` call that emits nothing is not free:
-the call happens, its arguments are built, and the level is
-checked, which measured at 24 bytecode instructions per site.
-HTTP/2 was making twenty such calls per request.
+Internal request-path DEBUG traces also capture the level at import.
 
 So **configure `DEBUG` before importing `blackbull`** if you want
 internal debug output:
@@ -326,7 +316,7 @@ record on `blackbull.caps` when it fires.  Coverage:
 | `BB_BODY_TIMEOUT` | body bytes didn't arrive in time |
 | `BB_MAX_BODY_SIZE` | request body over the total cap (H/1.1 + H/2; `requested` is the declared length at head time, the running total mid-stream) |
 | `BB_MIN_BODY_RATE` | body delivered below the minimum rate past the grace period — `requested` is the observed rate in bytes/second |
-| `BB_REQUEST_TIMEOUT` | handler exceeded per-request budget (H/1.1 + H/2) |
+| `BB_REQUEST_TIMEOUT` | handler exceeded its request budget (HTTP/1.1 + HTTP/2) |
 | `BB_WRITE_TIMEOUT` | drain stalled (slow-read peer) |
 | `BB_WS_MAX_FRAME_PAYLOAD` | WebSocket frame declared length exceeded |
 | `BB_WS_MAX_MESSAGE_SIZE` | WebSocket message over the total cap post-reassembly / post-inflation — `requested` is the size reached when the bound tripped, never the size the message would have become |
@@ -339,21 +329,15 @@ record on `blackbull.caps` when it fires.  Coverage:
 | `BB_COMPRESSION_MAX_INFLIGHT` | Compression middleware bypassed (executor saturated) |
 | `BB_SOCKET_BACKLOG` | An `AF_UNIX` listener's accept queue was full when accepting opened, so clients may have been refused during lifespan startup.  Logged as cap name `socket_backlog`; `requested` is the number waiting, `limit` the kernel's effective backlog (an adopted fd's own, capped by `net.core.somaxconn`), and `scope_path` the listener's path (`@name` for an abstract socket).  Linux only |
 
-The async client under `blackbull/client/` keeps the same record for its
-own bounds.  The argument for a client having bounds at all is
-diagnostic — a client picks its peer, and
-[fault injection](fault_injection.md) exists to point one at a server
-that misbehaves — so a bound that refused without naming itself would be
-no diagnostic at all.  A cap enforced on both protocols is two rejection
-sites and keeps two records, which is why this table has a column per
-protocol rather than a row per cap:
+Client bounds use the same records. A cap's refusal scope depends on the
+protocol:
 
 | Cap (env var) | HTTP/1.1 | HTTP/2 | WebSocket |
 |---|---|---|---|
 | `BB_CLIENT_HEAD_MAX_TOTAL` | the response head over the budget; the trailer section over the same one | the stream's field lines in aggregate; the encoded block reassembled across CONTINUATION | — |
 | `BB_CLIENT_HEAD_MAX_LINE` | a status line, response field line, chunk-size line or trailer field line over the per-line rule | — no field *line* exists; the section is the unit | — |
 | `BB_CLIENT_HEAD_TIMEOUT` | the response head did not arrive in time | the peer took the request and never began to answer — that stream is reset; or a field block opened and never finished with END_HEADERS — the connection ends | — |
-| `BB_CLIENT_BODY_TIMEOUT` | one body read outlasted its deadline | no frame for that stream inside the deadline | — |
+| `BB_CLIENT_BODY_TIMEOUT` | one body read outlasted its deadline | no nonempty DATA progress for that stream inside the deadline | — |
 | `BB_CLIENT_BODY_MAX_TOTAL` | a declared `Content-Length` over the cap, or the running total of a chunked or close-delimited body | the running total, checked before a DATA payload is held | — |
 | `BB_CLIENT_MIN_BODY_RATE` | body arriving below the floor past the grace period — `requested` is the observed rate in bytes/second | DATA payload arriving below the floor; each stream is reset independently | — |
 | `BB_CLIENT_MAX_INTERIM_RESPONSES` | too many `1xx` responses before the final one | too many `1xx` sections before the final one — one with no fields charges nothing to `BB_CLIENT_HEAD_MAX_TOTAL` | — |

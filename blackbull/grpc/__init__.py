@@ -1,24 +1,7 @@
-"""Pure-Python gRPC server support for BlackBull.
+"""gRPC server over HTTP/2.
 
-gRPC runs on HTTP/2; BlackBull already ships a complete HTTP/2 implementation,
-so this package adds only the gRPC-specific pieces:
-
-- [`codec`][blackbull.grpc.codec] — Length-Prefixed-Message framing.
-- [`compression`][blackbull.grpc.compression] — gzip message compression (``grpc-encoding``).
-- [`GrpcServiceRegistry`][blackbull.grpc.registry.GrpcServiceRegistry] — ``/Service/Method`` → handler.
-- [`GrpcStatus`][blackbull.grpc.status.GrpcStatus] / [`GrpcError`][] — canonical codes.
-- [`serve_grpc`][blackbull.grpc.asgi.serve_grpc] + [`GrpcContext`][] — the ASGI bridge.
-
-Wire it into an app with ``app.enable_grpc(registry)``; gRPC requests
-(``content-type: application/grpc``) are then multiplexed onto the same
-HTTP/2 port as the app's REST and WebSocket traffic.  All four RPC kinds are
-served — unary, server-streaming, client-streaming, and bidirectional — where a
-response-streaming handler is an async generator and a request-streaming handler
-takes an async iterator of request messages (``request_iter``).
-
-Protobuf is **not** a dependency: handlers receive and return raw message
-bytes, so the application chooses its own serialisation (``grpc_tools.protoc``
-output, ``protobuf``, or hand-rolled).
+Enable with app.enable_grpc(registry). Handlers exchange raw message bytes;
+protobuf is optional. Streaming contracts are in docs/guide/grpc.md.
 """
 from .codec import encode_message, decode_messages, GrpcDecodeError
 from .registry import GrpcServiceRegistry
