@@ -2,6 +2,9 @@
 
 HTTP/2 performance benchmarks for the BlackBull ASGI server.
 
+For connection behavior during startup and reload, see the
+[reload diagnostics](reload/README.md).
+
 ## Quick start
 
 ```bash
