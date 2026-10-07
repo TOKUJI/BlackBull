@@ -340,3 +340,22 @@ def test_non_minimal_variable_byte_integer_encodings_are_accepted():
     the code does today, so the tolerance cannot change silently."""
     assert decode_variable_byte_integer(b'\x80\x00') == (0, 2)     # 0 in 2 octets
     assert decode_variable_byte_integer(b'\xac\x82\x00') == (300, 3)  # 300 in 3
+
+    # Remaining Length 0 in 2 octets.
+    message, consumed = decode_packet(
+        bytes([MQTTPacketType.PINGREQ << 4]) + b'\x80\x00')
+    assert message.packet_type == MQTTPacketType.PINGREQ
+    assert consumed == 3
+
+    # Property Length 0 in 2 octets.
+    message, consumed = decode_packet(
+        packet(MQTTPacketType.PUBACK, b'\x00\x01' + b'\x00' + b'\x80\x00'))
+    assert message == MQTTPuback(packet_id=1, reason_code=ReasonCode.SUCCESS,
+                                 properties={})
+    assert consumed == 7
+
+    # Subscription Identifier 1 in 2 octets.
+    message, consumed = decode_packet(
+        packet(MQTTPacketType.PUBLISH, _publish_body(props=b'\x0b\x81\x00')))
+    assert message.properties == {'subscription_identifier': 1}
+    assert consumed == 9
