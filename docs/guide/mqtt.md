@@ -147,7 +147,7 @@ conformance matrix:
 | Client Identifier | a zero-length Client Identifier is assigned an identifier no live or offline session holds, returned in CONNACK as `Assigned Client Identifier` (§3.2.2.3.7) |
 | Properties | the full MQTT 5 property set (§2.2.2.2) on every packet that carries properties |
 | Sessions | subscriptions and pending QoS state preserved across reconnects with Clean Start = 0 |
-| Flow control | the client's `Receive Maximum` (§3.1.2.11.3) is enforced in the outbound direction; the broker's own is advertised in CONNACK as a promise to conforming clients |
+| Flow control | the client's `Receive Maximum` (§3.1.2.11.3) is enforced in the outbound direction, per Network Connection; the broker's own is advertised in CONNACK as a promise to conforming clients |
 | Resource limits | packet size, session backlog, subscription and session counts, and retained-store size are bounded; the ones MQTT 5 has a property for are advertised — see below |
 
 Variable Byte Integers accept **non-minimal encodings**: a value whose
@@ -255,6 +255,20 @@ packet-assembly time; zero disables that idle check.
 
 The QoS backlog keeps older promised messages and refuses the newest when
 full. It is separate from writer mailboxes and retained storage.
+
+**The send quota belongs to the connection, and retransmissions spend it
+too.** Every CONNECT re-declares the client's `Receive Maximum`; an omitted
+property means 65535, and a declared zero is a Protocol Error (`0x82`). That
+window is shared by live deliveries and the `DUP=1` retransmissions of a
+resumed session (§4.4), which go first, in the order the originals were sent
+(MQTT-4.4.0-2). A matching PUBACK, PUBCOMP, or error PUBREC frees one slot;
+a successful PUBREC keeps its slot until PUBCOMP. How many unacknowledged
+messages the *session* holds is never the quota. If all 65535 packet identifiers
+are still in use, new QoS>0 deliveries wait in the bounded outbound queue
+until an exchange completes, even when this connection has quota available.
+Control packets (PUBREL and
+the acknowledgements of the client's own publishes) flow even when the window
+is full.
 
 **Retained messages are capped by topic count, and correction is always
 allowed.** At the cap, a retained publish to a *new* topic is refused, but
