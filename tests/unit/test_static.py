@@ -674,7 +674,8 @@ class TestStaticFilesMalformedRange:
         'bytes=5-3',          # last-pos before first-pos: invalid, RFC 9110 §14.1.1
         'bytes=+2-5',         # positions are 1*DIGIT: no sign ...
         'bytes=--5',
-        'bytes=1_0-12',       # ... and no underscore
+        'bytes=1_0-12',       # ... no underscore ...
+        'bytes=2 - 5',        # ... and no whitespace inside a range-spec
     ])
     async def test_malformed_range_serves_full_200(self, static_dir, bad_range):
         from blackbull.middleware.static import StaticFiles
@@ -704,6 +705,17 @@ class TestStaticFilesMalformedRange:
         assert start['status'] in (200, 416), (
             f'{bad_range!r} must not 500; got {start["status"]}'
         )
+
+    async def test_non_utf8_range_is_ignored(self, static_dir):
+        """obs-text is legal in a field value; it is not a range-spec."""
+        from blackbull.connection import Connection
+        from blackbull.middleware.static import StaticFiles
+        app = StaticFiles(directory=str(static_dir))
+        conn = Connection(method='GET', path='/hello.txt', raw_path=b'/hello.txt',
+                          headers=Headers([(b'range', b'bytes=\xff-1')]), type='http')
+        start, body = await _collect(app, conn)
+        assert start['status'] == 200
+        assert body == self.FILE
 
     async def test_unsatisfiable_range_still_416(self, static_dir):
         """A well-formed but out-of-bounds range stays a 416 (not 200/500)."""

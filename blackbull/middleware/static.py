@@ -33,7 +33,7 @@ for _ext, _mime in (
 del _ext, _mime
 
 
-def _parse_byte_range(range_hdr: str, size: int) -> tuple[int, int] | None:
+def _parse_byte_range(range_hdr: bytes, size: int) -> tuple[int, int] | None:
     """Parse a single ``bytes=`` Range header into an inclusive ``(start, end)``
     with ``end`` clipped to ``size - 1``; ``start >= size`` means unsatisfiable.
 
@@ -41,21 +41,17 @@ def _parse_byte_range(range_hdr: str, size: int) -> tuple[int, int] | None:
     non-``bytes`` unit, a multi-range set, an invalid range-spec, or a suffix
     range on an empty file.  Never raises.
     """
-    if not range_hdr.startswith('bytes='):
+    if not range_hdr.startswith(b'bytes='):
         return None
-    spec = range_hdr[6:].strip()
-    if not spec or ',' in spec:
-        return None
-    start_s, sep, end_s = spec.partition('-')
-    if not sep:
-        return None
-    start_s, end_s = start_s.strip(), end_s.strip()
-    if not all(s.isascii() and s.isdigit() for s in (start_s, end_s) if s):
+    # A multi-range set or any non-digit fails the 1*DIGIT checks.
+    start_s, sep, end_s = range_hdr[6:].strip(b' \t').partition(b'-')
+    if (not sep or (start_s and not start_s.isdigit())
+            or (end_s and not end_s.isdigit())):
         return None
     try:
-        if start_s == '':
+        if not start_s:
             # Suffix range: bytes=-N → the last N bytes.
-            if end_s == '':
+            if not end_s:
                 return None
             n = int(end_s)
             if size == 0 and n > 0:
@@ -67,7 +63,7 @@ def _parse_byte_range(range_hdr: str, size: int) -> tuple[int, int] | None:
         return None
     if end_s and end < start:
         return None
-    return (start, min(end, size - 1))
+    return (start, end if end < size else size - 1)
 
 
 def _not_modified(headers, etag: bytes, mtime_ns: int) -> bool:
@@ -381,7 +377,7 @@ class StaticFiles:
                         or 'application/octet-stream').encode()
                 body = None
 
-        range_hdr = ranges[0][1].decode() if ranges else None
+        range_hdr = ranges[0][1] if ranges else None
 
         start, end = 0, size - 1
         status = HTTPStatus.OK
@@ -410,7 +406,6 @@ class StaticFiles:
 
         if range_hdr:
             parsed = _parse_byte_range(range_hdr, size)
-            # ``None`` → unparseable/multi-range → ignore and serve full 200.
             if parsed is not None:
                 start, end = parsed
                 if start >= size:

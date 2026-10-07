@@ -55,17 +55,32 @@ async def test_missing_file_404(live):
     assert r.status_code == 404
 
 
+async def _get_h1(port, path, rng):
+    async with httpx.AsyncClient() as c:
+        r = await c.get(f'http://127.0.0.1:{port}{path}', headers={'Range': rng})
+    return r.status_code, r.headers.get('content-range'), r.content
+
+
+async def _get_h2(port, path, rng):
+    from blackbull.client.http2 import HTTP2Client
+    async with HTTP2Client('127.0.0.1', port) as c:
+        r = await c.request('GET', path, headers=[('range', rng)])
+    cr = r.headers.get(b'content-range')
+    return r.status, cr.decode() if cr else None, r.body
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_range_request_206(live):
-    async with httpx.AsyncClient() as c:
-        r = await c.get(
-            f'{_base(live)}/static/hello.txt',
-            headers={'Range': 'bytes=0-4'},
-        )
-    assert r.status_code == 206
-    assert r.content == b'Hello'
-    assert 'content-range' in r.headers
+@pytest.mark.parametrize('get', [_get_h1, _get_h2], ids=['http1', 'http2'])
+@pytest.mark.parametrize('rng,status,content_range,body', [
+    ('bytes=0-4', 206, 'bytes 0-4/13', b'Hello'),
+    ('bytes=7-999', 206, 'bytes 7-12/13', b'world!'),
+    ('bytes=5-3', 200, None, b'Hello, world!'),
+    ('bytes=99-', 416, 'bytes */13', b''),
+])
+async def test_range_request(live, get, rng, status, content_range, body):
+    assert await get(live.port, '/static/hello.txt', rng) == (
+        status, content_range, body)
 
 
 @pytest.mark.integration
