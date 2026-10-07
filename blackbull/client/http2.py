@@ -1,11 +1,5 @@
-"""HTTP/2 client (RFC 7540).
-
-``HTTP2Client`` opens a single TCP/TLS connection, sends the connection
-preface and an initial SETTINGS frame, then drives request/response
-exchanges over multiple concurrent streams.
-
-The client is intended for **wire-level testing** of BlackBull's
-``ASGIServer`` rather than as a feature-rich application client.
+"""HTTP/2 client. HPACK and flow control are connection-owned;
+response state and deadlines are stream-owned.
 """
 import asyncio
 import logging
@@ -490,20 +484,9 @@ class HTTP2Client:
 
     @property
     def frame_factory(self) -> FrameFactory:
-        """This connection's one HPACK context (RFC 7541 §2.3, RFC 9113 §4.3).
+        """Return this connection's shared HPACK encoder/decoder and header limit.
 
-        The dynamic table is connection state and the peer keeps a single
-        decoder for it, so every header block written to this connection has
-        to come from this one encoder.  A second ``FrameFactory`` on the same
-        connection keeps a second table that diverges the moment the two
-        interleave, and the peer then resolves one stream's index against a
-        field the other inserted.  Anything that frames on this connection —
-        including the RFC 8441 WebSocket client layered over it — takes its
-        factory from here rather than building one.
-
-        It also carries the decoder's ``max_header_list_size``, so a second
-        factory would decode inbound blocks without the cap this connection
-        advertises.
+        Every header producer, including extended CONNECT, must reuse this context.
         """
         return self._factory
 
@@ -615,28 +598,10 @@ class HTTP2Client:
     async def execute_scenario(
         self, scenario: ScenarioH2Client,
     ) -> ScenarioH2ClientResult:
-        """Walk ``scenario.steps`` against the connected socket.
+        """Run HTTP/2 fault steps and collect peer/transport outcomes in the result.
 
-        The HTTP/2 counterpart of
-        [`blackbull.client.http1.HTTP1Client.execute_scenario`][blackbull.client.http1.HTTP1Client.execute_scenario], and
-        deliberately the same shape: every *outcome* — a frame read, a
-        timeout, a transport failure, a hard-abort — is folded into the
-        returned result, so callers categorise without a try/except per
-        scenario.  Raised instead is the scenario this connection cannot
-        express at all: a step belonging to another vocabulary, or a client
-        whose context has exited.  Neither is news about the peer, and
-        folding one would make a closed client indistinguishable from a
-        silent server.
-
-        Step dispatch:
-          * ``SendPreface``  → the RFC 9113 §3.4 preface bytes
-          * ``SendFrame``    → one frame, assembled here rather than by the
-            production sender (which is what lets a scenario declare a
-            length its payload does not match)
-          * ``SendRawBytes`` → arbitrary bytes, optionally one at a time
-          * ``Sleep``        → ``asyncio.sleep``
-          * ``ReadResponse`` → one frame, or a recorded timeout
-          * ``Abort``        → ``transport.abort()``; walks no further steps
+        Unsupported step vocabularies and an exited client raise instead of being
+        classified as peer failures. Abort stops further steps.
         """
         import time as _time  # noqa: PLC0415
 
@@ -1074,20 +1039,8 @@ class HTTP2Client:
         if isinstance(exc, FrameFormatError):
             await self._fail_connection(exc.error_code, str(exc))
         elif isinstance(exc, OversizedHeaderListError):
-            # The one HPACK failure a bound of ours caused, and the only arm
-            # that may name it: an invalid index or a bad table-size update
-            # is the peer's own error, and a cap-hit record for one would be
-            # a record of a refusal that never happened.
-            #
-            # ``requested`` is the limit plus one because that is the tight
-            # lower bound on the decoded total, and no exact figure exists to
-            # report: hpack charges each entry and compares immediately
-            # (``Decoder.decode``, hpack 4.2.0 at hpack.py:545), so it raises
-            # on the entry that crosses and the section is provably *just*
-            # over.  The encoded length is the number reachable here
-            # instead, and it is the wrong unit: compression makes it
-            # independent of what the cap counts, and low enough to read as a
-            # refusal below its own limit.
+            # Log only header-budget HPACK failures as cap hits. requested is limit+1,
+            # a lower bound on decoded bytes; encoded length is the wrong unit.
             log_cap_hit('client_h2_max_header_list_size',
                         requested=self._enforced_header_list_size + 1,
                         limit=self._enforced_header_list_size,
@@ -1235,24 +1188,8 @@ class HTTP2Client:
                     continue
                 if isinstance(frame, _DiscardedFrame):
                     continue
-                # Raw-frame streams (WebSocket-over-H2, etc.) bypass the
-                # request/response dispatcher for the frames their registrant
-                # reads — ``_RAW_STREAM_FRAME_TYPES`` names them and says why
-                # it is a whitelist.  Where each excluded type goes instead:
-                #   WINDOW_UPDATE, SETTINGS — connection-level bookkeeping; a
-                #     per-stream sender parked on its window wakes here.
-                #   PUSH_PROMISE — ``_on_push_promise`` is what refuses a
-                #     promise after we advertised ENABLE_PUSH=0, and queueing
-                #     it skipped that MUST on exactly the streams a WebSocket
-                #     uses.  Its block is decoded at parse time either way.
-                #   PRIORITY, PRIORITY_UPDATE — deprecated by RFC 9113 §5.3.1
-                #     and this client stores no priority state, so there is
-                #     nothing to hand anyone.
-                #   an unknown type — §5.5 says ignore it, which the null
-                #     responder does for the price of a dispatch instead of a
-                #     queue slot.
-                # CONTINUATION never arrives here: ``_absorb_field_block``
-                # folds it into the frame that opened the block.
+                # Only whitelisted frames enter raw-stream queues. Keep connection bookkeeping
+                # and PUSH_PROMISE validation on the normal dispatcher; fold CONTINUATION first.
                 raw_q = self._raw_streams.get(frame.stream_id)
                 if raw_q is not None and frame.FrameType() in _RAW_STREAM_FRAME_TYPES:
                     try:
@@ -1294,21 +1231,10 @@ class HTTP2Client:
 
     def _drop_pending(self, stream_id: int, *,
                       aborted: bool = True) -> '_PendingResponse | None':
-        """Remove a stream's state and release what was holding it open.
+        """Release response state and its deadline; retire uploads only when aborted.
 
-        Every path that ends a response goes through here.  Popping alone left
-        a progress timer on the loop — a strong reference to this client until
-        it fired — and, on an aborted stream, an upload still writing DATA on
-        a stream we had just closed, which RFC 9113 §5.1 forbids and a peer
-        MAY answer with a connection error, losing the point of refusing only
-        one stream.
-
-        *aborted* is ``False`` when the response merely finished.  The upload
-        and its sender are then left alone: a server may answer with
-        END_STREAM while the request body is still going up (an early 401 or
-        413), and releasing the sender there parks ``_write_data`` on a window
-        event nothing will set again.  Held by
-        ``test_an_early_response_does_not_strand_the_upload``.
+        A final response may arrive while its request upload is still in progress.
+        Completing that response must not strand the upload on a retired sender.
         """
         pending = self._responses.pop(stream_id, None)
         if pending is None:
@@ -1321,30 +1247,17 @@ class HTTP2Client:
         return pending
 
     def _spawn(self, coro) -> None:
-        """Run *coro* detached, holding a strong reference until it ends.
-
-        asyncio keeps only a weak reference to a task, and a bare
-        ``ensure_future`` also outlived ``__aexit__`` here — still writing to
-        a transport the client had just closed.
+        """Own a detached task until it ends; context exit cancels outstanding tasks.
         """
         task = asyncio.ensure_future(coro)
         self._detached.add(task)
         task.add_done_callback(self._detached.discard)
 
     def _arm_deadline(self, stream_id: int, phase: _Phase) -> None:
-        """Put the stream on *phase*'s clock, starting or restarting it.
+        """Start or restart the stream phase clock.
 
-        The single arming point for both, since ``_Phase`` makes them
-        consecutive; what each phase measures is ``docs/guide/client.md``
-        §What the client waits for.
-
-        A 1xx is not the handover, and there is deliberately no branch here
-        saying so: it falls out of ``_on_response_headers`` arming only once
-        the final head is seen, which is where the reasoning lives.
-
-        ``_FRAME_READ_TIMEOUT`` does not cover either phase.  It bounds the
-        remainder of a frame whose 9-byte header has arrived, so a peer
-        sending one complete 1-byte DATA frame every 29 s never trips it.
+        Interim heads must not start the body clock. The frame-read timeout only
+        bounds an incomplete frame and cannot replace head/body progress deadlines.
         """
         pending = self._responses.get(stream_id)
         if pending is None:
@@ -1366,25 +1279,14 @@ class HTTP2Client:
             timeout, self._on_stream_stalled, stream_id, timeout)
 
     def _on_stream_stalled(self, stream_id: int, timeout: float) -> None:
-        """No frame for this stream within the deadline.
+        """Schedule deadline refusal; re-check stream liveness in _refuse_stream.
 
-        A timer callback cannot await, so this hands off to a task; the
-        re-check that the resulting gap needs is [`_refuse_stream`][]'s,
-        and checking only here reset streams that had already succeeded.
-
-        The phase is read from the pending rather than passed: a timer that
-        survives to fire is the current phase's, since a handover disarms the
-        one before it.
+        Read the current phase from pending state; phase handover disarms the old timer.
         """
         pending = self._responses.get(stream_id)
         if pending is None:
             return
         elapsed = asyncio.get_running_loop().time() - pending.opened_at
-        # Each phase names its own cap at the call that writes the record.
-        # The name is what makes a refusal a diagnostic rather than a hang
-        # with extra steps, so a grep for the cap has to reach the line that
-        # refuses on it — forwarding the name from ``phase`` would hide the
-        # site from a reader and from the cap-record audit alike.
         if pending.phase is _Phase.HEAD:
             self._spawn(self._refuse_stream(
                 stream_id, 'client_head_timeout', elapsed, timeout,
@@ -1402,27 +1304,11 @@ class HTTP2Client:
                              seen: int | float, limit: int | float,
                              error: Exception,
                              code: ErrorCodes = ErrorCodes.CANCEL) -> None:
-        """Refuse one response without ending the connection.
+        """Reset this response while keeping sibling streams and the connection alive.
 
-        The difference from the HTTP/1.1 client is real and belongs here.  A
-        refusal there leaves the reader's position inside a message, so the
-        connection is abandoned; HTTP/2 frames are self-delimiting, so the
-        peer's remaining DATA parses as DATA whether or not we want it.
-        ``RST_STREAM`` refuses this response and every other stream, and the
-        connection, survives — which is what makes a per-stream cap usable at
-        all.
-
-        *code* defaults to ``CANCEL`` — RFC 9113 §7, "the stream is no longer
-        needed" — which fits a budget *this* client chose and the peer did not
-        violate.  The header-aggregate breach passes ``ENHANCE_YOUR_CALM``
-        instead, because the server answers its own header cap that way and
-        cites nginx and Envoy for it; one cap should not get two codes
-        depending on which end enforces it.
-
-        Nothing happens if the stream has already ended, and that check has to
-        be here rather than at the call sites: the timeout path arrives
-        through a task, and in the gap the receive loop can complete the
-        response.
+        Retired streams are a no-op: the receive loop may finish one before its
+        timeout task runs. Budget refusals default to CANCEL; header aggregate
+        breaches use ENHANCE_YOUR_CALM.
         """
         pending = self._drop_pending(stream_id)
         if pending is None:
@@ -1441,17 +1327,9 @@ class HTTP2Client:
 
     async def _reject_response(self, stream_id: int,
                                error: Exception) -> None:
-        """Refuse one response whose *meaning* the peer got wrong.
+        """Refuse malformed response semantics with PROTOCOL_ERROR (RFC 9113 §8.1.1).
 
-        A cap refusal in [`_refuse_stream`][] is this client's own budget; this
-        is the peer breaching RFC 9113 §8.1, so the frame carries
-        ``PROTOCOL_ERROR`` (§8.1.1) and ``blackbull.caps`` is not told — a
-        malformed response is not a limit being reached.
-
-        Everything released here is what `_complete` would otherwise own:
-        the pending entry (and with it the deadline and the upload it cancels),
-        and the flow-control credit for DATA already consumed, which
-        [`_on_response_data`][] has returned by the time this runs.
+        Do not report to blackbull.caps: this is a protocol breach, not a local budget.
         """
         pending = self._drop_pending(stream_id)
         if pending is None:
@@ -1622,18 +1500,9 @@ class HTTP2Client:
         pending = self._responses.get(frame.stream_id)
         if pending is None:
             logger.debug('DATA for unknown stream %d — dropping', frame.stream_id)
-            # The *payload* is dropped; the credit is not.  RFC 9113 §6.9
-            # makes the connection window shared by every stream, so bytes
-            # that arrive for a stream we no longer track still consumed it.
-            # Returning early without crediting leaks that window by every
-            # such frame, and once it reaches zero every stream's body
-            # stalls in the peer's writer.  A stream that closed while its
-            # DATA was in flight is ordinary, not hostile.
-            # ``frame.length``, not ``len(payload)``: RFC 9113 §6.9.1 counts
-            # the whole DATA payload against the window, and ``payload`` has
-            # already had the pad-length octet and the padding stripped.
-            # Crediting the visible half leaked the window by the padding —
-            # 7.9% on a 20%-padded stream, and a leak only ever closes.
+            # Dropped DATA still consumes shared connection credit. Return frame.length,
+            # including padding, even after the stream is retired; otherwise sibling
+            # streams eventually stall. Do not return stream credit to a retired stream.
             await self._credit_connection(frame.length)
             return
         payload = frame.payload
@@ -1733,12 +1602,7 @@ class HTTP2Client:
         await self._credit_connection(n)
 
     async def _credit_connection(self, n: int) -> None:
-        """Return *n* bytes of connection-level credit.
-
-        Split out from [`_credit_received`][] because it is owed for every
-        DATA octet that arrived, including octets for a stream this client
-        no longer tracks — that path has no per-stream state to accumulate
-        against but consumed the shared window all the same.
+        """Return connection credit for all DATA octets, including retired streams.
         """
         if n <= 0:
             return
@@ -1829,12 +1693,7 @@ class HTTP2Client:
 
     def _on_goaway(self, frame) -> None:
         self._goaway_received = True
-        # RFC 9113 §6.8 — a GOAWAY's own stream identifier MUST be 0; the
-        # Last-Stream-ID is the first four *payload* bytes, which ``GoAway``
-        # parses into its own field.  Reading the header field instead made
-        # ``sid > last_stream_id`` true for every stream, so a graceful
-        # shutdown failed the responses the peer had just promised it *had*
-        # processed — the opposite of what GOAWAY communicates.
+        # RFC 9113 §6.8: GOAWAY Last-Stream-ID comes from payload, not its stream-0 header.
         last_stream_id = frame.last_stream_id
         self._goaway_error_code = frame.error_code
         for sid, pending in list(self._responses.items()):

@@ -1,13 +1,4 @@
-"""HTTP/1.1 client (RFC 7230).
-
-Provides ``HTTP1Client`` plus the lower-level ``HTTP1RequestSender`` /
-``HTTP1ResponseRecipient`` helpers that frame and unframe HTTP/1.1 messages
-on the wire.
-
-Symmetric with the server-side ``HTTP1Sender`` / ``HTTP1Recipient`` in
-[`blackbull.server.sender`][blackbull.server.sender] and [`blackbull.server.recipient`][blackbull.server.recipient],
-but reversed: the client *writes* request lines + request headers + request
-body, and *reads* status lines + response headers + response body.
+"""HTTP/1.1 request framing and response reading (RFC 9110, RFC 9112).
 """
 import asyncio
 import ssl as _ssl
@@ -377,17 +368,7 @@ class HTTP1ResponseRecipient:
 
     @staticmethod
     async def _read_head(reader: AbstractReader) -> bytes:
-        """The whole response head, bounded in all three triad columns.
-
-        ``read_head`` is the reader contract's own bounded head read, so the
-        total column costs a budget rather than a mechanism, and every reader
-        under the client answers it the same way.
-
-        The per-line rule runs over the returned head instead of during the
-        read.  No line can be longer than the block containing it, so the
-        total has already capped what a single field can accumulate; what is
-        left is a policy the caller chose, and the server draws the same line
-        between ``header_max_total`` and ``header_max_line``.
+        """Read a response head under the total budget, then enforce the per-line budget.
         """
         cfg = get_settings()
         timeout = cfg.client_head_timeout
@@ -526,27 +507,11 @@ class HTTP1ResponseRecipient:
 
     async def _body_read(self, coro, *, payload: bool = False,
                          allow_eof: bool = False):
-        """One body read, under both of the body's time bounds.
+        """Bound one body read by its timeout and response-body rate floor.
 
-        ``BB_CLIENT_BODY_TIMEOUT`` is per read, not per body — the peer must
-        keep making progress, which is what ``body_timeout`` means on the
-        server and ``client_body_timeout`` in nginx.  It stops a peer that
-        **stops**; one that trickles satisfies every individual read, which is
-        why ``BB_CLIENT_MIN_BODY_RATE`` exists.
-
-        *payload* is the floor's numerator and the reason it means anything:
-        only response-body octets count, because chunk-size lines, extensions,
-        terminators and trailers are discarded on receipt and a peer can pad
-        them at will.  The denominator is every read's wait, framing reads
-        included — a peer that stalls in front of the octets that are not
-        counted must not buy free time with the gap.  This is the one place a
-        body read waits, so the seconds measured here are transport wait: a
-        caller slow between ``stream()`` yields is never mistaken for a peer
-        slow to send.
-
-        Truncation is named here too: ``AbstractReader.readexactly`` returns
-        short at EOF while ``AsyncioReader`` raises, and neither answer
-        belonged to the client's exception family.
+        Only payload octets count toward the rate; transport wait for framing also
+        counts. Caller time between stream() yields must not count against the peer.
+        Normalize short EOF and reader truncation errors to the client exception.
         """
         cfg = get_settings()
         timeout = cfg.client_body_timeout
@@ -599,14 +564,8 @@ class HTTP1ResponseRecipient:
         if watching:
             short = floor.record(len(data) if payload else 0,
                                  _monotonic() - started)
-            # A framing read is judged one read too early.  The octets that
-            # pay for its wait arrive in the same delivery as the chunk-size
-            # line and are read on the *next* call, so a framing read that is
-            # short has proved nothing yet — a peer sending 2 KiB/s against a
-            # 1 KiB/s floor was refused for it.  A second read that still
-            # cannot clear the window has: either payload arrived and was not
-            # enough, or none is coming.  The seconds stay in the denominator
-            # throughout, so nothing is forgiven — only deferred.
+            # Defer a short framing read judgement until the next read can deliver payload.
+            # Keep its waiting time in the rate denominator.
             if short and (payload or self._unpaid_framing):
                 log_cap_hit('client_min_body_rate', requested=floor.observed,
                             limit=floor.rate, protocol='http1')
@@ -797,52 +756,27 @@ class HTTP1ResponseRecipient:
 
     async def _read_declared(self, reader: AbstractReader,
                              declared: int) -> AsyncIterator[bytes]:
-        """A ``Content-Length`` body, in transport-paced slices.
+        """Yield a Content-Length body in bounded, transport-paced slices.
 
-        Slices, so a large response need not fit in memory: a single exact
-        read hands the caller the whole body as one chunk, which is the
-        memory bound missing on exactly the path that asked for it.
-
-        Up-to-n rather than ``readexactly``, because an exact read loops
-        internally until its slice is full and every bound above it therefore
-        sees one read.  On the buffering path that made
-        ``BB_CLIENT_BODY_TIMEOUT`` the deadline for the entire body, so a
-        large response that never once stopped arriving was refused for
-        outlasting what one read is allowed — while its own documentation
-        promised a per-read progress deadline.  Transport-paced reads return
-        whatever arrived, which is the shape and the reason of the server's
-        ``body_chunk_max`` path.
+        Use up-to-n reads: readexactly would hide transport progress and turn the
+        per-read timeout into a deadline for a whole slice.
         """
         remaining = declared
         while remaining > 0:
             chunk = await self._body_read(
                 reader.read(min(remaining, _STREAM_CHUNK_SIZE)), payload=True)
             if not chunk:
-                # A short-reading reader answers EOF with b'', so subtracting
-                # it left the loop spinning on a condition nothing could
-                # change — and with no await in the reader, uncancellable.
+                # Reject a short EOF instead of looping without progress.
                 raise ConnectionError('connection closed mid-body')
             remaining -= len(chunk)
             yield chunk
 
     async def _read_framing_line(self, reader: AbstractReader,
                                  limit: int) -> bytes:
-        """One chunk-framing line — chunk-size line or trailer field line.
+        """Read a chunk-size or trailer line under the header-line budget.
 
-        Bounded by the same budget as a header field line.  A chunk-*ext* and
-        a trailer field are discarded on receipt, so nothing legitimate needs
-        more; the chunk-*size* is not discarded, but no legitimate one is
-        anywhere near this long either.
-
-        Not every reader's ``readuntil`` takes the budget.  ``AbstractReader``
-        ships ``_accepts_read_limit`` for exactly that, and ``read_head``
-        consults it; passing the budget positionally and unconditionally
-        raised ``TypeError`` on a one-argument reader — and, because
-        ``receive`` marks the framing broken on any exception, abandoned the
-        connection along with it.  Falling back must not fall open, so the
-        default bounded implementation carries the same budget.  The answer is
-        cached on the reader, as ``read_head`` caches it, so the question is
-        asked once per connection rather than once per framing line.
+        Readers accepting only one readuntil argument still require the bounded
+        fallback; adapting the signature must not disable the limit.
         """
         native = reader.__dict__.get('_readuntil_accepts_limit')
         if native is None:
@@ -873,32 +807,11 @@ class HTTP1ResponseRecipient:
 
     @staticmethod
     def _parse_chunk_size(size_line: bytes) -> int:
-        """The chunk-size numeral, by the grammar rather than by ``int``.
+        """Parse RFC 9112 §7.1 chunk-size grammar from a bounded line.
 
-        No digit ceiling.  RFC 9112 §7.1 asks recipients to *anticipate*
-        potentially large hexadecimal numerals and not to lose precision on
-        them, which Python's arbitrary-precision ``int`` already satisfies;
-        reading that as licence to reject long numerals would refuse
-        conforming wire, and ``last-chunk = 1*("0")`` puts no ceiling on the
-        zeros either.  The line length is already bounded by the caller, and
-        a declared size too large to satisfy is refused where the octets are
-        counted, not where the numeral is read.
-
-        The terminator is required rather than stripped, which is what makes
-        a bare CR inside the element fail: stripping every trailing CR/LF
-        deleted it and let the rest parse as though it were clean.  RFC 9112
-        §2.2 gives a recipient of a bare CR two options — treat the element as
-        invalid, or replace it with SP — and a replaced SP leaves a numeral
-        that is not ``1*HEXDIG``, so refusal is the only conforming outcome
-        either way.  A line that reached EOF without its CRLF is refused by
-        the same check.
-
-        ``BWS`` is removed only where the grammar has it: ``chunk-ext =
-        *( BWS ";" BWS chunk-ext-name … )``, so whitespace is legal before a
-        ``;`` and nowhere else.  RFC 9110 §5.6.3 makes removing it a MUST;
-        a bare ``5 \r\n`` with no extension has no BWS to remove and stays a
-        smuggling vector.  Mirrors the server's parser, which is the oracle
-        the tests compare against.
+        Require CRLF. Allow BWS only before an extension semicolon, not after a bare
+        numeral. Do not cap hexadecimal digit count; the caller bounds line length
+        and body reads enforce the declared size.
         """
         if not size_line.endswith(_CRLF) or size_line.count(b'\n') != 1:
             raise ProtocolError(
@@ -912,16 +825,7 @@ class HTTP1ResponseRecipient:
 
     async def _read_trailer_section(self, reader: AbstractReader,
                                     line_max: int, total_max: int) -> None:
-        """Consume the trailer section whole (RFC 9112 §7.1.2).
-
-        Reading one line assumed the section was empty.  With real trailers
-        the rest stayed buffered, so the next keep-alive response began
-        parsing at a trailer field line and took it for a status line — the
-        response-side twin of the desync ``_declared_content_length``
-        guards against.
-
-        Discarded, not surfaced: ``ClientResponse.trailers`` exists, but this
-        reader never fills it, so it is empty on every HTTP/1.1 response.
+        """Consume all HTTP/1.1 trailers; discard them rather than fill ClientResponse.trailers.
         """
         total = 0
         while True:
@@ -975,11 +879,7 @@ class HTTP1ResponseRecipient:
 
 
 def _record_response(result, response) -> None:
-    """Log one response: newest in ``response``, all of them in ``received``.
-
-    ``response`` keeps its old meaning (the most recent read) so existing
-    scenarios are untouched; ``received`` is what a scenario needs when the
-    peer sends more than one thing.
+    """Append to received and set response to the newest response.
     """
     result.response = response
     result.received.append(response)
@@ -1148,19 +1048,9 @@ class HTTP1Client:
     # ---- public API ------------------------------------------------------
 
     def _abandon(self) -> None:
-        """Stop using this connection: its place in the byte stream is lost.
+        """Close when framing position is lost; never reuse an incomplete exchange.
 
-        A message that stopped part-way leaves the rest of it on the wire — a
-        response read that broke off, or a request body that ran over or under
-        its declared length — so the next response read would begin inside it,
-        and a peer whose body is itself a well-formed response gets one
-        delivered for a request the server answered differently.  The server
-        answers the same situation by closing rather than by keep-aliving a
-        desynced stream.
-
-        Deliberately not applied to [`read_response`][], the fault-injection
-        primitive: driving a misbehaving peer and then looking at what else it
-        sent is what that method is for.
+        Fault-injection read_response deliberately permits continued inspection.
         """
         self._framing_broken = True
         self._reusable = False
@@ -1401,10 +1291,8 @@ class HTTP1Client:
 
     async def send_body_bytes(self, data: bytes, *,
                               byte_interval: float = 0.0) -> None:
-        """Send body octets to the peer.
-
-        Same semantics as [`send_raw`][], kept separate for readability
-        at call sites that frame headers separately from the body."""
+        """Send body bytes with the same semantics as send_raw.
+        """
         await self.send_raw(data, byte_interval=byte_interval)
 
     async def send_chunk(self, data: bytes) -> None:
@@ -1469,19 +1357,9 @@ class HTTP1Client:
     async def execute_scenario(
         self, scenario: Scenario,
     ) -> ScenarioResult:
-        """Walk ``scenario.steps`` against the connected socket.
+        """Run connected-socket scenario steps and collect outcomes in ScenarioResult.
 
-        Never raises.  Every outcome (response, timeout, transport
-        failure, hard-abort) is folded into the returned
-        [`ScenarioResult`][] so callers can categorise without
-        try/except boilerplate per scenario.
-
-        Step dispatch:
-          * [`SendRawBytes`][] → [`send_raw`][]
-          * [`Sleep`][]       → ``asyncio.sleep``
-          * [`ReadResponse`][] → [`read_response`][]
-          * [`Abort`][]       → ``transport.abort()`` (RST on Linux);
-                                   walks no further steps.
+        Record peer responses, timeouts and transport failures; Abort stops further steps.
         """
         import time as _time  # noqa: PLC0415
 
@@ -1567,8 +1445,8 @@ class HTTP1Client:
 
 # Unannotated: see tests/unit/test_deprecated_send_bytes_spellings.py::test_the_warning_is_attributed_to_the_callers_line.
 def __getattr__(name):
-    """PEP 562 — ``SendBytes`` is resolved only when a caller names it, so the
-    deprecation warning reaches that caller and ``import *`` stays silent."""
+    """Deprecated SendBytes alias for SendRawBytes; removal no earlier than 2027-08-19.
+    """
     if name == 'SendBytes':
         import warnings  # noqa: PLC0415
         warnings.warn(

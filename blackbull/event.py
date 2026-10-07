@@ -1,24 +1,8 @@
-"""Event-driven dispatcher.
+"""Event dispatch with three lifetime contracts.
 
-Implements the minimal Pub/Sub dispatcher used by ``BlackBull.on`` /
-``BlackBull.intercept``.  Three delivery modes are supported:
-
-- **Interception** (``intercept``): handlers are awaited in registration order;
-  exceptions propagate to the emitter and abort subsequent interceptors.
-- **Blocking observation** (``on(..., blocking=True)``): handlers are awaited in
-  registration order *before* ``emit`` returns, but their exceptions are caught
-  and logged — they never reach the emitter or abort siblings.  This is the
-  "observe but block" mode: use it when a side effect must *complete* within the
-  event's lifetime (resource cleanup on ``scope_completed``) yet must not be
-  able to break the thing that emitted it.
-- **Observation** (``on``): handlers are scheduled as independent
-  ``asyncio.Task``s (fire-and-forget); exceptions are caught and logged and
-  never reach the emitter or other observers.
-
-The two observation modes share isolation (a failing observer is contained);
-they differ only in whether ``emit`` waits for them.  Blocking is the right
-default for cleanup that must finish before the request context is gone;
-detached is right for telemetry that must not add latency to the hot path.
+Interceptors run in order and propagate failures. Blocking observers finish
+before emit returns but isolate failures. Detached observers do not extend
+the event lifetime; use blocking observers for cleanup that must finish first.
 """
 import asyncio
 import logging
@@ -65,16 +49,8 @@ class EventDispatcher:
         self._interceptors: defaultdict[str, list[EventHandler]] = defaultdict(list)
         self._pending_tasks: set[asyncio.Task] = set()
         self._shutdown_timeout = shutdown_timeout
-        # Monotonic counter bumped on every registration.  Hot-path callers
-        # (e.g. EventAggregator.has_any_request_listeners) cache a derived
-        # boolean keyed on this value, recomputing only when it changes —
-        # listeners are almost always registered before serving, so the
-        # per-request cost collapses to one int read + compare.
+        # Invalidate derived listener caches on every registration.
         self.generation: int = 0
-        # Names with at least one handler of any kind.  ``has_listeners`` is
-        # called several times per request — once per lifecycle emit site — so
-        # it answers from this set rather than probing three dicts.  Handlers
-        # are only ever added, so the set never needs to shrink.
         self._registered: set[str] = set()
 
     def on(self, event_name: str, handler: EventHandler,
@@ -101,11 +77,6 @@ class EventDispatcher:
         self.generation += 1
 
     def has_listeners(self, event_name: str) -> bool:
-        """Return True if any interceptor or observer is registered for ``event_name``.
-
-        One set lookup, and it never inserts an entry for a name nobody has
-        registered, so a caller may ask on every event.
-        """
         return event_name in self._registered
 
     async def emit(self, event: Event, *, timeout: float | None = None) -> None:
@@ -171,18 +142,9 @@ class EventDispatcher:
             logger.exception("Observer failed for event %r", event.name)
 
     async def drain(self, timeout: float = 5.0) -> bool:
-        """Wait until no detached observer task is outstanding.
+        """Wait for observer quiescence, including tasks emitted by observers.
 
-        Returns ``True`` on quiescence, ``False`` if *timeout* ran out
-        first.  **Nothing is cancelled either way** — that is the whole
-        difference from [`aclose`][], which is a shutdown operation and
-        kills what overruns.  A test helper that cancelled the work it was
-        asked to observe would make the side-effect it exists to reveal
-        unobservable.
-
-        Drains to *quiescence*, not to a snapshot: an observer may itself
-        emit, so the set is re-read after every wait and a second generation
-        is waited for too.
+        Return False on timeout, True on quiescence; never cancel pending work.
         """
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
@@ -196,21 +158,7 @@ class EventDispatcher:
             await asyncio.wait(pending, timeout=remaining)
 
     async def aclose(self) -> None:
-        """Drain pending observer tasks during shutdown.
-
-        Waits up to ``shutdown_timeout`` seconds (configured at
-        construction) for all in-flight observer tasks to complete.  Any
-        tasks still running after the timeout are logged at WARNING and
-        cancelled.
-
-        Drains to quiescence through [`drain`][], so an observer that emits
-        is waited for too.
-
-        The cost is that a pathological observer chain can hold shutdown for
-        the full budget rather than returning early.  Returning early is the
-        wrong answer, not a cheaper one, and ``shutdown_timeout`` is the
-        ceiling — so an observer chain that never quiesces is a bounded
-        latency cost at shutdown.
+        """Wait up to shutdown_timeout for quiescence; warn and cancel remaining observers.
         """
         if not self._pending_tasks:
             return

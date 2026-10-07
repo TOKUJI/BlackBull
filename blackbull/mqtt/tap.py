@@ -1,25 +1,8 @@
-"""Application taps on broker routing — the ``on_message`` observability layer.
+"""Best-effort application taps independent of broker routing.
 
-A *tap* is an async ``(message, **captures) -> None`` callback registered via
-[`blackbull.mqtt.MQTTExtension.on_message`][blackbull.mqtt.MQTTExtension.on_message] for a topic filter.  Taps are
-best-effort observers on top of normal broker routing; the broker runs whether
-or not any tap is registered.
-
-Two dispatch engines share one code path ([`run_taps`][]):
-
-* **actor** (default) — [`TapActor`][] is a single, lifespan-owned consumer.
-  A connection actor hands it a [`Message`][] with [`TapActor.offer`][TapActor.offer]
-  (non-blocking) and returns immediately, so a slow tap can never back-pressure
-  the connection or the broker.  Its inbox is **bounded**; on overflow the
-  *newest* message is dropped and a running dropped-count is logged (taps are
-  best-effort, but silent loss is unacceptable).
-* **inline** — the connection actor awaits the callbacks itself.  This is the
-  original contract, retained as an internal option so the perf comparison
-  (``bench/mqtt/tap_throughput.py``) stays reproducible.
-
-A topic filter may carry ``{name}`` capture segments
-(``'sensors/{room}/temperature'``); ``{name}`` matches one level like ``+`` and
-binds it as a keyword argument to the callback, mirroring HTTP path params.
+Actor mode drops newest on bounded-inbox overflow; inline mode backpressures
+only the publishing connection. Both share matching. A {name} topic segment
+captures one level and supplies a keyword argument.
 """
 from __future__ import annotations
 
@@ -38,12 +21,7 @@ _DEFAULT_TAP_QUEUE = 1024
 
 @dataclass(frozen=True)
 class Message:
-    """A published message handed to an ``on_message`` tap.
-
-    A plain, immutable read-model of one PUBLISH — neither the wire codec
-    ``MQTTPublish`` nor the actor inbox ``Message`` base, both of which it
-    sits between.  It takes the bare name anyway, because ``Message`` is
-    what aiomqtt and paho call this and what users reach for.
+    """Immutable published-message view for on_message taps.
     """
     topic: str
     payload: bytes
@@ -54,12 +32,7 @@ class Message:
 
 @dataclass(frozen=True)
 class Tap:
-    """A compiled ``on_message`` registration.
-
-    ``match_filter`` is the topic filter with each ``{name}`` segment rewritten
-    to ``+`` (so the validated [`topic_matches_filter`][] does the matching);
-    ``captures`` records the ``(level_index, name)`` of each ``{name}`` segment
-    for binding once a topic matches.
+    """Compiled on_message filter with named captures.
     """
     match_filter: str
     captures: tuple[tuple[int, str], ...]
@@ -170,12 +143,7 @@ class TapActor(Actor):
         self._dropped = 0
 
     def offer(self, message: Message) -> None:
-        """Enqueue *message* without blocking; drop-newest on overflow.
-
-        Taps are best-effort observability, so a full queue drops the incoming
-        message rather than back-pressuring the publisher — but the running
-        dropped count is always logged, since silent loss is the one
-        unacceptable outcome.
+        """Enqueue without blocking; drop newest on overflow and log the dropped count.
         """
         try:
             self._inbox.put_nowait(TapDeliver(message=message))

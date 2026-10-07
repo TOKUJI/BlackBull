@@ -111,16 +111,11 @@ wait in the kernel's accept queue, bounded by the creator's `Backlog=` where
 the fd is adopted and by
 [`BB_SOCKET_BACKLOG`](../reference/env-vars.md#socket-tuning) where BlackBull
 binds it.  The window lasts as long as the startup hook runs, with no deadline
-from the framework.  The kernel admits `backlog + 1` parked connections per
-socket, each holding one 128 KiB receive buffer on a stock Linux (nothing reads,
-so it does not autotune upward): **128.125 MiB per listener** at the default,
-256.25 MiB dual-stack, and 4097 × 128 KiB = **512.125 MiB** on an adopted
-fd given `Backlog=4096`.
-`BB_SOCKET_RCVBUF` sets that buffer on the listener and parked connections
-inherit it: a requested `262144` is 416 KiB effective each, making the window
-**416.406 MiB** per listener, 832.812 MiB dual-stack.  A window longer than the
-client's SYN retransmission budget (about two minutes) loses the excess.
-BlackBull documents this window rather than forcing it smaller.
+from the framework. Budget startup memory across every listener's backlog
+and the receive buffers of parked connections. Effective kernel values are
+platform-dependent; adopted sockets retain the creator's backlog.
+`BB_SOCKET_RCVBUF` affects listeners BlackBull binds and is inherited by their
+accepted connections. Long startup hooks can exceed clients' connect budgets.
 
 ### What a client beyond the backlog observes
 

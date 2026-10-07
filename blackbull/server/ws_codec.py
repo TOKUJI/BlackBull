@@ -61,17 +61,10 @@ class WSFrameHeader(NamedTuple):
 
 def encode_frame_header(length: int, opcode: WSOpcode | int = WSOpcode.TEXT,
                         *, rsv1: bool = False) -> bytes:
-    """Encode just the **unmasked** 2-to-10-byte WebSocket frame header
-    (server → client, RFC 6455 §5.1/§5.2).
+    """Encode an unmasked, final server-to-client frame header (RFC 6455 §5.2).
 
-    Server frames MUST NOT be masked, so this never sets the mask bit and
-    takes no masking key.  Callers that already hold the payload separately
-    (e.g. ``WebSocketSender``) write ``(header, payload)`` as a vectored
-    ``writelines`` — avoiding the header+payload concatenation copy that
-    ``encode_frame`` would otherwise allocate on every send.
-
-    ``rsv1`` (RFC 7692 §7) marks the FIRST frame of a permessage-deflate
-    compressed message.
+    RSV1 belongs only on the first frame of a compressed message. Pass header
+    and payload parts to the sender; its shared size gate chooses the write.
     """
     first_byte = WSFrameBits.FIN | opcode
     if rsv1:
@@ -102,8 +95,6 @@ def encode_frame(payload: bytes, opcode: WSOpcode | int = WSOpcode.TEXT,
     frames in the same message keep ``rsv1=False``.
     """
     if not mask:
-        # Server → client fast path: reuse the header builder and concatenate
-        # once (two allocations total vs. the old three).
         return encode_frame_header(len(payload), opcode, rsv1=rsv1) + payload
 
     length = len(payload)
@@ -246,11 +237,6 @@ async def read_payload(
     raw = await reader.readexactly(length)
     if length == 0:
         return raw
-    # XOR via int arithmetic — does the work at C speed via CPython's
-    # bignum routines.  Equivalent to ``bytes(b ^ mask[i % 4] ...)`` but
-    # ~20× faster on real payload sizes; with Autobahn 12/13 fragmenting
-    # large compressed messages into hundreds of small frames, the slow
-    # comprehension dominated the read loop.
     extended_mask = mask * ((length + 3) // 4)
     if len(extended_mask) > length:
         extended_mask = extended_mask[:length]

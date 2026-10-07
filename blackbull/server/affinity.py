@@ -1,14 +1,7 @@
-"""Per-worker CPU placement: pin a worker's event loop to one core, so the hot
-state it accumulates stays resident in that core's L1/L2.
+"""Worker event-loop CPU placement.
 
-Three rules, argued in ``docs/deployment/workers.md`` §CPU pinning:
-
-* **Never widen the mask we were given.**  Every placement is drawn from
-  ``sched_getaffinity``, so ``taskset``, ``numactl`` and a cpuset are inputs
-  rather than obstacles.
-* **Never pin the thread pool.**  Linux threads inherit the creating thread's
-  mask; [`make_offload_executor`][] hands each pool thread the full one back.
-* **Always be switchable off** — ``BB_CPU_PINNING=off``.
+Never widen the inherited affinity mask or pin executor threads to the loop
+CPU. BB_CPU_PINNING=off must disable placement.
 """
 from __future__ import annotations
 
@@ -29,19 +22,10 @@ _AUTO = 'auto'
 
 
 def _parse_cpu_list(spec: str, ceiling: int) -> set[int] | None:
-    """Parse ``taskset``-style ``2,4,6-9`` into a CPU set, or ``None`` if the
-    text is not a well-formed list.
+    """Parse taskset-style CPU ids/ranges or return None for invalid input.
 
-    Deliberately strict — a typo in a deployment variable should announce
-    itself rather than resolve to some neighbouring core.
-
-    Ranges are clamped to *ceiling*, the highest CPU this process could
-    possibly be placed on.  Nothing above it survives the caller's
-    intersection anyway, and materialising it first is how a mistyped bound
-    (``0-20000000`` for ``0-20``) turns into a gigabyte and two seconds in
-    every worker at fork time.  Validation happens before the clamp, so a
-    reversed range is still reported rather than flattened into a plausible
-    one.
+    Reject reversed ranges before clamping to ceiling. Clamp before materializing
+    sets so hostile or mistyped ranges cannot allocate unbounded memory.
     """
     cpus: set[int] = set()
     for field in spec.split(','):

@@ -1,29 +1,8 @@
-"""ASGI protocol types: event-type string constants, typed message shapes,
-and typed event wrappers.
+"""ASGI boundary types and events.
 
-Three responsibilities, all framework-side:
-
-- ``ASGIEvent``: namespace of ASGI 3.0 event-type strings, used for
-  ``match``/``case`` dispatch and equality checks across both the
-  framework and (importing from here) the server stack.  Every constant is
-  ``Final``, so a type checker infers a ``Literal`` and comparisons against
-  them narrow the event unions below.
-- The 19 ``TypedDict`` message shapes and the two direction unions
-  (``ASGIReceiveEvent`` / ``ASGISendEvent``) plus the two channel callable
-  aliases (``ASGIReceiveCallable`` / ``ASGISendCallable``).  These are
-  declarations only — erased at runtime, no wire or dispatch change.
-- ``ResponseStart`` / ``ResponseBody``: dict-subclass wrappers for the
-  two outgoing response event shapes so middleware can dispatch on
-  Python type rather than string comparison.  Both subclass ``dict``
-  so ``isinstance(e, dict)`` remains True — required for beartype and
-  any ASGI send callable annotated ``event: dict``.
-
-**Naming rule**: an ``ASGI`` prefix marks boundary vocabulary and is
-quarantined to this module; unprefixed names (``Connection``, ``Headers``,
-``Request``, ``Response``) are BlackBull's native layer.  The dicts on the
-channel are ASGI 3.0 events verbatim — the spec is free documentation for
-every key — so ``rg "from .asgi import"`` stays a literal map of the
-remaining ASGI surface.
+Keep ASGI-prefixed vocabulary here; native Connection and response objects
+belong outside this module. Response wrappers remain dict subclasses for
+external ASGI callables.
 """
 from collections.abc import Awaitable, Callable
 from typing import Final, Literal, NotRequired, TypedDict

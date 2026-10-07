@@ -109,8 +109,6 @@ class Cache:
         self._cacheable_statuses = frozenset(cacheable_statuses)
         self._cache_authenticated = cache_authenticated
         self._generate_etag = generate_etag
-        # Base key → variants.  OrderedDict gives O(1) move-to-end and
-        # ``popitem(last=False)`` for the LRU, as functools.lru_cache does.
         self._store: OrderedDict[tuple, _Variants] = OrderedDict()
 
     async def __call__(self, conn, receive, send, call_next):
@@ -546,13 +544,11 @@ def _stated_freshness(fields: Iterable[tuple[bytes, bytes]]) -> int | None:
 
 def _may_reuse(entry: _StoredResponse, cc: bytes | None,
                pragma: bytes | None) -> bool:
-    """Whether *entry* may answer this request without validation.
+    """Check request validation requirements (RFC 9111 §5.2.1, §5.4).
 
-    RFC 9111 §5.2.1 — a request's ``no-cache`` asks the origin to validate, and
-    ``max-age=N`` refuses a copy older than N, so ``max-age=0`` always
-    validates.  ``Pragma: no-cache`` counts when no ``Cache-Control`` was sent
-    (§5.4), and a field that cannot be read could be hiding a ``no-cache``.
-    ``min-fresh``, ``max-stale`` and ``only-if-cached`` are not implemented.
+    no-cache forbids reuse; max-age refuses older entries (age zero may satisfy
+    max-age=0). Honor Pragma only without Cache-Control; unreadable fields require
+    validation. min-fresh, max-stale and only-if-cached are unsupported.
     """
     if cc is not None and not _readable(cc):
         return False

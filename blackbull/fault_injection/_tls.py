@@ -53,9 +53,7 @@ def make_self_signed_h2_context() -> ssl.SSLContext:
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(certfile=str(cert_path), keyfile=str(key_path))
     weakref.finalize(ctx, shutil.rmtree, str(tmp), ignore_errors=True)
-    # Real clients pick the strongest ALPN entry both sides advertise;
-    # offering http/1.1 too keeps the example friendly to clients that
-    # don't enable HTTP/2.
+    # Advertise both h2 and http/1.1 for local protocol tests.
     ctx.set_alpn_protocols(['h2', 'http/1.1'])
     ctx.bb_ca_cert_path = str(cert_path)
     return ctx

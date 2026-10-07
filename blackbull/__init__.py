@@ -1,58 +1,15 @@
-"""BlackBull — async ASGI 3.0 web framework.
+"""BlackBull public API. MINOR releases may change contracts.
 
-**Early Alpha** — API may break between MINOR versions; see
-``KNOWN_LIMITATIONS.md`` before building production-shape work on top.
-
-Public API exports — ``__all__`` at the foot of this module is the complete
-and authoritative list; the notes below cover the ones worth a sentence:
-
-- `BlackBull`: the main application object; wraps routing, middleware, and lifespan hooks.
-- `AppConfig`: declarative, immutable holder for the startup settings ``run()`` accepts (port, TLS, workers, …).
-- `serve`: synchronous entry point that runs any ASGI 3.0 callable (also used by the ``blackbull`` console script).
-- `Response`, `JSONResponse`, `RedirectResponse`, `StreamingResponse`, `EventSourceResponse`, `WebSocketResponse`: response helpers.
-- `RouteInfo`: immutable ``(method, path, name)`` snapshot returned by ``app.get_routes()``.
-- `QUERY`: the HTTP QUERY method (RFC 10008) as a plain string — ``http.HTTPMethod`` lacks the member until Python ≥3.16.
-- `UnprocessableQuery`: raise from a QUERY handler for ``422`` when the (accepted) request media type carries a semantically unprocessable query (RFC 10008).
-- `Headers`: case-insensitive, ordered, multi-valued HTTP header store.
-- `Connection`: the typed internal request representation; the handler context object exposing ``method``/``path``/``raw_path``/``query_string``/``headers``/``cookies``/``query``/``query_list``/``path_params``/``state`` and ``body()``/``json()``/``text()``/``form()``. The ASGI ``scope`` is a derived view (``Connection.as_scope()``).
-- `Request`: **deprecated** alias of ``Connection``. Accessing ``blackbull.Request`` emits a ``DeprecationWarning``; replace ``request: Request`` handler params with ``conn: Connection`` (identical API). Removal no earlier than 2027-08-01.
-- `WebSocket`: the high-level WebSocket handler object — ``await ws.accept()``, ``async for message in ws``, ``ws.send_text()``/``send_bytes()``/``send_json()``, ``await ws.close()``. Declare ``async def handler(ws: WebSocket)`` on a ``Scheme.websocket`` route to receive it; the raw ``(conn, receive, send)`` form keeps working unchanged.
-- `WebSocketDisconnect`: raised by ``ws.receive()`` when the peer closes; carries ``code`` and ``reason``. ``async for`` ends the loop instead of raising.
-- `Depends`: per-request provider injection for simplified handlers (async-generator providers get teardown after the response is sent).
-- `cookie_header`: builds a ``Set-Cookie`` header tuple.
-- `read_body`: reads and buffers the full request body from the ASGI receive channel.
-- `read_json`: reads the body and parses it as JSON (``None`` on empty/invalid).
-- `read_text`: reads the body and decodes it as text.
-- `parse_cookies`: parses the ``Cookie`` header into a plain ``dict``.
-- `CORS`: adds ``Access-Control-*`` headers; handles preflight OPTIONS requests.
-- `as_middleware`: decorator that marks an async function or class as middleware; normalises ``send`` so inner wrappers see only ASGI event dicts.
-- `TrustedProxy`: rewrites ``scope['client']`` / ``scope['scheme']`` from proxy headers.
-
-Importing this package loads the server stack (``blackbull.server.*``) as a
-side effect: ``blackbull.app`` imports ``RawBinding`` from
-``blackbull.server.protocol_registry``, and ``blackbull/server/__init__.py``
-re-exports ``ASGIServer``, so the whole of it is resolved before ``BlackBull``
-itself is bound.  Use ``ASGIServer`` from ``blackbull.server`` to embed
-BlackBull's own server;
-otherwise pass the ``BlackBull`` instance to any external ASGI server
-(uvicorn, hypercorn, granian, …) since ``BlackBull.__call__`` is ASGI 3.0
-compliant.
+Importing blackbull loads the server stack. Use blackbull.server.ASGIServer
+to embed it, or pass a BlackBull instance to an external ASGI host.
+Request is a deprecated Connection alias; new code should use Connection.
 """
-# Bound privately, all of it.  A bare ``import logging`` here publishes
-# ``blackbull.logging`` — resolving to the *standard library* module, next
-# door to the real ``blackbull.logger`` — because anything imported into a
-# package's ``__init__`` becomes an attribute of it.  Same for the exception
-# below, which was reachable as ``blackbull.PackageNotFoundError``.  The
-# underscore is what actually removes the name; ``__all__`` only governs
-# ``import *``.  Guarded by tests/architecture/test_public_api_surface.py.
+# Keep implementation imports private; __all__ alone does not hide package attributes.
 import logging as _logging
 _logging.getLogger('blackbull').addHandler(_logging.NullHandler())
 
-# Single source of truth for the version is pyproject.toml; expose it at
-# runtime via importlib.metadata so the two never drift.  Falls back to a
-# sentinel only when blackbull is being imported from a source checkout
-# without `pip install -e .` (the test runners and `bench/app.py` both
-# install editably, so this path is exercised only in unusual setups).
+# Runtime version comes from installed metadata; a source-only checkout
+# without an install uses the sentinel.
 from importlib.metadata import (PackageNotFoundError as _PackageNotFoundError,
                                 version as _pkg_version)
 
@@ -84,13 +41,7 @@ from .middleware.cors import CORS
 from .middleware.utils import as_middleware
 from .middleware.proxy import TrustedProxy
 
-#: The public surface, and — because this package ships ``py.typed`` — the
-#: thing that makes these names re-exports rather than private imports for a
-#: strict type checker.  Submodule names are deliberately absent from
-#: ``__all__``: ``blackbull.server`` and friends are reached by path, not bound
-#: as attributes by ``import *``.  ``Request`` is absent because it is a
-#: deprecated alias resolved through ``__getattr__``; listing it would make
-#: ``import *`` warn at code that never asked for it.
+# Exclude Request from __all__ so import * cannot trigger its deprecation warning.
 from .server.listener import InheritedFd, Listener, Tcp, Unix
 
 __all__ = [
@@ -122,15 +73,7 @@ __all__ = [
 
 
 def __getattr__(name):
-    """Lazy, deprecated attribute access — ``blackbull.Request``.
-
-    ``Request`` was the opt-in HTTP context object; it has been merged
-    into [`Connection`][] and the name demoted to an alias. Resolving it
-    through the module ``__getattr__`` (PEP 562) means the ``DeprecationWarning``
-    fires only if code actually touches ``Request`` — importing the package
-    stays warning-free — and the alias still evaluates to ``Connection`` so
-    existing ``request: Request`` handler signatures keep working unchanged
-    during the migration window (removal no earlier than 2027-08-01).
+    """Deprecated Request alias for Connection; removal no earlier than 2027-08-01.
     """
     if name == 'Request':
         import warnings

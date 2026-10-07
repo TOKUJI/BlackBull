@@ -1,21 +1,7 @@
-"""gRPC Length-Prefixed-Message codec.
+"""gRPC length-prefixed message framing.
 
-The gRPC wire format (https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md)
-carries each message inside an HTTP/2 DATA stream as:
-
-    Length-Prefixed-Message = Compressed-Flag (1 byte, unsigned)
-                              Message-Length  (4 bytes, big-endian uint32)
-                              Message         (Message-Length bytes)
-
-``Compressed-Flag`` is 0 for an uncompressed message and 1 when the message
-body is compressed with the algorithm named in the ``grpc-encoding`` header.
-This module is pure framing: it carries the flag but does not (de)compress —
-[`compression`][blackbull.grpc.compression] holds the gzip codec and the ASGI bridge
-sets/reads the flag around it.
-
-This module is pure binary framing — no protobuf dependency.  Protobuf
-serialisation is the application's concern; handlers receive and return the
-raw message bytes.
+The compressed flag travels here but compression belongs to the compression
+module. Protobuf serialization remains the handler's responsibility.
 """
 from __future__ import annotations
 

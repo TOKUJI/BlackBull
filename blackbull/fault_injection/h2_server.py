@@ -1,35 +1,7 @@
-"""Programmable HTTP/2 server that emits deliberate misbehaviour.
+"""Programmable malformed HTTP/2 server.
 
-[`H2FaultServer`][] listens on ``127.0.0.1:<random>``, accepts one
-HTTP/2 (h2c plaintext) connection at a time, and walks a
-[`ScenarioH2`][blackbull.fault_injection.scenario_h2.ScenarioH2] against it.
-It is designed for client-library / proxy / security-research test
-suites that need to exercise a client against a server that
-**deliberately** does the wrong thing — half-closed streams, exhausted
-flow-control windows, illegal SETTINGS, weird frame sequences.
-
-The server is an opt-in testing instrument: it refuses to start when
-``BLACKBULL_ENV=production`` or ``BB_PRODUCTION`` is set, and refuses a
-non-loopback bind without ``allow_remote=True``.
-
-Tutorial: ``docs/guide/fault_injection.md``.
-
-Quick start
------------
-
-    import pytest
-    from blackbull.fault_injection import H2FaultServer
-    from blackbull.fault_injection.catalogue import half_closed_stream_no_data
-
-    @pytest.fixture
-    async def fault_server():
-        async with H2FaultServer(scenario=half_closed_stream_no_data()) as srv:
-            yield srv
-
-    async def test_client_times_out_on_stalled_stream(fault_server):
-        client = MyH2Client(fault_server.url)
-        with pytest.raises(TimeoutError):
-            await client.get('/', timeout=1.0)
+Production mode is refused; non-loopback binds require allow_remote=True.
+Use raw-byte steps when normal frame encoding cannot express a fault.
 """
 from __future__ import annotations
 
@@ -77,14 +49,7 @@ class H2FaultServerError(RuntimeError):
 
 
 def _refuse_in_production() -> None:
-    """Hard opt-out: refuse to start in a production context.
-
-    The framework's canonical production signal is
-    ``BLACKBULL_ENV=production`` (surfaced as ``Settings.env``); the previous
-    check keyed on ``BB_PRODUCTION`` alone — a var read nowhere else in the
-    codebase — so a standard production process did **not** trip the guard
-    ``BB_PRODUCTION`` is still honoured as an explicit override
-    so the guard also trips outside the Settings machinery.
+    """Refuse startup in BLACKBULL_ENV=production or when BB_PRODUCTION is enabled.
     """
     override = os.environ.get('BB_PRODUCTION', '').strip().lower() in (
         '1', 'true', 'yes', 'on')

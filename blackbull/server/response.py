@@ -1,19 +1,7 @@
-"""Server-side responders: what an incoming HTTP/2 control frame makes happen.
+"""HTTP/2 control-frame responders.
 
-One ``Responder`` subclass per frame type, each declaring its ``FRAME_TYPE``.
-``__init_subclass__`` registers it, so
-[`ResponderFactory`][blackbull.server.response.ResponderFactory] dispatches by
-dict lookup, and ``respond(handler)`` reaches back into the owning
-``HTTP2Actor`` for state rather than keeping any of its own.
-
-Only the connection-management half of RFC 9113 arrives here — PING, SETTINGS,
-WINDOW_UPDATE, PRIORITY, PRIORITY_UPDATE and RST_STREAM.  HEADERS,
-CONTINUATION, DATA and GOAWAY drive the request lifecycle and stay in the
-actor's own frame loop; ``docs/about/rfc9113-implementation.md`` says where
-each frame type is dispatched.
-
-A responder also owns the validation its frame type owes, because a malformed
-control frame is a connection or stream error before it is anything else.
+State remains on the owning HTTP2Actor. Validate a control frame before
+acting; preserve required connection-versus-stream error scope.
 """
 from ..protocol.stream import StreamState
 from ..protocol.frame_types import (
@@ -45,9 +33,7 @@ class ResponderFactory:
 
 
 class Responder:
-    """
-    Abstract base class of responsing classes. You can find every subclass
-    (i.e. responsing classes) by accessing __subclasses__().
+    """Base for HTTP/2 frame responders.
     """
     FRAME_TYPE = None
     _registry = {}
@@ -265,20 +251,10 @@ class SettingsResponder(Responder):
 
 
 class PriorityResponder(Responder):
-    """RFC 9113 §6.3 — validate the frame, then discard the signal.
+    """Validate and discard legacy dependency priorities (RFC 9113 §6.3).
 
-    §5.3 deprecated the stream-dependency scheme and this server does not
-    implement it: scheduling reads RFC 9218 extensible priorities
-    (``Stream.priority_hint``), never the dependency tree.  Recording
-    ``weight`` and ``parent`` therefore built state that nothing read —
-    and, because §6.3 permits PRIORITY on an *idle* stream, state a peer
-    could grow one node per 14-byte frame for the life of the connection,
-    with no rate meter covering the frame type.  The exclusive branch made
-    it worse than linear: it walked every child of root to rewrite that
-    same unread field.
-
-    What must not be discarded is the validation.  §5.3.1 makes a stream
-    depending on itself a stream error, and h2spec asserts it.
+    Reject self-dependency; do not create nodes for idle streams. Scheduling
+    uses RFC 9218 priority hints rather than this deprecated dependency tree.
     """
 
     async def respond(self, handler):
@@ -309,11 +285,7 @@ class PriorityUpdateResponder(Responder):
                 self.frame.prioritized_stream_id)
             if is_closed:
                 return
-            # PRIORITY_UPDATE arrived before HEADERS — pre-create the stream so
-            # the hint survives until HEADERS does.  This is the one path on
-            # which a peer can grow the priority tree, so RFC 9218 §7's
-            # permission to bound the buffer is taken: a hint for more streams
-            # than it may hold open at once is one it can never redeem.
+            # RFC 9218 §7: retain idle hints only up to the concurrent stream bound.
             if len(handler.root_stream.children) >= handler.max_concurrent_streams:
                 log_cap_hit('h2_priority_update_buffer',
                             requested=len(handler.root_stream.children) + 1,
@@ -324,25 +296,17 @@ class PriorityUpdateResponder(Responder):
             stream = handler.find_stream(self.frame.prioritized_stream_id)
         if stream is not None:
             stream.priority_hint = hint
-            # Reflect a late PRIORITY_UPDATE onto an already-dispatched request.
-            # ``stream.conn.extensions`` is shared by reference with the ASGI
-            # scope the compat lane hands the app, so one write reaches both —
-            # and that is why the hint lives in an extension rather than a
-            # top-level scope key, which would be a dispatch-time copy this
-            # write could not reach.
+            # Late priority updates must reach the same extensions dictionary seen by the app.
             conn = stream.conn
             if conn is not None and conn.extensions is not None:
                 conn.extensions['http.response.priority'] = hint
 
 
 class RstStreamResponder(Responder):
-    """Tears down the stream a RST_STREAM names, and frees what it held.
+    """Retire the reset stream and return unconsumed connection credit.
 
-    Cancels the handler task, drops the stream's sender and recipient, and
-    replays to the connection window the inbound credit the cancelled handler
-    never consumed, so later streams are not starved by it.  The identifier is
-    recorded as closed-via-RST, so a frame arriving on it afterwards meets the
-    §5.1 closed-stream rules rather than opening a new stream.
+    Cancel its handler and record closed-via-RST so later frames follow
+    RFC 9113 §5.1 closed-stream rules.
     """
 
     @log
@@ -371,13 +335,7 @@ class RstStreamResponder(Responder):
             return
 
         logger.warning('stream_id=%d %s', stream_id, self.frame.error_code)
-        # Cancel the running handler for this stream.  Without this a
-        # server-streaming handler abandoned by the client blocks forever in the
-        # sender's flow-control wait (no further WINDOW_UPDATE will ever arrive),
-        # permanently holding a max_concurrent_streams slot — a high-churn
-        # streaming client leaks slots until new streams are REFUSED_STREAM'd.
-        # Common retirement frees the slot synchronously and cancels the
-        # flow-control wait; the handler's finally/aclose continues to run.
+        # Retire synchronously; cancellation still runs handler finally/aclose.
         handler._retire_stream(stream_id, via_rst=True)
 
     FRAME_TYPE = FrameTypes.RST_STREAM

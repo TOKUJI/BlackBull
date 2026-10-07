@@ -1,26 +1,7 @@
-"""An app-facing seam for testing your own gRPC servicers.
+"""Loopback gRPC test server.
 
-BlackBull ships a gRPC **server** and no gRPC client, and this module does
-not add one.  What it adds is the boilerplate the framework's own gRPC
-tests repeat — serve the app on an ephemeral h2c port, POST with
-``content-type: application/grpc``, read the status back out of the
-*trailing* headers — behind one helper::
-
-    async with GrpcTestServer(app) as grpc:
-        reply = await grpc.unary('/demo.Greeter/SayHello', b'world')
-
-    assert reply.status is GrpcStatus.OK
-    assert reply.message == b'hi world'
-
-Every gRPC response reports its status in trailing headers, success and
-error alike, so a transport without ``http.response.trailers`` never
-observes completion — which is why this runs over a real socket rather than
-in process.  ``docs/guide/grpc.md`` argues it under "Why not the in-process
-test client".
-
-The gRPC analogue of [`NativeTestServer`][blackbull.testing.native.NativeTestServer],
-and the same shape: a real server on a loopback port, the whole dispatch
-path exercised, and the port left public so anything else can drive it.
+Status lives in trailers, so an in-process ASGI transport that loses trailers
+cannot establish gRPC completion. This helper does not provide a general gRPC client.
 """
 from __future__ import annotations
 
@@ -111,12 +92,10 @@ class GrpcTestServer:
 
 
 def _read_reply(response) -> GrpcReply:
-    """Fold one ``ClientResponse`` into a [`GrpcReply`][].
+    """Collect a reply; this helper defaults a missing grpc-status to OK.
 
-    ``grpc-status`` is absent on some error paths that fail before the
-    handler runs; absent is treated as ``OK`` because that is what the
-    protocol says an omitted trailer means, and inventing UNKNOWN here
-    would report a failure the server never sent.
+    That fallback is a test-helper limitation, not a gRPC guarantee. Tests for
+    missing status must inspect the actual headers/trailers.
     """
     # gRPC puts these in the trailer section. A Trailers-Only response — one
     # from a path that fails before the handler runs — has only the head, so

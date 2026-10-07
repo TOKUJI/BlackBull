@@ -1,13 +1,7 @@
-"""Worker process entry point for multi-worker deployments.
+"""Forked worker entry point.
 
-Each worker is a forked child that inherits pre-bound socket file descriptors
-from the master, creates a fresh asyncio event loop, and runs a standard
-ASGIServer with those sockets.
-
-The worker:
-  - ignores SIGINT (the master handles Ctrl+C and sends SIGTERM to workers)
-  - runs lifespan independently (startup/shutdown per worker)
-  - tracks active connections via the ASGIServer connection counter
+Create a fresh event loop, run lifespan per worker and leave SIGINT handling
+to the master. Workers handle its SIGTERM.
 """
 import asyncio
 import logging
@@ -37,7 +31,7 @@ def run_worker(app, bound_listeners, ssl_context, worker_id: int,
         fork — every listener this worker owns, which the master decided from
         each listener's own ``workers`` field.
     ssl_context:
-        TLS context to pass to asyncio.start_server, or None for plain HTTP.
+        TLS context for accepted connections, or None for cleartext.
     disowned:
         Listening sockets this worker inherited through fork but does not
         serve — another worker's, or a single-owner listener it does not own.
@@ -61,10 +55,7 @@ def run_worker(app, bound_listeners, ssl_context, worker_id: int,
     # Workers should not respond to Ctrl+C directly — the master handles the
     # signal and sends SIGTERM to every worker for a coordinated shutdown.
     signal.signal(signal.SIGINT, signal.SIG_IGN)
-    # The handler inherited from the master is a no-op here that also
-    # suppresses the default terminate.  SIG_DFL until ``_serve`` installs the
-    # loop-stopping one below: a signal arriving before the loop exists has
-    # nothing to stop.
+    # Restore SIG_DFL before the loop installs its shutdown handler.
     signal.signal(signal.SIGTERM, signal.SIG_DFL)
 
     from ..env import apply_event_loop_policy, get_settings as _get_settings  # noqa: PLC0415

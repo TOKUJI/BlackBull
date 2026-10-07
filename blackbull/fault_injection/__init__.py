@@ -1,26 +1,8 @@
-"""BlackBull's deliberate-misbehaviour toolkit.
+"""Deliberately malformed peers and scenario helpers.
 
-A single namespace for the two directions of protocol fault injection:
-
-* **Client-side, HTTP/1.1** — [`blackbull.fault_injection.scenario_h1`][blackbull.fault_injection.scenario_h1]
-  ships a programmable client (driven through
-  [`blackbull.client.HTTP1Client.execute_scenario`][blackbull.client.HTTP1Client.execute_scenario]) that emits
-  deliberately bad HTTP/1.1 against a target *server*: trickled bytes,
-  partial headers, mid-request idle, abrupt RST.
-  [`blackbull.fault_injection.oracle_h1`][blackbull.fault_injection.oracle_h1] adds a differential oracle
-  for comparing two HTTP/1.1 implementations under the same scenario.
-
-* **Server-side, HTTP/2** — [`blackbull.fault_injection.h2_server`][blackbull.fault_injection.h2_server]
-  ships a programmable server that emits deliberately bad HTTP/2 toward
-  a target *client*: half-closed streams, exhausted windows, illegal
-  SETTINGS, weird frame sequences.  A canned-misbehaviour catalogue
-  lives at [`blackbull.fault_injection.catalogue`][blackbull.fault_injection.catalogue].
-
-This module is an opt-in testing instrument.  Both fault servers refuse to
-start when ``BLACKBULL_ENV=production`` or ``BB_PRODUCTION`` is set, and
-refuse a non-loopback bind without ``allow_remote=True``.
-
-See ``docs/guide/fault_injection.md`` for a tutorial.
+Choose the scenario vocabulary by protocol and by whether the target is a
+client or server. Fault servers refuse production mode and remote binds
+without allow_remote=True; see docs/guide/fault_injection.md.
 """
 from __future__ import annotations
 
@@ -80,10 +62,7 @@ from .scenario_h1_server import (
     scenario_from_json as scenario_h1_server_from_json,
     scenario_to_json as scenario_h1_server_to_json,
 )
-# Fourth vocabulary, fourth set of role-qualified aliases.  ``H2C`` reads as
-# "HTTP/2 client-side"; the unprefixed names stay with the HTTP/1.1 client
-# vocabulary that had them first, ``H1S`` is the HTTP/1.1 server side and
-# ``H2`` the HTTP/2 server side.
+# H2C denotes client scenarios; unprefixed names remain HTTP/1.1 client names.
 from .scenario_h2_client import (
     Abort as H2CAbort,
     CLIENT_PREFACE as H2C_CLIENT_PREFACE,
@@ -126,12 +105,7 @@ from .scenario_h2 import (
     scenario_to_json as scenario_h2_to_json,
 )
 
-# The role-qualified spellings for the HTTP/2 *server* vocabulary.  The
-# other three cells are ``H1C`` / ``H1S`` / ``H2C``; this one shipped as a
-# bare ``H2`` prefix, which reads as "HTTP/2" rather than "HTTP/2 server"
-# and leaves the scheme with a hole exactly where a reader would look for
-# the fourth cell.  Both spellings are exported — the older one is not
-# deprecated, it is just less legible next to its three siblings.
+# H2S denotes HTTP/2 server scenarios; H2 aliases remain supported.
 from .scenario_h2 import (
     Abort as H2SAbort,
     CloseGracefully as H2SCloseGracefully,
@@ -242,8 +216,8 @@ _DEPRECATED_SPELLINGS = {
 
 # Unannotated: see tests/unit/test_deprecated_send_bytes_spellings.py::test_the_warning_is_attributed_to_the_callers_line.
 def __getattr__(name):
-    """PEP 562 — a deprecated spelling is resolved only when a caller names it,
-    so the warning reaches that caller and ``import *`` stays silent."""
+    """Resolve deprecated spellings with a caller-attributed warning.
+    """
     if name in _DEPRECATED_SPELLINGS:
         import warnings  # noqa: PLC0415
         replacement, step = _DEPRECATED_SPELLINGS[name]

@@ -1,11 +1,7 @@
-"""Cross-Origin Resource Sharing.
+"""CORS response headers and preflight handling.
 
-[`CORS`][blackbull.middleware.cors.CORS] answers preflight ``OPTIONS`` requests
-itself and attaches the headers a browser needs before it will hand a
-cross-origin response to page script.  A request with no ``Origin``, or an
-``Origin`` the configuration does not allow, passes through untouched — this
-middleware never refuses a request, because the enforcement happens in the
-browser.
+CORS is browser enforcement, not server authorization. Unallowed origins
+pass through without granting cross-origin access.
 """
 from ..native import NativeResponse
 from ..connection import Connection

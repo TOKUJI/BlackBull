@@ -1,9 +1,4 @@
-"""Four named HTTP/2 misbehaviour scenarios.
-
-See [`blackbull.fault_injection.catalogue`][blackbull.fault_injection.catalogue] for the catalogue
-overview and the four spec-grade categories.
-
-Each builder returns a [`ScenarioH2`][blackbull.fault_injection.ScenarioH2].
+"""Named HTTP/2 server faults; each builder returns a ScenarioH2.
 """
 from __future__ import annotations
 

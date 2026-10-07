@@ -1,11 +1,7 @@
 """Public middleware exports.
 
-Names are short nouns: the module path supplies the "this is middleware"
-context, so a suffix would only repeat it.
-
-The ``*Middleware``-suffixed spellings and the ``compress`` pre-built
-instance remain reachable through PEP 562 ``__getattr__``, each with a
-one-time ``DeprecationWarning``, and will be removed in a future release.
+Legacy Middleware-suffixed aliases and compress emit DeprecationWarning;
+use the unsuffixed classes for new code.
 """
 from .cache import Cache
 from .compression import Compression, _make_default_compress

@@ -1,49 +1,23 @@
-"""The single owned buffer for the H/1.1 inbound path.
+"""Single connection-owned byte buffer.
 
-One `bytearray` per connection, written **directly by the kernel** through
-[`ReadBuffer.get_buffer`][ReadBuffer.get_buffer] and read by cursor.  Every inbound byte is
-materialised once: the head is sliced out for the parser, the body is handed
-out as a `memoryview`, and a keep-alive peer's next request is simply the bytes
-that were already sitting between the cursors.
-
-Deliberately free of HTTP semantics.  It reports an over-budget head with
-``LIMIT_EXCEEDED`` rather than raising, because the 431 belongs to the
-actor; it distinguishes "EOF with nothing" from "EOF mid-head" only by leaving
-``available`` intact, because deciding between a silent close and a 400 is
-also the actor's job.
-
-Free of *receive* policy for the same reason: it grows on demand, reports a
-drained message boundary, tracks the message's peak resident bytes, and offers
-``release_to_floor``, but takes none of those decisions.  The Internals
-page says which object does.
-
-Not thread-safe and not concurrency-safe — one connection, one buffer, one
-actor loop, per the actor model.
+Keep protocol verdicts and receive policy outside this class. It reports
+bytes and drained boundaries; the reader decides when to release capacity.
+Not safe for concurrent readers or cross-thread mutation.
 """
 from __future__ import annotations
 
 __all__ = ('ReadBuffer',)
 
-#: Initial allocation: a typical head plus a small body without a resize,
-#: without holding a page per idle keep-alive peer.
+# Initial allocation in bytes.
 _INITIAL = 8192
 
-#: Smallest write window offered to the transport — a **memory floor decision,
-#: not a throughput one**.  Whatever is offered here is allocated for the life
-#: of every connection, idle ones included, so the 64 KiB a `recv` could use
-#: would cost ~640 MB across 10k idle peers.  A large body simply takes more
-#: `recv` calls.
+# Minimum transport write window in bytes, retained even on idle connections.
 _MIN_READ = 4096
 
-#: Compact once the consumed prefix is at least this large *and* at least half
-#: the buffer.  The first stops a memmove of a few bytes on every request; the
-#: second stops a large resident body being shuffled while it is consumed.
+# Compact after this many consumed bytes, only when at least half the buffer is consumed.
 _COMPACT_MIN = 4096
 
-#: Size at or above which [`ReadBuffer.take`][ReadBuffer.take] copies through a memoryview
-#: instead of a `bytearray` slice — the measured crossover, tabulated on
-#: ``take``.  Deliberately not configurable: a property of the interpreter's
-#: copy costs, not of a deployment.
+# Internal copy-size gate, not a deployment setting.
 _VIEW_COPY_THRESHOLD = 8192
 
 
@@ -63,8 +37,7 @@ class ReadBuffer:
         'peak_avail',
     )
 
-    #: [`find_head_end`][] result meaning "the byte budget ran out before the
-    #: terminator appeared".  Returned rather than raised — see module docstring.
+    # Head scan sentinel: byte budget exceeded before the terminator.
     LIMIT_EXCEEDED = -2
 
     #: The size ``release_to_floor`` returns to.  Public because the
@@ -78,9 +51,7 @@ class ReadBuffer:
         self._scanned = 0    # absolute offset the head scan has cleared
         self._eof = False
         self._examined = 0   # cumulative bytes the scan has looked at
-        #: Allocation is above the floor.  A flag rather than a
-        #: ``capacity > FLOOR`` comparison: read on every arrival and every
-        #: consuming read, written only where the buffer resizes.
+        # Allocation is above FLOOR.
         self.grown = False
         #: A compaction left the buffer empty.  Raised here and cleared by
         #: [`consume_boundary`][]; this object never reads it.
@@ -166,20 +137,11 @@ class ReadBuffer:
         return self._w - self._r
 
     def _drop_view(self, *, tolerate_export: bool = False) -> None:
-        """Release the outstanding write window so the buffer can be resized.
+        """Release the write view before resizing.
 
-        ``tolerate_export`` is for the one caller that can legitimately still
-        hold an export: uvloop's buffered read path calls ``buffer_updated()``
-        inside its own Py_buffer export and releases it immediately after we
-        return, so ``release()`` there raises ``memoryview has 1 exported
-        buffer`` on the cleartext path (TLS goes through SSLProtocol and never
-        hits this).  Dropping the reference is enough.
-
-        Everywhere else a BufferError is a genuine export leak of ours — a body
-        ``memoryview`` outliving its request — and must propagate rather than be
-        masked.  On that path the reference is deliberately left set, so every
-        later call fails the same way and the connection is fatal at the first
-        sign of a leak instead of crashing somewhere unrelated later.
+        Only the uvloop buffer_updated callback may tolerate its still-live export.
+        Elsewhere propagate BufferError and retain the reference so an export leak
+        cannot be masked by a later resize.
         """
         if self._view is not None:
             try:
@@ -192,16 +154,10 @@ class ReadBuffer:
     # -- reading ----------------------------------------------------------
 
     def find_head_end(self, limit: int = 0) -> int:
-        """Length of the message head, terminator included, or a sentinel.
+        """Return head length including terminator, -1 if incomplete, or LIMIT_EXCEEDED.
 
-        Returns ``-1`` when the terminator has not arrived yet and
-        ``LIMIT_EXCEEDED`` when *limit* (0 = unbounded) is passed without
-        one.
-
-        The scan resumes from where the last call stopped, backed off by three
-        bytes so a ``\\r\\n\\r\\n`` split across two arrivals is still found.
-        Without that resumption a peer dribbling one byte per segment makes
-        every arrival re-scan the whole head — quadratic, and attacker-chosen.
+        limit=0 is unbounded. Resume across split terminators without rescanning the
+        whole head; reset scan state at each message boundary.
         """
         start = max(self._r, self._scanned - 3)
         self._examined += self._w - start
@@ -233,38 +189,10 @@ class ReadBuffer:
         return -1 if idx < 0 else idx - self._r
 
     def take(self, n: int) -> bytes:
-        """Materialise and consume the next *n* bytes.
+        """Materialize and consume the next n bytes.
 
-        The one copy per message: the head goes to the parser as `bytes`
-        because the parse path's `split`/`translate` bulk ops need a real
-        buffer object, and those are what keep the parser at C speed.
-
-        Two ways to make that copy, and which one wins depends on size — so
-        the size decides, the same shape as the send path's join-vs-vectored
-        gate.  Slicing the `bytearray` allocates an intermediate and copies
-        twice; a `memoryview` slice copies once but pays for building and
-        releasing the view.  Measured on this tree (min of 7, µs/call):
-
-        | n | bytearray slice | memoryview | ratio |
-        |---|---|---|---|
-        | 300 | 0.102 | 0.180 | 1.77× |
-        | 4 KiB | 0.197 | 0.242 | 1.23× |
-        | 8 KiB | 0.270 | 0.289 | 1.07× |
-        | 16 KiB | 0.559 | 0.413 | 0.74× |
-        | 1 MiB | 1052 | 16.4 | 0.02× |
-
-        The crossover sits between 8 and 16 KiB.  Below it the view setup
-        dominates and the double copy is cheaper — and *every request* takes
-        its head through here, so that is the hot path.  Above it the second
-        copy dominates and doubles peak memory besides (2.0 → 1.0 MiB on a
-        1 MiB take), which matters because a body read asks for whatever the
-        peer declared.
-
-        Above the threshold the view is released explicitly rather than left
-        to refcounting: a `bytearray` with a live export raises `BufferError`
-        on resize, and the next `get_buffer` may resize.  Tying that to when a
-        temporary happens to be collected is how it becomes a load-dependent
-        crash.
+        Use the size gate for copying. Release temporary memoryviews before returning:
+        a live export prevents the next buffer resize and can cause BufferError.
         """
         r = self._r
         if n < _VIEW_COPY_THRESHOLD:
@@ -284,10 +212,7 @@ class ReadBuffer:
         return out
 
     def view(self, n: int) -> memoryview:
-        """A view of the next *n* resident bytes — no copy, not consumed.
-
-        Body bytes reach the application through this, so a request that is
-        streamed or sent to a file never allocates a `bytes` for its payload.
+        """Return an unconsumed view of the next n resident bytes; callers own its lifetime.
         """
         return memoryview(self._buf)[self._r:self._r + n]
 
@@ -366,12 +291,6 @@ class ReadBuffer:
             self.compact()
 
     def _make_room(self, want: int) -> None:
-        """Ensure *want* writable bytes, compacting before growing.
-
-        Growth doubles rather than adding exactly what was asked for: a
-        `want`-sized bump reallocates on nearly every read of a large body,
-        which is O(n) memmoves over the message.
-        """
         self._drop_view()
         if self._r and len(self._buf) - (self._w - self._r) >= want:
             self.compact()

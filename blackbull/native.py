@@ -1,28 +1,8 @@
-"""Native response message for the H1 send path.
+"""Native send messages.
 
-The unified response message BlackBull's own server carries on the native
-path.  One class replaces the ASGI start/body/trailers dicts: a response
-object may carry any combination of ``header`` (status line + headers),
-``body`` (chunks), and ``trailers``, so a complete response is **one object
-and one ``send``**, while streaming is header-object then body-chunk objects.
-
-Design invariants (validated in ``bench/scratch/send-model-c.py``):
-
-- **Presence is ``is not None``, never truthiness** — an empty body is a real
-  body (204-style).  Middleware must preserve ``None`` when transforming
-  (``header or []`` turns ``None`` into ``[]`` and the sender mis-detects a
-  header — a real bug caught in the scratch model).
-- **DX via properties, not the wire shape** — ``resp.header`` is a zero-copy
-  view with ``get``/``append``/``getlist``/``__contains__``/``__len__``/
-  ``__iter__`` (BlackBull ``Headers``-like); ``body`` is a plain ``bytes``
-  with ``content_length``/``is_empty``/``content_type`` helpers.
-- **Server hot path may read the raw slots** (``_header``/``_body``) to skip
-  the property+view overhead; the properties exist for middleware and
-  handler-facing DX.
-- **``to_asgi()`` is the boundary conversion** — 1 object → ASGI event list,
-  used only at conversion boundaries: the external ASGI edge (``asgi=True``
-  / external hosts) and the middleware native-read arms (symmetric with
-  [`Connection.as_scope`][Connection.as_scope]).
+Presence is is not None, never truthiness: an empty body is real content.
+Preserve absent header/body/trailers through middleware. Introduce ASGI event
+dictionaries only at conversion boundaries.
 """
 from __future__ import annotations
 
@@ -81,29 +61,10 @@ class _HeaderView:
 
 
 class NativeWSMessage:
-    """One message on the native WebSocket send channel.
+    """A native WebSocket send message.
 
-    The WS counterpart of [`NativeResponse`][], and it exists for the same
-    reason.  HTTP has a native send message and the sender a native arm;
-    WebSocket would otherwise be native only in the sense that "conn is
-    native, no scope" while its *event channel* stayed ASGI-shaped — so
-    ``websocket.*`` dicts would travel object → middleware → actor → sender
-    on BlackBull's own path.
-    The handler never saw them (that is the [`WebSocket`][blackbull.websocket.WebSocket]
-    object's whole point), but everything under it did.
-
-    Three kinds, discriminated by ``kind`` rather than by which of seven
-    fields happens to be set — the variants carry disjoint payloads, so a tag
-    reads better here than the presence test that suits ``NativeResponse``'s
-    combinable arms:
-
-    - ``ACCEPT`` — ``subprotocol`` / ``headers``; completes the handshake.
-    - ``SEND`` — exactly one of ``text`` (``str``) or ``data`` (``bytes``).
-    - ``CLOSE`` — ``code`` / ``reason``.
-
-    ``data`` rather than ``bytes``: the ASGI key is ``bytes``, but a slot of
-    that name shadows the builtin at every use site inside the class.
-    [`to_asgi`][] maps it back for the boundary.
+    ACCEPT carries subprotocol/headers; SEND exactly one of text/data;
+    CLOSE code/reason. to_asgi maps data to the ASGI bytes key at a boundary.
     """
 
     ACCEPT = 'accept'
@@ -218,12 +179,7 @@ class NativeResponse:
                  file_path: str | None = None,
                  push: str | None = None) -> None:
         self.status = status
-        # Write the slot directly rather than going through the ``header``
-        # property.  The setter is a descriptor call plus an isinstance test,
-        # and this constructor runs for every response the framework emits —
-        # once per HTTP response, three times per gRPC unary call.  The two
-        # branches below are the setter's, inlined; the property remains the
-        # public way to assign a header after construction.
+        # Keep constructor normalization synchronized with the header setter.
         self._header = header._items if isinstance(header, _HeaderView) else header
         self._body = body
         self.more_body = more_body
@@ -240,24 +196,8 @@ class NativeResponse:
         if push is not None:
             self.push = push
 
-    # --- fast constructors for framework-owned producers -------------------
-    #
-    # `Connection` — the request-side native object — is built once per
-    # request by a generated dataclass ``__init__`` taking positional
-    # arguments.  The response side had no equivalent: every emission went
-    # through the keyword-only ``__init__`` above, and keyword dispatch with
-    # several defaulted parameters is where the cost is.  Measured on the same
-    # slots: positional 105.9 ns, ``__new__`` + direct writes 102.9 ns,
-    # keyword 245.4 ns.  Bypassing ``__init__`` buys nothing on its own; the
-    # calling convention is the whole difference.
-    #
-    # These are deliberately *shape-specific* rather than one positional
-    # ``_make``.  The adjacent body/trailer completion flags make a positional
-    # catch-all a standing misordering trap.  Each constructor below names the
-    # shape it builds and takes only what that shape varies.
-    #
-    # The public keyword ``__init__`` is unchanged and remains the form for
-    # application code and for any shape not covered here.
+    # Shape-specific constructors avoid misordering adjacent completion flags.
+    # Application code uses the public keyword constructor.
 
     @classmethod
     def complete(cls, status: int, header: list[tuple[bytes, bytes]],
@@ -458,19 +398,10 @@ def _native_from_asgi(event, *, copy_headers=True):
 
 
 def asgi_send_boundary(inner_send):
-    """Wrap *inner_send* so native send-channel objects arrive as ASGI dicts.
+    """Expand native HTTP/WebSocket messages to ASGI dictionaries at a boundary.
 
-    Native message types own a ``to_asgi()``, and cross the same two
-    edges: the external-host boundary (uvicorn / ``asgi=True``) and the
-    scope-declared middleware's own send wrapper.  Consumers there subscript
-    ``event['type']``, so a native object reaching them raises in *their* code,
-    not ours.
-
-    This is deliberately the single place that decides which types convert: the
-    HTTP message was expanded at both edges and the WebSocket one at neither,
-    because each edge carried its own ``isinstance`` list.  A new native message
-    now cannot be handled at one edge and forgotten at the other.  Anything
-    already ASGI-shaped passes straight through.
+    Use for external hosts and scope-declared middleware. Pass already-ASGI
+    values through unchanged.
     """
     async def _send(event):
         if isinstance(event, (NativeResponse, NativeWSMessage)):

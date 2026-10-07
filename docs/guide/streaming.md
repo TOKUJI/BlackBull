@@ -126,24 +126,11 @@ indefinitely.
 
 ### HTTP/2
 
-`HTTP2Sender._write_data()` enforces per-stream and per-connection
-flow control per RFC 9113 §6.9.  Before writing each DATA frame
-the sender waits on an `asyncio.Event` until either window has
-credit, and re-checks both after clearing the event so a
-WINDOW_UPDATE arriving mid-clear cannot be lost.
-
-The handler's next `yield` only fires after the previous chunk's
-`await send()` returns — and that return only happens after the
-peer has granted enough WINDOW_UPDATE credit to put the chunk on
-the wire.  No background queue, no buffering, no per-stream
-unbounded growth.  `BB_REQUEST_TIMEOUT` bounds total per-stream
-runtime if you want a hard ceiling on streams that produce
-forever.
-
-The unit test [`test_http2_sender_blocks_when_window_closed`](https://github.com/TOKUJI/BlackBull/blob/master/tests/unit/test_sse.py)
-proves this experimentally: forcing both windows to zero before
-the write starts produces zero wire bytes; signalling the
-`_window_open` event releases the write.
+HTTP/2 writes require both stream and connection flow-control credit.
+The next generator yield waits for send to finish, so a closed window applies
+backpressure. BB_WRITE_TIMEOUT bounds an individual socket/credit wait;
+BB_REQUEST_TIMEOUT can impose a total handler budget, including intentional
+long-lived streams. These waits do not need application-side polling.
 
 ## When SSE, when WebSocket, when chunked HTTP
 
@@ -160,9 +147,9 @@ and **plain `StreamingResponse`** for non-browser HTTP clients
 
 ## Caveats
 
-- **Compression interaction**: the `Compression` middleware buffers
-  the full body before deciding whether to compress; pair it with
-  a route-specific exclusion if you want SSE delivered unbuffered.
+- **Compression interaction**: Compression handles complete bodies. On a
+  streamed chunk, it releases any held response head and passes subsequent
+  chunks through uncompressed; it does not gather the whole stream.
 - **`Content-Length`**: streaming responses do not set
   `content-length`; the transport advertises chunked encoding
   (HTTP/1.1) or stream framing (HTTP/2).  Clients that require a

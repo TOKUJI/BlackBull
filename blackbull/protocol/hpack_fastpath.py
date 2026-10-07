@@ -1,35 +1,7 @@
-"""HPACK static-table fast path for outbound HEADERS / PUSH_PROMISE frames.
+"""HPACK static-index fast path.
 
-RFC 7541 Appendix A defines the HPACK static table.  When a header pair's
-name AND value exactly match a static-table entry, the wire encoding is
-a single byte: ``0x80 | index``.  This module precomputes those bytes
-for every entry where both name and value are defined — primarily
-``:status`` (every response) and the request-side pseudo-headers used
-by PUSH_PROMISE (``:method``, ``:scheme``, ``:path``).
-
-Wire equivalence: given the same input, the encoder produces identical
-bytes.  Static-indexed fields do not mutate the encoder's dynamic table
-(RFC 7541 §6.1), so emitting precomputed bytes outside the encoder
-leaves dynamic-table state unchanged across requests.  Round-trip tests
-in ``tests/conformance/http2/test_hpack_fastpath.py`` assert byte
-equivalence.
-
-Coverage of RFC 7541 Appendix A indices 1–61 with both name and value
-defined (the only entries eligible for single-byte encoding):
-
-  - 8–14   :status 200/204/206/304/400/404/500   (always-on response path)
-  - 16     accept-encoding: gzip, deflate         (defensive — rare on responses)
-  - 2–3    :method GET / POST                     (PUSH_PROMISE only)
-  - 4–5    :path / and /index.html                (PUSH_PROMISE only)
-  - 6–7    :scheme http / https                   (PUSH_PROMISE only)
-
-All other static-table entries are name-only (e.g. ``content-type`` at
-index 31 has no static value), so they cannot use the single-byte
-indexed encoding.  The table is exhausted at this encoding tier — any
-further fastpath work would need to handle the
-literal-with-indexed-name encoding (RFC 7541 §6.2), which involves
-encoder choices (Huffman vs raw, incremental indexing vs not) that we
-cannot pre-decide without coupling to encoder configuration.
+Use only exact name/value matches. Static entries do not mutate the dynamic
+table; literal encodings must still use the connection encoder.
 """
 
 # RFC 7541 Appendix A — static-table entries with both name and value
@@ -66,21 +38,12 @@ def _coerce_bytes(v) -> bytes:
 
 
 def status_fast_bytes(status_value) -> bytes | None:
-    """Return the precomputed wire bytes for ``:status <value>`` when the
-    value matches a static-table entry, else ``None``.
-
-    Accepts ``str`` (the ASGI shape, e.g. ``'200'``) or ``bytes``.
-    Kept as a separate function for the ``Headers.save()`` call site.
+    """Return static-table encoding for a str/bytes status, or None.
     """
     return _STATIC_INDEXED.get((b':status', _coerce_bytes(status_value)))
 
 
 def pseudo_fast_bytes(name, value) -> bytes | None:
-    """Return the precomputed wire bytes for any static-indexed
-    ``(name, value)`` pair, else ``None``.
-
-    Used by ``PushPromise.save`` to fast-path the request-side
-    pseudo-headers (``:method``, ``:scheme``, ``:path``).  ``name`` and
-    ``value`` may be ``str`` (the ASGI shape) or ``bytes``.
+    """Return static-table encoding for a str/bytes name/value pair, or None.
     """
     return _STATIC_INDEXED.get((_coerce_bytes(name), _coerce_bytes(value)))

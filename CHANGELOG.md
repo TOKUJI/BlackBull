@@ -5,535 +5,117 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Versioning
 
-BlackBull uses [ZeroVer](https://0ver.org/) prior to a 1.0 commitment:
+BlackBull uses [ZeroVer](https://0ver.org/): `0.MINOR.PATCH`.
 
-- `0.MINOR.PATCH`
-- `MINOR` advances at a sprint close that changes what users see — a new
-  capability, a new or changed public API, new environment variables, or a
-  behaviour change an application has to react to.  Not every sprint earns
-  one: a version bump asks every adopter to work out what changed, and
-  spending one on an unchanged public surface spends their attention for
-  nothing.  The minor number therefore does **not** equal the sprint number —
-  patch releases and combined-sprint releases have introduced an offset
-  (Sprint 49 closed as `v0.43.0`; Sprint 97 closed as `v0.73.1`).
-- **Decide on the strongest justification present, not the first one found.**
-  A release usually satisfies more than one of the conditions above, and they
-  are not equally strong: a documented public-API addition qualifies formally,
-  while a behaviour change an application must react to is what the *effective
-  surface* test is actually asking about.  Name the strongest — the release
-  notes are what tells an adopter whether they have work to do, and leading
-  with a formal qualifier buries that.  (v0.79.0 was first explained as a MINOR
-  because it added `app.drain_events()`, a test seam an adopter can ignore
-  entirely.  The version was right; the reason given was the weaker of the two
-  it had.  What earned it was MQTT QoS 3 becoming a disconnect.)
+- MINOR advances when a sprint close changes the effective public surface:
+  capabilities, APIs, environment settings, or behavior adopters must react to.
+  State the strongest user-facing reason in the release notes. Sprint numbers
+  do not determine version numbers; combined work may ship in one release.
+- PATCH covers fixes and harness work. Removing a deprecated API with a
+  documented replacement is PATCH if adopters following the deprecation need
+  no further action; otherwise the removal is MINOR.
+- No 1.0 commitment until the framework's identity and public API stabilize.
 
-- **MINOR is judged by effective surface, not the diff.**  Removing a public
-  API key that has been deprecated with a documented replacement long enough
-  for adopters to have migrated is a **PATCH**: an adopter who followed the
-  deprecation does nothing, so the surface they see is unchanged.  Only a
-  removal that forces action on current, doc-following adopters is a MINOR.
-  (Sprint 99 removed `scope['http2_priority']`, deprecated since v0.31.0; it
-  shipped as v0.75.0 under the pre-change rule, which now reads it as a
-  PATCH.)
-- **Exception (2026-06-25)**: Sprints 50 through 54 are not independently
-  released — they ship together as `v0.44.0` (the next minor after `v0.43.0`),
-  the MQTT-broker debut plus its actor-model rebuild and the protocol-agnostic
-  connection dispatcher.  Normal per-sprint versioning resumes at the next
-  sprint close as `v0.45.0`.
-- **Exception (2026-08-16)**: the attack-resistance programme ships as **one**
-  MINOR when it is complete, not one release per sprint.  It spans several
-  sprints (request-body limits, WebSocket message bounds, MQTT resource
-  bounds, HTTP/2 time bounds, frame-rate metering) and its deliverable is a
-  *coherent* resource-governance surface — a partial release would advertise a
-  security posture the code does not hold yet, and would ask adopters to
-  re-read the same subject three times.  Sprints inside the programme close
-  without cutting a release; `[Unreleased]` accumulates until the last one
-  lands.
-- `PATCH` covers bug fixes, security fixes, and harness work — whether they
-  land between sprints or close one.
-- No `1.0.0` until the framework's identity (pure-Python H1 parser,
-  BlackBull-internal `ASGIServer`, per-process tick scanner deadline
-  subsystem) and public API have stabilised across several sprints.
-
-The runtime version is exposed as `blackbull.__version__` via
-`importlib.metadata.version("blackbull")` — single source of truth is
-`pyproject.toml`.  Re-run `pip install -e .` after a local version bump
-so the editable install's metadata catches up.
+`pyproject.toml` owns the version. `blackbull.__version__` reads installed
+metadata; reinstall an editable checkout after changing that version.
 
 ## [Unreleased]
 
 ## [0.81.0] — 2026-10-05
 
-- **Response header names are sent lowercase on HTTP/1.1 and HTTP/2.**  An
-  HTTP/2 response carried the application's `Content-Type` as written, which
-  RFC 9113 §8.2.2 forbids and a strict client rejects as malformed; trailers
-  did the same.  Names are now lowercased where the sender takes the
-  response, so HTTP/1.1 responses, the server's own `Date` included, arrive
-  lowercase too (names are case-insensitive, RFC 9110 §5.1), as do the events
-  `to_asgi()` gives an external ASGI host.
-- **A `Transfer-Encoding` list is split one way.**  The server's request
-  validator, the request sender's pre-flight check and the response reader
-  each had their own comma split, and the three disagreed at the margin:
-  `chunked; ext=1` was a coding named `chunked; ext=1` to two of them and
-  `chunked` with a parameter to the third.  The split is now one
-  decomposition in `blackbull.protocol.framing` — parameters kept, empty
-  members bounded, the whole list grammar read once — and each site's
-  refusal stays its own: `501` for a coding the server does not implement,
-  `400` for a length no reading can determine, `ProtocolError` for a
-  request the client would have to rewrite.  At the server a malformed or
-  absurd list (`gzip;bad`, a field of commas) answers `400`, and a
-  parametered `chunked` now counts as `chunked` — so `chunked; ext=1,
-  gzip` is a non-final `chunked` and `chunked; ext=1, chunked` a doubled
-  one, both `400` — where the broken split graded each of these `501`.
-- **A lifespan task that dies after its startup ack is reported at once**,
-  not only at shutdown.  Serving continues; the shutdown failure still
-  surfaces exactly as before.
-- **A multi-worker master's exit code reflects its workers' ends.**  A stop
-  in which any worker failed to clean up exits non-zero (previously 0);
-  workers that died during normal operation and were respawned do not
-  affect it.
-- **Precompressed static variants are held to the served root.**  A
-  `<path>.<suffix>` sibling resolving outside the root — a symlink, say —
-  answers `400` before it is cached, opened or sent.  Inward symlinks and
-  every compressed variant keep serving.
-
-- Dynamic compression and precompressed static files honor `Accept-Encoding`
-  refusals (`q=0`), wildcard acceptance, and repeated fields consistently.
-  Malformed qualities or parameters refuse the named coding, including when
-  `*` would otherwise allow it.
-
-- **A malformed trailing field section is refused like a malformed head.**
-  RFC 9113 §8.1 calls the trailer section a field section, so §8.2.1 grades
-  it — but only the request head carried the verdict.  A trailer value with
-  SP or HTAB at either end (or a NUL, a CR, an uppercase field name) was
-  flagged at the frame layer and then ignored: the request completed and the
-  handler ran as if the peer had sent nothing malformed.  The trailing
-  section now earns the request's own verdict, `RST_STREAM(PROTOCOL_ERROR)`,
-  and the stream is retired instead of completed.
-
-- **An HTTP/2 `:scheme` is read case-insensitively, and the application sees
-  it lowercase.**  A scheme is case-insensitive and its canonical form is
-  lowercase (RFC 3986 §3.1, RFC 9110 §4.2.3), but the host rule compared the
-  value against lowercase literals, so `:scheme: HTTPS`
-  with neither `:authority` nor `Host` was accepted and reached a handler
-  with no host at all — the very request `:scheme: https` answers `missing
-  :authority and Host` for.  The same unnormalized value mapped an RFC 8441
-  Extended CONNECT to `ws` rather than `wss`, and arrived as `conn.scheme`,
-  where `scope['scheme'] == 'https'` is how secure-cookie and redirect
-  decisions read it.  The parser normalizes the scheme to lowercase once
-  (RFC 3986 §3.1), so the host rule, the WebSocket mapping and the
-  application read one spelling.
-
-- **An HTTP/2 request's `:method` must be a token and its `:scheme` a URI
-  scheme.**  `G,ET` used to reach the router and the access log over HTTP/2
-  while HTTP/1.1 refused it on its request line, and `a_b` was taken as a
-  scheme although no URI grammar admits an underscore.  A value outside
-  RFC 9110 §9.1 or RFC 3986 §3.1 is now malformed and answered with
-  `RST_STREAM(PROTOCOL_ERROR)`.  An empty `:method`, which the request
-  builder silently turned into `HEAD`, is refused the way an empty `:path`
-  already was — an HTTP/2 peer relying on that placeholder has to send a
-  method.  An empty `:scheme`, which the builder silently turned into
-  `https`, is refused for the same reason; `:scheme` is still defaulted only
-  where plain CONNECT omits it (RFC 9113 §8.5).
-
-- **An HTTP/2 response is now complete only when it is a well-formed final
-  response.**  `request()` used to resolve on the first `END_STREAM` whatever
-  had arrived before it: a body with no head at all, a head with no
-  `:status`, an informational `103` that ended the stream, a body that
-  contradicted its own `Content-Length`, and content on a `HEAD` response
-  each reached the caller as a successful response.  RFC 9113 §8.1's order is
-  now enforced — informational heads, one final head, the body, then an
-  optional trailer section — with `:status` required and three ASCII digits,
-  RFC 9110 §9.3's body rules, and a declared `Content-Length` matched against
-  the body.  A response that breaks it raises `ProtocolError` and resets that
-  stream alone; the connection and its other streams survive.  The order is
-  worth about 1 µs per response on top of the old handler, measured
-  round-paired against an in-session A/A floor of 0.3 µs
-  (`bench/h2_client_response_ab.py`); that is the cost of the check, and it
-  is why the field section is normalised once rather than per check.
-- **Breaking for HTTP/2 client callers.**  `res.headers` now holds the final
-  head's fields only, and the trailer section arrives in the new
-  `res.trailers`.  The two had been folded together, so a caller could not
-  tell which field section a field came from — gRPC's `grpc-status` lives in
-  the trailer, and now reads as `res.trailers.get(b'grpc-status')`.
-  Informational heads are read and discarded, which is what the HTTP/1.1
-  reader has always done with them.  A `Content-Length` on a response that
-  may not carry content is kept as metadata and is not compared against a
-  body there is none of.
-
-- **An HTTP/1.1 request now declares exactly one body framing, and a caller's
-  framing fields are checked rather than relayed.**  `Content-Length` is
-  written once and must agree with the body across every occurrence.  A caller
-  `Transfer-Encoding` is honoured only when it is exactly `chunked`, the one
-  framing this client writes, and refused otherwise.  Previously a fixed body
-  with a caller `Transfer-Encoding` went out carrying both fields and writing
-  an unchunked body, a stream body with a caller `Content-Length` went out
-  carrying both fields and writing chunk syntax, and `Content-Length: 5, 9`
-  went out as two competing message boundaries.  A stream body with a
-  `Content-Length` is now written raw against that total and checked as it
-  goes, so an upload of known size need not be buffered.
-- **Breaking for HTTP/1.1 client callers.**  A framing refusal raises
-  `ProtocolError` where it raised `ValueError`, and `prepare`'s return value is
-  now internal — its third element is the declared length (`int | None`), not
-  the `chunked` flag it used to be.  A `Transfer-Encoding` of `gzip, chunked`
-  carrying a body the caller compressed itself is refused rather than sent:
-  dropping the coding would deliver compressed octets as the payload.  Use
-  `Content-Encoding` for a content coding.  A bad or conflicting
-  `Content-Length` now reports `invalid Content-Length value` / `conflicting
-  Content-Length values` on every side, values included, since one rule now
-  backs the server's response framing, the server's request framing check, and
-  the client.
-- **A failing `@app.on_shutdown` hook now exits `1`** instead of `0` in a
-  single-worker process (`app.run()`, the `blackbull` CLI).  `TestClient` and
-  `NativeClient` raise it from the `with` block unless the block is already
-  raising.
-- **`SIGTERM` now shuts a single-worker process down gracefully**: in-flight
-  requests finish, up to `BB_WORKER_DRAIN_TIMEOUT`, and `@app.on_shutdown`
-  runs.  An application's own `SIGTERM` handler is restored afterwards and
-  still runs.
-- `Server.stop()` and `SIGTERM` now end `run()` during lifespan startup
-  instead of waiting for the application to answer.
-- `Server.shutdown()` without `Server.startup()` raises `RuntimeError`.
-- On Linux, an `AF_UNIX` listener whose accept queue is full when accepting
-  opens logs one `socket_backlog` warning on `blackbull.caps`, adopted fds
-  included unless created in another network namespace.
-- A burst beyond `BB_MAX_CONNECTIONS` no longer exhausts file descriptors,
-  and each refused client reads its `503`, on every event loop, uvloop
-  included.  A TLS connection counts toward the cap from accept, while its
-  handshake runs, and `Server.stop()` closes connections still in their
-  handshake.
-- `BB_HEADER_TIMEOUT` now also bounds the TLS handshake, including that of a
-  port-bound protocol with `tls=True` such as MQTT.
-- An event loop that cannot register a reader on a listener now fails
-  `Server.run()` with that error, instead of serving without the descriptor
-  bound.
-- `NativeTestServer` accepts the way `Server` does, so `max_connections=`
-  counts its connections from accept.
-- `BB_MAX_CONNECTIONS=auto` also leaves room for the descriptors already open
-  when accepting starts, so a burst at the cap still gets its `503`s.
-- Less work per request on the HTTP/1.1 path, the response-header checks
-  added in this release included: about 5 % fewer executed instructions than
-  v0.80.0 on keep-alive and 6 % on one request per connection.
-- Less work per request on HTTP/2, whose request fields are now checked in one
-  pass, and for precompressed static files: only the siblings the client
-  accepts are looked up, and the file selected is stat'ed once.
-
-- Added client-owned write and WebSocket size bounds, and applied the
-  response minimum-body-rate floor to HTTP/2 streams.
-- Corrected the defaults stated in `blackbull/env.py`'s environment-variable
-  reference, which had drifted from the values `get_settings()` selects for
-  `BB_WS_QUEUE_DEPTH`, `BB_LOG_BATCH_SIZE` and `BB_SOCKET_BACKLOG`, and
-  documented the twenty-two variables it read but never listed — the whole
-  `BB_CLIENT_*` block among them.  `blackbull --help` no longer reports
-  `--max-connections` as defaulting to unlimited; the default is `auto`, a
-  finite cap derived from `RLIMIT_NOFILE`, and the numeric defaults it quotes
-  are now read from `Settings` rather than typed out.  Importing `blackbull` does load
-  the server stack, and the package docstring now says so.  Docstrings no
-  longer refer the reader to a private issue tracker for a design note or a
-  defect history; the invariant is stated where it applies, and where a test
-  holds it, that test is named.  Three new architecture tests fail the build
-  when a stated default and the shipped one disagree again.
-- The Workers deployment page now documents warm-up before fork — a shipped
-  feature previously reachable only through its budget environment variable —
-  and `@app.on_warmup`'s reference entry states the contract rather than the
-  copy-on-write mechanism behind it.  Published docstrings no longer restate
-  arguments the guides already make: `app.run()`, `BB_MAX_CONNECTIONS`, the
-  WebSocket recipient, `read_head`, `next_chunk` and `linger_close` each state
-  their contract and name the page that argues it.  Three published claims
-  were wrong and are corrected — a WebSocket connection's default read mode
-  costs the same loop touches per request as HTTP/1.1 (the higher figure was
-  the read-ahead mode's), `after_dispatch` now names the three values it
-  returns instead of only defending its shape, and protocol detection peeks
-  without consuming rather than replaying peeked bytes to the winning
-  binding.  A static audit that checks every resource cap is wired at its
-  rejection site was being satisfied by a docstring; it now reads the syntax
-  tree, so prose cannot stand in for wiring.
-- Published API docstrings no longer retell how the code got here.  `GoAway`
-  narrated a past defect; the invariant it was protecting — GOAWAY is
-  connection-level, so the frame header names stream 0 while `last_stream_id`
-  is a separate payload field — is now asserted by the test that covers the
-  frame, and the docstring cites it.  Seven more entries stated an
-  arrangement in terms of the change that produced it (`Server` "formerly
-  `ASGIServer`", a default kept "so existing serving is unchanged", three
-  supported paths described as "legacy"), and now state the arrangement.
-  Eighteen citations of a `_wrap_send` that does not exist — one of them
-  inside an assertion message, so a failing architecture check sent the
-  developer to a function they could not find — name `_wrap_send_native`.
-  Two pointers a reader could not follow are retired: a `guide.md §14` that
-  is not a file, and an `ActorDesign.md` that exists nowhere in the
-  repository.
-- **Removed** `BlackBull.certfile` and `BlackBull.keyfile`.  Both were
-  read-only properties that could only ever return `None`: nothing assigned
-  the fields behind them, and TLS reaches the server through `run()`,
-  `AppConfig`, `BLACKBULL_CERT` / `BLACKBULL_KEY`, a `.env` file, the CLI
-  flags or a TOML config file, all of which resolve onto the server object
-  rather than onto the app.  To ask which certificate a process loaded, read
-  the startup line on the `blackbull.config` logger; to declare one, use any
-  of the paths the Configuration guide lists.  The TLS page now says so.
-- The API reference no longer opens blank pages, and no longer argues with the
-  guides.  Every published module and class now says what it is — 69 of them
-  rendered as a heading and nothing else, including `BlackBull` itself — and
-  the test clients now list the methods they are used through, which
-  `show_if_no_docstring` had been hiding entirely.  In the other direction,
-  docstrings that restated an argument already made by the Configuration,
-  Workers, WebSocket, MQTT, fault-injection or Internals pages now state their
-  contract and name the page, so the argument has one home.  Corrections found
-  along the way: a published deprecation shim named the wrong spelling as the
-  one that warns, a fault-injection page said the HTTP/1.1 server carries no
-  production lock when it carries two, four `HalfClose` entries described an
-  HTTP/1 keep-alive exchange on HTTP/2 vocabularies, and a docstring pointed
-  readers at a file that is not shipped.  `blackbull/middleware/base.py`, which
-  defined nothing and only recorded its own removal, is gone.
-- `HTTP2WSReader.readuntil` now accepts the base `limit` argument, and it and
-  `read_head` raise `NotImplementedError` for every call: the reader carries
-  WebSocket frame payload, which has no lines.  `read_head` with a positive
-  limit previously returned a head through a byte-at-a-time fallback.  The
-  HTTP/2 WebSocket client's reader behaves the same way.
-- HTTP/2 frame objects now compare by identity, and are hashable.  Two frames
-  built separately are never equal.
-- `blackbull.client.SendBytes`, `blackbull.client.http1.SendBytes` and
-  `blackbull.fault_injection.SendBytes` now emit a `DeprecationWarning`, as the
-  `scenario_h1` spelling already did, and
-  `blackbull.fault_injection.H2CSendBytes` is deprecated the same way.  None of
-  these names is in the `__all__` of `blackbull.client`,
-  `blackbull.fault_injection` or `blackbull.fault_injection.scenario_h1`, so
-  `import *` from those modules no longer binds them.  `import *` from
-  `blackbull.client.http1` stops binding `SendBytes` too, for a different
-  reason: the name was a module-level alias there, and it is now resolved only
-  when a caller asks for it.  Use `SendRawBytes` from
-  `blackbull.client`, and `H1CSendRawBytes` or `H2CSendRawBytes` from
-  `blackbull.fault_injection` — a bare `SendRawBytes` there is the HTTP/2
-  server step.  Removal no earlier than 2027-08-19.
-
 ### Changed
 
-- **HTTP/2 server push now honors the peer's `SETTINGS_ENABLE_PUSH`.**  The
-  connection starts with the RFC 9113 §6.5.2 initial value of `1`; valid peer
-  `0` and `1` settings disable and re-enable push.  Request extensions reflect
-  the permission at dispatch time, and a send-time guard logs and drops a late
-  push event if the peer disables push after the scope was built.
+- Response header and trailer names are lowercase on HTTP/1.1, HTTP/2 and
+  external-ASGI events. Applications must treat field names case-insensitively.
+- HTTP/2 request methods must be tokens and schemes must be valid URI schemes.
+  Empty or malformed values receive `RST_STREAM(PROTOCOL_ERROR)`; schemes
+  reach the application lowercase, including the HTTPS-to-WSS mapping.
+- Malformed HTTP/2 request trailers now reset their stream with
+  `PROTOCOL_ERROR` instead of allowing the request to complete.
+- HTTP/2 client responses require informational heads, one valid final head,
+  its body, and optional trailers in that order. Invalid status, body framing
+  or Content-Length raises `ProtocolError` and resets only that stream.
+- **HTTP/2 client migration:** `res.headers` contains final-head fields only;
+  read trailing fields from `res.trailers`, including gRPC's `grpc-status`.
+  Informational heads are discarded. Content-Length on a bodyless response
+  remains metadata.
+- **HTTP/1.1 client migration:** caller framing must agree with the body.
+  Conflicting or invalid Content-Length and unsupported Transfer-Encoding
+  raise `ProtocolError` instead of `ValueError`. A stream with a declared
+  length is sent raw and checked against that total. Use Content-Encoding for
+  a content coding. `prepare()` is internal; its third result is now the
+  declared length rather than a chunked flag.
+- Transfer-Encoding parsing shares one grammar across server and client.
+  Malformed lists receive 400 at the server; unsupported codings receive 501.
+  Parametered `chunked` counts when detecting non-final or duplicate chunked,
+  both 400, but bare `chunked` remains the only implemented server form.
+- **HTTP/2 client deadline migration:** `BB_CLIENT_HEAD_TIMEOUT` now bounds
+  the wait from a fully sent request to its final response head, default
+  30 seconds. Interim heads do not reset it. Set `0` for intentional waits
+  beyond that budget. A breach resets that stream with CANCEL; other streams
+  survive. Caller cancellation removes the stream's deadline.
+- Client-owned write and WebSocket size bounds were added; the configured
+  minimum response-body rate also applies to HTTP/2 streams.
+- HTTP/2 server push honors peer SETTINGS_ENABLE_PUSH at dispatch and send
+  time. Late pushes are dropped if the peer disabled them.
+- A single-worker shutdown hook failure exits 1; a master's failed worker
+  cleanup exits non-zero. TestClient and NativeClient raise a shutdown failure
+  unless the context block is already raising.
+- SIGTERM drains single-worker requests for up to BB_WORKER_DRAIN_TIMEOUT and
+  runs shutdown hooks. The application's previous signal handler is restored
+  and invoked afterwards. Server.stop() and SIGTERM also end lifespan startup.
+- Server.shutdown() without startup raises RuntimeError. A lifespan task dying
+  after startup acknowledgement is reported immediately; serving continues.
+- TLS handshakes count toward BB_MAX_CONNECTIONS from accept and are closed
+  by Server.stop(). BB_HEADER_TIMEOUT bounds TLS on HTTP and port-bound
+  protocols. Auto connection caps also reserve already-open descriptors.
+- A listener whose event loop cannot register it now fails startup. On Linux,
+  a full AF_UNIX accept queue at startup produces a socket_backlog warning.
+- **Removed** BlackBull.certfile and BlackBull.keyfile, which always returned
+  None. Configure TLS through run(), AppConfig, environment, CLI or TOML; read
+  the configured certificate path in blackbull.config's startup log.
+- HTTP2WSReader and the client-side HTTP/2 WebSocket reader reject readuntil
+  and read_head with NotImplementedError; these payload readers have no lines.
+- HTTP/2 frame objects compare by identity and are hashable.
+- SendBytes aliases under blackbull.client and blackbull.fault_injection, and
+  fault_injection.H2CSendBytes, warn and leave import-star surfaces. Use
+  client.SendRawBytes or fault_injection.H1CSendRawBytes/H2CSendRawBytes;
+  bare fault_injection.SendRawBytes is the HTTP/2 server step. Removal is
+  no earlier than 2027-08-19.
 
-- **`BB_CLIENT_HEAD_TIMEOUT` now bounds the HTTP/2 wait for a response to
-  begin, and this refuses traffic that was previously accepted.**  The
-  HTTP/2 client's progress deadline (`BB_CLIENT_BODY_TIMEOUT`) is armed by the
-  first response frame and deliberately exempts the wait before it — a peer
-  that has not answered yet is working, not stalling.  Nothing then owned the
-  wait for the answer to *begin*, so a peer that completed the handshake, took
-  the HEADERS and said nothing parked `request()` forever.  HTTP/1.1 refuses
-  exactly that shape at `BB_CLIENT_HEAD_TIMEOUT`, and `Client` dispatches on
-  ALPN — so the peer chose which of the two bounds it faced.
+### Security and fixes
 
-  **What this breaks.**  An HTTP/2 server that legitimately defers its
-  response head past the deadline — **long polling**, or a query computed
-  before the headers are flushed — is now refused where it used to be waited
-  for, at the **30 second** default.  Set **`BB_CLIENT_HEAD_TIMEOUT=0`** to opt
-  out; `0` disables every wait the knob owns.  HTTP/1.1 callers see no change,
-  and neither does the connection-level wait: what acquires a deadline is a
-  stream that has asked a question.  A breach resets that stream with
-  `RST_STREAM(CANCEL)` and the connection, with every other stream on it,
-  survives.
+- WebSocket-over-HTTP/2 shares its HTTP2Client's HPACK context, preventing
+  cross-stream header corruption when ordinary requests use that connection.
+  Direct WebSocketH2Session construction drops its factory argument;
+  WebSocketH2Client.connect() is unchanged.
+- Raw HTTP/2 queues admit only DATA, RST_STREAM and HEADERS. Other frames keep
+  their protocol handling, including refusal of forbidden PUSH_PROMISE,
+  without consuming WebSocket queue slots or breaking its handshake.
+- Direct Headers/PushPromise frame construction requires the connection's
+  HPACK encoder/decoder. Use FrameFactory.create rather than inventing a
+  codec per frame; missing codecs now raise even under python -O.
+- After HTTP2Client context exit, requests, raw-stream registration, reads,
+  writes, scenarios and re-entry raise ConnectionError identifying local
+  closure. unregister_raw_stream remains usable for teardown.
+- Precompressed static symlinks escaping the served root receive 400.
+  Compression and static variants honor repeated Accept-Encoding fields,
+  wildcard acceptance and q=0; malformed parameters refuse the named coding.
+- Connection-cap refusals no longer exhaust descriptors under bursts,
+  including uvloop; HTTP peers receive best-effort 503.
+- HTTP/1.1 request handling, HTTP/2 field validation and precompressed static
+  selection avoid repeated boundary work.
 
-  The same knob rather than a `BB_CLIENT_H2_*` name, because a second name
-  would let the limit be configured on one path and answered on the other,
-  which is the defect restated.  The bound runs from the moment the request is
-  fully on the wire — a send parked on our own flow-control window is our
-  backpressure, not the peer's silence — until the final (`>= 200`) response
-  head, which hands the stream to `BB_CLIENT_BODY_TIMEOUT`.  A `1xx` interim
-  response neither stops the clock nor restarts it.
+### Documentation
 
-  Also fixed with it: a `client_body_timeout` record on a stream now reports
-  the body phase's own elapsed time rather than the whole request's, and a
-  caller that abandons `request()` — an outer `asyncio.wait_for`, a cancelled
-  task group — takes its deadline with it instead of leaving one to refuse a
-  stream nobody is waiting on.
-
-### Security
-
-- **A WebSocket-over-HTTP/2 client shared a connection with a second HPACK
-  encoder, and a header field from one stream could be resolved into
-  another stream's request.**  `WebSocketH2Client` built its own
-  `FrameFactory` — its own HPACK encoder and decoder — and sent the RFC 8441
-  Extended CONNECT header block through the `HTTP2Client` it is layered over.
-  Two encoders therefore wrote header blocks to one connection.
-
-  HPACK's dynamic table is connection state and a peer keeps exactly one
-  decoder for it (RFC 7541 §2.3, RFC 9113 §4.3), so the two tables diverge as
-  soon as the writes interleave: an index that means one field to the encoder
-  that wrote it means whatever the *other* encoder inserted at that position to
-  the peer reading it.  Nothing raises — on either side.  On one connection
-  carrying a `request()`, a WebSocket CONNECT, and a further `request()`, the
-  peer read the second request's `:path` as the WebSocket's `/ws`, read
-  `:protocol: websocket` inside an ordinary GET, and did not see that request's
-  own header field at all.  A field that belongs to one stream — an
-  `authorization` header is the obvious one — is readable inside another
-  stream's block, and a request can arrive at the peer addressed somewhere its
-  caller did not send it.
-
-  Reachable by any application that opened a WebSocket over HTTP/2 with this
-  client and used the same connection for ordinary requests.  It was latent
-  only because the client's WebSocket path is usually the connection's sole
-  user: one encoder is always consistent with itself.  Server-side framing was
-  never affected — `HTTP2Actor` has always kept one factory per served
-  connection — and no inbound decoding went through the second context, so no
-  response was ever misread.
-
-  The connection now owns the context and everything framing on it takes that
-  one, rather than the WebSocket layer being fixed at the site where it showed:
-  `HTTP2Client.frame_factory` names it, `WebSocketH2Client.frame_factory` reads
-  it from the connection (and says so, rather than raising `AttributeError`,
-  before the context manager is entered), and `WebSocketH2Session` no longer
-  takes a factory argument at all — a session on a connection has no choice
-  about which context it frames with, so the parameter could only ever be
-  passed a wrong one.  **Callers constructing `WebSocketH2Session` directly
-  drop the second argument**; `WebSocketH2Client.connect()` is unchanged.
-- **A raw HTTP/2 stream's queue accepted frames nothing would ever read, and
-  filling it reset the stream.**  The queue behind `register_raw_stream` — the
-  hatch `WebSocketH2Client` uses to carry WebSocket frames over one HTTP/2
-  stream — filtered by a blacklist of two types.  Everything else a peer put on
-  that stream bought a slot, including types the two consumers between them
-  never look at.  Only three are ever read: `DATA` and `RST_STREAM` by the
-  WebSocket reader, `HEADERS` by the Extended CONNECT handshake.
-
-  Two consequences, both from the peer's side of the connection.  The queue
-  filled with frames no consumer would act on, and at `BB_CLIENT_RAW_QUEUE_DEPTH`
-  the client's answer is to reset that stream — so traffic that costs the peer
-  no flow-control credit at all ended a WebSocket session.  Ahead of the
-  handshake it did not even need the depth: one stray frame arriving before the
-  `CONNECT` response failed the handshake outright, because the handshake reads
-  whatever is first in the queue.
-
-  The queue now takes only those three types.  Every other type keeps the
-  destination it has on any other stream, which closes the second gap: a
-  `PUSH_PROMISE` on a raw stream never reached `_on_push_promise`, so a client
-  that had advertised `SETTINGS_ENABLE_PUSH=0` skipped the refusal RFC 9113
-  §6.5.2 obliges it to make — on exactly the streams a WebSocket uses.  The
-  promised field block was decoded before and is decoded now; the HPACK table
-  was never at risk.  `PRIORITY` and `PRIORITY_UPDATE` are dropped, an unknown
-  type is ignored per §5.5, and `WINDOW_UPDATE` and `SETTINGS` keep the
-  connection-level handling they already had.
-
-### Fixed
-
-- **A HEADERS or PUSH_PROMISE frame built without its connection's HPACK codec
-  no longer invents one.**  `Headers.save()` and `PushPromise.save()`
-  substituted a fresh encoder when the frame had none, and
-  `PushPromise.parse_payload()` returned without decoding when the decoder was
-  missing.  HPACK state is connection-wide and a peer keeps exactly one table
-  for it (RFC 7541 §2.3, RFC 9113 §4.3), so neither substitute is a weaker
-  version of the right codec — each is a *different table*.  A private encoder
-  writes indices the peer resolves against entries some other encoder inserted;
-  a promised block that never reaches the connection's decoder leaves it one
-  set of insertions behind its peer for the rest of the connection.  Both
-  produce well-formed bytes and raise on neither side.
-
-  **No traffic reached either path.**  Every `Headers` and `PushPromise` the
-  framework builds comes from a `FrameFactory`, which passes its own encoder
-  and decoder on every construction, so nothing BlackBull sent or read has been
-  framed by a substitute context.  This is a latent hole in a class other code
-  can reach, closed because the same failure arrived *reachably* one layer up
-  (the WebSocket-over-HTTP/2 entry under **Security** above) — where it was
-  equally latent right until one application used one connection two ways.
-
-  Both classes now refuse instead, with a message that names the connection's
-  `FrameFactory` as where the codec comes from rather than reporting a missing
-  argument.  `Headers.parse_payload()`'s `assert` became the same refusal, so
-  it holds under `python -O` too.  **Code constructing
-  `blackbull.protocol.frame_types.Headers` or `PushPromise` directly now passes
-  the connection's `encoder`, and its `decoder` for a frame carrying an inbound
-  block; going through `FrameFactory.create` already does both.**  A throwaway
-  encoder used for one block on a connection that holds no long-lived encoder
-  remains correct HPACK and is untouched — it never indexes an entry it did not
-  itself insert.
-
-- **A closed `HTTP2Client` refuses every door into it, and says whose close it
-  was.**  `__aexit__` closed the transport and left the client's public surface
-  open.  `request` and `register_raw_stream` were guarded, but on the *peer's*
-  departure — a state a close we perform ourselves never sets — so after
-  `async with` exited, `request` and `receive_raw_frame` parked, `send_raw_frame`
-  and `execute_scenario` wrote to a closed transport, `register_raw_stream`
-  handed out a queue nothing would fill, and `__aenter__` re-admitted the caller
-  to a client that could not carry a byte.  All five now raise
-  `ConnectionError('HTTP2Client context is closed')`; `unregister_raw_stream`
-  stays permissive, because it is teardown and a cleanup path that raises after
-  close turns an orderly shutdown into an error.
-
-  **No production path reaches this state** — it needs a client adopted or
-  hand-built and torn down before its receive loop ever ran — so this is depth
-  rather than a live defect.  What it buys is the message: closing the doors by
-  setting the peer-departure flag would have cost one line and made a client
-  built for diagnosing servers report a disconnect it had performed itself.
-  The two states are kept apart, and a connection the peer really dropped still
-  says so.  `_closed` is spelled as `HTTP1Client._closed` is, so the two clients
-  answer the same question with the same word.
-
-### Docs
-
-- **The client's security posture is published, and the hedge that stood in
-  for it is retired.**  `SECURITY.md` said the client's bounds were "still
-  being put in place", so its paragraph stated what a report *should* hold us
-  to rather than a settled surface.  They are all in place, so every sentence
-  that survives is now a commitment: a peer that **stops** part-way through a
-  response is abandoned with a named failure on **both** protocols at the
-  shipped defaults, and every bound that refuses names itself on
-  `blackbull.caps`.
-
-  One surviving sentence changed because it was not true as written: the
-  refusal sentence was an HTTP/1.1 sentence applied to the client as a whole.
-  HTTP/1.1 abandons the connection because a refusal leaves the reader's
-  position inside a message, while on HTTP/2 the refusal is a **stream** error
-  and the connection deliberately survives — except where a field block refused
-  before the decoder walked it leaves HPACK unusable.
-
-  `docs/about/security-model.md` gains the client's paths in the invariant
-  table and its posture in the existing table, at **`bounded-when-configured`**
-  — ten `BB_CLIENT_*` bounds refuse traffic and two of them,
-  `BB_CLIENT_BODY_MAX_TOTAL` and `BB_CLIENT_MIN_BODY_RATE`, ship off.  The
-  table's `Protocol` column gains a `Role` beside it, because a client is not
-  a protocol: the same HTTP/2 parser bounds a request we were sent and a
-  response we asked for, and only one of those came from a peer who chose us.
-  The 10-of-12 split is the audited one — `_CLIENT_CAPS` and
-  `_CLIENT_NOT_A_CAP` in `tests/unit/test_cap_log_sites.py`, where
-  `test_every_client_env_var_has_a_verdict` fails the day a new variable
-  arrives with neither verdict — and not a count made by hand.
-
-  **What is named as absent**: the client follows no redirects and pools no
-  connections — neither exists, so neither is a bound that failed — and a
-  buffered response body costs about twice the cap in peak memory, against
-  `stream()`'s ~1× without status, headers or the cap.  Both are things a
-  reader can act on, which is the line: the posture is an audit result and
-  not a proof, the read paths were enumerated by hand, that method has missed
-  paths here before, and no known gaps is not no gaps.
-
-  `docs/reference/env-vars.md` records where it had gone stale against that:
-  `BB_WRITE_TIMEOUT` is read by the client too.
-
-  **No behaviour changed** — documentation only, no new tests.
-
-- **`BB_CLIENT_BODY_MAX_TOTAL` now publishes what it costs: about twice its
-  value in peak memory.**  The cap counts response-body octets, and an
-  operator sizing it against a container memory limit was sizing it against
-  the wrong number — both the HTTP/1.1 and the HTTP/2 client accumulate the
-  body in slices and then join them, so at the join the slices and the joined
-  result are both live.  `blackbull/env.py` and `docs/reference/env-vars.md`
-  now state the multiplier, that it applies to **both** protocols, and that
-  `stream()` is the ~1x escape — at the cost of the status, the headers and
-  this cap, none of which it exposes.
-
-  **No behaviour changed.**  Nothing is refused that was accepted, no default
-  moved, and the client allocates exactly as it did.  What is new besides the
-  prose is `tests/unit/client/test_client_body_buffer_cost.py`, which drives
-  the real buffering paths under `tracemalloc` and pins the ratio inside
-  `[1.9, 2.2]` so the published number cannot drift from the code.
-
-  Recorded with the number: accumulating into a single `bytearray` and
-  returning `bytes(buf)` measures **2.07** rather than **1**, because
-  `ClientResponse.body` is `bytes` and pure Python cannot freeze a buffer into
-  one in place — so the bytearray's over-allocation is added to the final copy
-  instead of replacing it.  The rewrite is therefore not the fix, and the pin
-  cannot say so on its own: 2.07 is inside any band that tolerates the
-  2.030 a 4 KiB-slice peer produces.  An opt-in way to receive a body into a
-  buffer while keeping status, headers and the cap would remove it, and is a
-  separate decision about the public type of `ClientResponse.body`.
+- Generated environment and CLI defaults match shipped Settings. The API
+  reference includes previously hidden entries and corrects obsolete pointers.
+- Client buffered responses can need about twice their body cap in peak memory,
+  plus headers, Python overhead and concurrent responses. The HTTP/1.1
+  stream() alternative omits status, headers and the total-body cap; there is
+  no HTTP/2 streaming response-body API. Client body-size and rate caps default
+  off; configure them for the workload.
+- Warm-up before fork and its budget are documented in the Workers guide.
 
 ## [0.80.0] — 2026-08-29
 
@@ -591,38 +173,6 @@ so the editable install's metadata catches up.
   workers fork, naming the three ways out.  Pass `stateful=False` for a
   protocol that keeps nothing between exchanges.
 
-### Internal
-
-- **Shutdown no longer goes through `Server.serve_forever()`.**  The sockets
-  are already accepting — `create_server` starts them — so `serve_forever()`
-  only ever blocked.  CPython 3.13.15 and 3.14.7 made its cancellation path
-  call `Server.close_clients()`, which closes the **accepted** transports
-  ([gh-123720], fixing a 3.12 regression where cancelling could hang on a
-  handler blocked reading from a client that never closed).  A graceful drain
-  then finished the handler and wrote its response into a transport asyncio
-  had already closed: the access log recorded a 200 the client never received.
-
-  The server blocks on its own event instead, and shuts down the way the
-  documentation describes — `close()` (which leaves accepted connections open
-  by contract), then the drain, then `wait_closed()`.  `close_clients()` and
-  `abort_clients()` are deliberately not called: closing the client is the
-  opposite of draining it.
-
-  This works on every supported version, but not for the same reason on each.
-  On 3.11 `wait_closed()` returns as soon as the server is closed, so the
-  drain is the only thing that waits for a request to finish.  From **3.12**
-  `wait_closed()` waits for active connections itself, and the drain's job
-  narrows to bounding that wait and cancelling what overruns it.
-
-  So the simplification arrives when **3.11** is dropped, not when 3.12 is:
-  with a 3.12 floor the sequence is `close()` → `wait_closed()`, and the drain
-  stays only for its timeout — an unbounded `wait_closed()` is not a shutdown
-  that completes.  Dropping 3.12 as well changes nothing here; the 3.13
-  additions (`close_clients()`, `abort_clients()`) are ones this path
-  deliberately does not call.
-
-[gh-123720]: https://github.com/python/cpython/issues/123720
-
 ### Fixed
 
 - **A port-bound protocol is bound however the HTTP listener was said.**
@@ -632,11 +182,7 @@ so the editable install's metadata catches up.
   auto-reload** therefore had no broker — the reload handoff carries the HTTP
   descriptors only.  No warning, no test.
 
-- **A worker lets go of the listeners it does not serve.**  `fork` copies the
-  descriptor table, so every worker held the broker's listening socket and
-  every other worker's — measured 4 of 4.  Single ownership was a property of
-  what nobody called, not of who could; a worker now closes what it was not
-  given, in its own process.
+- Workers close listener descriptors they do not own, including the single-owner broker listener.
 
 - **A stream's coroutine is built past the two places it may never reach**,
   removing the `coroutine 'StreamActor.run' was never awaited` warning (EC2
@@ -740,15 +286,6 @@ so the editable install's metadata catches up.
   is a *specified normal outcome* (RFC 9113 §5.5 requires ignoring it), not
   an exception; `.get()` returning `None` says so.
 
-  **Measured +2.65 % ± 0.15 throughput on the HTTP/2 lane** — 73.89 →
-  71.89 µs/req, so 2.00 µs/req saved, 2.71 % of BlackBull's own per-request
-  cost.  EC2 `m7a.2xlarge`, 12 ABBA rounds, 24 runs per arm; the paired null
-  (A/A) floor was 0.28 %, which the effect clears by 9.5×.
-
-  An HTTP/1.1 control lane ran in the same session and moved −0.30 % ± 0.20,
-  consistent with zero — the change is HTTP/2-only, and a control that had
-  moved with it would have meant the session measured something other than
-  the diff.
 ## [0.78.1] — 2026-08-27
 
 ### Fixed
@@ -760,21 +297,6 @@ so the editable install's metadata catches up.
   the dead socket.  asyncio drops those writes silently and logs a warning for
   each one past its threshold of five, so the cost showed up as log volume
   rather than as an error.
-
-  Measured on HttpArena's published logs for this server: one 30-second
-  `baseline-h2` run produced **264,278** lines of "SSL connection is closed"
-  and **4,415** of "socket.send() raised exception.", while the HTTP/1.1
-  lanes — one sender per connection — produced none.  Reproduced at 96 wasted
-  writes out of 100 streams on both the TLS and cleartext paths.
-
-  The discovery is now published on the writer, which every sender on the
-  connection shares, and — the half that matters most — it is read from the
-  transport rather than waited for as an exception.  `connection_lost` is
-  delivered through `call_soon`, so between the transport recording the loss
-  and the protocol learning of it there is a window in which `write()` drops
-  silently and `drain()` returns without raising.  A guard that waits for an
-  exception never fires there.  Measured in that window: **96 of 100 writes**
-  produced a warning before, none after.
 
 - **A client that reset mid-upload printed a full traceback.**  The read path
   surfaces the OS `ConnectionResetError` when the reset lands while a handler
@@ -1164,9 +686,7 @@ disconnect itself.
 - **`BB_WS_MAX_MESSAGE_SIZE`** (default `16777216`, 16 MiB) — bounds a
   WebSocket message *as the application receives it*: after fragment
   reassembly and after `permessage-deflate` inflation.  `BB_WS_MAX_FRAME_PAYLOAD`
-  bounds a frame on the wire and cannot express this — deflate ratios measured
-  in this tree reach **1028.8:1**, so a 1 MiB frame inflates to roughly 1 GiB,
-  and a fragmented message accumulates frames that are each individually legal.
+  bounds a frame on the wire, not its inflated size or the sum of fragments.
   Over the bound closes with **1009 Message Too Big** (RFC 6455 §7.4.1) and
   logs a `ws_max_message_size` cap hit.  `0` disables.  The default admits the
   largest message the Autobahn suite sends, so conformance passes unconfigured;
@@ -1274,7 +794,7 @@ reader is still a growable path.**
 
 | What was unbounded | Reachable by | Now |
 |---|---|---|
-| WebSocket message after `permessage-deflate` inflation | one compressed frame; ratios measured at **1028.8:1** in this codebase, so a 1 MiB frame inflated to ~1 GiB | `BB_WS_MAX_MESSAGE_SIZE`, enforced by zlib's own `max_length` so the payload is never built |
+| WebSocket message after `permessage-deflate` inflation | a compressed frame that inflates beyond its wire-size cap | `BB_WS_MAX_MESSAGE_SIZE`, enforced by zlib's own `max_length` so the payload is never built |
 | WebSocket message across fragments | N continuation frames, each individually legal | same knob, checked before each append |
 | MQTT packet | declaring a Remaining Length up to the 256 MiB spec ceiling and dribbling it | `BB_MQTT_MAX_PACKET_SIZE`, judged from the header before buffering |
 | MQTT session backlog | subscribing and never acknowledging | client's `Receive Maximum` honoured; excess bounded by `BB_MQTT_MAX_QUEUED_MESSAGES` |
@@ -1284,7 +804,7 @@ reader is still a growable path.**
 | WebSocket control-frame flood | one PONG write per PING | same meter |
 | Rapid Reset counter's blind spot | provoking *server-emitted* resets rather than sending them | emitted resets counted in the same window |
 | MQTT session state — subscriptions per session, sessions per broker, and an expiry that was recorded but never enforced | one CONNECT per Client Identifier at `session_expiry_interval = 0xFFFFFFFF`, which §3.1.2.11.2 defines as *never expires*; or one client subscribing to endless filters | `BB_MQTT_MAX_SUBSCRIPTIONS`, `BB_MQTT_MAX_SESSIONS`, and a one-shot expiry sweep |
-| HTTP/2 priority-tree growth | PRIORITY for arbitrary idle stream ids — legal under §6.3, unmetered, and measured at 10,000 frames → 10,000 nodes that nothing removed | the state was never read, so it is no longer recorded at all; PRIORITY_UPDATE hints bounded by `SETTINGS_MAX_CONCURRENT_STREAMS` |
+| HTTP/2 priority-tree growth | PRIORITY for arbitrary idle stream identifiers that grew unbounded state | the state was never read, so it is no longer recorded at all; PRIORITY_UPDATE hints bounded by `SETTINGS_MAX_CONCURRENT_STREAMS` |
 
 Also in this release: the request-body total cap and minimum delivery rate
 (`BB_MAX_BODY_SIZE`, `BB_MIN_BODY_RATE`), and a finite default connection cap
@@ -1326,13 +846,7 @@ no red-team exercise, no volumetric-DoS protection.
   deprecated `Connection` alias, is also excluded so `import *` no longer risks
   a `DeprecationWarning` for code that never asked for it.
 
-- **Internal `DEBUG` logging is now decided at import, not per call.**  A
-  `logger.debug(...)` that emits nothing is not free — the call happens, its
-  arguments are built, and the level is checked — and the framework was making
-  twenty of them per HTTP/2 request and three per HTTP/1.1 request, measured at
-  4.5 % and 1.7 % of those lanes.  The per-request modules (request dispatch,
-  HTTP/2 frame parsing, the response senders) now read the level once at import
-  and branch on the result.
+- Internal request-path DEBUG traces capture the logger level at import. Configure DEBUG before importing blackbull; changing it afterwards does not activate those traces.
 
   **What this changes for you**: raising the log level to `DEBUG` *after*
   importing `blackbull` no longer switches on those internal traces.
@@ -1378,27 +892,6 @@ no red-team exercise, no volumetric-DoS protection.
   chunks instead of floor-sized ones.  The exact-bytes contract is unchanged:
   EOF before the declared length is still a truncated upload, never a complete
   one.
-- **Receive-path responsibility separation** — the receive competence moves
-  onto `BufferReader`, the only object that knows both what was asked for and
-  what was consumed.  It now owns the stop-reading decision, the backpressure
-  release, and the grown-buffer release hysteresis; `ConnectionProtocol` keeps
-  the transport callbacks, the rendezvous, and executing `pause_reading` /
-  `resume_reading`; `ReadBuffer` keeps bytes, scanning, and growth, reporting a
-  drained message boundary instead of acting on one.  Internal only — no public
-  API, environment variable, or wire behaviour changes.
-  - Side effect of deleting the old inference: a reader that is already parked
-    now arms **no** backpressure pause at all.  The transport front end used to
-    guess "is anybody waiting" from the rendezvous future, which clears when a
-    reader is *woken*, so arrivals in that window cost a
-    `pause_reading`/`resume_reading` pair that the next park undid.
-  - The reader's transport offer is now *published* (`ConnectionProtocol.read_offer`)
-    rather than polled through a method call — the mirror of `reading_paused`
-    going the other way.  `get_buffer` runs on every arrival on every
-    connection, including the ones that never read a body, so the decision is
-    kept out of that path on principle rather than measured into it — an EC2
-    A/B on `/conn` puts the change at +0.13 % (95 % CI [−0.13, +0.39]), i.e.
-    no throughput claim either way.  Ownership is unchanged: the party that
-    decides is the party that writes.
 - **Server-emitted `RST_STREAM` frames now count toward the Rapid Reset
   budget.**  The meter watched inbound resets only, so a peer could get the
   same stream-slot churn for free by *provoking* ours — protocol violations,
@@ -1427,57 +920,6 @@ no red-team exercise, no volumetric-DoS protection.
   makes explicit what a desynced chunked stream already implied, and extends it
   to a body refused for size: the actor breaks the keep-alive loop instead of
   reading the next request out of octets the peer chose.
-- **The cost of the new limits, measured and then worked down.**  The close A/B
-  for this programme found a regression against `v0.76.1`: HTTP/1.1 `/conn`
-  −1.98 % and HTTP/2 `/1kb` −3.75 % (EC2 m7a.2xlarge, 8 rounds ABBA with a
-  passing A/A null).  Paying the limits once per connection instead of once per
-  request roughly halved it — to −1.06 % and −1.85 % — and that is the last
-  figure confirmed on EC2.
-
-  Attribution then moved to counting *executed instructions* per request, which
-  is deterministic where this box's timing is not.  Its most useful finding:
-  about **40 % of the added cost was not the limits at all** but the receive
-  path's ownership split, which shipped in the same window.
-
-  Four further changes brought the instruction cost against `v0.76.1` from
-  +2.23 % to +0.19 % on `/conn` and from +1.85 % to +0.29 % on HTTP/2 — the
-  largest of them being the DEBUG-logging gate below, which was never about
-  the limits.  A second EC2 A/B (20 rounds, targeting ±0.5 % equivalence)
-  confirmed both lanes are **bounded within ±1 %** of `v0.76.1`, which is the
-  bound the original regression was measured against, but did not reach the
-  stricter ±0.5 % target: HTTP/2 `/1kb` keeps a real, CI-confirmed residual of
-  **−0.35 % to −0.42 %** (91–89 % of the original −3.75 % recovered);
-  `/conn` did not resolve either way — its confidence interval cannot rule out
-  zero or a cost approaching −1 % at every trim level but one, though a
-  regression larger than 1 % is excluded.  Neither is release-blocking on this
-  evidence; further reduction remains an open, non-blocking candidate.
-
-  The instruction count under-predicted both lanes (by 1.2–1.5× on HTTP/2 and
-  1.6–2.4× on `/conn`) — it counts Python bytecode, not the C-level work,
-  syscalls, allocation and GC underneath it.  Treat any "N % of the lane"
-  figure derived from it as a **lower bound**, not an estimate.
-
-  What the limits themselves now cost, and what was taken back:
-  - the declared-body check reads the length `_validate_message_framing`
-    already validated, instead of asking the header store again — a request
-    with no `Content-Length` was paying an index miss plus the `bytes.lower()`
-    allocation of the fallback probe;
-  - `HTTP2Recipient` and `HTTP2Sender` are handed their limits by the
-    connection's actor rather than resolving settings themselves.  One of each
-    is built per stream, so a function-level import was being resolved through
-    `importlib._bootstrap` on every request;
-  - the HTTP/2 declared-body refusal is a comparison at the call site, so the
-    common answer — no — costs neither a coroutine nor a method call per
-    stream;
-  - the HTTP/1.1 actor asks the recipient one question after dispatch
-    (`after_dispatch`) rather than combining two predicates itself.
-
-  Behaviour is unchanged in every case.  `BB_H2_IDLE_TIMEOUT`'s per-frame clock
-  read was left alone deliberately, because it is what makes that bound mean
-  the period it states; the frame-rate meters and the body-cap state were
-  likewise left, because they are the checks rather than the way they are
-  written.
-
 ### Fixed
 
 - **A PRIORITY flood no longer grows HTTP/2 server state.**  RFC 9113 §6.3
@@ -1595,12 +1037,6 @@ shipped.  This patch restores the v0.75.1 receive path.
   only the number of events varies.  Set `BB_BODY_CHUNK_MAX` equal to
   `BB_BODY_CHUNK_SIZE` for the previous fixed-size slices.
 
-  Measured on EC2 against v0.75.1 (m7a.8xlarge, 16 workers, 20-profile
-  HttpArena sweep): upload/32 **+15.0 %**, upload/256 **−14.5 %** — the
-  256-connection upload cell regresses and the mechanism is not yet
-  attributed.  The body-read design is under re-examination; a follow-up
-  release will revise it.
-
 [netty-adaptive]: https://netty.io/4.1/api/io/netty/channel/AdaptiveRecvByteBufAllocator.html
 
 ### Changed
@@ -1631,67 +1067,19 @@ shipped.  This patch restores the v0.75.1 receive path.
   connection by sending that dict; it is logged and dropped like any other
   unknown send event.
 
-### Internal
-
-- **Per-request closure annotations stripped** on the HTTP/2 and gRPC
-  streaming hot paths (four sites each).  A nested `def` pays for its
-  annotations on every creation; the types move to comments, saving ~250 ns
-  per H/2 request stream, and an architecture test now guards the rule that
-  per-request factories stay unannotated.
-
 ## [0.75.1] — 2026-08-13
 
-Sprint 100.  A patch rather than a minor: the public surface is unchanged —
-no new API, no new environment variable, nothing new to call or configure.
-What shipped is a set of read-path fixes (the largest term named by the
-per-request attribution run) and the measurement harness that named them.
+Read-path fixes; no new public API or environment setting.
 
 ### Fixed
 
-- **Every HTTP/1.1 cleartext connection crashed under uvloop.**
-  `buffer_updated` released the buffer's memoryview while uvloop still held
-  its Py_buffer export (uvloop releases the export in a `finally` after the
-  transport callback returns), raising `BufferError: memoryview has 1
-  exported buffer` and killing the connection.  TLS was unaffected (a
-  different transport path).  The tolerant call site fixes the crash; the
-  strict call sites still fail loudly on a genuine leak.
-- **Small keep-alive requests churned a 64 KiB allocation per request.**
-  `BufferedProtocol.get_buffer`'s sizehint — which uvloop fills with
-  libuv's fixed 64 KiB on every cleartext read — was treated as a demand,
-  growing every connection's buffer to 64 KiB on its first request and
-  shrinking it back at the message boundary: a 64 KiB alloc/free per
-  request.  The sizehint is advisory (CPython's documented contract), so
-  growth is now driven by the bytes actually arriving.  Measured on EC2:
-  the read-path term of the B1 cleartext deficit dropped +4.24 → +0.16 µs/req.
-
-### Internal
-
-- **Empty head-scan skip.**  `read_head` no longer scans for the head
-  terminator while the buffer is empty — an empty buffer can never exceed
-  the scan's limit, so the scan was a control-flow artifact, not a
-  conformance requirement.  Measured on EC2: empty scans 1.00 → 0.00/req.
-- **`_release` hysteresis.**  A buffer grown for a large message now returns
-  to its floor only after several fully-consumed small messages, so a
-  keep-alive connection that repeats a large body reuses its allocation
-  instead of growing and shrinking per message.
-- **Benchmark attribution harness.**  The per-seam timing instruments, null
-  seam, gate stamps, and EC2 driver used to attribute the read-path deficit
-  land under `bench/` (harness only; nothing runs in a stock launch).
-
-### Docs
-
-- `docs/about/internals.md` §Read-path invariant — the sizehint is advisory
-  and the buffer returns to its floor with hysteresis.
+- Fixed HTTP/1.1 cleartext connections crashing under uvloop with BufferError;
+  TLS was unaffected.
+- Small keep-alive requests no longer repeatedly grow and free a 64 KiB buffer.
 
 ## [0.75.0] — 2026-08-11
 
-Sprint 99.  The app boundary becomes one shared `RequestActor`.  What the
-application is called with — the native `Connection`, or a materialised
-ASGI scope on the `BB_FORCE_ASGI_SCOPE=1` compat lane — is now decided in a
-single actor shared by HTTP/1.1 and HTTP/2, and the forty-three-release-old
-`scope['http2_priority']` deprecation finally ships its removal.  The
-separation cost on the H/1 native lane (≈0.4-0.5 %, below the A/B null
-floor's spread) is accepted and recorded in `bench/results/`.
+Removed the deprecated `scope['http2_priority']` key; use the priority extension documented below.
 
 Versioned as a MINOR under the then-current rule (a public-API removal).
 The versioning rule was tightened on 2026-08-11 to judge removals by
@@ -1713,24 +1101,6 @@ have migrated is now a PATCH — under that rule this release would have been
   it; the top-level key was a dispatch-time copy that silently went stale for
   the rest of the request.  Only the ASGI-compat lane
   (`BB_FORCE_ASGI_SCOPE=1`) ever carried it; native handlers never saw it.
-
-### Internal
-
-- **The app boundary moved into one shared `RequestActor`.**  What the
-  application is called with — the native `Connection`, or a materialised
-  ASGI scope on the `BB_FORCE_ASGI_SCOPE=1` lane — is now decided in a single
-  actor shared by HTTP/1.1 and HTTP/2, instead of one per-protocol
-  dispatch site.  No user-facing API change; the A/B measurement of the
-  separation cost is recorded in `bench/results/`.
-- **Access-log record construction unified.**  H/1's per-request record is
-  built inline (master-equivalent); the record owners for H/2 and WS share
-  the same helpers.
-- **Bench tooling fixes:** `ab.sh` finish's pgrep self-match (50-min poll
-  budget) fixed via the `[.]` bracket trick; `ab_commit_h2.sh` no longer
-  recreates `.venv` on the EC2 instance; `BB_FORCE_ASGI_SCOPE` threaded
-  through the ab-verify tooling.
-
----
 
 ## [0.74.0] — 2026-08-10
 
@@ -1780,35 +1150,6 @@ every other response body.
   process was granted.  Pinning had no off switch before this, which is the
   wrong default for a shared or externally-orchestrated host.
 
-### Internal
-
-- **A mistyped CPU range no longer allocates the range.**  `BB_CPU_PINNING`
-  expanded each range before intersecting it with the process's mask, so
-  `0-20000000` in place of `0-20` built 20 000 001 entries — 1.15 GiB and
-  1.8 s, in every worker, at fork time — and then discarded all of it.  Ranges
-  are clamped to the highest allowed CPU, which nothing above could have
-  survived anyway.  Caught in review; the parser is new this sprint, so no
-  release ever carried it.
-- **The per-connection serve task starts eagerly.**  `connection_made` now
-  builds the task with `eager_start=True`, running the serve prologue inline
-  instead of queueing its first step for a later loop iteration.  Measured at
-  **0.387 µs saved per accepted connection** (95% CI 0.343–0.431, five pooled
-  ABBA runs against an A/A null of +0.059 ± 0.025; `bench/accept_hop_ab.py`).
-  That is ~0.8 % of a churn request and ~0.008 % of a request on a
-  100-request keep-alive connection — bookkeeping, not a latency win, since an
-  accepted connection waits for the peer's first packet either way.
-
-### Harness
-
-- **The Autobahn image is pinned by digest.**  `autobahn_run.sh` pulled
-  `crossbario/autobahn-testsuite:latest`, so "the wire behaviour regressed" and
-  "the test suite changed" arrived as the same red X and no passing run was
-  repeatable.  Override with `AUTOBAHN_IMAGE=` to test an upgrade.  The pinned
-  digest is the one Docker Hub's `latest` resolved to on 2026-08-10, so what CI
-  runs is unchanged.
-
----
-
 ## [0.73.1] — 2026-08-09
 
 Sprint 97.  A patch rather than a minor: the public surface is byte-for-byte
@@ -1840,17 +1181,7 @@ line, and a test that can now explain its own failures.
 
 ### Fixed
 
-- **A stop signal delivered while the master was still starting up was
-  silently discarded.**  `MultiWorkerServer.run()` installed the SIGTERM /
-  SIGINT handlers first and then reset the flag those handlers set, so any
-  signal arriving during worker spawn — or, under `reload=True`, during the
-  watcher thread's start — was overwritten before the supervision loop ever
-  read it.  The master then kept supervising a shutdown it had already
-  acknowledged in the log, until something SIGKILLed it: an orchestrator that
-  SIGTERMs a slow-starting container waited out its full grace period, and
-  `Ctrl-C` in the first moments of `--reload` did nothing.  The flag is now
-  owned from construction and never re-initialised.  Measured on the reload
-  end-to-end path: SIGTERM-to-exit went from a 15 s SIGKILL to 0.12 s.
+- SIGTERM/SIGINT received while the master starts workers or the reload watcher now initiates shutdown instead of being discarded.
 
 ### Added
 
@@ -1860,34 +1191,11 @@ line, and a test that can now explain its own failures.
   which only appears if the master acted; a reload that never happened gave no
   way to tell a watcher that stayed silent from a master that ignored it.
 
-### Docs
-
-- **Hot reload** — documented the reload log sequence as a diagnostic ladder,
-  and a caveat that was not previously written down: `watchfiles`' poller
-  (forced on by default under WSL) treats a file as modified only when its
-  mtime moves *forward*, so a backwards clock step — NTP correction, VM
-  resume, WSL2 time resync — silently drops every save for the next few
-  seconds.  Verified: 12/12 saves dropped with an mtime forced into the past,
-  0/12 with the mtime left alone or forced forward.
-
----
-
 ## [0.73.0] — 2026-08-09
 
 ### Removed
 
-- **`BB_H1_PROTOCOL` and its buffer-owning read front end.**  The flag shipped
-  as an explicit measurement gate — "not a supported switch … will either
-  become the default or be removed once that measurement lands" — and the
-  measurement landed: it is **slower**, by 2.02 % ± 0.11 at a browser-like
-  header count and 2.9–4.8 % at wrk's default (local ABBA paired by round,
-  against a +0.00 % ± 0.14 A/A null floor).  The cause is structural rather
-  than incidental: the reader was layered *over* `asyncio.StreamReader`, so it
-  was a third buffer rather than a replacement, and its premise — "one loop
-  turn per header line today" — does not hold, because `StreamReader.readuntil`
-  only suspends when the separator is not already buffered.  Removed rather
-  than left opt-in: an unmeasured, untested, slower duplicate of the header
-  read is worse than either path alone.
+- Removed the unsupported BB_H1_PROTOCOL experiment; setting the variable no longer selects another reader.
 
 ### Fixed
 
@@ -1937,42 +1245,11 @@ line, and a test that can now explain its own failures.
   peer can no longer send a head of any size and escape the `431` the same
   bytes draw on its first request.
 
-### Internal
-
-- **The H/1.1 inbound path is one buffer and one cursor.**
-  `ConnectionProtocol` (an `asyncio.BufferedProtocol`) has the kernel write
-  straight into the connection's `ReadBuffer`; the server accepts through
-  `loop.create_server` with a protocol factory instead of a `StreamReader`
-  callback pair.  Three workarounds go with the second buffer that is no
-  longer there: protocol detection consumes nothing (so the winning binding
-  needs no replayed prefix), the message head is found in one resumable scan
-  rather than a `readuntil` per line, and an upgrade hand-off to WebSocket or
-  h2c carries nothing because the peer's surplus is already resident.
-
-- **`read_head` is part of `AbstractReader`, not a capability callers sniff
-  for.**  One call returns a head, `b''` for an idle close, or
-  `IncompleteReadError` carrying the partial for a truncated one;
-  `ReadLimitExceeded` reports a budget breach and carries the bytes so the
-  protocol — not the reader — decides between `400` and `431`.  The keep-alive
-  loop no longer has a second head-read path of its own: every request after
-  the first re-enters the same read, differing only in which idle window
-  applies.  `tests/unit/test_read_head_contract.py` holds all three reader
-  kinds to identical answers.
-
-- **`NativeTestServer` accepts through the production protocol factory.**  It
-  used `asyncio.start_server`, so the large share of the suite that runs
-  through it was exercising the legacy read path rather than the one that
-  ships.
-
 ## [0.72.0] — 2026-08-08
 
 ### Security
 
-Two instances of one defect class — a path that answers a request without
-reading its body, leaving those octets to be re-read as something else.  Both
-are keep-alive framing desyncs of the shape request smuggling exploits; neither
-has been demonstrated cross-client, and the measured cases are self-inflicted.
-The remedies differ because the RFC treats the two methods differently.
+Fixed two keep-alive framing desynchronizations described below. No cross-client exploit was demonstrated.
 
 - **A WebSocket handshake that declares content is now refused with `400`.**
   ⚠️ **Behaviour change** — an upgrade request with `Content-Length` above zero
@@ -1991,47 +1268,16 @@ The remedies differ because the RFC treats the two methods differently.
   `websockets` 16.1.1 (handshake, text/binary/70 KB echo, ping-pong, clean
   close, all unaffected).
 
-- **`OPTIONS *` carrying a request body desynchronised the connection.**  The
-  server-wide answer (RFC 9112 §3.2.4) replies without routing and without
-  reading the body, and it was the one answered path that skipped the
-  keep-alive drain, so the leftover bytes were parsed as the start of the next
-  request: `OPTIONS *` with `Content-Length: 4`, pipelined with `GET /`,
-  answered `204` then **`405`** — the method had parsed as `bodyGET`.  RFC 9110
-  §9.3.7 explicitly permits content on `OPTIONS`, so this is a conforming
-  request shape, and behind a reverse proxy that pools upstream connections the
-  desync is the standard request-smuggling shape (not demonstrated
-  cross-client here — the measured case is self-inflicted).  The drain
-  predicate now lives in the loop tail with no per-path exemption, so every
-  request that stays on the connection reaches it, and the 64 KiB bound applies
-  uniformly: a body past it closes the connection instead of draining
-  unboundedly.
-  Http11Probe covers bodyless `OPTIONS *` and origin-form `OPTIONS /` with a
-  body, but never the product and never with a pipelined follow-up, so its
-  159/159 was clean on both sides of the defect.
+- OPTIONS * now drains a declared request body before parsing the next
+  keep-alive request. Bodies above the 64 KiB drain budget close the connection.
 
 ## [0.71.0] — 2026-08-07
 
 ### Fixed
 
-- **A static file larger than the `StaticFiles` cache threshold (4 MiB),
-  requested with `Accept-Encoding`, returned no response at all.**  Above the
-  threshold `StaticFiles` sends `http.response.start` then
-  `http.response.pathsend`; with a codec negotiated the Compression middleware
-  was still holding the start pending a compress decision, so the sender —
-  which drops a pathsend it has no buffered start for — emitted nothing.  The
-  held header is now released before any event compression cannot act on.
-  Pre-existing and older than v0.67.0; never surfaced because the benchmark
-  corpus is all small files.
-- **The `static` lane no longer round-trips through ASGI dicts.**  The native
-  complete-response path matched only a response arriving as one object, so
-  `StaticFiles` — which sends its header and body as two events — expanded
-  through `to_asgi()` and was re-converted below, on every request that
-  negotiated a codec.  Compression now holds a header arm and merges it with
-  the terminal body that follows, restoring one-object-one-send.  Worth
-  ~0.6 µs/req (microbenchmark, N=30,000), which an ABBA A/B on the static
-  lane could not separate from noise: −0.52 % ± 0.31 against a 0.26 % null.
-  The v0.67.0 → v0.70.0 HttpArena `static` delta is **not** explained by this
-  round trip and remains unattributed.
+- Fixed responses disappearing for static files above 4 MiB when
+  Accept-Encoding negotiated compression. Compression now releases a held
+  response head before pathsend and other events it cannot compress.
 
 - **`Expect: 100-continue` is answered on every request, not just the first
   on a connection.**  The interim response was written before the shared
@@ -2090,240 +1336,12 @@ The remedies differ because the RFC treats the two methods differently.
   watchdog starts the deferred reader if the handler goes quiet.  A positive
   `BB_WS_QUEUE_DEPTH` is unchanged — an explicit opt-in to read-ahead.
 
-### Internal
-
-- **HttpArena correctness gate runs on WSL2; EC2 only ready-checks.**  New
-  `bench/httparena/build_wheel.sh` (git-archive wheel build + sha256 record),
-  `validate_local.sh` (clone+patch the `MDA2AV/HttpArena` harness, stage the
-  framework, pre-build the image, run `validate.sh` under a wall-clock bound,
-  verdict to `bench/results/httparena-local/<UTC>/verdict.txt`) and
-  `ready_check.sh` (minimal container/port/WS/TLS/h2c/gRPC smoke).
-  `run_httparena.sh` runs `ready_check.sh` in place of the full `validate.sh`
-  when `SKIP_VALIDATE=1`; `httparena_compare.sh` uploads it and records the
-  wheel sha256 in `provenance.md`.  The identity rule: validate and benchmark
-  the **same wheel file** (`BB_WHEEL_PATH`).
-
-- **HttpArena crud profile contract completed.**  The get-by-id route now
-  emits `x-cache: MISS|HIT` from the Redis cache status (the harness's
-  cache-aside check), and the create INSERT supplies the NOT NULL columns
-  (`active`, `tags`, `rating_score`, `rating_count`) the schema requires —
-  the harness's crud POST was 503 without them.  Both gaps previously caused
-  HttpArena's `validate.sh` to silently abort mid-crud (the empty `x-cache`
-  grep tripped `set -euo pipefail`), so validation never reached the later
-  profiles on EC2 either; the local gate surfaced and fixed them.
-
-- **Every framework-owned response producer emits native.**  `StaticFiles`
-  (cache hit, sendfile, chunked fallback, and its error/`304` responses),
-  the `CORS` preflight, and the `Cache` middleware's stored entries now build
-  `NativeResponse` directly instead of ASGI event dicts; `NativeResponse`
-  grew a `file_path` arm so the sendfile form is one native shape rather than
-  a `http.response.pathsend` dict.  `Cache` stores `(status, header, body)` as
-  data and builds a fresh response per hit, keeping the header-list copy the
-  dict form provided.
-
-  With no dict producer left inside the seam, `Compression`'s ASGI-dict lane
-  (`_dict_event` and the buffered-parts tail) and the app's `_boundary_wrap`
-  are both deleted — the second conversion altitude has nothing left to
-  catch.  `parse_response_event` now has no caller inside the framework; it
-  remains exported for the external compat surface.
-
-  Counted on the `static` lane (`Accept-Encoding: gzip`, one request):
-  send-path adapter closures 2 → 1, `NativeResponse` allocations 3 → 2,
-  `to_asgi()` round trips 0, per-request function-level imports 9 → 8.  This
-  is object-count work; it is not an A/B result, and the unattributed
-  v0.67.0 → v0.70.0 `static` delta stays open.
-
-- **Architecture guard: the ASGI boundaries are enumerated.**
-  `tests/architecture/test_single_native_world.py` scans the package for
-  native↔ASGI conversions (`to_asgi()`, `to_asgi_scope()`, response-event dict
-  literals, `http.request` dict literals) and fails on any site not named in
-  its allowlist with the reason it exists.  Entries are marked *boundary*
-  (permanent — where BlackBull meets ASGI) or *residual* (a producer awaiting
-  conversion); every entry is *boundary*, on every rule and both directions,
-  so the enumerated edges are the only places a dict is built.  The guard
-  self-checks, so a scanner that stopped matching cannot pass vacuously.
-
-- **`Response` and `StreamingResponse` emit native (proposal §8.2).**  Both are
-  BlackBull-owned serialisers on BlackBull's own send path, and both emitted
-  `http.response.*` dicts that `wrap_native_send` converted straight back —
-  the last response-dict round trip in the framework.  `Response` gets the
-  bigger win: a complete response is now **one object, one send** (header and
-  body together) where the dict form always cost two.  The shared
-  `_emit_response` helper carries the app's `send(body, status, headers)`
-  convenience form and the default error handler with it.
-
-  No residual response-dict producers remain; the architecture guard's
-  allowlist is boundary-only on that rule.
-
-- **`CORS` and `Compression` no longer crash an object-form WebSocket
-  handler.**  Both middleware wrap `send` with a header-injecting wrapper whose
-  non-native branch assumed every event is a dict and called `.get('type')` on
-  it.  Once the WS send channel went native (below), an object-form handler
-  sending through either raised
-  `AttributeError: 'NativeWSMessage' object has no attribute 'get'` —
-  `NativeWSMessage` is a `__slots__` class with no `.get`.  Reachable on
-  `CORS` for any object-form WS handler whose upgrade request carries an
-  allowed `Origin`, and on `Compression` via the no-matching-codec path.  The
-  raw `(conn, receive, send)` form was unaffected, since its events really are
-  dicts — which is why the break was invisible until the object form was run.
-
-  `Cache` was already correct.  Both branches are now guarded with
-  `isinstance(event, dict)`, and both guards are mutation-tested: removing
-  either turns the new suite red.
-
-- **The WebSocket receive channel is native too (proposal §6, receive half).**
-  `WebSocketRecipient` built a `websocket.receive` dict for every message,
-  which the `WebSocket` object then took apart one frame later to hand the
-  application the `str | bytes` it had a moment earlier.  The channel now
-  carries the message itself — `str` for text, `bytes` for binary, which *is*
-  the discriminator the object's public contract already publishes — via
-  `next_message()`, with the peer's close raising `WebSocketDisconnect`
-  carrying the RFC 6455 §7.4 code and a `ProtocolError` propagating unchanged.
-  `await_connect()` is the handshake counterpart.  Same shape as the HTTP body
-  channel, for the same reason.
-
-  `receive()` is unchanged and still mints the ASGI dicts, for the raw
-  `(conn, receive, send)` form and the external host.  Measured on the real
-  recipient (20 000 messages, 64-byte payloads, mean ± SE over 3 runs):
-  **2550.1 ± 30.1 → 2438.5 ± 30.6 ns/message**, −4.4 %.
-
-- **A WebSocket's close code is recorded once.**  `WebSocketActor` kept its own
-  copy of the code, updated only when a disconnect *event* passed through its
-  receive wrapper — but a protocol violation emits the exception instead, so
-  the copy stayed at its `1006 ABNORMAL` default while the server had already
-  sent `CLOSE(1002)` on the wire.  `websocket_disconnected` and the access log
-  now report the code the peer actually received.  The wrapper is gone with
-  it: one less per-message coroutine hop on the WebSocket hot path.
-
-- **The WebSocket send channel is native (proposal §6).**  The `WebSocket`
-  object was called the native form but was a facade: `accept()` /
-  `send_text()` / `send_bytes()` / `close()` built `websocket.*` ASGI dicts and
-  pushed them down the *same* channel the raw `(conn, receive, send)` form
-  uses, and `WebSocketSender` had no native arm at all — HTTP gained
-  `case NativeResponse():` in Sprint 93; WS never did.  The handler never saw
-  those dicts, but middleware, the actor, and the sender all did.
-
-  New `NativeWSMessage` (accept / send / close, tagged by `kind` because the
-  variants carry disjoint payloads), a native arm on `WebSocketSender` sharing
-  its framing helpers with the dict arm, and a native accept arm on
-  `WebSocketActor`.  `websocket.*` dicts now appear only at the enumerated
-  boundaries: the external ASGI edge, the raw compat form, and the Tier-2 test
-  client.  The sender tests the **dict** shape first: a dict is the one arm
-  here that nothing cheaper than `isinstance` recognises, so ordering it first
-  costs the native arm nothing and saves the compat path — every raw-form
-  handler and every external ASGI host — the second check it would otherwise
-  pay as a type guard.  Worth 61 ns on a ~800 ns send (ABBA, in-process,
-  n=16/arm); a test asserts the dict arm is reached without the native type
-  being consulted at all, so the ordering cannot regress silently.
-  A test asserts the two arms put **identical bytes on the wire**, so
-  the compat surface cannot drift.
-
-- **The gRPC bridge emits native (proposal §7).**  `serve_grpc` is dispatched
-  from `BlackBull._dispatch` *before* the handler-boundary adapter, so its
-  `http.response.*` dicts reached middleware and the sender unconverted — an
-  ASGI shape on the native seam that nothing had asked for, from
-  framework-internal code that only lives in a module called `asgi.py`.  All
-  seven emission sites now build `NativeResponse`; the wire contract is
-  unchanged and tested in both directions.
-
-- **The last request-dict producer is gone (proposal §8.1).**  The H2 trailers
-  path (RFC 9113 §8.1 — a second HEADERS on an open stream) built an
-  `http.request` dict for the recipient to translate straight back.
-  `put_event()` is replaced by `put_end_of_stream()`, which enqueues the native
-  pair.  RFC 8441 WS-over-H2 (`HTTP2WSWriter`, and the client's `_send_ws`)
-  emits `NativeResponse` too (§8.2).
-
-- **The request body crosses the framework as `bytes`.**  `HTTP1Recipient` and
-  `HTTP2Recipient` grew `next_chunk()`, which returns the chunk itself and
-  `None` once the body is complete; a peer that vanishes mid-body raises
-  `ClientDisconnected`, and so does a body-read timeout (still recorded as a
-  cap hit).  `None` rather than `b''` for the reason `NativeResponse` decides
-  presence with `is not None` — an empty body is a real body — and the
-  sentinel is unambiguous on both framings, since a zero-length chunk *is* the
-  terminator in chunked encoding (RFC 9112 §7.1) and a Content-Length slice is
-  never empty.
-
-  `Connection.body()` / `stream()` — and `read_body` / `stream_body` beneath
-  them — consume that channel directly.  The `http.request` dict is now built
-  **only** by the recipients' `__call__`, i.e. only when something asks for the
-  ASGI encoding: a full-form handler calling `receive()`, or an external host.
-  It used to be built unconditionally, so a handler using `conn.body()` paid
-  one dict per chunk it never read.
-
-  No user-visible contract changes: `receive()` returns the identical event
-  sequence (`more_body` is recovered from the end marker `next_chunk` just
-  set), and both channels share that marker so a reader starting on one cannot
-  block on the other.  Measured on the real H1 recipient at 4 KiB chunks over
-  2000 requests per run (mean ± SE, N=5): **803.2 ± 52.6 → 536.3 ± 12.3
-  ns/chunk**, −33.2 % — 4.27 µs on a 64 KiB upload, which also goes from 16
-  `http.request` dicts to **0**.
-
-- **The receive and event paths take a `Connection`, not "a `Connection` or a
-  scope dict".**  `HTTP1Recipient.__init__` / `bind()` carried a three-way
-  shape check — native `Connection`, a scope dict with a stashed `Connection`,
-  a raw scope dict — plus a `Headers` re-wrap, on a per-request path.  Only
-  `HTTP1Actor._dispatch_request` ever builds or rebinds a recipient and it is
-  typed `conn: Connection`; under `BB_FORCE_ASGI_SCOPE=1` the *app* gets the
-  scope dict while the recipient still gets the `Connection`.  The dict shape
-  was reachable from tests alone.  Same deletion in `WebSocketRecipient`
-  (`conn`, the `websocket_disconnected` detail, the frame-payload cap log) and
-  in `EventAggregator._ws_fields`.
-
-  `RequestActor` keeps its `dict | Connection` union — that one is the real
-  `BB_FORCE_ASGI_SCOPE` lane, not a compat leftover.
-
-### Docs
-
-- WebSocket guide + env-vars reference: the `websocket_message` note now
-  describes the deferred reader instead of forced read-ahead.
-- Middleware guide: the `scope` / `conn` parameter names now select the
-  request form a middleware receives, and the examples say which is which.
-  The `scope`-subscripting examples throughout the middleware, logging,
-  extensions, requests-and-responses, testing, and first-app pages were
-  rewritten to the native form — they raised `TypeError` as written, because
-  an undecorated middleware receives a `Connection`, which is not
-  subscriptable.  Injection is now documented as `conn.state[...]`: a
-  top-level scope-key write never reached inner layers.
-- **`blackbull.testing.NativeResponse` is now `NativeTestResponse`.**  The
-  old name collided with `blackbull.native.NativeResponse` — the framework's
-  send message — so two unrelated classes were indistinguishable in a
-  traceback or an `isinstance` check, and `testing/native.py` had to import
-  the framework one *inside a function* to dodge the shadowing.  It joins its
-  siblings `NativeClient` / `NativeTestServer`.  `NativeResponse` remains as
-  an alias, so existing imports keep working.
-- Handler-facing docs no longer teach the request as a scope dict.  The
-  `hello-world` request table, `routing`'s `path_params`, `error-handling`'s
-  `state`, `requests-and-responses`' header and query-string sections,
-  `http2`'s `extensions`, and `behind-nginx`'s `client` / `scheme` were all
-  written as `scope['x']` — which raises `TypeError` on the `Connection` a
-  handler actually receives.  They now use attributes, and 27 full-form
-  handler signatures were renamed from `scope` to `conn`.  Every rewritten
-  idiom was executed against a running app.  The `scope[...]` references that
-  remain are the ones that genuinely mean the ASGI scope: the parameter-name
-  rule's own example, two field-origin notes, and a pre-v0.31 migration note.
-- Events guide: the request- and connection-scoped events carry
-  `detail['conn']` — the native `Connection` — which the reference tables
-  called `scope` and typed as an ASGI dict.  The four examples that read it
-  as a mapping (`.get('state', {})`, `['headers']`, `['path']`) now use
-  attributes, and the `websocket_connected` / `websocket_disconnected` rows
-  list the keys those events actually emit.
-
----
-
 ## [0.70.0] — 2026-08-04
 
 ### Changed
 
-- **HTTP/2 sends natively — the send-side native seam now covers every HTTP
-  boundary.**  `HTTP2Sender` consumes `NativeResponse` (header / body /
-  trailers arms mirroring the H1 path), and the three Sprint-92
-  `http_version == '1.1'` gates are removed: the handler-boundary adapter,
-  `_boundary_wrap`, and `as_middleware` normalise to the native contract
-  unconditionally.  ASGI event dicts remain only on the WebSocket lane and
-  the external-host edge (`BlackBull(asgi=True)` under uvicorn, via
-  `to_asgi()`).  An EC2 A/B (m7a.2xlarge, H1/WS/H2 lanes) showed no
-  regression: the H2 native arm measured **+0.66 % ± 0.26** over the dict
-  lane (2.5 SE), H1 neutral, WS neutral.
+- HTTP/2 now accepts native response head, body and trailer messages.
+  External-ASGI hosting still converts responses at its boundary.
 
 - **WebSocket: the deferred reader (design A′) is gone; canonical
   post-terminal receive.**  A `websocket_message` listener now switches
@@ -2334,20 +1352,6 @@ The remedies differ because the RFC treats the two methods differently.
   app, `receive()` keeps answering a disconnect with the last terminal close
   code in both modes — eager mode previously blocked forever on a dead
   queue; inline returned a hardcoded ABNORMAL.
-
-### Internal
-
-- **Orphan audit (vulture 2.16):** removed verified dead code —
-  `blackbull/server/http2_messages.py` (never imported), WebSocket
-  `has_received_closed`, `Compression._brotli_quality`,
-  `Reloader._watchfiles`, `Headers.has_continuation`,
-  `Headers.set_table_size` / `table_size` (RFC 9113 §6.2 has no
-  `table_size`), `Stream.on_rst_received` / `closed_via_rst`, and a dead
-  Router f-string.  Public API kept even where test-only (project policy).
-
-- **A/B harness:** new HTTP/2 lane runner (`ab_commit_h2.sh`, h2c + h2load)
-  and WebSocket/H2 runner fixes (deleted-file swap handling, venv `python`
-  resolution, no "AD" index state on restore).
 
 ## [0.69.0] — 2026-08-03
 
@@ -2400,21 +1404,6 @@ The remedies differ because the RFC treats the two methods differently.
   inline floor: **WebSocket 2.08**, HTTP/1.1 2.06, HTTP/2 5.21 — unchanged
   (`python bench/loop_touches.py`).
 
-### Internal
-
-- **The HTTP per-request listener checks use the generation-keyed plain-bool
-  cache the WS path already had.**  `has_request_completed_listeners` /
-  `has_request_disconnected_listeners` collapse to a cached bool + int
-  compare instead of a dispatcher set lookup per request.  An EC2 four-row
-  A/B showed no measurable throughput change (the zero-listener workload
-  cannot resolve sub-0.3 % effects); shipped as structure matching the WS
-  pattern.
-- **The WebSocket idle watchdog is armed once at connect, not per message.**
-  `send_touch` no longer re-arms the watchdog, removing the per-message arm
-  check from the echo path.  Measured on the EC2 WS echo lane at
-  **+0.78 % ± 0.49** (four-row rule: clears its own SE and the null floor);
-  the ~1-tick worst-case PONG-latency contract is unchanged.
-
 ## [0.68.1] — 2026-08-02
 
 Post-Sprint-88 patch — router param-kind classification (which also fixed a
@@ -2434,40 +1423,6 @@ env vars, no behaviour change beyond the fix below.
   with no `{body}` placeholder still binds the request body, unchanged.
   Pinned by three new regression tests covering both wrappers and the normal
   case.
-
-### Internal
-
-- **Simplified-handler parameters are classified once at registration into a
-  `_ParamKind` enum, and the plain and extended wrappers dispatch on it with
-  `match`.**  The wrappers previously re-derived parameter kinds from string
-  literals (`'conn'`, `'body'`, `'query'`, …), which is how the plain and
-  extended wrappers drifted apart; the classification now lives in one place,
-  produced once per handler at registration.  A plain `Enum` is deliberate —
-  `kind == 'query'` must fail loudly, not string-match.
-- **The extended wrapper is built by a factory extracted at registration
-  time**, so both wrapper shapes share one construction path instead of two
-  independent `_adapt_handler` branches.
-- **Per-request dispatch prep merged into `_dispatch_request` (zero-hop).**
-  The HTTP/1.1 actor's per-request preparation is folded into the dispatch
-  call, removing one call boundary from the request path (no benchmark claim;
-  shipped as structure).
-
-### Docs
-
-- **A/B verdict asymmetry documented.**  `bench/peers/AB-HIGH-PRECISION.md`
-  records why local and EC2 A/B verdicts can disagree, and the ab-verify
-  workflow is wired into the agent docs (`AGENTS.md`) with EC2 calibration
-  and a two-consecutive-polls wait rule for reading check rollups.
-- **ab-verify EC2 launcher added** — `bench/aws/ab.sh` (ABBA measurement +
-  import-hash proof) with `install.sh` uv/.git provisioning and a
-  `native_app` bench target, so high-precision A/Bs can run on EC2 without
-  ad-hoc setup.
-
-### CI
-
-- **Dependabot group and dependency bumps.**  The `python-deps` group gains a
-  `dependabot.yml` entry; pyright → 1.1.411, codeql-action steps → v4.37.4,
-  and `pypa/gh-action-pypi-publish` → 1.14.2.  No runtime dependency changes.
 
 ## [0.68.0] — 2026-08-01
 
@@ -2512,92 +1467,13 @@ env vars, no behaviour change beyond the fix below.
   existing import (`from blackbull.testing import TestClient`,
   `WebSocketTestSession`, `WebSocketDisconnect`) resolves unchanged.
 
-### Docs
-
-- `docs/guide/testing.md` rewritten around which instrument answers which
-  question, with the two dispatch paths shown side by side so the choice
-  between `native` and `TestClient` is a structural one rather than taste.
-- `KNOWN_LIMITATIONS.md` records Tier 2's scope: HTTP/1.1 and WebSocket,
-  cleartext only — TLS, ALPN, and HTTP/2 stay with the BlackBull clients +
-  ephemeral-port pattern.
-
-### Internal
-
-- The dual-path corpus moved to `tests/conformance/http1/_dual_path_corpus.py`
-  as a single definition of the request shapes the compat lane must be
-  invisible for.  For the vectors a conformant client can issue, the client
-  spec is the definition and the raw bytes are derived from it, so the two
-  drives cannot drift; the malformed and raw-form vectors (`OPTIONS *`,
-  obs-fold, HTTP/9.9, …) stay raw-drive-only.  Byte identity is still asserted
-  over all 19; the client-expressible subset is now also replayed through a
-  real socket on both lanes.
-- Http11Probe re-scored at **159/159 scored, 0 failed, 0 errors**, with a
-  per-test verdict diff **empty** against the v0.67.0 baseline on both the
-  native and `BB_FORCE_ASGI_SCOPE=1` lanes.
-
 ## [0.67.0] — 2026-07-31
 
 ### Changed
 
-- **Header lines whose values a specification enumerates are validated once at
-  import, not once per request.**  A process-wide table seeds Fetch Metadata's
-  `Sec-Fetch-*`, the UA client hints' boolean/platform forms and RFC 9110's
-  fixed tokens (`Connection`, `TE`, `Pragma`, `Upgrade-Insecure-Requests`,
-  `DNT`) — **56 % of all header lines** on captured browser traffic, and a
-  share that does not decay with connection churn.  It is the HPACK *static*
-  table's idea, which HTTP/1.1 has no wire form for.  Entries are admitted
-  only because a spec fixes their value set, never because they were frequent
-  in a capture; framing names (`Content-Length`, `Transfer-Encoding`, `Host`,
-  `Expect`, `Upgrade`) are excluded by a check that raises at import; and each
-  entry is asserted equal to what parsing that line actually produces.  This is
-  what makes the win survive short-lived connections: at one request per
-  connection the per-connection cache alone was **21 % slower** than no cache,
-  and with the shared table it is **6 % faster**.
-- **Keep-alive connections stop re-validating header lines they have already
-  validated.**  A peer that resends a byte-identical header line — which every
-  browser does for `User-Agent`, `Accept`, `Accept-Language` and `Cookie` —
-  now gets that line answered from a per-connection cache of
-  `raw line bytes → (name, value)` pairs, replacing the colon split, token
-  check, lowercase, OWS strip and value scan with one dict lookup.  Scored on
-  **captured** traffic — a real Chromium loading a real page, every request
-  head recorded as it arrived — 21 requests carried 275 header lines drawn from
-  only 26 distinct ones, and parse cost falls **8.96 → 5.85 µs (−35 %)** at the
-  observed single connection, **−27 %** when the same requests are re-dealt
-  across the six connections Chromium opens per origin.  The cache is keyed per
-  *line*, so a request that changes four of its thirteen lines still hits on
-  the other nine, and header **order** changing between navigations and
-  subresources costs it nothing.  Against an adversarial peer whose every
-  header value is unique it is still **5 %** faster, so no input shape
-  regresses.  Because the key is attacker-controlled the cache is bounded by
-  **bytes, not entries** — lines over 1 KiB skip it entirely (lookup included)
-  and a per-connection 8 KiB budget caps admission — which holds the worst case
-  to **16 KiB/connection and +19.2 % CPU** under a peer sending 64
-  never-repeating 128-byte headers per request.  An entry-count bound alone
-  would have retained ~1 MiB per connection (9.6 GiB across 10k connections)
-  against 988 B of real need.  The per-header slope falls
-  **0.413 → 0.174 µs** (−58 %) and a 32-header request **17.06 → 8.78 µs**.
-  Nothing enters the
-  cache unvalidated, the key is the exact line bytes so one changed byte is a
-  miss, the cache is per connection so validated lines never cross a tenant,
-  and it is bounded at 64 entries so an attacker cycling unique names cannot
-  grow it.  Requests parse to exactly what they parsed to before — asserted by
-  a differential test, and by an unchanged 213-test Http11Probe verdict.
-- **The HTTP/1.1 header-size limit is read once per connection, not once per
-  request.**  `_parse` ran a `from ..env import get_settings` statement on
-  every call; the limit is connection-scoped, so it is memoised on the actor.
-  This is what makes the cache-miss path faster too.
-- **The status line and small Content-Length values come from tables.**  Both
-  were rebuilt per response (`f'HTTP/1.1 {status} {status.phrase}'.encode()`
-  and `str(n).encode()`); they are now precomputed at import for every
-  `HTTPStatus` member and for lengths `0…8192`, each falling back to the
-  original expression outside that domain.
-- **`EventDispatcher.has_listeners` answers from a registration index.**  It
-  probed three dicts, once per lifecycle emit site per request; it is now one
-  set lookup.
-
-Measured end to end on one box in one session, one worker, medians of five
-interleaved sweeps: **+6.7 % to +10.9 %** req/s, the larger figure on
-browser-shaped header sets.
+- HTTP/1.1 header validation reuses exact validated lines within bounded
+  per-connection caches. Framing headers remain outside those caches.
+- Response status and short Content-Length encodings use precomputed tables.
 
 ### Fixed
 
@@ -2614,104 +1490,16 @@ browser-shaped header sets.
 
 ### Changed
 
-- **The HTTP/1.1 parser validates octets with C-level bulk operations.**  The
-  request-target scan, the Host authority scan, and the field-name token check
-  were per-byte Python generator expressions or regexes; each is now a single
-  `bytes.translate` delete-table pass or a precompiled character class,
-  whichever the set size favours.  Field values are checked **once for the
-  whole header block** instead of once per header: deleting every permitted
-  octet leaves only CR, LF and forbidden CTLs, and a residue that tiles into
-  CRLF pairs proves no value can carry a forbidden octet.  A block that fails
-  the pre-scan falls back to the per-header regex, so every error message and
-  status code is unchanged — Http11Probe re-scores 159/159 with a
-  **per-test verdict diff that is empty across all 213 vectors**.  Measured on
-  a Zen 4 box: per-header cost **0.510 → 0.346 µs**, fixed cost **4.53 → 3.57
-  µs**, and a 32-header request **20.33 → 14.25 µs (−30 %)**.
-- **Header names are lowercased once instead of twice.**  `_parse` already
-  lowercases each name while validating it, then handed the list to
-  `Headers.__init__`, which lowercased every name again; `Headers.from_lowered`
-  is the alternate constructor for callers that can guarantee pre-lowered
-  input.  HTTP/2 qualifies by protocol — RFC 9113 §8.2.1 makes an uppercase
-  field name malformed and the frame is rejected before any pair reaches the
-  header list.  `Headers` lookups (`get`, `getlist`, `__contains__`,
-  `__getitem__`, and the Structured Fields accessors) now probe with the
-  caller's bytes before lowercasing.  The index is keyed lowercased, so the
-  probe can only hit on a key the old path would also have found — a
-  lowercase literal, which is what essentially every internal call site
-  passes, drops from 47 to 25 ns.
-- **`app.static()` registers a route instead of global middleware.**  Static
-  serving no longer runs on every request: `<prefix>/{filepath:path}` (plus
-  `<prefix>` and `<prefix>/`, so `index=` can still answer the mount root)
-  resolves in the router, and a non-static request never enters `StaticFiles`
-  at all.  This is also what Starlette, Sanic, aiohttp, Flask and Django all
-  do.  The production gate is resolved once and memoised rather than calling
-  `get_settings()` per request.  **Behaviour change**: a miss under the prefix
-  is now answered 404 by the static route rather than falling through to
-  another route that also matches the prefix; the 404 takes the normal error
-  path, so `@app.on_error(HTTPStatus.NOT_FOUND)` still applies.  An explicit
-  route on the bare prefix always wins — `app.static()` never replaces a path
-  you registered yourself.
-- **`Compression` no longer parses body events on its no-codec path.**  When
-  the client accepts nothing the server can produce, the response is forwarded
-  verbatim through a wrapper that stamps `Vary: Accept-Encoding` on the
-  response start (bug 1.21f).  That wrapper ran `parse_response_event` on
-  every event, allocating a `ResponseBody` copy of each body chunk only for
-  the next line's `isinstance` to reject it.  It now discriminates on the raw
-  event type first, so a streamed body costs one dict lookup per chunk.
-- **`BB_WRITE_TIMEOUT` no longer arms a timer per response.**  It defaults to
-  `30.0`, so every write took `asyncio.wait_for` — exactly one `loop.call_at`
-  per response, which the loop-touch instrument read as `call_at=1.00`/req.
-  The bound now rides the per-process deadline scanner that already enforces
-  `BB_HEADER_TIMEOUT`, `BB_BODY_TIMEOUT`, and `BB_KEEP_ALIVE_TIMEOUT`.  The
-  defence is unchanged — a slow-read peer still gets its transport closed and
-  a `ConnectionResetError` still surfaces to the sender's existing error path
-  — but the timeout now fires within `BB_DEADLINE_TICK_MS` of the requested
-  instant instead of exactly on it (~1 % slop at the 30 s default).  BlackBull
-  falls from 3.06 to 2.06 event-loop touches per request, which is the bare
-  `asyncio.start_server` floor: all remaining per-request loop exposure is now
-  the streams layer itself.
+- HTTP/1.1 bulk validation preserves the existing rejection messages and
+  statuses. Headers.from_lowered adopts already-lowercase pairs; callers must
+  guarantee their casing and relinquish mutation of the list.
+- app.static() now mounts routes. A missing file under the prefix answers 404
+  rather than falling through; custom 404 handlers still apply. Explicit bare
+  prefix routes are preserved.
+- BB_WRITE_TIMEOUT uses the shared scanner; enforcement can lag by one
+  BB_DEADLINE_TICK_MS interval. The refusal still closes a stalled transport.
 
 ### Added
-
-- **`bench/loop_ab.py` and `bench/loop_touches.py`** — permanent forms of the
-  two-arm event-loop A/B and the loop-touch counter.  `loop_ab.py` runs both
-  `BB_UVLOOP` arms of the same build in one session on pinned disjoint cores
-  and reports stock/uvloop/gap against the previous run of the same harness;
-  `--repo` points it at a git worktree so a previous commit can be baselined
-  with the identical harness.  `loop_touches.py` counts `call_soon` +
-  `call_at` + `call_later` + `create_future` per request for HTTP/1.1,
-  HTTP/2, and WebSocket against a per-protocol budget, and `--check` fails on
-  a rise.  It emits a count, not a duration, so unlike req/s it is
-  machine-independent and can gate CI.
-- **Loop-touch budget lane in `test.yml`.**  `bench/loop_touches.py --check`
-  now runs on every push/PR.  Current budgets: HTTP/1.1 2.20, HTTP/2 5.40,
-  WebSocket 4.30 touches per request.
-
-### Docs
-
-- **Sprint numbers and private defect IDs removed from comments and
-  docstrings** across 249 files.  A docstring is read by users, who cannot
-  resolve `Sprint 79` or `bug 1.16` — and `git log`, this changelog and the
-  sprint logs already own the timeline.  Migration narration was rewritten as
-  present-tense fact ("Sprint 64 moved emission from the server layer" →
-  "Emission is consolidated into `_dispatch`").  Externally resolvable
-  references are kept: RFC and CVE citations, Http11Probe/Autobahn vector
-  names, and GitHub issue numbers.  Excluded deliberately: `bench/results/**`,
-  `bench/CHARACTERIZATION.md` and `docs/about/grpc-assessment.md`, which *are*
-  the record.
-- **`docs/about/internals.md` gains a §Parse-path invariant** documenting the
-  delete-the-allowed-table idiom, the whole-block value pre-scan, and a table
-  of three plausible optimisations that were measured and rejected, so they
-  are not retried blind.
-- **`KNOWN_LIMITATIONS.md` static-file section corrected.**  It claimed
-  `StaticFiles` emits no `ETag` and had to be paired with the `Cache`
-  middleware; `StaticFiles` has emitted a strong `ETag` + `Last-Modified` and
-  answered `If-None-Match` / `If-Modified-Since` by default since
-  `conditional=True` became the default.  The section now also states the
-  route-dispatch consequence for a miss under the prefix.
-- **`Headers` class docstring corrected** — it still said every accessor
-  lowercases the requested name, which stopped being true with the
-  probe-first lookup fast path.
 
 ## [0.65.0] — 2026-07-29
 
@@ -2734,10 +1522,7 @@ browser-shaped header sets.
   pipelined request.  Owning the buffer answers both: the scan starts from the
   already-consumed prefix, and the surplus has somewhere to live.
 
-  This is a **measurement gate, not a supported switch** — it exists so both
-  read paths can be A/B'd on identical builds, and will become the default or
-  be removed once that lands.  Both paths pass the same HTTP/1.1 conformance
-  suite; the flag changes how bytes arrive, never what a request means.
+  This was an unsupported experiment, not a production reader setting.
 
   `BufferedH1Reader` is registered as an `AbstractReader`.  Without that,
   `RecipientFactory.http1` re-wrapped it in an `AsyncioReader` on **every**
@@ -2798,17 +1583,6 @@ browser-shaped header sets.
   `RequestActor` per stream, since concurrent streams sharing an instance
   would interleave their fields.
 
-  Measured on a same-session A/B over 400 serialized keep-alive requests:
-  **17.46 → 16.25 µs/req (−6.9%)** through `HTTP1Actor.run`, with every "after"
-  minimum below every "before" minimum across five runs each.  Rebinding turns
-  out to save more than the two constructors do, because it also skips
-  `RecipientFactory.http1`'s dispatch and the function-level
-  `from ..env import get_settings` that ran inside `__init__` on every request.
-  The 213-vector Http11Probe suite returns an identical per-test verdict before
-  and after (0 failed, 0 errors), which is the check that matters here: the
-  framing state a rebind must reset is exactly what request smuggling exploits
-  when it leaks between requests.
-
 - **The integration tier now gates pull requests.**  `tests/integration` and
   `tests/conformance` run under `--run-integration` on every push and PR
   (~98s locally for 3526 tests).  Previously the only job passing
@@ -2824,18 +1598,6 @@ browser-shaped header sets.
   and failed 2 of those unattended; by the time anyone looked, the logs had
   aged out.  Reuses one open `ci-full-tier` issue rather than filing weekly
   duplicates.
-
-### Tests
-
-- **`tests/architecture/test_native_handler_contract.py`** — a source scan
-  forbidding the shape that rotted: a registered handler or middleware using
-  its `Connection` as a mapping.  Turns a request-time `AttributeError` into a
-  collection-time failure, repo-wide, with no allowlist.  Verified against the
-  pre-fix sources, where it catches 23 of the 25 offending handler definitions
-  behind the 33 failures.  The two it misses passed the `Connection` to a
-  helper that subscripts it (`parse_cookies(conn)`) — indirect use needs
-  call-graph analysis, and the guard documents that gap rather than implying
-  coverage it does not have.
 
 ## [0.64.0] — 2026-07-29
 
@@ -2893,46 +1655,6 @@ browser-shaped header sets.
   The semantics themselves are unchanged and intentionally so: the exception
   must reach the generator, or a commit-or-rollback provider would commit on
   error.  Applies to HTTP and WebSocket alike.
-
-### Docs
-
-- `docs/guide/dependency-injection.md` gains a **Write cleanup in a
-  `finally`** section; the provider-forms table no longer implies that "code
-  after `yield`" and `finally` are equivalent.
-- `docs/guide/websockets.md` gains an **Injected parameters** section with a
-  dependency-lifetime warning; `KNOWN_LIMITATIONS.md`'s "WebSocket handlers
-  take no injected parameters" entry is replaced by the two narrower fences
-  that remain.  `examples/websocket_object.py` reads `room` from the
-  signature instead of `conn.path_params`.
-
-- **`README.md` documents HTTP QUERY (RFC 10008)**, which shipped without ever
-  being named there — a reader met its caveats in `KNOWN_LIMITATIONS.md`
-  before meeting the feature.  The new section covers `from blackbull import
-  QUERY` and why routes registered against the exported string need no
-  migration when `http.HTTPMethod` eventually grows a `QUERY` member.
-
-- **`KNOWN_LIMITATIONS.md` separates limitations from deliberate non-goals.**
-  Absent capabilities that were never promised (HTTP/3, an ORM, a gRPC
-  client, CDN glue) moved to a "not limitations" table, and operational
-  how-to moved to where it is actionable: the worker-count ceiling and the
-  worker-0 raw-protocol rule to `docs/deployment/workers.md`, HTTP/2 fronting
-  to `docs/deployment/behind-nginx.md`, the single-broker-owner rationale
-  (an MQTT 5.0 session-state requirement) to `docs/guide/mqtt.md`, and the
-  nginx differential-corpus divergences to `docs/about/conformance.md`.
-  Nothing was dropped; 17 entries became 11 genuine ones.
-
-### Internal
-
-- **The test suite runs on Python 3.14 again.**  CPython 3.14 made
-  `forkserver` the default `multiprocessing` start method on POSIX, and the
-  live-server fixtures bind their listening socket in the parent before
-  starting a worker that serves on it — an inherited socket and an app of
-  locally-defined closures, neither of which pickles.  Every such fixture
-  became a setup error, and because the repo's pre-commit hook runs the
-  suite, the hook could not pass at all on 3.14.  `tests/conftest.py` now
-  pins the `fork` start method those fixtures were written against.  No
-  change to shipped code, and a no-op on 3.11/3.12 where `fork` is already
-  the default.
 
 ## [0.63.0] — 2026-07-29
 
@@ -2999,21 +1721,6 @@ browser-shaped header sets.
   handshake nobody completed.  Omit both and the object raises a
   `RuntimeError` naming each, rather than swallowing the message.
 
-### Internal
-
-- The pyright gate now also covers `blackbull/websocket.py`, the first
-  framework module written *against* the ASGI message declarations rather
-  than declaring them.  It caught a `client` property typed narrower than
-  `Connection.client` actually is.  The scope-pin test was updated
-  accordingly and now additionally refuses package *directories*, so the
-  gate can grow by reviewed module but not drift into whole-repo checking.
-
-- `blackbull.testing.WebSocketDisconnect` is re-exported from
-  `blackbull.websocket` rather than defined separately.  Both meant "the
-  other end closed", and two identically-named exception classes would mean
-  an `except` written against one silently missing the other.  Existing
-  `from blackbull.testing import WebSocketDisconnect` imports are unaffected.
-
 ## [0.62.0] — 2026-07-28
 
 ### Added
@@ -3053,18 +1760,6 @@ browser-shaped header sets.
   ASGI-prefixed *type names* are kept deliberately: they mark the boundary
   vocabulary, and the values they carry are spec-defined ASGI strings.
 
-### Internal
-
-- Per-request `send` wrapper closures are deliberately left unannotated.  A
-  nested `async def` created inside a per-request factory rebuilds an
-  `__annotate__` closure on every creation — measured at ~93 ns per closure
-  on CPython 3.14, or ~0.23 µs/req (~3.4 % of in-process dispatch) across the
-  three wrappers on the HTTP/1.1 path.  Annotations are only free on
-  definitions evaluated once at import.  The accepted event shapes are
-  documented in a comment at each site instead; `Compression`'s two wrappers
-  are now covered by the same rule, making them slightly cheaper than in
-  0.61.0.
-
 ### Fixed
 
 - **HTTP/2 connection-window leak on Python 3.13+ (un-drained request
@@ -3096,65 +1791,19 @@ browser-shaped header sets.
 
 ### Added
 
-- **Native streaming request-body API — `Connection.stream()`.**
-  `async for chunk in conn.stream()` async-iterates the request body
-  chunk-by-chunk without ever buffering it, the non-accumulating
-  counterpart to `conn.body()`/`.json()`/`.text()`. It measures identical
-  to a raw-`receive` stream loop (zero framework overhead), so streaming
-  handlers no longer have to drop out of the `Connection` idiom back to the
-  raw ASGI triplet. Because the request body is a single drain, `stream()`
-  is mutually exclusive with the buffering accessors — buffering after
-  streaming (or vice versa) raises `RuntimeError` rather than silently
-  returning a partial body; a mid-body disconnect raises
-  `ClientDisconnected`. New `request.stream_body(receive)` underpins it.
+- Added Connection.stream() to iterate request-body chunks without buffering.
+  It is mutually exclusive with body()/json()/text(); mixing access modes
+  raises RuntimeError. A mid-body disconnect raises ClientDisconnected.
 
 ### Fixed
 
-- **v0.60.0 framework-overhead regression — resolved.** v0.60.0's native
-  `Connection` refactor regressed the framework-overhead-bound HttpArena
-  profiles ~18–25% on identical hardware (baseline / baseline-h2 /
-  pipelined / limited-conn). Root cause was the per-request cost of the new
-  object model (a second scope-dict representation built every request, a
-  per-request reference cycle, and unconditionally-built access-log records
-  and disconnect closures), not any single line. Recovered by: a
-  direct-attribute dispatch-scope builder with a precomputed field list; a
-  lazy scope view (`_LazyScope`) that serves ASGI keys straight from the
-  backing `Connection` and never materializes a dict body on the
-  self-hosted path; lazy `path_params`; eliminating the per-request
-  reference cycle; and gating the per-request access-log record, the
-  capturing-send wrapper, and the disconnect-detecting receive closure
-  behind actual consumers (no listener → not built) on both the HTTP/1.1
-  and HTTP/2 dispatch paths. Final same-instance EC2 A/B against v0.59.1
-  came back mean +0.78% / median +0.52% — regression closed.
+- Reduced repeated request-boundary allocations introduced in 0.60.0.
 - **WebSocket-over-HTTP/2 access-log method.** RFC 8441 sessions now record
   their true `CONNECT` method in the access log (and expose it on
   `conn.method` to method-gating middleware) instead of a leftover `HEAD`
   placeholder, matching how HTTP/1.1 upgrades log their real `GET`. Routing
   and lifecycle events were already unaffected (they branch on
   `conn.type`).
-
-### Internal
-
-- **Full-native `Connection` dispatch (HTTP/1.1, HTTP/2, WebSocket).** The
-  protocol actors now thread the typed `Connection` end-to-end; the ASGI
-  `scope` dict is built only at a genuine ASGI boundary (external host,
-  `BB_FORCE_ASGI_SCOPE`, or a handler/middleware that asks for it). The
-  name "scope" is now reserved exclusively for real ASGI scope dicts —
-  every internal `Connection` parameter formerly called `scope` was
-  renamed. WebSocket is native too: no scope dict is threaded on the native
-  WS path. No public API break — simplified and full `(conn, receive,
-  send)` handler forms, the middleware contract, and lifecycle-event
-  payloads are all preserved.
-- **Connection allocation hygiene.** The HTTP/2 header parser
-  (`parse_headers`) was restructured to construct the `Connection` once
-  with the real `Headers` (removing a throwaway `Headers([])` built and
-  discarded every request) under a uniform `None ⟺ malformed` contract,
-  and the plain-HTTP branch now uses a lean `object.__new__` builder with a
-  shared empty-extensions sentinel. `parse_headers()` itself is ~20–24%
-  faster head-to-head; pinned by field-drift and sentinel-escape
-  architecture tests. No throughput claim — shipped as hygiene.
-- Examples, warm-up, and the WebSocket test session were migrated to the
-  native `Connection` model.
 
 ## [0.60.0] — 2026-07-22
 
@@ -3252,18 +1901,6 @@ browser-shaped header sets.
   disconnect follows it.  Invisible for GET handlers, which never read
   the body.
 
-### Internal
-
-- **Generic per-route hooks replace the QUERY dispatch special-case.**
-  `accept_query` enforcement is now implemented through two
-  method-agnostic handler hooks — `_bb_response_headers` (extra headers
-  injected on every response, success and central error alike) and
-  `_bb_request_guard` (a pre-dispatch callable that may reject with an
-  `HTTPException`) — which `BlackBull._dispatch` applies uniformly. The
-  dispatcher carries no method-specific branch; all QUERY-specific logic
-  lives in the guard built at registration. Reusable by any future
-  per-route response-header or request-guard feature. No behaviour change.
-
 ## [0.58.0] — 2026-07-19
 
 ### Added
@@ -3289,17 +1926,8 @@ browser-shaped header sets.
 
 ### Removed
 
-- **`ConnCoalescer` / `BB_H2_CONN_BUFFER_US` (Sprint 77).** The opt-in
-  connection-level TCP-segment coalescer (shipped default-off in v0.48.0) is
-  removed. Given its designed killer case — gRPC unary fan-out, one connection
-  × 200 concurrent RPCs, on a real network path — the mechanism fired (~20%
-  fewer TCP segments) but produced no throughput or tail-latency gain (RPS
-  +2.8%, p99 −4%, both inside noise): gRPC/HTTP-2 runs with `TCP_NODELAY`, so
-  there is no delayed-ACK stall to eliminate, and natural HTTP/2+TCP batching
-  already packs most responses per segment. With no effective occasion on any
-  measured workload, it is removed rather than kept as dormant opt-in weight.
-  **Breaking**: setting `BB_H2_CONN_BUFFER_US` now has no effect (it defaulted
-  to off, so no default behaviour changes).
+- Removed ConnCoalescer and BB_H2_CONN_BUFFER_US. The setting now has no
+  effect; it previously defaulted off.
 
 ### Fixed
 
@@ -3493,19 +2121,6 @@ browser-shaped header sets.
   reading and writing `scope['session']` unchanged, and `BB_SESSION_SECRET`
   is still honoured by the replacement package.
 
-### Internal
-
-- `bench/conformance/autobahn_run.sh` — `CASES='1.*'` (comma-separated
-  patterns accepted) now actually subsets the Autobahn run instead of being
-  silently ignored; a per-run config is rendered with only `"cases"`
-  substituted, so the unset-`CASES` CI job still runs the full 517-case
-  suite (#152, audit P.2).
-
-### Docs
-
-- `docs/about/rfc9113-implementation.md` §8.3 — documents the new
-  `:authority` validation and ASGI `host` mapping.
-
 ## [0.53.4] — 2026-07-15
 
 ### Fixed
@@ -3651,11 +2266,6 @@ the sprint's other half, is calendar-gated and lands separately as `v0.54.0`.)
   honoured); previously a chained `for=a, for=b` folded the second element's
   `for=` into `scope['client']`.
 
-### Docs
-
-- Static-files and middleware guides document the new conditional-request
-  support, the malformed-`Range` handling, and the now variant-aware `Cache`.
-
 ## [0.53.0] — 2026-07-13
 
 Sprint 68 — ASGI path-decoding conformance (percent-decoding + RFC 3986
@@ -3715,46 +2325,15 @@ that resolves the long-standing v0.33.1 → v0.51.0 HttpArena regression.
 
 ### Fixed
 
-- **Send-path size gate — `writelines` regression** (inter-sprint, releases with
-  Sprint 67).  `BaseSender._write_many` now joins parts totalling ≤ 32 KiB and
-  sends them via a single `write()`; only larger payloads use vectored
-  `transport.writelines`.  Root cause of the v0.33.1 → v0.51.0 HttpArena
-  regression (echo-ws −8~−20 %, plaintext HTTP/1.1 −4~−8 %): on CPython's
-  selector transport, `writelines` costs more than the small memcpy it avoids
-  (per-part `memoryview` allocations + `sendmsg` setup), and under backpressure
-  it attempts a send and re-registers the writer on **every** call.  The
-  transport strategy now lives in one place (`BaseSender`); protocol senders
-  keep expressing *what* they have via `_write_many((head, body))`.  Breakeven
-  measured at 16–64 KiB (join wins below, vectored wins above); local A/B
-  recovers the full HTTP/1.1 baseline regression (−10 % CPU/request vs
-  v0.51.0).
-- **HTTP/2 bidi stream state: client END_STREAM now half-closes, not
-  closes** (RFC 9113 §5.1). `Stream.on_data_received(end_stream=True)`
-  transitioned straight to CLOSED, so a legitimate `WINDOW_UPDATE` sent by
-  the client after ending its request body — routine for gRPC bidi
-  streaming, where the client keeps crediting the server's in-flight
-  response DATA — was answered with `RST_STREAM(STREAM_CLOSED)`, tearing
-  down the live stream (the `test_echo_each_message` RST(5) flake). The
-  stream now enters HALF_CLOSED_REMOTE, from which WINDOW_UPDATE /
-  PRIORITY / RST_STREAM remain legal; full CLOSED is still reached when
-  the response completes (done-callback prune) or via RST_STREAM. Also
-  removed the dead `Stream.mark_locally_closed` (never called; its
-  docstring claimed otherwise).
+- All protocol send fragments now use BaseSender's shared 32 KiB join/vectored
+  size gate.
+- HTTP/2 request END_STREAM now half-closes the stream, allowing later
+  WINDOW_UPDATE, PRIORITY and RST_STREAM while its response is still active.
 
 ### Changed
 
-- **Connection-accept path trims** (inter-sprint, releases with Sprint 67;
-  follow-up to the `limited-conn` churn analysis).  (1) The cleartext
-  protocol-detection order is now cached on `ProtocolRegistry`
-  (`detection_order`, rebuilt on `register()`) instead of being reallocated
-  per accepted connection — HTTP-only apps pay nothing per connection for the
-  raw-protocol machinery.  (2) Per-connection ids are generated by
-  `blackbull.server.conn_id.new_connection_id()` — a 12-hex per-process
-  random prefix plus an 8-hex monotonic sequence — replacing per-connection
-  `uuid.uuid4()` on the accept path and the 4-byte `os.urandom` fallback in
-  `cap_log`, whose birthday-bound collision odds were real at churn scale
-  (~1.2 % at 10 k concurrent connections).  Ids remain opaque hex strings;
-  width changes from 32/8 to 20 characters.
+- Connection identifiers remain opaque hex strings; their width changed
+  from 32/8 to 20 characters. Do not parse or depend on their format.
 - **One connection id per connection.**  Previously the same TCP connection
   could carry up to three unrelated ids: the accept-time id
   (`ProtocolContext`), a second minted by the cap-hit counter, and a third
@@ -3813,25 +2392,11 @@ is untouched.
   ≤5 DATA events for a 1000-message burst), and flushes are
   lock-serialised so wire order matches yield order.
 
-### Docs
-
-- gRPC guide: new "Protobuf integration: `blackbull-protobuf`" section
-  (servicers, grpcurl reflection flow, health map, rich errors).
-- `KNOWN_LIMITATIONS.md`: "no protobuf codegen toolchain" resolved;
-  remaining gap narrowed to reflection `v1alpha`-only + server-side-only.
-- `SECURITY.md`: `blackbull/grpc/` and `blackbull/mqtt/` explicitly listed
-  in scope; `blackbull-protobuf` reports accepted through either repo.
-
 ## [0.50.0] — 2026-07-11
 
 Sprint 65 — a first-class, opt-in `Request` context object for HTTP
 handlers, matching the convention gRPC (`GrpcContext`) and non-ASGI
-protocol handlers (`ProtocolContext`) already follow. Perf-neutral
-(EC2 HttpArena A/B, same instance, full 20 profiles: mean +0.13%
-across 36 cells; gate cells baseline/512 −0.57%, baseline/4096
-+0.59%, json/4096 +1.29%).
-
-### Added
+protocol handlers (`ProtocolContext`) already follow. ### Added
 
 - **`Request` context object for simplified handlers** (`from blackbull
   import Request`). Declare `request: Request` under any parameter name —
@@ -3862,211 +2427,47 @@ across 36 cells; gate cells baseline/512 −0.57%, baseline/4096
   pointed at a git-ignored `.claude/` path and broke on the published
   API reference; it now points at the shipped docs.
 
-### Removed (internal, no public API impact)
-
-- **`BaseRouter`** (CodeQL alert #426) — an HTTP-shaped abstract stub
-  with no consumer beyond `Router`'s inheritance clause and its own
-  tests; MQTT's router shipped without it. `Router` stands alone.
-
 ## [0.49.4] — 2026-07-10
-
-Sprint 64 — event-emission consolidation and dead-code purge. Perf-neutral
-(EC2 HttpArena A/B, same instance: mean +1.0%, dispatch-path lanes
-+3–4.6%). No new public API surface.
 
 ### Fixed
 
-- **Request-lifecycle events fire exactly once per request**, under any
-  transport (BlackBull's own HTTP/1.1 + HTTP/2 actors, uvicorn/hypercorn,
-  `TestClient`). `request_received`, `before_handler`, `after_handler`, and
-  `request_completed` are now emitted from a single choke point,
-  `BlackBull._dispatch`, replacing per-actor emitters that double-fired
-  `before_handler` on the production-server path and never fired
-  `request_received` under `TestClient`. `test_extension_event_handler_is_fired`
-  (a strict xfail since Sprint 40) now passes.
-- **HTTP/2 `request_completed` details carry real wire fields.** HTTP/2 now
-  publishes its access-log record the same way HTTP/1.1 does, so `status` /
-  `response_bytes` / `duration_ms` are no longer `'-'`/`0` on that path.
-- **`@app.route(path=re.compile(...))`** — the documented custom-regex form —
-  no longer crashes at registration; route paths now accept `str | re.Pattern`.
-- **A raising `app_shutdown` hook** now emits `lifespan.shutdown.failed`
-  (previously only startup failures were reported).
-- **gRPC integration tests migrated off `httpx.ASGITransport`**, which has no
-  `http.response.trailers` support and can't observe gRPC's trailer-carried
-  `grpc-status` (every gRPC response has reported status in trailing headers
-  since Sprint 58). Tests now drive a real h2c socket via BlackBull's own
-  `HTTP2Client`, exercising the full `__call__ → _dispatch → serve_grpc` path.
-
-### Removed (internal, no public API impact)
-
-Net −614 lines. Removed dead code flagged by the 2026-07-07 comprehensive
-audit: the orphaned `EventEmitter` utility, ~40 pre-registered identical
-`ErrorRouter` fallback entries (replaced by a single `default=` miss
-handler), the racy TOCTOU `check_port` connect-probe, `parse_post_data`,
-and several other unused helpers and orphaned tests. The router now stores
-only string paths in its trie; a route registered with a regex-*source
-string* (as opposed to a compiled `re.Pattern`) is rejected at registration
-with a pointed `ValueError` instead of silently mis-routing.
+- Request lifecycle events fire once across native and external-ASGI transports.
+- HTTP/2 request_completed includes real status, byte count and duration fields.
+- Compiled-regex routes no longer fail registration; regex-source strings
+  are rejected instead of silently misrouting.
+- A failing app_shutdown hook sends lifespan.shutdown.failed.
 
 ## [0.49.3] — 2026-07-09
 
-### Security
+### Security and fixes
 
-- **HTTP/1.1 — chunk-framing line length bound (audit bug 1.24,
-  CVE-2023-39326 class)**: the chunk-size+extension line and every trailer
-  line are now capped at 8 KiB; an oversized line (probe
-  `MAL-CHUNK-EXT-64K`) answers 400 instead of escaping as a
-  `LimitOverrunError`-backed 500.  A bare-LF-terminated trailer section
-  (`SMUG-CHUNK-LF-TRAILER`) is rejected 400 instead of hanging until the
-  client gives up.
-- **HTTP/1.1 — prohibited trailer fields rejected (RFC 9110 §6.5.1)**:
-  framing / routing / authentication / content-handling fields
-  (`Transfer-Encoding`, `Content-Length`, `Host`, `Authorization`,
-  `Content-Type`, …) in a chunked trailer section now answer 400.
-- **HTTP/1.1 — strict Content-Length (RFC 9110 §8.6)**: leading zeros,
-  doubled/tab/trailing OWS around the value (probe `SMUG-CL-*`,
-  `MAL-CL-TAB-BEFORE-VALUE`) are rejected 400 before the generic OWS strip
-  hides them.
-- **HTTP/1.1 — underscore framing confusables**: `Content_Length` /
-  `Transfer_Encoding` header names (probe `NORM-UNDERSCORE-*`) are
-  rejected 400.
-
-### Fixed
-
-- **HTTP/1.1 — missing `Host` on an HTTP/1.1 request now 400**
-  (RFC 9112 §3.2, audit bug 1.25); HTTP/1.0 requests may still omit it.
-- **HTTP/1.1 — unsupported HTTP major version now 505** (RFC 9110
-  §15.6.6, audit bug 1.25): `GET / HTTP/9.9` was served as if 1.1.
-  `HTTP/1.x` minors above 1.1 remain accepted as 1.x-compatible.
-- **HTTP/1.1 — no `100 Continue` to HTTP/1.0 clients** (RFC 9110 §15.2,
-  probe `COMP-NO-1XX-HTTP10`): `Expect: 100-continue` from a 1.0 client
-  is ignored and the body read normally.
-- **HTTP/2 — refused multi-frame HEADERS no longer kills the connection**
-  (audit bug 1.14 #2): a HEADERS refused at `MAX_CONCURRENT_STREAMS` with
-  `END_HEADERS` unset now keeps consuming the header block; the refusal
-  (RST_STREAM `REFUSED_STREAM`) happens at `END_HEADERS`, after the HPACK
-  decode that keeps the dynamic table in sync, instead of the peer's
-  legal CONTINUATION tripping a bogus GOAWAY(PROTOCOL_ERROR).
-
-With these fixes the authoritative Http11Probe re-score reaches
-**161/161 (0 failed, 5 warnings)** — up from 156/161 (5 failed, 13
-warnings) at v0.49.2.
-
-### Docs
-
-- `bench/conformance/README.md` — CI status badge + per-job coverage
-  table; removed the stale "work in progress / h2spec only" framing.
-- `bench/peers/NOTES.private.md` — AI-agent stale-data note on the
-  2026-05-18 h2spec 51 % calibration section.
-- `KNOWN_LIMITATIONS.md` — corrected the swapped nginx/BlackBull columns
-  on the HTTP/9.9 differential-corpus row.
+- HTTP/1.1 chunk-size and trailer lines are capped at 8 KiB. Oversized lines,
+  bare-LF trailers and prohibited framing/routing/authentication/content
+  trailer fields receive 400.
+- Tightened Content-Length and rejected underscore-confusable framing fields.
+- Missing Host on HTTP/1.1 receives 400; HTTP/1.0 may omit it. Unsupported
+  HTTP major versions receive 505; HTTP/1.x-compatible minors remain accepted.
+- HTTP/1.0 Expect: 100-continue is ignored; the body is read without an interim response.
+- HTTP/2 stream-limit refusal consumes/decompresses a fragmented field block
+  before REFUSED_STREAM, preserving connection HPACK state.
 
 ## [0.49.2] — 2026-07-08
 
-Sprint 63 — Http11Probe hardening (RFC 9112 §3.2 / §7.1) + audit bug 1.16 —
-**plus** the two Sprint 62 HTTP/2 flow-control deferrals from the
-2026-07-07 comprehensive audit: consume-based inbound flow control
-(`proposals/consume-based-inbound-flow-control.md`) and the strict-peer
-multi-stream concurrency gate for the shared connection send window (audit
-bug 1.2). HTTP/1.1 request framing and request-target parsing are tightened
-to reject the smuggling / malformed-input vectors the Http11Probe baseline
-flagged; malformed chunked framing now answers a clean `400` instead of a
-`500` or a silent `200`. No public-API changes.
-
 ### Fixed
 
-- **Consume-based inbound HTTP/2 flow control (Sprint 62)** —
-  `WINDOW_UPDATE` credit for an inbound DATA frame is now replayed when the
-  application *consumes* the event off the stream's recipient queue, not
-  when the frame is enqueued (`HTTP2Recipient` gained a `credit_callback`,
-  mirroring `HTTP2WSReader`'s credit-replay shape). A handler that stalls
-  reading (e.g. a bidi gRPC handler blocked on `yield` under response
-  back-pressure, or a client-streaming handler starved of CPU) now closes
-  the inbound window and back-pressures the peer instead of overflowing the
-  64-deep recipient queue into `RST_STREAM(ENHANCE_YOUR_CALM)` — grpcio no
-  longer sees intermittent `RESOURCE_EXHAUSTED` on over-window request
-  streams. The recipient queue is bounded by the advertised inbound window
-  in *bytes* (plus a generous frame-count cap against zero/tiny-frame
-  floods), so the queue-full RST is now strictly an abuse backstop for
-  peers that ignore the closed window. A stream released without draining
-  its body (handler ignored `receive`, or was cancelled by RST_STREAM)
-  replays the un-consumed balance to the *connection* window so the shared
-  stream-0 budget cannot leak shut. The two Sprint 60
-  `xfail(strict=False)` interop tests (`test_large_both_directions_over_window`,
-  `test_large_request_stream_over_window`) are now hard gates in the
-  `grpc-interop` CI job.
-
-- **Chunked request framing (RFC 9112 §7.1)** — the chunk-size token is
-  validated against the strict `1*HEXDIG` grammar *before* `int()` (rejecting
-  `-1`, `0x5`, `+0`, `1_0`, leading/trailing whitespace), the `chunk-ext`
-  grammar is validated (bare `;`, non-token names/values, and control
-  characters rejected), the size line must be CRLF-terminated (bare-LF
-  rejected), and the chunk-data terminator is checked as exactly `CRLF`
-  (chunk-data spill and bare CR/LF terminators rejected). Violations raise a
-  `400 Bad Request` and close the connection instead of surfacing as a
-  fabricated `500` or being silently accepted.
-- **Request-target forms (RFC 9112 §3.2)** — absolute-form
-  (`GET http://host/path`) is rewritten to origin-form for routing with the
-  request's authority overriding a spoofed/mismatched `Host`; asterisk-form
-  (`OPTIONS *`) is answered server-wide (`204` + `Allow`) rather than routed
-  to a 404, and is rejected (`400`) for any method other than OPTIONS;
-  `CONNECT` returns `501`; a raw non-ASCII byte in the request-target is
-  rejected (`400`).
-- **Header validation** — userinfo in the `Host` header (`user@host`) is
-  rejected (`400`, RFC 3986 §3.2); a duplicate `Content-Type` is rejected;
-  a `Transfer-Encoding` where `chunked` is not the sole final coding
-  (`chunked, gzip`, `chunked, chunked`) is `400` (undeterminable length),
-  distinct from an unimplemented coding (`gzip`) which stays `501`.
-- **Bug 1.16 — `X-Forwarded-Prefix` no longer trusted off the wire.** The
-  HTTP/1.1 and HTTP/2 parsers no longer set `scope['root_path']` from the
-  client-controlled `X-Forwarded-Prefix` header; only the `TrustedProxy`
-  middleware sets it, after verifying the direct peer — mirroring the
-  existing `X-Forwarded-For` / `X-Forwarded-Proto` trust model. A client
-  could previously spoof the application's mount prefix.
-
-### Added
-
-- `docs/about/architecture.md` — protocol ownership, the Actor model,
-  fault injection, conformance, and performance, with the reasoning
-  behind each design bet.
-- `docs/getting-started/why-blackbull.md` — a scenario-based guide for
-  deciding whether BlackBull fits a given project, plus the honest
-  trade-off table.
-- **Strict-peer multi-stream flow-control gate (Sprint 62, audit bug 1.2)** —
-  `test_concurrent_large_responses_share_connection_window`: 10 concurrent
-  unary calls multiplexed on ONE grpcio channel × 100 KB responses, so
-  cumulative response bytes far exceed the 65535-byte connection window.
-  Guards the shared connection send window on the wire: per-stream window
-  copies would over-emit and a strict peer kills the connection with
-  `FLOW_CONTROL_ERROR`. Runs in the `grpc-interop` CI job on every push/PR.
-- `h2_inbound_window_budget` cap-hit log site (`log_cap_hit`) — emitted when
-  a peer overruns the advertised inbound stream window (the consume-based
-  crediting abuse backstop above); registered in the cap inventory audit.
-
-### Changed
-
-- The four enqueue-time crediting tests in
-  `tests/conformance/http2/test_http2_dispatch.py::TestHTTP2FlowControl`
-  now assert the consume-time contract (spec change, Sprint 62): crediting
-  tests use a body-draining app, and the >65535-byte cumulative-inbound test
-  models a window-respecting (credit-paced) peer.
-
-### Docs
-
-- `docs/guide/grpc.md` and `KNOWN_LIMITATIONS.md` corrected — both
-  claimed client-streaming and bidirectional gRPC were unsupported and
-  that message compression was absent; both shipped in v0.49.0 (all
-  four RPC shapes + `gzip`).
-- `SECURITY.md` supported-versions table updated (`0.49.x` / `0.48.x`)
-  — it had not shifted when v0.49.0 (a MINOR release) shipped.
-- `README.md` gained an Actor-model bullet, a cross-reference line to
-  the two new docs pages, and an updated Architecture doc link.
-  `docs/index.md` now mentions gRPC and MQTT alongside HTTP/1.1, HTTP/2,
-  and WebSocket, and links the two new pages.
-- `docs/about/rfc9113-implementation.md` §5.2/§6.1/§6.9.1 updated to
-  describe consume-time inbound crediting (Sprint 62); a pre-existing
-  staleness describing the pre-bug-1.2 per-sender window scalars was
-  fixed alongside.
+- HTTP/2 inbound credit follows application consumption. A stalled consumer
+  closes its inbound window rather than overflowing a window-respecting peer's
+  recipient queue. Retirement restores unused connection credit.
+- Malformed chunk-size tokens/extensions and chunk-data delimiters receive
+  400 and close instead of a 500 or silent acceptance.
+- Absolute request targets override mismatched Host and route by origin path.
+  OPTIONS * answers 204 with Allow; other asterisk methods receive 400.
+  CONNECT receives 501; raw non-ASCII request-target bytes receive 400.
+- Userinfo in Host and duplicate Content-Type are rejected. Non-final or
+  duplicate chunked receives 400; unsupported transfer codings receive 501.
+- X-Forwarded-Prefix is trusted only through TrustedProxy after peer
+  verification, not directly from wire headers.
+- Inbound HTTP/2 window overruns emit h2_inbound_window_budget cap records.
 
 ## [0.49.1] — 2026-07-07
 
@@ -4147,17 +2548,6 @@ HTTP/2 flow control + lifecycle:
 - `HTTPException` — a status-carrying exception (`.status` / `.detail`) that the
   dispatcher turns into the corresponding HTTP response.
 
-### Deferred (documented, not in this release)
-
-- **Refused multi-frame HEADERS / multi-frame trailers** (audit 1.14 #2) — needs
-  a CONTINUATION-accumulation restructure to keep HPACK decoder state coherent;
-  left for a focused follow-up rather than risking the H2 core.
-- **Consume-based inbound flow control**
-  (`proposals/consume-based-inbound-flow-control.md`) — credits the inbound
-  window on app consumption rather than enqueue, so a slow handler back-pressures
-  instead of triggering `RST_STREAM(ENHANCE_YOUR_CALM)`. Its strict-xfail gates
-  remain deferred; the large-over-window interop test stays a non-strict xfail.
-
 ## [0.49.0] — 2026-07-07
 
 Sprint 60 — completing the gRPC **transport** (the dependency-free gaps; no
@@ -4206,78 +2596,20 @@ protobuf on the wire).
 ## [0.48.0] — 2026-07-04
 
 ### Added
-- **Async logging is now batch logging** (`BB_LOG_BATCH_SIZE`, default `64`) — the
-  async-logging stream/file sink *always* coalesces records into one
-  `write()`+`flush()` per batch (via one flusher thread, flushed when the batch
-  fills or after `BB_LOG_BATCH_TIMEOUT_MS`, default 5 ms). A per-record `flush()`
-  is the dominant cost of access logging — py-spy showed one flush syscall per
-  request churning the GIL against the event loop for ~16% of CPU and a −44%
-  throughput hit; coalescing removes it (single-process re-profile: −44% → −31%
-  and rising with width). `BB_LOG_BATCH_SIZE` is now the coalescing width (floored
-  at 2), not an on/off switch; to force per-record flush, disable async logging
-  (`BB_ASYNC_LOGGING=0`). Drained at teardown so no trailing batch is lost; not
-  applied to the syslog sink. (Logging optimization O2 / approach 4.)
-- **Structured JSON logging** (`BB_LOG_FORMAT=json`) — the async-logging sink can
-  emit one JSON object per line instead of plain text. Access-log records expose
-  `client_ip`, `method`, `path`, `http_version`, `status`, `response_bytes`,
-  `duration_ms` (and `close_code` on WebSocket disconnect) as top-level keys;
-  every record carries `timestamp`, `level`, `logger`, `message`. Formatting runs
-  on the listener thread, so the access record's string build still happens off
-  the event loop. Opt-in; plain text stays the default. (Logging approach 3.)
-- **Syslog / UDP log shipping** (`BB_SYSLOG_ADDR=host:port`) — when set, the
-  async-logging sink ships records via a UDP `SysLogHandler` instead of `stderr`;
-  composes with `BB_LOG_FORMAT=json` (JSON lines over syslog). An unparseable
-  address falls back to `stderr` with a warning. (Logging approach 6.)
-- **Access-log fast path — direct enqueue, bypassing `logging.Logger._log`**
-  (logging optimization O4). When async logging is active, `emit_access_log`
-  builds the `LogRecord` and puts it straight on the listener queue via
-  `enqueue_access_log`, skipping `Logger._log`'s `findCaller` stack walk, filter
-  chain, and `callHandlers` dispatch — py-spy attributed ~93% of the loop-side
-  emit cost to that stdlib machinery. Structured fields (`as_extra()`) are merged
-  onto the record, so JSON/structured sinks are unchanged; the self-formatting
-  message still renders on the listener thread (deferred format preserved). Falls
-  back to the synchronous `logger.info` path when async logging is off. Producer
-  microbench: **~7.5µs → ~5.7µs per emit (−24%)**; single-process server penalty
-  −33% → −24%. Transparent: the fast path runs only when `blackbull.access` has
-  no user-attached handlers or filters — if it does, the standard `logger.info`
-  path is used, so the documented custom-handler/filter access-log extension
-  keeps working.
-- **File log sink** (`BB_LOG_FILE=path`) — the async-logging sink can write to a
-  file (append mode) instead of `stderr`, composing with `BB_LOG_FORMAT=json` and
-  `BB_LOG_BATCH_SIZE`. The stream is opened on the listener side (post-fork) so a
-  multi-worker server never inherits a writer thread across `fork()`; access-log
-  lines (< `PIPE_BUF`) interleave atomically under `O_APPEND`. Ignored for the
-  syslog sink; an unopenable path falls back to `stderr` with a warning. (Logging
-  approach 2.)
-- **Connection-level TCP segment coalescing** (`BB_H2_CONN_BUFFER_US`, default
-  `0` = off) — response frames from HTTP/2 streams that complete within a short
-  window on one connection can be flushed as a single TCP segment instead of one
-  per stream, removing the per-response delayed-ACK stall that dominates at low
-  connection counts / high multiplexing (e.g. a gRPC fan-out of many RPCs over
-  one connection). The first frame of an idle window writes immediately (no
-  added latency for an isolated response); control frames
-  (`SETTINGS`/`PING`/`WINDOW_UPDATE`/`GOAWAY`/`RST_STREAM`) always bypass the
-  buffer, and wire/HPACK order is preserved by FIFO flushing. Opt-in — the
-  single-segment shape can regress at higher connection counts, so it is off by
-  default. See `docs/reference/env-vars.md`.
 
-### Changed
-- **WebSocket send hot path (fewer allocations, no behaviour change)** — outbound
-  data frames are now written vectored: the 2-to-10-byte frame header
-  (`encode_frame_header`) and the payload go to the transport as
-  `writelines((header, payload))`, so the payload is no longer copied into a
-  concatenated frame buffer on every send. `encode_frame` shares the same header
-  builder for its unmasked path (two allocations instead of three). The
-  per-message `websocket_message` event emit is now skipped entirely (no `Event`
-  or detail-dict build) when no handler is registered, via a generation-cached
-  `has_websocket_message_listeners()` guard — matching the existing
-  request-lifecycle fast path. Wire bytes are byte-for-byte identical.
-- **Internal refactors (no behaviour change)** — replaced mechanical repetition
-  in the frame, MQTT, sender, HTTP/1.1, HTTP/2, app, and router layers with
-  module-level dispatch tables and shared helpers (SETTINGS parsing, MQTT
-  encode/decode + property codecs, sender drain/guarded-write/writer helpers,
-  the HTTP/1.1 error-response path, HTTP/2 priority-extension setup, and app
-  lifecycle registration). Net −54 effective code lines; full suite unchanged.
+- Async stream/file logging batches records, default 64; batch size is floored
+  at 2. Partial batches flush after BB_LOG_BATCH_TIMEOUT_MS, default 5 ms, and
+  teardown drains remaining records. BB_ASYNC_LOGGING=0 flushes per record;
+  syslog remains per datagram.
+- BB_LOG_FORMAT=json emits structured records, with access fields at the top
+  level; plain text remains the default.
+- BB_SYSLOG_ADDR=host:port selects UDP syslog; an invalid address warns and
+  falls back to stderr.
+- BB_LOG_FILE selects an append file opened after fork per worker. Syslog
+  overrides it; an unopenable path warns and falls back to stderr.
+- Custom access-log handlers and filters retain the standard logging path.
+- Added the default-off BB_H2_CONN_BUFFER_US experiment, later removed in
+  0.58.0. It is not a current setting.
 
 ## [0.47.0] — 2026-07-03
 
@@ -4323,33 +2655,16 @@ protobuf on the wire).
   handshakes.
 
 ### Changed
-- **Default `listen()` backlog raised from 128 to 1024** (`BB_SOCKET_BACKLOG`).
-  128 (the traditional `SOMAXCONN`) is shallow next to peers like nginx (511);
-  1024 reduces silent connection drops during burst arrivals. The kernel still
-  caps the effective queue at `net.core.somaxconn`.
-- **`Response(headers=...)` accepts a `dict`** (matching the
-  FastAPI/Starlette/httpx convention) as well as a list of `(name, value)`
-  pairs; names/values may be `str` or `bytes`. Malformed shapes now raise
-  `TypeError` at construction instead of silently corrupting the response
-  (the old loop iterated a dict's *keys*).
-- **Access-log hot-path cost cut (~28–30% less event-loop work per emit** in a
-  200k-emit producer microbenchmark, ~9.3µs → ~6.6µs). The access record is now
-  self-formatting and handed to the logger *as the message*, so the `format()`
-  string build (and the stdlib `QueueHandler`'s eager format + record copy)
-  moves off the event loop to the logging listener thread via a new
-  deferred-format `QueueHandler`. The request duration is snapshotted at emit so
-  the deferred format still reports real request duration, not duration + queue
-  latency. Structured `extra` fields (the documented access-log API) stay eager
-  and unchanged; ordinary debug/warning logs keep the stdlib's eager,
-  mutation-safe formatting.
-- **gRPC handler isolation now catches `Exception`, not `BaseException`.** A
-  handler bug (any `Exception`) is still isolated as `INTERNAL`, but a
-  non-`Exception` throwable — `CancelledError`, `KeyboardInterrupt`,
-  `SystemExit`, `GeneratorExit`, or a raw `BaseException` — now propagates
-  instead of being masked into a status, so task cancellation and interpreter
-  shutdown are honoured (and a server-streaming generator's `GeneratorExit`
-  cleanup is no longer swallowed). Each call runs in its own stream task, so a
-  propagating throwable unwinds only that stream.
+
+- Raised default socket backlog from 128 to 1024, still capped by
+  net.core.somaxconn.
+- Response(headers=...) accepts a mapping or pair list, with str/bytes names
+  and values. Malformed shapes raise TypeError at construction.
+- Access-log duration is snapshotted before deferred formatting, excluding
+  queue latency; structured extra fields remain eager.
+- gRPC handler isolation catches Exception, while CancelledError,
+  KeyboardInterrupt, SystemExit, GeneratorExit and other BaseException
+  subclasses propagate to honor cancellation and cleanup.
 
 ### Fixed
 - **gRPC Trailers-Only framing (real-client interop)** — unary gRPC error
@@ -4362,20 +2677,6 @@ protobuf on the wire).
   BlackBull's own `HTTP2Client` was lenient about the framing, which hid the bug
   until a real gRPC client (`ghz`/grpcio) exercised the wire path. The success
   path was already correct; only the error/Trailers-Only path changed.
-
-### Internal
-- **Reload watcher unit tests pinned to polling** — `test_watcher_fires_callback_on_py_change`
-  / `test_watcher_ignores_non_py` now force watchfiles into polling mode (as the
-  reload *integration* test already did in its subprocess), removing the inotify
-  startup-race flake where the first `.py` write was silently dropped under
-  suite contention. These run in the fast tier on every PR, so the flake blocked
-  merges; the watcher logic under test is identical either way.
-- **H2 flow-control deadlock gate now covers a large bidirectional payload** — a
-  4th subprocess-isolated scenario echoes 128 KiB of gRPC (up *and* down),
-  forcing multiple `WINDOW_UPDATE` refills in both directions at once rather than
-  the single-refill window boundary of the existing steps. A regression in
-  client crediting or sender resume that survives the boundary cases deadlocks
-  here. Rides the existing `h2-flow-control` conformance CI job (every push/PR).
 
 ## [0.46.0] — 2026-06-30
 
@@ -4480,12 +2781,7 @@ hot-path wins (cached request-listener check, lazy per-connection cap counter).
 
 ## [0.44.1] — 2026-06-26
 
-Sprint 55 close. A PATCH on top of `v0.44.0`: HTTP now scales across workers
-while a stateful single-owner protocol (the MQTT 5 broker) runs alongside,
-AsyncAPI 3.0 docs for the broker taps, and behaviour-preserving hot-path perf.
-Measured **+8.7% FA-normalized mean HTTP/1.1 throughput** vs `v0.44.0` across the
-HttpArena suite (c7i.8xlarge, FastAPI reference; validation 47/0 + WS 7/0), with
-the largest gains on the connection-churn / pipelining lanes.
+HTTP scales across workers alongside a stateful single-owner protocol; added AsyncAPI 3.0 documentation for MQTT taps.
 
 ### Changed
 - **Hot-path copy + logging reduction (no behaviour change).** Three low-risk
@@ -4541,18 +2837,6 @@ the largest gains on the connection-churn / pipelining lanes.
   propagating it. It now re-raises `CancelledError` before the generic handler
   (mirroring `HTTP1Actor`); the disconnect/close cleanup still runs in `finally`.
   (CodeQL `py/catch-base-exception`.)
-
-### Internal
-- **MQTT per-connection actor renamed `MQTTConnectionActor` → `MQTT5Actor`**,
-  matching the `HTTP1Actor` / `HTTP2Actor` `<Protocol><Version>Actor` convention
-  (the `Connection` suffix made it read like a dispatcher). No public API impact —
-  it was never exported.
-- CodeQL quality analysis is scoped to the shipped package (`blackbull/`) plus
-  `examples/`; `tests/`, `bench/`, `templates/`, and `docs/` are excluded via
-  `.github/codeql/codeql-config.yml`, removing ~196 style-lint alerts in
-  non-shipped code.
-
----
 
 ## [0.44.0] — 2026-06-25
 
@@ -4677,36 +2961,6 @@ adds zero hardcoded branches.
   **Behaviour change:** an `@app.on('connection_closed')` handler will now also
   receive HTTP connection events.
 
-### Internal
-- **`ConnectionActor` is now protocol-agnostic** (decouple-connection-detection).
-  Detection peeks a binding-declared discriminator prefix and replays
-  it to the winning binding via a `PrefixReader`; the three `serve_alpn` /
-  `serve_cleartext` / `serve_raw` methods collapse to one `serve(conn)`, and the
-  24-byte HTTP/2 preface read and the HTTP/1.1 request-line read move into the
-  bindings. The detection-timeout 408 also moves into a binding hook
-  (`ProtocolBinding.on_detect_timeout`; HTTP emits the 408, other protocols
-  close silently). `ConnectionActor._dispatch()` no longer contains hardcoded
-  byte counts, delimiters, or HTTP status strings. No hot-path regression
-  (EC2 HttpArena gate).
-- **`RawProtocolActor` (the non-ASGI Layer-2 actor) is removed.** Connection
-  timing, error isolation, and the `connection_closed` event now live in
-  `ConnectionActor.run()` for every protocol; a `RawBinding` calls its handler
-  directly. One lifecycle owner instead of an HTTP path and a separate raw path.
-- MQTT codec reads in spec terms instead of raw hex: named flag/level
-  constants (`ConnectFlags`, `PublishFlagBits`, `SubscriptionOptions`,
-  `ProtocolLevel`, `WILL_QOS_*`, `PUBLISH_QOS_*`, `RETAIN_HANDLING_*`,
-  `RESERVED_FLAGS_0010`) in `blackbull.mqtt.messages`.
-- Single source of truth for the reason codes the broker uses: `ReasonCode`
-  (`IntEnum`) in `messages.py`; the duplicated per-module `_RC_*` constants in
-  `broker.py`/`connection.py` are deleted.
-- Raw protocol handlers are single-worker and cleartext-only for now; documented
-  in `KNOWN_LIMITATIONS.md` / `docs/guide/raw-protocols.md`.  Combined Sprint
-  50 + 51 + 52 work releases together as `v0.44.0`.
-- `AbstractReader.readuntil` / `readexactly` now have concrete default
-  implementations built on `read()`, so a minimal reader (e.g. an MQTT test
-  double) only needs to implement `read`.  Concrete transport readers continue
-  to override both with their native buffered versions.
-
 ## [0.43.2] — 2026-06-22
 
 ### Fixed
@@ -4722,20 +2976,6 @@ adds zero hardcoded branches.
   everything above the route handler observes plain ASGI dicts.  (The defect
   shipped in 0.43.0; it surfaced only in 0.43.1 once the lifespan-startup crash
   it hid behind — the beartype forward-ref bug — was fixed.)
-
-### Internal
-
-- **Unified the Response→ASGI serialisation onto a single source of truth.**
-  `Response` is now ASGI-callable (`Response.__call__(scope, receive, send)`),
-  mirroring `StreamingResponse`, so every response type shares one protocol.
-  `app._wrap_send` and `middleware.utils._normalize_send` both delegate to it
-  instead of carrying their own (and previously divergent) copies of the
-  `http.response.start` + `http.response.body` event construction.  No wire
-  behaviour change; terminal body events now consistently carry
-  `more_body: False`.
-- Added a regression test (`test_middleware_decorator.py`) asserting that a
-  plain, undecorated middleware's `send` wrapper receives ASGI dicts through
-  the full app stack.
 
 ## [0.43.1] — 2026-06-21
 
@@ -4772,17 +3012,6 @@ adds zero hardcoded branches.
   directory serves the named file (e.g. `index.html`) when present, guarded
   by the same realpath + traversal check.
 
-### Docs
-- Added [`docs/about/rfc9113-implementation.md`](docs/about/rfc9113-implementation.md)
-  — a section-by-section map of how BlackBull implements RFC 9113, ordered by the
-  RFC's own §-numbers, with a coverage summary measured against the spec's
-  normative requirements/options (no mandatory MUST is unimplemented).
-- Corrected RFC 7540→9113 section citations in `http2_actor.py` and
-  `frame_types.py` comments/docstrings (server push §8.4, malformed messages
-  §8.1.1/§8.2.1; no behaviour change).
-- Documented `AppConfig` and `blackbull serve` in the configuration,
-  static-files, and running guides.
-
 ## [0.42.3] — 2026-06-19
 
 **HTTP/2 perf: deferred HEADERS write coalesces HEADERS + DATA into one TCP segment.**
@@ -4797,20 +3026,6 @@ the previous eager-write path.
 Wire order is unchanged: HEADERS precedes DATA per RFC 9113 §8.1.  Date header
 auto-injection (RFC 9110 §6.6.1) is preserved on all paths — bytes, ASGI event,
 and trailers.
-
-### Performance
-
-- Single-body HTTP/2 responses: HEADERS + DATA coalesced into one `write()` +
-  `drain()` (was two separate calls, ~2× the drain yield count per response).
-
-### Internal
-
-- `HTTP2Sender`: three new `__slots__` (`_buffered_status`, `_buffered_headers`,
-  `_expect_trailers`) mirror the `HTTP1Sender` buffering model.
-- `HTTP2Sender._flush_buffered_start()`: new method handles the coalesced write
-  with flow-control and max-frame-size fallback.
-- `HTTP2Sender.reset_per_request_state()`: clears buffered fields alongside
-  `_end_stream_sent` for correctness across stream reuse.
 
 ## [0.42.2] — 2026-06-19
 
@@ -4831,13 +3046,6 @@ class-level `frozenset` (`_FRAME_SIZE_CONNECTION_ERROR_TYPES`).
 
 - `HTTP2Actor`: RST_STREAM and PUSH_PROMISE frames with `stream_id == 0` now
   raise a connection error per RFC 9113 §6.4 and §6.6 respectively.
-
-### Internal
-
-- `HTTP2Actor._STREAM_ONLY_FRAME_TYPES`: class-level `frozenset` replaces
-  four individual checks; coverage expanded to six frame types.
-- `HTTP2Actor._FRAME_SIZE_CONNECTION_ERROR_TYPES`: class-level `frozenset`
-  eliminates per-frame tuple allocation in `_frame_loop`.
 
 ## [0.42.1] — 2026-06-18
 
@@ -4951,30 +3159,6 @@ refreshes `SECURITY.md` (supported versions + in-scope modules).
   up: removed `h2` (never a runtime dep), added the optional
   extras (`brotli`, `zstandard`, `uvloop`, `watchfiles`).
 
-### Internal
-
-- `blackbull.client.scenario` / `scenario_oracle` modules moved
-  to `blackbull.fault_injection.scenario_h1` /
-  `oracle_h1`.  Import paths under `blackbull.client.*` keep
-  working as re-exports.
-- `tests/unit/test_fault_injection_h2.py` — 21 tests covering
-  server lifecycle, the frame-level step VM, every catalogue
-  entry, and the TLS / ALPN handshake against a real httpx
-  client.
-- `_tls.py` lazily imports `cryptography` inside
-  `_generate_self_signed_pem()` so importing
-  `blackbull.fault_injection` works without the
-  `[fault-injection]` extra installed (only calling the TLS
-  helper requires it).
-
-### Docs
-
-- **`.claude/skills/pre-release-docs/`** (local-only) — new skill
-  that audits `README.md` / `SECURITY.md` / `CHANGELOG.md` /
-  `KNOWN_LIMITATIONS.md` / `docs/guide/*` / `mkdocs.yml` for
-  staleness before tagging a release.  Cross-linked from
-  `.claude/patterns/release.md`.
-
 ### Compatibility
 
 Additive on the public Python surface — no existing import path
@@ -5031,23 +3215,6 @@ naturally throttles to the credit the peer has granted.
   that fakes LLM tokens, plus a `/raw` endpoint showing the
   bare async-generator handler shape.
 
-### Internal
-
-- `tests/unit/test_sse.py` — 16 tests covering the SSE
-  encoder (data lines, event/id/retry fields, multi-line
-  split, dict-data JSON encoding, unsupported-type
-  TypeError), `EventSourceResponse` ASGI event shape
-  (content-type + cache-control headers, one body event per
-  yield, final empty body close, caller-supplied
-  cache-control wins), the simplified-handler dispatcher
-  (async-generator wraps to `StreamingResponse`,
-  `StreamingResponse` instance passes through,
-  `EventSourceResponse` instance passes through to take the
-  subclass branch not the Response branch), and an HTTP/2
-  backpressure test that forces both windows to zero before
-  the write starts and confirms no DATA bytes hit the wire
-  until the `_window_open` event fires.
-
 ### Compatibility
 
 Additive surface — no existing handler shape changes
@@ -5100,31 +3267,6 @@ and is unaffected.
   them from the graceful-close summary without inspecting
   state.
 
-### Internal
-
-- `tests/unit/test_cap_log.py` extended with 10 new tests:
-  `connection_id` propagation through emission and summary;
-  auto-generation produces unique 8-hex IDs; explicit
-  `connection_id=` kwargs honoured; threshold trigger emits
-  intermediate summary at boundary; threshold resets and
-  resumes (two summaries from a single cap); interval timer
-  fires after the configured delay; disabled triggers (both 0)
-  yield no intermediate emission; threshold cancels pending
-  interval timer (no double summary); graceful `flush()`
-  cancels pending interval timer.
-- `tests/unit/test_cap_log_sites.py` upgraded:
-  the previously signature-shaped `h2_max_concurrent_streams`
-  and `h2_ws_max_streams_per_connection` tests now drive the
-  real rejection sites in `HTTP2Actor._on_headers_frame` and
-  `_handle_h2_websocket` with `MagicMock(spec=Stream)` /
-  `MagicMock(spec=asyncio.TaskGroup)` so they exercise the cap
-  guard end-to-end while still satisfying beartype.
-- `tests/unit/test_max_connections_503.py` extended to assert
-  the `max_connections` cap-hit record fires alongside the 503
-  + Retry-After response — a functional pass through
-  `ASGIServer.client_connected_cb` rather than a direct
-  `log_cap_hit()` call.
-
 ### Compatibility
 
 `CapHitCounter()` is backwards-compatible — all new parameters
@@ -5173,55 +3315,6 @@ on connection close.
   CI if a future PR adds a `BB_*` cap to the inventory list
   without wiring a `log_cap_hit('<cap>', ...)` call.
 
-### Internal
-
-Cap rejection sites wired to `log_cap_hit()` — twelve in all:
-
-- `BB_MAX_CONNECTIONS` — accept loop in
-  `blackbull/server/server.py` (process-scoped, no counter
-  needed; an adversary cannot loop past the cap).
-- `BB_HEADER_TIMEOUT` — slowloris defences in
-  `blackbull/server/connection_actor.py` (ALPN-h2 preface +
-  cleartext first-line) and `blackbull/server/http1_actor.py`
-  (header-completion phase).
-- `BB_HEADER_MAX_LINE` and `BB_HEADER_MAX_TOTAL` — H/1.1 parser
-  in `blackbull/server/http1_actor.py`; HTTP/2 CONTINUATION
-  guard in `blackbull/server/http2_actor.py`.
-- `BB_BODY_TIMEOUT` — H/1.1 recipient in
-  `blackbull/server/recipient.py` (was indistinguishable from
-  EOF mid-body before; now split so the timeout path logs).
-- `BB_REQUEST_TIMEOUT` — H/1.1 and H/2 paths.
-- `BB_WRITE_TIMEOUT` — both write paths in
-  `blackbull/server/sender.py` (`AsyncioWriter.write` and
-  `AsyncioWriter.writelines`).
-- `BB_WS_MAX_FRAME_PAYLOAD` — WebSocket frame guard in
-  `blackbull/server/recipient.py:WebSocketRecipient._read_loop`.
-- `BB_H2_MAX_CONCURRENT_STREAMS` — both stream-open guards in
-  `blackbull/server/http2_actor.py`.
-- `BB_H2_WS_MAX_STREAMS_PER_CONNECTION` — RFC 8441 WS guard.
-- `BB_COMPRESSION_MAX_INFLIGHT` — executor-saturation bypass in
-  `blackbull/middleware/compression.py`.
-- HTTP/2 per-stream queue drops in
-  `blackbull/server/recipient.py:HTTP2Recipient` (logged under
-  the cap name `stream_queue_depth`).
-
-`BB_WS_QUEUE_DEPTH` was deliberately **not** wired — the
-WebSocket event queue applies backpressure via blocking
-`await put()` rather than dropping, so a hit is normal flow
-control rather than a rejection.
-
-### Docs
-
-- `docs/guide/logging.md` gains a *Cap-hit log — `blackbull.caps`*
-  section covering the inventory, record shape (the `cap`,
-  `requested`, `limit`, `peer`, `scope_path`, `protocol`
-  structured fields), the rate-limit model, and a
-  ready-to-paste subscription recipe.
-- `docs/reference/env-vars.md` gains a section-header note in
-  *Connection limits and timeouts* pointing at the new logging
-  section, plus a one-liner under *Logging* on how to set the
-  `blackbull.caps` level programmatically.
-
 ## [0.39.1] — 2026-06-15
 
 **Patch release: two cross-platform bug fixes surfaced via the
@@ -5254,15 +3347,6 @@ sprint and is unaffected.
   unchanged.  Non-ASCII input raises `UnicodeEncodeError` at
   construction time rather than letting obs-text bytes onto
   the wire.
-
-### Internal
-
-- `tests/unit/test_socket_manager_af_unix.py` — regression test
-  that monkeypatches `socket.AF_UNIX` away and exercises
-  `SocketManager` against a real AF_INET socket; would have
-  caught the Windows crash had it existed earlier.
-- `tests/unit/test_response.py` — added
-  `test_response_str_headers_coerced_to_bytes`.
 
 ## [0.39.0] — 2026-06-15
 
@@ -5374,13 +3458,6 @@ no convention adjustments were needed.
   the `blackbull-session` extension; an admonition documents the
   deprecation and removal target.
 
-### Internal
-
-- The audit of `OpenAPIExtension` against the documented convention
-  found a 1:1 match (`extension_key` class attribute, eager + deferred
-  construction, collision check with `is not self` idempotence, `app`
-  as first positional argument).  No back-port required.
-
 ## [0.37.0] — 2026-06-14
 
 **Sprint 41 close: OpenAPI as the reference implementation of the
@@ -5421,25 +3498,6 @@ example of Sprint 40's extension convention.
   `app.enable_openapi(...)` to `OpenAPIExtension(app, ...)` to
   demonstrate the reference form in a real end-to-end app.
 
-### Docs
-- `docs/guide/openapi.md`: new "The `OpenAPIExtension` class" section
-  showing the two construction styles and when to prefer them over
-  the convenience method.  Query-parameter gap noted under "What's
-  not yet automated" — the simplified-handler model has no annotation
-  source for query params today, so they're not emitted.
-- `docs/guide/extensions.md`: new "In-tree reference:
-  `OpenAPIExtension`" callout pointing readers to the OpenAPI
-  module as the concrete example of the convention.
-- `docs/about/internals.md`: post-Sprint-40 audit corrections.
-  `ServerActor` (which doesn't exist as a class) is renamed to
-  `ASGIServer` in 4 sites (hierarchy diagram, dedicated section
-  heading, supervisor strategies table row, exception propagation
-  table row).  `app_startup` / `app_shutdown` attribution corrected
-  to `BlackBull._handle_lifespan` rather than the server.
-  `RequestActor` added under `StreamActor` (HTTP/2) in the hierarchy
-  diagram since the H/2 path also delegates through it for the
-  ASGI call.
-
 ### Migration risk
 Zero.  `BlackBull.enable_openapi(...)` signature and behaviour are
 unchanged; `OpenAPIExtension` is purely additive.
@@ -5457,14 +3515,6 @@ unchanged; `OpenAPIExtension` is purely additive.
   in addition to `HTTPStatus` and exception classes.  Coerced to
   `HTTPStatus` internally; ergonomic shortcut for extension code
   that already uses raw status codes.
-
-### Docs
-- New guide page `docs/guide/extensions.md` covering the
-  `app.extensions` namespace, the `init_app(app)` convention,
-  the `blackbull-<name>` → `app.extensions['<name>']` key
-  convention with `RuntimeError` collision detection, and the
-  author-managed dependency-ordering pattern with the
-  prerequisite-check idiom.
 
 ## [0.35.0] — 2026-06-14
 
@@ -5557,46 +3607,6 @@ plain HTTP/2 POST workloads above that boundary.
   doesn't `RST_STREAM` the connection; recipients without the
   marker keep the legacy `ENHANCE_YOUR_CALM` semantics.
 
-### Docs
-
-- `KNOWN_LIMITATIONS.md` — the RFC 8441 section now documents the
-  stream-exhaustion attack surface and the recommended mitigations
-  (nginx frontend or finite `BB_MAX_CONNECTIONS`).
-- `docs/reference/env-vars.md` — new `BB_H2_WS_MAX_STREAMS_PER_CONNECTION`
-  row in the WebSocket table, and a production-posture note on
-  `BB_H2_ENABLE_WEBSOCKET` pointing at the nginx-frontend shape.
-
-### Internal
-
-- `HTTP2Client.register_raw_stream(stream_id)` — per-stream queue
-  for raw frame I/O, used by `WebSocketH2Client` to receive frames
-  on a stream without racing the receive loop.  Connection-level
-  frames (WINDOW_UPDATE, SETTINGS) bypass the raw-stream queue so
-  flow-control state stays consistent.
-- `HTTP2Actor._make_done_cb(stream_id, *, is_ws=False)` —
-  consolidates per-stream lifecycle cleanup (the existing
-  `_active_stream_count` decrement, the sender/recipient dict
-  evictions, and the new RFC 8441 `_ws_stream_count` decrement)
-  in one site.  `is_ws=True` opts the WS counter in at the call
-  site so regular HTTP stream completions don't silently drift
-  the WS counter below the true in-flight count.
-- `HTTP1Sender` / `HTTP2Sender` — `reset_per_request_state()`
-  encapsulates the per-keep-alive-request reset block surfaced by
-  Sprint 38's `BB_REQUEST_TIMEOUT` work.  `HTTP1Sender` also
-  extracts `_ensure_framing_headers` / `_ensure_date_header` helpers
-  shared by `_flush` and `_pathsend`.  `HTTP2Sender`'s bytes
-  `__call__` path now carries the same `_end_stream_sent` defensive
-  guard the dict path got in Sprint 38.
-
-### Status
-
-- `BB_H2_ENABLE_WEBSOCKET` remains opt-in (default `False`).
-  Sprint 39 lands the interop coverage + safety guards so the
-  eventual default flip does not regress the project's security
-  posture.
-
----
-
 ## [0.34.0] — 2026-06-13
 
 **Sprint 38 close: cross-protocol parity.**
@@ -5663,43 +3673,6 @@ direction in each path — closed in one sprint.
   `BaseException` catch so `wait_for` sees the cancellation and
   raises `TimeoutError` to the outer keep-alive loop.
 
-### Docs
-
-- **`intercepting_send` middleware pattern documented.**  Added a
-  "Post-response middleware (inspect / modify the response)"
-  subsection to [`docs/guide/middleware.md`](docs/guide/middleware.md)
-  showing the worked status-logger example, a table mapping
-  common goals (add a response header, compute a checksum,
-  replace the body, short-circuit a status code) to the right
-  hook point inside the wrapped `send`, a pointer to
-  `Compression` as the reference implementation, and a
-  streaming-buffering caveat.  Previously this pattern was used
-  internally by `Compression` and `Cache` but only discoverable
-  by reading their source.
-- **`BB_REQUEST_TIMEOUT` doc framing updated.**  `docs/reference/
-  env-vars.md` and the `blackbull/env.py` module docstring no
-  longer describe it as a "Per-HTTP/2-stream deadline" — the
-  cross-protocol behaviour is the new framing, with the
-  protocol-specific cancellation mechanism described inline
-  (RST_STREAM CANCEL on HTTP/2; 408 + `Connection: close` on
-  HTTP/1.1).
-
-### Conformance
-
-- 19 new tests under
-  [`tests/conformance/http2/test_rfc9113_trailers.py`](tests/conformance/http2/test_rfc9113_trailers.py)
-  (frame shape, no-pseudo-headers, empty trailers,
-  body-then-trailers, field encoding, trailers-only response,
-  sender contract, cross-protocol symmetry,
-  no-longer-unhandled).
-- 20 new tests under
-  [`tests/conformance/http1/test_http1_request_timeout.py`](tests/conformance/http1/test_http1_request_timeout.py)
-  (408 + close, fast-handler unaffected, disabled-by-zero,
-  boundary, isolation, pipelining, custom value, buffered-start
-  + timeout, keep-alive second-request reset).
-
----
-
 ## [0.33.1] — 2026-06-12
 
 **Brotli default quality aligned with documented dynamic-content
@@ -5738,16 +3711,6 @@ static) rather than introducing a benchmark-mode toggle.
   field.  Documented in
   [`docs/reference/env-vars.md`](docs/reference/env-vars.md).
 
-### Tests
-
-- `tests/unit/test_compression_brotli_quality.py` pins the
-  module-level default (4), verifies the constructor kwarg
-  propagates to the bound brotli callable via
-  `functools.partial`, and round-trips the env var →
-  `Settings` → middleware path.
-
----
-
 ## [0.33.0] — 2026-06-12
 
 **Sprint 37 — defaults reset to RFC / kernel baselines; static
@@ -5820,121 +3783,6 @@ recommendations.
   new "Performance recommendations" section that documents the
   pre-0.33 tuned values as production tuning targets with
   per-variable rationale.
-
-### Tests
-
-- 1,268 tests pass on the release commit, 196 skipped
-  (testcontainer-gated), 0 failures.
-- Two H/2 architecture handshake tests reshaped to set non-default
-  values via `monkeypatch.setenv` + `reset_settings_cache()` and
-  assert the actor honours the configured value, instead of
-  tautologically asserting "value > RFC default" (which used to
-  pass by coincidence on the tuned defaults).  The new shape is
-  the right pattern for any future test reading framework-default
-  numerics — assert behaviour, not magic constants.
-
-### Notes
-
-- **Migration**: standalone deployments serving static files
-  directly should pass `cache=True` to `app.static(...)` to keep
-  prior performance.  Deployments behind nginx / a CDN are
-  unaffected — static traffic doesn't reach the framework on
-  that topology.
-- **Production tuning**: deployments that previously implicitly
-  benefitted from the tuned socket / H/2 window defaults should
-  set the recommended env vars explicitly — see
-  `docs/reference/env-vars.md` "Performance recommendations" for
-  the recipe.
-- BlackBull has no production users yet (per `CLAUDE.md`, this
-  is a personal learning project) so the default flip doesn't
-  break anyone in the wild.
-
----
-
-## [0.33.0] — 2026-06-12
-
-**Sprint 37 — defaults reset to RFC / kernel baselines; static
-body cache becomes opt-in.**
-
-This release moves BlackBull's defaults from a benchmark-tuned
-posture to RFC 7540 / Linux kernel baselines, so a fresh install
-behaves predictably regardless of host tuning state and the
-framework can stand on its architecture alone.  The previous
-tuned values are preserved as documented production
-recommendations.
-
-### Changed
-
-- **`StaticFiles` body cache is now opt-in** (default
-  `cache=False`).  `app.static(url_prefix, root_dir)` reads files
-  from disk on every request unless explicitly opted in via
-  `app.static(url_prefix, root_dir, cache=True)`.  Sibling
-  existence (for `.br` / `.zst` / `.gz` precompressed serving) is
-  recomputed per-request when the cache is off; memoised when on.
-  Most production deployments terminate static traffic at nginx
-  or a CDN and won't notice — standalone setups that previously
-  benefitted from the in-process cache should opt in to keep
-  prior performance.  See
-  [`docs/guide/static-files.md`](docs/guide/static-files.md) for
-  the full discussion.
-
-- **Seven framework defaults reset to platform baselines**:
-
-  | Setting | Pre-0.33 | 0.33 | Baseline source |
-  |---|---|---|---|
-  | `BB_SOCKET_BACKLOG` | 4096 | 128 | kernel `net.core.somaxconn` traditional default |
-  | `BB_SOCKET_SNDBUF` | 262144 | 0 | kernel default (unchanged unless set) |
-  | `BB_SOCKET_RCVBUF` | 262144 | 0 | kernel default (unchanged unless set) |
-  | `BB_SOCKET_REUSEPORT` | True | False | kernel default |
-  | `BB_TCP_USER_TIMEOUT_MS` | 60000 | 0 | kernel default (off) |
-  | `BB_H2_INITIAL_WINDOW_SIZE` | 1048576 | 65535 | RFC 7540 §6.9.2 |
-  | `BB_H2_CONNECTION_WINDOW_SIZE` | 4194304 | 65535 | RFC 7540 §6.9.2 minimum |
-
-  Production deployments that need throughput should set these
-  explicitly — the previous values plus per-variable rationale
-  are documented under "Performance recommendations" in
-  [`docs/reference/env-vars.md`](docs/reference/env-vars.md).
-
-- **`BB_FRAME_YIELD_EVERY`, `BB_COMPRESSION_MAX_INFLIGHT`,
-  `BB_KEEP_ALIVE_TIMEOUT` deliberately kept** at their previous
-  values (8, `cpu*2`, 5.0 respectively).  These are
-  correctness / fairness / safety mechanisms (cooperative-yield
-  fairness, compression-offload backpressure cap, keep-alive
-  idle timer), not numerical optimisations above a platform
-  baseline.
-
-### Added
-
-- `cache` keyword parameter on
-  [`StaticFiles.__init__`](blackbull/middleware/static.py) and
-  [`app.static()`](blackbull/app.py) — opt in to the in-process
-  body cache for standalone deployments that serve static
-  traffic directly.
-
-- [`docs/guide/static-files.md`](docs/guide/static-files.md) —
-  rewrote "In-memory cache" as an opt-in feature with explicit
-  when-to-turn-on / when-to-leave-off guidance.  New
-  "Precompressed sibling serving" section documenting
-  `.br` / `.zst` / `.gz` lookup as an official feature (same
-  pattern as nginx's `gzip_static` / `brotli_static`), including
-  the Range-bypass and `Vary: Accept-Encoding` behaviour.
-
-- [`docs/reference/env-vars.md`](docs/reference/env-vars.md) —
-  new "Performance recommendations" section that documents the
-  pre-0.33 tuned values as production tuning targets with
-  per-variable rationale.
-
-### Tests
-
-- 1,268 tests pass on the release commit, 196 skipped
-  (testcontainer-gated), 0 failures.
-- Two H/2 architecture handshake tests reshaped to set non-default
-  values via `monkeypatch.setenv` + `reset_settings_cache()` and
-  assert the actor honours the configured value, instead of
-  tautologically asserting "value > RFC default" (which used to
-  pass by coincidence on the tuned defaults).  The new shape is
-  the right pattern for any future test reading framework-default
-  numerics — assert behaviour, not magic constants.
 
 ### Notes
 
@@ -6020,12 +3868,7 @@ server (uvicorn, hypercorn, `httpx.ASGITransport`).
 
 ### Changed
 
-- [`KNOWN_LIMITATIONS.md`](KNOWN_LIMITATIONS.md) rewritten to
-  user-facing content only.  209 → 157 lines.  WSL2 measurement
-  specifics, sprint references, and maintainer roadmap items moved
-  into [`bench/CHARACTERIZATION.md`](bench/CHARACTERIZATION.md) and
-  the sprint logs.  Renamed "Benchmark + measurement caveats" to
-  "Deployment notes" with just the multi-worker scaling guidance.
+- KNOWN_LIMITATIONS.md now lists user-facing limits and deployment constraints.
 
 - 14 integration test files migrated from `live_server` +
   `httpx.AsyncClient` to `TestClient` (net −271 lines).  Files
@@ -6210,17 +4053,6 @@ assessment is included.
   and scheduled for removal in `0.32.0`.  Apps should read
   `scope['extensions']['http.response.priority']` instead.
 
-### Tests
-
-- 9 new unit tests in `tests/unit/test_http2_extensions.py`
-  pinning the helper's per-request fresh-dict semantics,
-  the priority extension contents (RFC 9218 default + explicit
-  pass-through), and the http2_stream snapshot fields.
-- 3 new integration tests in
-  `tests/integration/test_http2_advanced.py` confirming the new
-  extension keys show up in a real HTTP/2 scope and agree with
-  the deprecation alias.
-
 ### Notes for adopters
 
 - **Migrating from `scope['http2_priority']`.**  Replace
@@ -6237,29 +4069,9 @@ assessment is included.
   back-pressure) need a future sprint — see *Open question* in
   `docs/about/grpc-assessment.md`.
 
-### Out of scope / deferred
-
-- **HTTP/2 mutation API** — set-priority-on-push, app-driven
-  window updates, dependency edits.  Wait for an adopter need.
-- **gRPC implementation** — only the assessment doc this sprint.
-  A real gRPC server is 1-3 sprints of work on top of these
-  primitives; the assessment doc spells out the breakdown.
-- **`scope['http2_priority']` removal** — happens in `v0.32.0`;
-  retained this release to give adopters one cycle to migrate.
-- **RFC 7540 weight/depends_on parity with gunicorn** — RFC 9113
-  deprecated those; modern clients don't send them.
-
----
-
 ## [0.30.0] — 2026-06-04
 
-**Sprint 31 close — zero-copy static-file serving for cleartext
-HTTP/1.1.**  The streaming path for files > 4 MiB (the in-memory
-cache threshold) previously went through chunked
-`asyncio.to_thread`; microbench measured ~64 µs of per-chunk
-event-loop dispatch overhead, which dominated the 16 ms total cost
-on a 16 MiB transfer.  This release swaps that for a single
-`loop.sendfile()` call when the transport supports it.
+Added sendfile for uncached static files above 4 MiB on supported cleartext HTTP/1.1 transports.
 
 ### Added
 
@@ -6289,34 +4101,6 @@ on a 16 MiB transfer.  This release swaps that for a single
   unchanged: the bytes are already in Python, so the cache path
   stays the same.
 
-### Performance
-
-EC2 `c7i.2xlarge` cross-check on a 16 MiB file at c=64, 60 s
-measurement window:
-
-| | chunked (v0.29.0) | sendfile (this release) | Δ |
-|---|---:|---:|---:|
-| Effective throughput | 25 r/s | **569 r/s** | **23×** |
-| Server-side p50 latency | 664 ms | **44 ms** | **15× lower** |
-| Server-side p99 latency | 742 ms | 520 ms | 1.4× lower |
-
-The chunked path was dispatch-bound at ~25 r/s (16 ms of pure
-event-loop overhead per 16 MiB request); sendfile moves the
-dispatch into kernel-space.  Effective throughput at this
-concurrency is ~9 GB/s on loopback.
-
-### Tests
-
-- 14 new unit/architecture tests covering `AsyncioWriter.sendfile`
-  (happy / TLS-NotImpl / abstract default), `HTTP1Sender`'s
-  `pathsend` handler (header rendering, computed Content-Length,
-  TLS chunked fallback, HEAD-only, defensive no-op),
-  `StaticFiles` emitting `pathsend` correctly (extension present /
-  absent / Range / small files), and the `HTTP1Actor` scope
-  extension advertisement (cleartext / TLS).
-- Total unit-test count: **1,234 passing** (was 1,206 at 0.29.0).
-  Beartype-instrumented run: also clean.
-
 ### Notes for adopters
 
 - **No API change.**  Existing apps see zero-copy file serving
@@ -6333,29 +4117,14 @@ concurrency is ~9 GB/s on loopback.
   chunked) while keeping the "front a real CDN for anything
   user-visible" framing.
 
-### Out of scope / deferred
-
-- **HTTP/2 zero-copy** — no kernel path exists.  Documented as
-  intentional; revisit only if a real user need surfaces.
-- **Off-loop cached (small-file) read on cache miss** — Sprint 31
-  Task 1 diagnosis measured the cold-cache penalty at
-  sub-millisecond p50 even for 1 MiB files.  Not worth the
-  complexity.
-
----
-
 ## [0.29.0] — 2026-06-04
 
 **Sprint 30 close — event-loop integrity under hostile / burst load
 (Tier 1 only).**  Supersedes the `0.29.0a1` alpha pre-release: the
 custom-protocol path (Tier 1.5, PRs #36 / #37 / #38) shipped in `a1`
 behind `BB_USE_CUSTOM_PROTOCOL=False` was **reverted before the
-final** after the EC2 cross-check showed it regressed client-side
-latency by ~9 % (p50 189 → 207 ms) and throughput by ~8 % at c=4096
-on `c7i.2xlarge`.  The code is parked on the
-`Sprint30-tier1.5-custom-protocol` branch for future revisit; it is
-not in this release in any form.  See *Notes for adopters* below
-for migration guidance from `a1`.
+final**. The final release contains no custom-protocol path. See
+*Notes for adopters* below for migration from a1.
 
 ### Added
 
@@ -6421,24 +4190,6 @@ for migration guidance from `a1`.
   diagnostic dumps).  Replaced with a direct `await self._dispatch()`
   + plain `except Exception`.  (PR #32)
 
-### Local benchmark (HttpArena static profile, c=4096, 3 back-to-back wrk runs)
-
-| Configuration | Run 1 r/s | Run 2 r/s | Run 3 r/s | Degradation 1→3 |
-|---|---:|---:|---:|---:|
-| **Master before Sprint 30** (cap=0) | 4,630 | 4,362 | 4,048 | **12.6%** |
-| **Sprint 30 default** (cap=1024, keep-alive 5 s) | 4,287 | 4,173 | 4,081 | **4.8%** |
-| Same with c=1024 (under cap) | 4,704 | 5,159 | 5,056 | **none — runs 2/3 faster** |
-
-The cliff at c=4096 is halved.  At c=1024 (the realistic adopter
-concurrency) it is **eliminated** — back-to-back runs 2/3 are
-faster than run 1.
-
-### Tests
-
-- 9 new unit tests across `test_asyncio_writer.py` (5 — write-timeout
-  edge cases) and `test_max_connections_503.py` (4 — 503-response
-  shape).
-
 ### Notes for adopters
 
 - **Default keepalive 60 s → 5 s** matches every other major HTTP
@@ -6453,25 +4204,6 @@ faster than run 1.
   anyone who set it explicitly should unset it.  The code is parked
   on `Sprint30-tier1.5-custom-protocol` if you need to keep
   experimenting.
-
-### Out of scope / deferred
-
-- **Custom asyncio protocol (`_BlackBullProtocol` + `ProtocolBuffer`,
-  former Tier 1.5).**  Parked on the `Sprint30-tier1.5-custom-protocol`
-  branch.  EC2 cross-check (`c7i.2xlarge`, c=4096, 60 s window)
-  measured **client-side p50 latency 189 → 207 ms (+9 %)** and
-  **throughput 5,329 → 4,879 r/s (-8 %)** with the toggle on — a
-  regression, not the local microbenchmark's ~5 % drain-time win.
-  Removed from the release rather than shipped as opt-in code that
-  the EC2 evidence says nobody should turn on.
-- **Accept-pausing watermarks** (`BB_ACCEPT_PAUSE_HIGH/LOW_WATERMARK`):
-  prototyped on the `tier2-accept-pausing` branch but deferred — the
-  mechanism works (3× client-side latency reduction in measurement)
-  but trades throughput in a way that surprises adopters who expect
-  asyncio servers to be throughput-stable.  Branch retained for
-  future revisit if a priority-scheduling primitive becomes available.
-
----
 
 ## [0.28.1] — 2026-06-02
 
@@ -6528,26 +4260,6 @@ under burst load.
   alongside (path, mtime, size).  Different encodings of the
   same file now coexist in the cache as separate entries.
 
-### Local benchmark — three back-to-back wrk passes, `c=1024`
-
-| Workload | 0.28.0 | 0.28.1 |
-|---|---:|---:|
-| `Accept-Encoding: br` + precompressed sibling | 54 / 0 / 0 r/s | **54,664 / 34,380 / 34,920 r/s** |
-| `Accept-Encoding: br` + no sibling (backpressure) | 54 / 0 / 0 r/s | **3,857 / 3,994 / 3,951 r/s** stable |
-| No `Accept-Encoding` (no Compression engagement) | 24,572 / 27,386 / 31,358 r/s | unchanged |
-
-### Tests
-- **+10 unit tests.**  `tests/unit/test_static.py` gains 9 tests
-  covering precompressed-variant negotiation (br/gzip/zstd
-  preference, q=0 refusal, Range bypass, no-sibling fall-through,
-  cache hits, separate-encoding cache entries).
-  `tests/unit/test_compression_backpressure.py` is new with 6
-  tests covering the executor-inflight counter (under cap →
-  compresses; at cap → serves uncompressed; counter decrement on
-  success and on exception; small-body path bypasses the cap;
-  skip-path emits exactly one start event).  Total unit-test
-  count: **812 passing**.
-
 ### Notes for adopters
 - For `static` content under burst load, the right pattern is to
   ship precompressed `.br` / `.gz` / `.zst` siblings on disk
@@ -6569,59 +4281,16 @@ ZeroVer; see [`KNOWN_LIMITATIONS.md`](KNOWN_LIMITATIONS.md) for
 the explicit "what's not promised yet" list.
 
 ### Added
-- **`KNOWN_LIMITATIONS.md`** — single consolidated doc covering
-  RFC 8441 opt-in, HTTP/2 mux overhead, slowloris response shape,
-  single-host benchmark caveats, RFC-defensible diffs from nginx
-  in the differential corpus, no DB layer, no HTTP/3, no gRPC.
-- **`bench/soak/`** — soak harness (1-hour wrk + tracemalloc +
-  `/proc/<pid>/status` sampling, mixed-lane lua script).  Two
-  1-hour soaks (single-worker + 4-worker) across 19.5 M requests
-  confirmed RSS plateau, FD return-to-baseline, no growing
-  tracemalloc slab.  Artefacts gitignored under
-  `bench/results/soak/`.
-- **`bench/aws/httparena_compare.sh`** — EC2 c7i.xlarge HttpArena
-  comparison harness; provisions Docker + liburing 2.9 + gcannon
-  from source + wrk + h2load + h2spec + Autobahn runner; vendors
-  `bench/httparena/` as the framework; trap-EXIT teardown.
-- **CLI `--version` flag** — prints `blackbull <version>` and
-  exits 0.  Reads from `importlib.metadata.version('blackbull')`
-  so it always agrees with the installed wheel.
-- **HttpArena `/ws` echo route** + `/baseline2` (H/2 path) in
-  `bench/httparena/app.py`.  Closes the WebSocket profile and the
-  H/2 baseline; previously only H/1.1 was implemented.
+
+- Consolidated user-facing protocol and deployment limitations in KNOWN_LIMITATIONS.md.
+- CLI --version prints the installed blackbull version and exits 0.
 
 ### Changed
-- **`StaticFiles` middleware now caches small files in memory.**
-  mtime+size-keyed LRU cache (default ≤ 4 MiB per file, 256
-  entries); cache hits are two `send()` calls with no thread-pool
-  dispatch.  Replaces the per-request `asyncio.to_thread(...)`
-  open/seek/read/close chain that exhausted the default
-  ThreadPoolExecutor (8 workers) at HttpArena's c=1024–6800 load
-  — first run plateaued at 71-79 r/s and subsequent runs collapsed
-  to 0 r/s as the dispatch queue saturated.  Local back-to-back
-  c=1024 measurements after the fix: 17,885 / 18,345 / 18,149 r/s
-  with worker RSS flat at ~33 MB (was 275 → 768 MiB).  Files
-  above the threshold keep the streaming path so per-request peak
-  memory stays at one chunk regardless of body size.
-- **Default error handler is environment-aware.**
-  `_default_error_handler` (registered on every HTTP error status
-  and `Exception`) now reads `BLACKBULL_ENV`:
-  - `development` — surfaces the full Python traceback inline so
-    users debugging locally see the failure point in the response
-    body.  `Accept: text/html` returns a styled HTML page;
-    everything else returns text/plain.
-  - `production` — terse: status code + phrase only.  Exception
-    class and message no longer leak to the network.
-  Sets `Content-Type` and `Content-Length` explicitly on all
-  error responses (previously omitted).
-- **`bench/httparena/launcher.py` now spawns three workers** —
-  HTTP cleartext on :8080, HTTPS+H1 on :8081, HTTPS+H2 on :8443.
-  Matches HttpArena's `scripts/validate.sh` port layout
-  (`PORT=8080`, `H1TLS_PORT=8081`, `H2PORT=8443`).  Closes the 5
-  `json-tls` validation failures the previous two-process layout
-  caused (nothing was bound on :8081).  Shape mirrors the
-  HttpArena `frameworks/fastapi/launcher.py` reference — no
-  port-readiness gating, no TLS-handshake synchronisation.
+
+- StaticFiles caches bodies up to 4 MiB in a 256-entry per-process LRU;
+  larger files stream. Subsequent releases made the body cache opt-in.
+- Development error responses include tracebacks; production responses show
+  only status and phrase, without exception class or message.
 
 ### Fixed
 - **Static-file middleware run-2/run-3 collapse to 0 r/s** under
@@ -6634,28 +4303,6 @@ the explicit "what's not promised yet" list.
   `status: 200 / 404` integer literals with `HTTPStatus.OK` /
   `HTTPStatus.NOT_FOUND`.  Cosmetic; no runtime behaviour
   change.
-
-### EC2 cross-check (Sprint 28 Task 3 + Task 4 carry-forward)
-- HttpArena validate on `c7i.xlarge`: **49/49 pass** (previous
-  pass-count 44/5 fail before the launcher fix).  Includes
-  baseline H/1.1, pipelined, limited-conn, json, json-comp,
-  json-tls, upload, static, baseline-h2, static-h2, echo-ws.
-- HttpArena benchmark numbers captured for BlackBull and FastAPI
-  across the validated profiles.  Detailed results in the
-  Sprint 28 internal log; consolidated summary in
-  `bench/CHARACTERIZATION.md ## Sprint history`.
-- Static throughput on EC2 remained the dominant gap pre-cache;
-  the in-memory cache lands as a 0.28.0 source change but the
-  EC2 re-measure of static under the new code is a Sprint 29
-  open carry-forward (no new EC2 spend in Sprint 28).
-
-### Methodology
-- **Early Alpha classification confirmed** after Task 2 (soak) and
-  Task 4 (release-shape + EC2 cross-check) closed.  Both blocking
-  risks noted at the start of the sprint — no ≥1-hour soak, no
-  externally reproducible benchmark — are now closed.
-
----
 
 ## [0.27.1] — 2026-05-31
 
@@ -6691,19 +4338,6 @@ the new PEP 561 marker.
   Issues entries (previously just two redundant pointers at the
   GitHub repo).
 
-### Documentation
-- **README rewritten** as a PyPI sell sheet — what BlackBull is, why
-  someone would pick it, working install + hello-world + TLS +
-  WebSocket + middleware snippets.  Internal P1/P2/P3/P4 roadmap
-  removed (lived as project-facing todo, not user-facing reference).
-- **Fixed a real bug in the prior README's hello-world.** Was
-  `asyncio.run(app.run(port=8000))` — `app.run()` is itself a
-  blocking sync entry point; wrapping it in `asyncio.run` raised on
-  the first execution.  Now `app.run(port=8000)`, matching
-  `examples/helloworld-simple.py`.
-
----
-
 ## [0.27.0] — 2026-05-30
 
 Sprint 27 — methodology pin (cascade-multiplier rule) + HttpArena
@@ -6711,28 +4345,6 @@ local-only integration prep.  No optimisation Phase 2: the new
 profile data placed the original Sprint 28 candidate (SSL/TLS Python
 glue) under deployment-posture conditions and the `httptools` target
 sub-cascade, both reclassified accordingly.
-
-### Added
-- **Cascade-multiplier rule** pinned in
-  [`bench/CHARACTERIZATION.md ## Methodology`](bench/CHARACTERIZATION.md)
-  as a sprint-gating mechanism.  Profile-share table maps per-call
-  microbench delta → expected B-lane throughput delta.  Replaces the
-  ad-hoc "≈2-3×" rule of thumb with three explicit bands
-  (≥ 30 %, 10-30 %, < 10 %).
-- **`bench/aws/profile_lanes.sh`** — wrk-driven per-lane py-spy
-  capture on EC2 split topology.  `BB_TLS=0` opt-in for cleartext
-  profiling (mirrors nginx-fronted production posture).  Lessons
-  baked in: `(...&)` subshell form for nohup re-parenting, cold-cache
-  warmup discard before the measured wrk pass.
-- **`bench/app.py --no-tls`** flag — listens cleartext for the
-  TLS-off profiling lane.
-- **`bench/httparena/`** scaffold (Task 4) — HttpArena
-  `frameworks/blackbull/`-shaped Docker container with two-process
-  launcher (cleartext :8080, TLS :8081), `meta.json` declaring 13
-  profiles, integration with the existing `Compression` +
-  `StaticFiles` middleware.  Verified per-process 1.5-7.2× faster
-  than FastAPI/uvicorn on H/1.1 + static paths; HTTP/2 served (vs
-  uvicorn's zero h2c).  Not enabled for leaderboard submission.
 
 ### Fixed
 - **HTTP/2 query-string scope (`scope['path']`)** — the H/2 `:path`
@@ -6752,54 +4364,14 @@ sub-cascade, both reclassified accordingly.
   triggered protocol errors on strict HTTP/2 clients.  Now strips
   upstream `Content-Length` and writes the post-compression length.
 
-### Methodology
-- Sprint 28 anchor flipped from `httptools` to **deployment-posture
-  dependent**.  Re-profile (`0c80080`, B1/B3 EC2 c7i.xlarge, py-spy
-  200 Hz) showed:
-  - With BlackBull terminating TLS: SSL/TLS Python glue ~15 %
-    self-time → cascade-rule prediction +7-8 % B1 if coalesced.
-  - With TLS terminated upstream (`--no-tls`, nginx-fronted
-    posture): SSL/TLS slice **disappears** — no single Python slice
-    exceeds ~5 % self-time post-Sprint-26.
-  - `_parse` (the `httptools` target) was ~2 % self-time in both
-    topologies — sub-cascade per the new rule.  Decommissioned as a
-    Sprint 28 candidate; pure-Python H1 parser kept as identity.
-- HTTP/3 / QUIC confirmed as **intentionally out of scope** —
-  removed from Sprint 28 candidates.
-
----
-
 ## [0.26.0] — 2026-05-30
 
 Sprint 26 — deadline subsystem rework.
 
 ### Changed
-- **Per-arm `loop.call_later` replaced by a per-process tick scanner.**
-  Singleton `TimerHandle` re-arms itself every `BB_DEADLINE_TICK_MS`
-  (default 300 ms); `ConnectionDeadline.arm` / `disarm` become
-  attribute writes + set ops.  Per-call cost: 1.69 µs → 350 ns
-  (−79.3 % on Phase A, −83.7 % cumulative vs the Sprint 23
-  `@contextmanager` baseline).  uvloop sanity: 332 ns/call.
-- **`ConnectionDeadline.guard()` is now class-based.**  Replaced the
-  `@contextmanager` decorator with `__enter__` / `__exit__` on the
-  deadline instance directly; saves the per-call generator-frame
-  allocation.  All five exit-path semantic cases (normal, non-CE
-  raise, foreign CE, deadline CE, same-tick race) preserved
-  byte-equivalent.
-- EC2 c7i.xlarge sequential cross-pair (N=2) vs Sprint 25 close:
-  B1 +17.4 % / +14.2 % (BB_UVLOOP=0/1), B2 +17.1 % / +19.1 %,
-  B3 +18.3 % / +14.5 %.  7/7 B-lanes ✓.
 
-### Added
-- `bench/aws/full_ab_sequential.sh` — sequential N-pair wrapper for
-  AWS accounts under the 32-vCPU default limit (parallel M=3 with
-  c7i.xlarge + c7i.2xlarge needs 36 vCPU).  Methodologically
-  equal-or-better than parallel M=N: sequential pairs sample
-  different time windows, so neighbour drift becomes part of the
-  cross-pair signal.
-- `BASE_REF=<commit>` env mode in `bench/aws/full_ab.sh` — compare
-  HEAD bytes vs an arbitrary historical commit for cumulative
-  cross-sprint re-measures.
+- Deadlines use a shared per-process scanner. Enforcement can lag by one
+  BB_DEADLINE_TICK_MS interval, default 300 ms.
 
 ### Fixed
 - `bench/aws/install.sh` — apt source swapped from
@@ -6820,17 +4392,7 @@ Sprint 26 — deadline subsystem rework.
 
 Sprint 25 — HTTP/1 parser hot-path + cross-pair EC2 harness.
 
-### Changed
-- **`_parse` URL splitter** — `urllib.parse.urlparse` + `re.sub` →
-  three `bytes.partition` calls + slice.  Per-call −91.6 %.
-- **Header-loop regex validators** — per-byte `any(...)` validation
-  scans → compiled-regex `search()` (`_FIELD_NAME_INVALID_RE`,
-  `_FIELD_VALUE_INVALID_RE`).  Per-call −77.1 %.
-- EC2 c7i.xlarge `TOPO=split` M=3 cross-pair: B1 +13.6 % / +15.3 %
-  (BB_UVLOOP=0/1), 6/7 lanes ✓ (B7 △).  Measured 2-3× the
-  microbench prediction at c=256 — the cascade-effect calibration
-  is the load-bearing methodology lesson (later refined in 0.26.0
-  + 0.27.0).
+- HTTP/1.1 parser optimizations preserve framing and validation behavior.
 
 ### Added
 - `bench/aws/full_ab.sh` + `bench/aws/_pair_bench.sh` +
@@ -6875,16 +4437,7 @@ Sprint 24 — follow-ups + Lane E.
 Sprint 23 — `asyncio.timeouts.*` cost removed from the per-request
 hot path.
 
-### Changed
-- Replaced per-phase `async with asyncio.timeout(d):` context
-  managers in `connection_actor.py` (sniff + preface),
-  `http1_actor.py` (header + keep-alive idle), and `recipient.py`
-  (per-chunk body) with a single rescheduled `loop.call_later()`
-  `TimerHandle` per connection.
-- AWS single-worker on c7i.xlarge `TOPO=split`: B1 plaintext
-  **+6.5 %** (14 822 → 15 793 req/s).  py-spy at 200 Hz showed
-  `asyncio.timeouts.*` at **0 samples** (was 9.6 % inclusive in
-  Sprint 21 Phase B).
+- Reduced per-phase timeout scheduling without changing the timeout settings.
 
 ### Added
 - `blackbull/server/deadline.py::ConnectionDeadline` with `guard()`

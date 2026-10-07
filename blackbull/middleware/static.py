@@ -1,15 +1,7 @@
-"""Serving files off the filesystem.
+"""Static-file middleware.
 
-[`StaticFiles`][blackbull.middleware.static.StaticFiles] is the whole public
-surface: conditional requests, byte ranges, precompressed siblings and the
-optional in-memory cache all live behind it.  ``docs/guide/static-files.md``
-is where to read about when to turn each of those on.
-
-Importing this module has one effect beyond defining that class: it registers
-``.woff``, ``.woff2``, ``.webp``, ``.avif`` and ``.wasm`` with the standard
-``mimetypes`` module, which slim container images often lack.  The
-registration is process-wide and benefits every caller of
-``mimetypes.guess_type``, not only this middleware.
+Import registers additional MIME types process-wide. Usage, containment and
+cache visibility contracts are in docs/guide/static-files.md.
 """
 import asyncio
 import mimetypes
@@ -28,20 +20,8 @@ from blackbull.native import NativeResponse
 from ._accept_encoding import acceptable_encodings
 
 
-# Common web-asset MIME types that may be missing from the host's
-# ``/etc/mime.types`` file.  Without this registration, slim container
-# images (e.g. ``python:3.13-slim`` ships no mime-support package) make
-# ``mimetypes.guess_type('foo.woff2')`` return ``None``; StaticFiles
-# falls back to ``application/octet-stream``; downstream Compression
-# middleware then runs brotli on already-compressed font/image bytes —
-# a 30-60 ms per-request CPU tail on ``.woff2`` files.
-#
-# ``mimetypes.add_type`` is idempotent, runs once at module import, and
-# integrates with the standard machinery so ``mimetypes.guess_type``
-# returns the right answer everywhere — including for callers other
-# than StaticFiles.  Keep this list conservative: only entries that are
-# both (a) commonly served by static-files mounts and (b) standardised
-# IANA / WHATWG types.
+# Register standard web-asset MIME types missing from slim host databases.
+# Keep compressed fonts/images out of downstream compression.
 for _ext, _mime in (
     ('.woff',  'font/woff'),
     ('.woff2', 'font/woff2'),
@@ -178,13 +158,8 @@ class StaticFiles:
     _CACHE_MAX_ENTRIES = 256
     # 64 KiB streaming chunk for files above the cache threshold.
     _CHUNK = 64 * 1024
-    # Per-entry stat throttle.  Once a cached entry is validated by
-    # ``stat()``, skip the syscall on subsequent requests until the
-    # monotonic clock has advanced this many seconds.  Default 1 s keeps
-    # edit-on-disk visibility under a second while removing the per-
-    # request stat from the cache-hit hot path.  Override via
-    # ``BB_STATIC_STAT_TTL_S`` (env var, float seconds); set to ``0`` to
-    # stat on every request.
+    # Seconds between cached-body validations. Requests still stat the target;
+    # 0 compares every request. This can delay visibility of on-disk edits.
     _STAT_TTL_S = float(os.environ.get('BB_STATIC_STAT_TTL_S', '1.0'))
 
     #: Precompressed sibling suffix and Content-Encoding token per coding.
@@ -198,34 +173,17 @@ class StaticFiles:
                  url_prefix: str = '', root_dir: str | Path | None = None,
                  cache: bool = False, index: str | None = None,
                  conditional: bool = True):
-        """Serve files from ``directory`` (or ``root_dir``).
+        """Serve directory or root_dir; at least one must be supplied.
 
-        ``index`` (default ``None`` — off): when set to a filename (e.g.
-        ``'index.html'``), a request that resolves to a *directory* is
-        served that file from inside the directory if it exists.  Left off, a
-        request that resolves to a directory is not served at all; the
-        ``blackbull serve`` CLI turns it on to match ``python -m
-        http.server``'s directory-index behaviour.
-
-        ``cache`` (default ``False``): when ``True``, small file bodies are
-        held in a bounded in-memory ``OrderedDict`` and the ``stat()``
-        syscall is throttled.  When ``False``, every request stats and
-        reads afresh.  Turn it on only where BlackBull terminates static
-        traffic itself, with no nginx or CDN in front.
-
-        ``conditional`` (default ``True``): emit ``ETag`` + ``Last-Modified``
-        validators and honour ``If-None-Match`` / ``If-Modified-Since`` with a
-        304.  Set ``False`` to suppress validators (e.g. the ``blackbull
-        serve --no-etag`` path).
+        index=None disables directory indexes. cache=True holds small bodies in a
+        bounded per-worker cache; its validation TTL can delay on-disk edits.
+        conditional=False disables validators and 304 responses. See
+        docs/guide/static-files.md for cache, traversal and production-mode limits.
         """
         resolved = directory or root_dir
         if resolved is None:
             raise ValueError('directory or root_dir is required')
-        # Internal hot path uses ``str`` + ``os.path`` rather than
-        # ``pathlib.Path``: the traversal-safety check runs per request, and
-        # the several PurePath / Path objects one ``Path`` form allocates for
-        # it show up under ``mw_static_in → static_pre_send`` in profiles.
-        # ``os.path`` is a thin C wrapper.
+        # Use the canonical real path for the traversal boundary.
         self._root_str: str = os.path.realpath(os.fspath(resolved))
         # Pre-computed prefix for the traversal check — accept
         # ``<root>/...`` exactly, reject ``<root>x/...``.
@@ -236,17 +194,9 @@ class StaticFiles:
         self._cache_enabled: bool = cache
         self._index: str | None = index
         self._conditional: bool = conditional
-        # cache key = the actual filesystem path served (original or
-        # sibling), held as a ``str`` so the hash is cheap and the
-        # key matches the value returned by ``os.path.realpath``.
-        # value = (mtime_ns, size, body, mime, content_encoding, last_stat).
-        # content_encoding is b'' for uncompressed; b'br'/b'gzip'/b'zstd'
-        # for precompressed siblings.  ``last_stat`` is the monotonic
-        # clock when ``stat()`` last confirmed the entry was still fresh
-        # — used to throttle the per-request stat syscall.
-        # Allocated even when caching is disabled so the read sites can
-        # check membership without a None-guard; the cache simply never
-        # gets populated.
+        # Key by the canonical served path, including precompressed siblings.
+        # Values are (mtime_ns, size, body, mime, content_encoding, last_validation).
+        # The validation TTL can defer cached-body changes; requests still stat.
         self._cache: OrderedDict[
             str, tuple[int, int, bytes, bytes, bytes, float]
         ] = OrderedDict()
@@ -262,13 +212,7 @@ class StaticFiles:
         return Path(self._root_str)
 
     async def __call__(self, conn, receive, send, call_next=None):
-        # BlackBull threads a native Connection for HTTP and WebSocket alike;
-        # the guard is defensive against a raw ASGI scope dict (only reachable
-        # if this middleware runs outside BlackBull's own dispatch).
-        #
-        # Registered as a route middleware, the route table has already
-        # decided scheme and method before this runs; the checks stay because
-        # `StaticFiles` is also usable stand-alone as a plain ASGI app.
+        # Retain HTTP/method guards for standalone ASGI use outside the route table.
         if (not isinstance(conn, Connection) or conn.type != 'http'
                 or conn.method not in ('GET', 'HEAD')):
             if call_next:
@@ -277,10 +221,7 @@ class StaticFiles:
                 await self._respond(send, HTTPStatus.NOT_FOUND)
             return
 
-        # Resolved once, not per request.  Hoisting it into `__init__` would
-        # be wrong — settings may be loaded after the app is constructed —
-        # so it is memoised on first use instead, which keeps late-loaded
-        # settings working while charging one attribute test thereafter.
+        # Resolve settings on first use, after late configuration loading.
         if self._enabled is None:
             self._enabled = get_settings().env != Environment.PRODUCTION
         if not self._enabled:
@@ -302,10 +243,7 @@ class StaticFiles:
             raw_path = raw_path[len(self._url_prefix):]
 
         decoded = unquote(raw_path)
-        # ``realpath`` follows symlinks the same way ``Path.resolve()``
-        # does.  The traversal check is then a single string-prefix
-        # comparison against the pre-computed ``<root>/`` form — no
-        # ``PurePath.relative_to`` allocation per request.
+        # Resolve symlinks before checking the root boundary.
         target = os.path.realpath(os.path.join(self._root_str, decoded.lstrip('/')))
         if not self._inside_root(target):
             await self._respond(send, HTTPStatus.BAD_REQUEST)
@@ -420,16 +358,7 @@ class StaticFiles:
                     mtime_ns, size, body, mime, content_encoding, now)
                 self._cache.move_to_end(served_path)
             elif size <= self._CACHE_MAX_BYTES_PER_FILE:
-                # Read from disk.  When caching is enabled, also store
-                # the body for next time.  When caching is disabled,
-                # this branch fires on every request and the read is
-                # always fresh.
-                # Content-Type derives from the ORIGINAL request's path
-                # extension, not the .br/.gz/.zst suffix — e.g. app.js.br
-                # is still ``text/javascript``.  ``mimetypes.guess_type``
-                # only inspects the extension so passing the full path
-                # is equivalent to passing the basename, with one fewer
-                # call.
+                # Derive Content-Type from the original extension, not the compression suffix.
                 mime = (mimetypes.guess_type(path)[0]
                         or 'application/octet-stream').encode()
                 try:
@@ -500,9 +429,6 @@ class StaticFiles:
             extra_headers.append((b'vary', b'Accept-Encoding'))
 
         if body is not None:
-            # Cache-hit (or just-filled) fast path: one send(), no thread-pool
-            # dispatch.  Slicing a bytes object is cheap and the slice doesn't
-            # escape this coroutine.
             chunk = body[start:end + 1] if (start or end != size - 1) else body
             await send(NativeResponse(
                 status=status,
@@ -514,21 +440,8 @@ class StaticFiles:
                 body=chunk))
             return
 
-        # Large-file streaming path — only hit when size exceeds the cache
-        # threshold.  Two variants:
-        #
-        # 1. ``http.response.pathsend`` ASGI extension is advertised by
-        #    the server AND this is a full-file response (no Range).
-        #    Hand the file path to the sender; HTTP1Sender calls
-        #    ``loop.sendfile`` for zero-copy delivery — no per-chunk
-        #    event-loop dispatch (vs. ~64 µs/chunk × 256 = 16 ms wasted
-        #    on a 16 MiB transfer through the fallback path).
-        #
-        # 2. Fallback chunked streaming through ``asyncio.to_thread``.
-        #    Used for TLS (kernel sendfile can't see plaintext), HTTP/2
-        #    (h2 frames in user-space), Range requests (pathsend extension
-        #    doesn't carry offset/count), and any server that doesn't
-        #    advertise the extension.
+        # Use pathsend only for full-file responses on a host advertising it.
+        # TLS, HTTP/2 and Range responses need the threaded-read fallback.
         pathsend_ok = (status != HTTPStatus.PARTIAL_CONTENT
                        and 'http.response.pathsend' in conn.extensions)
 

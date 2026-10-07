@@ -1,17 +1,7 @@
-"""Recovering the real client from behind a reverse proxy.
+"""Trusted-proxy address, scheme and prefix recovery.
 
-Once a proxy sits in front of the server the TCP peer *is* the proxy, and every
-request appears to come from it.
-[`TrustedProxy`][blackbull.middleware.proxy.TrustedProxy] restores the client
-address, scheme and mount prefix from the headers the proxy set — but only when
-the peer that set them is one you named as trusted, since any client can send
-those headers itself.
-
-Nothing here is honoured off the wire by default: the parser ignores
-``X-Forwarded-Prefix``, and client and scheme keep whatever the socket
-reported, until this middleware decides the hop is trustworthy.
-
-See ``docs/deployment/behind-reverse-proxy.md`` for the deployment shape.
+Only configured trusted peers may supply forwarding headers; accepting
+headers from arbitrary peers permits spoofing.
 """
 import ipaddress
 import re
@@ -140,29 +130,12 @@ def _prefix(value: bytes) -> str | None:
 
 
 class TrustedProxy:
-    """Rewrite ``conn['client']`` and ``conn['scheme']`` from proxy headers.
+    """Rewrite conn.client and conn.scheme only behind configured trusted peers.
 
-    Applied only when the direct TCP peer matches the configured trusted set.
-    Trusted proxies must append their observed peer or overwrite the chain;
-    standalone proto/prefix assertions must replace client-supplied values.
-
-    Supported headers (in precedence order):
-
-    1. RFC 7239 ``Forwarded`` — ``for=<ip>; proto=<scheme>``
-    2. ``X-Forwarded-For`` — walk right to left to the first untrusted IP
-    3. ``X-Forwarded-Proto`` — rewrite ``conn['scheme']``
-
-    Args:
-        trusted_proxies: IP addresses or CIDR strings (IPv4 or IPv6).  Accepts a
-            single string or a list.  Defaults to loopback (``'127.0.0.1'``, ``'::1'``).
-
-    Usage::
-
-        app = BlackBull(trusted_proxies=['127.0.0.1', '10.0.0.0/8'])
-
-        # or register explicitly for more control:
-        from blackbull import TrustedProxyMiddleware
-        app.use(TrustedProxyMiddleware(['127.0.0.1', '::1']))
+    Proxies must append the observed peer or overwrite the chain. Standalone
+    proto/prefix assertions must replace client-supplied values. Forwarded takes
+    precedence over X-Forwarded-For/Proto; walk right to left to the first
+    untrusted IP. Trust defaults to loopback. See the reverse-proxy guide.
     """
 
     _LOOPBACK: tuple[str, ...] = ('127.0.0.1', '::1')
