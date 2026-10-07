@@ -1,17 +1,7 @@
-"""Where an actor's internal message becomes an application-facing event.
+"""Boundary from internal actor traffic to application events.
 
-BlackBull has two event levels, and they do not meet by accident.  Level A is
-actor-to-actor traffic that application code cannot subscribe to; Level B is
-what ``@app.on`` and ``@app.intercept`` see.
-[`EventAggregator`][blackbull.event_aggregator.EventAggregator] is the single
-seam between them: an actor calls the ``on_*`` method for what happened, and
-the aggregator decides the Level B event's name and detail shape.
-
-That indirection is why the detail dict a listener receives is stable across
-transports — an HTTP/1.1 request, an HTTP/2 stream and an external ASGI host
-reach the same method here and produce the same keys.
-
-``docs/guide/events.md`` lists the events and what each detail carries.
+Keep application event names and detail shapes transport-independent.
+See docs/guide/events.md for the public contract.
 """
 from blackbull.asgi import WebSocketReceiveEvent
 from blackbull.event import Event, EventDispatcher
@@ -57,11 +47,7 @@ class EventAggregator:
 
     def __init__(self, dispatcher: EventDispatcher) -> None:
         self._dispatcher = dispatcher
-        # Generation-keyed caches for the per-message / per-request listener
-        # guards.  Each event's verdict is a plain bool, refreshed only when
-        # the dispatcher's registration generation changes (listeners are
-        # almost always registered before serving), so the hot path pays one
-        # int read + compare per check instead of a set lookup.
+        # Invalidate listener caches whenever dispatcher registration changes.
         self._ws_msg_cache_gen: int = -1
         self._ws_msg_cache_val: bool = False
         self._req_completed_cache_gen: int = -1
@@ -81,15 +67,8 @@ class EventAggregator:
         """Fire Level B ``app_shutdown``."""
         await self._dispatcher.emit(Event("app_shutdown", {}))
 
-    # ------------------------------------------------------------------
-    # Request lifecycle
-    # ------------------------------------------------------------------
-    # The request-lifecycle events are emitted by the application layer —
-    # request_received / before_handler / after_handler by BlackBull._dispatch
-    # emits it; request_completed is emitted by BlackBull.__call__ after the global
-    # middleware chain returns (issue #145) — so they fire under external
-    # ASGI hosts (uvicorn, TestClient) too, exactly once per request.  Only
-    # wire-level events remain here.
+    # Application boundaries own request lifecycle events on native and ASGI
+    # transports. This aggregator owns wire-level events.
 
     async def on_request_disconnected(self, conn) -> None:
         """Fire Level B ``request_disconnected``.
@@ -138,11 +117,7 @@ class EventAggregator:
         }))
 
     def has_request_completed_listeners(self) -> bool:
-        """Return True if any ``request_completed`` handler is registered.
-
-        Cached against the dispatcher's registration generation, so the
-        request path can ask on every request and the lookup runs only when
-        listeners change.
+        """Check request_completed registration; cache invalidates when listeners change.
         """
         gen = self._dispatcher.generation
         if gen != self._req_completed_cache_gen:
@@ -151,12 +126,7 @@ class EventAggregator:
         return self._req_completed_cache_val
 
     def has_request_disconnected_listeners(self) -> bool:
-        """Return True if any ``request_disconnected`` handler is registered.
-
-        Read on the request hot path to decide whether the disconnect-detecting
-        receive wrapper needs to be built at all.  Cached against the
-        dispatcher's registration generation, so the lookup runs only when
-        listeners change.
+        """Check request_disconnected registration; cache invalidates when listeners change.
         """
         gen = self._dispatcher.generation
         if gen != self._req_disconnected_cache_gen:
@@ -165,13 +135,7 @@ class EventAggregator:
         return self._req_disconnected_cache_val
 
     def has_websocket_message_listeners(self) -> bool:
-        """Return True if any ``websocket_message`` handler is registered.
-
-        The WebSocket receive path calls this per frame to skip the
-        ``Event`` + detail-dict allocation and the ``emit`` indirection when
-        nothing is listening (the common case on a throughput workload).
-        Cached against the dispatcher's registration generation, so the
-        lookup runs only when listeners change.
+        """Check current registration; the cache invalidates when listeners change.
         """
         gen = self._dispatcher.generation
         if gen != self._ws_msg_cache_gen:
@@ -182,15 +146,7 @@ class EventAggregator:
     async def on_websocket_message(
         self, conn, message: WebSocketReceiveEvent
     ) -> None:
-        """Fire Level B ``websocket_message`` (``conn`` is a Connection).
-
-        Canonical detail shape ``{'conn', 'text', 'bytes'}`` — the shape the
-        direct-recipient path and docs/guide/events.md use.
-
-        Guarded like the other ``on_*`` methods: with no ``websocket_message``
-        listener, the ``Event`` + detail-dict allocation and the ``emit``
-        indirection are skipped (the cached predicate is the receive path's
-        documented skip mechanism).
+        """Emit websocket_message with conn/text/bytes detail when listeners exist.
         """
         if not self.has_websocket_message_listeners():
             return

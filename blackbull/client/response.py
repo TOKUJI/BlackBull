@@ -22,11 +22,7 @@ class ResponderFactory:
 
 
 class Responder:
-    """Base class for client-side reactions to an incoming HTTP/2 frame.
-
-    Subclasses set ``FRAME_TYPE`` and implement ``respond(client)``.
-    ``__init_subclass__`` registers each concrete subclass keyed on its
-    ``FRAME_TYPE`` so ``ResponderFactory.create`` can dispatch by type.
+    """Frame responders set FRAME_TYPE and implement respond(client).
     """
 
     FRAME_TYPE: 'FrameTypes | None' = None
@@ -48,12 +44,7 @@ class Responder:
 
 
 class _NullResponder(Responder):
-    """Drops frame types the client does not act on (PRIORITY,
-    PRIORITY_UPDATE) without raising.
-
-    Inherits from ``Responder`` but keeps ``FRAME_TYPE = None`` so
-    ``__init_subclass__`` skips registration — this class is only ever
-    created directly by ``ResponderFactory.create`` as the fallback.
+    """Ignore unsupported response frame types without raising.
     """
 
     async def respond(self, client) -> None:

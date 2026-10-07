@@ -105,13 +105,8 @@ double-serving the same files.
 
 ### In-memory cache (opt-in)
 
-`StaticFiles` supports an in-process body cache for fast cache-hit
-serving.  It is **off by default**: every request does a fresh
-`stat()` and reads the body from disk.  This matches the behaviour
-of Starlette / FastAPI / Flask static serving and keeps BlackBull's
-default behaviour compatible with standards that require "read
-files from disk on every request, no in-memory caching" (e.g. the
-HttpArena standard-mode static profile).
+The body cache is off by default. Enable it only if retaining file bodies
+in each worker's memory and delaying on-disk edit visibility is acceptable.
 
 Opt in by passing `cache=True`:
 
@@ -120,7 +115,7 @@ Opt in by passing `cache=True`:
 app.static('/assets', 'public/assets')
 
 # Opt-in — small files (≤ 4 MiB each, up to 256 entries) held in
-# process memory; stat() syscall throttled to once per second per
+# process memory; cached-body validation throttled to once per second per
 # entry; sibling-existence answers memoised across requests.
 app.static('/assets', 'public/assets', cache=True)
 ```
@@ -137,11 +132,8 @@ When you should turn it on:
 
 When to leave it off (the default):
 
-- nginx / a CDN fronts the framework — they handle the static path
-  far more efficiently than any in-process cache can.
+- A reverse proxy or CDN already serves the static paths.
 - You want edit-on-disk visibility to be immediate.
-- You're running the benchmark suites HttpArena's standard-mode
-  rules describe.
 
 The cache is per-process — multi-worker deployments hold a
 separate cache in each worker.

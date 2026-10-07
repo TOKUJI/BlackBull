@@ -1,30 +1,8 @@
-"""The high-level WebSocket handler object.
+"""Object-form WebSocket handlers.
 
-A [`WebSocket`][] wraps the raw ``(conn, receive, send)`` triplet so a
-handler works in **data and methods** instead of event dicts::
-
-    @app.route(path='/chat', scheme=Scheme.websocket)
-    async def chat(ws: WebSocket):
-        await ws.accept()
-        async for message in ws:
-            await ws.send_text(message)
-
-The equivalent raw handler has to know that the first ``receive()`` yields
-``websocket.connect``, that ``accept`` is a *send*, that a text message hides
-under ``event['text']`` while a binary one hides under ``event['bytes']``,
-and that the loop ends on a ``websocket.disconnect`` whose code lives in yet
-another key.  None of that is protocol knowledge — it is transport encoding,
-which is exactly what a framework should absorb.
-
-**The raw triplet form is not deprecated.**  It stays supported for at least
-a year (see ``docs/guide/websockets.md``); this object is additive, and both
-forms run over the same actor, codec, and sender.  Nothing about the wire
-changes — a handler that uses this object produces byte-identical frames to
-one that sends the dicts by hand.
-
-Naming follows the native-surface rule: this is a *native* surface, so it is
-unprefixed and lives outside ``asgi.py``.  The ``ASGIEvent`` dicts it builds
-are the boundary representation, and stay there.
+Accept before sending. Iteration ends on disconnect; receive() raises
+WebSocketDisconnect with code and reason. Raw (conn, receive, send) handlers
+remain supported; see docs/guide/websockets.md.
 """
 import json
 import logging
@@ -43,10 +21,7 @@ __all__ = ['WebSocket', 'WebSocketDisconnect',
            'handshake_accepted', 'mark_handshake_accepted',
            'handshake_closed', 'mark_handshake_closed']
 
-#: RFC 6455 §7.4.1 normal closure — the default for [`WebSocket.close`][WebSocket.close].
-#: Spelled out rather than imported from ``blackbull.server.constants``: this
-#: is a user-facing handler object, and the public package should not have to
-#: reach into the server stack for two integers.
+# RFC 6455 §7.4.1: normal closure, the default close code.
 _NORMAL_CLOSURE = 1000
 
 #: Close code reported when the peer went away without sending one.  RFC 6455
@@ -54,37 +29,10 @@ _NORMAL_CLOSURE = 1000
 #: what the *application* observes in that case.
 _NO_STATUS = 1005
 
-# ---------------------------------------------------------------------------
-# Handshake state, shared across the layers that can drive it
-# ---------------------------------------------------------------------------
-#
-# The handshake can be completed by the handler (``ws.accept()``), by
-# middleware that accepts on the handler's behalf
-# (``blackbull.middleware.websocket``), or by a raw handler sending the event
-# itself.  Whoever does it records the fact on the *connection*, so the other
-# layers can see it: without that, a middleware-accepted connection would
-# leave the WebSocket object waiting for a handshake that already happened —
-# and treating the client's first message as it.
-#
-# The state lives in the connection's WebSocket bag (``conn._ws``), which
-# already exists for exactly this kind of handshake internal (``send_101``,
-# ``auto_subprotocol``, the negotiated deflate params).  Plain dicts are
-# accepted too, mirroring [`blackbull.connection.disconnected`][blackbull.connection.disconnected] — the
-# middleware is unit-tested against a bare ``{}`` connection, and the
-# ``BB_FORCE_ASGI_SCOPE`` boundary threads a scope dict.
+# Handshake state is shared on the connection across handlers and middleware.
+# Consuming connect does not accept it; acceptance and closure are separate.
+# Keep these facts visible so another layer never reads a data message as connect.
 
-# Two *distinct* states, because middleware does both independently:
-#
-#   consumed  — the ``websocket.connect`` event has been taken off the receive
-#               channel, but nothing has been answered yet.  An auth
-#               middleware that pops connect so it can reject with a close
-#               code leaves the connection here (see
-#               examples/ChatServer/chatserver.py ``auth_mw``).
-#   accepted  — ``websocket.accept`` has been sent; the connection is live.
-#
-# Collapsing them would be a real bug, not a simplification: a handler that
-# adopted "accepted" from a merely-consumed connection would never send the
-# accept, and the client would hang on a handshake nobody completed.
 _CONSUMED_KEY = '_handshake_connect_consumed'
 _ACCEPTED_KEY = '_handshake_accepted'
 _CLOSED_KEY = '_handshake_closed'
@@ -297,11 +245,7 @@ class WebSocket:
     # ---- handshake -------------------------------------------------------
 
     async def _consume_connect(self) -> None:
-        """Pop the opening ``websocket.connect`` event, once.
-
-        The raw form makes every handler do this by hand before it may
-        accept.  It carries no information beyond "a client is offering a
-        handshake", so the object absorbs it.
+        """Consume the opening connect event once before accepting or rejecting.
         """
         if self._connect_seen:
             return
@@ -486,11 +430,8 @@ class WebSocket:
                 'receiving.')
         native = getattr(self._receive, 'next_message', None)
         if native is not None:
-            # Native channel (BlackBull's own recipient): the message *is* the
-            # str/bytes this method returns, and the close arrives as the
-            # WebSocketDisconnect this method raises — so there is nothing to
-            # build and nothing to take apart.  The dict loop below is the
-            # external-host / middleware-wrapped path.
+            # Native receives return str/bytes and raise WebSocketDisconnect.
+            # Wrapped or external channels use the dictionary loop below.
             try:
                 return await native()
             except WebSocketDisconnect as exc:

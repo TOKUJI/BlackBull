@@ -1,30 +1,8 @@
-"""Unified protocol registry.
+"""Protocol bindings own detection, framing reads and actor construction.
 
-BlackBull dispatches every accepted connection through a single
-[`ProtocolRegistry`][].  ``http1`` and ``http2`` are built-in *bindings*;
-non-HTTP protocols (raw TCP, and later MQTT/Redis) register their own bindings
-via [`BlackBull.raw_handler`][BlackBull.raw_handler] / [`BlackBull.register_protocol_handler`][BlackBull.register_protocol_handler].
-
-A *binding* owns protocol selection, *its own* framing reads, and Actor
-construction.  ``ConnectionActor`` peeks only a tiny protocol-agnostic
-discriminator prefix; the 24-byte
-HTTP/2 preface read and the HTTP/1.1 request-line read live in
-[`Http2Binding`][] / [`Http1Binding`][], reached through the single
-[`ProtocolBinding.serve`][ProtocolBinding.serve] entry point.
-
-Two dispatch routes:
-
-* **Detection** (the shared HTTP listener): ``ConnectionActor`` peeks the
-  discriminator and asks each [`ProtocolBinding`][] via ``claims`` — ALPN
-  first, then the ordered cleartext chain (``http2`` preface, ``http1``
-  fallback) — then calls the winner's ``serve``.
-* **Port-bound** (raw protocols): a binding registered with ``port=`` gets its
-  own listening socket; connections there skip detection entirely.
-
-Note:
-    Do not export the internal classes from ``blackbull/__init__.py``; the
-    public surface is [`BlackBull.raw_handler`][BlackBull.raw_handler] and
-    [`BlackBull.register_protocol_handler`][BlackBull.register_protocol_handler].
+ConnectionActor peeks without consuming; bindings claim by ALPN or ordered
+cleartext detection. Port-bound raw protocols skip detection. Keep internal
+bindings out of the top-level public exports.
 """
 from __future__ import annotations
 
@@ -37,6 +15,7 @@ from typing import Any
 
 from ..event_aggregator import EventAggregator
 from .deadline import ConnectionDeadline
+from .http1_actor import HTTP1Actor
 from .recipient import AbstractReader, _HTTP2_STREAM_QUEUE_DEPTH, _WS_READ_INLINE
 from .sender import AbstractWriter
 
@@ -77,11 +56,7 @@ class ProtocolContext:
 
 @dataclass
 class ConnectionView:
-    """Everything a [`ProtocolBinding`][] needs to build its Actor.
-
-    Assembled once per connection by ``ConnectionActor`` and handed to the
-    selected binding's ``serve_*`` method.  Keeps the binding API narrow and
-    decouples bindings from ``ConnectionActor``'s internals.
+    """Per-connection inputs for the selected ProtocolBinding to construct its actor.
     """
     reader: AbstractReader
     writer: AbstractWriter
@@ -167,15 +142,7 @@ class ProtocolBinding:
         return True
 
     def claims(self, prefix: bytes, alpn: str | None) -> bool:
-        """Unified detection predicate: does this binding own a connection whose
-        first bytes are *prefix* (with negotiated *alpn*)?
-
-        The single selection seam for cleartext + shared-port dispatch.
-        Default delegates to
-        [`matches_cleartext`][]; [`RawBinding`][] overrides it to consult
-        its [`ProtocolDetector`][].  ``alpn`` is accepted so a future binding
-        can claim on the negotiated token, not just the wire prefix.
-        """
+        """Claim a shared-port connection by prefix; defaults to matches_cleartext."""
         return self.matches_cleartext(prefix)
 
     async def serve(self, conn: ConnectionView) -> None:
@@ -246,7 +213,6 @@ class Http1Binding(ProtocolBinding):
         return True
 
     async def serve(self, conn: ConnectionView) -> None:
-        from .http1_actor import HTTP1Actor  # noqa: PLC0415
         # Nothing is pre-read.  Detection does not consume, so the actor reads
         # the whole head in one scan — pulling the first line here would split
         # that scan in two and, worse, hand the actor a head it must then
@@ -356,9 +322,7 @@ class ProtocolRegistry:
             b.alpn_token: b for b in self._cleartext if b.alpn_token
         }
         self._ports: dict[str, RawBinding] = {}
-        # Cached because ``ConnectionActor`` consults the order on EVERY accept
-        # while registration happens once at startup: rebuilding it per accept
-        # cost a dict copy plus two list allocations.
+        # Registration updates the cached detection order before accepts start.
         self._detection_order: tuple[ProtocolBinding, ...] = tuple(self._cleartext)
 
     def register(

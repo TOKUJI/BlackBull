@@ -1,13 +1,6 @@
-"""Declarative application configuration -- [`AppConfig`][].
-
-A small, typed, immutable holder for the server-facing settings that
-[`blackbull.BlackBull.run`][blackbull.BlackBull.run] and
-[`blackbull.serve`][blackbull.serve] accept as keyword arguments, so an
-application can declare them once instead of threading flags through.
-
-An explicit argument still wins over the config, and an environment variable
-wins over both; the Configuration guide gives the order in full and shows
-what each source looks like.
+"""Immutable startup configuration. Explicit run() arguments take precedence
+over BLACKBULL_* environment values, .env entries, AppConfig and defaults.
+See docs/guide/configuration.md for sentinel values and BB_* tuning.
 """
 from __future__ import annotations
 
@@ -168,14 +161,7 @@ def resolve_run_config(
 
 
 def log_config_sources(resolved: dict[str, Any], sources: dict[str, str]) -> None:
-    """Log one INFO line per deploy setting that was configured non-trivially.
-
-    Only the ``BLACKBULL_*``-resolvable deploy settings whose value came from
-    an environment variable, ``.env``, or an [`AppConfig`][] are reported —
-    explicit call-site arguments (the author already knows them) and plain
-    defaults are left silent to keep startup quiet.  Paths are logged; secrets
-    are not (a ``keyfile`` path is configuration, its contents never touch the
-    log).
+    """Log non-default deployment settings from env, .env or AppConfig; omit explicit call arguments.
     """
     if not logger.isEnabledFor(logging.INFO):
         return

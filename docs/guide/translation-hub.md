@@ -1,10 +1,8 @@
 # Protocol translation hub
 
-BlackBull speaks HTTP/1.1, HTTP/2, WebSocket, SSE, gRPC, and MQTT from a
-single Python process — which means *translating* between them needs no
-Envoy, no nginx, no sidecar, and no config file.  A device publishes over
-MQTT; a browser watches over WebSocket or SSE; a REST call becomes a gRPC
-invocation.  The glue is ordinary application code.
+The example translates MQTT publishes to WebSocket/SSE messages and exposes
+a gRPC handler through REST. Run it with one worker: the hub is in-process
+state, and MQTT belongs only to worker 0 in a multi-worker deployment.
 
 The complete working example is
 [`examples/translation_hub.py`](https://github.com/tokuji/BlackBull/blob/master/examples/translation_hub.py)
@@ -36,10 +34,6 @@ class Hub:
                 q.get_nowait()          # drop that subscriber's oldest
             q.put_nowait(item)
 ```
-
-That is the entire "message bus".  No broker process, no serialization
-hop — the dict flows from the MQTT tap to the WS/SSE handlers as a
-Python object.
 
 ## MQTT → WebSocket / SSE
 
@@ -83,9 +77,9 @@ method, and map `GrpcStatus` onto an HTTP status:
 
 ```python
 @app.route(path='/rooms/{room}/stats')
-async def rest_room_stats(room: str, scope: dict):
+async def rest_room_stats(room: str, conn):
     handler = grpc.lookup('/hub.Telemetry/RoomStats')
-    context = GrpcContext(scope)
+    context = GrpcContext(conn)
     try:
         payload = await handler(json.dumps(room).encode(), context)
     except GrpcError as exc:
@@ -97,16 +91,6 @@ async def rest_room_stats(room: str, scope: dict):
 `context.abort(GrpcStatus.NOT_FOUND, ...)` in the service surfaces as a
 `NOT_FOUND` status trailer to gRPC clients and as a `404` JSON error to
 REST clients — one handler, both protocols, consistent semantics.
-
-## Why this is hard elsewhere
-
-The conventional shape of this system is four processes and a gateway:
-an MQTT broker (Mosquitto), a translation worker, a gRPC service behind
-Envoy's gRPC-JSON transcoder, and the web server.  Each hop adds a
-serialization boundary, a network hop, a config file, and a failure mode.
-Here the entire hub is one `python` invocation whose "config" is the
-example file itself — and every protocol conversation is observable with
-the same [event API](events.md) the rest of BlackBull uses.
 
 (The [fault-injection](fault_injection.md) toolkit does **not** stretch
 this far: it covers HTTP/1.1 and HTTP/2.  gRPC gets transport-layer

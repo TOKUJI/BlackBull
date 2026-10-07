@@ -346,3 +346,38 @@ async def test_abstract_writer_sendfile_default_raises():
     bare = _Bare()
     with pytest.raises(NotImplementedError):
         await bare.sendfile(object(), 0, 1)
+
+
+@pytest.mark.asyncio
+async def test_write_timeout_bounds_a_connection_protocol_whose_transport_paused():
+    from blackbull.server.connection_protocol import ConnectionProtocol
+
+    proto = ConnectionProtocol()
+
+    class _FullTransport:
+        closed = False
+
+        def write(self, data):
+            proto.pause_writing()       # over the high-water mark
+
+        def close(self):
+            self.closed = True
+
+        def is_closing(self):
+            return self.closed
+
+        def get_extra_info(self, name, default=None):
+            return default
+
+        def pause_reading(self):
+            pass
+
+        def resume_reading(self):
+            pass
+
+    transport = _FullTransport()
+    proto.connection_made(transport)
+    w = AsyncioWriter(proto, write_timeout=0.05)
+    with pytest.raises(ConnectionResetError, match='write timeout'):
+        await asyncio.wait_for(w.write(b'too big to fit in send buffer'), 5)
+    assert transport.closed

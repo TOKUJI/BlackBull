@@ -3,9 +3,12 @@
 HTTP1Actor drives the keep-alive loop for one TCP connection.
 RequestActor owns the lifetime of a single HTTP request.
 """
+import asyncio
 import ipaddress
+from functools import lru_cache
 import logging
 import re
+import time as _time
 from base64 import b64encode, b64decode
 from binascii import Error as BinasciiError
 from collections.abc import Awaitable, Callable
@@ -13,12 +16,14 @@ from hashlib import sha1
 from http import HTTPStatus
 
 from ..actor import Actor, Message
+from ..env import get_settings
 from ..event_aggregator import EventAggregator
 from ..asgi import ASGIReceiveCallable, ASGISendCallable
 from ..connection import (
     Connection, bind_receive_channel)
 from ..headers import Headers
-from ..protocol.framing import method_is, parse_content_length
+from ..protocol.framing import (method_is, parse_content_length,
+                                split_transfer_codings)
 from .deadline import ConnectionDeadline
 from .request_target import split_path_query
 from .recipient import (CONNECTION_MUST_CLOSE, CONNECTION_NEEDS_DRAIN,
@@ -53,12 +58,7 @@ _H1_PATHSEND_EXTENSIONS = {'http.response.pathsend': {}}
 # RFC 9112 §4 — HTTP-version = "HTTP/" DIGIT "." DIGIT
 _HTTP_VERSION_RE = re.compile(rb'\AHTTP/\d\.\d\Z')
 
-# The RFC 9110 field grammar — the name alphabet and the allowed value
-# octets — is defined once in ``blackbull.protocol.field_grammar``, so HTTP/2
-# cannot validate against a different set than this one.  `_parse` reads both
-# as bytes tables, which is what makes each check one C-level pass;
-# `tests/unit/test_parse_octet_tables.py` audits the name table against the
-# frozenset form of it, octet for octet.
+# Share field octet grammar with HTTP/2.
 from ..protocol.field_grammar import (
     COMMON_METHODS_OCTETS, FIELD_VALUE_ALLOWED_OCTETS, TCHAR_OCTETS,
     URI_SCHEME_RE, method_token_is_valid)
@@ -76,31 +76,19 @@ def _block_values_are_clean(data: bytes) -> bool:
     return residue.count(b'\r\n') * 2 == len(residue)
 
 
-# The cache key is attacker-controlled, and the resource a peer can force us to
-# spend is **bytes**, not entries: an entry-count-only bound would let 7 x 8 KiB
-# never-repeating lines per request grow to ~1 MiB per connection, held for as
-# long as the peer keeps it alive.  A captured Chromium page load needs 26
-# distinct lines totalling 988 B, longest 145 B, so real traffic stays uncapped.
+# Bound attacker-controlled cache keys by bytes, per connection;
+# an entry-count limit alone does not bound retained memory.
 
 #: Entries.
 _LINE_CACHE_MAX = 64
 
-#: Longest line admitted.  1 KiB clears the largest thing a browser really
-#: repeats (a ~145 B ``User-Agent``, a session ``Cookie``) by a wide margin.
 _LINE_CACHE_MAX_LINE = 1024
 
-#: Total key bytes per connection — the binding constraint, and the one that
-#: multiplies by concurrent connections: ~8 KiB/conn worst case (~16 KiB
-#: counting the retained name/value slices) against 988 B of real need.
+# Total retained key bytes per connection; value slices also consume memory.
 _LINE_CACHE_MAX_BYTES = 8192
 
 
-# ---------------------------------------------------------------------------
-# Shared default line table
-# ---------------------------------------------------------------------------
-# The admission rule — spec-enumerated values only, and never a framing header
-# — is in ``docs/about/internals.md`` §The shared spec table, and pinned by
-# ``tests/unit/test_default_line_table.py``.
+# Admit only explicitly allowed fixed lines to the shared table; exclude framing headers.
 _SPEC_ENUMERATED_LINES: tuple[bytes, ...] = (
     # Fetch Metadata Request Headers (W3C) — closed value sets.
     *(b'Sec-Fetch-Site: ' + v for v in
@@ -176,18 +164,11 @@ _FRAMING_NAMES = frozenset({
     b'trailer', b'te-framing',
 })
 
-# RFC 9110 §8.6 — at most one canonical leading SP (the byte after the colon),
-# then ``0`` or a no-leading-zero decimal.  Matched against the *raw*
-# post-colon bytes, before the generic OWS strip discards the evidence: leading
-# zeros, doubled/tab OWS and trailing OWS are all parser-disagreement smuggling
-# vectors (SMUG-CL-LEADING-ZEROS / -DOUBLE-ZERO / -TRAILING-SPACE /
-# -EXTRA-LEADING-SP, MAL-CL-TAB-BEFORE-VALUE) a lenient ``int()`` would accept.
+# Validate raw Content-Length before stripping OWS: accept one leading SP
+# and canonical decimal only. Reject leading zeros, tabs and trailing whitespace.
 _CL_STRICT_RE = re.compile(rb'\A ?(?:0|[1-9][0-9]*)\Z')
 
-# NORM-UNDERSCORE-CL / -TE — header names that differ from a framing
-# header only by ``_`` vs ``-``.  Underscore is a legal tchar, but these
-# two exist solely to desync a front-end that normalises ``_`` to ``-``
-# (CGI-style); nginx drops them by default, we reject.
+# Reject underscore spellings of framing headers to avoid proxy normalization ambiguity.
 _UNDERSCORE_FRAMING_NAMES = frozenset((
     b'content_length', b'transfer_encoding'))
 
@@ -264,34 +245,15 @@ def _declares_content(headers: 'Headers') -> bool:
     return bool(cl) and bool(cl.lstrip(b'0'))
 
 
-def _validate_message_framing(headers: 'Headers') -> int:
-    """RFC 9112 §6 — reject framing-header combinations that are unsafe.
+def _validate_message_framing(cls: list | None, tes: list | None) -> int:
+    """Validate framing once and return declared Content-Length, or zero.
 
-    These are the rules every smuggling-class incident I'm aware of has
-    exploited.  The ``Content-Length`` half is
-    [`parse_content_length`][blackbull.protocol.framing.parse_content_length]
-    — the same answer the senders give, so no third reading of the field can
-    drift from them.  What is here is the combination policy:
-
-    * §6.1 — if both ``Content-Length`` and ``Transfer-Encoding`` are
-      present, the message is anomalous.  We reject (the spec also
-      allows "ignore CL, use TE"; rejecting is the safer policy).
-    * §6.1 — unknown ``Transfer-Encoding`` codings → 501 Not Implemented.
-      We accept exactly ``chunked``; anything else (``gzip``, the
-      ``identity, chunked`` multi-coding form, etc.) raises
-      [`NotImplementedFramingError`][].
-
-    Returns the declared body length — the validated ``Content-Length``, or 0
-    when the message declares none (``chunked`` included: that framing
-    announces no total, so its body is counted as it arrives instead).
-    Returned rather than looked up again because the common request carries no
-    ``Content-Length`` at all, making a second lookup a guaranteed index miss
-    plus the fallback probe's ``bytes.lower()`` allocation, on the per-request
-    path.
+    Reject CL+TE, malformed lists, conflicting lengths, and non-final or doubled
+    chunked with 400. Only bare chunked is implemented: other codings or
+    parameters raise NotImplementedFramingError (501). The shared split retains
+    parameters, so parametered chunked still counts when grading order and
+    multiplicity. Chunked declares no total; count its body while receiving.
     """
-    cls = headers.getlist(b'content-length')
-    tes = headers.getlist(b'transfer-encoding')
-
     if cls and tes:
         raise BadRequestError(
             'Content-Length and Transfer-Encoding both present '
@@ -305,28 +267,34 @@ def _validate_message_framing(headers: 'Headers') -> int:
             raise BadRequestError(str(exc)) from exc
 
     if tes:
-        codings = [c.strip().lower()
-                   for _, raw_value in tes for c in raw_value.split(b',')]
-        if codings == [b'chunked']:
-            pass  # RFC 9112 §6.1 — the one accepted form
-        elif b'chunked' not in codings:
+        try:
+            members = split_transfer_codings(tes)
+        except ValueError as exc:
+            # A list no reading can split (``gzip;bad``, a field of commas)
+            # declares a length no one can determine.
+            raise BadRequestError(str(exc)) from exc
+        if members == [(b'chunked', ())]:
+            return declared  # RFC 9112 §6.1 — the one accepted form
+        codings = [name for name, _params in members]
+        if b'chunked' not in codings:
             # A coding we don't implement, chunked absent (``gzip``,
             # ``deflate``) ⇒ 501 (nginx parity).
             raise NotImplementedFramingError(
                 f'Transfer-Encoding {codings!r} is not implemented')
-        elif codings[-1] != b'chunked' or codings.count(b'chunked') > 1:
+        if codings[-1] != b'chunked' or codings.count(b'chunked') > 1:
             # chunked present but not the sole final coding (``chunked, gzip``,
-            # ``chunked, chunked``) ⇒ the message length is undeterminable, and
-            # a server MUST NOT process it (SMUG-TE-NOT-FINAL-CHUNKED).
+            # ``chunked, chunked``; a parametered ``chunked`` counts too) ⇒ the
+            # length is undeterminable, and a server MUST NOT process the
+            # message (SMUG-TE-NOT-FINAL-CHUNKED).
             raise BadRequestError(
                 f'Transfer-Encoding with chunked not the sole final coding: '
                 f'{codings!r}')
-        else:
-            # chunked IS final but preceded by a coding we can't decode
-            # (``gzip, chunked``) ⇒ 501.
-            raise NotImplementedFramingError(
-                f'Transfer-Encoding {codings!r} applies an unimplemented '
-                f'content coding before chunked')
+        # chunked IS final and sole but the list is still not the one accepted
+        # form: a coding precedes it (``gzip, chunked``) or a parameter sits on
+        # it (``chunked; ext=1``, RFC 9112 §7.1) ⇒ 501.
+        raise NotImplementedFramingError(
+            f'Transfer-Encoding {members!r} applies an unimplemented '
+            f'coding or parameter with chunked')
 
     return declared
 
@@ -339,16 +307,8 @@ _HOST_FORBIDDEN_BYTES = (
     frozenset(b'/?# \t@') | frozenset(range(0x20)) | frozenset({0x7F})
     | frozenset(range(0x80, 0x100)))
 
-# §3.2.2 puts the brackets of an IP-literal in an authority only around an
-# IPv6 address, so they join the same scan: one pass over the octets that can
-# make a Host value invalid, and the octet it reports decides which rule
-# applies.  Folding them in here rather than testing for them separately is
-# what keeps the ASCII rule (BLA-293) on the single pass it already paid for.
-#
-# RFC 3986 §3.2.2 — the host is required, and outside the brackets a
-# reg-name carries no ``:``: the one colon is the port delimiter and its tail
-# is ``*DIGIT``.  A missing host or a non-digit port tail is refused here too,
-# on the same pass.
+# RFC 3986 §3.2.2: brackets enclose IPv6, and an unbracketed colon starts
+# a numeric port. Keep host and port validation on the authority boundary.
 _AUTHORITY_SCAN_BYTES = _HOST_FORBIDDEN_BYTES | {0x5B, 0x5D}  # '[' ']'
 _AUTHORITY_SCAN_RE = re.compile(
     b'[' + re.escape(bytes(sorted(_AUTHORITY_SCAN_BYTES))) + b']'
@@ -358,12 +318,7 @@ _AUTHORITY_SCAN_RE = re.compile(
 _TARGET_ALLOWED_OCTETS = bytes(range(0x21, 0x7F))
 
 
-# RFC 3986 §3.2.2 — IP-literal = "[" IPv6address "]"; the port that may follow
-# it keeps the authority's lax octet rule (the reg-name path's port is
-# validated in ``_authority_is_valid``).
-# ``IPvFuture`` is not accepted even though §3.2.2 lists it beside
-# ``IPv6address``: nothing emits it, and the one stdlib reading of it is a
-# case-sensitive ``v`` special case with a laxer tail than the production.
+# Accept bracketed IPv6; IPvFuture is unsupported.
 def _ip_literal_is_valid(value: bytes) -> bool:
     """RFC 3986 §3.2.2 — whether *value*'s bracketed host is an IPv6 address."""
     if (
@@ -392,17 +347,17 @@ def _ip_literal_is_valid(value: bytes) -> bool:
 
 
 def _authority_is_valid(value: bytes) -> bool:
-    """RFC 3986 §3.2 — whether *value* is a URI authority.
-
-    The one scan decides: a forbidden octet, a missing host, or a port tail
-    that is not ``*DIGIT`` refuses the value, and a bracket hands it to
-    §3.2.2's IP-literal grammar.  Neither caller reads a reason, so the
-    message it raises names the value and nothing finer.
+    """Validate a URI authority against RFC 3986 §3.2, including bracketed IP literals.
     """
     match = _AUTHORITY_SCAN_RE.search(value)
     if match is None:
         return True
     return match[0] in (b'[', b']') and _ip_literal_is_valid(value)
+
+
+# A client repeats its authority on every request; the answer depends only on
+# the bytes, so it is remembered (bounded: the bytes are the peer's).
+_authority_is_valid = lru_cache(maxsize=256)(_authority_is_valid)
 
 
 def _parse_host_header(value: bytes, default_port: int) -> tuple[str, int]:
@@ -435,25 +390,25 @@ def _parse_host_header(value: bytes, default_port: int) -> tuple[str, int]:
     return _dec(host), default_port
 
 
-def _validate_host(headers: 'Headers') -> None:
-    """RFC 9112 §3.2 / §7.2 — Host MUST be present and contain a valid
-    URI-authority component.  Inputs such as ``host: 0/0`` and an empty
-    host are accepted by a lenient parser and rejected with 400 by nginx;
-    this check keeps BlackBull on the RFC side of that split.
+def _validate_host(hosts: list | None) -> bytes | None:
+    """Validate Host presence and URI-authority syntax (RFC 9112 §3.2, §7.2).
+
+    Return the received value, or None when absent.
     """
-    hosts = headers.getlist(b'host')
-    if len(hosts) > 1:
+    if hosts is not None and len(hosts) > 1:
         raise BadRequestError(
             f'multiple Host headers ({len(hosts)} — smuggling vector)')
     if not hosts:
         # The version-aware presence rule lives in ``_parse``, which knows the
         # request version; this helper only grades a value that is present.
-        return
-    value = hosts[0][1].strip(b' \t')
+        return None
+    received = hosts[0][1]
+    value = received.strip(b' \t')
     if not value:
         raise BadRequestError('empty Host header value')
     if not _authority_is_valid(value):
         raise BadRequestError(f'invalid Host authority {value!r}')
+    return received
 
 
 # ---------------------------------------------------------------------------
@@ -497,15 +452,9 @@ class RequestActor(Actor):
 
     def bind(self, conn: Connection, recipient: ASGIReceiveCallable,
              send: ASGISendCallable) -> 'RequestActor':
-        """Point this actor at the next request on the same connection.
+        """Bind the next sequential HTTP/1.1 request; retain per-connection settings.
 
-        HTTP/1.1 dispatches one request at a time per connection, so the
-        instance is free between requests and rebinding it is indistinguishable
-        from building a new one.  ``app``, ``aggregator`` and ``force_asgi``
-        are per-connection and stay put.
-
-        Deliberately **not** available to HTTP/2, whose streams are concurrent:
-        two live requests sharing one actor would interleave their fields.
+        Do not share this actor across concurrent HTTP/2 streams.
         """
         self._conn = conn
         self._recipient = recipient
@@ -513,16 +462,12 @@ class RequestActor(Actor):
         return self
 
     async def run(self) -> None:  # override: single-shot, no inbox loop
-        # Inlined rather than a helper call: the per-request hot path, where an
-        # extra call frame measured ~0.1-0.2 %.
+        # Keep the common validation branch inline on the per-request path.
         if self._force_asgi:
             target = self._conn.to_asgi_scope(force_asgi=True)
         else:
             target = self._conn
-        # Bind the *raw* recipient, before any disconnect-detecting wrapper
-        # exists: binding the wrapper closes a per-request reference cycle
-        # (target._receive → wrapper → target) reclaimable only by the cyclic
-        # GC, and cost tail latency.  Idempotent.
+        # Bind the raw recipient before wrappers to avoid a target/wrapper reference cycle.
         bind_receive_channel(target, self._recipient)
         # Only when a listener observes it — otherwise the raw recipient, and
         # no per-request closure.  Body-level disconnect (``target.body()`` →
@@ -566,10 +511,12 @@ class HTTP1Actor(Actor):
     _ssl: bool = False
     _line_cache: 'dict[bytes, tuple[bytes, bytes]] | None' = None
     _line_cache_bytes: int = 0
-    _max_line: int | None = None
     #: Body length the current request declares, as validated by
     #: [`_validate_message_framing`][]; 0 when it declares none.
     _declared_body_len: int = 0
+    #: ``(content_length, chunked)`` of the request ``_parse`` validated last.
+    _request_framing: tuple[int | None, bool] = (None, False)
+    _expects_continue: bool = False
 
     def __init__(
         self,
@@ -608,10 +555,7 @@ class HTTP1Actor(Actor):
 
     async def run(self) -> None:
         """Keep-alive loop — process requests until connection closes."""
-        import asyncio  # noqa: PLC0415
-        import time as _time  # noqa: PLC0415
-        from ..env import get_settings as _get_settings  # noqa: PLC0415
-        cfg = _get_settings()
+        cfg = get_settings()
         driven_without_connection_actor = self._deadline is None
         if driven_without_connection_actor:
             self._deadline = ConnectionDeadline()
@@ -739,15 +683,8 @@ class HTTP1Actor(Actor):
                     await self._handle_upgrade(conn)
                     return
 
-                # RFC 9110 §15.5.14 — refused before a single octet is read.
-                # The per-read bound (``body_chunk_max``) caps what one read
-                # materialises, never the sum, so without this the peer picks
-                # how much memory the request costs.  Answered ahead of any
-                # ``Expect: 100-continue`` for the reason the status exists
-                # (RFC 9110 §10.1.1 — a final status tells the peer not to send
-                # the body), and the connection closes because the refused
-                # octets are still coming: reading the next request out of them
-                # is the smuggling shape.
+                # Refuse oversized declared bodies before Expect: 100-continue. Close without
+                # reusing framing positioned before the unread body (RFC 9110 §10.1.1, §15.5.14).
                 oversized = self._declared_body_len
                 if max_body_size and oversized > max_body_size:
                     logger.warning(
@@ -800,12 +737,7 @@ class HTTP1Actor(Actor):
                 if not ok:
                     break  # unhandled error — close connection
 
-                # Loop tail, and no per-path exemption — see
-                # ``docs/about/internals.md`` §Keep-alive drain invariant.
-                # One verdict rather than two predicates: whether the message
-                # boundary survived, and so what this connection may do next, is
-                # the recipient's judgement, and asking ``must_close`` and then
-                # ``needs_drain()`` left the two free to drift apart.
+                # Every keep-alive exit uses the recipient drain verdict; see the drain invariant.
                 verdict = inner_receive.after_dispatch()
                 if verdict is CONNECTION_MUST_CLOSE:
                     break
@@ -848,13 +780,7 @@ class HTTP1Actor(Actor):
         (``BB_HEADER_MAX_TOTAL``) is enforced in ``run()``, which sees the
         accumulating buffer; per-line is cheaper here, post-split.
         """
-        # Memoised per connection.  The cost removed is not ``get_settings()``
-        # (it is ``functools.cache``d) but the ``from ..env import`` statement
-        # that would run ahead of it on every single parse.
-        max_line = self._max_line
-        if max_line is None:
-            from ..env import get_settings as _get_settings  # noqa: PLC0415
-            max_line = self._max_line = _get_settings().header_max_line
+        max_line = get_settings().header_max_line
         lines = data.split(b'\r\n')
         # No line can be longer than the block that contains it, so the
         # per-line walk is only reachable for a block that is itself over the
@@ -965,20 +891,16 @@ class HTTP1Actor(Actor):
         cache = self._line_cache
         if cache is None:
             cache = self._line_cache = {}
-        # A probe into a cache known to be empty buys nothing, and on a
-        # connection's first request that is every probe.  Decided once per
-        # request, not once per line.
         do_lookup = len(cache) > 0
 
         raw: list[tuple[bytes, bytes]] = []
+        index: dict[bytes, list[tuple[bytes, bytes]]] = {}
         for line in lines[idx + 1:]:
             if not line:
                 # Empty line = end of headers; anything after is body (already
                 # split off upstream because we read until CRLFCRLF).
                 continue
-            # Too long to be admitted ⇒ skip the cache entirely, the lookup
-            # included: hashing 8 KiB for an answer that is always "no" is the
-            # adversary's cheapest way to spend our CPU.
+            # Only probe lines eligible for cache admission.
             cacheable = len(line) <= _LINE_CACHE_MAX_LINE
             if cacheable:
                 # This peer's own lines first, then the shared spec table.
@@ -990,10 +912,13 @@ class HTTP1Actor(Actor):
                     # *this* block: the hit was proved clean when it was
                     # admitted, and its bytes have not changed since.
                     raw.append(hit)
+                    same = index.get(hit[0])
+                    if same is None:
+                        index[hit[0]] = [hit]
+                    else:
+                        same.append(hit)
                     continue
-            # RFC 9112 §5.2 — obs-fold MUST be rejected in requests.  Indexing
-            # skips the one-byte slice a `line[:1]` comparison would allocate;
-            # the empty-line case is retired by the `continue` above.
+            # RFC 9112 §5.2: reject obs-fold in requests.
             if line[0] in (0x20, 0x09):
                 raise BadRequestError(
                     f'obsolete line folding rejected: {line!r}')
@@ -1029,6 +954,11 @@ class HTTP1Actor(Actor):
                     f'{key!r}: {value!r}')
             pair = (lkey, value)
             raw.append(pair)
+            same = index.get(lkey)
+            if same is None:
+                index[lkey] = [pair]
+            else:
+                same.append(pair)
             # Admission last, and tested against the *resulting* byte total, so
             # the budget is a ceiling no final line can step over.
             if (cacheable
@@ -1043,23 +973,35 @@ class HTTP1Actor(Actor):
         if authority_override is not None:
             raw = [(k, v) for k, v in raw if k != b'host']
             raw.append((b'host', authority_override))
-        # Names were lowercased in the loop above while being validated;
-        # `Headers.__init__` would lowercase them a second time.
-        headers = Headers.from_lowered(raw)
+            headers = Headers.from_lowered(raw)
+            index = headers._index
+        else:
+            # The loop above lowercased each name and indexed it.
+            headers = Headers._adopt(raw, index)
 
         # RFC 9110 §8.3 — Content-Type is a singleton; multiple values are
         # ambiguous and a request-smuggling surface (COMP-DUPLICATE-CT).
-        if len(headers.getlist(b'content-type')) > 1:
+        content_types = index.get(b'content-type')
+        if content_types is not None and len(content_types) > 1:
             raise BadRequestError('multiple Content-Type headers')
 
         # RFC 9112 §6 — framing rejected before any body byte is read.  ``run``
         # weighs the returned length against ``BB_MAX_BODY_SIZE``.
-        self._declared_body_len = _validate_message_framing(headers)
-        _validate_host(headers)
+        content_length = index.get(b'content-length')
+        transfer_encoding = index.get(b'transfer-encoding')
+        self._declared_body_len = _validate_message_framing(
+            content_length, transfer_encoding)
+        self._request_framing = (
+            self._declared_body_len if content_length else None,
+            transfer_encoding is not None)
+        expect = index.get(b'expect')
+        self._expects_continue = (
+            expect is not None and expect[0][1].lower() == b'100-continue')
+        host_value = _validate_host(index.get(b'host'))
         # RFC 9112 §3.2 / §7.2 — every HTTP/1.1 (and later 1.x) request MUST
         # carry a Host header (RFC9112-7.1-MISSING-HOST); only HTTP/1.0, which
         # predates Host, may omit it (COMP-HTTP10-NO-HOST).
-        if version != b'HTTP/1.0' and not headers.getlist(b'host'):
+        if version != b'HTTP/1.0' and host_value is None:
             raise BadRequestError(
                 f'missing Host header on {version.decode("ascii")} request '
                 f'(RFC 9112 §3.2)')
@@ -1087,19 +1029,20 @@ class HTTP1Actor(Actor):
         if asterisk_form:
             conn._asterisk_form = True
 
-        if headers.getlist(b'host'):
+        if host_value is not None:
             default_port = _HTTPS_PORT if self._ssl else _HTTP_PORT
-            host, port = _parse_host_header(headers.get(b'host'), default_port)
+            host, port = _parse_host_header(host_value, default_port)
             conn.server = (host, port)
 
-        if headers.getlist(b'upgrade'):
+        upgrade = index.get(b'upgrade')
+        if upgrade:
             # RFC 9110 §7.8 — a server MAY ignore an Upgrade it does not
             # support and MUST NOT fail the request over it.  Only WebSocket
             # may switch ``conn.type``; any other token (notably curl's default
             # ``Upgrade: h2c`` probe on ``--http2``) is served as ordinary
             # HTTP/1.1, because dispatch has no route for it and the connection
             # would close with no reply.
-            if headers.get(b'upgrade').strip().lower() == b'websocket':
+            if upgrade[0][1].strip().lower() == b'websocket':
                 conn.type = 'websocket'
                 conn.scheme = 'ws'
 
@@ -1234,25 +1177,12 @@ class HTTP1Actor(Actor):
         loop_start_perf: float,
         loop_start_cpu: float,
     ) -> tuple[bool, 'HTTP1Recipient']:
-        """Prepare and run one request; return ``(keep_alive, inner_receive)``.
+        """Prepare and run a request; return (keep_alive, inner_receive).
 
-        Protocol-side preparation only: the access-log record, the sender's
-        per-request reset, the Expect/100-continue answer, the HEAD→GET
-        rewrite, and the recipient.  Everything app-facing is delegated to
-        [`RequestActor`][], the shared app boundary.
-
-        The HEAD→GET rewrite must run before [`RequestActor`][] snapshots
-        the app argument; reversed, the compat lane freezes ``method='HEAD'``,
-        the router finds no HEAD route, and the dual-path lane answers 405
-        where the native lane answers 200 (COMP-HEAD-NO-BODY).
-        ``test_head_dual_path.py`` is the guard.
+        Rewrite HEAD to GET before RequestActor snapshots the compatibility scope.
+        Keep the original method for access logs and suppress the response body.
         """
-        import asyncio  # noqa: PLC0415
-
-        # Only when something consumes it (access log / phase trace /
-        # request_completed listener).  Otherwise ``None``, skipping a
-        # per-request allocation and the ``conn.state`` dict it forces — the
-        # Connection graph's per-request objects are what the cyclic GC scans.
+        # Open records only for access logs, phase trace or lifecycle consumers.
         if _request_record_needed(self._aggregator):
             log_record = _AccessLogRecord.from_conn(conn)
             if _PHASE_TRACE:
@@ -1263,33 +1193,16 @@ class HTTP1Actor(Actor):
         else:
             log_record = None
 
-        # The sender is shared across keep-alive requests: without the reset
-        # ``_started`` stays True after the first response, and the timeout
-        # branch's ``if not send._started`` then skips the synthetic 408 on a
-        # second-or-later request.  ``_chunked`` / ``_buffered_status``
-        # likewise outlive their request.
+        # Reset all per-request sender state before dispatch or interim responses.
         send.reset_per_request_state()
 
-        # RFC 9110 §10.1.1 / §15.2 — MUST NOT send a 1xx to an HTTP/1.0 client
-        # (COMP-NO-1XX-HTTP10); the Expect header is ignored.
-        #
-        # Placed after the reset and before the sender capture below.  Written
-        # before the reset, the previous response's "already complete" guard
-        # drops the interim response from request two onward and the peer
-        # stalls until its own Expect timeout; written after the capture, the
-        # interim status lands in the record the real response owns.
-        if (conn.http_version != '1.0'
-                and conn.headers.get(b'expect').lower() == b'100-continue'):
+        # Ignore Expect on HTTP/1.0. Reset before sending 100; attach capture after it
+        # so the final response record excludes the interim status.
+        if conn.http_version != '1.0' and self._expects_continue:
             await send(b'', HTTPStatus.CONTINUE)
 
-        # Inline access-log capture into the sender — avoids the per-event
-        # coroutine dispatch through a wrapper (7% of CPU in the py-spy
-        # profile).  RFC 9110 §9.3.2 — a HEAD response is the GET response
-        # without the body, synthesised by dispatching to the GET handler and
-        # stripping body bytes.  The rewrite lands on the Connection only: a
-        # materialized scope reads ``method`` back from it, so writing
-        # ``scope['method']`` too would force materialization for nothing.
-        # The access log keeps the original HEAD, from the request line.
+        # Dispatch HEAD to GET but suppress its body. Preserve the original HEAD
+        # in access logs; changing Connection must not materialize an ASGI scope.
         send._log_record = log_record
         send._head_mode = method_is(conn.method, 'HEAD')
         if send._head_mode:
@@ -1300,9 +1213,10 @@ class HTTP1Actor(Actor):
         first_request_on_connection = inner_receive is None
         if first_request_on_connection:
             inner_receive = RecipientFactory.http1(
-                self._reader, conn, body_timeout=cfg.body_timeout, deadline=dl)
+                self._reader, conn, body_timeout=cfg.body_timeout, deadline=dl,
+                framing=self._request_framing)
         else:
-            inner_receive.bind(conn)
+            inner_receive.bind(conn, self._request_framing)
 
         if conn._asterisk_form:
             # RFC 9112 §3.2.4 — ``OPTIONS *`` targets the origin, not a
@@ -1367,7 +1281,8 @@ class HTTP1Actor(Actor):
     def _should_keep_alive(self, conn) -> bool:
         """Return True if the connection should persist after this request."""
         http_version = conn.http_version
-        connection = conn.headers.get(b'connection', b'').lower()
+        fields = conn.headers._index.get(b'connection')
+        connection = fields[0][1].lower() if fields else b''
         if http_version == '1.1':
             return connection != b'close'
         return connection == b'keep-alive'

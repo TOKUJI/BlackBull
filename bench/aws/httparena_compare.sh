@@ -8,8 +8,8 @@
 # scripts/validate.sh and scripts/benchmark.sh, pulls results back,
 # and tears the instance down.
 #
-# Cost estimate: c7i.2xlarge at ~$0.36/hr × ~30 min = ~$0.18.
-# Override INSTANCE_TYPE to c7i.xlarge (~$0.18/hr) for ~$0.09.
+# AMD (c7a) by default: no SMT, so every vCPU is a physical core and runs
+# stay comparable across instance sizes.
 #
 # Usage:
 #   bash bench/aws/httparena_compare.sh
@@ -79,7 +79,7 @@ set -euo pipefail
 # headroom that the loadgen isn't competing with the framework for CPU.
 # Set BEFORE sourcing config.sh so config.sh's `: "${INSTANCE_TYPE:=...}"`
 # default no-ops (env-set value wins).  Override with the env var.
-: "${INSTANCE_TYPE:=c7i.2xlarge}"
+: "${INSTANCE_TYPE:=c7a.2xlarge}"
 export INSTANCE_TYPE
 
 # shellcheck source=config.sh
@@ -92,8 +92,15 @@ export TOPO=single
 
 : "${PROFILES:?must be set explicitly, space-separated (e.g. 'baseline baseline-h2 echo-ws json json-comp json-tls limited-conn pipelined static static-h2 upload')}"
 FRAMEWORKS="${FRAMEWORKS:-blackbull fastapi}"
-# Supported frameworks: blackbull, blackbull-uvloop, blackbull-asgiscope, fastapi, sanic, aiohttp
+# Supported frameworks: blackbull, blackbull-uvloop, blackbull-asgiscope,
+# blackbull-base, fastapi, sanic, aiohttp
 KEEP_INSTANCE="${KEEP_INSTANCE:-0}"
+case " $FRAMEWORKS " in *" blackbull-base "*)
+    if [ "${LOCAL_BB_WHEEL:-0}" != "1" ] || [ ! -f "${BASE_BB_WHEEL_PATH:-}" ]; then
+        echo "blackbull-base needs LOCAL_BB_WHEEL=1 and BASE_BB_WHEEL_PATH=<wheel>" >&2
+        exit 2
+    fi ;;
+esac
 SKIP_VALIDATE="${SKIP_VALIDATE:-0}"
 # STAGE_PEERS=0 leaves upstream HttpArena's own `sanic` / `aiohttp` entries in
 # place instead of overwriting them with this repo's.  Default 1 preserves the
@@ -444,6 +451,8 @@ fi
 #   blackbull-uvloop    BB_UVLOOP=1
 #   blackbull-asgiscope BB_FORCE_ASGI_SCOPE=1 (ASGI scope conversion on every
 #                       request — the dual-path lane, and Sprint 99's baseline)
+#   blackbull-base      the wheel at $BASE_BB_WHEEL_PATH (LOCAL_BB_WHEEL=1
+#                       only) — a release-to-release A/B on one instance
 #
 # Naming them in $FRAMEWORKS puts the variants on the *same instance in the
 # same session*, alongside the same peers.  That is the only way to read a
@@ -476,7 +485,8 @@ _BB_RSYNC_FILES=(
 _LOGGING_INI_COPY=''
 
 _stage_blackbull() {
-    local fw="$1" uvloop="$2" scope="$3"
+    local fw="$1" uvloop="$2" scope="$3" wheel="${4:-$LOCAL_WHEEL}"
+    local wheel_name; wheel_name="$(basename "$wheel")"
     local dir="HttpArena/frameworks/${fw}"
 
     echo ">>> staging ${fw} framework dir on the instance (BB_UVLOOP=${uvloop}"
@@ -500,9 +510,9 @@ _stage_blackbull() {
          echo '    build context:'; ls -1 ${dir}/"
 
     if [ "$LOCAL_BB_WHEEL" = "1" ]; then
-        echo "    uploading wheel $LOCAL_WHEEL_NAME ..."
+        echo "    uploading wheel $wheel_name ..."
         rsync -e "ssh ${SSH_OPTS[*]}" -az \
-            "$LOCAL_WHEEL" \
+            "$wheel" \
             "$SERVER_REMOTE:${dir}/"
     fi
 
@@ -520,9 +530,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \\
     PIP_NO_CACHE_DIR=1 \\
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-COPY ${LOCAL_WHEEL_NAME} /tmp/
+COPY ${wheel_name} /tmp/
 # asyncpg + redis back the async-db / crud profiles (Postgres + Redis sidecars).
-RUN cd /tmp && pip install --no-cache-dir "/tmp/${LOCAL_WHEEL_NAME}[compression,speed]" asyncpg redis
+RUN cd /tmp && pip install --no-cache-dir "/tmp/${wheel_name}[compression,speed]" asyncpg redis
 VOLUME /results
 
 COPY app.py launcher.py db.py grpc_bench.py /app/
@@ -583,6 +593,7 @@ for fw in $FRAMEWORKS; do
         blackbull)          _stage_blackbull blackbull "$BB_UVLOOP" "" ;;
         blackbull-uvloop)   _stage_blackbull blackbull-uvloop 1 "" ;;
         blackbull-asgiscope) _stage_blackbull blackbull-asgiscope "$BB_UVLOOP" 1 ;;
+        blackbull-base)     _stage_blackbull blackbull-base "$BB_UVLOOP" "" "$BASE_BB_WHEEL_PATH" ;;
     esac
 done
 
@@ -703,7 +714,7 @@ print("BB_UVLOOP=" + str(os.environ.get("BB_UVLOOP"))
 loop.close()
 '
 for fw in $FRAMEWORKS; do
-    case "$fw" in blackbull|blackbull-uvloop) ;; *) continue ;; esac
+    case "$fw" in blackbull|blackbull-uvloop|blackbull-base) ;; *) continue ;; esac
     _want=$([ "$fw" = "blackbull-uvloop" ] && echo 1 || echo "$BB_UVLOOP")
     echo ">>> verifying event loop for $fw (expect BB_UVLOOP=${_want}) ..."
     _probe=$(ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
@@ -887,6 +898,7 @@ cat > "$LOCAL_DEST/provenance.md" <<EOF
 - BlackBull:  blackbull==$BLACKBULL_VERSION ($([ "$LOCAL_BB_WHEEL" = "1" ] && echo "local wheel: $LOCAL_WHEEL_NAME" || echo "from PyPI"))
 - Harness ref: $(cd "$REPO_ROOT" && git rev-parse --short HEAD) — the commit app.py / launcher.py / meta.json were rsynced from, which is NOT necessarily where the wheel came from
 - Wheel sha256: $([ -n "${LOCAL_WHEEL:-}" ] && sha256sum "$LOCAL_WHEEL" | awk '{print $1}' || echo n/a)  (n/a = PyPI install)
+- Base wheel (blackbull-base): $([ -n "${BASE_BB_WHEEL_PATH:-}" ] && echo "$(basename "$BASE_BB_WHEEL_PATH") sha256 $(sha256sum "$BASE_BB_WHEEL_PATH" | awk '{print $1}')" || echo n/a)
 - Profiles:   $PROFILES
 - Frameworks: $FRAMEWORKS
 

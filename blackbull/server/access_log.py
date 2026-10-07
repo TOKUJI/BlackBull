@@ -16,9 +16,7 @@ from ..logger import enqueue_access_log
 
 _access_logger = logging.getLogger('blackbull.access')
 
-# Capture per-request wall + CPU checkpoints into AccessLogRecord.phases.  Off
-# by default: the extra perf_counter()/process_time() calls would show up in
-# benchmark numbers.  For one-off investigation runs, not production.
+# Diagnostic checkpoints are opt-in; their clock reads add request work.
 PHASE_TRACE: bool = os.environ.get('BB_PHASE_TRACE', '0') == '1'
 
 
@@ -38,22 +36,10 @@ def _escape(value: str) -> str:
 def open_record(conn, aggregator: 'EventAggregator | None',
                 loop_start: 'tuple[float, float] | None' = None,
                 ) -> "AccessLogRecord | None":
-    """Start a request's access-log record, or ``None`` if nothing reads it.
+    """Open a request record when a consumer exists; otherwise return None.
 
-    The one place that answers "does this request need a record, and if so
-    what does a fresh one look like".  Both protocol actors call it; neither
-    decides the gate, builds the record, or knows that ``conn.state`` is where
-    it is published.
-
-    *loop_start* seeds the phase trace with the keep-alive loop's entry
-    timestamps, which only the H/1 actor has to give.
-
-    The record is always built from the ``Connection``, never from an ASGI
-    scope: the actor has the parsed Connection on every lane, and on the
-    ``BB_FORCE_ASGI_SCOPE`` lane the emitted scope shares ``conn.state`` by
-    identity — so the app's rebuilt Connection reads back the same record.
-    That sharing is the contract ``BlackBull._dispatch`` relies on to source
-    ``request_completed``'s wire fields.
+    Publish in conn.state, shared by compatibility scopes. loop_start seeds
+    HTTP/1.1 keep-alive timing; snapshot wire fields before application rewrites.
     """
     if not request_record_needed(aggregator):
         return None
@@ -80,11 +66,7 @@ def start_record(conn) -> 'AccessLogRecord':
 
 
 def close_record(record: "AccessLogRecord | None") -> None:
-    """Finish a request's record and emit it.  A no-op when there is none.
-
-    Paired with [`open_record`][], so a caller that opened a record does not
-    also have to remember the final ``mark`` or repeat the ``is not None``
-    guard at every dispatch exit.
+    """Mark dispatch done and emit; no-op for None.
     """
     if record is None:
         return
@@ -93,14 +75,7 @@ def close_record(record: "AccessLogRecord | None") -> None:
 
 
 def close_ws_record(record: 'AccessLogRecord | None', close_code) -> None:
-    """Finish a WebSocket session's record and emit it.  A no-op when there is
-    none — a session that never opened a record (no consumer, per
-    [`request_record_needed`][]) must not crash its close path.
-
-    A session is not a request dispatch: it has no ``dispatch_done`` phase,
-    and what it reports instead is the close code the peer or the server
-    ended on.  Separate from [`close_record`][] for that reason, so neither
-    protocol actor has to know which terminal field belongs to which shape.
+    """Emit session close code without a dispatch_done phase; no-op for None.
     """
     if record is None:
         return
@@ -109,23 +84,11 @@ def close_ws_record(record: 'AccessLogRecord | None', close_code) -> None:
 
 
 def emit_access_log(record: 'AccessLogRecord') -> None:
-    """Emit *record* on the access logger if INFO is enabled.
+    """Emit on the access logger when INFO is enabled.
 
-    The ``isEnabledFor`` gate matters because ``record.as_extra()`` is
-    evaluated before ``logger.info`` decides to discard the call — measured at
-    ~1.2% of CPU under ``-R 5000`` with ``BB_ACCESS_LOG=0``.
-
-    The record is its own message (self-formatting via ``__str__``), so the
-    ``format()`` build runs on the logging listener thread; ``finalize()``
-    snapshots the duration first, so a deferred format still reports the
-    request's real duration rather than duration + queue latency.  The
-    structured ``extra`` fields stay eager — they are the documented public
-    access-log API, held by ``tests/integration/test_access_log.py``.
-
-    A default access logger is enqueued directly, skipping the stdlib
-    ``logging.Logger._log`` machinery that is ~93% of the loop-side emit cost.
-    User handlers or filters on ``blackbull.access`` would be bypassed by that,
-    so their presence takes the standard ``logger.info`` path instead.
+    Snapshot duration before deferred formatting so queue latency is excluded.
+    Keep structured extra fields eager. User handlers or filters require the
+    standard logging path; direct enqueue must not bypass them.
     """
     if _access_logger.isEnabledFor(logging.INFO):
         record.finalize()
@@ -222,9 +185,8 @@ class AccessLogRecord:
 
     @classmethod
     def from_conn(cls, conn) -> 'AccessLogRecord':
-        """Build directly from a [`Connection`][blackbull.connection.Connection]
-        so the self-hosted actor never materializes the ASGI
-        scope just to record the access line."""
+        """Snapshot parsed Connection fields without creating an ASGI scope.
+        """
         client = conn.client or ('-',)
         ae = b''
         rng = b''
@@ -261,10 +223,8 @@ class AccessLogRecord:
         return self
 
     def __str__(self) -> str:
-        """Self-formatting message body.  ``emit_access_log`` hands the record
-        to ``logger.info`` as the message so this — and the ``format()`` string
-        build it wraps — runs on the logging listener thread, not the event
-        loop.  Cached because several sink handlers may format the same record."""
+        """Format once and cache for multiple logging sinks.
+        """
         if self._formatted is None:
             self._formatted = self.format()
         return self._formatted

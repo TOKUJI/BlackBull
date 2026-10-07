@@ -1,22 +1,7 @@
-"""Per-connection rescheduled deadline.
+"""Loop-scoped shared deadline scanner.
 
-No per-connection asyncio timer.  One singleton ``TimerHandle`` per
-process re-arms itself every ``_TICK_S`` and walks the registry of
-armed [`ConnectionDeadline`][] instances for expirations, so arming
-costs a ``loop.time()``, a comparison and a set insertion — ~0.34 µs
-against the ~1.7 µs of a ``TimerHandle`` plus heap push plus cancel.
-
-Trade-off: a fired deadline lands within ``[now, now + _TICK_S]``
-rather than at the exact requested instant.  At the default
-``_TICK_S = 0.3 s`` this is ~3 % slop on the tightest configurable
-deadline (``BB_HEADER_TIMEOUT`` default 10 s) and ~1 % on the
-``body_timeout`` default 30 s.  Tune via ``BB_DEADLINE_TICK_MS``
-(milliseconds, default 300, floor 10).
-
-The scanner is loop-scoped and lazily started on the first ``arm``;
-it quiesces (cancels its own handle) when the registry empties and
-auto-resurrects on the next ``arm``.  Each worker process has its
-own scanner.
+Enforcement can lag by one BB_DEADLINE_TICK_MS interval. The registry must
+quiesce when empty and resume on the next arm; each worker owns its scanner.
 """
 from __future__ import annotations
 
@@ -31,11 +16,7 @@ _INF = float('inf')
 
 
 class _Scanner:
-    """Per-process singleton state for the tick scanner.
-
-    Stored as class attributes rather than a module-global dict so the
-    invariant "at most one handle armed at a time" is enforced by the
-    type system.
+    """Per-process scanner state; keep at most one tick handle armed.
     """
 
     _LOOP: ClassVar[asyncio.AbstractEventLoop | None] = None
@@ -176,27 +157,10 @@ class ConnectionDeadline:
 
 
 class WriteDeadline:
-    """Bounds a drain on a connection's writer, via the same scanner.
+    """Bound writer drain with a task owner selected per arm.
 
-    Rides in ``_Scanner._REGISTRY`` alongside
-    [`ConnectionDeadline`][] — the scanner only needs
-    ``_deadline_at`` and ``_fire_from_scanner``.  Two differences from
-    that class, both forced by the write path:
-
-    *Binding is per-arm, not per-construction.*  HTTP/2 drains the one
-    connection-level writer from per-stream tasks, so the task to cancel
-    is whichever one is parked in ``drain()`` right now — not whichever
-    one happened to build the writer.
-
-    *One owner at a time.*  Concurrent drains are not nested drains, so
-    a second entrant does not re-arm and does not interpret a firing —
-    it simply rides along.  Two tasks can only be inside ``drain()``
-    simultaneously when the transport is paused, which is precisely the
-    slow-read shape the timeout defends against; letting a later drain
-    push the deadline out would let a peer that dribbles
-    acknowledgements hold the connection open indefinitely.  When the
-    owner's deadline fires it closes the transport, which is what
-    resolves the riders.
+    Concurrent riders must not rearm or interpret firing. The owner closes the
+    transport on deadline, resolving every rider; one shared scanner serves all.
     """
 
     __slots__ = ('_loop', '_owner', '_deadline_at', '_fired',
@@ -264,20 +228,10 @@ class WriteDeadline:
 
 
 class WsIdleWatchdog:
-    """Per-connection WebSocket idle state, riding the shared tick scanner.
+    """Service quiet WebSocket control/deferred reads through the shared scanner.
 
-    Inline reading (the default) services PING/CLOSE only when the handler
-    calls ``receive()``.  A handler that goes quiet — long work between
-    reads, or send-only — stops servicing control frames, and (with a
-    ``websocket_message`` listener) stops producing events.  This watchdog
-    bounds both: while a connection has been quiet for more than one tick,
-    the scanner fires the connection's callback roughly every tick, and the
-    callback services buffered control frames / starts the deferred reader.
-
-    Registry state plus a callback, under this module's no-per-connection-timer
-    rule, re-armed on every fire so it keeps watching until [`disarm`][].
-    ``touch()`` on each receive/send keeps an actively-driven connection from
-    ever firing.
+    Receive/send touch activity; disarm removes the watch. Quiet connections
+    invoke the callback roughly each tick without per-connection timer handles.
     """
 
     __slots__ = ('_loop', '_idle_s', '_deadline_at', '_callback', '_registered')

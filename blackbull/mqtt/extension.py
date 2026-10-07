@@ -120,15 +120,7 @@ class MQTTExtension(Extension):
             yield Subscription(topic=tap.display_filter, callback=tap.callback)
 
     def iter_taps(self) -> Iterator[Tap]:
-        """Yield the compiled [`Tap`][] for each registered ``on_message`` handler.
-
-        The dispatch-side counterpart of [`iter_subscriptions`][]: that
-        method yields the *display* form (``topic`` as the application wrote
-        it, ``{name}`` captures restored) for documentation tools; this yields
-        the already-compiled [`Tap`][] objects, so a dispatch consumer
-        (``MQTTTestBroker``) can feed them straight to
-        [`blackbull.mqtt.tap.run_taps`][blackbull.mqtt.tap.run_taps] without re-parsing the filters.
-        Both reflect the handlers registered *at call time*.
+        """Yield compiled tap registrations present at call time.
         """
         yield from self._handlers
 

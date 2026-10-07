@@ -1,18 +1,8 @@
 # Security model
 
-BlackBull parses every protocol itself and accepts connections directly, so
-it is the first thing an untrusted peer talks to. This page states what that
-peer can and cannot make the server spend, what the limits are out of the box,
-and what BlackBull explicitly does **not** claim.
-
-It describes the version it ships with. Where a limit is on by default, that is
-stated; where it is off, that is stated too, along with what to set.
-
-Most of it is about the server. The async HTTP client under `blackbull/client/`
-appears **after** the server rows in the tables below, at its own posture: it
-reads a response from a peer the operator chose, not a request from one who
-chose us, and that is a different standard — stated where it differs rather
-than assumed.
+Use this page to choose resource bounds. The tables cover audited paths, not
+a proof that every growable path has been found. Client and server limits
+have separate owners.
 
 ## Scope and trust boundary
 
@@ -49,20 +39,8 @@ Named non-goals — real limits, not oversights:
 > **A path a peer can grow gets a bound on one unit, on the total, and on how
 > long it may take.**
 
-Read that as the **rule this project holds itself to**, not as a proven
-property of the whole surface. Applying it is what the table below records;
-finding every path it should apply to is a separate problem, and a harder one
-(see [Non-claims](#non-claims)).
-
-The three questions are not interchangeable. A total cap with no time bound
-lets a peer hold a slot for as long as the cap allows; a time bound with no
-total cap lets it deliver forever in small, timely pieces. Almost every gap
-this project has found in its own defences was one shape — a cap on one unit
-standing in for a cap on the total. The exception is instructive: the HTTP/2
-priority tree was bounded per unit and had no total because nobody had counted
-it as storage at all, since nothing ever read what it stored. **A write with no
-reader is still a growable path.** Each row below names the knob for each
-column.
+Apply the rule to each growable path, including write-only state. Unit,
+aggregate, count and time limits are independent; one cannot replace another.
 
 | Path | One unit | Total | Time |
 |---|---|---|---|
@@ -101,12 +79,9 @@ Full descriptions: [Environment variables](../reference/env-vars.md).
 
 ### Four limits that are less obvious than they look
 
-**A message is bounded by what your handler receives, not by what the wire
-carried.** `permessage-deflate` ratios measured in this codebase reach
-**1028.8:1**, so a WebSocket frame far under the 64 MiB frame cap can still
-inflate to gigabytes. `BB_WS_MAX_MESSAGE_SIZE` bounds the message *after*
-fragment reassembly and *after* inflation, and the inflate is bounded by zlib
-itself — an over-sized message is refused without ever being built.
+**Bound messages after reassembly and decompression.** A small frame can
+inflate to a large message. `BB_WS_MAX_MESSAGE_SIZE` bounds inflation before
+the oversized result is materialized; a frame cap alone does not.
 
 **A size cap is judged from what the peer declares, before its payload is
 read.** An over-cap `Content-Length`, an over-cap MQTT Remaining Length, and an
@@ -150,7 +125,7 @@ from a peer who chose us.
 | Server | WebSocket | `bounded-by-default` | message bounded post-reassembly and post-inflation; a silent peer is probed with a PING and closed if it does not answer |
 | Server | MQTT | `bounded-by-default` | limits are also *advertised* in CONNACK, so conforming clients stay inside them; see qualification 3 |
 | Client | HTTP/1.1 | `bounded-when-configured` | two of its bounds ship off; see qualification 4 |
-| Client | HTTP/2 | `bounded-when-configured` | the same two, and one of them is not merely off but absent; see qualification 4 |
+| Client | HTTP/2 | `bounded-when-configured` | the same two default-open bounds; see qualification 4 |
 
 **Four qualifications, stated here rather than in a footnote**, because they
 are the difference between the label and the whole truth:
@@ -163,19 +138,13 @@ are the difference between the label and the whole truth:
    rate floor, not a hole in either. nginx and Kestrel have the same property.
    Set `BB_REQUEST_TIMEOUT` if your application has no long-lived requests.
 
-2. **The default connection cap is only as protective as your `ulimit`.**
-   `BB_MAX_CONNECTIONS` defaults to `auto`, which derives the cap from the
-   process's own `RLIMIT_NOFILE` less a 64-descriptor reserve. That is finite
-   and honest — a cap above the fd budget cannot be honoured, because the
-   descriptors run out first — but on a host whose limit is 1,048,576 the
-   derived cap is ~1,048,512. It bounds *descriptor exhaustion*, not
-   event-loop health. For the latter, set an explicit number; 1024 is a
-   typical single-loop value.
-
-   Connections beyond the cap wait in the accept queue and each receives a
-   `503`, on the default event loop.  Under `BB_UVLOOP=1` a burst beyond the
-   cap can leave clients unanswered; see [Sizing the connection cap under
-   uvloop](../deployment/unix-and-fd.md#sizing-the-connection-cap-under-uvloop).
+2. **An auto connection cap is a descriptor budget, not a memory budget.**
+   `auto` subtracts 64 reserved descriptors and those already open from
+   `RLIMIT_NOFILE`. Set an explicit cap for the worker's memory and CPU budget,
+   allowing for descriptors the application opens after acceptance starts.
+   TLS handshakes count from accept. Excess connections wait in the accept
+   queue; HTTP/1.1 and prior-knowledge h2c get best-effort 503, while ALPN-h2
+   and raw connections close silently.
 
 3. **An MQTT session that never expires is bounded by the total, not by the
    clock.** §3.1.2.11.2 defines a Session Expiry Interval of `0xFFFFFFFF` as
@@ -186,17 +155,11 @@ are the difference between the label and the whole truth:
    deadline, so they cost nothing while none is pending. Sessions live in
    memory only and do not survive a restart.
 
-4. **The client's rung is the generous reading.** Thirteen `BB_CLIENT_*`
-   bounds refuse traffic, and two — `BB_CLIENT_BODY_MAX_TOTAL` and
-   `BB_CLIENT_MIN_BODY_RATE` — ship off, which is exactly what
-   `bounded-when-configured` says. (Fifteen `BB_CLIENT_*` variables exist;
-   `BB_CLIENT_H2_ENABLE_PUSH` is a conformance switch and
-   `BB_CLIENT_MIN_BODY_RATE_GRACE` a modifier of the floor, and neither
-   refuses anything on its own. That split is not an editorial choice:
-   `_CLIENT_CAPS` and `_CLIENT_NOT_A_CAP` in
-   `tests/unit/test_cap_log_sites.py` declare it, and
-   `test_every_client_env_var_has_a_verdict` fails on the day a new variable
-   arrives with neither verdict.)
+4. **Client buffered-body and rate bounds default off.** Set
+   `BB_CLIENT_BODY_MAX_TOTAL` when response size is predictable, and
+   `BB_CLIENT_MIN_BODY_RATE` only for transfers expected to make sustained
+   progress. Both apply to HTTP/1.1 and HTTP/2. Client send and WebSocket
+   limits use client-owned settings, separate from server tuning.
 
 ## Defaults and deployment checklist
 
@@ -228,15 +191,6 @@ occupy, because the buffered body costs about **twice** the cap in peak
 memory. `BB_CLIENT_MIN_BODY_RATE` asserts the peer is a transfer rather than a
 stream, which an event stream or a long poll is not.
 
-How the defaults compare, verified against primary sources:
-
-| Limit | BlackBull | Peer |
-|---|---|---|
-| Max request body | 30 MiB (31,457,280 B) | Kestrel `MaxRequestBodySize` 30,000,000 B (~28.6 MB) — the same class, not the same number |
-| Min request body rate | 240 B/s, 5 s grace | Kestrel `MinRequestBodyDataRate` 240 B/s, 5 s grace — identical |
-| Max connections | derived from `RLIMIT_NOFILE` | HAProxy `maxconn` also defaults to `ulimit -n`; nginx `worker_connections` 512; Kestrel `MaxConcurrentConnections` unlimited |
-| HTTP/2 keep-alive ping | on, 300 s delay / 30 s timeout | Kestrel `KeepAlivePingDelay` disabled by default, `KeepAlivePingTimeout` 20 s |
-
 ## Evidence
 
 Every claim on this page is backed by a test or an external conformance suite.
@@ -261,23 +215,10 @@ Every claim on this page is backed by a test or an external conformance suite.
 
 ## Non-claims
 
-Stated plainly, because a security page that only lists strengths is worth
-less than one that draws its own boundary:
+The limits do not cover volumetric floods or arbitrary application resource
+use. No third-party audit or red-team exercise establishes completeness.
+Treat the tables as audited paths, not proof of absence of other paths.
 
-- **No third-party security audit.** No external firm has reviewed this code.
-- **No red-team exercise.** The limits above were derived by auditing the code
-  for growable paths, not by attacking a running deployment.
-- **The coverage above is an audit result, not a proof.** It comes from reading
-  the code for paths a peer can grow, and that method has found paths it had
-  previously missed — including twice on rows it had already written down. Read
-  the table as *what has been looked at*, not as *what exists*.
-- **Not volumetric-DoS protection.** Bandwidth and SYN floods are answered
-  upstream.
-- **A malicious application handler is out of scope.** BlackBull bounds what a
-  *peer* can spend, not what your own code can.
-- **"No known gaps" is not "no gaps."** A bound that no one has found missing is
-  not the same as a bound proven complete. This work is continuing, not
-  finished.
 - **The server sends `100 (Continue)` only to HTTP/1.1.** An HTTP/1.0 client
   gets no interim response at all and its `Expect` is ignored (COMP-NO-1XX-HTTP10),
   so a client that waits for the signal stalls until its own timeout. The
@@ -313,10 +254,5 @@ contrast is visible:
 - **A buffered response body costs about twice the cap in peak memory.**
   Reaching ~1× means `stream()`, which exposes no status, no headers and sits
   outside the cap — so today a caller can have ~1× *or* all three, never both.
-- **This is an audit result, not a proof.** The client's read paths were
-  enumerated by hand; that method has missed paths on this codebase before,
-  and it will again. No known gaps is not no gaps. What the rows above claim
-  is that each named bound holds — not that the list of rows is complete.
-
 Found something? Please open an issue at
 [github.com/TOKUJI/BlackBull](https://github.com/TOKUJI/BlackBull/issues).

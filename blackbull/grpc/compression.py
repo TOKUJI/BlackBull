@@ -1,30 +1,7 @@
-"""gRPC message compression (the ``grpc-encoding`` header + LPM Compressed-Flag).
+"""Per-message gRPC gzip compression.
 
-Only ``gzip`` is implemented, via the stdlib ``zlib`` in gzip-framing mode
-(RFC 1952); ``identity`` (no compression) needs no code.  gzip is the encoding
-grpcio and grpc-go negotiate by default, so it covers the real interop cases.
-
-Compression is a **transport** concern and lives here beside the LPM codec, not
-in a middleware and not in a serialisation package: gRPC compresses each message
-*inside* its Length-Prefixed-Message frame (the flag + length stay in clear), so
-it is entangled with framing, not a whole-body byte transform a ``send``-wrapper
-could apply.  A second codec (deflate, snappy, …) is the one anticipated
-extension of *this* module: lift ``SUPPORTED`` to a
-``{grpc-encoding-name: (compress, decompress)}`` registry and route it through
-the two negotiation points already in [`asgi`][blackbull.grpc.asgi] (the request
-``grpc-encoding`` lookup and the response ``grpc-accept-encoding`` selection).
-Deferred until a real second codec is needed — YAGNI, gzip is the interop floor.
-
-Compression is only *one form* of gRPC runtime extension, and this registry is
-**not** the runtime's extension model.  Do not fold other extension forms into
-"compression": call-level concerns are gRPC interceptors (the analogue of
-``@app.intercept``); service-level, protobuf-carrying features (reflection,
-health, rich errors) are the Track B package; new wire protocols attach via the
-framework Extension mechanism.  Keep the problem's scope where it belongs.
-
-This module is pure compression, with **no** gRPC-status dependency (mirroring
-[`codec`][blackbull.grpc.codec]): callers translate [`DecompressionError`][]
-into the appropriate gRPC status.
+The flag and length stay uncompressed, so this is not whole-body middleware.
+Callers translate DecompressionError into status; this codec owns no status.
 """
 from __future__ import annotations
 

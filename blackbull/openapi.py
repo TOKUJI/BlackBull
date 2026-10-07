@@ -1,35 +1,7 @@
-"""OpenAPI 3.1 spec generation + Swagger UI for BlackBull apps.
+"""OpenAPI generation from registered routes.
 
-Walk the router and emit a minimal but valid OpenAPI document describing every
-HTTP route the app exposes.  v1 covers what the router itself already knows:
-
-* paths, methods, scheme (HTTP-only — WebSocket routes are skipped);
-* path parameters with schemas derived from the converter (``str`` / ``int`` /
-  ``uuid`` / ``path``);
-* handler docstring → ``summary`` / ``description``;
-* a stub ``200`` response and, for write methods, a permissive
-  ``requestBody: object`` placeholder.
-
-What v1 does **not** do:
-
-* Request-body schemas — handlers do not yet declare body models, so the spec
-  describes them as ``{"type": "object"}``.  Add a model layer (Pydantic or
-  dataclass-with-schema) to lift this.
-* Security schemes — auth is application-defined here, so no global
-  ``securitySchemes`` are emitted.  Add per-app via the override parameter.
-* Tags / grouping — single flat list per path.
-
-Usage from an app::
-
-    app = BlackBull()
-    app.enable_openapi(title='My API', version='1.0.0')
-
-    @app.route(path='/items/{item_id:int}')
-    async def get_item(item_id: int):
-        return {'id': item_id}
-
-After ``app.run()`` the spec is reachable at ``/openapi.json`` and the
-Swagger UI at ``/docs``.
+Handler docstrings become summary/description. Dataclass annotations provide body schemas; security requires explicit
+configuration. Supply overrides for contracts not expressed by annotations.
 """
 from __future__ import annotations
 
@@ -134,7 +106,7 @@ def _query_parameters(handler, param_specs: dict[str, str]) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Type → JSON-schema synthesis (v2)
+# Type → JSON-schema synthesis
 #
 # Supported:
 #   - primitives           — str / int / float / bool / bytes
@@ -338,9 +310,7 @@ def _operation(handler, param_specs: dict[str, str],
         op['parameters'] = params
 
     if method in _BODY_METHODS:
-        # Prefer a synthesized schema from a dataclass-typed handler param.
-        # When no annotation is present we fall back to the opaque object
-        # schema from v1 so a JSON body is still required.
+        # Use dataclass body annotations when available; otherwise use an opaque object schema.
         body_type = _find_body_type(handler, param_specs)
         body_schema = _type_to_schema(body_type) if body_type is not None else {'type': 'object'}
         op['requestBody'] = {
@@ -422,10 +392,7 @@ def generate_spec(app, *, title: str = 'BlackBull API',
 # Swagger UI
 # ---------------------------------------------------------------------------
 
-# Pinned upstream release.  Swagger UI is loaded from the CDN — no offline
-# story in v1, but the request is small and cacheable.  Bumping the version
-# requires no other changes here; the URLs are versioned identically for the
-# JS bundle and the CSS.
+# The pinned Swagger UI assets require CDN access.
 _SWAGGER_UI_VERSION = '5.17.14'
 
 # Minimal HTML host page for Swagger UI.  The {{spec_url}} placeholder is
@@ -456,20 +423,12 @@ window.onload = () => {{
 
 
 def swagger_ui_html(spec_url: str, title: str = 'BlackBull API — Swagger UI') -> str:
-    """Return a self-contained HTML page hosting Swagger UI pointed at *spec_url*."""
+    """Return Swagger UI HTML for spec_url, loading assets from a CDN.
+    """
     return _SWAGGER_UI_HTML.format(
         title=title, version=_SWAGGER_UI_VERSION, spec_url=spec_url)
 
 
-# ---------------------------------------------------------------------------
-# Extension class — reference implementation of the ``init_app(app)`` convention
-# (see docs/guide/extensions.md).
-#
-# Mounts ``/openapi.json`` (and optionally ``/docs``) on the application, and
-# registers itself at ``app.extensions['openapi']`` so collaborators can look
-# up the live extension instance.  ``BlackBull.enable_openapi(...)`` is a thin
-# convenience wrapper around this class.
-# ---------------------------------------------------------------------------
 
 
 class OpenAPIExtension(Extension):
@@ -513,10 +472,6 @@ class OpenAPIExtension(Extension):
         self.description = description
         self.spec_path = spec_path
         self.docs_path = docs_path
-        # Hold references to the registered handler functions so they survive
-        # past ``init_app`` return — the router stores them weakly via
-        # ``functools.wraps``, and a GC of the closure would cause the route
-        # to point at a dead function.
         self._spec_handler = None
         self._docs_handler = None
         if app is not None:
@@ -543,10 +498,7 @@ class OpenAPIExtension(Extension):
             spec = generate_spec(app, title=title, version=version,
                                  description=description)
             await send(JSONResponse(spec))
-        # Mark before registration so the original handler stored in
-        # ``Router._route_info`` carries the flag — ``functools.wraps`` does
-        # not copy arbitrary attributes onto the wrapper, so setting it
-        # post-hoc on the decorated form would not propagate back.
+        # Mark the original handler before registration; changing a wrapper later does not update it.
         _openapi_spec.__blackbull_openapi_internal__ = True
         app.route(methods=HTTPMethod.GET, path=spec_path)(_openapi_spec)
         self._spec_handler = _openapi_spec

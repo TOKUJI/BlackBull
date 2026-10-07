@@ -98,9 +98,8 @@ route still receive the `Accept-Query` header but are not Content-Type-gated.
 
 Two more RFC 10008 notes:
 
-- The response-cache rules (the cache key must incorporate the request
-  content) bind *caches*, not origin servers — BlackBull ships no
-  response cache, so nothing to configure.
+- QUERY cache keys must include request content. The built-in Cache middleware
+  does not cache QUERY; any cache you add must satisfy that rule.
 - OpenAPI 3.1 has no `query` operation, so QUERY routes are not emitted
   in the [generated spec](openapi.md) (they are never faked as another
   operation).
@@ -287,9 +286,9 @@ async def ws_handler(ws: WebSocket):
 Declaring a `WebSocket` parameter gets you the connection as an object.
 The raw `(conn, receive, send)` triplet is still accepted and still
 supported; a route is classified once, at registration, by whether its
-signature contains both `receive` and `send`.  The HTTP simplified-handler
-features — path params, query params, `Depends` — are not injected into
-WebSocket handlers yet.
+signature contains both `receive` and `send`. Simplified WebSocket handlers
+can also inject path/query parameters and Depends providers; see
+[dependency lifetime](websockets.md#dependency-lifetime-read-this-before-injecting-a-database-handle).
 
 See [WebSockets](websockets.md) for the handshake,
 subprotocol negotiation, fragmented messages, `permessage-deflate`,

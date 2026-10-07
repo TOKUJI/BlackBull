@@ -201,6 +201,29 @@ async def test_lifespan_runs_around_the_server():
 
 
 @pytest.mark.asyncio
+async def test_a_failure_to_accept_still_runs_shutdown(monkeypatch):
+    a = BlackBull()
+    order = []
+
+    @a.on_startup
+    async def _up():
+        order.append('up')
+
+    @a.on_shutdown
+    async def _down():
+        order.append('down')
+
+    def _refuse(*_args):
+        raise NotImplementedError('no readers on this loop')
+
+    monkeypatch.setattr(asyncio.get_running_loop(), 'add_reader', _refuse)
+    with pytest.raises(NotImplementedError):
+        async with NativeTestServer(a):
+            pass
+    assert order == ['up', 'down']
+
+
+@pytest.mark.asyncio
 async def test_the_port_is_released_on_exit(app):
     async with NativeTestServer(app) as server:
         port = server.port
@@ -208,6 +231,22 @@ async def test_the_port_is_released_on_exit(app):
     # lingering until interpreter teardown.
     async with NativeTestServer(app, port=port) as second:
         assert second.port == port
+
+
+@pytest.mark.asyncio
+async def test_a_connection_is_counted_from_accept_as_in_production(app):
+    async with NativeTestServer(app) as server:
+        gate = server._bb_server._accept_gate
+        _reader, writer = await asyncio.open_connection('127.0.0.1', server.port)
+        try:
+            for _ in range(200):
+                if gate._descriptors_held == 1:
+                    break
+                await asyncio.sleep(0.01)
+            assert gate._descriptors_held == 1
+        finally:
+            writer.close()
+            await writer.wait_closed()
 
 
 @pytest.mark.asyncio

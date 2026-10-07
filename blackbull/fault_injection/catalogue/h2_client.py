@@ -1,11 +1,4 @@
-"""Named HTTP/2 client-side misbehaviour cases.
-
-Each entry is one thing a real client does wrong to a server, named so a
-suite can ``parametrize`` over the set and report which case broke it.
-
-The HTTP/2 rows of the attack-surface audit are what this set is drawn
-from, so the names line up with the defences on the other side: if
-``rapid_reset_burst`` stops failing, the meter that answers it changed.
+"""Named HTTP/2 client faults for testing server refusal boundaries.
 """
 from __future__ import annotations
 

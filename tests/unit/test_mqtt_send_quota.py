@@ -267,6 +267,104 @@ class TestReplayOrder:
 
 
 class TestReplayAcrossMixedQoS:
+    @pytest.mark.parametrize('qos,acks', [
+        (2, [ClientPuback]),
+        (1, [ClientPubcomp]),
+        (1, [ClientPubrec]),
+        (1, [ClientPubrec, ClientPubcomp]),
+        (2, [ClientPubcomp]),
+    ])
+    async def test_mismatched_ack_does_not_release_another_flow(self, qos, acks):
+        broker = BrokerActor()
+        sub, pub = RecordingConn(), RecordingConn()
+        await _attach(broker, sub, receive_maximum=1)
+        await _subscribe(broker, sub, qos=2)
+        await _attach(broker, pub, client_id='pub')
+        await _publish(broker, pub, payload=b'first', qos=qos)
+        first = sub.publishes()[0]
+        await _publish(broker, pub, payload=b'held', qos=1, packet_id=2)
+
+        for ack in acks:
+            values = {'packet_id': first.packet_id, 'sender': sub}
+            if ack is ClientPubrec and len(acks) == 1:
+                values['reason_code'] = ReasonCode.QUOTA_EXCEEDED
+            await broker._handle(ack(**values))
+
+        assert [p.payload for p in sub.publishes()] == [b'first']
+        await _detach(broker, sub)
+        resumed = RecordingConn()
+        await _attach(broker, resumed, clean_start=False, receive_maximum=1)
+        assert [(p.payload, p.dup) for p in resumed.publishes()] == [(b'first', True)]
+        pid = resumed.publishes()[0].packet_id
+        if qos == 1:
+            await broker._handle(ClientPuback(packet_id=pid, sender=resumed))
+        else:
+            await broker._handle(ClientPubrec(packet_id=pid, sender=resumed))
+            await broker._handle(ClientPubcomp(packet_id=pid, sender=resumed))
+        assert [p.payload for p in resumed.publishes()] == [b'first', b'held']
+
+    @pytest.mark.parametrize('queued_before_reconnect', [False, True])
+    async def test_full_identifier_space_holds_delivery_until_pubcomp(self, queued_before_reconnect):
+        broker = BrokerActor()
+        sub, pub = RecordingConn(), RecordingConn()
+        await _attach(broker, sub, receive_maximum=1)
+        await _subscribe(broker, sub, qos=2)
+        await _attach(broker, pub, client_id='pub')
+        await _publish(broker, pub, qos=2)
+        await broker._handle(ClientPubrec(packet_id=sub.publishes()[0].packet_id,
+                                         sender=sub))
+        session = broker._sessions['c1']
+        entry = session['pending_qos2_out'][sub.publishes()[0].packet_id]
+        session['pending_qos2_out'] = {pid: dict(entry) for pid in range(1, 65536)}
+        session['_send_order'] = dict.fromkeys(session['pending_qos2_out'])
+        if queued_before_reconnect:
+            await _publish(broker, pub, payload=b'held', packet_id=2)
+        await _detach(broker, sub)
+        resumed = RecordingConn()
+        await _attach(broker, resumed, clean_start=False, receive_maximum=1)
+        resumed.outbox.clear()
+
+        if not queued_before_reconnect:
+            await _publish(broker, pub, payload=b'held', packet_id=2)
+        assert not resumed.publishes()
+        await broker._handle(ClientPing(sender=resumed))
+        assert any(type(p).__name__ == 'MQTTPingresp' for p in resumed.packets())
+        await broker._handle(ClientPubcomp(packet_id=1, sender=resumed))
+        assert [(p.payload, p.packet_id) for p in resumed.publishes()] == [(b'held', 1)]
+
+    async def test_unknown_pubrec_does_not_create_a_replay_flow(self):
+        broker = BrokerActor()
+        conn = RecordingConn()
+        await _attach(broker, conn)
+        await broker._handle(ClientPubrec(packet_id=123, sender=conn))
+        releases = [p for p in conn.packets() if isinstance(p, MQTTPubrel)]
+        assert len(releases) == 1
+        assert releases[0].packet_id == 123
+        assert releases[0].reason_code == ReasonCode.PACKET_IDENTIFIER_NOT_FOUND
+        await _detach(broker, conn)
+        resumed = RecordingConn()
+        await _attach(broker, resumed, clean_start=False)
+        assert not [p for p in resumed.packets() if isinstance(p, MQTTPubrel)]
+
+    async def test_error_pubrec_after_pubrel_does_not_complete_the_flow(self):
+        broker = BrokerActor()
+        sub, pub = RecordingConn(), RecordingConn()
+        await _attach(broker, sub, receive_maximum=1)
+        await _subscribe(broker, sub, qos=2)
+        await _attach(broker, pub, client_id='pub')
+        await _publish(broker, pub, qos=2, payload=b'first')
+        pid = sub.publishes()[0].packet_id
+        await broker._handle(ClientPubrec(packet_id=pid, sender=sub))
+        await _publish(broker, pub, payload=b'held', packet_id=2)
+        await broker._handle(ClientPubrec(packet_id=pid,
+                                         reason_code=ReasonCode.QUOTA_EXCEEDED, sender=sub))
+        assert [p.payload for p in sub.publishes()] == [b'first']
+        await _detach(broker, sub)
+        resumed = RecordingConn()
+        await _attach(broker, resumed, clean_start=False, receive_maximum=1)
+        assert [p.packet_id for p in resumed.packets() if isinstance(p, MQTTPubrel)] == [pid]
+        assert resumed.publishes()[0].packet_id != pid
+
     async def test_mixed_replays_share_the_window_and_pubrel_never_waits(self):
         broker = BrokerActor()
         sub, pub = RecordingConn(), RecordingConn()

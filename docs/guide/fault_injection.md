@@ -82,8 +82,7 @@ assert result.received                  # every frame read, in order
 ```
 
 `result.received` holds everything a read step took off the wire, in
-order; `result.response` stays the most recent one.  Before both existed,
-a second read overwrote the first and the loss was silent.
+order; `result.response` stays the most recent one.
 
 ### Closing the connection: three ways, not two
 
@@ -108,8 +107,8 @@ report a pass while exercising the keep-alive path.
 * **gRPC** has no fault injection of its own.  gRPC rides HTTP/2, so
   `H2FaultServer` already misbehaves *beneath* a gRPC client at the
   transport layer — but gRPC-specific faults (an invalid `grpc-status`,
-  a malformed length-prefixed message, a trailers-only response) cannot
-  be expressed.
+  a malformed length-prefixed message, a trailers-only response) have no
+  dedicated typed API or catalogue. Raw-byte steps can construct them.
 * **MQTT** has none and is not planned to.  The broker is server-side by
   design and fault injection for it is out of scope.
 * **WebSocket** has none in either direction.
@@ -171,8 +170,8 @@ async def test_my_client_survives_each_catalogue_scenario(fault_server):
 ```
 
 Omitting `ssl_context=` runs the server as plaintext h2c — fine for
-prior-knowledge clients, but httpx / curl / hyper-h2 only negotiate
-HTTP/2 via ALPN over TLS, so most real clients need the TLS path.
+prior-knowledge clients such as `curl --http2-prior-knowledge`. For clients
+that require ALPN, such as httpx, supply the TLS context.
 
 After each connection, `fault_server.last_result` is a
 `ScenarioH2Result` carrying step-completion count, byte counters,
@@ -209,7 +208,7 @@ scenario = ScenarioH2(
             match={'type': 'HEADERS', 'stream_id': 1},
             timeout=5.0,
         ),
-        # Emit a malformed frame (illegal frame type 0xFF).
+        # Emit an unknown frame type; outside a field block the peer must ignore it.
         SendRawBytes(b'\x00\x00\x00\xff\x00\x00\x00\x00\x01'),
         # Pause so the client has time to react.
         H2Sleep(0.5),
@@ -227,7 +226,7 @@ The supported steps:
   framework's frame factory.  Most frames carry their own type byte,
   flags, stream id, and payload.
 * `SendRawBytes(data, byte_interval=0.0)` — escape hatch for bytes
-  the typed factory cannot construct (illegal type bytes, oversize
+  the typed factory cannot construct (unknown type bytes, oversize
   frames, malformed length fields).  `byte_interval > 0` trickles
   byte-by-byte for slowloris patterns.
 * `WaitForClientFrame(match, timeout=5.0)` — pause until an inbound
@@ -459,9 +458,6 @@ One walkthrough ships with the framework and covers the whole grid:
 | **C** | A broken *server* against a real HTTP/2 client — every HTTP/2 catalogue case against `httpx` over the self-signed TLS context |
 | **D** | Prints what is **not** implemented, and why, so the gap is visible from the same output as the coverage |
 | **E** | The same scenarios as **JSON Lines** — serialised, round-tripped, and one loaded from hand-written JSON and executed |
-
-It was previously two files, one per protocol.  A file per cell would have
-meant four, and the next cell five.
 
 Cells B and C need `pip install 'blackbull[fault-injection]'`; without it
 they report themselves skipped rather than failing.

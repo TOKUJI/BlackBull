@@ -1,29 +1,26 @@
-"""Exception hierarchy for the protocol-layer client.
-
-All client-side errors derive from ``ClientError`` so callers can catch the
-whole family with one ``except`` clause and still distinguish specific causes.
-"""
+"""Client errors; timeouts use the built-in TimeoutError."""
 
 
 class ClientError(Exception):
-    """Base class for all client-side errors."""
+    """Base for protocol client errors; built-in TimeoutError is separate.
+    """
 
 
 class ProtocolError(ClientError):
-    """The client refused to send a request that violates the protocol."""
+    """A request or peer response violates the protocol.
+    """
 
 
 class ConnectionError(ClientError):  # noqa: A001 — shadows builtin intentionally
-    """The connection was closed unexpectedly (e.g. server sent GOAWAY)."""
+    """The connection is closed or unusable.
+    """
 
 
 class ResponseTooLarge(ClientError):
-    """The peer's response head passed a byte budget the client set.
+    """A response head or body exceeds a configured client budget.
 
-    Distinct from [`ProtocolError`][]: the response was well-formed as far
-    as it was read.  What failed is a limit this client chose, so a caller that
-    wants the peer's output anyway can raise the budget rather than conclude
-    the peer is broken.
+    This is a local limit, distinct from a protocol violation. Raise the budget
+    only if the caller can safely accept more data.
     """
 
     def __init__(self, message: str, seen: bytes = b'') -> None:

@@ -1,30 +1,7 @@
-"""Auto-reload support for the BlackBull multi-worker master.
+"""Master re-exec with inherited listening sockets.
 
-The reload model is **master re-exec**:
-
-  1. Master binds and listens on the configured sockets.
-  2. Master forks worker processes; they inherit the listening sockets
-     via fd inheritance.
-  3. A background ``watchfiles`` watcher signals the master when any
-     watched ``*.py`` file changes.
-  4. Master sends SIGTERM to all workers and waits up to
-     ``shutdown_timeout`` for them to drain in-flight requests.
-  5. Master marks the listening sockets inheritable, exports their fds
-     via ``BB_INHERIT_FDS``, and ``os.execvp``\\ s ``sys.executable``
-     with the original argv.
-  6. The fresh master process adopts the inherited sockets
-     (see [`blackbull.protocol.rsock.adopt_inherited_sockets`][blackbull.protocol.rsock.adopt_inherited_sockets])
-     and re-forks workers — now running the *new* code.
-
-Picking up new code requires the master itself to re-import, which is
-why we re-exec the whole process rather than ``importlib.reload``.  On a
-successful re-exec, the listening sockets stay open throughout: the
-kernel multiplexes the same fd across master+workers while Python state churns.
-
-The watcher runs in a daemon thread so it can not block the master's
-synchronous supervision loop.  It debounces filesystem events itself
-(watchfiles default ~50 ms) so a single editor save does not trigger
-multiple reloads.
+Re-import code by replacing the master, not importlib.reload. Keep listeners
+open across exec and close temporary event loops before fork.
 """
 from __future__ import annotations
 
@@ -61,10 +38,7 @@ def _describe_changes(changes: Iterable[tuple[object, str]]) -> str:
 
 
 def _default_filter(change, path: str) -> bool:  # noqa: ARG001
-    """watchfiles ``watch_filter`` accepting only ``*.py`` files.
-
-    Lives outside the class so reuse from tests is trivial.  ``change``
-    is a ``watchfiles.Change`` enum but we only care about path here.
+    """Accept only Python files for automatic reload.
     """
     return path.endswith(_DEFAULT_WATCH_SUFFIXES)
 
@@ -121,12 +95,7 @@ class FileChangeWatcher:
                 ):
                     if self._stop_event.is_set():
                         return
-                    # Logged before the callback, and by the watcher rather
-                    # than by whoever acts on it: the master's own
-                    # "recycling workers" fires a tick later and only if it
-                    # acted, so without this line a reload that never
-                    # happens gives no way to tell a watcher that stayed
-                    # silent from a master that ignored it.
+                    # Log detection before invoking reload so an ignored callback is diagnosable.
                     logger.info('auto-reload: change detected in %s',
                                 _describe_changes(changes))
                     try:
@@ -157,24 +126,10 @@ class FileChangeWatcher:
 
 def exec_self_with_sockets(sockets: Sequence[socket.socket],
                            argv: Sequence[str] | None = None) -> None:
-    """Re-execute the current Python process, preserving listening sockets.
+    """Re-execute without returning on success, preserving listening descriptors.
 
-    Marks each socket's fd inheritable, sets ``BB_INHERIT_FDS`` to a
-    comma-separated list of those fds, and calls ``os.execvp`` —
-    which replaces the current process image while keeping fds open
-    (unless ``FD_CLOEXEC`` is set, which we clear here).
-
-    Does not return on success: the current process image is gone.
-
-    Parameters
-    ----------
-    sockets:
-        Listening sockets the new process should adopt.  Caller is
-        responsible for having already terminated any subprocesses
-        that hold copies of these fds.
-    argv:
-        Argv to exec.  Defaults to ``sys.argv`` (re-runs the same
-        command line).  ``sys.executable`` is always used as argv[0].
+    The caller must terminate subprocesses holding copies first. argv defaults
+    to sys.argv; sys.executable is always the executable.
     """
     if argv is None:
         argv = sys.argv

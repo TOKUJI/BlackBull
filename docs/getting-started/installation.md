@@ -57,7 +57,7 @@ blackbull --version
 ```
 
 ```
-blackbull 0.28.0
+blackbull <installed-version>
 ```
 
 The version printed comes from `importlib.metadata.version('blackbull')`,
@@ -66,6 +66,6 @@ so it always agrees with the installed wheel.
 ## Next
 
 - [Hello World](hello-world.md) — minimal app using the full ASGI
-  `(scope, receive, send)` triplet.
+  `(conn, receive, send)` triplet.
 - [Your First App](first-app.md) — using the simplified handler form
   so handlers omit the boilerplate they don't need.

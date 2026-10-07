@@ -1,27 +1,7 @@
-"""AsyncAPI 3.0 documentation for the MQTT broker — [`AsyncAPIExtension`][].
+"""AsyncAPI 3.0 documentation for registered application taps.
 
-OpenAPI has no vocabulary for topics, QoS, retain, or the publish/subscribe
-direction, so the broker is invisible to it.  **AsyncAPI**
-(https://www.asyncapi.com/) is the messaging-world counterpart, and this
-extension emits an AsyncAPI 3.0 document for the taps registered via
-``MQTTExtension.on_message``, served as ``/openapi.json`` is.
-
-It is a normal [`Extension`][blackbull.extension.Extension], parallel to
-``OpenAPIExtension`` and coexisting with it::
-
-    app = BlackBull()
-    mqtt = app.add_extension(MQTTExtension(port=1883))
-    app.add_extension(AsyncAPIExtension(title='Sensor Gateway', version='1.0.0'))
-
-    @mqtt.on_message(topic='sensors/{room}/temperature')
-    async def on_temp(msg, room): ...
-
-After ``app.run()`` the document is at ``/asyncapi.json`` and an HTML viewer at
-``/asyncapi``.
-
-What it documents is the application's taps and not the broker's API, without
-QoS or retain, over opaque payloads.  The emitted ``info.description`` says so
-to whoever reads the document, and ``docs/guide/mqtt.md`` says why.
+This describes opaque tap payloads, not broker QoS or retained-delivery
+guarantees. Register alongside MQTTExtension through app.add_extension.
 """
 from __future__ import annotations
 
@@ -188,7 +168,8 @@ AsyncApiStandalone.render({{
 
 
 def asyncapi_html(spec_url: str, title: str = 'BlackBull — AsyncAPI') -> str:
-    """Return a self-contained HTML page hosting the AsyncAPI renderer."""
+    """Return renderer HTML that loads its JavaScript from a CDN.
+    """
     return _ASYNCAPI_HTML.format(
         title=title, version=_ASYNCAPI_COMPONENT_VERSION, spec_url=spec_url)
 
@@ -224,7 +205,6 @@ class AsyncAPIExtension(Extension):
         self.server_host = server_host
         self.spec_path = spec_path
         self.docs_path = docs_path
-        # Hold strong refs to the registered handlers (see OpenAPIExtension).
         self._spec_handler = None
         self._docs_handler = None
         if app is not None:
@@ -251,9 +231,7 @@ class AsyncAPIExtension(Extension):
 
         async def _asyncapi_spec(conn, receive, send):  # noqa: ARG001
             await send(JSONResponse(self._generate(app)))
-        # Flag so a *future* AsyncAPI-aware generator never documents itself;
-        # set before registration so the original handler carries the attribute
-        # (functools.wraps does not copy it onto the wrapper).
+        # Exclude the documentation endpoint from generated operations.
         _asyncapi_spec.__blackbull_asyncapi_internal__ = True
         app.route(methods=HTTPMethod.GET, path=spec_path)(_asyncapi_spec)
         self._spec_handler = _asyncapi_spec

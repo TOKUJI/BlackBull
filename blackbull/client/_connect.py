@@ -6,14 +6,7 @@ back out of the package.
 import asyncio
 import ssl as _ssl
 
-# How long a client may spend establishing a connection before giving up.
-#
-# A bare open_connection() has no deadline of its own -- TLS
-# negotiation in particular can stall for the lifetime of the process -- so
-# leaving it unset is an unbounded wait, not a generous one.
-#
-# 30 s matches the server's own BB_BODY_TIMEOUT default: the same order as the
-# other time bounds in this tree, and far above any healthy handshake.
+# Default connection-establishment deadline, including TLS.
 DEFAULT_CONNECT_TIMEOUT: float = 30.0
 
 

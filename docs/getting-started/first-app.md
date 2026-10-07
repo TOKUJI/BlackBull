@@ -1,10 +1,8 @@
 # Your First App
 
-The [Hello World](hello-world.md) used the full ASGI
-`(scope, receive, send)` triplet so you could see what BlackBull
-gives every handler.  Most real handlers don't need most of that.
-BlackBull detects this at route-registration time and lets you
-omit whatever you aren't using.
+[Hello World](hello-world.md) uses `(conn, receive, send)`. A handler is
+full-form only when both `receive` and `send` are present; otherwise BlackBull
+injects its declared inputs and sends its return value.
 
 ## Simplified handlers
 
@@ -198,8 +196,8 @@ $ curl localhost:8000/tasks
 
 The simplified form covers most needs, but not all:
 
-- **WebSocket handlers** always receive the full
-  `(conn, receive, send)` triplet.
+- **WebSocket full-form handlers** use `(conn, receive, send)`; simplified
+  handlers can inject a `WebSocket` helper. See [WebSockets](../guide/websockets.md).
 - **Middleware** functions keep the `(conn, receive, send, call_next)`
   shape; the simplified adaptation does not apply to them.
 - **Streaming uploads / long polling** need to call `receive()` in

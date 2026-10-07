@@ -1,25 +1,7 @@
-"""MQTT 5.0 control-packet codec.
+"""Pure MQTT 5 packet codec, without I/O or broker state.
 
-Level-A (pure-data) layer for the ``blackbull-mqtt`` broker sidecar: the 15
-MQTT 5.0 control packets as frozen dataclasses, a wire encoder/decoder, the
-MQTT 5.0 property system, reason codes, and the topic-filter matching
-algorithm.  No I/O and no broker state live here — that is the job of
-[`blackbull.mqtt.broker`][blackbull.mqtt.broker] and [`blackbull.mqtt.connection`][blackbull.mqtt.connection].
-
-Reference: MQTT Version 5.0, OASIS Standard
-  https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html
-
-Decoder return contract
------------------------
-[`decode_packet`][] returns the decoded message object.  Every message also
-unpacks into ``(message, bytes_consumed)`` so a caller walking a buffer of
-concatenated packets can advance its offset::
-
-    msg = decode_packet(buf)            # attribute access / isinstance
-    msg, consumed = decode_packet(buf)  # buffer-walking
-
-This dual ergonomics is provided by ``MQTTMessage.__iter__``; the consumed
-count is recorded on the instance during decode.
+Decoded messages also unpack as (message, bytes_consumed) for buffer walking.
+Packet property and direction rules follow the MQTT 5 OASIS specification.
 """
 from __future__ import annotations
 
@@ -149,13 +131,7 @@ SESSION_EXPIRY_NEVER = 0xFFFFFFFF
 
 
 def decode_publish_flags(flags_byte: int) -> PublishFlags:
-    """§3.3.1 — DUP (bit 3), QoS (bits 2-1), RETAIN (bit 0).
-
-    QoS is two bits, so the field can hold 3, and §3.3.1-4 says a PUBLISH
-    with both QoS bits set is a **Malformed Packet**.  Masking alone
-    returned it as a value: nothing downstream acknowledged qos 3 (only 1
-    and 2 have an ack path), so such a packet was routed and retained with
-    no acknowledgement at all -- delivered, and invisible.
+    """Decode DUP/QoS/RETAIN (MQTT §3.3.1); reject QoS=3 as malformed.
     """
     qos = (flags_byte >> PUBLISH_QOS_SHIFT) & PUBLISH_QOS_MASK
     if qos > 2:
@@ -598,8 +574,6 @@ _WIRE_CODECS: dict[str, tuple[Callable[[Any], bytes],
     _UTF8:   (_encode_utf8, _decode_utf8_at),
     _BINARY: (_encode_binary, _decode_binary_at),
 }
-# Key and decoder are static per identifier: one lookup serves the decode
-# loop where separate key and wire-type hops would do three.
 _PROP_DECODE: dict[int, tuple[str, Callable[[bytes, int, int], tuple[Any, int]]]] = {
     int(pid): (_PROP_ID_TO_KEY[pid],
                _decode_pair_at if wt == _PAIR else _WIRE_CODECS[wt][1])
@@ -826,16 +800,10 @@ class MQTTPubcomp(_PacketIdAck):
 
 @dataclass(frozen=True)
 class MQTTSubscribe(MQTTMessage):
-    """SUBSCRIBE — ask for one or more topic filters (§3.8).
+    """Subscribe to (filter, max_qos) pairs with a required packet_id.
 
-    ``subscriptions`` pairs each filter with its maximum QoS.  ``packet_id``
-    defaults to ``None`` only so the field can be passed by keyword; §3.8.2
-    requires one, and construction without it raises.
-
-    ``subscription_options`` is the §3.8.3.1 per-entry options — ``no_local``,
-    ``retain_as_published``, ``retain_handling`` — as one dict per entry in
-    ``subscriptions``.  Decoding always fills it; hand-built packets may leave
-    it ``None`` to take the defaults.
+    subscription_options carries per-entry no_local/retain_as_published/
+    retain_handling. Decoding fills it; None on hand-built packets uses defaults.
     """
 
     packet_type: ClassVar[MQTTPacketType] = MQTTPacketType.SUBSCRIBE
@@ -866,12 +834,7 @@ class MQTTSuback(MQTTMessage):
 
 @dataclass(frozen=True)
 class MQTTUnsubscribe(MQTTMessage):
-    """UNSUBSCRIBE — drop the listed topic filters (§3.10).
-
-    ``topics`` holds the filters as subscribed, matched literally rather than
-    by wildcard expansion.  ``packet_id`` defaults to ``None`` only so the
-    field can be passed by keyword; §3.10.2 requires one, and construction
-    without it raises.
+    """Unsubscribe literal registered filters; packet_id is required.
     """
 
     packet_type: ClassVar[MQTTPacketType] = MQTTPacketType.UNSUBSCRIBE
@@ -1082,11 +1045,7 @@ def _encode_reason_and_props(packet_type: MQTTPacketType,
     return _frame(packet_type, 0, bytes(body))
 
 
-# Concrete message class → encoder.  Module-level constant (allocated once at
-# import), so encode_packet is a single ``type(message)`` lookup + call rather
-# than an O(n) isinstance chain that walks each class's MRO.  The four
-# _PacketIdAck subclasses are enumerated explicitly because dict dispatch keys
-# on exact type, not base class.
+# Dispatch uses exact types; list every _PacketIdAck subclass explicitly.
 _ENCODERS: dict[type, Callable[[Any], bytes]] = {
     MQTTConnect: _encode_connect,
     MQTTConnack: _encode_connack,
@@ -1337,10 +1296,6 @@ def _decode_reason_props_msg(cls: type, body: bytes) -> MQTTMessage:
     return cls(reason_code=rc, properties=props)
 
 
-# Packet type → decoder, keyed on MQTTPacketType.  Module-level constant: one
-# hash + lookup per packet regardless of type, versus the O(n) elif chain's up
-# to 17 integer comparisons.  All decoders share a uniform ``(body, flags)``
-# signature; those that ignore flags simply don't read the second argument.
 _DECODERS: dict[MQTTPacketType, Callable[[bytes, int], MQTTMessage]] = {
     MQTTPacketType.CONNECT:     _decode_connect,
     MQTTPacketType.CONNACK:     lambda body, flags: _decode_connack(body),
@@ -1478,11 +1433,9 @@ def validate_topic_name(topic: str) -> bool:
 
 
 def validate_topic_filter(filter_str: str) -> bool:
-    """§4.7.1 — Validate a subscription Topic *Filter*.
+    """Validate MQTT §4.7.1/§4.8.2 wildcard and shared-subscription grammar.
 
-    Returns True when valid; raises ``ValueError`` describing the first
-    rule violated.  Enforces single-``#`` / terminal-``#`` / whole-level
-    wildcard rules (§4.7.1.2-3) and the ``$share`` share-name rule (§4.8.2).
+    Return True when valid, False on NUL; raise ValueError for other violations.
     """
     if filter_str == '':
         raise ValueError('Topic filter must not be empty')

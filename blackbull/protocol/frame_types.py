@@ -12,14 +12,12 @@ from io import BytesIO
 from itertools import chain
 
 from . import hpack_fastpath, structured_fields
-from .field_grammar import FIELD_VALUE_ALLOWED_OCTETS, TCHAR_OCTETS
+from .field_grammar import FIELD_VALUE_ALLOWED_OCTETS, LOWERCASE_TCHAR_OCTETS
 
 import logging
 from ..logger import log, debug_gate
 logger = logging.getLogger(__name__)
-#: Read once at import: a disabled ``logger.debug`` on a per-request path
-#: costs 24 executed instructions to emit nothing.  Same bargain as
-#: ``@log`` — see [`blackbull.logger.debug_gate`][blackbull.logger.debug_gate].
+# debug_gate reads the logger level at import, like @log.
 _DEBUG = debug_gate(logger)
 
 
@@ -59,12 +57,7 @@ class FrameTypes(bytes, Enum):
 
 
 class FrameFlags(IntEnum):
-    """Common base for all HTTP/2 frame flag enums.
-
-    Inheriting from this empty base allows type annotations to reference
-    ``FrameFlags`` instead of listing every concrete flag enum.  Because
-    ``FrameFlags`` itself has no members, Python's restriction on subclassing
-    a non-empty ``IntEnum`` does not apply.
+    """Common annotation base for frame flag enums.
     """
 
 
@@ -133,11 +126,7 @@ class ErrorCodes(IntEnum):
 
 
 class FrameFormatError(ValueError):
-    """A frame the RFC calls malformed, carrying the code its own section names.
-
-    A parser that raises a bare ``Exception`` leaves the caller to guess the
-    error code from the message, and the guess is the thing the peer acts on.
-    ``ValueError`` because that is what the padding checks already raised.
+    """Malformed frame with its RFC-defined error code.
     """
 
     def __init__(self, message: str, error_code: ErrorCodes) -> None:
@@ -220,10 +209,7 @@ class SettingFrame(FrameBase):
     initial_window_size = None
     FRAME_TYPE = FrameTypes.SETTINGS
 
-    # RFC 9113 §6.5.2 — SETTINGS identifier (2-byte) → attribute name.
-    # Module-level constant: allocated once at import, so parsing a SETTINGS
-    # frame is a single dict lookup + setattr per entry rather than a bound
-    # method per identifier.
+    # RFC 9113 §6.5.2: SETTINGS identifier to attribute name.
     _SETTING_ATTRS: dict[bytes, str] = {
         b'\x00\x01': 'header_table_size',
         b'\x00\x02': 'enable_push',
@@ -319,30 +305,8 @@ class PseudoHeaders(StrEnum):
     PROTOCOL  = ':protocol'
 
 
-# RFC 9113 §8.3 — known pseudo-header field names.  At the frame parser
-# level we accept any of these (a HEADERS frame is parsed identically for
-# requests and responses).  The request-vs-response distinction (e.g.
-# ":status" is response-only, ":method"/":scheme"/":path" are request-only)
-# is enforced one layer up by ``parse_headers`` on the server side and by
-# the HTTP/2 client on the client side.
-#: Wire name -> member, built once at import.
-#:
-#: This replaces a frozenset of the same six names *plus* a
-#: ``PseudoHeaders(k_str)`` coercion.  Membership was checked against one
-#: representation and the value looked up in the other, so the list existed
-#: twice and a ``str`` was allocated purely to feed the second check.
-#:
-#: ``PseudoHeaders(value)`` is not a constructor — members are singletons
-#: created when the class body ran, and the call is a lookup routed through
-#: the metaclass (``EnumType.__call__`` -> ``Enum.__new__`` ->
-#: ``_value2member_map_``): two Python frames to do one dict lookup.  A
-#: plain module-level dict is that lookup without the frames, and it returns
-#: the same singletons.
-#:
-#: Keyed by ``bytes`` because the wire is bytes.  A module-level dict rather
-#: than a helper function or a classmethod on purpose: a helper is a call,
-#: and the call is what this removes — wrapping it gives back roughly a
-#: third of the saving to buy an API with one caller.
+# Accept known pseudo-fields here; request/response restrictions are enforced
+# by server parse_headers and the HTTP/2 client.
 _PSEUDO_BY_BYTES: dict[bytes, PseudoHeaders] = {
     m.value.encode('ascii'): m for m in PseudoHeaders
 }
@@ -353,11 +317,6 @@ _HOP_BY_HOP_HEADERS: frozenset[bytes] = frozenset((
     b'connection', b'keep-alive', b'proxy-connection',
     b'transfer-encoding', b'upgrade',
 ))
-
-
-#: The shared token alphabet with the uppercase octets removed — RFC 9113 §8.2
-#: puts an HTTP/2 name in lowercase, so uppercase is not a name octet here.
-_NAME_OCTETS = TCHAR_OCTETS.translate(None, b'ABCDEFGHIJKLMNOPQRSTUVWXYZ')
 
 
 def field_name_is_valid(name: bytes) -> bool:
@@ -372,7 +331,7 @@ def field_name_is_valid(name: bytes) -> bool:
     if not name:
         return False
     start = 1 if name[0] == 0x3A else 0
-    return not name[start:].translate(None, _NAME_OCTETS)
+    return not name[start:].translate(None, LOWERCASE_TCHAR_OCTETS)
 
 
 def field_value_is_valid(value: bytes) -> bool:
@@ -385,6 +344,9 @@ def field_value_is_valid(value: bytes) -> bool:
     return not value.translate(None, FIELD_VALUE_ALLOWED_OCTETS)
 
 
+_EDGE_WHITESPACE = (0x20, 0x09)
+
+
 def field_value_has_boundary_whitespace(value: bytes) -> bool:
     """RFC 9113 §8.2.1 — SP or HTAB at either end of a field value.
 
@@ -392,23 +354,26 @@ def field_value_has_boundary_whitespace(value: bytes) -> bool:
     question and not folded into [`field_value_is_valid`][]: it is about the
     position, not the octet.
     """
-    return bool(value) and (value[0] in (0x20, 0x09)
-                            or value[-1] in (0x20, 0x09))
+    return bool(value) and (value[0] in _EDGE_WHITESPACE
+                            or value[-1] in _EDGE_WHITESPACE)
+
+
+def _field_defect(name: bytes, value: bytes) -> str:
+    """Which rule refuses a request field that ``Headers.parse_payload``'s
+    combined test refused."""
+    if not field_name_is_valid(name):
+        return f'invalid character in field name: {name!r}'
+    if not field_value_is_valid(value):
+        return f'prohibited character in field value: {value!r}'
+    if field_value_has_boundary_whitespace(value):
+        return f'field value starts or ends with whitespace: {value!r}'
+    return f'undefined pseudo-header: {name!r}'
 
 
 def no_hpack_context(frame: 'FrameBase', codec: str) -> TypeError:
-    """The refusal for a header frame that cannot name its connection's codec.
+    """Refuse header framing without the connection-owned shared HPACK context.
 
-    HPACK state is connection-wide and the peer keeps exactly one table for it
-    (RFC 7541 §2.3, RFC 9113 §4.3), so a substitute codec is never a weaker
-    version of the right one — it is a different table.  Both directions fail
-    the same way and silently: a private encoder writes indices the peer
-    resolves against entries someone else inserted, and a block that never
-    reaches the connection's decoder leaves it behind its peer for good.
-    Valid-looking bytes, wrong fields, no exception on either side.
-
-    The message has to send the reader to the connection rather than to the
-    signature, because "missing argument" is answered by passing *any* codec.
+    Never substitute a private encoder or decoder (RFC 7541 §2.3, RFC 9113 §4.3).
     """
     return TypeError(
         f'{frame.FRAME_TYPE.name} frame on stream {frame.stream_id} has no '
@@ -460,9 +425,7 @@ class Headers(FrameBase):
         # Values stored as str so they can flow directly into the ASGI scope
         # (which requires str for method/path/scheme).
         self.pseudo_headers: dict[PseudoHeaders, str] = {}
-        # Regular headers stored as bytes — ASGI requires bytes pairs and hpack
-        # returns bytes when decoded with raw=True (avoids the ~4% CPU cost of
-        # hpack's _unicode_if_needed bytes→str→bytes round-trip).
+        # Keep regular headers as bytes pairs throughout decoding.
         self.headers: list[tuple[bytes, bytes]] = []
 
         # Set by parse_payload when the header block violates RFC 9113 §8.1.2 /
@@ -522,8 +485,7 @@ class Headers(FrameBase):
                 return
             remaining -= 5
 
-        # raw=True keeps hpack output as bytes and bypasses its
-        # _unicode_if_needed UTF-8 decode (~4% CPU under load).
+        # raw=True preserves bytes header values.
         block = payload.read(remaining)
         if continued:
             block = bytes(block) + bytes(continued)
@@ -532,44 +494,26 @@ class Headers(FrameBase):
 
         seen_regular = False
         for k, v in fields:
-            kb_raw = bytes(k)  # bytes(...) normalizes memoryview/bytearray
+            kb = bytes(k)  # bytes(...) normalizes memoryview/bytearray
             vb = v if isinstance(v, bytes) else bytes(v)
-            # RFC 9113 §8.2.1 — field-name octet validation, which is the
-            # RFC 9110 §5.6.2 token alphabet plus a leading colon: it rejects
-            # the separators, uppercase, controls/SP and 0x7F-0xFF too.
-            if not field_name_is_valid(kb_raw):
-                self._mark_malformed(f'invalid character in field name: {kb_raw!r}')
+            pseudo_key = _PSEUDO_BY_BYTES.get(kb)
+            # RFC 9113 §8.2.1 / §8.3 in one test; _field_defect names the rule.
+            # Edge SP/HTAB is refused here but trimmed on HTTP/1.1 (RFC 9112
+            # §5): the transports diverge by design.
+            if ((pseudo_key is None
+                    and (not kb or kb.translate(None, LOWERCASE_TCHAR_OCTETS)))
+                    or vb.translate(None, FIELD_VALUE_ALLOWED_OCTETS)
+                    or (vb and (vb[0] in _EDGE_WHITESPACE
+                                or vb[-1] in _EDGE_WHITESPACE))):
+                self._mark_malformed(_field_defect(kb, vb))
                 return
-            # RFC 9113 §8.2.1 — a field value is RFC 9110 §5.5 field-content
-            # (its MUSTs are the NUL/LF/CR and edge-SP/HTAB cases of that), and
-            # MUST NOT start or end with SP or HTAB.  Both apply to
-            # pseudo-header and regular field values alike.  RFC 9112 §5 trims
-            # the edge whitespace on the HTTP/1.1 side instead, so this is
-            # where the two transports diverge by design, not by accident.
-            if not field_value_is_valid(vb):
-                self._mark_malformed(f'prohibited character in field value: {vb!r}')
-                return
-            if field_value_has_boundary_whitespace(vb):
-                self._mark_malformed(
-                    f'field value starts or ends with whitespace: {vb!r}')
-                return
-            kb = kb_raw  # already lowercase per the check above
 
-            if kb[:1] == b':':
+            if pseudo_key is not None:
                 # RFC 9113 §8.3 — pseudo-header fields MUST appear before any
-                # regular header field in a header block.
+                # regular header field in a header block.  Whether the field
+                # suits a request or a response is decided one layer up.
                 if seen_regular:
                     self._mark_malformed(f'pseudo-header after regular: {kb!r}')
-                    return
-                # RFC 9113 §8.3 — pseudo-header name must be one of the
-                # defined fields (rejects unknown ":foo").  The
-                # request-vs-response check (e.g. ":status" not on requests)
-                # is enforced one layer up.
-                # One bytes-keyed lookup does both the membership check and
-                # the value lookup, over one representation of the six names.
-                pseudo_key = _PSEUDO_BY_BYTES.get(kb)
-                if pseudo_key is None:
-                    self._mark_malformed(f'unknown pseudo-header: {kb!r}')
                     return
                 # RFC 9113 §8.3.1 — each defined request pseudo-header field
                 # MUST NOT appear more than once.
@@ -843,11 +787,7 @@ class Data(FrameBase):
             data_length = length - pad_length - 1
             self.payload = payload.read(data_length)
         else:
-            # Non-padded is the common case: the payload IS the frame data, so
-            # skip the BytesIO wrap + read copy.
-            # FrameFactory.load already sliced data to exactly ``length``; the
-            # conditional preserves BytesIO.read(length) semantics for the rare
-            # over-long input without copying when it already fits.
+            # FrameFactory.load bounds data to length; preserve truncation for direct calls.
             self.payload = data if len(data) == length else data[:length]
         if _DEBUG:
             logger.debug(self.payload)

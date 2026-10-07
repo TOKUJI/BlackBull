@@ -10,9 +10,9 @@ Usage:
     python3 compare_table.py <result_dir>
 
 Stdlib only, no third-party deps — it runs on the bench driver host at the end
-of a successful benchmark.  When ``blackbull`` and exactly one peer framework
-are present, a ``BB/peer`` throughput ratio column is added; otherwise it just
-lists each framework's req/s side by side.
+of a successful benchmark.  The req/s table carries each framework's ratio to
+``blackbull``; the latency table puts every framework's mean and p99 side by
+side.
 
 The JSON's ``rps`` is HttpArena's **best of three** runs.  Best-of-N is a fine
 headline but a poor basis for judging a small gap: it reports no spread, so a
@@ -43,7 +43,7 @@ def _profile_key(profile: str, conns: int) -> tuple:
 
 
 def collect(result_dir: str) -> tuple[dict, list]:
-    """Return ({(profile, conns): {fw: rps}}, [frameworks_seen])."""
+    """Return ({(profile, conns): {fw: result JSON}}, [frameworks_seen])."""
     base = os.path.join(result_dir, "httparena-tree", "results")
     rows: dict = {}
     frameworks: list = []
@@ -55,14 +55,13 @@ def collect(result_dir: str) -> tuple[dict, list]:
                 data = json.load(fh)
         except (OSError, ValueError):
             continue
-        rps = data.get("rps")
-        if rps is None:
+        if data.get("rps") is None:
             continue
         try:
             conns_i = int(conns)
         except ValueError:
             continue
-        rows.setdefault((profile, conns_i), {})[fw] = rps
+        rows.setdefault((profile, conns_i), {})[fw] = data
         if fw not in frameworks:
             frameworks.append(fw)
     # blackbull first, then the rest alphabetically — stable, readable columns.
@@ -174,30 +173,46 @@ def render_uvloop_delta(runs: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def render(rows: dict, frameworks: list) -> str:
-    ratio_peer = None
-    if "blackbull" in frameworks and len(frameworks) == 2:
-        ratio_peer = next(f for f in frameworks if f != "blackbull")
+def _ms(value) -> float | None:
+    """A latency field ("215.6us", "1.2ms", "3s") in milliseconds."""
+    m = re.fullmatch(r'([0-9.]+)\s*(us|ms|s)', str(value or '').strip())
+    if not m:
+        return None
+    return float(m.group(1)) * {'us': 1e-3, 'ms': 1.0, 's': 1e3}[m.group(2)]
 
-    header = ["profile/conns"] + [f"{f} req/s" for f in frameworks]
-    if ratio_peer:
-        header.append(f"BB/{ratio_peer}")
+
+def render(rows: dict, frameworks: list) -> str:
+    peers = [f for f in frameworks if f != "blackbull"] if "blackbull" in frameworks else []
+    header = (["profile/conns"] + [f"{f} req/s" for f in frameworks]
+              + [f"{p}/BB" for p in peers])
     lines = ["| " + " | ".join(header) + " |",
              "|" + "|".join(["---"] * len(header)) + "|"]
 
     for key in sorted(rows, key=lambda k: _profile_key(*k)):
         profile, conns = key
+        vals = {f: d.get("rps") for f, d in rows[key].items()}
         cells = [f"{profile}/{conns}"]
-        vals = rows[key]
-        for f in frameworks:
-            v = vals.get(f)
-            cells.append(f"{v:,}" if v is not None else "—")
-        if ratio_peer:
-            bb, pv = vals.get("blackbull"), vals.get(ratio_peer)
-            cells.append(f"{bb / pv:.2f}x" if (bb and pv) else "—")
+        cells += [f"{vals[f]:,}" if vals.get(f) is not None else "—" for f in frameworks]
+        bb = vals.get("blackbull")
+        cells += [f"{vals[p] / bb:.3f}" if (bb and vals.get(p)) else "—" for p in peers]
         lines.append("| " + " | ".join(cells) + " |")
 
     return "# Framework comparison — req/s per profile\n\n" + "\n".join(lines) + "\n"
+
+
+def render_latency(rows: dict, frameworks: list) -> str:
+    header = ["profile/conns"] + [f"{f} mean / p99 (ms)" for f in frameworks]
+    lines = ["| " + " | ".join(header) + " |",
+             "|" + "|".join(["---"] * len(header)) + "|"]
+    for key in sorted(rows, key=lambda k: _profile_key(*k)):
+        profile, conns = key
+        cells = [f"{profile}/{conns}"]
+        for f in frameworks:
+            d = rows[key].get(f)
+            mean, p99 = (_ms(d.get("avg_latency")), _ms(d.get("p99_latency"))) if d else (None, None)
+            cells.append(f"{mean:.3f} / {p99:.3f}" if mean is not None and p99 is not None else "—")
+        lines.append("| " + " | ".join(cells) + " |")
+    return "\n## Latency — mean / p99 per profile\n\n" + "\n".join(lines) + "\n"
 
 
 def main(argv: list) -> int:
@@ -211,6 +226,7 @@ def main(argv: list) -> int:
         return 1
     runs = collect_runs(result_dir)
     table = (render(rows, frameworks)
+             + render_latency(rows, frameworks)
              + render_runs(runs, frameworks)
              + render_uvloop_delta(runs))
     out = os.path.join(result_dir, "COMPARISON.md")

@@ -1,30 +1,13 @@
-"""Bound, listening sockets for the server to accept on.
+"""Bound and listening sockets.
 
-Everything here hands back sockets already through ``bind()`` and ``listen()``
-— the caller passes them to the event loop and never binds again.  A bind that
-fails is reported as ``None`` (or an absence from the returned list) rather
-than raised, so check what you got back.  Which function to call depends on
-where the socket comes from:
-
-- [`create_dual_stack_sockets`][blackbull.protocol.rsock.create_dual_stack_sockets]
-  for a TCP port, one socket per family so both stacks are reached portably.
-- [`create_unix_socket`][blackbull.protocol.rsock.create_unix_socket] for an
-  ``AF_UNIX`` path.
-- [`adopt_listening_fd`][blackbull.protocol.rsock.adopt_listening_fd] when a
-  supervisor bound it — systemd socket activation, or ``--bind fd://N``.
-- [`adopt_inherited_sockets`][blackbull.protocol.rsock.adopt_inherited_sockets]
-  when the master re-exec'd itself and passed its own listeners across.
-
-The last two return sockets that are *already* listening; binding them again
-is an error.  ``SO_REUSEPORT`` is how several workers share one port, and the
-module constant ``REUSEPORT_SUPPORTED`` says whether this host offers it.
-
-See ``docs/deployment/unix-and-fd.md`` for the deployment shapes these serve.
+Check for None or absent results after bind failure. Adopted sockets are
+already listening and must not be bound again; see docs/deployment/unix-and-fd.md.
 """
 import os
 import socket
 import struct
 import sys
+import weakref
 
 from .._cleanup import combine_cleanup_errors
 
@@ -39,6 +22,35 @@ REUSEPORT_SUPPORTED = hasattr(socket, 'SO_REUSEPORT')
 #: Env var holding a comma-separated list of fds the master has handed
 #: to itself across ``os.execvp`` — see [`adopt_inherited_sockets`][].
 _INHERIT_FDS_ENV = 'BB_INHERIT_FDS'
+
+
+#: The socket files this process bound: listener -> (path, inode, pid).  A
+#: forked worker inherits the entry but not the pid, and an adopted socket
+#: never has one, so neither removes a file another process listens on.
+_BOUND_SOCKET_FILES: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+
+def _take_bound_socket_file(sock):
+    try:
+        return _BOUND_SOCKET_FILES.pop(sock, None)
+    except TypeError:
+        return None
+
+
+def _unlink_bound_socket_file(record) -> None:
+    """Remove the file unless another process bound it or something else has
+    been bound at that path since."""
+    if record is None:
+        return
+    path, inode, pid = record
+    if pid != os.getpid():
+        return
+    try:
+        if os.stat(path).st_ino == inode:
+            os.unlink(path)
+    except OSError:
+        # Best effort: a file that cannot be removed must not fail shutdown.
+        logger.debug('Socket file %s left in place', path, exc_info=True)
 
 
 def close_sockets(sockets) -> Exception | None:
@@ -70,28 +82,20 @@ def close_sockets(sockets) -> Exception | None:
             errors.append(exc)
             logger.exception('Failed to disarm aliased listening socket')
     for sock in unique:
+        socket_file = _take_bound_socket_file(sock)
         try:
             sock.close()
         except Exception as exc:
             errors.append(exc)
             logger.exception('Failed to close listening socket')
+        _unlink_bound_socket_file(socket_file)
     return combine_cleanup_errors(*errors)
 
 
 def adopt_inherited_sockets() -> list[socket.socket] | None:
-    """Build ``socket.socket`` objects from fds inherited across exec.
+    """Adopt owned listening descriptors advertised by BB_INHERIT_FDS, or return None.
 
-    Returns ``None`` when no inherited fds are advertised (the normal
-    cold-start path).  Returns a list of bound, listening sockets when
-    the master process has re-exec'd itself for an auto-reload — the
-    fds were marked inheritable, the env var ``BB_INHERIT_FDS`` was set
-    to a comma-separated fd list, and they survived the exec.
-
-    Callers MUST NOT bind/listen on the returned sockets — they are
-    already in the listening state from before exec.
-
-    The env var is cleared after adoption so child workers forked from
-    this process do not also try to adopt the same fds.
+    Do not bind/listen again. Clear the variable so forked workers cannot adopt twice.
     """
     spec = os.environ.get(_INHERIT_FDS_ENV)
     if not spec:
@@ -360,6 +364,11 @@ def create_unix_socket(path: str, backlog: int = _DEFAULT_BACKLOG,
                 # chmod failure isn't fatal for binding; warn and keep going.
                 logger.warning('Could not chmod %s to %o: %s', path, mode, msg)
         sock.listen(backlog)
+        try:
+            _BOUND_SOCKET_FILES[sock] = (path, os.stat(path).st_ino, os.getpid())
+        except OSError:
+            logger.debug('Socket file %s not tracked for removal', path,
+                         exc_info=True)
         logger.info('Bound AF_UNIX socket on %s (backlog=%d mode=%s)',
                     path, backlog,
                     'unchanged' if mode is None else f'0o{mode:o}')
@@ -447,24 +456,10 @@ def create_dual_stack_sockets(port, backlog: int = _DEFAULT_BACKLOG,
                                keepalive: bool = True,
                                user_timeout_ms: int = 0,
                                host: str | None = None):
-    """
-    Create one IPv4 socket (``0.0.0.0``) **and** one IPv6 socket (``::``),
-    both listening on *port*.
+    """Bind wildcard IPv4/IPv6 listeners, or only the named host's interface.
 
-    Naming a *host* asks for that interface instead, which is one socket in
-    one family — the point of naming it is to reach nothing else.
-
-    Using two explicit sockets — each with ``IPV6_V6ONLY`` set on the IPv6
-    one — is the most portable way to accept both IPv4 and IPv6 connections
-    on all major platforms (Linux, macOS, Windows).
-
-    When *port* is 0 (let the OS pick a free port), the IPv4 socket is bound
-    first to obtain the assigned port number, then the IPv6 socket is bound to
-    that **same** port.  This guarantees both sockets share a single port,
-    which is what callers expect.
-
-    Returns a list that contains whichever sockets were successfully bound
-    (typically two, but may be one if the platform lacks IPv6 support).
+    port=0 shares the assigned port across families. Return successfully bound
+    sockets; IPv6 may be unavailable.
     """
     sockets = []
 

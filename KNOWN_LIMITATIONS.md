@@ -190,8 +190,8 @@ serves files three ways at runtime:
 An optional in-memory cache (≤ 4 MiB) is available with
 `app.static(prefix, root, cache=True)`: first hit reads sync,
 subsequent hits serve from a per-process LRU, and the entry is
-stat-invalidated per request so edits on disk show up on the
-next request with no staleness window.  Default is `cache=False`;
+checked when the stat-throttle window expires, so edits on disk
+can take about one second to appear (`BB_STATIC_STAT_TTL_S`). Default is `cache=False`;
 standalone deployments serving static traffic directly should opt
 in to keep prior performance.
 

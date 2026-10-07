@@ -157,10 +157,11 @@ def _fresh_settings():
 @pytest.mark.asyncio
 @pytest.mark.timeout(30)
 @pytest.mark.parametrize('how', ['bound', 'adopted'])
-@pytest.mark.parametrize('max_connections', [0, 64], ids=['start_serving', 'gate'])
+@pytest.mark.parametrize('accept', ['uncapped', 'capped'])
 async def test_a_full_queue_at_open_warns_once_with_waiting_and_backlog(
-        tmp_path, caplog, monkeypatch, how, max_connections):
-    served = _server(tmp_path, how, max_connections, monkeypatch)
+        tmp_path, caplog, monkeypatch, how, accept):
+    served = _server(tmp_path, how, 0 if accept == 'uncapped' else 64,
+                     monkeypatch)
     path = served[1]
     with caplog.at_level(logging.WARNING, logger='blackbull'):
         refused = await _open_during_startup(served, BACKLOG + 3)

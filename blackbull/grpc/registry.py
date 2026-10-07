@@ -1,41 +1,9 @@
-"""gRPC service registry — maps ``/package.Service/Method`` to a handler.
+"""gRPC method registration.
 
-This is the gRPC analogue of [`blackbull.router.Router`][blackbull.router.Router]: it holds the
-table of method paths and the coroutine that serves each one.
-
-A **unary** handler is::
-
-    async def handler(request: bytes, context: GrpcContext) -> bytes
-
-A **server-streaming** handler is an async generator that yields zero or more
-response messages::
-
-    async def handler(request: bytes, context: GrpcContext):
-        yield b'...'
-        yield b'...'
-
-In both cases ``request`` is the (already de-framed) request message body and
-the yielded / returned value is a response message body.  Protobuf
-(de)serialisation is the handler's responsibility — the framework stays
-dependency-free.  Handlers signal a non-OK result by raising
-[`GrpcError`][] or calling ``context.abort(...)``.
-
-A **client-streaming** or **bidirectional** handler takes an async iterator of
-request messages instead of a single ``request``::
-
-    async def handler(request_iter, context) -> bytes:   # client-streaming
-        async for message in request_iter:
-            ...
-
-    async def handler(request_iter, context):            # bidirectional
-        async for message in request_iter:
-            yield ...
-
-Response-streaming is detected automatically at registration via
-``inspect.isasyncgenfunction``; request-streaming is detected from the first
-parameter name (``request_iter`` / ``requests`` / ``request_iterator`` /
-``request_stream``).  Pass ``streaming=`` / ``client_streaming=`` explicitly to
-override when a decorator hides the handler's nature.
+Response streaming is inferred from async-generator functions; request
+streaming from request_iter, request_iterator, requests or request_stream.
+Use explicit flags when a decorator hides these forms. Handler messages are
+bytes; raise GrpcError or call context.abort for non-OK status.
 """
 from __future__ import annotations
 
@@ -68,18 +36,10 @@ def _first_param_name(handler: Callable[..., object]) -> str | None:
 
 
 class GrpcMethod(NamedTuple):
-    """A registered method: its *handler* and the two streaming axes.
+    """Registered handler with request and response streaming flags.
 
-    *streaming* is the **response** axis (the handler is an async generator that
-    yields response messages); *client_streaming* is the **request** axis (the
-    handler takes an async iterator of request messages instead of a single
-    ``request: bytes``).  The four combinations are unary, server-streaming,
-    client-streaming, and bidirectional.
-
-    *handler* is annotated as a bare ``Callable`` and
-    not ``GrpcHandler``, which would break the runtime NamedTuple field
-    check: a response-streaming handler is an async generator function, so
-    calling it returns an async iterator rather than an ``Awaitable``.
+    client_streaming receives an async message iterator; streaming returns one.
+    The four flag combinations select unary, server, client or bidirectional calls.
     """
     handler: Callable[..., object]
     streaming: bool

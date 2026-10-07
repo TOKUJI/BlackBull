@@ -1,13 +1,5 @@
-"""HTTP/2 stream state and the priority tree (RFC 7540 §5).
-
-Each ``Stream`` node owns the dispatch target (native Connection, or ASGI scope on the compat lanes) for one in-flight request as
-well as its position in the dependency tree (parent + weight) used by the
-priority machinery.  ``StreamState`` enumerates the lifecycle states
-defined in RFC 7540 §5.1; ``on_headers_received`` / ``on_data_received``
-perform the corresponding transitions.
-
-Stream identifier ``0`` is reserved for connection-level frames and is the
-root of every priority tree.
+"""HTTP/2 stream state. Stream 0 belongs to the connection; native
+request state stays a Connection even on compatibility lanes.
 """
 from enum import Enum
 
@@ -21,25 +13,13 @@ class StreamState(Enum):
     CLOSED           = 'closed'
 
 class Stream:
-    """One node in the HTTP/2 stream-priority tree (RFC 7540 §5.1, §5.3).
+    """HTTP/2 stream state with a native Connection dispatch target.
 
-    A ``Stream`` carries the request's dispatch target (Connection or ASGI scope),
-    plus its position in the priority tree (parent + weight).
-
-    ``identifier == 0`` is the connection-level pseudo-stream
-    (RFC 7540 §5.1.1) and acts as the root of the tree; SETTINGS, PING,
-    GOAWAY, and connection-level WINDOW_UPDATE frames target it.
-    Client-initiated request streams use odd identifiers, server-pushed
-    streams use even identifiers (RFC 7540 §5.1.1).
-
-    ``window_size`` defaults to the connection's initial flow-control window
-    when omitted (the value lives on the sender, not the stream).
+    Stream 0 is connection-level state. Active requests are indexed as root
+    children; legacy dependency priority frames do not build a scheduling tree.
+    Client stream ids are odd; server push ids are even. Senders own default windows.
     """
 
-    # Per-stream object — allocated once per HTTP/2 stream and stored in the
-    # priority tree.  ``__slots__`` saves the ~56-byte ``__dict__`` overhead
-    # at the cost of forbidding dynamic attribute assignment.  Every
-    # attribute referenced anywhere on the class must be declared here.
     __slots__ = (
         'parent', 'weight', 'stream_id', 'window_size',
         'children', 'conn', 'state', 'priority_hint',
@@ -55,8 +35,7 @@ class Stream:
             self.window_size = window_size
 
         self.children = {}
-        # The dispatch target for this stream's request: the native Connection
-        # (HTTP), or an ASGI scope dict on the WebSocket / force_asgi lanes.
+        # Native HTTP and WebSocket streams carry Connection objects.
         self.conn = None
         self.state = StreamState.IDLE
         self.priority_hint: dict[str, int | bool] | None = None
@@ -107,13 +86,7 @@ class Stream:
         return r
 
     def find_child(self, stream_id):
-        """Locate a node by stream_id.
-
-        A stream nests under a priority parent only when PRIORITY names
-        another peer stream as its dependency, which is rare — in practice
-        every peer-initiated stream is a direct child of root.  So the
-        search stays flat and recurses only where the tree has depth; a
-        subtree walk on every miss costs O(N) per lookup and finds nothing.
+        """Find a stream id, returning None on a miss.
         """
         if self.stream_id == stream_id:
             return self

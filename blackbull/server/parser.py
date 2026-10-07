@@ -1,18 +1,7 @@
-"""HTTP/2 request parsing: a HEADERS frame becomes a native ``Connection``.
+"""HTTP request parsing into native Connection objects.
 
-[`parse_headers`][blackbull.server.parser.parse_headers] is the whole surface.
-Given a parsed HEADERS frame it returns the
-[`Connection`][blackbull.connection.Connection] the router and the application
-see — typed ``http`` for a request, ``websocket`` for an RFC 8441 Extended
-CONNECT — or ``None`` when the request is malformed, having marked the frame so
-the actor answers RST_STREAM.
-
-The request-level pseudo-header rules (RFC 9113 §8.3.1) live here: which
-pseudo-headers must be present, that ``:status`` may not appear in a request,
-the value grammars of ``:method``, ``:scheme`` and ``:path``, and the
-``:authority`` / ``Host`` authority grammar that decides the ``host``
-a handler sees.  Field-level validation already happened when the frame parsed
-its payload.
+Keep framing and field validation in shared grammar helpers. Fast paths may
+reuse validated bytes but cannot weaken checks or change error scope.
 """
 from ..protocol.frame_types import PseudoHeaders
 from ..protocol.field_grammar import (COMMON_METHODS, COMMON_SCHEMES,
@@ -26,30 +15,18 @@ from .request_target import split_path_query
 
 logger = logging.getLogger(__name__)
 
-# Shared empty extensions dict for the plain-HTTP/2 dispatch path — safe only
-# because ``HTTP2Actor._apply_priority_and_extensions`` replaces
-# ``conn.extensions`` with a fresh per-stream dict before the app or any
-# middleware sees the Connection, so user code never reads or mutates this one.
-# Same convention as ``http1_actor._H1_PATHSEND_EXTENSIONS``.
-#
-# The RFC 8441 WebSocket branch does NOT go through that call, so it must keep
-# a dict of its own.
+# Plain HTTP shares this empty dictionary only until _apply_priority_and_extensions
+# replaces it before dispatch. WebSocket branches need their own dictionary.
 _EMPTY_H2_EXTENSIONS: dict = {}
 
 
 def _build_h2_connection(method: str, path: str, raw_path: bytes,
                          query_string: bytes, headers: Headers,
                          scheme: str) -> Connection:
-    """Lean constructor for the plain-HTTP/2 [`parse_headers`][] return.
+    """Build the native HTTP/2 Connection without the dataclass initializer.
 
-    Bypasses the dataclass-generated ``Connection.__init__`` (type-call +
-    default-binding machinery, ~200 ns/req) via ``object.__new__`` + explicit
-    slot stores.  ``tests/architecture/test_h2_connection_builder.py`` pins it
-    field-for-field against the dataclass and must be kept in sync with any
-    change to [`Connection`][]'s field set.
-
-    The RFC 8441 WebSocket branch is cold — one Extended CONNECT per session,
-    not one per request — and keeps the plain constructor.
+    Keep every field synchronized with Connection. The parity gate is
+    tests/architecture/test_h2_connection_builder.py.
     """
     c = object.__new__(Connection)
     c.method = method
@@ -143,22 +120,11 @@ def _request_headers_with_host(frame, *, require_present: bool) -> list | None:
 
 
 def parse_headers(frame) -> Connection | None:
-    """Build a native [`Connection`][] (``http`` or ``websocket``) from a
-    HEADERS frame, or ``None`` when the request is malformed.
+    """Build a native HTTP or WebSocket Connection, or None for a malformed head.
 
-    ``result is None`` if and only if ``frame.malformed``.  Every early-out
-    returns ``None`` rather than a half-built [`Connection`][], so a caller
-    checks ``frame.malformed`` and never reads a partial object, and nothing
-    is constructed on the error path.
-
-    Also performs request-level pseudo-header presence and octet checks
-    (RFC 9113 §8.3.1: ``:path`` is graded like HTTP/1.1's request-target);
-    field-level checks already happened in ``parse_payload``.
-
-    A module-level function and not a ``ParserFactory`` product: nothing here
-    is per-instance, so a factory would charge every request for a dict lookup
-    and an allocation.  The Internals page states why the read path threads a
-    [`Connection`][] rather than an ASGI scope dict.
+    None must coincide with frame.malformed; never expose partial connections.
+    Validate required pseudo-fields and request-target octets (RFC 9113 §8.3.1)
+    after field-level checks in parse_payload.
     """
     # Short-circuit if the frame parser already flagged this malformed.
     if getattr(frame, 'malformed', False):
@@ -197,9 +163,8 @@ def parse_headers(frame) -> Connection | None:
         frame._mark_malformed(f'invalid :path {path_pseudo!r}')
         return None
 
-    # RFC 3986 §3.1 — the scheme grammar.  No HTTP/1.1 counterpart to match:
-    # that transport grades only an absolute-form target's scheme (BLA-434).
-    # Graded whenever the field is present, like ``:path`` above.
+    # RFC 3986 §3.1: grade a present scheme before using it for authority
+    # or transport mapping.
     scheme_pseudo = frame.pseudo_headers.get(PseudoHeaders.SCHEME)
     if scheme_pseudo is None:
         scheme = 'https'                # CONNECT omits :scheme (RFC 9113 §8.5)
@@ -209,9 +174,8 @@ def parse_headers(frame) -> Connection | None:
         frame._mark_malformed(f'invalid :scheme {scheme_pseudo!r}')
         return None
     else:
-        # RFC 3986 §3.1 — an uppercase spelling is equivalent and the
-        # canonical form is lowercase.  The grammar kept the value ASCII, so
-        # this maps ASCII case only.
+        # RFC 3986 §3.1: grade a present scheme before using it for authority
+        # or transport mapping.
         scheme = scheme_pseudo.lower()
 
     connect = method_is(method, 'CONNECT')

@@ -1,41 +1,9 @@
-"""Test clients for BlackBull applications — three instruments, three layers.
+"""Application test instruments.
 
-[`blackbull.testing.native`][blackbull.testing.native] drives application logic, its
-[`NativeTestServer`][blackbull.testing.native.NativeTestServer] drives the full stack on
-a loopback socket, and [`TestClient`][] drives the ASGI compatibility
-boundary.  ``docs/guide/testing.md`` tabulates which to reach for; a defect
-on one layer is invisible to the others.
-
-[`TestClient`][] is not the everyday one.  It reaches the app through
-``httpx.ASGITransport`` → ASGI scope dict → ``from_scope()``, never taking
-the ``isinstance(conn, Connection)`` branch of ``BlackBull.__call__``.  What
-it uniquely covers is that conversion chain, where a coercion bug surfaces
-here and nowhere else in the suite.
-
-``TestClient`` usage — a boundary-conformance instrument::
-
-    from blackbull import BlackBull
-    from blackbull.testing import TestClient
-
-    app = BlackBull()
-
-    @app.route('/')
-    async def hello():
-        return "hi"
-
-    def test_asgi_boundary():
-        with TestClient(app) as client:
-            response = client.get('/')
-            assert response.status_code == 200
-            assert response.text == "hi"
-
-The client is a context manager so that ASGI ``lifespan.startup`` runs
-before any request and ``lifespan.shutdown`` runs on exit.  Apps that
-don't implement the lifespan protocol are tolerated silently.  A failure
-the app reports is not: both ``lifespan.startup.failed`` and
-``lifespan.shutdown.failed`` raise out of the block.
-
-For everything else, start from ``docs/guide/testing.md``.
+Native helpers test dispatch; NativeTestServer tests the wire stack;
+TestClient tests the external ASGI boundary. Choosing one does not cover
+the other layers. TestClient runs lifespan and raises reported startup or
+shutdown failures; see docs/guide/testing.md.
 """
 
 from __future__ import annotations
@@ -68,14 +36,7 @@ __all__ = ['TestClient', 'WebSocketTestSession', 'WebSocketDisconnect']
 
 
 class _LoopThread:
-    """A dedicated background thread running an asyncio event loop.
-
-    ``run_coro`` schedules a coroutine on the loop and blocks the caller
-    until it returns; ``stop`` joins the thread cleanly.  ``server_to_client``
-    is a threading queue carrying events the ASGI app emits via ``send``;
-    ``client_to_server`` is an asyncio queue carrying events the test
-    writes that the app reads via ``receive``.  The queues are only used
-    for lifespan / WebSocket sessions; HTTP requests go through httpx.
+    """Own a background event loop; run_coro blocks, stop joins its thread.
     """
 
     def __init__(self) -> None:
@@ -219,16 +180,10 @@ class _LifespanManager:
 
 
 class WebSocketTestSession:
-    """Synchronous WebSocket session against an ASGI application.
+    """Synchronous BlackBull WebSocket session using its native Connection boundary.
 
-    Open via [`TestClient.websocket_connect`][TestClient.websocket_connect] as a context manager::
-
-        with client.websocket_connect('/ws') as ws:
-            ws.send_text('ping')
-            assert ws.receive_text() == 'pong'
-
-    Raises [`WebSocketDisconnect`][] when the server closes (or
-    rejects) the connection.
+    Open through TestClient.websocket_connect as a context manager. Server close
+    or handshake rejection raises WebSocketDisconnect.
     """
 
     def __init__(
@@ -382,18 +337,7 @@ class WebSocketTestSession:
         return json.loads(self.receive_text())
 
     def iter_text(self):
-        """Yield successive text messages from the server until the WebSocket closes.
-
-        Stops cleanly when the server emits a ``websocket.close`` — the
-        [`WebSocketDisconnect`][] raised by the underlying receive
-        is caught and converted into normal iterator termination, so
-        the test can write::
-
-            with client.websocket_connect('/stream') as ws:
-                for msg in ws.iter_text():
-                    ...
-
-        without an explicit try/except around the loop.
+        """Yield text messages until close; convert WebSocketDisconnect to iterator termination.
         """
         try:
             while True:
@@ -485,19 +429,11 @@ def _shutdown_on_exit(lifespan, exc_info) -> None:
 
 
 class TestClient:
-    """In-memory HTTP+WebSocket test client for ASGI 3.0 applications.
+    """Synchronous HTTP/ASGITransport and native BlackBull WebSocket tests.
 
-    Provides a synchronous façade over ``httpx.AsyncClient`` +
-    ``httpx.ASGITransport`` by hosting an event loop in a background
-    thread.  HTTP request methods (``get``, ``post``, ``put``, …)
-    forward to the underlying ``httpx.AsyncClient``; WebSocket sessions
-    use a dedicated bridge to the ASGI receive/send channels.
-
-    Use as a context manager so that the ASGI ``lifespan`` protocol
-    runs around the test::
-
-        with TestClient(app) as client:
-            ...
+    HTTP methods forward to httpx. WebSocket sessions pass a Connection and do
+    not exercise a generic scope-only ASGI app. Use as a context manager to run
+    lifespan startup and shutdown.
     """
 
     # Tell pytest not to collect this class as a test container — the
@@ -667,11 +603,7 @@ class TestClient:
         )
 
 
-# Imported last: ``native`` reaches back for ``_LoopThread`` /
-# ``_LifespanManager`` (lazily, inside its own methods), so both must already
-# be defined.  ``native`` stays importable as a submodule too — the
-# ``from blackbull.testing import native`` form is the documented one, because
-# ``native.get(app, '/')`` reads better at a call site than a bare ``get``.
+# Import after defining _LoopThread and lifespan helpers used by native.
 from . import native                                        # noqa: E402
 from .native import (                                        # noqa: E402
     NativeClient, NativeResponse, NativeTestResponse, NativeTestServer,

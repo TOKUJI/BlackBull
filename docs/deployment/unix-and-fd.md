@@ -111,16 +111,11 @@ wait in the kernel's accept queue, bounded by the creator's `Backlog=` where
 the fd is adopted and by
 [`BB_SOCKET_BACKLOG`](../reference/env-vars.md#socket-tuning) where BlackBull
 binds it.  The window lasts as long as the startup hook runs, with no deadline
-from the framework.  The kernel admits `backlog + 1` parked connections per
-socket, each holding one 128 KiB receive buffer on a stock Linux (nothing reads,
-so it does not autotune upward): **128.125 MiB per listener** at the default,
-256.25 MiB dual-stack, and 4097 × 128 KiB = **512.125 MiB** on an adopted
-fd given `Backlog=4096`.
-`BB_SOCKET_RCVBUF` sets that buffer on the listener and parked connections
-inherit it: a requested `262144` is 416 KiB effective each, making the window
-**416.406 MiB** per listener, 832.812 MiB dual-stack.  A window longer than the
-client's SYN retransmission budget (about two minutes) loses the excess.
-BlackBull documents this window rather than forcing it smaller.
+from the framework. Budget startup memory across every listener's backlog
+and the receive buffers of parked connections. Effective kernel values are
+platform-dependent; adopted sockets retain the creator's backlog.
+`BB_SOCKET_RCVBUF` affects listeners BlackBull binds and is inherited by their
+accepted connections. Long startup hooks can exceed clients' connect budgets.
 
 ### What a client beyond the backlog observes
 
@@ -136,32 +131,15 @@ Set `BB_SOCKET_BACKLOG` above the number of connections you expect during
 startup, especially on `AF_UNIX`.  An adopted fd (`--bind fd://N`) keeps the
 backlog it was created with until accepting opens, and `BB_SOCKET_BACKLOG`
 after: size the startup burst where the socket is created, such as systemd's
-`Backlog=`.  `net.core.somaxconn` caps both.
+`Backlog=`.  `net.core.somaxconn` caps both.  On shutdown an activated socket's
+file stays in place; a stale file left after `--reload` is replaced on the next
+start.
 
 On Linux, a worker that finds an `AF_UNIX` listener's queue full as it opens
 accepting logs one `socket_backlog` warning on `blackbull.caps`, naming the
 listener, the connections waiting and the backlog.  An adopted fd created in
 another network namespace (systemd `PrivateNetwork=yes`) cannot be read and is
 not checked.
-
-## Sizing the connection cap under uvloop
-
-Under `BB_UVLOOP=1`, accepting does not pause at `BB_MAX_CONNECTIONS`.
-Connections beyond the cap are refused using spare file descriptors, and when
-those run out, clients get no response at all.
-
-If you use uvloop and expect bursts beyond the cap:
-
-- Do not rely on `BB_MAX_CONNECTIONS=auto`; it leaves only 64 spare
-  descriptors.
-- Set `BB_MAX_CONNECTIONS ≤ RLIMIT_NOFILE − (peak burst + held + margin)`,
-  where `held` is what the process holds at its busiest besides client
-  connections: the connection pool's maximum, files opened per request times
-  concurrency, and anything opened lazily.  Do not count `held` at idle.
-- Use a margin of at least 64, and more with TLS or with
-  `BB_SOCKET_REUSEPORT=1`.
-
-If a hard bound matters more than uvloop's speed, use the default event loop.
 
 ## Inspecting the bind
 

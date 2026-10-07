@@ -16,14 +16,13 @@ from __future__ import annotations
 
 import pytest
 
-from blackbull.headers import Headers
 from blackbull.server.http1_actor import (
     BadRequestError, _parse_host_header, _validate_host,
 )
 
 
-def _headers(value: bytes) -> Headers:
-    return Headers([(b'host', value)])
+def _headers(value: bytes) -> list:
+    return [(b'host', value)]
 
 
 class TestANonDecodableHostIsRejected:

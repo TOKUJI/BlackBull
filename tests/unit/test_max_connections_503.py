@@ -4,7 +4,7 @@ When the per-worker cap is hit, new
 connections receive HTTP/1.1 ``503 Service Unavailable`` with
 ``Retry-After: 1`` (well-formed response, not a silent reset).
 
-These tests exercise ``ASGIServer.client_connected_cb`` directly with
+These tests exercise ``ASGIServer._serve_connection`` directly with
 mocked reader/writer pairs so we can assert on the wire bytes.
 
 Cap-hit observability: the test that drives the cap also
@@ -27,7 +27,7 @@ class _RecordingWriter:
         self.written = bytearray()
         self.closed = False
         # Pretend to be a wrapped asyncio.StreamWriter for the
-        # ``get_extra_info`` calls in client_connected_cb.
+        # ``get_extra_info`` calls in _serve_connection.
         self.transport = _RecordingTransport()
 
     def write(self, data: bytes) -> None:
@@ -70,7 +70,7 @@ class _NoopReader:
 
 
 async def _noop_app(scope, receive, send):
-    """Trivial ASGI app placeholder.  client_connected_cb on the
+    """Trivial ASGI app placeholder.  _serve_connection on the
     reject path never reaches the app, so it doesn't need to do
     anything sensible."""
     return None
@@ -86,7 +86,7 @@ async def test_below_cap_no_cap_hit_log(caplog):
     assert srv._active_connections == 0
     assert srv._max_connections == 2
     # The reject branch is not entered — verify via counter state.
-    # We can't run the full client_connected_cb without mocking
+    # We can't run the full _serve_connection without mocking
     # ConnectionActor, but we can verify the precondition.
     assert srv._active_connections < srv._max_connections
 
@@ -108,9 +108,9 @@ async def test_at_cap_sends_503_with_retry_after_and_closes(caplog):
     writer = _RecordingWriter()
     reader = _NoopReader()
 
-    # client_connected_cb signature: (reader, writer).  It pulls
+    # _serve_connection signature: (reader, writer).  It pulls
     # peername/sockname/alpn from writer.transport.
-    await srv.client_connected_cb(reader, writer)
+    await srv._serve_connection(reader, writer)
 
     payload = bytes(writer.written)
     # First line must be the 503 status line.
@@ -167,7 +167,7 @@ async def test_max_connections_zero_disables_the_cap(monkeypatch):
 
     writer = _RecordingWriter()
     reader = _NoopReader()
-    await srv.client_connected_cb(reader, writer)
+    await srv._serve_connection(reader, writer)
 
     # The cap branch was skipped → no 503 written, actor was invoked.
     payload = bytes(writer.written)
@@ -191,7 +191,7 @@ async def test_at_cap_503_response_is_rfc9112_well_formed():
 
     writer = _RecordingWriter()
     reader = _NoopReader()
-    await srv.client_connected_cb(reader, writer)
+    await srv._serve_connection(reader, writer)
 
     payload = bytes(writer.written)
     # Split status line + headers (RFC 9112 §2.2 — CRLF line endings).
