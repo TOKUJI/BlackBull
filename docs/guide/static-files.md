@@ -196,7 +196,12 @@ Content-Range: bytes 0-1023/4096000
 Content-Length: 1024
 ```
 
-A syntactically **unsatisfiable** range (start past the end of the
+If the requested end is at or beyond the file's length, it is clipped to
+the last byte; the response remains `206 Partial Content`, with
+`Content-Range` and `Content-Length` describing the bytes actually served
+(RFC 9110 §14.1.2).
+
+An **unsatisfiable** range (start at or past the end of the
 file) returns `416 Range Not Satisfiable`.  A **malformed** or
 unsupported `Range` header — a bad byte spec (`bytes=abc-def`), a
 non-`bytes` unit, or a multi-range set — is ignored and the full file

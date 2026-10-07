@@ -265,8 +265,32 @@ class TestStaticFilesRangeRequests:
             f'Expected last 5 bytes {self.FILE[-5:]!r}; got {body!r}'
         )
 
+    @pytest.mark.parametrize('cache', [False, True])
+    @pytest.mark.parametrize('first', [0, 7, 19])
+    @pytest.mark.parametrize('last', [20, 999])
+    async def test_range_end_beyond_file_serves_remainder(
+            self, static_dir, cache, first, last):
+        from blackbull.middleware.static import StaticFiles
+        app = StaticFiles(directory=str(static_dir), cache=cache)
+        if cache:
+            await _collect(app, _scope(path='/hello.txt'))
+
+        start, body = await _collect(
+            app, _scope(path='/hello.txt',
+                        headers={'Range': f'bytes={first}-{last}'})
+        )
+
+        assert start['status'] == 206
+        assert body == self.FILE[first:]
+        headers = dict(start['headers'])
+        assert headers[b'content-range'] == f'bytes {first}-19/20'.encode()
+        assert headers[b'content-length'] == str(len(body)).encode()
+
     @pytest.mark.parametrize('rng,expected', [
         pytest.param('bytes=0-3', 206, id='in-range-206'),
+        pytest.param('bytes=20-20', 416, id='start-at-eof'),
+        pytest.param('bytes=20-999', 416, id='start-at-eof-oversized-end'),
+        pytest.param('bytes=100-', 416, id='start-beyond-eof-open-end'),
         pytest.param('bytes=100-200', 416, id='out-of-range-416'),
     ])
     async def test_out_of_range_returns_416(self, static_dir, rng, expected):
@@ -526,6 +550,28 @@ def _scope_with_pathsend(path: str, headers: dict | None = None) -> 'Connection'
 
 @pytest.mark.asyncio
 class TestStaticFilesPathsend:
+    async def test_range_end_beyond_large_file_streams_remainder(self, large_dir):
+        from blackbull.middleware.static import StaticFiles
+        app = StaticFiles(directory=str(large_dir))
+        size = (large_dir / 'big.bin').stat().st_size
+        first = size - 100
+        events = []
+
+        await app(
+            _scope_with_pathsend('/big.bin',
+                                 headers={'Range': f'bytes={first}-{size + 100}'}),
+            _noop_receive, _native_collecting_send(events))
+
+        start = next(e for e in events if e['type'] == 'http.response.start')
+        assert start['status'] == 206
+        headers = dict(start['headers'])
+        assert headers[b'content-range'] == f'bytes {first}-{size - 1}/{size}'.encode()
+        assert headers[b'content-length'] == b'100'
+        assert all(e['type'] != 'http.response.pathsend' for e in events)
+        chunks = [e for e in events if e['type'] == 'http.response.body']
+        assert b''.join(e['body'] for e in chunks) == b'L' * 100
+        assert chunks[-1]['more_body'] is False
+
     async def test_emits_pathsend_when_extension_advertised(self, large_dir):
         """Above-cache file + cleartext H1 scope → pathsend event."""
         from blackbull.middleware.static import StaticFiles

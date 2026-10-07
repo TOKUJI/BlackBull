@@ -42,8 +42,8 @@ def _parse_byte_range(range_hdr: str, size: int) -> tuple[int, int] | None:
     RFC 9110 §14.2 an unparseable/ignored Range is served as a normal 200,
     so the caller treats ``None`` as "serve the whole file".  Never raises:
     a bare ``int()`` here 500s on
-    ``Range: bytes=abc-def``.  *Satisfiability* against ``size``
-    is still checked by the caller (so an out-of-range spec stays a 416).
+    ``Range: bytes=abc-def``.  The caller answers 416 when start >= size
+    and clips end to size - 1.
     """
     if not range_hdr.startswith('bytes='):
         return None
@@ -411,10 +411,11 @@ class StaticFiles:
             # ``None`` → unparseable/multi-range → ignore and serve full 200.
             if parsed is not None:
                 start, end = parsed
-                if start >= size or end >= size or start > end:
+                if start >= size or start > end:
                     await self._respond(send, HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE,
                         [(b'content-range', f'bytes */{size}'.encode())])
                     return
+                end = min(end, size - 1)
                 status = HTTPStatus.PARTIAL_CONTENT
                 extra_headers.append(
                     (b'content-range', f'bytes {start}-{end}/{size}'.encode()))
