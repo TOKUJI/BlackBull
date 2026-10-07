@@ -1,6 +1,4 @@
 """User-facing wiring for the MQTT 5 broker — detector + [`MQTTExtension`][]."""
-from __future__ import annotations
-
 import asyncio
 import contextlib
 import logging

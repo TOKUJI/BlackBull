@@ -5,8 +5,6 @@ streaming from request_iter, request_iterator, requests or request_stream.
 Use explicit flags when a decorator hides these forms. Handler messages are
 bytes; raise GrpcError or call context.abort for non-OK status.
 """
-from __future__ import annotations
-
 import inspect
 from collections.abc import Awaitable, Callable
 from typing import NamedTuple

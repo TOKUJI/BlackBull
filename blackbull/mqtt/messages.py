@@ -3,8 +3,6 @@
 Decoded messages also unpack as (message, bytes_consumed) for buffer walking.
 Packet property and direction rules follow the MQTT 5 OASIS specification.
 """
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from enum import IntEnum, IntFlag
 from typing import Any, Callable, ClassVar, NamedTuple

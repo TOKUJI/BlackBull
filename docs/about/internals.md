@@ -3,6 +3,11 @@
 This page defines ownership boundaries for contributors. Use the
 [Guide](../guide/index.md) for application APIs.
 
+NamedTuple fields with imported types need resolvable annotations when the class
+is created. Their modules omit `from __future__ import annotations` so package-wide
+beartype checks can decorate the generated constructors. Run `just typecheck`
+when changing these records.
+
 ## Actor model
 
 Each mutable state machine has one owner. HTTP/1.1 reuses request work

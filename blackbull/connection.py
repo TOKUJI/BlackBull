@@ -3,8 +3,6 @@
 ASGI scopes exist only at compatibility boundaries. Keep conversion fields
 in _CONNECTION_FIELDS; state and extensions remain shared after conversion.
 """
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Callable, NamedTuple
 from urllib.parse import parse_qsl
@@ -461,4 +459,3 @@ class Connection:
             else:
                 self._form = {}
         return self._form
-
