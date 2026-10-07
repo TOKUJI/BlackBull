@@ -5759,6 +5759,10 @@
 <h1 id="internals">Internals<a class="headerlink" href="#internals" title="Permanent link">&para;</a></h1>
 <p>This page defines ownership boundaries for contributors. Use the
 <a href="../../guide/">Guide</a> for application APIs.</p>
+<p>NamedTuple fields with imported types need resolvable annotations when the class
+is created. Their modules omit <code>from __future__ import annotations</code> so package-wide
+beartype checks can decorate the generated constructors. Run <code>just typecheck</code>
+when changing these records.</p>
 <h2 id="actor-model">Actor model<a class="headerlink" href="#actor-model" title="Permanent link">&para;</a></h2>
 <p>Each mutable state machine has one owner. HTTP/1.1 reuses request work
 sequentially on a connection; HTTP/2 requires separate stream work because
