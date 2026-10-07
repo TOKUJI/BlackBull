@@ -79,6 +79,10 @@ nav:
   - Reference:
     - Environment variables: reference/env-vars.md
     - API: api/
+  - Security:
+    - Severity criteria: security/severity.md
+    - Minimal fixture app: security/fixture-app.md
+    - Local robustness probe: security/probe.md
   - About:
     - Architecture: about/architecture.md
     - Conformance: about/conformance.md
