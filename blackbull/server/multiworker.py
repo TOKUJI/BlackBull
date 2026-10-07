@@ -1,27 +1,7 @@
-"""Multi-worker master process for BlackBull.
+"""Multi-worker master.
 
-Uses a pre-fork model:
-  1. The master binds sockets once (via ASGIServer.open_socket).
-  2. N worker processes are forked; each inherits the socket file descriptors.
-  3. The master monitors workers in a synchronous loop and respawns any that crash.
-  4. On SIGTERM or SIGINT the master sends SIGTERM to all workers, waits up to
-     *shutdown_timeout* seconds, then SIGKILLs any that are still alive.
-
-When ``reload=True`` the master additionally runs a file watcher; on any
-matching change it SIGTERMs the workers, marks the listening sockets
-inheritable, and ``os.execvp``\\ s itself with the original argv — the
-fresh process adopts the inherited fds and re-forks workers from the
-new code.  See [`blackbull.server.reload`][blackbull.server.reload].
-
-The worker entry point is [`blackbull.server.worker.run_worker`][blackbull.server.worker.run_worker].
-Each worker runs its own asyncio event loop and its own ASGI lifespan cycle.
-
-Usage::
-
-    from blackbull.server.multiworker import MultiWorkerServer
-
-    server = MultiWorkerServer(app, raw_sockets, ssl_context, workers=4)
-    server.run()          # blocks until SIGTERM / SIGINT
+Workers inherit listeners, not a live event loop. Lifespan runs per worker;
+the master owns signals and supervision. Shared state is process-local.
 """
 import logging
 import multiprocessing
@@ -146,11 +126,7 @@ def _describe(socks) -> str:
 
 
 def _refuse_non_ip_rebind(shared, workers: int) -> None:
-    """Refuse the per-worker re-bind for a listener that is not an IP socket.
-
-    ``SO_REUSEPORT`` is an IP-socket option: an ``AF_UNIX`` listener has no
-    address to ask for, and its ``getsockname`` is the path, whose second
-    character a plan read as the port before this refusal existed.
+    """Refuse non-IP listeners: SO_REUSEPORT rebinding does not support AF_UNIX.
     """
     for _listener, socks in shared:
         non_ip = [sock for sock in socks if sock.family not in _IP_FAMILIES]
@@ -713,7 +689,7 @@ class MultiWorkerServer:
         self._pending_processes = unreclaimed
         if not unreclaimed:
             logger.info('All workers stopped')
-        # A stop whose signalled worker did not end 0 must not exit 0 (BLA-452).
+        # A stop whose signalled worker did not end 0 must not exit 0.
         failed = [f'{p.name} (exit {code})' for p, code in ends
                   if any(p is s for s in signaled) and code not in (0, None)]
         worker_error = (RuntimeError(

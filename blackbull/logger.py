@@ -1,29 +1,7 @@
-"""Keeping logging off the event loop, and the formatters and gates that help.
+"""Queued logging and import-time logging gates.
 
-Nothing here replaces the standard library — BlackBull logs through ordinary
-``logging`` loggers and attaches no handler of its own until asked.  What this
-module adds is the machinery for logging from an event loop without paying for
-it there.
-
-[`setup_async_logging`][blackbull.logger.setup_async_logging] moves every
-handler on the ``blackbull`` hierarchy behind a queue drained by a background
-thread, so a log call on the loop is an enqueue and nothing else; formatting,
-I/O and rotation all happen off the loop until
-[`teardown_async_logging`][blackbull.logger.teardown_async_logging] undoes it.
-[`JsonFormatter`][blackbull.logger.JsonFormatter] and
-[`ColoredFormatter`][blackbull.logger.ColoredFormatter] are the two sink
-formats, and [`BatchWriteHandler`][blackbull.logger.BatchWriteHandler]
-coalesces a burst of records into one write.
-
-[`log`][blackbull.logger.log] and
-[`debug_gate`][blackbull.logger.debug_gate] are the other half: both read the
-logger's level once, at import, and cost nothing afterwards.  That is the one
-thing to know before using them — raising a level at runtime does not switch
-on what they guard, so configure ``DEBUG`` before importing the framework.
-
-``docs/guide/logging.md`` describes the three logger hierarchies
-(``blackbull``, ``blackbull.access``, ``blackbull.caps``) and the fields an
-access record carries.
+Configure DEBUG before importing guarded code: raising logger levels later
+does not enable log/debug_gate wrappers. Sink I/O belongs off the event loop.
 """
 import inspect
 import json
@@ -74,31 +52,10 @@ def log(fn):
 
 
 def debug_gate(logger: logging.Logger) -> bool:
-    """Whether *logger* wants DEBUG, decided once at import.
+    """Capture DEBUG enablement at import time.
 
-    ``logger.debug(...)`` is not free when DEBUG is off.  The call still
-    happens, ``Logger.debug`` still calls ``isEnabledFor``, the arguments are
-    still evaluated — 24 executed bytecode instructions to emit nothing,
-    measured.  Guarding with ``isEnabledFor`` yourself saves 6 of those,
-    because that *is* what ``debug`` does; only a value settled at import
-    brings it down to 4 (one global read and a branch).
-
-    So modules on a per-request path do::
-
-        _DEBUG = debug_gate(logger)
-        ...
-        if _DEBUG:
-            logger.debug('...', x)
-
-    This is the same bargain [`log`][] already makes and
-    ``docs/guide/logging.md`` already documents: the level is read at import,
-    so raising it afterwards does not switch these on.  Configure ``DEBUG``
-    before importing the framework, or restart.  The paths this guards emit
-    around twenty lines per request, which is not something a running server
-    is switched into anyway.
-
-    Returns a plain bool rather than a callable on purpose — a callable would
-    reintroduce the call this exists to remove.
+    Configure the level before importing guarded code; later level changes do not
+    update this bool. Guard argument evaluation as well as the logging call.
     """
     return logger.isEnabledFor(logging.DEBUG)
 
@@ -184,29 +141,10 @@ class JsonFormatter(logging.Formatter):
 
 
 class BatchWriteHandler(logging.Handler):
-    """Coalesce formatted records into one write per batch (O2 — batch writes,
-    a.k.a. logging approach 4).
+    """Flush formatted records when a batch fills or its interval expires.
 
-    The stdlib ``StreamHandler`` issues ``stream.write()`` + ``stream.flush()``
-    per record — one flushed write syscall per log line.  Under a high-rate
-    access log that is the dominant cost on the listener thread.  This handler
-    instead appends each formatted line to an in-memory buffer and lets a single
-    long-lived flusher thread emit the batch as one ``write()`` when the buffer
-    reaches ``batch_size`` **or** ``flush_interval`` seconds elapse — whichever
-    comes first, so latency is bounded at low rate and syscalls collapse at high
-    rate.
-
-    Design notes:
-    - **One** flusher thread total (not a ``threading.Timer`` per batch — that
-      would churn a thread per ~``batch_size`` records under load).  It waits on
-      a ``Condition`` with the flush interval as its timeout: a full batch
-      notifies it awake, an idle interval wakes it to drain a partial batch.
-    - Formatting runs on the flusher thread, so a deferred-format access record
-      still builds its string off the event loop (as with the plain default).
-    - ``close()`` drains the buffer and joins the thread, so a partial trailing
-      batch is never lost at teardown.
-
-    Opt-in: only constructed when ``BB_LOG_BATCH_SIZE`` > 1.
+    One flusher thread handles all batches. close() drains trailing records and
+    joins it. Do not inherit this live thread across fork.
     """
 
     def __init__(self, stream=None, *, batch_size: int = 128,
@@ -257,11 +195,7 @@ class BatchWriteHandler(logging.Handler):
 
     def _write_batch(self, batch: list[str]) -> None:
         try:
-            # One join, one write, one flush.  Appending a trailing '' makes the
-            # single join emit the terminating newline too, so we don't allocate
-            # and copy the whole (multi-KB) joined string a second time the way
-            # `'\n'.join(batch) + '\n'` would.  `batch` is the drained buffer
-            # (local, already detached from self._buf), so mutating it is safe.
+            # The drained batch is detached from self._buf; it may be mutated.
             batch.append('')
             self._stream.write('\n'.join(batch))
             self._stream.flush()
@@ -288,40 +222,11 @@ def _build_sink_handlers(
     batch_timeout_ms: int | None = None,
     log_file: str | None = None,
 ) -> list[logging.Handler]:
-    """Build the async-logging sink handler(s).
+    """Choose the async sink from explicit values or environment defaults.
 
-    Selects the *destination* and *format* for the background listener when
-    [`setup_async_logging`][] is called without explicit handlers (the
-    common path — the app has only the ``NullHandler`` from import):
-
-    - *syslog_addr* ``host:port`` → a UDP ``SysLogHandler`` (approach 6).
-      An unparseable value falls back to ``stderr`` with a warning rather than
-      crashing startup.
-    - *log_file* path → the sink writes to that file (append mode, approach 2)
-      instead of ``stderr``.  Composes with *batch_size* and *log_format*.
-      Ignored for the syslog sink (UDP has no file stream).  Opened here — i.e.
-      on the worker/listener side after fork — so the file's background flusher
-      thread is created in the worker, never inherited across ``fork()``.
-
-    The stream/file sink is **always** a batching ``BatchWriteHandler``
-    (approach 4 / O2): async logging *is* batch logging.  A per-record
-    ``flush()`` (the stdlib ``StreamHandler`` default) is the dominant cost of
-    access logging — one flush syscall per request churns the GIL against the
-    event loop; profiling showed ~16% of CPU and a −44% throughput hit.
-    Coalescing records into one write per batch removes it.  *batch_size* is the
-    coalescing width (default 64); *batch_timeout_ms* (default 5 ms) bounds the
-    visibility latency of a partial batch at low rate.  To force an immediate
-    per-record flush, disable async logging (the synchronous path) rather than
-    setting *batch_size* to 1.  Syslog is exempt — UDP is one datagram per
-    record.
-
-    Formatter: ``JsonFormatter`` when *log_format* is ``json`` (approach 3),
-    otherwise the stdlib default (plain text — unchanged behaviour).
-
-    Each parameter defaults to ``None`` → the corresponding ``BB_*`` env var.
-    The typed server config (``Settings``/CLI) passes resolved values in via
-    [`setup_async_logging`][]; the env fallback keeps ``logger`` usable
-    standalone (tests, direct use) without importing the settings stack.
+    Syslog wins over a file path. Invalid destinations warn and fall back to
+    stderr. Open files and start batch threads after fork. Stream/file sinks
+    always batch; synchronous logging is the per-record-flush option.
     """
     if log_format is None:
         log_format = os.environ.get('BB_LOG_FORMAT', '')
@@ -334,10 +239,7 @@ def _build_sink_handlers(
     if log_file is None:
         log_file = os.environ.get('BB_LOG_FILE', '')
 
-    # Resolve the destination stream (approach 2 = file, else stderr).  For a
-    # multi-worker server each worker builds this post-fork, so concurrent
-    # workers open independent append-mode streams to the same path; access
-    # lines are < PIPE_BUF, so O_APPEND writes interleave atomically.
+    # Open each worker's append-mode sink after fork.
     log_file = log_file.strip()
     stream = sys.stderr
     if log_file:
@@ -362,9 +264,7 @@ def _build_sink_handlers(
                 syslog_addr, exc)
             handler = logging.StreamHandler()
     else:
-        # Async logging is batch logging: the stream/file sink always coalesces
-        # writes (see the note above).  BatchWriteHandler clamps batch_size to a
-        # floor of 2, and the timeout still flushes partial batches promptly.
+        # Batch stream/file writes, including partial batches on timeout.
         handler = BatchWriteHandler(stream, batch_size=batch_size,
                                     flush_interval=max(0, batch_timeout_ms) / 1000.0)
 
@@ -387,23 +287,11 @@ def _int_env(name: str, default: int) -> int:
 
 
 class _DeferredFormatQueueHandler(logging.handlers.QueueHandler):
-    """QueueHandler that defers formatting of self-formatting records.
+    """Defer immutable access-record formatting to the listener thread.
 
-    The stdlib [`prepare`][logging.handlers.QueueHandler.prepare] eagerly calls
-    ``self.format(record)`` on the *producer* thread (here, the event loop) so
-    the record is safe to hand across a process boundary.  For BlackBull's
-    access log that means the expensive ``AccessLogRecord.format()`` string
-    build runs on the hot path even though the actual write happens on the
-    listener thread.
-
-    Records whose message object is marked ``_bb_deferred_format`` (the
-    [`AccessLogRecord`][]) are enqueued *without* formatting or copying, so
-    the string build moves to the listener thread.  This is safe because the
-    queue is in-process (``SimpleQueue`` — no pickling) and an access record is
-    created fresh per request and never mutated after emit (its duration is
-    snapshotted by ``finalize()``).  Every other record keeps the stdlib's
-    eager-format, copy-and-sanitize behaviour, so mutable ``%``-args in
-    debug/warning logs still render their value-at-log-time.
+    Only _bb_deferred_format messages may cross this in-process queue unchanged.
+    Other records keep stdlib copying and sanitization so mutable arguments
+    retain their value at emission. Never mutate a deferred record after emit.
     """
 
     def prepare(self, record: logging.LogRecord) -> logging.LogRecord:
@@ -414,11 +302,8 @@ class _DeferredFormatQueueHandler(logging.handlers.QueueHandler):
 
 _listener: logging.handlers.QueueListener | None = None
 
-# O4 (zero-copy record path): a direct reference to the live listener queue so
-# the access-log hot path can enqueue without going through
-# ``logging.Logger._log`` (findCaller + makeRecord + filter + callHandlers ≈ 93%
-# of the loop-side emit cost — see bench/results/httparena/access-log-profile/).
-# ``None`` when async logging is not active → callers fall back to the sync path.
+# None requires the synchronous fallback. Direct enqueue is only safe
+# without custom access-log handlers or filters.
 _log_queue: _queue_mod.SimpleQueue | None = None
 
 # A stand-in pathname for access LogRecords built by the fast path.  We do not
@@ -428,24 +313,10 @@ _ACCESS_PATHNAME = '(blackbull.access)'
 
 
 def enqueue_access_log(msg: object, extra: dict | None = None) -> bool:
-    """O4 fast path: enqueue an access-log record straight onto the async
-    listener queue, bypassing ``logging.Logger._log`` (no ``findCaller`` stack
-    walk, no filter chain, no ``callHandlers`` dispatch).
+    """Enqueue an access record; return False when synchronous fallback is needed.
 
-    *msg* is the self-formatting ``AccessLogRecord``; its ``__str__``/``format()``
-    still runs on the listener thread (deferred format preserved), because the
-    sink formats the record there.  *extra* (``AccessLogRecord.as_extra()``) is
-    merged onto the record so structured/JSON sinks keep their documented fields.
-
-    Returns ``True`` when the record was enqueued (async logging active), or
-    ``False`` when the caller must use the synchronous ``logger`` path (async
-    logging disabled or torn down).  The level gate is the caller's job —
-    ``emit_access_log`` checks ``isEnabledFor(INFO)`` before calling.
-
-    This path does not run the logger's handler/filter chain, so
-    ``emit_access_log`` only calls it when ``blackbull.access`` has no
-    user-attached handlers or filters (see there); when it does, the standard
-    ``logger.info`` path is used so those are honoured.
+    The caller owns the INFO gate. This bypasses handler/filter chains, so use it
+    only when the access logger has no user handlers or filters.
     """
     q = _log_queue
     if q is None:
@@ -513,7 +384,7 @@ def setup_async_logging(
         log_queue, *handlers, respect_handler_level=True,
     )
     _listener.start()
-    _log_queue = log_queue  # arm the O4 fast path (enqueue_access_log)
+    _log_queue = log_queue
 
 
 def teardown_async_logging() -> None:
@@ -523,7 +394,7 @@ def teardown_async_logging() -> None:
     if _listener is None:
         return
 
-    _log_queue = None  # disarm the O4 fast path → callers fall back to sync
+    _log_queue = None
     _listener.stop()
     # Drain and stop any batching sink so a partial trailing batch is flushed
     # (its flusher is a daemon thread that would otherwise be killed at exit).

@@ -1,17 +1,7 @@
-"""Negotiated response-body compression.
+"""Negotiated body compression.
 
-[`Compression`][blackbull.middleware.compression.Compression] is the only name
-a caller needs here; the rest of the module is codec detection and the ``Vary``
-bookkeeping that stops a shared cache replaying an encoded body to a client
-that never asked for one.
-
-brotli and zstandard are optional installs.  Whichever is present joins the
-negotiable set, so the same middleware quietly offers fewer codecs on a smaller
-install rather than failing.  Built from settings, its defaults come from
-``BB_COMPRESSION_MIN_SIZE``, ``BB_COMPRESSION_EXECUTOR_THRESHOLD``,
-``BB_COMPRESSION_MAX_INFLIGHT`` and ``BB_BROTLI_QUALITY``, all of which
-``docs/reference/env-vars.md`` describes; constructing it yourself takes those
-same four as arguments.
+Optional codec installs change the available set. Preserve Vary so shared
+caches cannot replay an encoded body to a client that refused its coding.
 """
 import asyncio
 import functools
@@ -28,12 +18,7 @@ from .utils import as_middleware
 
 _MIN_SIZE = 100  # default minimum body size to bother compressing
 _EXECUTOR_THRESHOLD = 65536  # default body size above which compression is offloaded
-# Default brotli quality level for dynamic responses.  The brotli library's
-# own default is 11 (max compression, designed for build-time / static
-# pre-compression) — for sub-KB dynamic JSON that's ~5–15 ms of CPU per
-# response, which pegs the loop.  4 matches Google's and Cloudflare's
-# recommendation for dynamic content; 5 matches Apache mod_brotli;
-# 6 matches nginx ngx_brotli.  Configurable via ``BB_BROTLI_QUALITY``.
+# Dynamic brotli quality; BB_BROTLI_QUALITY overrides it.
 _BROTLI_QUALITY = 4
 # Default cap on concurrent executor offloads.  When at the cap, additional
 # eligible responses are served *uncompressed* rather than queued — bounded
@@ -41,18 +26,8 @@ _BROTLI_QUALITY = 4
 import os as _os  # noqa: PLC0415
 _MAX_INFLIGHT = max((_os.cpu_count() or 1) * 2, 4)
 
-# Content-Type prefixes whose payloads are already compressed or binary and
-# should not be re-compressed (compressing them wastes CPU with no size gain).
-#
-# ``font/woff`` and ``font/woff2`` are intentionally listed but ``font/``
-# is not blanket-skipped: ``font/ttf``, ``font/otf``, and ``font/sfnt`` are
-# uncompressed font tables that DO benefit from gzip/brotli, so they stay
-# off this list and run through the codec like any other text-shaped
-# payload.  WOFF wraps zlib internally; WOFF2 wraps brotli internally —
-# re-compressing them is the worst case (high-entropy input; under the
-# brotli library's bare-call default of quality 11 — BlackBull's own
-# default is q=4 via ``BB_BROTLI_QUALITY``) and contributes a measurable
-# per-request CPU tail on a static-asset workload.
+# Skip compressed/binary media. Do not skip font/ wholesale: TTF, OTF and
+# SFNT still need compression, while WOFF and WOFF2 are already compressed.
 _SKIP_CONTENT_TYPES = (
     'image/',
     'audio/',
@@ -77,11 +52,6 @@ _SKIP_CONTENT_TYPES = (
 # ---------------------------------------------------------------------------
 
 def _detect_codecs(brotli_quality: int = _BROTLI_QUALITY) -> dict[str, Callable[[bytes], bytes]]:
-    """Return a dict of codec-name → compress-callable for every available encoder.
-
-    ``brotli_quality`` is bound into the ``br`` callable so each request
-    pays only the dict lookup + call, with no per-call kwarg setup.
-    """
     available: dict[str, Callable[[bytes], bytes]] = {}
     try:
         import brotli  # type: ignore[import-untyped]
@@ -210,21 +180,13 @@ class Compression:
         # The offload's own thread returns the permit, so the counter is shared.
         self._executor_lock = threading.Lock()
         self._available = _detect_codecs(brotli_quality=brotli_quality)
-        # ``Accept-Encoding`` header bytes → selection.  Real-world traffic
-        # has very few distinct Accept-Encoding values (browsers send a
-        # constant string; benchmark generators send one); parsing the
-        # q-values + iterating the server-preference list on every request
-        # showed up in py-spy profiles.  Bounded so a hostile
-        # peer can't grow it unboundedly.
+        # Bound the selection cache: its header-byte keys are peer-controlled.
         self._codec_cache: dict[bytes, tuple[str, Callable[[bytes], bytes]] | None] = {}
 
     def _select_codec(self, accept_header: bytes) -> tuple[str, Callable[[bytes], bytes]] | None:
-        """Pick the best codec that the client accepts and the server has installed.
+        """Select an installed accepted codec in server order: br, zstd, gzip.
 
-        Server preference order (br > zstd > gzip) is applied among the
-        accepted codecs, regardless of positive q-values, because the
-        server knows which codec yields better compression.
-        Returns ``None`` when there is no overlap.
+        Ignore positive q-value ordering; q=0 forbids a codec. Return None on no overlap.
         """
         cache = self._codec_cache
         if accept_header in cache:
@@ -237,21 +199,13 @@ class Compression:
 
     async def _compress(self, compressor: Callable[[bytes], bytes],
                         body: bytes) -> bytes | None:
-        """Offload *body*'s compression to the executor, honouring the
-        in-flight cap.  Only called when the caller's threshold check says
-        the body crosses ``_executor_threshold`` (below it the caller inlines
-        the synchronous ``compressor(body)`` — no coroutine hop on the
-        common small-body path).  Returns ``None`` when the executor is at
-        cap (the caller serves the body uncompressed).  Shared by the native
-        complete-response path and the ``_dict_event`` lane so the
-        backpressure behaviour is defined once.  The cap bounds work, not time:
-        bytes are the caller's threshold, and a wedged offload holds only its
-        own permit.
+        """Offload compression under the in-flight admission cap.
+
+        Return None at the cap so callers serve uncompressed. This limits outstanding
+        work, not duration; small bodies are compressed inline by the caller.
         """
         loop = asyncio.get_running_loop()
-        # Backpressure: at cap, serve uncompressed rather than queue — an
-        # unbounded executor backlog collapsed the HttpArena `static` profile
-        # to 0 r/s under burst load.
+        # At the admission cap, serve uncompressed rather than queue more work.
         with self._executor_lock:
             inflight = self._executor_inflight
             capped = (self._executor_max_inflight > 0
@@ -309,11 +263,6 @@ class Compression:
                     if _is_compressible_content_type(headers) and \
                             not headers.get(b'content-encoding'):
                         _merge_vary(event._header)
-            # Discriminate on the raw type before building anything.  Going
-            # through `parse_response_event` allocated a `ResponseBody` copy
-            # of every body event just to have the next line's `isinstance`
-            # reject it — a per-chunk cost on a streamed response, for a
-            # wrapper that only ever cares about the start event.
             await send(event)
         return vary_send
 
@@ -352,14 +301,6 @@ class Compression:
 
         async def _emit_native_complete(status, header, body,
                                         original=None) -> None:
-            """Decide, compress, and emit the response as **one** object.
-
-            The whole point of the native lane: no ``to_asgi()`` expansion
-            into dicts for the layer below to convert straight back.  Pass
-            *original* when the caller already holds an equivalent
-            ``NativeResponse``, so the uncompressed exit forwards it verbatim
-            instead of allocating a copy.
-            """
             if _stamp_vary_if_compressible(header) and len(body) >= self._min_size:
                 threshold = self._executor_threshold
                 if threshold > 0 and len(body) >= threshold:
@@ -392,14 +333,9 @@ class Compression:
                 status=status, header=header, body=body))
 
         async def _release_pending(held) -> None:
-            """Forward a held header arm verbatim and stop compressing.
+            """Send held headers before a streaming body or pathsend; stop compressing.
 
-            Used when whatever followed the header is something compression
-            cannot act on — a ``pathsend`` (we never see the bytes), or a
-            streamed chunk (we no longer have the body in one piece).  The
-            header has to go out *first*: the sender drops a pathsend it has
-            no buffered start for, which left a large static file answering
-            with no response at all.
+            The sender requires a preceding start for pathsend.
             """
             nonlocal start_forwarded, skip_compression
             _stamp_vary_if_compressible(held._header)
@@ -410,17 +346,8 @@ class Compression:
         async def intercepting_send(event):
             nonlocal streaming, skip_compression, start_forwarded
             nonlocal pending_header
-            # H1/H2 native path.  Two shapes reach the one-object fast path:
-            # a *complete* NativeResponse (header + terminal body together,
-            # the shape a handler returning a ``Response`` produces), and a
-            # header arm followed by its terminal body — the shape
-            # ``StaticFiles`` produces, which is held here and merged.
-            # Expanding either through ``to_asgi()`` → dict →
-            # ``wrap_native_send`` → NativeResponse round-trips the exact
-            # two-dicts-two-sends cost the native seam removed (measured
-            # against v0.67.0 on m7a.8xlarge: static −3.4〜−6.3 %, json-comp
-            # −1.2〜−3.2 %).  Trailer shapes and plain dict events keep the
-            # ``_dict_event`` lane.
+            # Keep complete and split head/body responses native; expanding them to
+            # ASGI would duplicate boundary work. Trailers retain the event lane.
             if (isinstance(event, NativeResponse)
                     and (event._extension is None or event.push is None)):
                 # Pass-through: a forward-verbatim decision is already made,
@@ -519,12 +446,6 @@ class Compression:
 
 
 def _make_default_compress() -> 'Compression':
-    """Build a Compression instance pre-configured from BB_COMPRESSION_*.
-
-    Kept as a module-level helper so the legacy ``from blackbull.middleware
-    import compress`` import (which exposes a pre-built instance) keeps
-    working through the deprecation alias in [`blackbull.middleware`][blackbull.middleware].
-    """
     try:
         from ..env import get_settings as _get_settings  # noqa: PLC0415
         cfg = _get_settings()

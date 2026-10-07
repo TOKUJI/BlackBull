@@ -1,14 +1,7 @@
-"""MQTT 5.0 per-connection actor and its raw-protocol entry point.
+"""MQTT reader and sole-writer connection actor.
 
-[`MQTT5Actor`][] is one per connection. Its **inbox carries only
-outbound packets** ([`Send`][blackbull.mqtt.broker.Send] from the broker, plus
-local transport refusals). ``Close`` sets terminal state
-without needing a queue slot. Its ``run()`` — draining that inbox — is the
-*sole writer* to the socket, so there are no cross-task write races.  A sibling
-reader loop decodes the wire (via [`PacketFramer`][]) and ``send``s control
-messages to the broker.  [`serve_connection`][] is the
-[`RawProtocolHandler`][blackbull.server.protocol_registry.RawProtocolHandler] body that wires
-the two together.
+All output traverses the writer inbox; Close changes terminal state without
+requiring a queue slot. Supervise both tasks and finish Detach before teardown.
 """
 from __future__ import annotations
 
@@ -294,13 +287,7 @@ class MQTT5Actor(Actor):
         idle deadline (§3.1.2.10)."""
         if not self._keep_alive:
             return await reader.read(_READ_CHUNK)
-        # NB: ``asyncio.timeout``, not ``asyncio.wait_for``.  On Python 3.11 the
-        # latter can *swallow* an external ``CancelledError`` when the wrapped
-        # read completes in the same loop iteration the cancel arrives — the
-        # read-loop then never observes the cancellation and spins forever (the
-        # connection task wedges in the ``cancelling`` state).  ``asyncio.timeout``
-        # distinguishes its own deadline from an outer cancel and re-raises the
-        # latter, so ``serve_connection`` can be torn down deterministically.
+        # Outer cancellation must propagate; distinguish it from the keep-alive deadline.
         try:
             async with asyncio.timeout(self._keep_alive * 1.5):
                 return await reader.read(_READ_CHUNK)
@@ -330,7 +317,9 @@ class MQTT5Actor(Actor):
         elif isinstance(message, MQTTPuback):
             await broker.send(ClientPuback(packet_id=message.packet_id, sender=self))
         elif isinstance(message, MQTTPubrec):
-            await broker.send(ClientPubrec(packet_id=message.packet_id, sender=self))
+            await broker.send(ClientPubrec(packet_id=message.packet_id,
+                                           reason_code=message.reason_code,
+                                           sender=self))
         elif isinstance(message, MQTTPubrel):
             await broker.send(ClientPubrel(packet_id=message.packet_id, sender=self))
         elif isinstance(message, MQTTPubcomp):

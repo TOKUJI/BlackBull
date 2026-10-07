@@ -293,25 +293,10 @@ class BlackBull:
         ]
 
     def on_startup(self, fn: Callable[[], Awaitable[None]]) -> Callable[[], Awaitable[None]]:
-        """Register a zero-argument coroutine to run at lifespan startup.
+        """Register a zero-argument coroutine; return it unchanged.
 
-        Handlers run in registration order, before the ASGI server receives
-        the ``lifespan.startup.complete`` acknowledgement.  An exception aborts
-        the remaining handlers and withholds that acknowledgement.
-
-        Args:
-            fn: Async callable that takes no arguments.
-
-        Returns:
-            fn unchanged, so the decorator can be stacked or the function
-            used normally after registration.
-
-        Example:
-            ```python
-            @app.on_startup
-            async def open_db():
-                await db.connect()
-            ```
+        Run in registration order before startup.complete. An exception aborts
+        remaining hooks and withholds the acknowledgement.
         """
         return self._on_lifecycle_event('app_startup', fn)
 
@@ -324,25 +309,10 @@ class BlackBull:
         return fn
 
     def on_shutdown(self, fn: Callable[[], Awaitable[None]]) -> Callable[[], Awaitable[None]]:
-        """Register a zero-argument coroutine to run at lifespan shutdown.
+        """Register a zero-argument coroutine; return it unchanged.
 
-        Handlers run in registration order, before the ASGI server receives
-        the ``lifespan.shutdown.complete`` acknowledgement.  An exception
-        aborts the remaining handlers.
-
-        Args:
-            fn: Async callable that takes no arguments.
-
-        Returns:
-            fn unchanged, so the decorator can be stacked or the function
-            used normally after registration.
-
-        Example:
-            ```python
-            @app.on_shutdown
-            async def close_db():
-                await db.disconnect()
-            ```
+        Run in registration order before shutdown.complete. An exception aborts
+        remaining hooks.
         """
         return self._on_lifecycle_event('app_shutdown', fn)
 
@@ -373,19 +343,10 @@ class BlackBull:
 
     async def warm_request(self, conn: Connection, *, body: bytes = b'', n: int = 1
                            ) -> None:
-        """Invoke this app in-process *n* times with a [`Connection`][] to
-        warm the request path.
+        """Invoke the native app n times without sockets, discarding output.
 
-        A warm-up primitive: drives the full **native** ``__call__`` →
-        middleware → ``_dispatch`` chain (HTTP, gRPC, whatever *conn* routes to)
-        with a synthetic ``receive`` that yields *body* once and a ``send`` that
-        discards output.  Faults in code pages and trips PEP 659 specialization
-        on the dispatch + handler + codec — no socket, no wire I/O.  Intended
-        for use from an [`on_warmup`][blackbull.app.BlackBull.on_warmup] hook; safe to call anytime.
-
-        Each iteration runs on a fresh copy of *conn* (its own body cache,
-        ``state`` and receive binding), so the one template drives all *n* runs
-        cleanly.
+        Each iteration copies conn with independent body/state/receive bindings.
+        The synthetic receive yields body once. Intended for on_warmup hooks.
         """
         async def _send(_event) -> None:
             pass
@@ -410,43 +371,12 @@ class BlackBull:
 
     def on(self, event_name: str, *, blocking: bool = False
            ) -> Callable[[EventHandler], EventHandler]:
-        """Decorate a handler to observe ``event_name``.
+        """Observe an event; the decorated coroutine is returned unchanged.
 
-        With ``blocking=False`` (the default) the handler is scheduled as an
-        independent ``asyncio.Task`` each time the event fires — fire-and-forget,
-        never delaying the emitter.  Use it for telemetry that must not add
-        latency to the hot path.
-
-        With ``blocking=True`` the handler is *awaited* in registration order
-        before the emit completes, so a side effect is guaranteed to finish
-        within the event's lifetime.  Use it for resource cleanup keyed to an
-        event's completion — most notably ``scope_completed`` (close a
-        per-request DB session, delete a temp file).
-
-        Either way the handler's exceptions are isolated: they are caught and
-        logged and never propagate to the emitter or affect other handlers.
-        (For a hook that *may* affect the request, use [`intercept`][].)
-
-        Args:
-            event_name: Name of the event to observe (e.g. ``'scope_completed'``).
-            blocking: Await the handler before emit returns (default ``False``).
-
-        Returns:
-            A decorator that registers the wrapped coroutine and returns it
-            unchanged.
-
-        Example:
-            ```python
-            @app.on('request_completed')            # detached telemetry
-            async def log_it(event: Event):
-                metrics.record(event.detail)
-
-            @app.on('scope_completed', blocking=True)   # awaited cleanup
-            async def close_session(event: Event):
-                session = event.detail['conn'].get('state', {}).get('db')
-                if session is not None:
-                    await session.close()
-            ```
+        The default schedules a detached task. blocking=True awaits observers in
+        registration order; cancellation can still interrupt them. Ordinary observer
+        exceptions are logged and isolated. Use intercept for hooks that may change
+        the request, and see docs/guide/events.md for event lifetimes.
         """
         def decorator(handler):
             self._dispatcher.on(event_name, handler, blocking=blocking)
@@ -463,25 +393,9 @@ class BlackBull:
         return await self._dispatcher.drain(timeout)
 
     def intercept(self, event_name: str) -> Callable[[EventHandler], EventHandler]:
-        """Decorate a handler to intercept ``event_name`` synchronously.
+        """Await interceptors in registration order; return the handler unchanged.
 
-        The handler is awaited in registration order when the event fires.
-        Exceptions propagate to the emitter and abort subsequent interceptors
-        registered for the same event.
-
-        Args:
-            event_name: Name of the event to intercept (e.g. ``'app_startup'``).
-
-        Returns:
-            A decorator that registers the wrapped coroutine and returns it
-            unchanged.
-
-        Example:
-            ```python
-            @app.intercept('app_startup')
-            async def handler(event: Event):
-                await setup()
-            ```
+        Exceptions propagate and abort subsequent interceptors for that event.
         """
         def decorator(handler):
             self._dispatcher.intercept(event_name, handler)
@@ -542,15 +456,10 @@ class BlackBull:
 
     async def _dispatch(self, conn, receive: ASGIReceiveCallable | None,
                         send: ASGISendCallable):
-        """Route and dispatch a single non-lifespan request.
+        """Emit request_received/before_handler/after_handler while dispatching.
 
-        The single emission point for ``request_received`` / ``before_handler``
-        / ``after_handler``.  Why they are emitted here, and why
-        ``request_completed`` is not, is in ``docs/about/internals.md``.
-
-        Each emit is guarded by ``has_listeners`` so a request with no
-        registered handler pays a dict lookup rather than an ``Event`` and its
-        detail dict.
+        BlackBull.__call__ emits request_completed after the global middleware chain;
+        keep this boundary so external ASGI hosts get the same lifecycle.
         """
         if _DEBUG:
             self._logger.debug((conn, receive, send))
@@ -601,12 +510,7 @@ class BlackBull:
         raw_send = send
         send = _wrap_send_native(send)
 
-        # RFC 9110 §9.1 — methods are case-sensitive tokens.  Prefer the
-        # HTTPMethod enum; for anything outside it — IANA registrations it
-        # hasn't caught up with (QUERY, RFC 10008; no member before 3.16)
-        # or extension tokens — keep the raw str so the router still
-        # matches and returns the correct Allow header.  StrEnum equality
-        # makes the two interchangeable as router keys.
+        # RFC 9110 §9.1: methods are case-sensitive; preserve unknown tokens as str.
         method = _METHOD_BY_VALUE.get(conn.method, conn.method)
 
         path = conn.path
@@ -677,12 +581,7 @@ class BlackBull:
                 }))
             await function(conn, receive, send)
         except (ClientDisconnected, ConnectionResetError) as e:
-            # Peer vanished mid-body — there is no one to answer.
-            # ``ConnectionResetError`` is the same event unwrapped: the read
-            # path surfaces the OS error when the reset lands while a handler is
-            # mid-``stream()``.  Uncaught it falls to the generic arm below and
-            # prints a traceback per occurrence — 307 in one sixteen-profile
-            # run, for a client's ordinary prerogative.
+            # Peer disconnect during body reads is an ordinary close, not a handler failure.
             exc_caught = e
             if _DEBUG:
                 self._logger.debug('client disconnected before request body completed')
@@ -771,13 +670,9 @@ class BlackBull:
             if request is None:
                 request = Connection.from_scope(conn, receive)
         else:
-            # HTTP as a scope dict.  BlackBull's own HTTP/2 actor stashes the
-            # Connection it already built under ``CONNECTION_STASH_KEY``; reuse
-            # it, because ``from_scope`` would rebuild a byte-identical one —
-            # measured ~1.8 µs/req, the dominant HTTP/2 per-stream cost.
-            # Do NOT rebind ``_receive``: the stash holds the *raw* recipient
-            # (the disconnect-detecting wrapper arrives separately as
-            # ``receive``), which is what keeps the per-request graph acyclic.
+            # Reuse the stashed native Connection on compatibility scopes.
+            # Do not rebind _receive to the disconnect wrapper: it captures conn and
+            # would create a per-request reference cycle.
             request = conn.get(CONNECTION_STASH_KEY)
             if request is None:
                 request = Connection.from_scope(conn, receive)
@@ -785,15 +680,7 @@ class BlackBull:
         if self._chain is None:
             self._build_chain()
 
-        # The terminal events are emitted here rather than in ``_dispatch``
-        # because an ``app.use`` middleware wraps outside it and may buffer the
-        # response (``Compression``), so the wire data is only final once the
-        # whole chain returns (issue #145).  What each one guarantees is in
-        # docs/guide/events.md.
-        #
-        # ``request`` is always a Connection here — the native branch keeps it
-        # and both scope branches converted it, while lifespan returned early —
-        # so the reads below need no ASGI fallback.
+        # Emit terminal events after the whole middleware chain, including buffered responses.
         dispatcher = self._dispatcher
         want_request_completed = (request.type == 'http'
                                   and dispatcher.has_listeners('request_completed'))
@@ -886,28 +773,11 @@ class BlackBull:
         return RouteGroup(self, middlewares)
 
     def register_converter(self, type_: type, converter: Callable | None = None):
-        """Teach simplified handlers to return values of a custom *type_*.
+        """Convert a custom simplified-handler return type to a supported sendable.
 
-        A simplified handler may already return ``str``, ``bytes``, ``dict``,
-        ``list``, a dataclass, a ``Response``, or ``None``.  Register a
-        converter to extend that set — e.g. so a handler can
-        ``return my_orm_object`` and have it serialised automatically.  The
-        converter receives the returned value and must return a *natively
-        supported* sendable (a ``Response``, ``str``/``bytes``, ``None``, or a
-        JSON-able ``dict``/``list``/dataclass).
-
-        Direct form::
-
-            app.register_converter(MyOrmObject, lambda o: o.to_dict())
-
-        Decorator form (omit *converter*)::
-
-            @app.register_converter(MyOrmObject)
-            def _(o):
-                return o.to_dict()
-
-        Registration order does not matter: a converter registered after a
-        route is still honoured by that route's handler.
+        The converter must return Response, str, bytes, None, or a JSON-able
+        mapping, list or dataclass. Pass it directly or omit it to get a decorator.
+        Converters registered after a route still apply to that route.
         """
         if converter is None:
             def _decorator(fn: Callable) -> Callable:
@@ -937,13 +807,6 @@ class BlackBull:
         return True
 
     def _static_miss(self):
-        """Terminal handler for a static route whose target is not a file.
-
-        A static route must end in a real handler — ``_register_chain`` binds
-        the last function's ``call_next`` to ``do_nothing``, which sends
-        nothing — and routing the miss through the app's own 404 path is what
-        makes a user's ``@app.on_error`` override apply to it.
-        """
         async def _static_not_found(conn, receive, send):
             conn.state['error_status'] = HTTPStatus.NOT_FOUND
             handler = self._error_router[HTTPStatus.NOT_FOUND]
@@ -954,29 +817,11 @@ class BlackBull:
     def static(self, url_prefix: str, root_dir: str | Path, *,
                cache: bool = False, index: str | None = None,
                conditional: bool = True) -> None:
-        """Serve static files from *root_dir* under *url_prefix* as a route.
+        """Mount static GET/HEAD routes under url_prefix.
 
-        ``cache`` (default ``False``): when ``True``, file bodies are
-        held in-memory for fast cache-hit serving.  Useful for
-        standalone deployments where BlackBull terminates static
-        traffic directly.  Most production deployments place nginx /
-        a CDN in front of the framework for static traffic and don't
-        need the in-process cache; the default off is calibrated to
-        that majority.  See ``docs/guide/static-files.md`` for the
-        full discussion.
-
-        ``index`` (default ``None`` — off): a filename (e.g.
-        ``'index.html'``) served when a request resolves to a directory.
-
-        ``conditional`` (default ``True``): emit ``ETag`` / ``Last-Modified``
-        validators and answer ``If-None-Match`` / ``If-Modified-Since`` with
-        a 304.  Set ``False`` to disable conditional responses.
-
-        Registered as a **route**, not global middleware, so a request that
-        is not for a static path never enters this code: it resolves in the
-        router's exact-match dict and never reaches the parametrised scan.
-        This is also what every peer framework does — Starlette, Sanic,
-        aiohttp, Flask and Django all mount static as a route.
+        cache=True retains file bodies in memory. index names a directory index;
+        None disables it. conditional=False disables ETag/Last-Modified and 304
+        responses. See docs/guide/static-files.md for cache and traversal limits.
         """
         from blackbull.middleware.static import StaticFiles
         root = Path(root_dir).resolve()
@@ -999,30 +844,11 @@ class BlackBull:
                                    functions=list(chain))
 
     def on_error(self, key):
-        """Register a custom error handler for an HTTPStatus or exception class.
+        """Register a (conn, receive, send) handler for a status or exception class.
 
-        ``key`` may be an ``HTTPStatus``, a plain ``int`` status code
-        (coerced to ``HTTPStatus``), or an exception class.
-
-        Usage::
-
-            @app.on_error(HTTPStatus.FORBIDDEN)
-            async def handle_403(conn, receive, send):
-                ...
-
-            @app.on_error(403)            # int shorthand
-            async def handle_403(conn, receive, send):
-                ...
-
-            @app.on_error(ValueError)
-            async def handle_value_error(conn, receive, send):
-                ...
-
-        The handler receives (conn, receive, send).
-        conn.state contains:
-          - 'error_status'    : HTTPStatus
-          - 'error_exception' : exception instance (when triggered by an exception)
-          - 'allowed_methods' : allowed method names (for 405)
+        An int key is converted to HTTPStatus. conn.state supplies error_status,
+        error_exception when an exception triggered it, and allowed_methods for 405.
+        See docs/guide/error-handling.md for exception-class precedence.
         """
         if isinstance(key, int) and not isinstance(key, HTTPStatus):
             key = HTTPStatus(key)
@@ -1033,32 +859,17 @@ class BlackBull:
         return self._router.url_path_for(name, **params)
 
     def get_routes(self) -> 'list[RouteInfo]':
-        """Return a snapshot of all registered routes.
+        """Return a shallow snapshot in registration order, one RouteInfo per HTTP method.
 
-        Each entry is a [`RouteInfo`][blackbull.router.RouteInfo] named tuple
-        ``(method, path, name)``.  Routes are returned in registration
-        order, one entry per HTTP method.  The list is a shallow copy and
-        may be freely sorted, filtered, or mutated without affecting the
-        live router.
-
-        This is the public, stable alternative to reaching into the
-        internal ``app._router._route_info`` attribute — use it for
-        dashboards, OpenAPI generators, admin panels, and debug endpoints.
+        Changing the returned list cannot mutate the live router.
         """
         return self._router.get_routes()
 
     def enable_grpc(self, registry) -> None:
-        """Serve unary gRPC calls from *registry* over the HTTP/2 layer.
+        """Serve all four gRPC call shapes from registry over HTTP/2.
 
-        gRPC is HTTP/2 with ``content-type: application/grpc``; once enabled,
-        such requests are dispatched to the registry's handlers (returning
-        ``grpc-status`` trailers) instead of the HTTP router, while REST and
-        WebSocket traffic on the same port is unaffected.
-
-        ``registry`` is a [`blackbull.grpc.GrpcServiceRegistry`][blackbull.grpc.GrpcServiceRegistry].  gRPC
-        requires HTTP/2, so run the app with TLS+ALPN (or h2c) for real
-        clients.  Protobuf is not pulled in — handlers exchange raw message
-        bytes; see ``blackbull.grpc`` for the handler contract.
+        Handlers exchange raw message bytes without a protobuf dependency. Use
+        TLS+ALPN or h2c; status is sent in trailers. HTTP routes remain available.
         """
         self._grpc_registry = registry
 
@@ -1068,28 +879,10 @@ class BlackBull:
                        description: str | None = None,
                        spec_path: str = '/openapi.json',
                        docs_path: str | None = '/docs') -> None:
-        """Auto-publish an OpenAPI 3.1 spec and Swagger UI for the app.
+        """Publish OpenAPI JSON at spec_path and Swagger UI at docs_path.
 
-        Registers two routes:
-
-        * ``spec_path`` (default ``/openapi.json``) returns the spec as JSON.
-          The spec is regenerated on every request so new routes added after
-          this call are reflected.
-        * ``docs_path`` (default ``/docs``) returns an HTML page hosting
-          Swagger UI pointed at ``spec_path``.  Pass ``docs_path=None`` to
-          skip the UI route and serve only the JSON spec.
-
-        Call once, after the rest of the app's routes have been registered.
-
-        This is a thin convenience wrapper around ``OpenAPIExtension``,
-        which is the reference implementation of the ``init_app(app)``
-        extension convention (see the Extensions guide).  External
-        callers may also instantiate the extension class directly when they
-        want to keep a handle on it after registration::
-
-            from blackbull.openapi import OpenAPIExtension
-            ext = OpenAPIExtension(app, title='My API')
-            assert app.extensions['openapi'] is ext
+        Call once. The spec is regenerated per request to include new routes.
+        docs_path=None disables the UI; see docs/guide/openapi.md.
         """
         from .openapi import OpenAPIExtension  # noqa: PLC0415
 
@@ -1167,28 +960,10 @@ class BlackBull:
         return decorator
 
     def add_extension(self, ext):
-        """Register an extension and return it (for decorator chaining).
+        """Call ext.init_app(app) immediately and return ext.
 
-        *ext* is any object exposing ``init_app(app)``; subclassing
-        [`Extension`][blackbull.extension.Extension] is optional.  ``init_app`` is called immediately to wire the
-        extension's routes / middleware / protocol handlers / events through
-        the public ``app.*`` API.  Optional async ``startup(app)`` /
-        ``shutdown(app)`` methods are wired into the ``app_startup`` /
-        ``app_shutdown`` lifespan events.
-
-        This is the **only** extension- or protocol-registration entry point on
-        the core class; protocol support (e.g. an MQTT broker) is added by
-        passing the relevant extension here, never by editing this class::
-
-            from blackbull.mqtt import MQTTExtension, Message
-
-            mqtt = app.add_extension(MQTTExtension(port=1883))
-
-            @mqtt.on_message(topic='sensors/+/temperature')
-            async def on_temp(msg: Message):
-                ...
-
-        Returns *ext* so it can be captured and configured further.
+        Subclassing Extension is optional. Optional async startup(app)/shutdown(app)
+        methods are registered as lifespan hooks.
         """
         if not hasattr(ext, 'init_app'):
             raise TypeError(
@@ -1213,33 +988,12 @@ class BlackBull:
             ws_queue_depth: int | None = None,
             reload: bool | None = None,
             reload_paths: list | None = None) -> None:
-        """Run the app under BlackBull's own server (single- or multi-worker).
+        """Run synchronously; do not wrap in asyncio.run.
 
-        This is the synchronous, fire-and-forget entry point — callers
-        write ``app.run(port=8000)``, not ``asyncio.run(app.run(...))``.
-        For ``workers > 1`` *or* ``reload=True`` the master pre-binds
-        sockets, forks workers, and blocks until SIGTERM / SIGINT.
-
-        An argument left unset falls back to a ``BLACKBULL_*`` environment
-        variable, then to a ``.env`` file, then to the bound
-        [`AppConfig`][blackbull.AppConfig]; the Configuration guide gives the order
-        in full and names every variable.  Server-tuning knobs keep their
-        ``BB_*`` names — ``BLACKBULL_*`` is the deployment namespace.  The
-        provenance of each non-default setting is logged once at startup on
-        the ``blackbull.config`` logger.
-
-        For embedded use under an existing event loop, or for pre-binding
-        a socket before forking a test subprocess, instantiate
-        ``blackbull.server.ASGIServer`` directly.  Any external
-        ASGI server (uvicorn / hypercorn / granian / …) can drive the
-        [`BlackBull`][] instance via its ASGI 3.0 ``__call__``.
-
-        Example::
-
-            app.run(port=8000)
-            app.run(port=8443, certfile='cert.pem', keyfile='key.pem', workers=4)
-            app.run(port=8443, certfile='cert.pem', keyfile='key.pem', reload=True)
-            app.run(unix_path='/run/blackbull.sock')
+        Unset options resolve through BLACKBULL_* environment variables, .env,
+        AppConfig and defaults. BB_* controls server tuning. Multiple workers or
+        reload use a blocking supervisor. External ASGI hosts can call the app;
+        embedded event-loop use requires ASGIServer. See the Configuration guide.
         """
         from .config import resolve_run_config, log_config_sources  # noqa: PLC0415
 
@@ -1275,29 +1029,12 @@ def serve(app, *,
           ws_queue_depth: int | None = None,
           reload: bool = False,
           reload_paths: list | None = None) -> None:
-    """Synchronous entry point for any ASGI 3.0 callable.
+    """Run a BlackBull instance or ASGI 3.0 callable synchronously.
 
-    Works for a [`BlackBull`][] instance *and* for any plain ASGI
-    callable (uvicorn/hypercorn-style ``async def app(scope, receive,
-    send): …``).  This is what the ``blackbull`` console script calls
-    after resolving ``module:attr``; [`BlackBull.run`][BlackBull.run] is a thin
-    shim around it.
-
-    For ``workers=1`` without reload the server runs in the current
-    process via ``asyncio.run``.  For ``workers > 1`` *or*
-    ``reload=True`` the master pre-binds sockets, forks workers, and
-    blocks until SIGTERM / SIGINT — or in reload mode, until a
-    watched file changes (master then re-execs itself, see
-    [`blackbull.server.reload`][blackbull.server.reload]).
-
-    *listeners* states the sockets directly — one
-    [`Listener`][blackbull.server.listener.Listener] each, saying where it is,
-    what speaks there and whether TLS terminates there.  It replaces *port*,
-    *unix_path* and *inherited_fd* rather than joining them, so passing both
-    is refused.
-
-    All integer parameters default to their corresponding ``BB_*``
-    environment variables (see [`blackbull.env`][blackbull.env]).
+    One worker without reload runs in this process; multiple workers or reload
+    use a blocking supervisor. listeners replaces port/unix_path/inherited_fd;
+    passing both is refused. Unset workers, max_connections and queue depths
+    use BB_* settings. Deployment options do not resolve BLACKBULL_* here.
     """
     if listeners and (port or unix_path is not None or inherited_fd is not None):
         raise TypeError(
@@ -1426,8 +1163,6 @@ def _serve_single_worker(
     stream_queue_depth,
     ws_queue_depth,
 ) -> None:
-    """Run one worker in-process (no reload): loop policy + async logging,
-    then ``asyncio.run``.  Boot-time only — never on a request path."""
     import logging as _logging  # noqa: PLC0415
     from .logger import setup_async_logging, teardown_async_logging  # noqa: PLC0415
     from .env import apply_event_loop_policy  # noqa: PLC0415

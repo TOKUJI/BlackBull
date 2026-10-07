@@ -1,17 +1,5 @@
-"""WebSocket client (RFC 6455).
-
-Two pieces:
-
-- ``WebSocketClient`` opens a TCP/TLS connection and drives the HTTP/1.1
-  ``Upgrade: websocket`` handshake.
-- ``WebSocketSession``, returned by ``WebSocketClient.connect``, owns the
-  post-handshake frame loop: ``send_text`` / ``send_bytes`` / ``receive`` /
-  ``ping`` / ``close``.
-
-Reuses ``HTTP1RequestSender`` / ``HTTP1ResponseRecipient`` for the handshake
-and ``encode_frame(mask=True)`` / ``WebSocketRecipient(require_masked=False)``
-for post-handshake frames — the same codec serves both directions,
-parameterised by the ``mask`` flag.
+"""HTTP/1.1 WebSocket client. Client frames are masked; incoming
+server frames must not be. The returned session owns post-handshake reads.
 """
 import asyncio
 import os
@@ -253,11 +241,6 @@ class WebSocketClient:
             request_headers.append(b'sec-websocket-protocol', b', '.join(offered))
 
         await HTTP1RequestSender(self._writer).send('GET', path, request_headers)
-        # What keeps the first WebSocket frame from being read as a body is
-        # the 1xx half of RFC 9112 §6.3 item 1, which applies to the status
-        # alone; passing GET changes no outcome, since the method half names
-        # only HEAD and CONNECT.  It is passed because it is known and because
-        # a call that omits it is indistinguishable from one that forgot.
         if response_timeout is None:
             response = await HTTP1ResponseRecipient().receive(
                 self._reader, method='GET')
@@ -274,8 +257,7 @@ class WebSocketClient:
             raise HandshakeError(
                 f'invalid Sec-WebSocket-Accept: got {accept!r}, expected {expected_accept!r}')
 
-        # Headers.get returns b'' when absent, not None — normalise to None
-        # so callers can use ``ws.subprotocol is None`` as the no-protocol test.
+        # Normalize an absent or empty subprotocol to None.
         chosen_raw = response.headers.get(b'sec-websocket-protocol')
         chosen: bytes | None = chosen_raw if chosen_raw else None
         if chosen is not None and offered and chosen not in offered:

@@ -73,12 +73,13 @@ app = BlackBull()
 docs = OpenAPIExtension(title='Items API', version='1.0.0')
 docs.init_app(app)
 
-# Or eager — wire on construction.
-OpenAPIExtension(app, title='Items API', version='1.0.0')
-
-# Either way, the extension is reachable as a registry entry:
+# The extension is reachable as a registry entry:
 assert app.extensions['openapi'] is docs
 ```
+
+Alternatively, initialize a fresh app eagerly with
+`docs = OpenAPIExtension(app, title='Items API', version='1.0.0')`.
+Choose one style; do not register two instances on the same app.
 
 Why use the class form?
 

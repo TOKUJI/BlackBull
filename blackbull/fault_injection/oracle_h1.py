@@ -1,30 +1,7 @@
-"""Differential oracle for HTTP/1.1 implementation comparison.
+"""Differential HTTP/1.1 oracle.
 
-Public surface for differentially comparing two HTTP/1.1
-implementations against the same [`Scenario`][blackbull.fault_injection.Scenario]
-— typically a reference (e.g. nginx) against a target under test.
-
-Useful externally for client-library / proxy authors who want to
-assert behavioural parity between two implementations under
-wire-level fault injection.
-
-Components:
-
-  * [`Category`][] — the 9-way enum that buckets each example.
-  * ``ACCEPTED_CATEGORIES`` — pass-through set (``OK``,
-    ``BOTH_REJECTED``); divergences sit outside.
-  * [`SideOutcome`][] — what one server returned (response, or
-    exception / timeout) in normalised form.
-  * [`normalize_response`][], [`categorize`][] — the pure
-    functions that compare the two sides.
-  * [`run_scenario`][] — the async wrapper that drives a
-    [`Scenario`][blackbull.fault_injection.Scenario] against
-    ``(host, port)`` and returns ``(SideOutcome, wire_bytes)``.
-  * ``PER_REQUEST_TIMEOUT_S`` — wall budget cap per side.
-
-Test-suite-specific glue (fixtures, Hypothesis strategies, corpus
-capture, ``DiffContext``) continues to live in the conformance
-harness — it is not part of the public surface.
+Compare normalized outcomes under a per-side timeout. A divergence is not
+automatically a protocol defect; inspect its category and RFC requirement.
 """
 from __future__ import annotations
 

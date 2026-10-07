@@ -73,14 +73,7 @@ class ConnectionActor(Actor):
                                  if bound_binding is not None else 'http')
 
     async def run(self) -> None:
-        # Per-connection cap-hit state, bound on the ambient contextvar so every
-        # log_cap_hit() in this task tree picks it up without constructor
-        # plumbing (TaskGroup children inherit the context).  Lazy: the real
-        # counter and its os.urandom id are built only if a cap fires, which
-        # keeps a getrandom(2) syscall, an allocation and a flush off every
-        # accepted connection.  It reuses the accept-time id so a cap-hit record
-        # correlates with the lifecycle events, and generates its own only for
-        # the direct test drives that pass none.
+        # TaskGroup children share one cap counter and accept-time connection identity.
         counter = (_LazyCapHitCounter(connection_id=self._connection_id)
                    if self._connection_id else _LazyCapHitCounter())
         start = time.monotonic()
@@ -120,16 +113,10 @@ class ConnectionActor(Actor):
 
     def _select(self, prefix: bytes, at_eof: bool,
                 order: 'tuple[ProtocolBinding, ...]') -> 'ProtocolBinding | None':
-        """First binding (in priority order) to claim *prefix*, or ``None`` if a
-        higher-priority binding still needs more bytes to decide.
+        """Select in priority order; return None while a higher-priority match is incomplete.
 
-        A binding is only consulted once ``prefix`` holds at least its
-        ``detect_prefix_len`` bytes (or the peer has closed): until then we must
-        not let a lower-priority catch-all (``http1``) claim a connection the
-        higher-priority protocol might still own.  A binding that can rule the
-        bytes out cheaply ([`ProtocolBinding.prefix_possible`][ProtocolBinding.prefix_possible] returning
-        False) is skipped instead, so the http1 catch-all claims a plain HTTP
-        request on its first byte rather than after a full 16-byte peek.
+        Never let the catch-all claim early unless that higher-priority prefix is
+        impossible. EOF permits a decision with fewer than detect_prefix_len bytes.
         """
         for binding in order:
             if not at_eof and len(prefix) < binding.detect_prefix_len:
@@ -143,16 +130,7 @@ class ConnectionActor(Actor):
     async def _peek_and_select(
         self, order: 'tuple[ProtocolBinding, ...]',
     ) -> 'ProtocolBinding | None':
-        """Inspect the smallest discriminating prefix and return the binding.
-
-        Grows the peek one step at a time up to ``max(detect_prefix_len)`` and
-        stops the instant a binding claims — so a short non-HTTP frame (a
-        15-byte MQTT CONNECT, say) is recognised on its first byte and never
-        blocks waiting for HTTP-sized input.
-
-        Nothing is consumed: the bytes stay in the reader, so the winning
-        binding gets a stream still positioned at its own first byte and there
-        is no prefix to replay.
+        """Select using non-consuming prefixes; leave the chosen protocol at its first byte.
         """
         max_len = max((b.detect_prefix_len for b in order), default=0)
         at_eof = False

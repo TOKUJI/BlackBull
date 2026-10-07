@@ -70,8 +70,6 @@ class HelloExtension:
         async def hello():
             return {'message': f'{self._greeting} from extension'}
 
-        # Keep a reference so the registered handler is not GC'd
-        # if the user does not retain it.
         self._handler = hello
 
 
@@ -284,13 +282,7 @@ See [Middleware](middleware.md) for the full middleware
 contract, including how to short-circuit the chain and how to
 inspect responses via `intercepting_send`.
 
-## Patterns and pitfalls from real extractions
-
-The following notes come from packaging an in-tree middleware
-(`blackbull.middleware.Session`) as the standalone
-[`blackbull-session`](https://github.com/TOKUJI/blackbull-session)
-extension during the 0.38 cycle.  They are concrete decisions, not
-hypothetical advice.
+## Packaging an extension
 
 ### Pick a `dependencies` floor that matches what you import
 
@@ -311,12 +303,11 @@ want a different patch level.
 ### Reuse the framework's public middleware helpers
 
 Two BlackBull APIs are useful to extension authors and are
-guaranteed-stable public surface:
+public APIs; respect the declared minimum BlackBull version:
 
-- `from blackbull.middleware import as_middleware` — class
-  decorator that normalises `call_next` so any `send` wrapper your
-  middleware installs receives plain ASGI event dicts, not
-  `Response` objects.  Saves you from `isinstance` guards.
+- `from blackbull.middleware import as_middleware` — normalizes `Response`
+  objects for the active native or external-ASGI lane. A send wrapper must
+  handle that lane's messages; see [Middleware](middleware.md).
 - `from blackbull.asgi import ASGIEvent` — symbolic constants for
   ASGI event type strings (`HTTP_RESPONSE_START`, etc.).  Prefer
   these over hard-coded literals.
@@ -405,47 +396,6 @@ class Session:           # in-tree, deprecated form
         ...
 ```
 
-Schedule the removal with **two gates: at least three MINOR releases
-ahead AND at least one calendar month after the deprecation lands** —
-whichever boundary is later.  For a deprecation announced in v0.38.0
-on 2026-06-14, both gates put the earliest removal at v0.41.0 or
-later, and not before 2026-07-14.  Naming both gates in the warning
-text (rather than a single bare version target) anchors authors and
-users alike and forecloses cargo-cult removal at the release-count
-gate alone.  Early-alpha status does not shorten this window: users
-plan migrations against the announced removal target, and a
-too-short window forces emergency migrations.  At the same time,
-don't ship a deprecation without *some* removal plan — "deprecated
-forever" code accretes maintenance debt without the migration
-benefit.
-
-## Common extension categories
-
-BlackBull's core ships protocols, routing, middleware, events,
-error handling, and a minimal OpenAPI generator.  Almost everything
-else is deliberately *not* in the framework — partly to keep the
-core small and audited, partly because most of these categories
-have several reasonable shapes and BlackBull does not endorse one.
-The table below is informational, not a roadmap; ship one of these
-as `blackbull-<name>` on PyPI and it becomes a citizen of the
-extension ecosystem.
-
-| Category | Reasonable shapes (pick one per extension) | Notes |
-|---|---|---|
-| **Sessions** | signed cookie ([`blackbull-session`](https://github.com/TOKUJI/blackbull-session)), Redis-backed, SQL-backed | Signed cookies have no server state; backed stores allow revocation. |
-| **Authentication** | JWT bearer, OAuth2 PKCE, API keys, session-cookie auth, mutual TLS, HMAC-signed requests | BlackBull does not ship a blessed auth method.  Pick the one that matches your threat model and credential lifecycle. |
-| **Authorization / RBAC** | per-route decorators, policy objects (Casbin-style), scope-based | Often composes with an auth extension via `app.extensions['auth']`. |
-| **Observability** | Prometheus metrics, OpenTelemetry tracing, structured access logs, Sentry error reporting | The `blackbull.*` and `blackbull.access` loggers are the natural hook points; see [Logging](logging.md). |
-| **Rate limiting** | token bucket, leaky bucket, sliding window; in-process / Redis-backed | Best wired through `app.intercept('before_handler')`. |
-| **Caching** | response cache (already in tree as `Cache` middleware), fragment cache, full-page edge cache | Re-extraction of `Cache` is an option once user signal warrants. |
-| **Database integration** | SQLAlchemy async, Tortoise, raw `asyncpg`, SQLite via `aiosqlite` | Connection-pool lifecycle ties to `@app.on('lifespan_startup')` / `lifespan_shutdown`. |
-| **Background tasks** | in-process `asyncio.create_task` helpers, ARQ bridge, Celery bridge | Mind shutdown ordering: drain in `lifespan_shutdown` before pools close. |
-| **Admin / dashboards** | route-mount admin UIs, OpenAPI-driven CRUD | Most depend on an auth extension being already wired. |
-| **CORS / CSRF / security headers** | `CORS` (already in tree), CSP / HSTS injectors, double-submit CSRF | Single-touchpoint middlewares — straightforward to ship as extensions if your variant differs from the in-tree default. |
-| **WebSocket helpers** | room/channel managers, pub-sub bridges (Redis, NATS), broadcast routers | Build on the [`scheme=Scheme.websocket`](websockets.md) route form. |
-| **Static / templates** | static-file extras (already in tree), Jinja2 / Mako / minify-html bridges | Templates are usually a library, not an extension — call them from your handler. |
-
-The framework does not curate this list — there's no
-"blessed extension" registry.  If you want others to find your
-extension, the discovery path is PyPI search for `blackbull-` and
-linking to your project from your own documentation.
+Schedule removal at least three MINOR releases and one calendar month after
+announcing the deprecation, using whichever boundary is later. State both
+gates and the replacement in the warning so users can plan their migration.

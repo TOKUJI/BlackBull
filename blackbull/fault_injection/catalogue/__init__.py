@@ -1,16 +1,7 @@
-"""Canned-misbehaviour catalogue for HTTP/2 client testing.
+"""Named fault-scenario builders.
 
-Each function returns a [`ScenarioH2`][blackbull.fault_injection.ScenarioH2]
-that drives [`H2FaultServer`][blackbull.fault_injection.H2FaultServer] through
-one well-known misbehaviour pattern: one named pathology per scenario,
-so a suite can ``parametrize`` over the set.  The four spec-grade
-categories they cover — half-closed streams, exhausted flow-control
-windows, illegal SETTINGS, weird frame sequences — are tabulated in
-``docs/guide/fault_injection.md`` against the builder for each.
-
-Catalogue entries are pure builders.  They allocate nothing at
-import time, take no I/O, and the returned scenario is immutable;
-two consecutive calls to the same builder are interchangeable.
+Builders perform no I/O and allocate no scenarios at import. Returned
+scenarios are immutable; use them in parametrized resilience tests.
 """
 from __future__ import annotations
 
@@ -26,12 +17,7 @@ from .h1 import CATALOGUE as CATALOGUE_H1
 from .h1_client import CATALOGUE as CATALOGUE_H1_CLIENT
 from .h2_client import CATALOGUE as CATALOGUE_H2_CLIENT
 
-#: The four cells, named by protocol **and role**.  The older spellings
-#: below predate the grid being full: ``CATALOGUE`` and ``CATALOGUE_H2``
-#: are the HTTP/2 *server* set, and ``CATALOGUE_H1`` the HTTP/1.1 *server*
-#: set — names that read as "the HTTP/2 one" and were unambiguous only
-#: while each protocol had a single cell.  Both spellings are exported;
-#: the role-qualified four are what a reader should reach for.
+# Catalogues distinguish protocol and client/server role; legacy aliases remain supported.
 CATALOGUE_H1_SERVER = CATALOGUE_H1
 
 #: HTTP/2 cases.  ``CATALOGUE`` keeps its original name and contents so
@@ -50,10 +36,6 @@ CATALOGUE = {
 CATALOGUE_H2 = CATALOGUE
 CATALOGUE_H2_SERVER = CATALOGUE
 
-#: Every cell, keyed the way the grid is drawn.  A suite that wants to
-#: sweep the whole toolkit iterates this rather than remembering four
-#: module paths — and a cell added later shows up without the suite
-#: changing.
 CATALOGUES = {
     'h1_client': CATALOGUE_H1_CLIENT,
     'h1_server': CATALOGUE_H1_SERVER,

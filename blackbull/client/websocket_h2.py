@@ -1,40 +1,7 @@
-"""WebSocket-over-HTTP/2 client (RFC 8441).
+"""RFC 8441 WebSocket client over one HTTP/2 stream.
 
-Mirrors the HTTP/1.1 [`blackbull.client.WebSocketClient`][blackbull.client.WebSocketClient] /
-[`blackbull.client.WebSocketSession`][blackbull.client.WebSocketSession] pair: the *Client* owns the
-TLS + HTTP/2 transport and runs the Extended CONNECT handshake; the
-*Session* owns the post-handshake WebSocket frame loop on one H2 stream.
-
-Flow control: outgoing WS frames are dispatched as
-``http.response.body`` events through the per-stream
-[`blackbull.server.sender.HTTP2Sender`][blackbull.server.sender.HTTP2Sender], which splits payloads
-across multiple DATA frames at ``max_frame_size`` and respects send
-windows.  Incoming DATA payloads are tracked per stream + at the
-connection level; ``WINDOW_UPDATE`` frames are emitted when received
-bytes accumulate past ``_WINDOW_UPDATE_THRESHOLD``.
-
-Example::
-
-    import ssl
-    from blackbull.client import WebSocketH2Client
-
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    ctx.set_alpn_protocols(['h2'])
-
-    async with WebSocketH2Client('localhost', 8443, ssl=ctx) as c:
-        ws = await c.connect('/ws')
-        await ws.send_bytes(b'hello')
-        opcode, payload = await ws.receive()
-        await ws.close()
-
-The peer server must advertise ``SETTINGS_ENABLE_CONNECT_PROTOCOL=1``;
-BlackBull's own server does so when ``BB_H2_ENABLE_WEBSOCKET=1``.
-
-RFC 8441 is an experimental surface in BlackBull — both the server
-gate and this client may change shape until the feature is declared
-default-on.
+The peer must advertise ENABLE_CONNECT_PROTOCOL. Reuse the connection
+factory and flow control; a second HPACK context corrupts sibling streams.
 """
 import asyncio
 import logging
@@ -68,16 +35,10 @@ _WINDOW_UPDATE_THRESHOLD = 32768
 
 
 class _H2QueueReader(AbstractReader):
-    """``AbstractReader`` over a raw-stream DATA-frame queue.
+    """Expose queued DATA as a byte stream for the shared WebSocket codec.
 
-    Lets the H2 client session reuse the
-    shared ``ws_codec`` + ``WebSocketRecipient`` stack (whose read path
-    calls only ``readexactly``) instead of a third, private WS frame
-    parser.  DATA payloads are buffered as a byte stream; flow-control
-    credit is returned through *credit_cb* the moment a frame is consumed
-    off the queue — the same timing the old parser used.  END_STREAM or
-    RST_STREAM marks EOF, which the recipient's read loop surfaces as an
-    abnormal-closure ``websocket.disconnect`` (1006).
+    Return credit when frames are consumed. END_STREAM/RST_STREAM becomes EOF
+    and an abnormal WebSocket disconnect (1006).
     """
 
     def __init__(self, queue: asyncio.Queue, credit_cb) -> None:
@@ -135,9 +96,6 @@ class WebSocketH2Session:
     def __init__(self, http2_client: HTTP2Client,
                  stream_id: int, frame_queue: asyncio.Queue) -> None:
         self._client = http2_client
-        # Read from the connection, never taken as a parameter: a session
-        # has no choice about which HPACK context it frames with, so a
-        # parameter could only ever be passed a wrong one.
         self._factory = http2_client.frame_factory
         self._stream_id = stream_id
         self._queue = frame_queue
@@ -295,9 +253,6 @@ class WebSocketH2Client:
         self._ssl = ssl
         self._connect_timeout = connect_timeout
         self._stream_id = stream_id
-        # No HPACK context is held here.  It belongs to the connection —
-        # see ``frame_factory`` — and the connection is opened in
-        # ``__aenter__``, so anything built at this line would be a second one.
         self._client: HTTP2Client | None = None
         self._connect_status: int | None = None
 
@@ -330,17 +285,9 @@ class WebSocketH2Client:
 
     @property
     def frame_factory(self) -> FrameFactory:
-        """The connection's HPACK context — the ``HTTP2Client``'s own.
+        """Reuse the HTTP2Client connection's HPACK context.
 
-        Extended CONNECT rides an ordinary HTTP/2 connection that may already
-        be carrying ``request()`` traffic, and RFC 9113 §4.3 gives that
-        connection one dynamic table in each direction.  Reading the context
-        from the connection is what keeps the CONNECT's header block and
-        every other block on the wire encoded against the same table the
-        peer's single decoder is building.
-
-        Raises ``RuntimeError`` before ``__aenter__``: the context comes
-        into being with the connection, so there is none to hand out yet.
+        Raise RuntimeError before entering the connection context.
         """
         return self._require_client().frame_factory
 

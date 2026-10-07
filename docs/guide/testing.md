@@ -15,10 +15,6 @@ Start from what you are asserting:
 | Cross-protocol behaviour — TLS, ALPN, HTTP/2 framing, WebSocket fragments | BlackBull's own clients + an ephemeral port | Full protocol negotiation against a real server. |
 | One function, no framework | Direct handler / middleware calls | Stub `receive` / `send`, no routing, no transport. |
 
-`TestClient` used to be the default recommendation.  It is now the
-**ASGI-boundary instrument**, not the everyday one — the reasoning is in
-[Choosing between `native` and `TestClient`](#choosing-between-native-and-testclient).
-
 ## Setup
 
 Install the testing extras for `pytest`, `pytest-asyncio`,
@@ -197,41 +193,16 @@ Scope and limits:
 - **Plaintext HTTP/1.1 and WebSocket.** TLS and HTTP/2 are out of
   scope for this tier — use the BlackBull clients + ephemeral port
   pattern below, which negotiates ALPN against a real certificate.
-- **Startup cost is one loopback socket** — no subprocess, no fork.
-  Per-request cost is loopback TCP, well under a millisecond.
+- **No subprocess or fork.** One loopback listener per context.
 - **It accepts the way `Server` does**, connection cap included, so what
   your tests exercise is the accept and read path the server actually ships.
 
 ## Choosing between `native` and `TestClient`
 
-Both run in-process and neither needs a port, so the difference is not
-speed — it is *which code runs*.
-
-```text
-native.get(app, '/x')                TestClient(app).get('/x')
-  → Connection                         → httpx.ASGITransport
-  → app(conn, receive, send)           → builds an ASGI scope dict
-  → isinstance(conn, Connection)       → app(scope, receive, send)
-      → True   ← production branch     → isinstance(conn, Connection)
-  → dispatch                               → False
-                                       → Connection.from_scope(scope)
-                                       → dispatch
-```
-
-`TestClient` therefore never takes the branch every production request
-takes.  What it *uniquely* covers is the conversion chain itself: a
-missing `_CONNECTION_FIELDS` entry, or a coercion bug in
-`from_scope()`, shows up there and nowhere else — which is exactly why
-it stays, and why BlackBull keeps a CI lane that runs the whole suite
-under `BB_FORCE_ASGI_SCOPE=1`.
-
-So:
-
-- **Writing an application test?** Use `native` (or `NativeTestServer`
-  when the wire matters).
-- **Deploying under uvicorn, hypercorn, or another ASGI host?** Keep a
-  handful of `TestClient` tests — they are what proves the boundary
-  still works.
+Use native helpers for application behavior and TestClient for the scope
+conversion used by external-ASGI hosts. Neither exercises wire framing.
+Use NativeTestServer for plaintext HTTP/1.1/WebSocket; use a real server
+and protocol client for HTTP/2 and TLS.
 
 ## `TestClient` — the ASGI boundary
 
@@ -242,12 +213,6 @@ dispatched directly into the ASGI app — no socket, no port.
 The ASGI `lifespan` protocol runs around the `with` block, so
 `@app.on_startup` / `@app.on_shutdown` handlers fire in the
 expected order.
-
-Its job is the **compatibility boundary**: it drives the app the way
-an external ASGI host does, through a scope dict and `from_scope()`.
-Everything below still works as documented — it is the recommendation
-that changed, not the API.  For application-logic tests, reach for
-[`native`](#quick-start-with-native) instead.
 
 ```python
 from blackbull import BlackBull
@@ -338,20 +303,12 @@ response = client.get('/private', auth=('alice', 'hunter2'))
 response = client.get('/api/me', headers={'Authorization': 'Bearer abc.def.ghi'})
 ```
 
-**Per-request timeout** — pass `timeout=` (seconds, or an
-`httpx.Timeout` for finer control):
+ASGITransport does not enforce network read/write timeouts: requests call the
+app in process. Use a test-level deadline for hung application code and a
+real transport when asserting client timeout behavior.
 
-```python
-response = client.get('/slow', timeout=5.0)
-```
-
-Default timeouts can be passed on the `TestClient` constructor
-via the `headers=` / `cookies=` / `follow_redirects=` options,
-or set after construction by mutating `client.headers` /
-`client.cookies` — both forward to the underlying
-`httpx.AsyncClient`, so the standard httpx jar semantics apply
-(cookies set by responses persist across subsequent requests on
-the same client).
+Default headers, cookies and redirect behavior are constructor options;
+`client.headers` and `client.cookies` can also be updated between requests.
 
 ```python
 with TestClient(app, headers={'X-Test-Tag': 'integration'}) as client:
@@ -748,8 +705,8 @@ async def test_register_and_list_tasks():
         assert r.json()[0]['title'] == 'Buy milk'
 ```
 
-`httpx[http2]` lets you pass `http2=True` and drive the HTTP/2
-path through the same in-process adapter.
+ASGITransport does not send HTTP/2 frames, even with `http2=True`.
+Use a socket-based test to exercise the HTTP/2 actor and flow control.
 
 When to pick which:
 
@@ -762,18 +719,17 @@ When to pick which:
 - **`httpx.ASGITransport`** when you are asserting on the ASGI
   boundary and want the async equivalent of `TestClient`.
 
-## Direct handler tests
+## Direct ASGI app calls
 
-For unit-level assertions on a single handler — no transport,
-no routing — call the app callable directly with a hand-rolled
-scope.  `BlackBull.__call__` is a standard ASGI 3.0 callable so
+Call the app with a hand-built scope to assert its emitted ASGI events.
+This includes routing and middleware but no protocol transport.  `BlackBull.__call__` is a standard ASGI 3.0 callable so
 the stub `send` is a single-argument coroutine that receives
 event dicts:
 
 ```python
 import pytest
 from blackbull import BlackBull, JSONResponse
-from blackbull.server.headers import Headers
+from blackbull.headers import Headers
 
 app = BlackBull()
 
@@ -789,7 +745,7 @@ def make_scope(method='GET', path='/ping'):
         'method': method,
         'path': path,
         'query_string': b'',
-        'headers': Headers([]),
+        'headers': [],
         'state': {},
     }
 

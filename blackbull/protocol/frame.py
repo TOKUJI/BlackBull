@@ -13,10 +13,6 @@ from .frame_types import (
 
 logger = logging.getLogger(__name__)
 
-#: Wire type byte -> member, built once at import.  The same lookup
-#: ``FrameTypes(value)`` performs, without the two Python frames the
-#: metaclass adds to reach it.  See ``frame_types._PSEUDO_BY_BYTES`` for
-#: why this is a module-level dict rather than a helper.
 _FRAME_TYPE_BY_VALUE: dict[bytes, FrameTypes] = {m.value: m for m in FrameTypes}
 
 
@@ -186,12 +182,7 @@ class FrameFactory:
         stream_id = int.from_bytes(data[5:9], 'big', signed=False) & 0x7fffffff
         payload = data[9: 9 + length]
 
-        # RFC 9113 §5.5 — implementations MUST ignore frames of unknown
-        # type, so an unknown type is a *specified normal outcome* on a
-        # conformant connection, not an exceptional one.  ``.get`` returning
-        # None says that; ``except ValueError`` said the opposite while
-        # routing the happy path through the enum metaclass to do one dict
-        # lookup.
+        # RFC 9113 §5.5: unknown frame types are ignored without closing the connection.
         frame_type = _FRAME_TYPE_BY_VALUE.get(type_)
         if frame_type is None:
             # Return a sentinel so the frame loop skips dispatch but the

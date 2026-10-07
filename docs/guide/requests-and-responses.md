@@ -384,12 +384,10 @@ package to parse the body manually.
     case the application wrote: names are case-insensitive (RFC 9110 §5.1),
     and HTTP/2 requires lowercase (RFC 9113 §8.2.2).
 
-    On the native path a `Response` (or subclass) is serialised via
-    `Response.to_native()`.  A subclass that overrides `__call__` to emit a
-    custom event sequence is honoured on the WebSocket / external-host
-    lanes but not on the native HTTP path — keep the wire behaviour in
-    `__call__` (shared by both lanes via the normalisers) or override
-    `to_native()` to control the native serialisation.
+    Sending a Response through the normalizers uses to_native(), bypassing
+    a subclass's __call__ override. Override to_native() to customize that
+    serialization. Calling the response directly invokes __call__; test the
+    entry point your application actually uses.
 
 ### `Response`
 
@@ -479,11 +477,7 @@ await send(JSONResponse({'ok': True}, headers=[hdr]))
 
 Signature: `cookie_header(name, value, path='/', http_only=True)`.
 
-!!! note "Cookies vs. tokens for SPA clients"
-    Browsers may not reliably forward `HttpOnly` cookies set by a
-    `fetch()` response on the next page navigation.  For
-    single-page apps, store the session token in `sessionStorage`
-    and send it as `Authorization: Bearer <token>` instead.
+
 
 ## HTTP trailers
 
@@ -569,7 +563,7 @@ async def countdown():
 
 @app.route(path='/stream')
 async def handler(conn, receive, send):
-    await StreamingResponse(countdown())(scope, receive, send)
+    await StreamingResponse(countdown())(conn, receive, send)
 ```
 
 `StreamingResponse.__init__` accepts:
@@ -617,63 +611,11 @@ belongs to the trailing HEADERS block.
 
 ### Writing streaming-safe middleware
 
-Any middleware that wraps the `send` callable and collects body
-parts will silently buffer a streaming response, defeating
-`more_body=True`.
-
-For function-based middleware, the safest approach is to pass
-body events through immediately rather than accumulating them:
-
-```python
-from blackbull.native import NativeResponse
-
-async def prefix_mw(conn, receive, send, call_next):
-    captured_start = None
-
-    async def capturing_send(event):
-        nonlocal captured_start
-        if isinstance(event, NativeResponse):
-            # BlackBull's own HTTP server (H1 + H2) threads native response
-            # objects — see the middleware guide for the contract.  A single
-            # object may carry header + body together.
-            if event.body is not None and not event.more_body:
-                # Non-streaming — transform the terminal body
-                await send(NativeResponse(status=event.status,
-                                          header=(list(event.header)
-                                                  if event.header is not None
-                                                  else None),
-                                          body=b'[prefix] ' + event.body))
-            else:
-                # Streaming (or header-only) — pass through without buffering
-                await send(event)
-        elif event.get('type') == 'http.response.start':
-            captured_start = event
-        elif event.get('type') == 'http.response.body':
-            if event.get('more_body'):
-                # Streaming response — pass through without buffering
-                await send(captured_start)
-                captured_start = None
-                await send(event)
-            else:
-                # Non-streaming — transform the body
-                body = b'[prefix] ' + event.get('body', b'')
-                await send(captured_start)
-                await send({**event, 'body': body})
-        else:
-            await send(event)
-
-    await call_next(conn, receive, capturing_send)
-```
-
-The two branches are the same policy on two wire shapes: the native object
-arm transforms only terminal bodies (so `more_body=True` chunks stream
-through untouched), and the dict arm keeps the original start/body
-sequencing for the WebSocket / external-host lanes (where the wire contract
-stays ASGI).
-
-For most use cases (header injection, logging) the middleware
-does not touch the body at all and streaming safety is not a
-concern.
+Forward streaming heads and chunks as they arrive. A terminal chunk can be
+the end of an earlier stream, so more_body=False alone does not prove the
+body is a complete response. If changing payload length, update or remove
+Content-Length before sending the head. See [Middleware](middleware.md) for
+native and ASGI send shapes.
 
 ## Detecting client disconnection
 

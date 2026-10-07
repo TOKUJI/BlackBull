@@ -1,23 +1,6 @@
 # Edge inference serving
 
-A recurring deployment shape for local ML models: a
-Raspberry-Pi-class box (often ARM, often headless) runs a model and
-has to serve two very different kinds of traffic at once —
-
-- **interactive clients** — browser tabs, `curl`, `httpx` — that call
-  an HTTP endpoint and want the answer *streamed token by token* as
-  it is generated, and
-- **devices** — sensors, cameras, controllers — that report telemetry
-  and drop batch jobs over **MQTT**, the protocol they already speak.
-
-The conventional stack for this is three or four moving parts: an
-ASGI server for HTTP, a reverse proxy in front of it for HTTP/2, a
-separate MQTT broker, and whatever glue keeps them coordinated. On
-an edge box every extra part is another daemon to provision, another
-config file, and — on ARM or RISC-V — potentially another native
-dependency to cross-compile.
-
-BlackBull's bet is that one process can carry the whole surface:
+This example serves SSE token streams and MQTT device traffic in one process.
 
 ```
                         one Python process
@@ -33,11 +16,10 @@ BlackBull's bet is that one process can carry the whole surface:
     browsers · curl · httpx           devices · workers
 ```
 
-Everything above is pure Python — no C extensions, so `pip install
-blackbull` completes on any architecture CPython runs on, with no
-build step and nothing to cross-compile. The runnable version of
-this page is
+The runnable version is
 [`examples/edge_inference.py`](https://github.com/TOKUJI/BlackBull/blob/master/examples/edge_inference.py).
+Use one worker for this example: its HTTP handlers and MQTT tap share
+in-memory readings, while a multi-worker broker belongs only to worker 0.
 
 ## The serving surface: SSE token streaming
 
@@ -168,33 +150,14 @@ Two honest caveats for queue duty:
 - **Queue state lives in this process.** A broker restart clears
   in-flight session state; there is no persistence layer.
 
-## When this shape fits — and when it doesn't
+## Deployment limits
 
-This is deliberately a *narrow* pitch. It fits when:
+BlackBull does not batch, schedule or accelerate model inference. Keep
+blocking model calls off the event loop, bound queued tokens to the memory
+budget, and stop the model when the consumer disconnects. Cancelling an
+`asyncio.to_thread` task does not stop the running thread.
 
-- the deployment target is **one box** — an edge device, a
-  single-board computer, a small VM — and you want the whole serving
-  surface in one `python app.py`;
-- clients genuinely benefit from **streamed output** and **HTTP/2
-  multiplexing** (several consumers per connection);
-- devices already speak **MQTT** and you'd rather not operate a
-  separate broker for them;
-- the target is **ARM / RISC-V / anything without a C toolchain**,
-  where "no native dependencies" is the difference between `pip
-  install` and an afternoon of cross-compilation.
-
-It is *not* the right shape when:
-
-- **inference throughput is the bottleneck** — BlackBull moves the
-  bytes; it does not batch, schedule, or accelerate the model. A
-  dedicated inference server in front of the GPU does more for
-  throughput than any web framework choice;
-- you need a **fleet-scale message bus** — the broker runs on one
-  worker process, in memory ([limitations](mqtt.md#limitations));
-  it is a device-gateway broker, not a clustered one;
-- your stack needs **Trio/AnyIO**, or the other trade-offs in
-  [Is BlackBull right for your project?](../getting-started/why-blackbull.md)
-  cut against you.
+The broker is in memory, with one worker owner; see [MQTT limitations](mqtt.md#limitations).
 
 ## Run it
 

@@ -114,20 +114,13 @@ are importable from `blackbull.asgi` if you want to name one directly.
 Everything here is annotation-only: nothing is validated or converted at
 runtime, and unannotated middleware keeps working exactly as before.
 
-!!! note "Native path: the send channel carries `NativeResponse`"
-    On BlackBull's own HTTP path (HTTP/1.1 and HTTP/2), the response events
-    a middleware's inner `send` wrapper observes are `NativeResponse`
-    objects — not dicts.  A middleware that subscripts `event['type']`
-    must first pass through `event.push is not None` messages: their headers
-    describe a promised request, not the response. For responses, branch on
-    the object's arms: `event.header is not None`
-    (header arm, with `event.status` / `event.header.get(b'name')`),
-    `event.body is not None` (body chunk, with `event.more_body`), and
-    `event.trailers is not None`.  The `@as_middleware` decorator
-    guarantees this single native representation for the wrappers it
-    normalises; only on the WebSocket / external-host lanes do the same
-    wrappers see plain dicts.  Use
-    [`blackbull.testing.native`](testing.md) to exercise the native path.
+!!! note "Match the active send lane"
+    Middleware declaring `conn` receives native HTTP responses even under an
+    external host. Middleware requesting `scope` receives ASGI event dicts. For native
+    responses, pass `event.push is not None` through unchanged: those headers
+    describe a promised request. Inspect response head, body and trailers
+    through their object arms. Use [native test clients](testing.md) to
+    exercise that lane.
 
 ## The `@as_middleware` decorator
 
@@ -136,8 +129,9 @@ instead of calling `send(...)` with raw ASGI events.  A middleware
 that wraps `send` would otherwise have to handle both forms.
 Decorate the middleware with `@as_middleware` and the inner
 wrapper sees a single native representation: `NativeResponse` on
-the HTTP path (HTTP/1.1 and HTTP/2), plain ASGI dicts on the
-WebSocket / external-host lanes —
+the HTTP path (HTTP/1.1 and HTTP/2), plain ASGI dicts when the middleware
+requests `scope`. WebSocket send wrappers must also accept native WebSocket
+messages when the handler emits them —
 `Response` objects are converted for you, never leaking through:
 
 ```python
@@ -345,7 +339,7 @@ async def whoami(conn, receive, send):
 ```
 
 Handlers read and write the session through `conn.state['session']`;
-before; see the `blackbull-session` README for cookie attributes,
+See the `blackbull-session` README for cookie attributes,
 secret resolution, and session-clearing semantics.
 
 ### `Cache`

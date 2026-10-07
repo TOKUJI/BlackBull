@@ -1,14 +1,5 @@
-"""HTTP and WebSocket response objects.
-
-Provides:
-
-- `Response`: plain HTTP response (HTML / plain text / binary).
-- `JSONResponse`: convenience subclass that serialises a Python object to JSON.
-- `RedirectResponse`: convenience subclass that sets a ``Location`` header + 3xx status.
-- `StreamingResponse`: pushes an async iterator to the client without buffering.
-- `EventSourceResponse`: WHATWG Server-Sent Events on top of StreamingResponse.
-- `WebSocketResponse`: wraps text, bytes, or dict data as a WebSocket send event.
-- `cookie_header`: builds a ``(b'set-cookie', ...)`` header tuple with secure defaults.
+"""HTTP and WebSocket response objects. See docs/guide/requests-and-responses.md
+for send and streaming contracts.
 """
 import json
 import logging
@@ -22,25 +13,10 @@ logger = logging.getLogger(__name__)
 
 
 def _normalize_headers(headers) -> list[tuple[bytes, bytes]]:
-    """Coerce a user-supplied ``headers=`` argument to ASGI's wire shape.
+    """Normalize a Mapping or pair iterable to validated bytes header pairs.
 
-    Accepts either
-
-    * a [`Mapping`][collections.abc.Mapping] (``dict``-like) — matching the
-      FastAPI / Starlette / httpx convention, iterated by ``.items()``; or
-    * an iterable of ``(name, value)`` pairs (BlackBull's original shape).
-
-    Names and values may be ``str`` (encoded ASCII per RFC 9110 §5.5, so
-    non-ASCII raises ``UnicodeEncodeError`` at construction rather than
-    letting obs-text bytes onto the wire) or ``bytes``.  Any other shape —
-    a bare string, an iterable of non-pairs, a non-bytes/str value — raises
-    ``TypeError`` here, at construction, instead of silently corrupting the
-    response (the old ``for k, v in headers`` loop iterated a ``dict``'s
-    *keys* and unpacked each key string into ``(k, v)``) or blowing up later
-    in the sender's ``b''.join``.
-
-    Normalised pairs pass through the shared response-field validator before
-    they leave this construction boundary.
+    str names/values must encode as ASCII; non-ASCII raises UnicodeEncodeError.
+    Invalid shapes or value types raise TypeError at construction.
     """
     if not headers:
         return []
@@ -88,27 +64,17 @@ def _content_type_pair(content_type) -> tuple[bytes, bytes]:
 
 
 async def _emit_response(send, body: bytes, status, headers) -> None:
-    """Send a complete non-streamed HTTP response as ASGI ``start`` + ``body``.
+    """Send one complete NativeResponse with normalized integer status.
 
-    The single source of truth for the ``http.response.start`` /
-    ``http.response.body`` event pair used by every non-streaming response
-    path — [`Response.__call__`][Response.__call__], the app's ``send(body, status, headers)``
-    convenience form (``_wrap_send_native``), and the default error handler.  *status*
-    may be an ``int`` or an ``HTTPStatus`` (coerced to ``int`` for the wire);
-    *headers* is any iterable of ``(bytes, bytes)`` pairs (copied defensively).
+    Copy headers defensively; callers may supply an iterable of bytes pairs.
     """
-    # One object, one send: the complete-response shape the native seam was
-    # built for.  The dict form always cost two events for the same response.
     await send(NativeResponse.complete(int(status), list(headers), body))
 
 
 class Response:
-    """HTTP response object carrying body, status, and headers.
+    """HTTP body, status and headers; return from a handler or pass to BlackBull send.
 
-    Pass directly to the ASGI ``send`` callable when using BlackBull::
-
-        await send(Response('<h1>Hello</h1>'))
-        await send(Response(b'data', status=HTTPStatus.NOT_FOUND))
+    An arbitrary ASGI host's raw send does not accept Response objects.
     """
 
     def __init__(self, content: str | bytes,
@@ -130,14 +96,9 @@ class Response:
             self.headers.extend(_normalize_headers(headers))
 
     async def __call__(self, conn, receive, send) -> None:
-        """Drive this response as an ASGI app: emit ``start`` then ``body``.
+        """Send a complete native response when invoked directly.
 
-        Mirrors [`StreamingResponse`][] so every BlackBull response type
-        shares one protocol — ``await response(conn, receive, send)`` —
-        whether returned from a simplified handler, invoked explicitly by a
-        full-form handler, or normalised by ``_wrap_send_native``.  Keeping the
-        start/body serialisation here means there is a single source of truth
-        for turning a Response into ASGI events.
+        Normalized Response sends use to_native and bypass this method.
         """
         await _emit_response(send, self.body, self.status, self.headers)
 
@@ -155,12 +116,7 @@ class Response:
 
 
 class JSONResponse(Response):
-    """HTTP response with JSON-serialised body and ``application/json`` content-type.
-
-    Pass directly to the ASGI ``send`` callable when using BlackBull::
-
-        await send(JSONResponse({'ok': True}))
-        await send(JSONResponse({'error': 'Not found'}, status=HTTPStatus.NOT_FOUND))
+    """JSON response; return from a handler or pass to BlackBull send.
     """
 
     def __init__(self, content,
@@ -170,20 +126,9 @@ class JSONResponse(Response):
 
 
 class RedirectResponse(Response):
-    """HTTP redirect response carrying a ``Location`` header.
+    """Redirect with an empty body and Location; default status is 302.
 
-    Completes the ``Response`` convenience family alongside ``JSONResponse``.
-    The body is empty; *url* becomes the ``Location`` header value and *status*
-    a 3xx redirect code (default ``302 Found`` — the safer general-purpose
-    default, since it does not force the client to preserve the request method).
-
-    Pass directly to the ASGI ``send`` callable, or return it from a handler::
-
-        await send(RedirectResponse('/new-url'))
-        return RedirectResponse('/permanent', status=HTTPStatus.MOVED_PERMANENTLY)
-
-    *url* must be ASCII (RFC 9110 §10.2.2 — the Location field value is a
-    URI-reference); percent-encode non-ASCII URLs before passing them in.
+    url must be ASCII; percent-encode non-ASCII characters first.
     """
 
     def __init__(self, url: str,
@@ -204,18 +149,9 @@ def cookie_header(name: str, value: str, path: str = '/',
 
 
 class StreamingResponse:
-    """Stream a response body from an async generator.
+    """Stream from an async iterator; finalize the generator on completion or cancellation.
 
-    Usage::
-
-        async def lines():
-            for i in range(10):
-                yield f'line {i}\\n'.encode()
-                await asyncio.sleep(0.1)
-
-        @app.route(path='/stream')
-        async def handler(conn, receive, send):
-            await StreamingResponse(lines())(conn, receive, send)
+    Return from a handler, pass to BlackBull send, or invoke as (conn, receive, send).
     """
 
     def __init__(self, content: AsyncIterator,
@@ -315,31 +251,10 @@ def _sse_data_lines(text: str) -> bytes:
 
 
 class EventSourceResponse(StreamingResponse):
-    """Stream a Server-Sent Events response from an async iterator.
+    """Format str, UTF-8 bytes or data/event/id/retry mappings as SSE.
 
-    Yields are formatted per WHATWG §9.2.6 (the EventSource spec).  Each
-    item produced by *content* may be a ``str`` (bare data), ``bytes``
-    (bare data, UTF-8), or a ``Mapping`` with optional ``data`` /
-    ``event`` / ``id`` / ``retry`` keys.
-
-    CR, LF, and CRLF in data become equivalent logical line breaks.  Metadata
-    remains one field: CR/LF in ``event`` or ``id``, and NUL in ``id``, raise
-    ``ValueError`` when that item is encoded.
-
-    The content-type is forced to ``text/event-stream`` and
-    ``Cache-Control: no-cache`` is auto-emitted; both are overridable
-    via the *headers* argument if a deployment knows what it's doing.
-
-    Usage::
-
-        async def tokens():
-            yield {'event': 'token', 'data': 'hello'}
-            yield {'event': 'token', 'data': 'world'}
-            yield {'event': 'done',  'data': ''}
-
-        @app.route(path='/sse')
-        async def stream():
-            return EventSourceResponse(tokens())
+    Data line endings are normalized. Reject CR/LF in event/id and NUL in id.
+    Defaults to text/event-stream and Cache-Control: no-cache; headers may override.
     """
 
     def __init__(self, content: AsyncIterator,

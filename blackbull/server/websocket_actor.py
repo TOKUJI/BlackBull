@@ -23,8 +23,7 @@ logger = logging.getLogger(__name__)
 _DISCONNECT_HOOK_TIMEOUT = 5.0
 
 
-# The handshake owns these response fields; an application accept header with
-# one of these names would rewrite the protocol's own answer (BLA-378).
+# Application accept headers must not replace handshake-owned fields.
 _HANDSHAKE_OWNED = frozenset({
     b'upgrade', b'connection', b'sec-websocket-accept',
     b'sec-websocket-extensions', b'sec-websocket-protocol',
@@ -118,28 +117,13 @@ class WebSocketActor(Actor):
 
     @property
     def _disconnect_code(self) -> int:
-        """How this connection ended (RFC 6455 §7.4), for the access log.
-
-        Derived, not mirrored: the recipient records the terminal code for
-        both encodings.  A second copy in the actor would mean intercepting
-        every event to look for a disconnect — two records of one fact is one
-        place for them to disagree, and the interception is a per-message
-        coroutine hop on the WebSocket hot path.
-        """
         return self._ws_receive.terminal_code or WSCloseCode.ABNORMAL
 
     async def _emit_websocket_message(self, message: str | bytes) -> None:
-        """Read-time emit adapter: ``websocket_message`` fires when the
-        recipient reads a message, before the handler consumes it.
+        """Emit at recipient read time, before the handler consumes the message.
 
-        The recipient hands over the message itself (``str`` text, ``bytes``
-        binary); the documented ``{'conn', 'text', 'bytes'}`` detail shape is
-        built here, and only once a listener is known to want it.
-
-        Re-checks the listener set per message (cached predicate) so a
-        listener registered after this connection was built still receives
-        events, while a no-listener throughput workload pays one boolean
-        check instead of the whole ``Event``/``emit`` chain.
+        Re-check listeners for each message so registration after connection setup
+        still takes effect.
         """
         if not self._aggregator.has_websocket_message_listeners():
             return
@@ -206,13 +190,8 @@ class WebSocketActor(Actor):
                 self._conn.connection_id = new_connection_id()
             await self._aggregator.on_websocket_connected(self._conn, offered)
         await self._ws_send(event)
-        # Control-frame watchdog (design A'): the idle watchdog services
-        # PING/CLOSE frames on connections quiet for > ~1 scanner tick.  The
-        # send-time servicing fast path was removed — at echo throughput it
-        # cost ~2% per message, and the watchdog alone bounds PONG latency to
-        # ~one tick, the documented contract.  ``send_touch`` keeps the
-        # watchdog armed and marks activity only once control frames matter
-        # or a listener needs the deferred reader.
+        # The idle watchdog services PING/CLOSE within a scanner tick.
+        # send_touch arms it when control servicing or deferred observation needs it.
         self._ws_receive.send_touch()
 
     async def _handle(self, msg: Message) -> None:

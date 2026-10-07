@@ -1,14 +1,7 @@
-"""URL routing for BlackBull.
+"""Route registration and dispatch.
 
-``Router`` maps ``(path, method, scheme)`` triples to handler chains.  Paths
-support exact strings, regex patterns, and ``{name}`` / ``{name:converter}``
-parameter syntax; ``ErrorRouter`` does the same for HTTPStatus codes and
-exception classes.  ``_register_chain`` composes per-route middlewares with
-``functools.partial`` so each middleware receives ``call_next`` bound to the
-next link.
-
-``RouteGroup`` is defined in [`blackbull.app`][blackbull.app] to avoid a circular
-import; this module re-exports it lazily through ``__getattr__``.
+RouteGroup is re-exported lazily from app to avoid a circular import.
+Handler and middleware contracts are in docs/guide/routing.md.
 """
 from collections import OrderedDict
 from collections.abc import Iterable
@@ -182,12 +175,7 @@ class _RouteTrie:
             start = 1 if path[0] == '/' else 0
         n = len(segments)
 
-        # Iterative depth-first walk for the hit case: the priority order of
-        # [`_lookup`][], with cross-level backtracking on an explicit stack
-        # instead of recursion frames and per-level set allocations.  The stack
-        # is created lazily — an unambiguous walk allocates nothing.  A miss
-        # falls through to the recursive walk, whose remaining job is
-        # collecting the allowed-methods set for MethodNotApplicable.
+        # On a miss, collect allowed methods via the recursive walk.
         node = self.root
         idx = start
         caps: tuple = ()
@@ -379,9 +367,7 @@ class RouteInfo(NamedTuple):
 
 
 class _AnyScheme:
-    """Sentinel stored when scheme is omitted; matches any scheme at lookup.
-
-    A class rather than a bare object so ``isinstance`` narrows it in pyright.
+    """Match any scheme when registration omits it.
     """
 
 _ANY_SCHEME = _AnyScheme()
@@ -578,11 +564,7 @@ def _decode_json_body(cls: Any, raw: bytes, handler_name: str) -> Any:
 
 
 def _lookup_converter(converters: dict, result_type: type):
-    """Find a registered converter for *result_type* (exact match, then MRO).
-
-    Only reached on the cold path — after a handler returns a value that is
-    none of the natively supported shapes — so the MRO walk costs nothing on
-    the common path.  Returns the converter callable or ``None``.
+    """Find a converter by exact return type, then MRO; return None on a miss.
     """
     fn = converters.get(result_type)
     if fn is not None:
@@ -595,24 +577,11 @@ def _lookup_converter(converters: dict, result_type: type):
 
 
 async def _send_native(result, conn, receive, send) -> bool:
-    """Serialise a *natively supported* handler/converter return value to ASGI.
+    """Send a supported handler or converter result, returning whether it matched.
 
-    The single source of truth for return-value → ASGI mapping, shared by the
-    simplified-handler wrapper and the converter path.  Handles the shapes
-    BlackBull sends without an app-registered converter:
-
-    * ``None`` — send nothing;
-    * an existing ``StreamingResponse`` / ``EventSourceResponse`` instance, or a
-      bare async generator — driven directly so it owns its own start event;
-    * a ``Response`` (sent as-is);
-    * ``bytes`` / ``str`` (wrapped in a default ``Response``);
-    * a JSON-able ``dict`` / ``list`` / dataclass instance (``JSONResponse``).
-
-    Returns ``True`` when *result* matched one of those shapes (and has been
-    sent), ``False`` otherwise — leaving the caller to apply its own fallback
-    (the handler wrapper tries a registered converter, then raises;
-    ``_send_converted`` raises, since a converter must itself return a native
-    shape).
+    None sends nothing. Streaming results own their start event; Response,
+    bytes, str and JSON-able dict/list/dataclass values use native responses.
+    False leaves unsupported values to the caller's converter/error path.
     """
     if result is None:
         return True
@@ -653,12 +622,7 @@ async def _send_converted(value, conn, receive, send) -> None:
 
 
 async def _finish_result(result, conn, receive, send, converters, fn_name: str) -> None:
-    """Send a simplified handler's return value — native shapes first, then
-    the app's converter registry, then the loud ``TypeError``.
-
-    Same tail as the basic wrapper's inline version; kept as a module
-    function so the extended (query/``Depends``) wrapper shares it without
-    the basic wrapper gaining a per-request call.
+    """Send supported return shapes, then try converters; raise TypeError when neither matches.
     """
     if await _send_native(result, conn, receive, send):
         return
@@ -728,12 +692,7 @@ _QUERY_MISSING = object()
 
 
 class _ParamKind(Enum):
-    """Classification of one simplified-handler parameter (registration-time).
-
-    Emitted by [`_handler_param_plan`][] (HTTP) and
-    [`_websocket_param_plan`][] (WS).  A plain ``Enum``, not a ``StrEnum``,
-    so that a stringly-typed comparison like ``kind == 'query'`` fails loudly
-    rather than silently passing.
+    """Registration-time handler parameter classification.
     """
     PATH = 'path'
     CONN = 'conn'
@@ -746,19 +705,10 @@ class _ParamKind(Enum):
 
 
 def _handler_param_plan(fn, path_param_names: set) -> tuple:
-    """Classify every parameter of simplified handler *fn* — once, at
-    registration time.
+    """Classify parameters once at registration; reject unresolvable forms with TypeError.
 
-    Returns ``(params, annotations, categories)`` where *categories* maps
-    parameter name → ``(kind, payload)``: a [`_ParamKind`][] plus, for
-    ``DEPENDS``, the [`Depends`][blackbull.di.Depends] instance and, for
-    ``QUERY``, the [`_QuerySpec`][].  The ``elif`` chain below *is* the
-    precedence, in order; ``QUERY`` is the fallback category, so every branch
-    ahead of it claims its names before a leftover becomes a query param.
-
-    Everything unresolvable raises ``TypeError`` here, at registration, rather
-    than on the first request.  The user-facing forms are in
-    ``docs/getting-started/first-app.md``.
+    Recognized annotation/name bindings take precedence over the query fallback.
+    See docs/getting-started/first-app.md for supported signatures.
     """
     from .connection import Connection as _Conn  # ``Request`` is an alias of it
 
@@ -833,9 +783,7 @@ def _handler_param_plan(fn, path_param_names: set) -> tuple:
                 name=name, type=target, coercer=coercer, required=required,
                 default=None if required else default))
 
-    # At most one body parameter: consuming the body twice would hang the
-    # second ``read_body`` call indefinitely.  A ``Request`` param does not
-    # count — it drains lazily through the same cache the wrappers use.
+    # Allow at most one body-bound parameter; Connection injection does not count.
     body_param_count = sum(
         1 for kind, _ in categories.values() if kind in (_ParamKind.BODY, _ParamKind.DATACLASS))
     if body_param_count > 1:
@@ -849,24 +797,10 @@ def _handler_param_plan(fn, path_param_names: set) -> tuple:
 
 
 def _conn_of(target, receive):
-    """Return the [`Connection`][] for this request.
+    """Reuse a Connection or recover/build one from an ASGI scope.
 
-    *target* is the threaded dispatch object: a [`Connection`][] on the
-    self-hosted and external paths alike, or a hand-built ASGI scope dict on a
-    direct unit-test drive of a wrapper.  The self-hosted path reuses the
-    ``Connection`` the protocol actor stashed on the scope envelope under
-    ``CONNECTION_STASH_KEY`` with **no**
-    re-conversion; under an external ASGI server (uvicorn,
-    ``httpx.ASGITransport``) there is no stash, so one is built via
-    [`Connection.from_scope`][Connection.from_scope] — the single ASGI→native conversion point.
-
-    ``_receive`` is bound to the caller's channel **only when unset**, because
-    on the self-hosted path the actor has already bound the *raw* recipient via
-    [`bind_receive_channel`][blackbull.connection.bind_receive_channel].  The ``receive``
-    threaded here is the disconnect-detecting *wrapper*, which captures
-    ``conn``; overwriting the raw binding with it re-forms the per-request
-    reference cycle the actor binding exists to avoid.  Only a hand-built scope
-    that reached the router with no channel bound falls through to this bind.
+    Bind receive only if unset. Replacing the actor's raw recipient with the
+    router's disconnect wrapper recreates a reference cycle through conn.
     """
     conn, built = stashed_connection(target, receive)
     if built and isinstance(target, dict):
@@ -935,17 +869,9 @@ def _is_websocket_route(scheme) -> bool:
 
 
 def _websocket_param_plan(fn, path_param_names: set = frozenset()) -> tuple[tuple, ...]:
-    """Classify an object-form WebSocket handler's parameters, once, at
-    registration time.
+    """Classify object WebSocket parameters at registration; annotations win over names.
 
-    Returns ``(name, kind, payload)`` per parameter, in signature order, with
-    the same payloads [`_handler_param_plan`][] uses.  Annotation wins over
-    name, so an explicitly annotated parameter always means what it says;
-    after that the ``elif`` chain is the precedence, as on the HTTP side.
-
-    The two deliberate divergences from the HTTP plan — a query param must
-    carry its annotation, and there is no body parameter — are argued in
-    ``docs/guide/websockets.md`` §Injected parameters.
+    Query parameters require annotations; body injection is unsupported.
     """
     from .connection import Connection as _Conn  # noqa: PLC0415 — cycle-safe
     from .websocket import WebSocket as _WS      # noqa: PLC0415 — cycle-safe
@@ -1015,19 +941,9 @@ def _websocket_param_plan(fn, path_param_names: set = frozenset()) -> tuple[tupl
 
 
 def _adapt_websocket_handler(fn, path: str = ''):
-    """Wrap an object-form WebSocket handler in a ``(conn, receive, send)``
-    coroutine, building the [`WebSocket`][blackbull.websocket.WebSocket] per
-    connection.
+    """Adapt object handlers with one WebSocket and dependency lifetime per connection.
 
-    The plan is resolved once here, at registration; the wrapper itself only
-    indexes it.  One object per *connection* — not per message — so an
-    ``async for`` loop over a long-lived socket allocates nothing extra per
-    message.  A ``Depends`` is likewise resolved once per connection, which is
-    long enough to matter: see ``docs/guide/websockets.md`` §Dependency
-    lifetime before injecting a pooled resource.
-
-    Nothing is done to the wire: the wrapper's methods emit the same
-    ``websocket.*`` events the raw form sends by hand.
+    A pooled Depends resource may remain held for the whole session.
     """
     from .websocket import WebSocket as _WS  # noqa: PLC0415 — cycle-safe
 
@@ -1130,12 +1046,6 @@ async def _ws_reject(ws, detail: str) -> None:
 
 def _make_extended_wrapper(fn, annotations: dict, plan: tuple, depends_plan: tuple,
                            converters: dict | None):
-    """Build the per-request closure for handlers that use query params and/or Depends.
-
-    Registration-time only (called once per route from ``_adapt_handler``), so
-    this factory adds zero per-request calls; the closure it returns runs per
-    request and is intentionally NOT extracted further (hot-path policy).
-    """
     has_query = any(kind is _ParamKind.QUERY for _, kind, _ in plan)
     fn_name = fn.__name__
     is_async = inspect.iscoroutinefunction(fn)
@@ -1215,14 +1125,6 @@ def _make_extended_wrapper(fn, annotations: dict, plan: tuple, depends_plan: tup
 
 
 def _adapt_handler(fn, path: str, converters: dict | None = None):
-    """Wrap a simplified handler in a ``(conn, receive, send)`` coroutine.
-
-    Parameters are classified once by [`_handler_param_plan`][], which owns
-    the categories and their precedence; return values are serialised by
-    [`_send_native`][], which owns the supported shapes.  *converters* is
-    ``Router._converters``, consulted only for a return value none of those
-    shapes matched.
-    """
     from .connection import Connection as _Conn
 
     path_param_names: set[str] = _path_param_names(path)
@@ -1343,19 +1245,8 @@ def _to_tuple(value: Any) -> tuple:
     return (value,)
 
 
-# ---------------------------------------------------------------------------
-# Per-route hooks — generic request/response metadata a handler can carry.
-#
-#   ``_bb_response_headers`` — headers appended to every response the route
-#       produces, the centrally-rendered error included.
-#   ``_bb_request_guard`` — a ``(conn) -> None`` callable run before the
-#       handler, raising [`HTTPException`][] to reject pre-dispatch.
-#
-# Both are method-agnostic by construction: ``BlackBull._dispatch`` applies
-# them without naming a method or a feature, so all of ``accept_query``'s
-# QUERY-specific logic lives inside the guard it builds.  It is the only
-# producer today; the next one needs no dispatcher change.
-# ---------------------------------------------------------------------------
+# Route metadata applies to all responses, including errors.
+# Request guards run before dispatch and may raise HTTPException.
 
 _ROUTE_HOOK_ATTRS = ('_bb_response_headers', '_bb_request_guard')
 
@@ -1415,12 +1306,7 @@ def request_media_type(conn) -> str:
 
 
 class _LookupCache:
-    """Bounded LRU for resolved route lookups; ``cache_max`` of 0 disables it.
-
-    The whole caching *strategy* — store, bound, LRU ordering, eviction — is
-    behind ``get`` / ``set`` / ``clear``, so a replacement (trie-backed,
-    unbounded) is a drop-in: give ``Router._cache`` a different instance with
-    the same three methods and nothing on the lookup path changes.
+    """Bound route lookup cache; cache_max=0 disables caching.
     """
     __slots__ = ('cache_max', '_store')
 
@@ -1597,11 +1483,7 @@ class Router:
         self,
         key: Tuple[str, str | HTTPMethod, Scheme],
     ):
-        """Core route lookup — trie first, regex fallback.  Raises on miss.
-
-        No logging on the hit path: even a disabled ``logger.debug`` costs
-        ~100 ns/call, a measurable slice of the <1000 ns ``_resolve`` budget.
-        Miss-path logging is retained below.
+        """Resolve through the trie or regex fallback; raise on a miss.
         """
         key_path, key_method, key_scheme = key
 
@@ -1966,34 +1848,10 @@ class Router:
 
 
 class ErrorRouter:
-    """Maps HTTP error statuses and exception classes to ASGI error-handler functions.
+    """Map HTTPStatus values and exception classes to error handlers.
 
-    Keys accepted by __setitem__ / __getitem__:
-      - HTTPStatus value  (e.g. HTTPStatus.NOT_FOUND)
-      - Exception class   (e.g. ValueError)
-
-    Lookup rules:
-      - HTTPStatus key: exact match only.
-      - Exception class: walks the MRO so a handler registered for a base class
-        (e.g. Exception) catches all unhandled subclasses.
-      - On a miss, returns the *default* handler passed at construction
-        (``None`` when no default was given — caller decides the fallback).
-
-    Usage::
-
-        errors = ErrorRouter()
-
-        @errors(HTTPStatus.NOT_FOUND)
-        async def handle_404(conn, receive, send):
-            ...
-
-        @errors(ValueError)
-        async def handle_value_error(conn, receive, send):
-            ...
-
-        handler = errors[HTTPStatus.NOT_FOUND]   # → handle_404
-        handler = errors[KeyError()]              # → handle_value_error via MRO (if registered)
-        handler = errors[KeyError]               # same, accepting the class directly
+    Status lookup is exact. Exception instances or classes use MRO lookup;
+    a miss returns the configured default, which may be None.
     """
 
     def __init__(self, default: Callable | None = None):

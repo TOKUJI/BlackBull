@@ -1,18 +1,7 @@
-"""A rolling-window rate meter — the codebase's shared defence primitive.
+"""Rolling-window count meter.
 
-Several attack shapes are the same shape: a frame that is cheap for a peer
-to send and obliges the server to do a small piece of work per frame.  A
-PING costs an ACK write, a SETTINGS costs an ACK write, a zero-length
-CONTINUATION costs a parse and a loop turn, a WebSocket PING costs a PONG.
-None of them is large, so no byte budget sees them; each is unbounded in
-*count*, which is the axis this meters.
-
-Deliberately not a token bucket.  The constants its callers pass are
-calibrated against observed traffic — the inbound RST_STREAM window
-answering Rapid Reset (CVE-2023-44487) among them — and a burst-tolerant
-refill curve would change what those limits mean.  A site that needs
-smoothing gets a second primitive with its own name, not a quietly
-different `hit()`.
+Do not replace this with a token bucket: burst allowance would change the
+meaning of caller limits. Use a separately named primitive for smoothing.
 """
 from __future__ import annotations
 
@@ -69,26 +58,11 @@ class RateWindow:
 
 
 class ByteRateFloor:
-    """Minimum sustained *byte* rate over a rolling window.
+    """Enforce a rolling byte-rate floor after a grace period; rate=0 disables.
 
-    [`RateWindow`][] counts events; this weighs octets against the time
-    spent waiting for them, which is the other half of the same defence and a
-    different question.  A rate, not a deadline, because a one-byte drip
-    satisfies every per-read timeout ever set (Kestrel's
-    ``MinRequestBodyDataRate`` is the same answer).
-
-    The window is one grace period wide and rolls when it is satisfied, so a
-    peer that ran ahead and then stalled is judged on the stall.  Nothing is
-    judged before a grace period of waiting has accumulated.
-
-    Both arguments to [`record`][] are the caller's to define, and the
-    difference between them is the whole design.  *waited* should be every
-    second the caller sat on the transport, including reads that delivered
-    nothing countable — otherwise a peer stalls before the parts that are not
-    counted and buys unbounded time.  *nbytes* should be only the octets the
-    caller actually wanted; framing a peer can pad at will is not payload.  A
-    ``rate`` of ``0`` disables the floor, which is how every cap in this tree
-    spells "off".
+    waited includes every transport wait, even reads without countable payload.
+    nbytes counts wanted payload, excluding padding or framing the peer can
+    inflate. Satisfied windows roll so prior progress cannot cover later stalls.
     """
 
     __slots__ = ('rate', 'grace', '_waited', '_seen')

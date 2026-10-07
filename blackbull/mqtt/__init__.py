@@ -1,21 +1,7 @@
-"""MQTT 5 broker — a non-core "bridge" protocol shipped with BlackBull.
+"""MQTT 5 broker through the generic extension mechanism.
 
-A **bridge protocol**: it rides the Non-ASGI bridge and shares none of the
-HTTP stack the framework exists to implement.  Its own subpackage keeps that
-boundary explicit and leaves it extractable as a standalone
-``blackbull-mqtt`` distribution.  See ``docs/guide/mqtt.md``.
-
-Wire it in through the generic extension seam::
-
-    from blackbull import BlackBull
-    from blackbull.mqtt import MQTTExtension
-
-    app = BlackBull()
-    mqtt = app.add_extension(MQTTExtension(port=1883))
-
-    @mqtt.on_message(topic='sensors/+/temperature')
-    async def on_temp(msg: Message):
-        print(msg.topic, msg.payload)
+Register MQTTExtension with app.add_extension; HTTP dispatch stays independent.
+See docs/guide/mqtt.md for broker and tap contracts.
 """
 from .asyncapi import AsyncAPIExtension
 from .broker import BrokerActor

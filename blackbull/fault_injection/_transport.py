@@ -1,11 +1,4 @@
-"""Transport primitives shared by the four scenario executors.
-
-The scenario *vocabularies* are per-protocol and per-role; the socket
-operations underneath them are neither.  A half-close is the same system
-call whether it is a broken HTTP/1.1 client or a broken HTTP/2 server
-issuing it, so it lives here rather than four times over — four copies of
-one idea drift, and the drift is invisible until something outside the
-project reads the bytes.
+"""Transport operations shared across protocol-specific scenario executors.
 """
 from __future__ import annotations
 
@@ -15,14 +8,9 @@ logger = logging.getLogger(__name__)
 
 
 def half_close(writer) -> bool:
-    """Send FIN on the write side; leave the read side open.
+    """Send write-side FIN while retaining reads; return whether it succeeded.
 
-    Returns whether the transport accepted it, rather than raising or
-    silently doing nothing.  ``write_eof`` is genuinely unsupported on some
-    transports — TLS is the one that matters here, because a half-close has
-    no TLS equivalent — and a scenario whose half-close quietly did nothing
-    would report a pass while testing the peer's *keep-alive* path instead.
-    Recording the miss is what lets a test assert it actually happened.
+    TLS does not support this. Assert the result when the test requires half-close.
     """
     if writer is None:
         return False

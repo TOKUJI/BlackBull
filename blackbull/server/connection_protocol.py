@@ -1,23 +1,7 @@
-"""Connection transport front end: `asyncio.BufferedProtocol` over one buffer.
+"""One connection buffer and transport callbacks.
 
-One of these per accepted connection, created before the protocol is known —
-the shared listener detects HTTP/1.1, h2c, and MQTT off the same resident
-bytes, so the buffer belongs to the *connection*, not to any one protocol.
-[`BufferReader`][] presents the ``AbstractReader`` surface,
-so the body recipient and the WebSocket/h2c successors work unchanged.
-
-``docs/about/internals.md`` §Who decides, and who acts argues the split between
-the two classes: the reader owns the receive decisions, the protocol owns the
-socket.  Three facts cross that boundary as published state rather than as a
-call — ``BufferReader.read_offer``, ``ConnectionProtocol.reading_paused``,
-``ReadBuffer.drained_boundary`` — under one rule:
-
-    A published field has exactly one writer — its owner.  Reading it across
-    the boundary is free; changing it is a method call on the owner, gated on
-    a cheap read so it happens only when a change is actually due.
-
-Encapsulation normally *enforces* ownership; publishing gives that up, so the
-rule is tested instead — ``tests/unit/test_receive_decisions.py``.
+BufferReader owns receive policy; ConnectionProtocol owns socket operations.
+Published state has exactly one writer, its owner. See docs/about/internals.md.
 """
 from __future__ import annotations
 
@@ -45,17 +29,10 @@ _RELEASE_HYSTERESIS = 4
 
 
 class BufferReader(AbstractReader):
-    """`AbstractReader` over a [`ReadBuffer`][] fed by [`ConnectionProtocol`][].
+    """Read resident bytes before waiting for more.
 
-    Every method serves from resident bytes first and only parks when it needs
-    more, so a pipelined or keep-alive peer's next head usually completes
-    without a loop turn.  This is where the receive decisions live; the
-    Internals page says why.
-
-    Those decisions are deliberately not on
-    ``AbstractReader``: two of its three implementations have
-    no transport to pause, so promoting the competence to the interface would
-    force a no-op onto them.
+    Own high-water pause decisions, including the starving-reader exception.
+    Only one coroutine may wait for input at a time.
     """
 
     __slots__ = ('_buf', '_proto', '_release_count', '_waiting', 'read_offer')
@@ -86,13 +63,10 @@ class BufferReader(AbstractReader):
             self._proto.pause_reading()
 
     def _consumed(self) -> None:
-        """A read took bytes out: the two decisions that follow from that.
+        """Apply release policy after a read consumes bytes.
 
-        The message boundary is answered here and nowhere else, late rather
-        than eagerly.  ``compact()`` also raises it from the *arrival* path
-        (``_make_room`` compacts before growing), and a delivery lands
-        immediately after that — so answering it there could never release
-        anything, and would consume the boundary that this path can act on.
+        Do not resolve message boundaries during arrival-side compaction: new input
+        would immediately reuse the allocation.
         """
         proto, buf = self._proto, self._buf
         if proto.reading_paused and buf.available <= _LOW_WATER:
@@ -101,12 +75,9 @@ class BufferReader(AbstractReader):
             self._at_boundary()
 
     def _at_boundary(self) -> None:
-        """Decide whether the finished message's allocation is kept.
+        """Release peak allocation only after _RELEASE_HYSTERESIS fully consumed small messages.
 
-        A message whose peak exceeded the floor re-arms the counter; only after
-        ``_RELEASE_HYSTERESIS`` fully-consumed *small* ones is the peak given
-        back.  The decision is read off the buffer's accounting, which the
-        buffer is then told to close out — this method writes none of it.
+        A message exceeding the floor resets the count.
         """
         buf = self._buf
         if buf.grown:
@@ -120,18 +91,11 @@ class BufferReader(AbstractReader):
         buf.consume_boundary()
 
     async def wait_for_data(self) -> None:
-        """Park until more arrives, declaring the wait first.
+        """Park after releasing the high-water pause.
 
-        Parking releases the high-water pause, and must: a starved reader is
-        waiting for precisely the bytes the pause is refusing to read, so
-        without this any single read larger than the mark deadlocks — a
-        WebSocket frame, or a ``chunked`` chunk whose size the peer chose.
-
-        Parking is also the only moment a recv-size demand can be consulted, so
-        a caller that has one writes ``read_offer`` around its call.  Not a
-        *want* argument here: the readers that park without a size would pay a
-        pair of stores to declare nothing, which measured as the header path
-        funding what the body path saves.
+        A starving reader must resume input even if its requested slice exceeds the
+        watermark. The reader publishes read_offer around this wait; a paused
+        transport cannot otherwise supply the bytes needed to unblock it.
         """
         proto = self._proto
         if proto.reading_paused:
@@ -303,10 +267,7 @@ class BufferReader(AbstractReader):
         """
         while True:
             if not self._buf.available:
-                # Nothing resident: wait without scanning first.  The skipped
-                # scan is pure overhead (~0.79 µs/req on EC2, F5) — an empty
-                # buffer cannot exceed a positive limit, and it would leave
-                # ``_scanned`` where it already is.
+                # An empty buffer cannot exceed a positive limit; wait before scanning.
                 if self._proto.peer_closed:
                     return b''
                 await self.wait_for_data()
@@ -331,15 +292,9 @@ class BufferReader(AbstractReader):
 
 
 class ConnectionProtocol(asyncio.BufferedProtocol):
-    """Buffered-protocol front end for one H/1.1 connection.
+    """Own transport callbacks and wakeups for one connection.
 
-    The transport half of the receive path: it owns the socket callbacks, the
-    callback↔coroutine rendezvous, and the two flow-control calls — but none of
-    the judgement about when to make them.  Those belong to
-    [`BufferReader`][], which is the only object that knows what has been
-    asked for; this class executes what it is told.  Its one comparison — the
-    byte-level high-water threshold — is a transport fact, not a judgement:
-    whether a crossing pauses the peer is the Reader's call.
+    BufferReader decides pause/resume policy; this object applies it.
     """
 
     def __init__(self) -> None:
@@ -363,14 +318,7 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
 
     @property
     def peer_closed(self) -> bool:
-        """The transport signalled EOF: the peer will send nothing more.
-
-        A fact about the socket, which is why it lives here.  It is **not**
-        the same question as ``BufferReader.at_eof`` — bytes already
-        delivered are still there to be served after the peer has gone, so a
-        reader is at EOF only when this is true *and* its buffer is empty.
-        One name for both questions made every call site a guess about which
-        was meant.
+        """Return transport EOF; buffered bytes may still remain, so this differs from reader.at_eof.
         """
         return self._eof
 
@@ -384,11 +332,7 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
             transport.get_extra_info('ssl_object') is None)
 
     def get_buffer(self, sizehint: int) -> memoryview:
-        # The demand comes from the reader, not the hint.  Read as a published
-        # attribute rather than through a call: this runs on every arrival on
-        # every connection, and the EC2 /conn A/B put a *method call* here at
-        # the same order as the whole regression it showed (~0.7 %).  One
-        # attribute hop to the owner is not that call — measured at 1.66 ns.
+        # Read demand from the reader-owned published field, not the size hint.
         return self._rb.get_buffer(sizehint, want=self.reader.read_offer)
 
     def buffer_updated(self, nbytes: int) -> None:
@@ -407,16 +351,8 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
     def eof_received(self) -> bool:
         self._eof = True
         self._wake()
-        # True keeps the transport open for writing, which is what a cleartext
-        # client that sends its request then calls ``shutdown(SHUT_WR)`` needs:
-        # it is half-closed, legitimately, and still waiting for the response.
-        # The write half is ours to close, once the response has shipped.
-        #
-        # Over TLS that is not on offer.  asyncio's SSL protocol closes on EOF
-        # whatever the app protocol returns, and logs "returning true from
-        # eof_received() has no effect when using ssl" for each one — 3,425 of
-        # them in a sixteen-profile run.  Claiming a half-close we will not get
-        # is the thing to stop doing; the log line is only how we found out.
+        # Cleartext half-close keeps output open until the response is sent.
+        # TLS transports close on EOF regardless of this return value.
         return self._half_close_is_honoured
 
     def connection_lost(self, exc: BaseException | None) -> None:
@@ -459,11 +395,7 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
             self.transport.writelines(parts)
 
     async def drain(self) -> None:
-        """Block only while the transport is over its high-water mark.
-
-        Returns without awaiting in the common case, which matters: an
-        unconditional await here is one loop turn per response send, the very
-        cost the inbound rewrite is removing on the read side.
+        """Wait only while the transport is above its write high-water mark.
         """
         if self._exc is not None:
             raise self._exc

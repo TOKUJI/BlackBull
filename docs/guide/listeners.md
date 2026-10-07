@@ -25,9 +25,7 @@ app.run(listeners=[
 ], workers=4)
 ```
 
-All four run in **one process**, and every worker serves every one of them.
-Before listeners existed this deployment cost four processes, each with the
-full worker count.
+All four HTTP listeners run in each worker process.
 
 ## What a listener says
 
@@ -138,7 +136,8 @@ reclaims the lifespan task before the original startup exception is reported.
 
 A raising `@app.on_shutdown` hook therefore makes a single-worker process log
 the failure and exit `1`, so a supervisor can act on it.  With `workers > 1`
-or `--reload` the master exits `0`; check the workers' logs.
+or `--reload`, failed worker cleanup also makes the master exit non-zero;
+check the workers' logs for the cause.
 
 **Signals.**  `SIGINT` and `SIGTERM` both run the shutdown.  `SIGTERM` lets
 in-flight requests finish for up to

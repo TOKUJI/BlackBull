@@ -1,20 +1,8 @@
-"""Request body and cookie helpers.
+"""Request-body and cookie helpers.
 
-Provides:
-
-- `read_body`: buffers all ASGI ``http.request`` chunks into a single ``bytes`` object.
-- `read_json`: buffers the body and parses it as JSON (``None`` on empty/invalid).
-- `read_text`: buffers the body and decodes it as text.
-- `cookies_from_headers`: parses the ``Cookie`` header(s) into a ``dict[str, str]``
-  straight from a headers object — the native core (what ``Connection.cookies`` uses).
-- `parse_cookies`: the ASGI-scope-shaped wrapper of the above, for external
-  callers that hold a scope dict.
-
-The opt-in HTTP context object is [`blackbull.connection.Connection`][blackbull.connection.Connection];
-``Request`` is a **deprecated** alias of it, resolved through
-``blackbull.__getattr__``, and will be removed no earlier than 2027-08-01.
-This module holds only the transport-agnostic free functions, which
-[`Connection`][] builds on.
+read_body buffers; use streaming for bodies that should not accumulate.
+read_json returns None for an empty or invalid body. Request is a deprecated
+Connection alias, not an independent request model.
 """
 import json
 from typing import Any, AsyncIterator

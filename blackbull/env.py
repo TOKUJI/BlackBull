@@ -1,14 +1,7 @@
-"""Runtime configuration sourced from environment variables.
+"""Immutable environment settings snapshot.
 
-All server settings live in [`Settings`][].  [`get_settings`][] reads the
-environment once and returns an immutable snapshot; [`reset_settings_cache`][]
-drops it, which is what a test that changes the environment needs.
-
-Every default here comes from ``blackbull._env_vars``, which holds one
-variable per configurable knob: the default as its value, the description as
-its docstring.  ``scripts/gen_env_docs.py`` writes the reference page from
-that module, so a default and its documentation cannot disagree -- there is
-one of each.
+After changing the environment in a test, call reset_settings_cache().
+Defaults and generated reference descriptions live in blackbull._env_vars.
 """
 import dataclasses
 import functools as _functools
@@ -160,17 +153,10 @@ class Settings:
     socket_sndbuf: int = _env_vars.BB_SOCKET_SNDBUF
     socket_rcvbuf: int = _env_vars.BB_SOCKET_RCVBUF
 
-    #: No help for a cold-start connection burst, and measurably a
-    #: pessimization there: at cold start every worker is equally cold,
-    #: so N per-worker queues starve at once, and the shared queue's
-    #: cross-worker load-balancing is given up as well.
+    # Tune per-worker accept queues against the connection workload.
     socket_reuseport: bool = _env_vars.BB_SOCKET_REUSEPORT
 
-    #: 5 s, not the conventional 60: a connection parked in
-    #: ``readuntil`` inflates the suspended-task count and amplifies
-    #: burst-close drain time.  The timer also replaces a per-accept
-    #: ``SO_KEEPALIVE`` syscall, measured as a contributor to wrk
-    #: c=1024-burst connect-RST errors.
+    # Keep-alive expiry also bounds suspended connection tasks.
     keep_alive_timeout: float = _env_vars.BB_KEEP_ALIVE_TIMEOUT
     tcp_user_timeout_ms: int = _env_vars.BB_TCP_USER_TIMEOUT_MS
     request_timeout: float = _env_vars.BB_REQUEST_TIMEOUT
@@ -226,10 +212,6 @@ class Settings:
     ws_max_message_size: int = _env_vars.BB_WS_MAX_MESSAGE_SIZE
     worker_drain_timeout: float = _env_vars.BB_WORKER_DRAIN_TIMEOUT
 
-    #: 20 on both paths, because past it concurrency costs more than it
-    #: buys on one event loop: uncapped, mux-10 out-throughputs mux-50
-    #: on a single worker, and a multi-worker box reaches the same point
-    #: at roughly 4 connections x mux-50 per worker.
     h2_active_streams_1w: int = _env_vars.BB_H2_ACTIVE_STREAMS_1W
     h2_active_streams: int = _env_vars.BB_H2_ACTIVE_STREAMS
     use_uvloop: bool = _env_vars.BB_UVLOOP
@@ -248,17 +230,10 @@ class Settings:
 
 @_functools.cache
 def get_settings() -> Settings:
-    """Read environment variables and return an immutable [`Settings`][].
+    """Return cached process-wide settings.
 
-    Cached: first call parses env vars and builds the dataclass; subsequent
-    calls return the same instance.  Settings are server-process-wide
-    configuration, not per-request data — there's no reason to re-parse
-    ``os.environ`` on every request.  Profile showed ``_int_env`` and
-    ``_int_env_nonneg`` consuming ~5–6% of CPU in the HTTP/1.1 hot path
-    before this cache.
-
-    Tests that mutate environment between cases must call
-    [`reset_settings_cache`][] in their teardown.
+    Environment changes after the first call have no effect until
+    reset_settings_cache(); tests changing them must reset in teardown.
     """
     raw_env = _str_env('BLACKBULL_ENV', 'development').lower()
     try:

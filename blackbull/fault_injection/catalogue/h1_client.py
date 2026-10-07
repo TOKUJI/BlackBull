@@ -1,22 +1,5 @@
-"""Named HTTP/1.1 client-side misbehaviour cases.
-
-The last of the grid's four catalogues.  Cells B, C and D shipped named
-sets (9, 4 and 11 cases); this cell had **none** — it was reachable only
-through the atheris and Hypothesis harnesses, which generate inputs rather
-than name them.  That is a real difference in kind: a generated input
-tells you *that* something broke, a named case tells you *which known
-mistake* you are testing against, and only the second can be cited in a
-bug report or parametrized over by a downstream user.
-
-Every case is raw bytes, because on this side the fault *is* the bytes.
-A typed `SendRequest` step would be built from the same encoder the
-production client uses, and could not emit a fault that encoder has —
-the same reasoning that keeps the two fault *servers* off the production
-send path.
-
-The cases are drawn from RFC 9112's framing rules and the request-
-smuggling literature, so the names line up with what a reader is likely
-to be defending against.
+"""HTTP/1.1 client faults assembled as raw bytes. Do not reuse the
+production request encoder: it cannot expose its own defects.
 """
 from __future__ import annotations
 

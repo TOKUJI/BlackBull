@@ -1,13 +1,8 @@
 # Structured Fields (RFC 9651)
 
-Every HTTP header defined by the IETF since ~2021 — `Priority`,
-`Deprecation`, `Accept-Query`, rate-limit signalling, Client Hints —
-uses **Structured Field Values** (RFC 9651) instead of a bespoke
-grammar.  BlackBull ships a strict parser and serialiser for all of
-it in `blackbull.protocol.structured_fields`, verified against the
-HTTP Working Group's
-[conformance suite](https://github.com/httpwg/structured-field-tests)
-(2,135 cases).
+Use blackbull.protocol.structured_fields to parse and serialize RFC 9651
+values. Choose the header's specified top-level type; arbitrary HTTP fields
+are not necessarily Structured Fields.
 
 ## Reading structured headers
 

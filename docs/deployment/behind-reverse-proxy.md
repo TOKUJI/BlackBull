@@ -295,19 +295,11 @@ With a Unix socket there is no meaningful IP to trust, so `TrustedProxy` needs
 the peer that the socket presents rather than a network range — verify what
 `conn.client` reports before assuming a value.
 
-## When fronting HTTP/2 is the right call
+## Choosing the upstream protocol
 
-HTTP/2 costs more per request than HTTP/1.1 in *every* implementation — each
-stream carries state, framing, and flow control that HTTP/1.1 does not. That
-is the protocol, not a BlackBull property, but it has a deployment
-consequence worth naming: if a workload needs maximum throughput on a single
-HTTP/2 connection at high multiplex, the usual production shape is a fronting
-HTTP/2 terminator with BlackBull on HTTP/1.1 behind it.
-
-BlackBull's own HTTP/2 is conformant (`h2spec`, RFC 9113). How its per-stream
-cost compares to other servers is **not measured**: the
-`bench/CHARACTERIZATION.md` A-lane (h2load at n=1/10/50) is specified but has
-no recorded results, so no comparative claim is made in either direction.
+A proxy can terminate TLS and HTTP/2 and use HTTP/1.1 upstream. Choose an
+upstream protocol that preserves the application's required features:
+gRPC and multiplexed streams require HTTP/2 support along their path.
 
 ## Next
 

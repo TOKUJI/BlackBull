@@ -1,17 +1,5 @@
-"""HTTP/2 WebSocket byte-stream adapters (RFC 8441).
-
-HTTP2WSReader and HTTP2WSWriter bridge between the HTTP/2 DATA frame layer
-and the RFC 6455 WebSocket codec (ws_codec.py).
-
-HTTP2WSReader — AbstractReader backed by DATA frame payloads pushed by
-HTTP2Actor._on_data_frame(). Implements the same put_DATAFrame / put_disconnect
-interface as HTTP2Recipient so the existing _signal_recipients() helper and
-_on_data_frame() dispatch work without modification.
-
-HTTP2WSWriter — AbstractWriter that wraps an HTTP2Sender and translates raw
-WebSocket frame bytes into http.response.body events (inheriting HTTP/2 flow
-control from the sender). close() sends a final empty DATA+END_STREAM to signal
-orderly HTTP/2 stream termination per RFC 8441 §5.
+"""RFC 8441 byte-stream adapters. Reuse the HTTP/2 connection
+factory and flow control; do not create another HPACK context.
 """
 import asyncio
 from typing import Awaitable, Callable, Optional
@@ -22,10 +10,7 @@ from ..native import NativeResponse
 from ..protocol.frame_types import Data
 
 
-# Default per-stream buffer cap before the reader starts withholding
-# WINDOW_UPDATE credit.  1 MiB accommodates the largest reasonable
-# single WebSocket frame plus headroom; tune via the ``max_buffer``
-# constructor parameter when the workload has known-larger frames.
+# Withhold credit above this per-stream buffer cap; max_buffer overrides it.
 _DEFAULT_MAX_BUFFER = 1024 * 1024
 
 

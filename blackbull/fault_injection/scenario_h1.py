@@ -1,37 +1,7 @@
-"""Programmable HTTP/1.1 wire-level scenario model.
+"""HTTP/1.1 client-side fault scenarios for a target server.
 
-A [`Scenario`][] is a sequence of typed *steps* that the
-[`blackbull.client.HTTP1Client.execute_scenario`][blackbull.client.HTTP1Client.execute_scenario] executor walks
-in order against a live socket.  This is the *client-side* half of
-the [`blackbull.fault_injection`][blackbull.fault_injection] toolkit: a programmable client
-that drives a target HTTP/1.1 server through deliberate misbehaviour
-— slowloris trickle, mid-request idle, abrupt RST, partial reads —
-expressed as data, not procedural test code.
-
-The symmetric *server-side* half (programmable HTTP/2 server emitting
-deliberate misbehaviour toward a client) lives in
-[`blackbull.fault_injection.h2_server`][blackbull.fault_injection.h2_server].
-
-Use cases:
-
-  * Conformance differential testing — Hypothesis generates scenarios
-    and [`blackbull.fault_injection.oracle_h1`][blackbull.fault_injection.oracle_h1] compares the target
-    server's response to a reference (e.g. nginx).
-  * Coverage-guided fuzzing — atheris's byte mutations decode into
-    scenarios via [`Scenario.from_bytes`][Scenario.from_bytes].
-  * **External callers** — server-library authors, proxy authors, and
-    security researchers driving their server through programmable
-    misbehaviour from a pytest suite.
-
-Two serialisations are supported:
-
-  * [`Scenario.to_json`][Scenario.to_json] / [`Scenario.from_json`][Scenario.from_json] — JSON Lines,
-    one step per line.  Diff-friendly in git; readable when failures
-    are pasted into reports.
-  * [`Scenario.from_bytes`][Scenario.from_bytes] — a *total* opcode-tagged decoder.
-    Every byte string maps to a valid scenario, so atheris's byte-level
-    mutations never crash on input parsing — each mutation produces a
-    distinct execution path against the server.
+JSON Lines preserves typed steps. from_bytes is a total decoder for fuzz
+inputs: malformed input must still map to a scenario rather than crash parsing.
 """
 import base64
 import enum
@@ -178,17 +148,7 @@ class Scenario:
     # ------------------------------------------------------------------
 
     def to_json(self) -> str:
-        """Serialise to JSON Lines: one ``{"op": ..., ...}`` per line.
-
-        Bytes payloads are base64-encoded so the result round-trips
-        through stdout / git / json.loads without escape ambiguity.
-        Round-tripped by ``from_json``.
-
-        The scenario's name rides the first line under the op ``HEADER``,
-        the convention the other three vocabularies use, so the file stays
-        one line-oriented stream with no out-of-band metadata.  Without it
-        a round trip silently dropped the name, and a catalogue case that
-        came back anonymous cannot say which case it is.
+        """Serialize JSON Lines with base64 byte payloads and a first HEADER carrying name.
         """
         lines = [json.dumps({'op': 'HEADER', 'name': self.name})]
         for step in self.steps:
@@ -224,43 +184,10 @@ class Scenario:
 
     @classmethod
     def from_bytes(cls, raw: bytes) -> 'Scenario':
-        """Decode arbitrary bytes into a scenario.
+        """Decode every byte string into a runnable fuzz scenario, including empty input.
 
-        Total function: *every* byte string yields a valid scenario,
-        including the empty string (→ empty scenario).  Designed so
-        atheris's coverage-guided byte mutations always produce
-        runnable input — the fuzzer never spends cycles on parser
-        errors.
-
-        Encoding:
-
-          * The decoder walks ``raw`` left-to-right.  At each
-            position the next byte selects an opcode via ``% 4``
-            (every byte value is therefore a legal opcode tag).
-          * Each opcode then consumes a small payload from the
-            following bytes.  If the payload is short (end of input),
-            decoding stops cleanly and the partial scenario is
-            returned.
-
-        Opcode layout::
-
-            byte % 4 == 0  → SEND
-                next 2 bytes (big-endian uint16) = length;
-                next ``length`` bytes = data;
-                next 1 byte (% len(_BYTE_INTERVAL_TABLE))
-                  → byte_interval.
-            byte % 4 == 1  → SLEEP
-                next 1 byte (% len(_SLEEP_TABLE)) → duration.
-            byte % 4 == 2  → READ
-                next 1 byte (% len(_TIMEOUT_TABLE)) → timeout.
-            byte % 4 == 3  → ABORT
-                no payload.  Remaining bytes are discarded — an
-                Abort short-circuits execution anyway, so it's the
-                natural terminator.
-
-        Bounded payload sizes (uint16 length) keep individual
-        scenarios well under 64 KiB, which is what we want for
-        per-iteration fuzz throughput.
+        Truncated input returns the completed steps. Abort discards remaining bytes;
+        SEND payload lengths are uint16. This decoder must not raise on arbitrary input.
         """
         steps: list[Step] = []
         i = 0
@@ -319,12 +246,9 @@ _TIMEOUT_TABLE: tuple[float, ...] = (0.5, 1.0, 2.0, 5.0)
 
 @dataclass
 class ScenarioResult:
-    """Outcome of one ``HTTP1Client.execute_scenario`` call.
+    """Collect scenario outcomes; fields are not mutually exclusive.
 
-    Exactly one of ``response`` / ``exception`` / ``timed_out`` /
-    ``aborted`` is the meaningful field; the others are ``None`` /
-    ``False``.  The executor never raises, so a caller categorises on this
-    object rather than on an exception.
+    A timeout may precede a later response; response is newest, received holds all.
     """
 
     # Populated when a ReadResponse step received a full HTTP/1.1
@@ -349,17 +273,9 @@ class ScenarioResult:
     steps_completed: int = 0
 
     elapsed_s: float = 0.0
-    #: True when a ``HalfClose`` step actually shut down the write side.
-    #: False both when no such step ran and when the transport refused it
-    #: (TLS has no half-close), so a test can tell "did not ask" from
-    #: "asked and it did not happen" — a silently skipped half-close
-    #: otherwise reads as a pass.
+    #: True on successful write-side half-close; False if absent or unsupported.
     half_closed: bool = False
-    #: Everything a read step received, in order.  ``response`` stays the
-    #: most recent one for back-compat; this is what a scenario needs when
-    #: the peer sends more than one thing — a pipelined pair on HTTP/1.1, or
-    #: the handshake frames an HTTP/2 verdict arrives behind.  Before it
-    #: existed, the second read overwrote the first and the loss was silent.
+    # All read responses in order; response remains the newest.
     received: list = field(default_factory=list)
     #: Bytes read from the peer.  Named for who the peer is, mirroring
     #: ``client_bytes_received`` on the broken-server results.
@@ -490,17 +406,11 @@ def response_matches(response, match: dict) -> bool:
 
 
 def scenario_to_json(scenario: Scenario) -> str:
-    """Serialise *scenario* to JSON Lines (one step per line).
-
-    The same free function the other three vocabularies expose, so a reader
-    comparing the four files is not told they differ where they do not.
-    ``Scenario.to_json`` is the same serialisation reached as a method.
-    """
     return scenario.to_json()
 
 
 def scenario_from_json(src: str) -> Scenario:
-    """Parse what [`scenario_to_json`][] produced.  Twin of the other three."""
+    """Parse what [`Scenario.to_json`][] produced.  Twin of the other three."""
     return Scenario.from_json(src)
 
 
@@ -525,11 +435,7 @@ __all__ = [
 
 # Unannotated: see tests/unit/test_deprecated_send_bytes_spellings.py::test_the_warning_is_attributed_to_the_callers_line.
 def __getattr__(name):
-    """PEP 562 — warn when the deprecated spelling is actually used.
-
-    A module-level assignment would alias silently; going through
-    ``__getattr__`` means only a caller who reaches for ``SendBytes`` is
-    warned, and is warned at their own call site.
+    """Deprecated SendBytes alias for SendRawBytes; removal no earlier than 2027-08-19.
     """
     if name == 'SendBytes':
         import warnings  # noqa: PLC0415

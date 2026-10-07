@@ -1,36 +1,7 @@
-"""Native-path test client — the two tiers that drive BlackBull's *own*
-request path rather than the ASGI compatibility boundary.
+"""Native dispatch and full-stack loopback test instruments.
 
-A defect can live on the native path while a suite driven entirely through
-the ASGI compatibility boundary passes, because that boundary never takes
-the ``isinstance(conn, Connection)`` branch every production request does.
-Two tiers close that gap.
-
-**Tier 1** — [`request`][] and the verb helpers build a ``Connection`` and
-call ``app(conn, receive, send)`` directly.  No socket, no protocol actor:
-everything from ``Connection`` inward (dispatcher, middleware chain, router,
-handlers, DI, events, response serialisation).  The equivalent of actix-web's
-``init_service`` or Fastify's ``.inject()``::
-
-    resp = await native.get(app, '/hello')
-    assert resp.status == 200
-
-**Tier 2** — [`NativeTestServer`][] binds a real loopback socket and runs
-BlackBull's own [`Server`][blackbull.server.server.Server], so a request
-travels accept → ``HTTP1Actor`` parse → ``Connection`` → native dispatch →
-wire bytes.  The equivalent of aiohttp's ``TestServer`` or Go's
-``httptest.NewServer``::
-
-    async with NativeTestServer(app) as server:
-        resp = await server.client.get('/hello')
-
-Both tiers are async-first, because the app entry point is a coroutine and a
-handler runs on the caller's event loop, as it does in production.
-[`NativeClient`][] and the synchronous form of [`NativeTestServer`][]
-wrap them for tests written as plain ``def``, each owning one background
-event loop for its whole lifetime rather than one per request.
-
-``docs/guide/testing.md`` says which instrument answers which question.
+request() bypasses sockets; NativeTestServer includes protocol parsing.
+Synchronous wrappers own a background loop for their whole lifetime.
 """
 
 from __future__ import annotations
@@ -47,9 +18,6 @@ import httpx
 
 from ..connection import Connection, bind_receive_channel
 from ..headers import Headers
-# The framework's send message.  Aliased on import because this module defines
-# its own ``NativeTestResponse`` — two different things that both wanted the
-# name ``NativeResponse``, which is exactly the collision this alias removes.
 from ..native import NativeResponse as _NativeResponse
 from . import _shutdown_on_exit
 
@@ -79,12 +47,7 @@ def _encode_header(value: Any) -> bytes:
 
 
 def _header_pairs(headers: _HeaderInput) -> list[tuple[bytes, bytes]]:
-    """Normalise caller-supplied headers to lowercase byte pairs.
-
-    Accepts what a test naturally writes — a ``dict`` of ``str`` or ``bytes``,
-    a list of pairs, or a [`Headers`][] — because the alternative is every
-    call site spelling ``{b'x-probe': b'seen'}`` by hand.  Names are
-    lowercased to match the parser's index (``headers.get(b'content-type')``).
+    """Normalize Mapping, pair iterable or Headers input to lowercase bytes pairs.
     """
     if headers is None:
         return []
@@ -128,20 +91,11 @@ def build_connection(
     client: tuple[str, int | None] | None = _TEST_CLIENT_ADDR,
     server: tuple[str, int | None] | None = _TEST_SERVER_ADDR,
 ) -> Connection:
-    """Build the [`Connection`][] an H/1.1 request line would have produced.
+    """Build a Connection without protocol parsing.
 
-    The field derivations mirror the HTTP/1.1 parser's, so a Tier 1 test and
-    a real request agree on what the handler sees:
-
-    - the query string is split off ``path`` and carried in ``query_string``,
-      never in ``raw_path``;
-    - ``path`` is percent-decoded, ``raw_path`` keeps the undecoded bytes;
-    - a ``host`` header is supplied when the caller gave none, because every
-      HTTP/1.1 request carries one (RFC 9112 §3.2) and code that reads it
-      would otherwise behave differently under test than on the wire;
-    - a ``content-length`` is derived from *body* for the same reason — an
-      explicit one from the caller wins, so a test can still synthesise a
-      mismatched framing header on purpose.
+    Split query from path; retain undecoded raw_path and percent-decode path.
+    Supply missing Host and Content-Length; an explicit Content-Length wins so
+    tests can synthesize inconsistent framing.
     """
     raw_path, _, query = path.partition('?')
     pairs = _header_pairs(headers)
@@ -205,12 +159,8 @@ async def request(
     status: int | None = None
     response_headers: list = []
 
-    # Same dual-form signature as the protocol senders: a handler may emit ASGI
-    # dicts, the ``send(body, status, headers)`` convenience form that the
-    # actor's sender also accepts, or — on the H1 native seam — a
-    # NativeTestResponse.  Tier 1 has to accept all of them or it would reject code
-    # the real server runs.  The NativeTestResponse expansion iterates through the
-    # sibling ``_record`` — never a self-referential closure.
+    # Accept native NativeResponse sends, ASGI dictionaries and the three-argument
+    # body/status/headers form; NativeTestResponse is only the collected result.
     def _record(event: Any, status_arg: HTTPStatus = HTTPStatus.OK,
                 headers_arg: Any = ()) -> None:
         nonlocal status, response_headers
@@ -232,10 +182,7 @@ async def request(
         elif etype == 'http.response.body':
             chunks.append(event.get('body', b'') or b'')
         elif etype == 'http.response.pathsend':
-            # The ``http.response.pathsend`` extension hands the server a file
-            # path instead of bytes so it can sendfile(2).  Tier 1 has no
-            # transport to hand it to, so it does what the kernel would: read
-            # the file.  The observable response is then the same either way.
+            # Capture pathsend by reading its file: this test helper has no sendfile transport.
             with open(event['path'], 'rb') as fp:
                 chunks.append(fp.read())
 
@@ -262,10 +209,7 @@ async def request(
                           body=b''.join(chunks), events=events)
 
 
-#: Deprecated alias.  ``NativeResponse`` used to name *this* class, which
-#: collided with [`blackbull.native.NativeResponse`][blackbull.native.NativeResponse] — the framework's
-#: send message — so the two were indistinguishable in a traceback or an
-#: ``isinstance`` check.  Prefer [`NativeTestResponse`][].
+# Deprecated result alias; prefer NativeTestResponse, distinct from the native send message.
 NativeResponse = NativeTestResponse
 
 
@@ -483,25 +427,14 @@ class NativeTestServer:
 
         self._bb_server = Server(self.app, **self._server_kwargs)
 
-        # The production protocol factory, not a StreamReader callback: a test
-        # server that accepted connections a different way would leave the read
-        # path the server actually ships untested, and that is most of what
-        # these tests are for.
         protocol_factory = self._bb_server.connection_protocol_factory()
 
         def _accept():
-            # The only thing layered over it: count the accept.  A test
-            # asserting keep-alive reuse needs to know how many TCP connections
-            # its requests actually opened, and the honest place to learn that
-            # is the accept path — not a response header the server merely
-            # *may* send, and not httpx's private pool.
+            # Count accepted connections to test keep-alive reuse.
             self.connections_served += 1
             return protocol_factory()
 
-        # Its own socket rather than ``Server.open_socket``: the latter binds
-        # 0.0.0.0 + :: (right for a real deployment, wrong for a test that
-        # should never leave the loopback).  Everything from accept on is the
-        # production path, ``_AcceptGate`` included.
+        # Bind only loopback for tests; use the production protocol factory after accept.
         self._sock = socket.create_server((self.host, self.port),
                                           backlog=self._backlog)
         self.port = self._sock.getsockname()[1]

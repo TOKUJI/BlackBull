@@ -157,15 +157,5 @@ On a WebSocket the same rule matters more, because a socket ends by
 exception far more often than a request does — see
 [dependency lifetime](websockets.md#dependency-lifetime-read-this-before-injecting-a-database-handle).
 
-## Zero cost when unused
-
-Everything is resolved at **registration time**: a handler that declares
-no `Depends` parameter compiles to exactly the wrapper it compiled to
-before this feature existed — no per-request stack, no empty dependency
-loop, no reflection.  (FastAPI, by contrast, runs `solve_dependencies()`
-and enters two `AsyncExitStack`s on every request even with no
-dependencies declared.)  Handlers that do use `Depends` pay only for what
-they declared.
-
 `Depends` parameters are not request inputs, so they are excluded from the
 generated [OpenAPI](openapi.md) spec.

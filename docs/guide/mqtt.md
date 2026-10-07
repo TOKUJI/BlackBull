@@ -5,10 +5,6 @@ BlackBull ships a pure-Python **MQTT 5 broker** that runs as a sidecar on the
 WebSocket *and* speak MQTT on the standard `1883` port — no separate broker, no C
 extension, no extra dependency.
 
-It is the first real consumer of the bridge: where a raw `raw_handler` owns a
-single socket, the MQTT broker layers a full protocol on top — packet codec,
-per-connection actor, and process-wide message routing between clients.
-
 ```python
 from blackbull import BlackBull
 from blackbull.mqtt import MQTTExtension, Message
@@ -74,8 +70,7 @@ delivery or the broker. The `TapActor`'s inbox is bounded; if taps fall behind,
 the newest messages are dropped (best-effort observability) and a running
 dropped-count is logged. Taps are therefore *not* a reliable delivery path — use
 a real MQTT subscription for that. (`MQTTExtension(tap_mode='inline')` runs taps
-inline on the receiving connection instead — the original behaviour, kept
-mainly so the `bench/mqtt/tap_throughput.py` comparison stays reproducible.)
+inline on the receiving connection instead, so slow taps delay that reader.)
 
 The broker also runs without any handler at all: `on_message` is just how an
 application observes traffic. `app.add_extension(MQTTExtension())` on its own
@@ -128,9 +123,7 @@ boundary: commands ordered before it were admitted while the connection was
 active; commands after it cannot mutate broker state. Will and session-expiry
 processing belong to that retirement, not to a delayed second teardown.
 
-Admission history uses weak references tied to connection-actor lifetime, not
-a permanent table of past clients. Client identifiers alone are not admission
-credentials. This protocol sequencing is not application authentication or
+Client identifiers alone are not admission credentials. This protocol sequencing is not application authentication or
 topic authorization.
 
 ## What the broker implements
@@ -154,20 +147,8 @@ conformance matrix:
 | Client Identifier | a zero-length Client Identifier is assigned an identifier no live or offline session holds, returned in CONNACK as `Assigned Client Identifier` (§3.2.2.3.7) |
 | Properties | the full MQTT 5 property set (§2.2.2.2) on every packet that carries properties |
 | Sessions | subscriptions and pending QoS state preserved across reconnects with Clean Start = 0 |
-| Flow control | the client's `Receive Maximum` (§3.1.2.11.3) is enforced in the outbound direction; the broker's own is advertised in CONNACK as a promise to conforming clients |
+| Flow control | the client's `Receive Maximum` (§3.1.2.11.3) is enforced in the outbound direction, per Network Connection; the broker's own is advertised in CONNACK as a promise to conforming clients |
 | Resource limits | packet size, session backlog, subscription and session counts, and retained-store size are bounded; the ones MQTT 5 has a property for are advertised — see below |
-
-The wire codec lives in `blackbull.mqtt.messages` (the 15 control-packet
-dataclasses, `encode_packet` / `decode_packet`, the property system, reason
-codes, and `topic_matches_filter`).  `decode_packet` raises two classes:
-`IncompletePacket` means the buffer is short — the packet is not whole
-yet, and `PacketFramer` keeps the partial bytes buffered for the next
-`feed` — while `MQTTDecodeError` means the bytes are invalid.  Inside an
-already-whole packet the first is converted to the second at exactly two
-places: the property context (`_decode_vbi_at`, where "incomplete" can
-only mean a value crossing the declared Property Length) and
-`decode_packet`'s inner wrap (a body inconsistent with its Remaining
-Length).  Nothing else converts.
 
 Variable Byte Integers accept **non-minimal encodings**: a value whose
 encoding carries a redundant continuation octet (0 in two octets, 300 in
@@ -176,17 +157,6 @@ three) decodes normally.  A non-minimal encoding violates [MQTT-1.5.5-1]
 packet is a Malformed Packet (Terminology; §4.13.1).  This runtime does
 not enforce that.  The tolerance is pinned in
 `tests/unit/test_mqtt_codec_lengths.py`.
-
-The broker is an actor model split across a
-few small modules: `blackbull.mqtt.broker` holds the `BrokerActor`, which owns
-all routing state (subscriptions, sessions, retained messages) and, processing
-its inbox serially, needs no locks; `blackbull.mqtt.connection` holds the
-`MQTT5Actor` (one per connection — the sole writer to its socket,
-forwarding decoded control packets to the broker) and `serve_connection`, which
-wires the two; `blackbull.mqtt.tap` holds the `TapActor` and the `Message`
-read-model; and `blackbull.mqtt.extension` holds `MQTTExtension` and
-`MQTTProtocolDetector`, which recognises the MQTT CONNECT first byte (`0x10`) for
-shared-port sniffing.
 
 ## Shared subscriptions
 
@@ -271,22 +241,10 @@ number of readers and per-connection inboxes. These budgets do not include
 session pending QoS state, held QoS messages, retained storage or the tap inbox.
 Those retain their own count/packet-size limits and expiry or shutdown owners.
 
-Input backpressure stops further decoding rather than creating background
-admission tasks. Output never waits for a slow socket from inside the broker:
-doing so could block unrelated clients and form a cycle with that socket's
-reader. If output admission fails, a cap hit is logged and the connection ends;
-queued QoS 0 is not guaranteed delivery. Pending QoS state follows the existing
-session expiry/reconnect rules. A stalled writer cannot reliably transmit a
-DISCONNECT reason, so output overload does not promise one on the wire.
-`Close` needs no queue slot; `Detach` remains FIFO and waits for broker admission,
-and expiry notifications are coalesced. ACK traffic can progress as the broker
-consumes its bounded inbox; inability to queue an outbound ACK ends that
-connection instead of parking the broker. Active writes and clean-close flushing
-use `BB_WRITE_TIMEOUT` (zero explicitly disables this time bound).
-Graceful cleanup waits for the sole writer after the broker's `Detach` barrier:
-that barrier acknowledges routing work, not completion of socket writes.
-Normal broker and connection mailbox shutdowns emit DEBUG lifecycle logs under
-`blackbull.mqtt.broker` and `blackbull.mqtt.connection`.
+A slow output socket does not stall broker routing for other clients. Output
+admission failure logs a cap hit and ends that connection; it cannot promise
+a DISCONNECT reason on the wire. Queued QoS 0 is best-effort. Active writes
+and close flushing use BB_WRITE_TIMEOUT, which zero disables.
 
 **The packet limit includes the fixed header** and is checked as soon as the
 header is complete; zero disables it. Packet decoding errors or oversized
@@ -295,14 +253,22 @@ input closes silently before CONNECT admission; afterward it receives DISCONNECT
 (`0x81`). Keep Alive bounds receive idleness after CONNECT, not total
 packet-assembly time; zero disables that idle check.
 
-**The backlog exists because flow control is not a licence to forget.** When a
-client's `Receive Maximum` window is full, matching messages are held rather
-than dropped: the client asked the broker to slow down, not to lose its
-messages. But "hold everything" is how a subscriber that never acknowledges
-turns a subscription into a leak, so the queue is bounded too. At the bound the
-**newest** message is refused and the oldest kept — a subscriber is owed what it
-was promised first, and has no way to detect a message silently dropped from the
-middle.
+The QoS backlog keeps older promised messages and refuses the newest when
+full. It is separate from writer mailboxes and retained storage.
+
+**The send quota belongs to the connection, and retransmissions spend it
+too.** Every CONNECT re-declares the client's `Receive Maximum`; an omitted
+property means 65535, and a declared zero is a Protocol Error (`0x82`). That
+window is shared by live deliveries and the `DUP=1` retransmissions of a
+resumed session (§4.4), which go first, in the order the originals were sent
+(MQTT-4.4.0-2). A matching PUBACK, PUBCOMP, or error PUBREC frees one slot;
+a successful PUBREC keeps its slot until PUBCOMP. How many unacknowledged
+messages the *session* holds is never the quota. If all 65535 packet identifiers
+are still in use, new QoS>0 deliveries wait in the bounded outbound queue
+until an exchange completes, even when this connection has quota available.
+Control packets (PUBREL and
+the acknowledgements of the client's own publishes) flow even when the window
+is full.
 
 **Retained messages are capped by topic count, and correction is always
 allowed.** At the cap, a retained publish to a *new* topic is refused, but
@@ -447,29 +413,15 @@ Three honest caveats — also stated in the document's `info.description`:
 ## TLS (`mqtts://`)
 
 `MQTTExtension(port=8883, tls=True)` serves the broker port over TLS using the
-same certificate the HTTPS listener uses — pass `certfile`/`keyfile` (or an
-`ssl_context`) to `app.run()` as usual. The server refuses to start if
+configured server certificate — pass `certfile`/`keyfile` to `app.run()`. The server refuses to start if
 `tls=True` is set with no certificate configured. Cleartext remains the
 default (`tls=False`), so existing deployments are unchanged.
 
 ## Why the broker has a single owner
 
 The broker runs on **worker 0** only, while HTTP scales across all workers.
-That is a protocol requirement, not an implementation shortcut.
-
-MQTT 5.0 (OASIS Committee Specification 02, March 2019) defines semantics
-that depend on broker-side state visible to *every* connection:
-publish-subscribe matching (§3.3), retained messages (§3.3.2.3), session
-state across `Clean Start = 0` reconnects (§3.1.2.11), Will messages
-(§3.1.2.5), and QoS 1/2 delivery tracking (§4.3).  All five break if that
-state is split across worker processes with no shared store.
-
-This matches industry practice: the Eclipse Mosquitto reference
-implementation ([mosquitto.org](https://mosquitto.org/)) is single-threaded
-by architecture for the same reason, and EMQX clusters via Erlang
-distributed message passing rather than splitting state across local
-workers.  (Confirmed 2026-06-25 against the OASIS MQTT 5.0 specification and
-Mosquitto's project documentation.)
+Its subscriptions, sessions, retained messages and QoS state must remain
+consistent across connections; this broker has no shared or persistent store.
 
 See [Workers](../deployment/workers.md) for how the single-owner binding
 interacts with `--reload` and `SO_REUSEPORT`.
@@ -486,7 +438,5 @@ interacts with `--reload` and `SO_REUSEPORT`.
   pins `workers=1` when a broker is registered.)
 - **In-memory sessions.** Session state lives in the broker process and does
   not survive a restart. A session with a finite Session Expiry Interval is
-  removed once the interval elapses (§3.1.2.11.2), by a one-shot timer armed at
-  the earliest pending deadline — so a broker with nothing pending holds no
-  timer at all. `0xFFFFFFFF` means *does not expire*, and BlackBull honours it:
+  removed once the interval elapses (§3.1.2.11.2). `0xFFFFFFFF` means *does not expire*, and BlackBull honours it:
   such a session is bounded by `BB_MQTT_MAX_SESSIONS`, not by the clock.

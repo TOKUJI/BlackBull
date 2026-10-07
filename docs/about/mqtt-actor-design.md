@@ -1,175 +1,54 @@
-# MQTT broker — actor-model design
+# MQTT broker design
 
-This page explains *how* the MQTT broker is built, for readers who want to
-understand the internals or extend them. For the user-facing API (`on_message`,
-`{name}` captures, tap modes) see the [MQTT broker guide](../guide/mqtt.md).
+## Data-plane ownership
 
-The MQTT broker is the first part of BlackBull that uses the framework's
-**Actor inbox** for real — see [Relationship to the framework actor model](#relationship-to-the-framework-actor-model)
-below.
+`BrokerActor` owns routing, sessions, subscriptions, retained messages and
+Wills. Its serial inbox is the admission boundary: after rejection, takeover
+or retirement, commands from that connection identity are inert. Checking
+only a Client Identifier would admit a superseded connection.
 
-## Why an actor model at all
+`MQTT5Actor` owns socket writes. Readers, keep-alive handling and broker
+replies send output through its inbox; packets cannot interleave and replies
+cannot precede CONNACK or follow rejected admission.
 
-A broker is shared mutable state by nature: one routing table, one set of
-sessions, one retained-message store, all touched by every connection
-concurrently. The obvious implementation reaches for locks. The actor model
-removes the need for them: a single actor *owns* the state and processes one
-message at a time, so concurrent connections can never interleave inside it.
+Read `blackbull/mqtt/broker.py`, `connection.py` and `messages.py` before
+changing packet order. See the public
+[admission contract](../guide/mqtt.md#connection-admission-and-retirement).
 
-BlackBull's broker is three kinds of actor:
+## Backpressure and teardown
 
-| Actor | Count | Owns | Inbox carries |
-|-------|-------|------|---------------|
-| `BrokerActor` | one per app/worker | all routing/session/retained state | client control events (`Attach`, `ClientPublish`, …) |
-| `MQTT5Actor` | one per connection | one socket's write side | outbound packets (`Send`); `Close` sets terminal state without a queue slot |
-| `TapActor` | one per app/worker | nothing (stateless dispatch) | published messages for `on_message` taps |
+Data-plane mailboxes have independent count and wire-byte budgets. Broker
+input may backpressure a reader; the broker must never await room in a
+connection's output queue. That can stall every peer or form a wait cycle
+with the reader. Output overload closes only the affected connection.
 
-Each lives in its own module: `BrokerActor` in `blackbull.mqtt.broker`,
-`MQTT5Actor` in `blackbull.mqtt.connection`, `TapActor` (with the
-`Message` read-model) in `blackbull.mqtt.tap`, and the user-facing
-`MQTTExtension` wiring in `blackbull.mqtt.extension`. The wire codec is separate
-again, in `blackbull.mqtt.messages`.
+Supervise reader and writer together. Either child's failure must wake the
+other, including a reader waiting on a silent peer. `Detach` is the FIFO
+teardown barrier: preserve commands before it and flush its replies before
+closing output. Shutdown must release admission and completion waiters.
+Expiry notifications coalesce without mutating state outside the broker loop.
+Read `blackbull/mqtt/mailbox.py` and `serve_connection`.
 
-## The two-actor data plane
+## Application taps
 
-```
-            ┌──────────────────────── one per connection ────────────────────────┐
-  socket →  reader loop ──decode──►  MQTT5Actor.run()  ──write──►  socket
-  (bytes)        │  (control packets)        ▲   (sole writer, drains its inbox)
-                 │                           │
-                 ▼  send(ClientPublish, …)   │  send(Send(packet=…)), send(Close)
-            ┌─────────────────────────────────────────────┐
-            │            BrokerActor.run()                 │   one per app/worker
-            │  owns subscriptions / sessions / retained    │   (serial inbox → no locks)
-            └─────────────────────────────────────────────┘
-```
+Taps observe publishes; they do not own delivery. Positive admission permits
+a tap but does not certify PUBLISH validity, storage or delivery.
+Never await a tap in the broker's routing loop.
 
-### `BrokerActor` — the state owner
+Actor-mode taps have a bounded non-blocking inbox and drop newest on
+overflow. Inline taps backpressure their publishing connection. Both share
+matching and invocation in `blackbull/mqtt/tap.py`; changing mode must not
+change topic captures or callback arguments.
 
-`BrokerActor` is the single locus of routing state: the live-connection
-registry, per-client sessions (subscriptions and pending QoS state), retained
-messages, and Will templates. It never touches a socket. When it needs to send
-something to a client it `send`s a `Send` (or `Close`) message to that client's
-connection actor and moves on.
+## Reading the wire
 
-Because it processes its inbox serially, two PUBLISHes from two different
-connections are handled one after another, never concurrently — so the routing
-table and session dicts are plain Python objects with **no locks and no shared
-mutable state**. This is the property the actor model buys.
+`PacketFramer` retains incomplete packets and refuses malformed packets
+without resynchronizing. A truncated inner field in a complete packet is
+malformed, not incomplete input. Before admission, refusal closes silently;
+after admission it sends DISCONNECT through the sole writer.
 
-Connection admission belongs to this same FIFO. A successful CONNECT admits
-one actor identity; rejection, takeover and retirement make subsequent commands
-from that actor inert. A second CONNECT cannot reuse the transport or change
-its Client Identifier. Weak connection references remember attempted admission
-without retaining a permanent client history. Session lookup also checks the
-current live actor, not just its Client Identifier. Broker-originated protocol
-closure retires admission before the next command; transport teardown uses the
-FIFO `Detach` boundary. Commands before that boundary retain their normal
-semantics. See [Connection admission and retirement](../guide/mqtt.md#connection-admission-and-retirement).
-
-### `MQTT5Actor` — the sole socket writer
-
-Each connection has one `MQTT5Actor`. Its inbox carries *only outbound
-packets*, and its `run()` loop — draining that inbox — is the **only** code that
-writes to the socket. That single-writer invariant means there are no
-cross-task write races, even though the broker, the keep-alive path, and the
-reader can all originate outbound traffic.
-
-A sibling **reader task** (`read_loop`) does the opposite direction: it decodes
-the wire and `send`s control messages (`ClientPublish`, `ClientSubscribe`, …) to
-the broker. PINGREQ and AUTH also go through broker admission, so normal replies
-cannot precede the successful CONNACK or follow rejection. They return as `Send`
-messages through the same sole-writer inbox. Wrong-direction control packets
-request protocol-error retirement instead of being ignored.
-
-`serve_connection` is the raw-protocol handler body that wires the reader task
-and the writer loop together and guarantees the broker sees a `Detach` when the
-connection ends — including an abnormal (cancelled) close, which is what makes a
-Will fire.
-
-The MQTT data-plane inboxes use `blackbull.mqtt.mailbox.Mailbox`, a FIFO with
-independent count and wire-byte budgets. Broker input applies backpressure to
-the reader. Connection output gives a healthy writer a scheduling opportunity,
-but never awaits queue space from the broker: a slow socket cannot stop routing
-for other peers or form a circular wait with its reader. Overload closes only
-that connection and discards its queued output, with a cap log.
-
-`serve_connection` supervises both child tasks, so a writer failure or a
-broker-originated close wakes a reader blocked on a silent peer. Cleanup awaits
-bounded broker admission for `Detach`; its completion notification is a
-per-connection FIFO barrier for flushing replies. Broker shutdown wakes
-admission and completion waiters. Expiry timers coalesce a pending notification
-when the inbox is full, leaving all session changes to the broker loop. See
-[Resource limits](../guide/mqtt.md#resource-limits) for the unit, aggregate and
-time owners, including state that lives outside these mailboxes.
-
-### The Will-on-teardown payoff
-
-Because `BrokerActor` outlives every connection actor by construction, a peer's
-Last-Will-and-Testament routes to live subscribers *during* that peer's
-teardown with no special-casing. An earlier (pre-actor) broker had to keep
-global state alive forever to make this work; the long-lived broker actor makes
-the crutch unnecessary.
-
-## The tap dispatch plane
-
-`on_message` handlers are **application-level taps** on top of routing — the
-broker delivers to subscribers whether or not any tap is registered. Taps have
-their own dispatch plane so a slow tap can never stall the data plane.
-
-Before either dispatch mode, the reader awaits the publishing connection's
-admission result at that command's broker position. The optional result travels
-with `ClientPublish`; it adds no background task and at most one pending result
-per reader. Broker shutdown releases queued waiters with refusal, and cancelled
-waiters cannot disrupt the broker. A positive result reports connection
-admission, not PUBLISH validation, storage or delivery success. The broker never
-awaits a tap callback.
-
-- **actor mode (default).** The connection *offers* each published `Message` to
-  the shared `TapActor` with a non-blocking call and returns immediately. The
-  `TapActor` has a **bounded inbox**; on overflow it drops the newest message
-  and logs a running dropped-count. A slow tap therefore back-pressures
-  *nothing* — the cost surfaces as bounded coverage, not latency.
-- **inline mode.** The connection awaits the matching callbacks itself, so a
-  slow tap back-pressures only its own connection. Selected with
-  `MQTTExtension(tap_mode='inline')`; retained mainly so the
-  `bench/mqtt/tap_throughput.py` comparison is a controlled one-variable test.
-
-Both modes share one matching/invocation path (`run_taps`), so a tap behaves
-identically either way apart from the back-pressure characteristic. `{name}`
-topic captures are compiled once (rewriting `{name}` to a `+` level and
-recording the capture position) and bound to keyword arguments at dispatch.
-
-## Reading the wire: `PacketFramer`
-
-`PacketFramer` retains incomplete packets and rejects malformed input without
-resynchronizing. A complete packet with a truncated inner field is malformed,
-not an incomplete read. Refusals follow CONNECT admission through the broker
-FIFO: silent close before admission, otherwise DISCONNECT after CONNACK through
-the sole writer. Broker retirement and the serving task's Detach barrier own
-session cleanup and writer completion.
-
-The live reader drains packets before each 4096-byte read, bounding buffered
-wire input by an incomplete fixed header or capped partial packet, plus one
-read chunk when the cap is enabled. Direct `PacketFramer.feed()` callers own
-their feed sizes; the packet cap is not a separate aggregate buffer limit.
-Keep Alive owns receive idleness, not a total packet-assembly deadline.
-
-## Relationship to the framework actor model
-
-The framework's [actor-model design invariants](../about/internals.md) describe
-an `Actor` base with an `asyncio.Queue` inbox and a `send` / `run` / `_handle`
-contract. Historically the **HTTP** actors (`ConnectionActor`, `HTTP1Actor`,
-`HTTP2Actor`, `StreamActor`, …) override `run()` and call each other through
-direct method calls — the inbox is defined but latent on that path.
-
-The MQTT broker is the **first production code that uses the inbox for real**:
-`BrokerActor`, `MQTT5Actor`, and `TapActor` use the `send` / `run` / `_handle`
-contract. The MQTT data-plane actors specialize the serial drain loop to
-account for completed work and release mailbox waiters on shutdown; the tap
-actor uses the base loop. Each actor handles one message at a time, retaining
-the single-owner guarantee without locks.
-
-So the broker is not a parallel mechanism bolted onto the framework; it is the
-actor model the framework already described, finally exercised end-to-end. If
-you are looking for a worked example of BlackBull's actor inbox, this is it.
+The serving reader drains packets between bounded reads. Direct `feed()`
+callers own their feed sizes: a packet cap is not an aggregate feed-buffer
+cap. Keep Alive bounds receive idleness, not total packet assembly time.
+See `blackbull/mqtt/connection.py` and
+[Resource limits](../guide/mqtt.md#resource-limits).
